@@ -183,10 +183,15 @@ fn validate_request_specific_result(
     // genuine attempt) before an accepted result is allowed to stand. Reads only
     // required_tools and commands_run — no tool-, domain-, or PRD-specific
     // knowledge, so it holds for every task, tool, and workflow engine.
-    if result.status == WorkflowV2Status::Accepted
-        && let Some(tool) = first_unexercised_required_tool(&request.input, result)
-    {
-        return Err(WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tool));
+    if result.status == WorkflowV2Status::Accepted {
+        let unexercised = unexercised_required_tools(&request.input, result);
+        if !unexercised.is_empty() {
+            return Err(
+                WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(
+                    unexercised,
+                ),
+            );
+        }
     }
     match result.status {
         WorkflowV2Status::Accepted
@@ -309,32 +314,42 @@ fn request_declares_required_tools(input: &serde_json::Value) -> bool {
     }
 }
 
-/// The first declared required tool that has no matching invocation in this
-/// result's recorded commands, or `None` when every declared tool was exercised
-/// (or none were declared). Matching is by the raw tool name against each
-/// command string, case-insensitively, regardless of command status — a
-/// captured failure is a genuine attempt and satisfies the requirement. Reads
-/// only `required_tools` and `commands_run`, with no knowledge of any specific
-/// tool, domain, or PRD, so the same guard holds for every workflow engine.
-fn first_unexercised_required_tool(
+/// EVERY declared required tool with no matching invocation in this result's
+/// recorded commands — empty when all were exercised (or none were declared).
+/// Matching is by the raw tool name against each command string,
+/// case-insensitively, regardless of command status — a captured failure is a
+/// genuine attempt and satisfies the requirement. Reads only `required_tools`
+/// and `commands_run`, with no knowledge of any specific tool, domain, or PRD,
+/// so the same guard holds for every workflow engine.
+///
+/// Reports all of them, not just the first. Naming one at a time turns a single
+/// contract violation into a chain of rejections that each cost an attempt:
+/// observed on TDL-041's review remediation, where attempt 2 was rejected for
+/// `chart_get_state`, attempt 3 called it and was rejected for `quote_get`, and
+/// the task ran out of attempts at 3 having needed 4. The agent can only fix
+/// what the rejection told it about, so the rejection has to tell it everything.
+fn unexercised_required_tools(
     input: &serde_json::Value,
     result: &WorkflowV2Result,
-) -> Option<String> {
+) -> Vec<String> {
     let mut required: Vec<String> = Vec::new();
     collect_required_tool_names(input, &mut required);
     if required.is_empty() {
-        return None;
+        return Vec::new();
     }
     let commands: Vec<String> = result
         .commands_run
         .iter()
         .map(|command| command.command.to_ascii_lowercase())
         .collect();
-    required.into_iter().find(|tool| {
-        !commands
-            .iter()
-            .any(|command| command.contains(tool.as_str()))
-    })
+    required
+        .into_iter()
+        .filter(|tool| {
+            !commands
+                .iter()
+                .any(|command| command.contains(tool.as_str()))
+        })
+        .collect()
 }
 
 /// Collect the raw (lowercased) names of every declared required tool anywhere

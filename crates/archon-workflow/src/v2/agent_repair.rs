@@ -34,10 +34,15 @@ pub enum WorkflowV2AgentError {
         "task declares required_tools; a no-op is not acceptable — exercise the declared tools and return accepted with fresh command/artifact evidence, or block honestly"
     )]
     ImplementationNoopWithDeclaredRequiredTools,
+    /// Carries EVERY unexercised tool, not the first. One-at-a-time reporting
+    /// spends an attempt per missing tool, and the repair budget cannot fund
+    /// that: two missing-tool errors share the `Contract` repair class, so the
+    /// second can never earn an extra attempt from `differs_from`.
     #[error(
-        "task declares required_tools; an accepted result must show an actual invocation of every declared tool (a captured success OR a captured failure counts), but required tool '{0}' was never exercised this run — run it and return its captured result, or block honestly with the captured failure. Do not assert the tool is unavailable without attempting it."
+        "task declares required_tools; an accepted result must show an actual invocation of every declared tool (a captured success OR a captured failure counts), but these required tools were never exercised this run: {}. Run every one of them and return the captured results, or block honestly with the captured failures. Do not assert a tool is unavailable without attempting it.",
+        .0.join(", ")
     )]
-    ImplementationAcceptedWithRequiredToolUnexercised(String),
+    ImplementationAcceptedWithRequiredToolUnexercised(Vec<String>),
     #[error(
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]

@@ -11,8 +11,38 @@ const DEFAULT_TOOL_RESULT_CONTEXT_CHARS: usize = 64_000;
 const SHELL_TOOL_RESULT_CONTEXT_CHARS: usize = 24_000;
 const SUBAGENT_TOOL_RESULT_CONTEXT_CHARS: usize = 32_000;
 
+/// Hard ceiling applied when a tool result is FIRST recorded.
+///
+/// Deliberately not one of the constants above. Those are a *replay* budget —
+/// how much of an old turn is worth re-sending once context has accumulated.
+/// This is a different question: how large may a single block ever be. The two
+/// happen to share a unit, and reusing one for the other would silently cost
+/// every agent the recent-turn fidelity the preserve window exists to give it
+/// (a `Bash` result would drop from `bash.rs`'s 102_400-byte cap to 24_000
+/// chars the moment it was recorded).
+///
+/// Sized against the defect, not against the replay budget. The observed
+/// failure was a single 18_031_035-char result against a provider per-field
+/// limit of 10_485_760. 1_000_000 chars sits ~18x under the defect and ~10x
+/// under the provider limit, while still being ~10x the largest legitimate
+/// result the toolset can produce (`bash.rs` and `mcp_resources.rs` both stop
+/// at 102_400 bytes) — so in practice nothing real is truncated here, and the
+/// tool-aware limits above still do the actual context management on replay.
+const INGEST_TOOL_RESULT_CEILING_CHARS: usize = 1_000_000;
+
+/// Cap a tool result at the moment it is recorded.
+///
+/// Separate entry point from `cap_tool_output_for_context` so the ingest
+/// ceiling and the replay budget cannot drift into each other by accident.
+pub(crate) fn cap_tool_output_for_ingest(content: &str) -> ContextToolOutput {
+    cap_to_limit(content, INGEST_TOOL_RESULT_CEILING_CHARS)
+}
+
 pub(crate) fn cap_tool_output_for_context(tool_name: &str, content: &str) -> ContextToolOutput {
-    let limit_chars = context_limit_for_tool(tool_name);
+    cap_to_limit(content, context_limit_for_tool(tool_name))
+}
+
+fn cap_to_limit(content: &str, limit_chars: usize) -> ContextToolOutput {
     let original_chars = content.chars().count();
     if original_chars <= limit_chars {
         return ContextToolOutput {

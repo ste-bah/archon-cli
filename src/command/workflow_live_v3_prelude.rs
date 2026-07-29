@@ -226,26 +226,113 @@ function __archonPrimitives(w) {
     }
     return collected;
   };
+  // Stamp the reviewed task's id onto every finding as it is COLLECTED.
+  //
+  // The map contract is one accepted task per item, so the primitive already
+  // knows which task a finding belongs to — the branch it came out of. Leaving
+  // attribution to the reviewer was measured to fail outright on run
+  // wf-ee4a92fc: all 43 adversarial findings came back carrying no task key of
+  // any kind (keys were claim, counter_evidence, id, severity, source, type,
+  // evidence, impact, status, verdict...), so findingsByTask sent 100% of them
+  // to `unassigned` and remediateFindings returned them untouched. Coverage got
+  // 8 of 13 attributed only by luck of phrasing — its prompt happens to mention
+  // requirement ids. The map prompt never asks for attribution at all.
+  //
+  // That is precisely the failure remediateFindings was written to prevent:
+  // "a run could surface ~96 verified findings and exit having fixed none".
+  // Fixed here rather than by adding a sentence to the prompt, because a field
+  // the model is asked to remember is a field it can forget — and when it
+  // forgets, the finding is silently dropped from remediation rather than
+  // erroring.
+  const taskIdsOfOutcome = (outcome, itemTaskIds) => {
+    const declared = outcome && (outcome.canonical_task_ids || outcome.task_ids);
+    if (Array.isArray(declared) && declared.length > 0) return declared;
+    const itemId = outcome && outcome.item_id;
+    const known = itemId ? itemTaskIds[itemId] : null;
+    return known ? [known] : [];
+  };
+  // Never overwrite attribution the reviewer supplied itself — a finding that
+  // legitimately names several tasks must keep all of them.
+  const stampTaskIds = (finding, taskIds) => {
+    if (!finding || typeof finding !== "object") return finding;
+    const existing = finding.canonical_task_ids || finding.task_ids || finding.taskIds
+      || (finding.task_id ? [finding.task_id] : null);
+    if (Array.isArray(existing) && existing.length > 0) return finding;
+    if (!Array.isArray(taskIds) || taskIds.length === 0) return finding;
+    return Object.assign({}, finding, { canonical_task_ids: taskIds });
+  };
+  const attributedMapFindings = (env, itemTaskIds) => {
+    const outcomes = (env && env.data && env.data.outcomes)
+      || (env && env.result && env.result.data && env.result.data.outcomes);
+    // Not a fanout envelope: fall back to the plain reader rather than dropping
+    // findings that simply cannot be placed.
+    if (!Array.isArray(outcomes)) return findingsFrom(env);
+    const collected = [];
+    for (const outcome of outcomes) {
+      const branch = outcome && outcome.result && outcome.result.data && outcome.result.data.findings;
+      if (!Array.isArray(branch)) continue;
+      const taskIds = taskIdsOfOutcome(outcome, itemTaskIds);
+      for (const finding of branch) collected.push(stampTaskIds(finding, taskIds));
+    }
+    return collected;
+  };
+  // The reduce is instructed to preserve map findings verbatim, but "verbatim"
+  // is a model instruction, not a guarantee — the same assumption that lost the
+  // ids to begin with. Re-attach attribution by identity afterwards so a
+  // dropped field costs nothing.
+  const findingIdentities = (finding) => {
+    const keys = [];
+    for (const key of ["id", "title", "claim", "summary", "finding", "requirement_id"]) {
+      const value = finding && finding[key];
+      if (typeof value === "string" && value.trim() !== "") {
+        keys.push(`${key}:${value.trim().slice(0, 200)}`);
+      }
+    }
+    return keys;
+  };
+  const reattributeFindings = (findings, stamped) => {
+    const byIdentity = {};
+    for (const finding of stamped) {
+      const ids = finding && finding.canonical_task_ids;
+      if (!Array.isArray(ids) || ids.length === 0) continue;
+      for (const key of findingIdentities(finding)) {
+        if (!byIdentity[key]) byIdentity[key] = ids;
+      }
+    }
+    return (Array.isArray(findings) ? findings : []).map((finding) => {
+      for (const key of findingIdentities(finding)) {
+        if (byIdentity[key]) return stampTaskIds(finding, byIdentity[key]);
+      }
+      return finding;
+    });
+  };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
-    const map = await w.parallel(`${label}-map`, ids.map((taskId) => ({
-      item_id: `review-${slug(taskId)}`,
-      canonical_task_ids: [taskId],
-      task: mapTask,
-      evidence: (typeof evidenceFor === "function" ? evidenceFor(taskId) : []),
-    })), {
+    const itemTaskIds = {};
+    const mapItems = ids.map((taskId) => {
+      const itemId = `review-${slug(taskId)}`;
+      itemTaskIds[itemId] = taskId;
+      return {
+        item_id: itemId,
+        canonical_task_ids: [taskId],
+        task: mapTask,
+        evidence: (typeof evidenceFor === "function" ? evidenceFor(taskId) : []),
+      };
+    });
+    const map = await w.parallel(`${label}-map`, mapItems, {
       tier: "critic",
       itemKind: "review_map",
       maxParallelism: 4,
       task: mapTask,
       reviewContract: { version: 1, kind, stage: "map", findingsPath: "data.findings", itemTaskIdsPath: "canonical_task_ids", maxFindingsPerItem: 25 },
     });
-    const reduce = await w.reduce(`${label}-reduce`, { findings: findingsFrom(map) }, {
+    const mapFindings = attributedMapFindings(map, itemTaskIds);
+    const reduce = await w.reduce(`${label}-reduce`, { findings: mapFindings }, {
       tier: "critic",
       task: reduceTask,
       reviewContract: { version: 1, kind, stage: "reduce_final", sourceMapCallIds: [`${label}-map`], preserveMapFindings: true, findingsPath: "data.findings", accountingField: kind, maxInputBytes: 48000 },
     });
-    return findingsFrom(reduce);
+    return reattributeFindings(findingsFrom(reduce), mapFindings);
   };
   const adversarialReview = async (acceptedTaskIds, opts = {}) =>
     reviewMapReduce(
@@ -416,6 +503,32 @@ function __archonPrimitives(w) {
     };
     const summarizeEnvelope = (env) =>
       String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 300);
+    // Carry what the agent actually SAID and SHOWED, not a rephrasing of it.
+    //
+    // The remediation prompt explicitly invites refutation — "If a finding is
+    // factually wrong, say so with the evidence that disproves it rather than
+    // editing around it." An agent that complies has produced the most valuable
+    // output in the loop, and it lands in `unresolved` alongside agents that
+    // tried and failed. A human triaging 56 findings cannot separate those from
+    // a status, so the evidence has to travel with the record.
+    const envelopeBody = (env) =>
+      (env && env.result && typeof env.result === "object") ? env.result : env;
+    const verbatimEvidence = (env) => {
+      const body = envelopeBody(env);
+      if (!body) return null;
+      try {
+        return JSON.stringify({
+          status: body.status,
+          summary: body.summary,
+          evidence: body.evidence,
+          commands_run: body.commands_run,
+          task_coverage: body.task_coverage,
+          residual_gaps: body.residual_gaps,
+        }).slice(0, 8000);
+      } catch (_) {
+        return String((body && body.summary) || "").slice(0, 8000);
+      }
+    };
     // A call the PROVIDER failed says nothing about the work. Spending a round
     // on it costs the task an attempt it never had, and when the failure lands
     // on the verifier it also strands an already-accepted fix as unverified —
@@ -443,6 +556,45 @@ function __archonPrimitives(w) {
       // excludes from write-branch validation errors.
       return blob.indexOf("agent transport failed") >= 0
         || blob.indexOf("timed out after") >= 0;
+    };
+    // A half that SUCCEEDED is never a transport failure, whatever its prose
+    // says.
+    //
+    // The markers above are substring probes over the whole serialized
+    // envelope, so any agent that merely mentions a timeout — quoting a log
+    // line, describing a flake it worked around, naming a test — matches. On an
+    // accepted result that match is always a false positive: the work is done,
+    // and the transport plainly delivered it.
+    //
+    // Belt to the ordering brace. Success is already evaluated before these
+    // guards, so this cannot change the outcome of a completed round; it stops
+    // the fix half from being re-dispatched on its own prose in the window
+    // before the check has run, where there is no success pair to protect it.
+    const transportRetryable = (env) => transportFailure(env) && !acceptedEnvelope(env);
+    // Did the host see a patch land against the declared baseline?
+    //
+    // Keyed on the host's TYPED marker, set on EVERY write branch — accepted,
+    // rejected and failed alike — never on prose and never on status. Status
+    // cannot answer this: a wholesale size-policy rejection, an ownership
+    // violation, a schema-repair exhaustion and an accepted no-op all leave the
+    // reviewed code untouched while reporting four different statuses.
+    //
+    // Suppresses the verifier ONLY on an explicit host "nothing landed".
+    //
+    // The absent case must mean "run the check". Only the worktree write path
+    // sets this marker, and a host predating it sets nothing at all — so
+    // treating absence as "nothing landed" would silently skip EVERY verifier
+    // and leave remediateFindings unable to resolve anything. Reading it that
+    // way round is the difference between skipping a provably useless call and
+    // disabling verification wholesale.
+    const landedNothing = (env) => {
+      if (!env) return false;
+      let blob = "";
+      try { blob = JSON.stringify(env); } catch (_) { return false; }
+      // A positive marker anywhere wins: a fanout envelope can carry several
+      // branches, and one that landed work is enough to make the check useful.
+      if (blob.indexOf('"patch_landed":true') >= 0) return false;
+      return blob.indexOf('"patch_landed":false') >= 0;
     };
     // Tasks that exhausted their own remediation budget are ALSO unfinished work.
     // The reviews only inspect ACCEPTED tasks — they hunt false acceptance — so a
@@ -490,6 +642,10 @@ function __archonPrimitives(w) {
       // outage cannot spin: they do not consume a round, but they are not free.
       let transportRetries = 0;
       const maxTransportRetries = 2;
+      // Rounds whose fix landed nothing, so the verifier was never dispatched.
+      // Tracked so the unresolved reason can say WHY there is no verdict rather
+      // than reporting a bare "no summary" that reads like a verifier failure.
+      let skippedForNoPatch = 0;
       for (let round = 1; round <= maxRounds; ) {
         fix = await agent(
           `Post-review remediation for ${taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
@@ -501,6 +657,40 @@ function __archonPrimitives(w) {
             remediationContract: contractFor("remediate", taskId, round),
           },
         );
+        // A provider failure says nothing about the work, so it retries without
+        // spending the round. Checked BEFORE the verifier is dispatched: the
+        // fix half is what failed, and a verifier launched on the strength of a
+        // dead fix is exactly the wasted call this loop is being taught to
+        // avoid.
+        if (transportRetryable(fix) && transportRetries < maxTransportRetries) {
+          transportRetries += 1;
+          log(`transport failure on ${taskId} remediation; retrying without consuming round ${round}`);
+          continue;
+        }
+        // Only verify code that actually changed. This gate MUST precede the
+        // verifier call — the whole defect was that it did not exist and the
+        // call went out regardless.
+        //
+        // Observed live on TDL-041: the fix failed host validation at
+        // 09:09:55.153 and the verifier started 85.8ms later against unchanged
+        // code, returning the identical findings — four times across the run.
+        //
+        // Gated on the host's typed marker rather than on the fix's status,
+        // because status answers a different question: a wholesale size-policy
+        // rejection, an ownership violation and an accepted no-op all leave the
+        // reviewed code exactly as the reviewers found it while reporting three
+        // different statuses. A verifier pointed at code the review has already
+        // examined cannot discover anything the review has not already reported.
+        //
+        // Nothing is forced green: with no patch there is nothing to verify, so
+        // the round advances and the findings stay unresolved.
+        if (landedNothing(fix)) {
+          log(`no patch landed for ${taskId} in round ${round}; skipping the verifier that would have run against unchanged code`);
+          check = null;
+          skippedForNoPatch += 1;
+          round += 1;
+          continue;
+        }
         check = await agent(
           `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).`,
           {
@@ -510,15 +700,27 @@ function __archonPrimitives(w) {
             remediationContract: contractFor("verify", taskId, round),
           },
         );
-        // A provider failure on either half retries without spending the
-        // round. Retrying the fix would re-apply work that may already be on
-        // disk, so when only the CHECK failed, re-run the check alone.
-        if (transportFailure(fix) && transportRetries < maxTransportRetries) {
-          transportRetries += 1;
-          log(`transport failure on ${taskId} remediation; retrying without consuming round ${round}`);
-          continue;
-        }
-        if (transportFailure(check) && transportRetries < maxTransportRetries) {
+        // SUCCESS IS TERMINAL, AND IT IS EVALUATED FIRST.
+        //
+        // Two accepted halves end the task. Nothing the transport classifier
+        // believes can be more authoritative than the work having passed, so
+        // this is checked before any guard that can `continue` or re-dispatch.
+        //
+        // The old order put both transport guards ahead of this break, and
+        // `continue` restarts the round without ever reaching it — so an
+        // accepted fix AND an accepted check were discarded unread whenever the
+        // classifier matched something in the prose. That re-ran TDL-041's
+        // round 2 after both halves had already passed, and cost 67 minutes
+        // redoing work that was done.
+        //
+        // Ordering this way is what makes the guard safe independently of how
+        // good the classifier is: with success settled first, a transport retry
+        // can only ever add attempts to a round that genuinely failed, which is
+        // all it was ever for.
+        if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
+        // Retrying the fix would re-apply work that may already be on disk, so
+        // when only the CHECK failed, re-run the check alone.
+        if (transportRetryable(check) && transportRetries < maxTransportRetries) {
           transportRetries += 1;
           log(`transport failure verifying ${taskId}; re-running the check without consuming round ${round}`);
           check = await agent(
@@ -536,8 +738,41 @@ function __archonPrimitives(w) {
       }
       if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
         resolved.push({ taskId, findingCount: own.length });
+      } else if (check) {
+        // A verifier ran and did not accept: ordinary unfinished work.
+        unresolved.push({
+          taskId,
+          findingCount: own.length,
+          outcome: "unverified",
+          reason: summarizeEnvelope(check),
+        });
+      } else if (acceptedEnvelope(fix)) {
+        // The fix changed nothing and returned accepted/noop — it is ASSERTING
+        // the findings are wrong. That is a different claim from "I tried and
+        // could not fix this", and collapsing the two makes the refutation
+        // unreadable in a list of dozens.
+        //
+        // Not independently verified, and deliberately not: "is this fixed?" is
+        // unanswerable against an untouched tree, and a verifier sent anyway
+        // resolves the ambiguity by crediting pre-existing state — which is how
+        // TDL-041 got accepted on a tree nobody had modified. Confirming a
+        // refutation needs a different question ("is this refutation sound?"),
+        // which is answerable on unchanged code and belongs in its own pass.
+        unresolved.push({
+          taskId,
+          findingCount: own.length,
+          outcome: "refuted",
+          reason: "the remediation agent changed nothing and asserts these findings are not valid; NOT independently verified — confirming a refutation requires asking whether the refutation is sound, not whether the code was fixed",
+          refutation: verbatimEvidence(fix),
+        });
       } else {
-        unresolved.push({ taskId, findingCount: own.length, reason: summarizeEnvelope(check) });
+        unresolved.push({
+          taskId,
+          findingCount: own.length,
+          outcome: "failed",
+          reason: `no patch landed in ${skippedForNoPatch} of ${maxRounds} round(s); the verifier was not run because the reviewed code was never changed`,
+          failure: verbatimEvidence(fix),
+        });
       }
     }
     return { resolved, unresolved, unassigned };
@@ -796,6 +1031,479 @@ mod findings_extraction_tests {
                 || body.contains("outcome && outcome.result"),
             "findingsFrom must read each branch outcome's own findings: {body}"
         );
+    }
+}
+
+/// Review findings must carry the task they belong to, or remediation drops them.
+///
+/// Executes the REAL prelude JS. A source assertion cannot catch this class of
+/// bug: the code that lost the ids was syntactically fine and read correctly —
+/// it simply never wrote the field, and the loss was invisible until the
+/// findings reached `findingsByTask` and every one landed in `unassigned`.
+/// The helpers must actually be WIRED IN, not merely correct.
+///
+/// The behavioural tests in the sibling modules execute the real prelude
+/// helpers, but they call them directly and replay the round loop in their own
+/// driver. That proves the logic and says nothing about the call sites — delete
+/// every use of `attributedMapFindings` from `reviewMapReduce`, or move the
+/// success break back below the transport guards, and all of them still pass.
+///
+/// Found by sabotage: removing the attribution call sites reddened NOTHING.
+/// Correct, tested, and unreachable is this project's signature failure, and it
+/// had reproduced inside the suite written to catch it. These assertions pin the
+/// wiring; the behavioural tests pin the behaviour. Neither substitutes.
+#[cfg(test)]
+mod prelude_wiring_tests {
+    fn prelude() -> &'static str {
+        super::V3_PRIMITIVES_JS
+    }
+
+    fn offset_of(needle: &str) -> usize {
+        prelude()
+            .find(needle)
+            .unwrap_or_else(|| panic!("prelude must contain `{needle}`"))
+    }
+
+    /// `reviewMapReduce` must collect findings through the attributing reader
+    /// and repair the reduce output, never through the bare `findingsFrom`.
+    #[test]
+    fn review_map_reduce_collects_findings_through_the_attributing_reader() {
+        let start = offset_of("  const reviewMapReduce = ");
+        let body = &prelude()[start..start + prelude()[start..].find("\n  };").expect("fn end")];
+
+        assert!(
+            body.contains("attributedMapFindings(map, itemTaskIds)"),
+            "reviewMapReduce must stamp task ids as it collects the map shards: {body}"
+        );
+        assert!(
+            body.contains("reattributeFindings(findingsFrom(reduce)"),
+            "reviewMapReduce must repair attribution the reduce dropped: {body}"
+        );
+        assert!(
+            !body.contains("{ findings: findingsFrom(map) }"),
+            "the reduce must receive STAMPED findings; passing findingsFrom(map) directly is the \
+             original defect — 43 of 43 adversarial findings reached remediation unattributed"
+        );
+        assert!(
+            body.contains("itemTaskIds[itemId] = taskId"),
+            "the item_id -> taskId map must be built while the map items are constructed: {body}"
+        );
+    }
+
+    /// Success must be evaluated before any guard that can `continue` or
+    /// re-dispatch. Asserted on ORDER in the real loop, because the behavioural
+    /// test replays the ordering in its own driver and cannot see this.
+    #[test]
+    fn the_success_break_precedes_the_transport_guards_in_the_real_loop() {
+        let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
+        let body = &prelude()[loop_start
+            ..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
+
+        let check_dispatch = body
+            .find("label: `review-verify-${slug(taskId)}-${round}`")
+            .expect("the verifier dispatch must exist");
+        let success_break = body
+            .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")
+            .expect("the success break must exist");
+        let check_transport_guard = body
+            .find("transportRetryable(check)")
+            .expect("the check transport guard must exist");
+        let landed_gate = body
+            .find("if (landedNothing(fix))")
+            .expect("the landed-patch gate must exist");
+        let fix_transport_guard = body
+            .find("transportRetryable(fix)")
+            .expect("the fix transport guard must exist");
+
+        assert!(
+            success_break < check_transport_guard,
+            "two accepted halves must end the round BEFORE any transport guard: `continue` \
+             restarts the round without reaching the break, which discarded an accepted pair \
+             unread and re-ran TDL-041 round 2 after both halves had passed"
+        );
+        assert!(
+            landed_gate < check_dispatch,
+            "the landed-patch gate must precede the verifier dispatch, or the verifier still runs \
+             against unchanged code — the defect it exists to stop"
+        );
+        assert!(
+            fix_transport_guard < check_dispatch,
+            "a dead fix must be caught before a verifier is spent on it"
+        );
+    }
+
+    /// The guards must use the success-aware predicate. `transportFailure` is a
+    /// substring probe over the whole envelope, so an accepted result that
+    /// merely mentions a timeout matches it.
+    #[test]
+    fn the_round_loop_guards_use_the_success_aware_transport_predicate() {
+        let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
+        let body = &prelude()[loop_start
+            ..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
+
+        assert!(
+            !body.contains("transportFailure(fix)") && !body.contains("transportFailure(check)"),
+            "the loop must guard on transportRetryable, not the raw substring probe: an accepted \
+             half that merely mentions a timeout in its prose is not a transport failure"
+        );
+        assert_eq!(
+            body.matches("transportRetryable(").count(),
+            2,
+            "both halves must be guarded by the success-aware predicate"
+        );
+    }
+}
+
+/// A verifier must never be dispatched against code the fix did not change.
+#[cfg(test)]
+mod remediation_gate_tests {
+    /// The gate's reach, pinned as an invariant instead of a claim.
+    ///
+    /// `patch_landed` is stamped in ONE place — `run_one_worktree_branch` — so
+    /// the gate only bites on worktree writes. That is currently total coverage
+    /// for its only consumer, because every write the v3 prelude can request is
+    /// `write: "worktree"`, and the host does not silently downgrade: a worktree
+    /// request with no workspace-boundary support is an error, never a fall back
+    /// to serial or coordinated.
+    ///
+    /// If someone adds a coordinated or serial write to the prelude, that write
+    /// gets no marker, `landedNothing` reads absence as "run the check", and the
+    /// gate quietly stops applying to it — real, tested, and not reaching, which
+    /// is this project's signature failure. This test is the tripwire: it fails
+    /// the moment the prelude can emit a write the stamp does not cover.
+    #[test]
+    fn every_write_the_prelude_requests_is_a_worktree_write() {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let modes: Vec<&str> = prelude
+            .match_indices("write: \"")
+            .map(|(offset, _)| {
+                let rest = &prelude[offset + "write: \"".len()..];
+                &rest[..rest.find('"').expect("unterminated write mode literal")]
+            })
+            .collect();
+        assert!(
+            !modes.is_empty(),
+            "failed to parse any write mode from the prelude; the guard would pass vacuously"
+        );
+        assert!(
+            modes.iter().all(|mode| *mode == "worktree"),
+            "the patch_landed marker is only stamped on the worktree write path, but the prelude \
+             requests {modes:?}. Either stamp the new path in workflow_live_v2_write_worktree_branch.rs's \
+             sibling for that mode, or the remediation gate silently stops applying to it."
+        );
+    }
+
+    fn run_gate_js(driver: &str) -> String {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("    const landedNothing = ")
+            .expect("landedNothing must exist");
+        let end = start + prelude[start..].find("\n    };").expect("fn end") + 7;
+        let script = format!("{}\n{driver}\n", &prelude[start..end]);
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("gate.mjs");
+        std::fs::write(&path, script).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&path)
+            .output()
+            .expect("node must be available");
+        assert!(
+            out.status.success(),
+            "driver failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// One contiguous slice of the envelope helpers, so a single-expression
+    /// arrow cannot be swallowed by a neighbour's terminator and re-emitted —
+    /// which is exactly what a per-name extractor did here, producing a
+    /// duplicate `const` that only `node` caught.
+    fn envelope_helpers_js() -> String {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("    const acceptedEnvelope = ")
+            .expect("acceptedEnvelope must exist");
+        let end = prelude
+            .find("    const blocked = ")
+            .expect("blocked must follow the envelope helpers");
+        assert!(start < end, "envelope helpers must precede `blocked`");
+        prelude[start..end].to_string()
+    }
+
+    fn run_helpers_js(driver: &str) -> String {
+        let script = format!("{}\n{driver}\n", envelope_helpers_js());
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("outcome.mjs");
+        std::fs::write(&path, script).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&path)
+            .output()
+            .expect("node must be available");
+        assert!(
+            out.status.success(),
+            "driver failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A refutation and a failure must not share a bucket, and the agent's own
+    /// evidence must travel with the record.
+    ///
+    /// The remediation prompt invites refutation explicitly. An agent that
+    /// complies produces the most valuable output in the loop and still ends in
+    /// `unresolved`; with dozens of findings, a human triaging the list cannot
+    /// tell it apart from an agent that tried and could not. Distinguished by a
+    /// typed `outcome`, and the evidence is carried VERBATIM rather than
+    /// summarised, because the summary is the part that has no triage value.
+    #[test]
+    fn a_refuted_finding_is_recorded_distinctly_from_a_failed_fix() {
+        let driver = r#"
+const classify = (fix, check) => {
+  if (acceptedEnvelope(fix) && acceptedEnvelope(check)) return { outcome: "resolved" };
+  if (check) return { outcome: "unverified" };
+  if (acceptedEnvelope(fix)) return { outcome: "refuted", evidence: verbatimEvidence(fix) };
+  return { outcome: "failed", evidence: verbatimEvidence(fix) };
+};
+const refuted = { status: "noop", summary: "finding F1 is wrong: registry writes ARE atomic",
+  evidence: [{ kind: "proof", summary: "data_store.rs:212 write-temp-then-rename" }],
+  commands_run: [{ command: "cargo test registry_atomic", status: "succeeded" }] };
+const failed = { status: "failed", summary: "size policy: openbb.rs 501 > 500" };
+const r = classify(refuted, null);
+const f = classify(failed, null);
+console.log(JSON.stringify({
+  refuted: r.outcome,
+  failed: f.outcome,
+  keeps_refutation_text: r.evidence.indexOf("write-temp-then-rename") >= 0,
+  keeps_refutation_commands: r.evidence.indexOf("registry_atomic") >= 0,
+  keeps_failure_text: f.evidence.indexOf("501 > 500") >= 0,
+  resolved: classify({status:"accepted"}, {status:"accepted"}).outcome,
+  unverified: classify({status:"accepted"}, {status:"rejected"}).outcome
+}));"#;
+        assert_eq!(
+            run_helpers_js(driver),
+            r#"{"refuted":"refuted","failed":"failed","keeps_refutation_text":true,"keeps_refutation_commands":true,"keeps_failure_text":true,"resolved":"resolved","unverified":"unverified"}"#
+        );
+    }
+
+    /// Two accepted halves must END the task, whatever the prose says.
+    ///
+    /// Replays the round loop in its committed order. The old order put both
+    /// transport guards ahead of the success break, and `continue` restarts the
+    /// round without reaching it — so an accepted fix AND an accepted check were
+    /// discarded unread whenever the substring classifier matched something an
+    /// agent merely mentioned. That re-ran TDL-041's round 2 after both halves
+    /// had passed.
+    ///
+    /// Asserted on CALL SEQUENCE, not on a boolean: the defect was a wasted
+    /// re-dispatch, so the only proof that matters is that the second dispatch
+    /// never happens.
+    #[test]
+    fn two_accepted_halves_end_the_round_before_any_transport_guard_runs() {
+        let driver = r#"
+const run = (fixQ, checkQ) => {
+  const calls = []; let round = 1, retries = 0, fix = null, check = null;
+  const maxRounds = 2, maxTransportRetries = 2;
+  const agent = (k) => { calls.push(k); const q = k === "fix" ? fixQ : checkQ; return q.length > 1 ? q.shift() : q[0]; };
+  while (round <= maxRounds) {
+    fix = agent("fix");
+    if (transportRetryable(fix) && retries < maxTransportRetries) { retries += 1; continue; }
+    if (landedNothing(fix)) { check = null; round += 1; continue; }
+    check = agent("check");
+    if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
+    if (transportRetryable(check) && retries < maxTransportRetries) { retries += 1; check = agent("check"); }
+    if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
+    round += 1;
+  }
+  return calls.join(",");
+};
+const landed = (extra) => Object.assign({ status: "accepted", data: { patch_landed: true } }, extra);
+const ok = { status: "accepted", summary: "clean" };
+const dead = { status: "failed", summary: "agent transport failed: 520" };
+// Both halves accepted, with transport markers sitting in ordinary agent prose.
+const fixProse = landed({ summary: "fixed; the flaky suite timed out after 300s once, re-ran clean" });
+const checkProse = { status: "accepted", summary: "verified; agent transport failed earlier, retried" };
+console.log(JSON.stringify({
+  success_is_terminal: run([fixProse], [checkProse]),
+  dead_fix_retries:    run([dead, landed({})], [ok]),
+  dead_check_reruns:   run([landed({})], [dead, ok]),
+  persistent_dead:     run([landed({})], [dead])
+}));"#;
+        assert_eq!(
+            run_helpers_js(driver),
+            concat!(
+                r#"{"success_is_terminal":"fix,check","#,
+                r#""dead_fix_retries":"fix,fix,check","#,
+                r#""dead_check_reruns":"fix,check,check","#,
+                r#""persistent_dead":"fix,check,check,fix,check,check"}"#
+            )
+        );
+    }
+
+    /// The gate must be driven by the host marker, across every shape of
+    /// "nothing changed" — and must stay quiet when the marker is absent.
+    ///
+    /// The absent case is the load-bearing one. Reading absence as "nothing
+    /// landed" skips EVERY verifier: only the worktree write path sets this
+    /// marker, so a host predating it, or any other write mode, would silently
+    /// disable verification instead of skipping one provably useless call. That
+    /// inversion was written, and caught only by executing the loop.
+    #[test]
+    fn the_verifier_is_suppressed_only_on_an_explicit_host_nothing_landed() {
+        let driver = r#"
+const cases = {
+  rejected:  {"status":"failed","data":{"patch_landed":false}},
+  noop:      {"status":"noop","data":{"patch_landed":false}},
+  landed:    {"status":"accepted","data":{"patch_landed":true}},
+  no_marker: {"status":"accepted"},
+  absent_env: null,
+  mixed_fanout: {"data":{"outcomes":[
+    {"result":{"data":{"patch_landed":false}}},
+    {"result":{"data":{"patch_landed":true}}}]}}
+};
+const out = {};
+for (const k of Object.keys(cases)) out[k] = landedNothing(cases[k]);
+console.log(JSON.stringify(out));"#;
+        // Only the two explicit "false" cases suppress the verifier. A missing
+        // marker, a missing envelope, and a fanout where any branch landed work
+        // all keep the check running.
+        assert_eq!(
+            run_gate_js(driver),
+            r#"{"rejected":true,"noop":true,"landed":false,"no_marker":false,"absent_env":false,"mixed_fanout":false}"#
+        );
+    }
+}
+
+#[cfg(test)]
+mod review_attribution_tests {
+    /// Pull one named arrow-function definition out of the prelude by name.
+    ///
+    /// Sliced to the function's real end rather than a fixed window — a magic
+    /// width has already made a test in this file report failure on correct
+    /// code twice.
+    fn prelude_fn(name: &str) -> String {
+        let prelude = super::V3_PRIMITIVES_JS;
+        let marker = format!("  const {name} = ");
+        let start = prelude
+            .find(&marker)
+            .unwrap_or_else(|| panic!("prelude must define {name}"));
+        let end = start
+            + prelude[start..]
+                .find("\n  };")
+                .unwrap_or_else(|| panic!("{name} must end with a closing arrow body"))
+            + 5;
+        prelude[start..end].to_string()
+    }
+
+    fn run_review_js(driver: &str) -> String {
+        let mut script = String::new();
+        for name in [
+            "findingsFrom",
+            "taskIdsOfOutcome",
+            "stampTaskIds",
+            "attributedMapFindings",
+            "findingIdentities",
+            "reattributeFindings",
+            "findingsByTask",
+        ] {
+            script.push_str(&prelude_fn(name));
+            script.push('\n');
+        }
+        script.push_str(driver);
+        script.push('\n');
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("review.mjs");
+        std::fs::write(&path, script).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&path)
+            .output()
+            .expect("node must be available; these tests already shell out to zsh and python3");
+        assert!(
+            out.status.success(),
+            "driver failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A fanout map envelope whose findings carry NO task key of any kind —
+    /// the exact shape all 43 adversarial findings had on run wf-ee4a92fc.
+    const UNATTRIBUTED_MAP: &str = r#"{"data":{"outcomes":[
+      {"item_id":"review-task-tdl-010","result":{"data":{"findings":[
+        {"id":"F1","claim":"registry write is not atomic","severity":"high"},
+        {"id":"F2","claim":"no fsync on manifest","severity":"medium"}]}}},
+      {"item_id":"review-task-tdl-020","result":{"data":{"findings":[
+        {"id":"F3","claim":"validation report omits gaps","severity":"high"}]}}}
+    ]}}"#;
+
+    const ITEM_TASK_IDS: &str = r#"{"review-task-tdl-010":"TASK-TDL-010","review-task-tdl-020":"TASK-TDL-020"}"#;
+
+    /// The headline defect: without stamping, every finding routes to
+    /// `unassigned` and `remediateFindings` returns them untouched.
+    #[test]
+    fn map_findings_are_attributed_to_the_task_whose_branch_produced_them() {
+        let driver = format!(
+            r#"const stamped = attributedMapFindings({UNATTRIBUTED_MAP}, {ITEM_TASK_IDS});
+const {{ grouped, unassigned }} = findingsByTask(stamped);
+console.log(JSON.stringify({{
+  total: stamped.length,
+  unassigned: unassigned.length,
+  tdl010: (grouped["TASK-TDL-010"] || []).length,
+  tdl020: (grouped["TASK-TDL-020"] || []).length
+}}));"#
+        );
+        assert_eq!(
+            run_review_js(&driver),
+            r#"{"total":3,"unassigned":0,"tdl010":2,"tdl020":1}"#
+        );
+    }
+
+    /// A reviewer that DID name its tasks must keep exactly what it named — a
+    /// cross-task finding naming two tasks must not be collapsed to the one
+    /// branch it happened to surface in.
+    #[test]
+    fn reviewer_supplied_attribution_is_never_overwritten() {
+        let map = r#"{"data":{"outcomes":[{"item_id":"review-task-tdl-010","result":{"data":{"findings":[
+          {"id":"F1","claim":"shared invariant broken","canonical_task_ids":["TASK-TDL-010","TASK-TDL-020"]}]}}}]}}"#;
+        let driver = format!(
+            r#"const stamped = attributedMapFindings({map}, {ITEM_TASK_IDS});
+console.log(JSON.stringify(stamped[0].canonical_task_ids));"#
+        );
+        assert_eq!(run_review_js(&driver), r#"["TASK-TDL-010","TASK-TDL-020"]"#);
+    }
+
+    /// `preserveMapFindings` is an instruction to a model, not a guarantee. A
+    /// reduce that returns the same findings stripped of attribution must be
+    /// repaired from the stamped map set rather than silently losing routing.
+    #[test]
+    fn a_reduce_that_drops_attribution_is_repaired_by_identity() {
+        let reduce = r#"{"data":{"findings":[
+          {"id":"F1","claim":"registry write is not atomic","severity":"high"},
+          {"id":"F3","claim":"validation report omits gaps","severity":"high"}]}}"#;
+        let driver = format!(
+            r#"const stamped = attributedMapFindings({UNATTRIBUTED_MAP}, {ITEM_TASK_IDS});
+const repaired = reattributeFindings(findingsFrom({reduce}), stamped);
+console.log(JSON.stringify(repaired.map((f) => f.canonical_task_ids)));"#
+        );
+        assert_eq!(
+            run_review_js(&driver),
+            r#"[["TASK-TDL-010"],["TASK-TDL-020"]]"#
+        );
+    }
+
+    /// A finding the primitive genuinely cannot place must still be RETURNED.
+    /// Dropping it would trade a silent routing failure for a silent data loss.
+    #[test]
+    fn findings_from_an_unmappable_branch_are_kept_unattributed() {
+        let map = r#"{"data":{"outcomes":[{"item_id":"review-unknown-item","result":{"data":{"findings":[
+          {"id":"F9","claim":"orphan finding"}]}}}]}}"#;
+        let driver = format!(
+            r#"const stamped = attributedMapFindings({map}, {ITEM_TASK_IDS});
+const {{ unassigned }} = findingsByTask(stamped);
+console.log(JSON.stringify({{ kept: stamped.length, unassigned: unassigned.length }}));"#
+        );
+        assert_eq!(run_review_js(&driver), r#"{"kept":1,"unassigned":1}"#);
     }
 }
 

@@ -136,13 +136,51 @@ fn accepted_is_rejected_when_a_declared_required_tool_is_never_exercised() {
             &accepted_result_json(commands),
         )
         .expect_err("accepted must be rejected when a required tool was never invoked");
+    // Both remaining tools must be named. Reporting only `pine_compile` would
+    // cost a second attempt to discover `pine_smart_compile`, and the repair
+    // budget cannot fund that — both errors are the same repair class.
     assert!(
         matches!(
             &error,
-            WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tool)
-                if tool == "pine_compile"
+            WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tools)
+                if tools == &["pine_compile".to_string(), "pine_smart_compile".to_string()]
         ),
         "{error}"
+    );
+}
+
+/// The TDL-041 sequence, compressed into one rejection.
+///
+/// Live, the agent was told about `chart_get_state`, fixed it, was then told
+/// about `quote_get`, and ran out of attempts at 3 of 3 having needed 4. The
+/// message must name every unexercised tool so one attempt can close them all.
+#[test]
+fn every_unexercised_required_tool_is_named_in_a_single_rejection() {
+    let input = serde_json::json!({
+        "item": {
+            "canonical_task_ids": ["TASK-TDL-041"],
+            "required_tools": ["chart_get_state", "quote_get", "symbol_info"]
+        }
+    });
+    let commands = serde_json::json!([
+        { "kind": "inspect", "command": "mcp__tradingview__symbol_info AAPL", "status": "succeeded", "output_summary": "ok" }
+    ]);
+
+    let error = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(
+            &write_request_with_input(input),
+            &accepted_result_json(commands),
+        )
+        .expect_err("accepted must be rejected while required tools are unexercised");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("chart_get_state") && message.contains("quote_get"),
+        "both unexercised tools must appear in one message: {message}"
+    );
+    assert!(
+        !message.contains("symbol_info"),
+        "an exercised tool must not be reported as missing: {message}"
     );
 }
 

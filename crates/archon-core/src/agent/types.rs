@@ -289,11 +289,59 @@ impl ConversationState {
         }));
     }
 
+    /// Record a tool result, capped to its tool's context limit AT INGEST.
+    ///
+    /// This reverses the invariant `13ab4fd7` established, where the canonical
+    /// state stayed lossless and `project_messages_for_request` trimmed only on
+    /// replay of turns older than `preserve_recent_turns`. That left the most
+    /// recent turns exempt from every limit, and a single uncapped result is
+    /// enough to make a request unsendable no matter how well compaction works:
+    ///
+    /// - `HTTP 400 ... Invalid 'input[7].output': string too long. Expected a
+    ///   string with maximum length 10485760, but got ... 18031035` — a
+    ///   PER-FIELD provider limit. No compaction strategy can rescue this; the
+    ///   oversized block has to never exist.
+    /// - `context window exceeded` — the aggregate limit, reached faster when
+    ///   recent turns are exempt.
+    /// - `no safe compaction boundary` — old turns are already digests, so
+    ///   dropping them frees almost nothing while everything large sits inside
+    ///   the protected window with no legal move left.
+    ///
+    /// Capping here rather than at the request boundary is deliberate: this is
+    /// the one choke point every ingest path funnels through (postprocess, the
+    /// preflight deny/block gates, the cognitive gate, and the synthetic fills
+    /// in `fill_missing_tool_results`), so no caller can route around it and no
+    /// future one can forget to. A per-call-site cap is the shape that leaves
+    /// exactly the gap this bug came through.
+    ///
+    /// Full output is NOT lost: `record_tool_completion` fires
+    /// `AgentEvent::ToolCallComplete` with the complete `ToolResult` before this
+    /// is ever called, so UI and logs still receive it in full — which is what
+    /// the trim marker has always promised.
+    ///
+    /// The ceiling here is `INGEST_TOOL_RESULT_CEILING_CHARS`, NOT the
+    /// tool-aware replay limits. Those are a budget for how much of an OLD turn
+    /// is worth re-sending; this answers how large a single block may ever be.
+    /// Reusing the replay budget would have cost every agent the recent-turn
+    /// fidelity the preserve window exists to provide — a `Bash` result would
+    /// have dropped from 102_400 bytes to 24_000 chars on arrival — to fix a
+    /// bug that was three orders of magnitude away. `project_messages_for_request`
+    /// still applies the tighter tool-aware limits on replay, unchanged.
     pub fn add_tool_result(&mut self, tool_use_id: &str, content: &str, is_error: bool) {
+        let capped = crate::agent::tool_result_context::cap_tool_output_for_ingest(content);
+        if capped.truncated {
+            tracing::warn!(
+                tool_use_id,
+                original_chars = capped.original_chars,
+                stored_chars = capped.stored_chars,
+                limit_chars = capped.limit_chars,
+                "tool result exceeded the ingest ceiling and was truncated"
+            );
+        }
         let result = serde_json::json!({
             "type": "tool_result",
             "tool_use_id": tool_use_id,
-            "content": content,
+            "content": capped.content,
             "is_error": is_error,
         });
         if let Some(last) = self.messages.last_mut()
@@ -412,16 +460,84 @@ mod tests {
         assert_eq!(blocks[1]["tool_use_id"], "tool-2");
     }
 
+    /// Replaces `conversation_state_preserves_full_tool_result_text`, which
+    /// asserted the opposite and was the paired invariant of `13ab4fd7`'s
+    /// "trim only at the request boundary" design. That design left the most
+    /// recent turns uncapped, and an 18_031_035-char result blew the provider's
+    /// 10_485_760-char PER-FIELD limit — a request that no compaction strategy
+    /// can make sendable. The old invariant is reversed on purpose; losslessness
+    /// now lives on the event stream (see `add_tool_result`'s docs), not here.
     #[test]
-    fn conversation_state_preserves_full_tool_result_text() {
+    fn conversation_state_caps_tool_result_text_at_ingest() {
         let mut state = ConversationState::default();
-        let huge = "x".repeat(700_000);
+        let huge = "x".repeat(2_000_000);
 
         state.add_tool_result("tool-1", &huge, false);
 
         let content = state.messages[0]["content"][0]["content"]
             .as_str()
             .expect("tool result content");
-        assert_eq!(content, huge);
+        assert!(content.chars().count() < huge.chars().count());
+        assert!(content.contains("tool output trimmed"));
+    }
+
+    /// The whole point of a separate ingest ceiling: a result at the largest
+    /// size the toolset can actually produce must arrive INTACT. `bash.rs` caps
+    /// its own output at 102_400 bytes, so that is the realistic worst case for
+    /// a real tool. If this ever starts truncating, the ingest ceiling has been
+    /// confused with the replay budget again and every agent has quietly lost
+    /// recent-turn fidelity.
+    #[test]
+    fn realistically_large_tool_results_survive_ingest_untouched() {
+        let mut state = ConversationState::default();
+        let biggest_real_result = "x".repeat(102_400);
+
+        state.add_tool_result("tool-1", &biggest_real_result, false);
+
+        assert_eq!(
+            state.messages[0]["content"][0]["content"]
+                .as_str()
+                .expect("tool result content"),
+            biggest_real_result
+        );
+    }
+
+    /// The exact shape that reached the provider: one tool result far above the
+    /// per-field ceiling. Guards the property that actually matters — no single
+    /// stored block can exceed the largest limit the engine hands out — rather
+    /// than a specific tool's number.
+    #[test]
+    fn no_stored_tool_result_can_exceed_the_provider_per_field_limit() {
+        const PROVIDER_PER_FIELD_LIMIT: usize = 10_485_760;
+        let mut state = ConversationState::default();
+        state.add_assistant_message(vec![
+            serde_json::json!({"type": "tool_use", "id": "grep-1", "name": "Grep", "input": {}}),
+        ]);
+
+        state.add_tool_result("grep-1", &"x".repeat(18_031_035), false);
+
+        let stored = state.messages[1]["content"][0]["content"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count();
+        assert!(
+            stored < PROVIDER_PER_FIELD_LIMIT,
+            "stored {stored} chars still exceeds the provider's per-field limit"
+        );
+    }
+
+    /// Small results must pass through byte-for-byte. A cap that rewrote every
+    /// result would be a far bigger behaviour change than the one intended.
+    #[test]
+    fn small_tool_results_are_stored_verbatim() {
+        let mut state = ConversationState::default();
+        state.add_assistant_message(vec![
+            serde_json::json!({"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {}}),
+        ]);
+
+        state.add_tool_result("tool-1", "exit 0", false);
+
+        assert_eq!(state.messages[1]["content"][0]["content"], "exit 0");
     }
 }
