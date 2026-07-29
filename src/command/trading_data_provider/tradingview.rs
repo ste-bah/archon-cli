@@ -115,6 +115,8 @@ pub(super) fn fetch_tradingview_native(
         );
     }
     let captured_bars = bars.len();
+    // Captured before `bars` moves into the store request below.
+    let volume_degraded = tradingview_volume_degraded(&bars);
     let fetched_at = chrono::Utc::now().to_rfc3339();
     let record = TradingDataLake::new(root)
         .store_ohlcv(StoreOhlcvRequest {
@@ -145,6 +147,7 @@ pub(super) fn fetch_tradingview_native(
             dataset_id,
             request_span,
             &record,
+            volume_degraded,
         ),
         None,
     )
@@ -300,6 +303,13 @@ fn normalized_tradingview_timeframe(value: &str) -> String {
     }
 }
 
+/// Zero or missing volume makes a dataset diagnostic-only, never production
+/// eligible. `tradingview_bar` maps an absent `volume` field to 0.0, so both
+/// the zero and missing cases are caught by the same predicate.
+fn tradingview_volume_degraded(bars: &[OhlcvBar]) -> bool {
+    bars.iter().any(|bar| bar.volume <= 0.0)
+}
+
 fn tradingview_bar(row: &Value) -> Result<OhlcvBar> {
     Ok(OhlcvBar {
         timestamp: tv_timestamp(row)?,
@@ -357,7 +367,7 @@ fn tradingview_metadata(
         provider_symbol: symbol.trim().into(),
         timeframe: timeframe.trim().into(),
         native_interval: true,
-        production_eligible: true,
+        production_eligible: !tradingview_volume_degraded(bars),
         price_basis: "raw".into(),
         session: session_for(symbol).into(),
         data_type: DataType::Ohlcv,
@@ -445,6 +455,7 @@ fn tradingview_success(
     dataset_id: &str,
     request_span: TradingViewRequestSpan,
     record: &archon_trading::data_store::StoredDatasetRecord,
+    volume_degraded: bool,
 ) -> Value {
     json!({
         "provider": "tradingview", "symbol": symbol, "timeframe": timeframe,
@@ -452,7 +463,11 @@ fn tradingview_success(
         "can_fetch": true, "native_interval": true, "mcp_state": "available",
         "mcp_status": "success", "provider_symbol": symbol,
         "exact_native_timeframe": timeframe, "captured_bars": record.bars,
-        "quality_status": "passed", "production_eligible": true, "stored_ohlcv": record,
+        // Must agree with the stored metadata's production_eligible, which is
+        // derived from the same predicate — the report and the registry record
+        // are both asserted against.
+        "quality_status": if volume_degraded { "degraded" } else { "passed" },
+        "production_eligible": !volume_degraded, "stored_ohlcv": record,
         "requested_bars": request_span.requested_bars,
         "fail_closed_behavior": "dataset was registered only after TradingView MCP response parsed, validated, and artifact writes completed"
     })
