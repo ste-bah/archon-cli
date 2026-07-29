@@ -201,6 +201,12 @@ fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<String> {
                 call.id
             ));
         }
+        if stage == REMEDIATION_STAGE_VERIFY && call.write_mode.is_some() {
+            defects.push(format!(
+                "review remediation verifier `{}` must be read-only and must not set write mode",
+                call.id
+            ));
+        }
         let Some(task_id) = remediation_contract_string(call, "taskId") else {
             defects.push(format!(
                 "review remediation `{}` must name the canonical task it remediates via `taskId`",

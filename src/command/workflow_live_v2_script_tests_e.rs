@@ -924,6 +924,32 @@ fn remediation_naming_a_nonexistent_reduce_is_rejected() {
     );
 }
 
+#[test]
+fn remediation_write_call_marked_verify_is_rejected() {
+    let mut verify = remediation_call(
+        "verification-wave-review-verify-task-ex-001-1",
+        "verify",
+        "TASK-EX-001",
+        1,
+        2,
+    );
+    verify.write_mode = Some(WorkflowV2WriteMode::Worktree);
+    let details = remediation_details(vec![
+        remediation_call(
+            "review-remediate-task-ex-001-1",
+            "remediate",
+            "TASK-EX-001",
+            1,
+            2,
+        ),
+        verify,
+    ]);
+
+    let error = validate_map_reduce_review_calls(&details, &task_set(["TASK-EX-001"]))
+        .expect_err("write-capable remediation verification must be rejected");
+    assert!(error.contains("must be read-only"), "{error}");
+}
+
 /// A fix nothing re-checks is exactly the unreviewed work the ordering rule
 /// exists to prevent.
 #[test]
