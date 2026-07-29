@@ -137,9 +137,7 @@ impl CommandHandler for RenameHandler {
         if name_arg.is_empty() {
             // Empty-arg branch — byte-for-byte preservation of shipped
             // format string at slash.rs:426.
-            let _ = ctx
-                .tui_tx
-                .send(TuiEvent::Error("Usage: /rename <name>".into()));
+            ctx.emit(TuiEvent::Error("Usage: /rename <name>".into()));
             return Ok(());
         }
 
@@ -202,26 +200,15 @@ impl CommandHandler for RenameHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
 
-    /// Serialize env-mutating tests across `--test-threads=N` (N>1).
-    /// `default_db_path()` reads `dirs::data_dir()` which honours
-    /// `XDG_DATA_HOME` then falls back to `HOME/.local/share` on Linux.
-    /// Any test that needs the handler's `archon_session::storage::
-    /// default_db_path()` call to resolve to a tempdir MUST take this
-    /// lock for the duration of the env mutation + handler call.
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
     /// RAII guard that sets `XDG_DATA_HOME` + `HOME` to the supplied
     /// tempdir on construction and restores the prior values on drop.
-    /// The caller must hold `env_lock()` for the guard's lifetime to
-    /// prevent cross-test env races under `--test-threads>1`.
+    /// The caller must hold `crate::command::USER_DATA_ENV_LOCK` for the
+    /// guard's lifetime to prevent cross-test environment races.
     struct EnvGuard {
         prev_xdg: Option<std::ffi::OsString>,
         prev_home: Option<std::ffi::OsString>,
@@ -232,10 +219,9 @@ mod tests {
                 prev_xdg: std::env::var_os("XDG_DATA_HOME"),
                 prev_home: std::env::var_os("HOME"),
             };
-            // SAFETY: env mutation is protected by the
-            // process-global `env_lock()` Mutex acquired by every
-            // caller. No other thread mutates XDG_DATA_HOME/HOME
-            // while this guard is alive.
+            // SAFETY: env mutation is protected by the command-wide
+            // `USER_DATA_ENV_LOCK` acquired by every command test that mutates
+            // XDG_DATA_HOME/HOME.
             unsafe {
                 std::env::set_var("XDG_DATA_HOME", tmp);
                 std::env::set_var("HOME", tmp);
@@ -245,7 +231,7 @@ mod tests {
     }
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // SAFETY: see `EnvGuard::set`. Lock still held by caller.
+            // SAFETY: see `EnvGuard::set`. Shared lock still held by caller.
             unsafe {
                 match self.prev_xdg.take() {
                     Some(v) => std::env::set_var("XDG_DATA_HOME", v),
@@ -373,7 +359,9 @@ mod tests {
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         let h = RenameHandler::new();
         {
-            let _env_guard = env_lock().lock().expect("env_lock");
+            let _env_guard = crate::command::USER_DATA_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let tmp = tempfile::tempdir().expect("tempdir");
             let _env = EnvGuard::set(tmp.path());
             let db_path = archon_session::storage::default_db_path();
@@ -425,7 +413,9 @@ mod tests {
         let sid = "test-session-b17-dispatch";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         {
-            let _env_guard = env_lock().lock().expect("env_lock");
+            let _env_guard = crate::command::USER_DATA_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let tmp = tempfile::tempdir().expect("tempdir");
             let _env = EnvGuard::set(tmp.path());
             let db_path = archon_session::storage::default_db_path();

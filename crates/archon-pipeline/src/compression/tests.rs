@@ -1,8 +1,8 @@
 use super::*;
 
-    /// Realistic 2000-token (~8000 char) test input mimicking CODING_NAMESPACES.
-    fn realistic_input() -> String {
-        r#"
+/// Realistic 2000-token (~8000 char) test input mimicking CODING_NAMESPACES.
+fn realistic_input() -> String {
+    r#"
 ## Task Analysis — TASK-AUTH-042: Implement JWT Authentication Pipeline
 
 The UserService is the primary entry point for authentication flows. It delegates to
@@ -197,274 +197,274 @@ TestDataFactory depends on PostgresRepository
 
 Sherlock final integration review: APPROVED — all 156 integration points verified clean.
 "#
-        .to_string()
-    }
+    .to_string()
+}
 
-    #[test]
-    fn test_empty_input_produces_empty_output() {
-        let result = compress("", 1000);
-        assert!(result.text.is_empty());
-        assert_eq!(result.token_estimate, 0);
-        assert_eq!(result.entities_preserved, 0);
-        assert_eq!(result.compression_ratio, 0.0);
-        assert!(result.sections_present.is_empty());
+#[test]
+fn test_empty_input_produces_empty_output() {
+    let result = compress("", 1000);
+    assert!(result.text.is_empty());
+    assert_eq!(result.token_estimate, 0);
+    assert_eq!(result.entities_preserved, 0);
+    assert_eq!(result.compression_ratio, 0.0);
+    assert!(result.sections_present.is_empty());
 
-        // Whitespace-only also empty.
-        let result2 = compress("   \n  \t  ", 1000);
-        assert!(result2.text.is_empty());
-    }
+    // Whitespace-only also empty.
+    let result2 = compress("   \n  \t  ", 1000);
+    assert!(result2.text.is_empty());
+}
 
-    #[test]
-    fn test_estimate_tokens_accuracy() {
-        // chars/4 rounded up
-        assert_eq!(estimate_tokens(""), 0); // (0+3)/4 = 0
-        assert_eq!(estimate_tokens("a"), 1); // (1+3)/4 = 1
-        assert_eq!(estimate_tokens("abcd"), 1); // (4+3)/4 = 1
-        assert_eq!(estimate_tokens("abcde"), 2); // (5+3)/4 = 2
-        assert_eq!(estimate_tokens("abcdefgh"), 2); // (8+3)/4 = 2
+#[test]
+fn test_estimate_tokens_accuracy() {
+    // chars/4 rounded up
+    assert_eq!(estimate_tokens(""), 0); // (0+3)/4 = 0
+    assert_eq!(estimate_tokens("a"), 1); // (1+3)/4 = 1
+    assert_eq!(estimate_tokens("abcd"), 1); // (4+3)/4 = 1
+    assert_eq!(estimate_tokens("abcde"), 2); // (5+3)/4 = 2
+    assert_eq!(estimate_tokens("abcdefgh"), 2); // (8+3)/4 = 2
 
-        // Within 20% of chars/4 for larger text.
-        let text = "a".repeat(1000);
-        let est = estimate_tokens(&text);
-        let expected = 250; // 1000/4
-        let diff = (est as f64 - expected as f64).abs() / expected as f64;
-        assert!(
-            diff < 0.20,
-            "Token estimate {est} too far from expected {expected}"
-        );
-    }
+    // Within 20% of chars/4 for larger text.
+    let text = "a".repeat(1000);
+    let est = estimate_tokens(&text);
+    let expected = 250; // 1000/4
+    let diff = (est as f64 - expected as f64).abs() / expected as f64;
+    assert!(
+        diff < 0.20,
+        "Token estimate {est} too far from expected {expected}"
+    );
+}
 
-    #[test]
-    fn test_10x_compression_ratio() {
-        let input = realistic_input();
-        let input_tokens = estimate_tokens(&input);
-        assert!(
-            input_tokens > 500,
-            "Test input should be substantial: got {} tokens",
-            input_tokens
-        );
+#[test]
+fn test_10x_compression_ratio() {
+    let input = realistic_input();
+    let input_tokens = estimate_tokens(&input);
+    assert!(
+        input_tokens > 500,
+        "Test input should be substantial: got {} tokens",
+        input_tokens
+    );
 
-        let result = compress(&input, 200);
-        assert!(
-            result.token_estimate <= 200,
-            "Output should be under 200 tokens, got {}",
-            result.token_estimate
-        );
+    let result = compress(&input, 200);
+    assert!(
+        result.token_estimate <= 200,
+        "Output should be under 200 tokens, got {}",
+        result.token_estimate
+    );
 
-        let ratio = input_tokens as f64 / result.token_estimate.max(1) as f64;
-        assert!(
-            ratio >= 10.0,
-            "Compression ratio should be >= 10x, got {:.1}x",
-            ratio
-        );
-    }
+    let ratio = input_tokens as f64 / result.token_estimate.max(1) as f64;
+    assert!(
+        ratio >= 10.0,
+        "Compression ratio should be >= 10x, got {:.1}x",
+        ratio
+    );
+}
 
-    #[test]
-    fn test_output_starts_with_header() {
-        let result = compress("UserService depends on AuthMiddleware", 1000);
-        assert!(
-            result.text.starts_with("[MEM|v1]"),
-            "Output must start with [MEM|v1] header, got: {}",
-            &result.text[..result.text.len().min(40)]
-        );
-    }
+#[test]
+fn test_output_starts_with_header() {
+    let result = compress("UserService depends on AuthMiddleware", 1000);
+    assert!(
+        result.text.starts_with("[MEM|v1]"),
+        "Output must start with [MEM|v1] header, got: {}",
+        &result.text[..result.text.len().min(40)]
+    );
+}
 
-    #[test]
-    fn test_entities_extracted_and_abbreviated() {
-        let input = "The UserService processes requests via AuthMiddleware.";
-        let result = compress(input, 1000);
+#[test]
+fn test_entities_extracted_and_abbreviated() {
+    let input = "The UserService processes requests via AuthMiddleware.";
+    let result = compress(input, 1000);
 
-        // Should contain abbreviated entities.
-        assert!(result.entities_preserved > 0, "Should extract entities");
-        assert!(
-            result.text.contains("ENT:"),
-            "Should have ENT section: {}",
-            result.text
-        );
+    // Should contain abbreviated entities.
+    assert!(result.entities_preserved > 0, "Should extract entities");
+    assert!(
+        result.text.contains("ENT:"),
+        "Should have ENT section: {}",
+        result.text
+    );
 
-        // UserService -> USvc (U+Svc), AuthMiddleware -> AuthMW (Auth+MW)
-        // The exact abbreviation depends on the algorithm, but entities should be present.
-        assert!(
-            result.sections_present.contains(&"ENT".to_string()),
-            "sections_present should include ENT"
-        );
-    }
+    // UserService -> USvc (U+Svc), AuthMiddleware -> AuthMW (Auth+MW)
+    // The exact abbreviation depends on the algorithm, but entities should be present.
+    assert!(
+        result.sections_present.contains(&"ENT".to_string()),
+        "sections_present should include ENT"
+    );
+}
 
-    #[test]
-    fn test_decisions_extracted() {
-        let input = "We decided to use PostgreSQL for persistence. We chose JWT for auth tokens.";
-        let result = compress(input, 1000);
+#[test]
+fn test_decisions_extracted() {
+    let input = "We decided to use PostgreSQL for persistence. We chose JWT for auth tokens.";
+    let result = compress(input, 1000);
 
-        assert!(
-            result.text.contains("DEC:"),
-            "Should have DEC section: {}",
-            result.text
-        );
-    }
+    assert!(
+        result.text.contains("DEC:"),
+        "Should have DEC section: {}",
+        result.text
+    );
+}
 
-    #[test]
-    fn test_relationships_extracted() {
-        let input = "UserService -> PostgresRepository\nAuthMiddleware depends on TokenValidator";
-        let result = compress(input, 1000);
+#[test]
+fn test_relationships_extracted() {
+    let input = "UserService -> PostgresRepository\nAuthMiddleware depends on TokenValidator";
+    let result = compress(input, 1000);
 
-        assert!(
-            result.text.contains("REL:"),
-            "Should have REL section: {}",
-            result.text
-        );
-        assert!(
-            result.text.contains("->"),
-            "REL section should contain arrows: {}",
-            result.text
-        );
-    }
+    assert!(
+        result.text.contains("REL:"),
+        "Should have REL section: {}",
+        result.text
+    );
+    assert!(
+        result.text.contains("->"),
+        "REL section should contain arrows: {}",
+        result.text
+    );
+}
 
-    #[test]
-    fn test_deduplication_removes_existing() {
-        let input = "UserService depends on AuthMiddleware. TokenValidator verifies JWT.";
-        let existing = "The UserService is already documented.";
+#[test]
+fn test_deduplication_removes_existing() {
+    let input = "UserService depends on AuthMiddleware. TokenValidator verifies JWT.";
+    let existing = "The UserService is already documented.";
 
-        let without_dedup = compress(input, 1000);
-        let with_dedup = compress_with_dedup(input, existing, 1000);
+    let without_dedup = compress(input, 1000);
+    let with_dedup = compress_with_dedup(input, existing, 1000);
 
-        // With dedup should have fewer or equal entities since UserService is in context.
-        assert!(
-            with_dedup.entities_preserved <= without_dedup.entities_preserved,
-            "Dedup should remove entities found in existing context: {} vs {}",
-            with_dedup.entities_preserved,
-            without_dedup.entities_preserved
-        );
-    }
+    // With dedup should have fewer or equal entities since UserService is in context.
+    assert!(
+        with_dedup.entities_preserved <= without_dedup.entities_preserved,
+        "Dedup should remove entities found in existing context: {} vs {}",
+        with_dedup.entities_preserved,
+        without_dedup.entities_preserved
+    );
+}
 
-    #[test]
-    fn test_decompress_hint_readable() {
-        let input = realistic_input();
-        let compressed = compress(&input, 500);
-        let hint = decompress_hint(&compressed);
+#[test]
+fn test_decompress_hint_readable() {
+    let input = realistic_input();
+    let compressed = compress(&input, 500);
+    let hint = decompress_hint(&compressed);
 
-        assert!(
-            !hint.is_empty(),
-            "Hint should not be empty for non-empty input"
-        );
-        assert!(
-            hint.contains("Memory snapshot"),
-            "Hint should contain header: {}",
-            hint
-        );
-        assert!(
-            hint.contains("entities"),
-            "Hint should mention entities: {}",
-            hint
-        );
-    }
+    assert!(
+        !hint.is_empty(),
+        "Hint should not be empty for non-empty input"
+    );
+    assert!(
+        hint.contains("Memory snapshot"),
+        "Hint should contain header: {}",
+        hint
+    );
+    assert!(
+        hint.contains("entities"),
+        "Hint should mention entities: {}",
+        hint
+    );
+}
 
-    #[test]
-    fn test_decompress_hint_empty() {
-        let compressed = compress("", 1000);
-        let hint = decompress_hint(&compressed);
-        assert_eq!(hint, "(empty memory)");
-    }
+#[test]
+fn test_decompress_hint_empty() {
+    let compressed = compress("", 1000);
+    let hint = decompress_hint(&compressed);
+    assert_eq!(hint, "(empty memory)");
+}
 
-    #[test]
-    fn test_budget_enforcement() {
-        let input = realistic_input();
+#[test]
+fn test_budget_enforcement() {
+    let input = realistic_input();
 
-        // Very tight budget.
-        let result = compress(&input, 50);
-        assert!(
-            result.token_estimate <= 50,
-            "Must respect budget of 50 tokens, got {}",
-            result.token_estimate
-        );
+    // Very tight budget.
+    let result = compress(&input, 50);
+    assert!(
+        result.token_estimate <= 50,
+        "Must respect budget of 50 tokens, got {}",
+        result.token_estimate
+    );
 
-        // Slightly larger budget.
-        let result2 = compress(&input, 100);
-        assert!(
-            result2.token_estimate <= 100,
-            "Must respect budget of 100 tokens, got {}",
-            result2.token_estimate
-        );
-    }
+    // Slightly larger budget.
+    let result2 = compress(&input, 100);
+    assert!(
+        result2.token_estimate <= 100,
+        "Must respect budget of 100 tokens, got {}",
+        result2.token_estimate
+    );
+}
 
-    #[test]
-    fn test_deterministic_output() {
-        let input = realistic_input();
-        let a = compress(&input, 500);
-        let b = compress(&input, 500);
-        assert_eq!(a.text, b.text, "Compression must be deterministic");
-        assert_eq!(a.token_estimate, b.token_estimate);
-        assert_eq!(a.entities_preserved, b.entities_preserved);
-    }
+#[test]
+fn test_deterministic_output() {
+    let input = realistic_input();
+    let a = compress(&input, 500);
+    let b = compress(&input, 500);
+    assert_eq!(a.text, b.text, "Compression must be deterministic");
+    assert_eq!(a.token_estimate, b.token_estimate);
+    assert_eq!(a.entities_preserved, b.entities_preserved);
+}
 
-    #[test]
-    fn test_sherlock_verdicts_extracted() {
-        let input = "Phase 1 review: Sherlock verdict INNOCENT. Phase 2: APPROVED.";
-        let result = compress(input, 1000);
-        assert!(
-            result.text.contains("SH:"),
-            "Should have SH section: {}",
-            result.text
-        );
-    }
+#[test]
+fn test_sherlock_verdicts_extracted() {
+    let input = "Phase 1 review: Sherlock verdict INNOCENT. Phase 2: APPROVED.";
+    let result = compress(input, 1000);
+    assert!(
+        result.text.contains("SH:"),
+        "Should have SH section: {}",
+        result.text
+    );
+}
 
-    #[test]
-    fn test_corrections_extracted() {
-        let input = "Don't use unwrap in error paths. Avoid clone on hot paths.";
-        let result = compress(input, 1000);
-        assert!(
-            result.text.contains("FIX:"),
-            "Should have FIX section: {}",
-            result.text
-        );
-    }
+#[test]
+fn test_corrections_extracted() {
+    let input = "Don't use unwrap in error paths. Avoid clone on hot paths.";
+    let result = compress(input, 1000);
+    assert!(
+        result.text.contains("FIX:"),
+        "Should have FIX section: {}",
+        result.text
+    );
+}
 
-    #[test]
-    fn test_abbreviate_camel_case() {
-        assert_eq!(abbreviate("UserService"), "USvc");
-        // AuthMiddleware -> Auth + Middleware -> Auth + Mddl... let's check actual
-        let abbr = abbreviate("AuthMiddleware");
-        assert!(
-            abbr.len() < "AuthMiddleware".len(),
-            "Abbreviation '{}' should be shorter than original",
-            abbr
-        );
-    }
+#[test]
+fn test_abbreviate_camel_case() {
+    assert_eq!(abbreviate("UserService"), "USvc");
+    // AuthMiddleware -> Auth + Middleware -> Auth + Mddl... let's check actual
+    let abbr = abbreviate("AuthMiddleware");
+    assert!(
+        abbr.len() < "AuthMiddleware".len(),
+        "Abbreviation '{}' should be shorter than original",
+        abbr
+    );
+}
 
-    #[test]
-    fn test_split_camel_case() {
-        assert_eq!(split_camel_case("UserService"), vec!["User", "Service"]);
-        assert_eq!(
-            split_camel_case("AuthMiddleware"),
-            vec!["Auth", "Middleware"]
-        );
-        assert_eq!(split_camel_case("API"), vec!["A", "P", "I"]);
-        assert_eq!(split_camel_case("hello"), vec!["hello"]);
-    }
+#[test]
+fn test_split_camel_case() {
+    assert_eq!(split_camel_case("UserService"), vec!["User", "Service"]);
+    assert_eq!(
+        split_camel_case("AuthMiddleware"),
+        vec!["Auth", "Middleware"]
+    );
+    assert_eq!(split_camel_case("API"), vec!["A", "P", "I"]);
+    assert_eq!(split_camel_case("hello"), vec!["hello"]);
+}
 
-    #[test]
-    fn test_large_input_compression() {
-        // Generate ~8000 chars of realistic content.
-        let input = realistic_input();
-        let char_count = input.len();
-        assert!(
-            char_count > 3000,
-            "Realistic input should be at least 3000 chars, got {}",
-            char_count
-        );
+#[test]
+fn test_large_input_compression() {
+    // Generate ~8000 chars of realistic content.
+    let input = realistic_input();
+    let char_count = input.len();
+    assert!(
+        char_count > 3000,
+        "Realistic input should be at least 3000 chars, got {}",
+        char_count
+    );
 
-        let result = compress(&input, 200);
+    let result = compress(&input, 200);
 
-        // Output under 800 chars (200 tokens * 4).
-        assert!(
-            result.text.len() < 800,
-            "Compressed output should be under 800 chars, got {}",
-            result.text.len()
-        );
+    // Output under 800 chars (200 tokens * 4).
+    assert!(
+        result.text.len() < 800,
+        "Compressed output should be under 800 chars, got {}",
+        result.text.len()
+    );
 
-        // Should have multiple sections.
-        assert!(
-            result.sections_present.len() >= 2,
-            "Should have at least 2 sections, got {:?}",
-            result.sections_present
-        );
-    }
+    // Should have multiple sections.
+    assert!(
+        result.sections_present.len() >= 2,
+        "Should have at least 2 sections, got {:?}",
+        result.sections_present
+    );
+}

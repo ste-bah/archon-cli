@@ -86,6 +86,21 @@ pub struct DynamicTrainerTriggerSnapshot {
     pub elapsed_since_training_ms: Option<u64>,
 }
 
+pub type TrainerStopCallback<'a> = dyn Fn() -> bool + 'a;
+
+pub struct DynamicTrainingRequest<'a> {
+    pub root: &'a Path,
+    pub state_dim: usize,
+    pub backend: BackendKind,
+    pub allow_cpu_fallback: bool,
+    pub adapter: &'a dyn WorldRepresentationAdapter,
+    pub context_rows: usize,
+    pub policy: DynamicTrainerPolicy,
+    pub trigger_policy: DynamicTrainerTriggerPolicy,
+    pub runtime: TrainerRuntimeSnapshot,
+    pub triggers: DynamicTrainerTriggerSnapshot,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainerTriggerReason {
@@ -159,18 +174,16 @@ pub fn evaluate_trainer_trigger(
 }
 
 pub fn run_dynamic_training_once(
-    root: &Path,
-    state_dim: usize,
-    backend: BackendKind,
-    allow_cpu_fallback: bool,
-    adapter: &dyn WorldRepresentationAdapter,
-    context_rows: usize,
-    policy: DynamicTrainerPolicy,
-    trigger_policy: DynamicTrainerTriggerPolicy,
-    runtime: TrainerRuntimeSnapshot,
-    triggers: DynamicTrainerTriggerSnapshot,
+    request: &DynamicTrainingRequest<'_>,
 ) -> Result<DynamicTrainerRunReport> {
-    run_dynamic_training_once_controlled(
+    run_dynamic_training_once_controlled(request, None)
+}
+
+pub fn run_dynamic_training_once_controlled(
+    request: &DynamicTrainingRequest<'_>,
+    should_stop: Option<&TrainerStopCallback>,
+) -> Result<DynamicTrainerRunReport> {
+    let DynamicTrainingRequest {
         root,
         state_dim,
         backend,
@@ -181,30 +194,14 @@ pub fn run_dynamic_training_once(
         trigger_policy,
         runtime,
         triggers,
-        None,
-    )
-}
-
-pub fn run_dynamic_training_once_controlled(
-    root: &Path,
-    state_dim: usize,
-    backend: BackendKind,
-    allow_cpu_fallback: bool,
-    adapter: &dyn WorldRepresentationAdapter,
-    context_rows: usize,
-    policy: DynamicTrainerPolicy,
-    trigger_policy: DynamicTrainerTriggerPolicy,
-    runtime: TrainerRuntimeSnapshot,
-    triggers: DynamicTrainerTriggerSnapshot,
-    should_stop: Option<&dyn Fn() -> bool>,
-) -> Result<DynamicTrainerRunReport> {
-    let mut decision = evaluate_dynamic_trainer(policy, runtime);
-    let trigger = evaluate_trainer_trigger(trigger_policy, triggers);
+    } = request;
+    let mut decision = evaluate_dynamic_trainer(*policy, *runtime);
+    let trigger = evaluate_trainer_trigger(*trigger_policy, *triggers);
     if !decision.should_train {
         return Ok(report(decision, trigger, 0, 0, None, None, None));
     }
     if trigger.is_none() {
-        decision = decision_with_reason(policy, TrainerDecisionReason::NoTrigger);
+        decision = decision_with_reason(*policy, TrainerDecisionReason::NoTrigger);
         return Ok(report(decision, None, 0, 0, None, None, None));
     }
 
@@ -213,22 +210,22 @@ pub fn run_dynamic_training_once_controlled(
     check_training_stop(should_stop, "world-model example build")?;
     let examples = crate::train::examples_from_rows_with_representation_adapter_controlled(
         &rows,
-        adapter,
-        context_rows,
+        *adapter,
+        *context_rows,
         should_stop,
     )?;
     if examples.is_empty() {
-        decision = decision_with_reason(policy, TrainerDecisionReason::NotEnoughRows);
+        decision = decision_with_reason(*policy, TrainerDecisionReason::NotEnoughRows);
         return Ok(report(decision, trigger, rows.len(), 0, None, None, None));
     }
 
     check_training_stop(should_stop, "world-model candidate train")?;
     let started = std::time::Instant::now();
     let (model, outcome) = crate::train::train_candidate_with_backend_or_cpu_fallback(
-        state_dim,
+        *state_dim,
         &examples,
-        backend,
-        allow_cpu_fallback,
+        *backend,
+        *allow_cpu_fallback,
     )?;
     if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
         bail!("world-model training exceeded max_runtime_ms");
@@ -247,7 +244,7 @@ pub fn run_dynamic_training_once_controlled(
     ))
 }
 
-fn check_training_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+fn check_training_stop(should_stop: Option<&TrainerStopCallback>, stage: &str) -> Result<()> {
     if should_stop.is_some_and(|check| check()) {
         bail!("world-model training stopped or timed out during {stage}");
     }
@@ -386,17 +383,17 @@ mod tests {
             DeterministicHashEmbeddingAdapter::new(4).unwrap(),
         ));
 
-        let run = run_dynamic_training_once(
-            temp.path(),
-            4,
-            BackendKind::Cpu,
-            true,
-            &adapter,
-            1,
-            DynamicTrainerPolicy::default(),
-            DynamicTrainerTriggerPolicy::default(),
-            idle_snapshot(),
-            DynamicTrainerTriggerSnapshot {
+        let request = DynamicTrainingRequest {
+            root: temp.path(),
+            state_dim: 4,
+            backend: BackendKind::Cpu,
+            allow_cpu_fallback: true,
+            adapter: &adapter,
+            context_rows: 1,
+            policy: DynamicTrainerPolicy::default(),
+            trigger_policy: DynamicTrainerTriggerPolicy::default(),
+            runtime: idle_snapshot(),
+            triggers: DynamicTrainerTriggerSnapshot {
                 total_rows: 300,
                 candidate_count: 0,
                 new_rows_since_training: 0,
@@ -404,8 +401,8 @@ mod tests {
                 corrections_since_training: 0,
                 elapsed_since_training_ms: None,
             },
-        )
-        .unwrap();
+        };
+        let run = run_dynamic_training_once(&request).unwrap();
 
         assert!(run.candidate_id.is_some());
         assert!(run.checkpoint_path.unwrap().exists());

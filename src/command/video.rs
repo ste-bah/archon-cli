@@ -124,23 +124,6 @@ fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
     Ok(db)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn video_database_reuses_shared_document_handle() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("evidence.db");
-        let shared = archon_docs::acquire_docs_db(&path).unwrap();
-
-        let video = open_db_at(&path).unwrap();
-
-        assert!(std::sync::Arc::ptr_eq(&shared, &video));
-        archon_video::schema::create_video_schema(&video).unwrap();
-    }
-}
-
 fn normalize_kb_id(kb: Option<&str>) -> Option<String> {
     kb.map(str::trim)
         .filter(|value| !value.is_empty())
@@ -384,4 +367,21 @@ fn count_doc_provenance_edges(db: &DbInstance, document_id: &str) -> Result<usiz
         count += archon_docs::store::list_provenance_to(db, &artifact.artifact_id)?.len();
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_database_reuses_shared_document_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("evidence.db");
+        let shared = archon_docs::acquire_docs_db(&path).unwrap();
+
+        let video = open_db_at(&path).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&shared, &video));
+        archon_video::schema::create_video_schema(&video).unwrap();
+    }
 }

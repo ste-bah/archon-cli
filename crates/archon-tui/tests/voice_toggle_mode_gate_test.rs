@@ -5,7 +5,10 @@
 //! that must be called by both the TUI hotkey handler and the main binary
 //! wiring log, proving `voice.toggle_mode` is a load-bearing config flag.
 
-use archon_tui::voice::pipeline::{HotkeyAction, hotkey_action_for_mode};
+use archon_tui::voice::pipeline::{
+    HotkeyAction, VoiceTrigger, fire_trigger, hotkey_action_for_mode, install_trigger_sender,
+};
+use tokio::sync::mpsc;
 
 #[test]
 fn toggle_mode_true_returns_toggle_action() {
@@ -20,4 +23,15 @@ fn toggle_mode_false_returns_push_to_talk_action() {
 #[test]
 fn toggle_and_push_to_talk_are_distinct() {
     assert_ne!(hotkey_action_for_mode(true), hotkey_action_for_mode(false));
+}
+
+#[test]
+fn full_voice_trigger_queue_reports_rejection() {
+    let (tx, _rx) = mpsc::channel(1);
+    install_trigger_sender(tx);
+
+    fire_trigger(VoiceTrigger::Toggle).expect("first trigger accepted");
+    let error = fire_trigger(VoiceTrigger::Cancel).expect_err("full queue must reject loudly");
+
+    assert!(error.contains("no available capacity"));
 }

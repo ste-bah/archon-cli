@@ -186,9 +186,20 @@ pub(super) async fn handle_overlay_action(
             _ => {}
         }
         let updated = refreshed_server_entries(mcp_manager).await;
-        let _ = input_tui_tx.send(TuiEvent::UpdateMcpManager(updated));
+        if let Err(error) = input_tui_tx
+            .send_async(TuiEvent::UpdateMcpManager(updated))
+            .await
+        {
+            tracing::warn!(%error, "MCP manager update delivery failed");
+            return;
+        }
     }
-    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "MCP command completion delivery failed");
+    }
 }
 
 async fn refreshed_server_entries(mcp_manager: &McpServerManager) -> Vec<McpServerEntry> {

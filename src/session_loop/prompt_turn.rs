@@ -20,6 +20,30 @@ pub(super) async fn dispatch_user_prompt(
     dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     adapter: &Arc<crate::agent_handle::AgentHandle>,
 ) {
+    if !notify_generation_started(input_tui_tx).await {
+        return;
+    }
+    let guardrail = begin_prompt_guardrail(config, session_id, &input);
+    if let Some(record) = &guardrail
+        && !record.decision.allowed_to_finalize
+        && !record.decision.required_actions.is_empty()
+        && let Err(error) = input_tui_tx
+            .send_async(TuiEvent::TextDelta(format!(
+                "\nWorld model guardrail: {:?} risk; verification required before completion: {:?}.\n",
+                record.decision.risk_tier, record.decision.required_actions
+            )))
+            .await
+    {
+        tracing::error!(%error, "world-model guardrail notification delivery failed");
+        crate::command::world_model::record_guardrail_turn_outcome(config, record, false);
+        return;
+    }
+
+    let turn_runner: Arc<dyn archon_tui::TurnRunner> = guardrail
+        .as_ref()
+        .map(|record| adapter.scoped_turn_runner(record.action.action_id.clone()))
+        .unwrap_or_else(|| adapter.clone());
+
     {
         let mut response = cmd_ctx.last_assistant_response.lock().await;
         response.clear();
@@ -36,46 +60,43 @@ pub(super) async fn dispatch_user_prompt(
             )
             .await;
     }
-
-    let _ = input_tui_tx.send(TuiEvent::GenerationStarted);
     let effective_input = if let Some(prefix) = initial_prompt_pending.take() {
         format!("{prefix}\n\n{input}")
     } else {
         input.clone()
     };
-    let guardrail = begin_prompt_guardrail(config, session_id, &input);
-    if let Some(record) = &guardrail
-        && !record.decision.allowed_to_finalize
-        && !record.decision.required_actions.is_empty()
-    {
-        let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-            "\nWorld model guardrail: {:?} risk; verification required before completion: {:?}.\n",
-            record.decision.risk_tier, record.decision.required_actions
-        )));
-    }
-
-    let turn_runner: Arc<dyn archon_tui::TurnRunner> = guardrail
-        .as_ref()
-        .map(|record| adapter.scoped_turn_runner(record.action.action_id.clone()))
-        .unwrap_or_else(|| adapter.clone());
-    match dispatcher
-        .lock()
-        .unwrap()
-        .spawn_turn(effective_input, turn_runner)
-    {
-        archon_tui::DispatchResult::Running { .. } => {
-            tracing::debug!("spawned agent turn");
-        }
-        archon_tui::DispatchResult::Queued => {
-            tracing::debug!("agent busy; queued prompt");
-        }
-        archon_tui::DispatchResult::Rejected(error) => {
-            tracing::error!("dispatch rejected: {error}");
-        }
+    let dispatch =
+        dispatch_turn_after_generation_started(dispatcher, effective_input, turn_runner).await;
+    if dispatch.is_none() {
+        return;
     }
     queue.push_back(PostTurnAction::PersistSession {
         guardrail: guardrail.map(Box::new),
     });
+}
+
+async fn notify_generation_started(tui_tx: &archon_tui::event_channel::TuiEventSender) -> bool {
+    if let Err(error) = tui_tx.send_async(TuiEvent::GenerationStarted).await {
+        tracing::error!(%error, "generation-start notification delivery failed");
+        return false;
+    }
+    true
+}
+
+async fn dispatch_turn_after_generation_started(
+    dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
+    prompt: String,
+    runner: Arc<dyn archon_tui::TurnRunner>,
+) -> Option<archon_tui::DispatchResult> {
+    let result = dispatcher.lock().unwrap().spawn_turn(prompt, runner);
+    match &result {
+        archon_tui::DispatchResult::Running { .. } => tracing::debug!("spawned agent turn"),
+        archon_tui::DispatchResult::Queued => tracing::debug!("agent busy; queued prompt"),
+        archon_tui::DispatchResult::Rejected(error) => {
+            tracing::error!("dispatch rejected: {error}");
+        }
+    }
+    Some(result)
 }
 
 fn begin_prompt_guardrail(
@@ -103,4 +124,121 @@ fn begin_prompt_guardrail(
         &action_ref,
         input,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct NoopRouter;
+
+    impl archon_tui::AgentRouter for NoopRouter {
+        fn switch(&self, _agent_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct CountingRunner(AtomicUsize);
+
+    impl archon_tui::TurnRunner for CountingRunner {
+        fn run_turn<'a>(
+            &'a self,
+            _prompt: String,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[test]
+    fn generation_started_uses_async_backpressure() {
+        let source = include_str!("prompt_turn.rs");
+
+        assert!(source.contains("async fn notify_generation_started"));
+        assert!(source.contains("send_async(TuiEvent::GenerationStarted).await"));
+    }
+
+    #[test]
+    fn guardrail_persistence_follows_generation_acceptance() {
+        let source = include_str!("prompt_turn.rs");
+        let body = source
+            .split("pub(super) async fn dispatch_user_prompt")
+            .nth(1)
+            .expect("dispatch function");
+        let notification = body
+            .find("notify_generation_started(input_tui_tx)")
+            .expect("generation notification");
+        let guardrail = body
+            .find("begin_prompt_guardrail(config, session_id, &input)")
+            .expect("guardrail creation");
+
+        assert!(notification < guardrail);
+    }
+
+    #[tokio::test]
+    async fn full_tui_prevents_agent_turn_launch_without_waiting() {
+        let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        tui_tx.send(TuiEvent::Done).expect("fill TUI event channel");
+        let (agent_event_tx, _agent_event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatcher = Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
+            Arc::new(NoopRouter),
+            agent_event_tx,
+        )));
+        let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(25),
+            notify_generation_started(&tui_tx),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "full queue must backpressure prompt launch"
+        );
+        assert!(
+            dispatcher
+                .lock()
+                .expect("dispatcher")
+                .current_query
+                .is_none()
+        );
+        assert_eq!(runner.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn closed_tui_prevents_agent_turn_launch() {
+        let (tui_tx, rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        drop(rx);
+        let (agent_event_tx, _agent_event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatcher = Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
+            Arc::new(NoopRouter),
+            agent_event_tx,
+        )));
+        let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
+
+        let result = if notify_generation_started(&tui_tx).await {
+            dispatch_turn_after_generation_started(
+                &dispatcher,
+                "must not launch".into(),
+                runner.clone(),
+            )
+            .await
+        } else {
+            None
+        };
+
+        assert!(result.is_none());
+        assert!(
+            dispatcher
+                .lock()
+                .expect("dispatcher")
+                .current_query
+                .is_none()
+        );
+        assert_eq!(runner.0.load(Ordering::SeqCst), 0);
+    }
 }

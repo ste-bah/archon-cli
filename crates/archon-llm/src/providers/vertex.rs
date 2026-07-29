@@ -495,6 +495,11 @@ impl LlmProvider for VertexProvider {
 
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
+        if !self.is_claude_model() && !request.tools.is_empty() {
+            return Err(LlmError::Unsupported(
+                "Gemini tool use on Vertex is not implemented".into(),
+            ));
+        }
         request.messages = crate::message_invariants::sanitize_anthropic_shape(request.messages);
         self.do_stream(request).await
     }
@@ -550,8 +555,10 @@ impl LlmProvider for VertexProvider {
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         let is_claude = self.is_claude_model();
         match feature {
-            ProviderFeature::Thinking | ProviderFeature::PromptCaching => is_claude,
-            ProviderFeature::ToolUse | ProviderFeature::Streaming => true,
+            ProviderFeature::Thinking
+            | ProviderFeature::PromptCaching
+            | ProviderFeature::ToolUse => is_claude,
+            ProviderFeature::Streaming => true,
             ProviderFeature::SystemPrompt => is_claude,
             ProviderFeature::Vision => true,
         }
@@ -565,6 +572,24 @@ impl LlmProvider for VertexProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn gemini_rejects_tools_before_request_dispatch() {
+        let provider = VertexProvider::new(
+            "project".into(),
+            "region".into(),
+            "gemini-2.5-pro".into(),
+            "google".into(),
+            Some("missing-credentials.json".into()),
+        );
+        let request = LlmRequest {
+            tools: vec![serde_json::json!({"name": "lookup"})],
+            ..LlmRequest::default()
+        };
+
+        let error = provider.stream(request).await.expect_err("tools rejected");
+        assert!(matches!(error, LlmError::Unsupported(message) if message.contains("Gemini")));
+    }
 
     #[test]
     fn vertex_token_overflow_maps_to_context_window() {

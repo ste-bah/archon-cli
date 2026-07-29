@@ -1,7 +1,8 @@
 use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
 use serde_json::json;
 
-use super::workflow_live_runner::{activity_detail, allowed_tools, command_execution_stage};
+use super::workflow_live_runner::{allowed_tools, command_execution_stage};
+use super::workflow_live_runner_activity::activity_detail;
 
 fn request(input: serde_json::Value) -> StageRunRequest {
     request_with_task(input, "Implement")

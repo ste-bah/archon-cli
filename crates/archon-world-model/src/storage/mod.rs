@@ -269,10 +269,12 @@ mod tests {
 
     #[test]
     fn world_model_config_uses_db_sidecar_lock() {
-        let config = cozo_config(Path::new("/tmp/world-model.db"));
+        let db_path = Path::new("/tmp/world-model.db");
+        let expected_parent = db_path.parent().unwrap().canonicalize().unwrap();
+        let config = cozo_config(db_path);
         assert_eq!(
             config.write_lock_path.unwrap(),
-            PathBuf::from("/tmp/world-model.db.archon-cozo-write.lock")
+            expected_parent.join("world-model.db.archon-cozo-write.lock")
         );
     }
 }

@@ -146,12 +146,10 @@ impl CommandHandler for GardenHandler {
         if sub == "stats" {
             match archon_memory::garden::format_garden_stats(memory, 10) {
                 Ok(stats) => {
-                    let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!("\n{stats}\n")));
+                    ctx.emit(TuiEvent::TextDelta(format!("\n{stats}\n")));
                 }
                 Err(e) => {
-                    let _ = ctx
-                        .tui_tx
-                        .send(TuiEvent::Error(format!("Garden stats failed: {e}")));
+                    ctx.emit(TuiEvent::Error(format!("Garden stats failed: {e}")));
                 }
             }
         } else {
@@ -168,14 +166,10 @@ impl CommandHandler for GardenHandler {
             match archon_memory::garden::consolidate(memory, garden_config) {
                 Ok(report) => {
                     let formatted = report.format();
-                    let _ = ctx
-                        .tui_tx
-                        .send(TuiEvent::TextDelta(format!("\n{formatted}\n")));
+                    ctx.emit(TuiEvent::TextDelta(format!("\n{formatted}\n")));
                 }
                 Err(e) => {
-                    let _ = ctx
-                        .tui_tx
-                        .send(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
+                    ctx.emit(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
                 }
             }
         }

@@ -60,6 +60,8 @@ mod workflow_live_repo_root;
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
 mod workflow_live_runner;
+#[path = "workflow_live_runner_activity.rs"]
+mod workflow_live_runner_activity;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;
@@ -116,8 +118,14 @@ pub(crate) fn spawn_live_workflow(
     tui_tx: TuiEventSender,
     config_path: Option<PathBuf>,
 ) {
-    let _ = tui_tx.send(TuiEvent::TextDelta(live_start_message(&action)));
     archon_observability::spawn_named("dynamic-workflow-run", async move {
+        if let Err(error) = tui_tx
+            .send_async(TuiEvent::TextDelta(live_start_message(&action)))
+            .await
+        {
+            tracing::error!(%error, "workflow start notification delivery failed");
+            return;
+        }
         let generated_config = load_generated_workflow_config(&cwd, config_path.as_deref());
         let result = run_live_action(
             &cwd,
@@ -132,12 +140,22 @@ pub(crate) fn spawn_live_workflow(
         .await;
         match result {
             Ok(text) => {
-                let _ = tui_tx.send(TuiEvent::TextDelta(text));
+                if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(text)).await {
+                    tracing::error!(%error, "workflow completion notification delivery failed");
+                }
             }
             Err(err) => {
                 let message = format!("Workflow failed: {err}");
-                let _ = tui_tx.send(TuiEvent::TextDelta(format!("{message}\n")));
-                let _ = tui_tx.send(TuiEvent::Error(message));
+                if let Err(error) = tui_tx
+                    .send_async(TuiEvent::TextDelta(format!("{message}\n")))
+                    .await
+                {
+                    tracing::error!(%error, "workflow failure text delivery failed");
+                    return;
+                }
+                if let Err(error) = tui_tx.send_async(TuiEvent::Error(message)).await {
+                    tracing::error!(%error, "workflow failure notification delivery failed");
+                }
             }
         }
     });
@@ -152,13 +170,16 @@ pub(crate) async fn run_live_cli_action(
     let llm =
         build_subagent_pipeline_adapter(config, env_vars, "workflow_cli", cwd, "workflow-cli")
             .await?;
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
+    let (tui_tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
+    let drain = archon_observability::spawn_named("workflow-cli-tui-drain", async move {
+        while rx.recv().await.is_some() {}
+    });
     let config_path = env_vars
         .config_dir
         .as_ref()
         .map(|dir| dir.join("config.toml"))
         .unwrap_or_else(archon_core::config::default_config_path);
-    run_live_action(
+    let result = run_live_action(
         cwd,
         action,
         llm,
@@ -168,7 +189,9 @@ pub(crate) async fn run_live_cli_action(
         true,
         LiveApprovalMode::CliYes,
     )
-    .await
+    .await;
+    drain.abort();
+    result
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

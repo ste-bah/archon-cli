@@ -449,10 +449,8 @@ mod tests {
     use super::*;
     use crate::command::registry::{CommandHandler, default_registry};
     use crate::command::test_support::{CtxBuilder, drain_tui_events};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_gametheory_slash_declares_required_subcommands() {
@@ -701,7 +699,9 @@ mod tests {
     }
 
     fn with_temp_data_home<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::command::USER_DATA_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         // `dirs::data_dir()` only honours `XDG_DATA_HOME` on Linux. On
         // macOS it returns `$HOME/Library/Application Support` and on
         // Windows it returns `{FOLDERID_RoamingAppData}` — both ignore
@@ -716,7 +716,7 @@ mod tests {
         let prev_gametheory_db = std::env::var_os("ARCHON_GAMETHEORY_DB_PATH");
         let root = std::env::temp_dir().join(format!("archon-gt-slash-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        // SAFETY: `ENV_LOCK` serialises this module's env mutations.
+        // SAFETY: `USER_DATA_ENV_LOCK` serialises command-test env mutations.
         unsafe {
             std::env::set_var("XDG_DATA_HOME", &root);
             std::env::set_var("HOME", &root);

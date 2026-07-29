@@ -129,7 +129,7 @@ impl CommandHandler for ThemeHandler {
             // Valid theme — emit SetTheme first (the actual mutation
             // signal), then the confirmation TextDelta. Order matches
             // shipped slash.rs:765-770.
-            let _ = ctx.tui_tx.send(TuiEvent::SetTheme(theme_arg.to_string()));
+            ctx.emit(TuiEvent::SetTheme(theme_arg.to_string()));
             ctx.emit(TuiEvent::TextDelta(format!(
                 "\nTheme set to '{theme_arg}'.\n"
             )));

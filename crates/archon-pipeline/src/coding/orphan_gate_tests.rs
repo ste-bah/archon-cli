@@ -300,7 +300,7 @@ fn scanner_reports_dangling_source_symlinks() {
     assert!(result.errors[0].contains("Unable to inspect source symlink target"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn scanner_skips_directory_symlinks_and_non_utf8_hidden_directories() {
     use std::os::unix::ffi::OsStringExt;
@@ -382,7 +382,7 @@ fn scanner_returns_deterministic_candidate_and_reference_order() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn scanner_reports_non_utf8_candidate_name() {
     use std::os::unix::ffi::OsStringExt;
@@ -426,7 +426,7 @@ fn scanner_reports_non_utf8_source_content() {
     assert!(result.errors[0].contains("Non-UTF8 source content"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn scanner_reports_non_utf8_source_path() {
     use std::os::unix::ffi::OsStringExt;

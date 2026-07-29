@@ -44,6 +44,12 @@ pub(super) use model_selection::active_session_model;
 pub(crate) use modes::{run_headless_session, run_print_mode_session};
 pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};
 
+#[cfg(test)]
+fn anthropic_model_env_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
 /// Result of [`build_session_agent`] — a fully constructed Agent plus
 /// the event receiver, resolved agent definition, and channel metrics.
 #[allow(dead_code)]

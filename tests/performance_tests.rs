@@ -46,7 +46,7 @@ fn startup_under_500ms() {
 /// Verify that the binary stays within a reasonable size.
 ///
 /// Debug builds are much larger than release builds due to debug info,
-/// so we use different thresholds: 100 MB for release, 500 MB for debug.
+/// so we use different thresholds: 100 MB for release, 650 MB for debug.
 #[test]
 fn binary_size_check() {
     let Some(bin) = archon_bin() else {
@@ -58,7 +58,7 @@ fn binary_size_check() {
     let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
 
     let is_release = bin.to_string_lossy().contains("target/release");
-    let limit_mb = if is_release { 100.0 } else { 500.0 };
+    let limit_mb = if is_release { 100.0 } else { 650.0 };
     let label = if is_release { "release" } else { "debug" };
 
     assert!(

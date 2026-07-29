@@ -280,10 +280,12 @@ mod tests {
 
     #[test]
     fn finalization_breaks_equal_timestamp_ties_by_idempotency_key() {
-        let mut decision = WorldGuardrailDecision::default();
-        decision.mode = WorldGuardrailMode::Guarded;
-        decision.allowed_to_finalize = false;
-        decision.required_actions = vec![GuardrailRequiredAction::RunTests];
+        let decision = WorldGuardrailDecision {
+            mode: WorldGuardrailMode::Guarded,
+            allowed_to_finalize: false,
+            required_actions: vec![GuardrailRequiredAction::RunTests],
+            ..Default::default()
+        };
         let created_at = Utc::now();
         let passed = VerificationOutcome {
             kind: VerificationKind::UnitTests,

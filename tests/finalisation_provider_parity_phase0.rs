@@ -29,15 +29,13 @@ fn codex_agentic_capabilities_include_verified_tools_subagents_btw_and_pipelines
 
 #[test]
 fn phase0_direct_anthropic_construction_baseline_is_explicit() {
-    // Post-refactor (commit 02145e3 "Finalize 1.2.0 release and split session runtime"):
-    // session.rs was split into src/session/*.rs subfiles; the two direct
-    // AnthropicClient::new sites now live in build_agent.rs (agent factory)
-    // and interactive_bootstrap.rs (interactive session bootstrap).
+    // Session construction moved into the provider-specific factory during the
+    // later session split. The bootstrap site remains separate.
     let expected = BTreeMap::from([
         ("crates/archon-sdk/src/query.rs", 1usize),
         ("src/command/chat.rs", 1),
         ("src/runtime/llm.rs", 1),
-        ("src/session/build_agent.rs", 1),
+        ("src/session/build_agent_provider.rs", 1),
         ("src/session/interactive_bootstrap.rs", 1),
         ("src/session_loop/slash_handlers.rs", 1),
     ]);
@@ -92,7 +90,7 @@ fn direct_anthropic_construction_counts() -> BTreeMap<&'static str, usize> {
         "src/command/team.rs",
         "src/runtime/llm.rs",
         "src/session.rs",
-        "src/session/build_agent.rs",
+        "src/session/build_agent_provider.rs",
         "src/session/interactive_bootstrap.rs",
         "src/session_loop/slash_handlers.rs",
     ];

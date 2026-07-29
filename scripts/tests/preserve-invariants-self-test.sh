@@ -86,11 +86,11 @@ sed -i 's/pub const AUTO_BACKGROUND_MS: u64 = 120_000;/\/\/ REMOVED/' "$WORK/ws/
 assert_fails "auto-background-ms-missing"
 git -C "$WORK/ws" checkout -- crates/archon-core/src/subagent.rs 2>/dev/null || true
 
-# --- Case E: AGT-025 race structure missing from agent_tool.rs ---
+# --- Case E: AGT-025 race structure missing from agent_tool/run.rs ---
 echo "--- Case E: AGT-025 race structure missing ---"
-sed -i 's/tokio::select!/tokio::select_REMOVED!/' "$WORK/ws/crates/archon-tools/src/agent_tool.rs"
+sed -i 's/tokio::select!/tokio::select_REMOVED!/' "$WORK/ws/crates/archon-tools/src/agent_tool/run.rs"
 assert_fails "agt025-race-missing"
-git -C "$WORK/ws" checkout -- crates/archon-tools/src/agent_tool.rs 2>/dev/null || true
+git -C "$WORK/ws" checkout -- crates/archon-tools/src/agent_tool/run.rs 2>/dev/null || true
 
 # --- Case F: save_agent_memory signature drift (memory_scope removed) ---
 # Post-refactor (commit b2fb45c "Split agent memory modules"): the

@@ -1,19 +1,109 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use archon_tui::event_channel::bounded_tui_event_channel_with_capacity;
 use archon_workflow::{
-    RunStatus, StageKind, StageRunRequest, StageStatus, WorkflowRun, WorkflowSpec,
+    CommandAction, RunStatus, StageKind, StageRunRequest, StageStatus, WorkflowRun, WorkflowSpec,
     WriteBoundaryProbe,
 };
 use serde_json::json;
 
-use super::terminal_resume_message;
 use super::workflow_live_prompt::{harness_planner_prompt, workflow_prompt};
 use super::workflow_live_runner::{
     allowed_tools, request_target_repository_root, workflow_agent_ordinal,
     workflow_agent_session_id, workflow_stage_system_context,
 };
 use super::workflow_live_test_support::{InvalidPlanner, boundary_runner, request};
+use super::{spawn_live_workflow, terminal_resume_message};
+
+#[test]
+fn workflow_and_session_paths_do_not_ignore_tui_delivery() {
+    fn collect(path: &std::path::Path, offenders: &mut Vec<std::path::PathBuf>) {
+        if path.is_file() {
+            inspect_source(path, offenders);
+            return;
+        }
+        for entry in std::fs::read_dir(path).expect("read source directory") {
+            let path = entry.expect("read source entry").path();
+            if path.is_dir() {
+                collect(&path, offenders);
+            } else {
+                inspect_source(&path, offenders);
+            }
+        }
+    }
+
+    fn inspect_source(path: &std::path::Path, offenders: &mut Vec<std::path::PathBuf>) {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") || name.contains("test") {
+            return;
+        }
+        let compact: String = std::fs::read_to_string(path)
+            .expect("read source")
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        let ignores_tui_delivery = compact.split(';').any(|statement| {
+            statement.contains("let_=")
+                && (statement.contains(".send(TuiEvent")
+                    || statement.contains(".send(archon_tui::app::TuiEvent"))
+        });
+        if ignores_tui_delivery {
+            offenders.push(path.to_path_buf());
+        }
+    }
+
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    collect(&root.join("session"), &mut offenders);
+    collect(&root.join("session_loop"), &mut offenders);
+    for entry in std::fs::read_dir(root.join("command")).expect("read command directory") {
+        let path = entry.expect("read command entry").path();
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("workflow_live") && !name.contains("test"))
+        {
+            collect(&path, &mut offenders);
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "production paths ignore bounded TUI delivery: {offenders:?}"
+    );
+}
+
+#[tokio::test]
+async fn closed_tui_prevents_workflow_planner_launch() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let planner = Arc::new(
+        super::workflow_live_test_support::GuttedImplementationPlanner {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        },
+    );
+    let (tui_tx, rx) = bounded_tui_event_channel_with_capacity(1);
+    drop(rx);
+
+    spawn_live_workflow(
+        root.path().to_path_buf(),
+        CommandAction::Plan {
+            task: "must not launch".into(),
+        },
+        planner.clone(),
+        tui_tx,
+        None,
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert_eq!(
+        planner.calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "workflow planner launched after status delivery failed"
+    );
+}
 
 #[test]
 fn workflow_live_uses_target_repository_root_as_subagent_cwd() {
@@ -166,7 +256,7 @@ fn serial_implementation_keeps_bash_available() {
 
 #[test]
 fn workflow_live_reports_backing_workspace_boundary_support() {
-    let stage_runner = boundary_runner(Arc::new(InvalidPlanner));
+    let (stage_runner, _tui_rx) = boundary_runner(Arc::new(InvalidPlanner));
 
     assert!(stage_runner.supports_workspace_boundary());
 }

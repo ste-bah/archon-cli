@@ -171,9 +171,7 @@ impl CommandHandler for McpHandler {
         // snapshot owns the entries and cloning a `Vec<McpServerEntry>`
         // is an O(N) String clone per entry; N is tiny (single-digit
         // server counts in practice).
-        let _ = ctx
-            .tui_tx
-            .send(TuiEvent::ShowMcpManager(snap.entries.clone()));
+        ctx.emit(TuiEvent::ShowMcpManager(snap.entries.clone()));
         Ok(())
     }
 

@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,13 +8,14 @@ use serde_json::Value;
 
 const LIVE_AGENT_TRANSIENT_ATTEMPTS: usize = 3;
 
-pub(crate) async fn run_agent_with_transient_retry<F>(
+pub(crate) async fn run_agent_with_transient_retry<F, Fut>(
     llm: &Arc<dyn LlmClient>,
     agent_request: AgentExecutionRequest,
     mut on_retry: F,
 ) -> archon_workflow::WorkflowResult<LlmResponse>
 where
-    F: FnMut(usize),
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = archon_workflow::WorkflowResult<()>>,
 {
     let mut last_error = None;
     for attempt in 1..=LIVE_AGENT_TRANSIENT_ATTEMPTS {
@@ -25,7 +27,7 @@ where
                     && transient_live_agent_error_for_request(&agent_request, &message)
                 {
                     last_error = Some(message);
-                    on_retry(attempt);
+                    on_retry(attempt).await?;
                     tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
                     continue;
                 }
@@ -38,7 +40,7 @@ where
     ))
 }
 
-pub(crate) async fn send_message_with_transient_retry<F>(
+pub(crate) async fn send_message_with_transient_retry<F, Fut>(
     llm: &Arc<dyn LlmClient>,
     messages: Vec<Value>,
     system: Vec<Value>,
@@ -47,7 +49,8 @@ pub(crate) async fn send_message_with_transient_retry<F>(
     mut on_retry: F,
 ) -> Result<LlmResponse>
 where
-    F: FnMut(usize),
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = Result<()>>,
 {
     let mut last_error = None;
     for attempt in 1..=LIVE_AGENT_TRANSIENT_ATTEMPTS {
@@ -60,7 +63,7 @@ where
                 let message = error.to_string();
                 if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS && transient_live_agent_error(&message) {
                     last_error = Some(message);
-                    on_retry(attempt);
+                    on_retry(attempt).await?;
                     tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
                     continue;
                 }

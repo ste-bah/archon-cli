@@ -8,13 +8,16 @@ use serde_json::{Value, json};
 use super::workflow_live_retry;
 use super::workflow_live_runner::workflow_stage_system_context;
 
-pub(super) async fn repair_item_output(
+pub(super) async fn repair_item_output<Fut>(
     llm: &Arc<dyn LlmClient>,
     request: &StageRunRequest,
     agent_request: &AgentExecutionRequest,
     first_response: LlmResponse,
-    on_retry: impl FnMut(usize),
-) -> archon_workflow::WorkflowResult<LlmResponse> {
+    on_retry: impl FnMut(usize) -> Fut,
+) -> archon_workflow::WorkflowResult<LlmResponse>
+where
+    Fut: std::future::Future<Output = archon_workflow::WorkflowResult<()>>,
+{
     let mut repair_request = agent_request.clone();
     repair_request.messages = vec![serde_json::json!({
         "role": "user",

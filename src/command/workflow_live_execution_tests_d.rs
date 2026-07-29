@@ -3,7 +3,7 @@ async fn workflow_live_fails_item_producer_when_repair_is_still_invalid() {
     let client = Arc::new(AlwaysInvalidItemsAgentClient {
         calls: AtomicUsize::new(0),
     });
-    let stage_runner = runner(client.clone());
+    let (stage_runner, _tui_rx) = runner(client.clone());
     let req = StageRunRequest {
         stage_id: "t001-inventory".into(),
         stage_kind: StageKind::Agent,
@@ -31,7 +31,7 @@ async fn workflow_live_recovers_read_only_discovery_items_when_repair_is_still_i
     let client = Arc::new(AlwaysInvalidItemsAgentClient {
         calls: AtomicUsize::new(0),
     });
-    let stage_runner = runner(client.clone());
+    let (stage_runner, _tui_rx) = runner(client.clone());
     let req = StageRunRequest {
         stage_id: "discover".into(),
         stage_kind: StageKind::Agent,

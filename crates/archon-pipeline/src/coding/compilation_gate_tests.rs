@@ -16,6 +16,7 @@ const CHILD_DESCENDANT_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCEND
 const CHILD_STDIN_OUTCOME_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_STDIN_OUTCOME";
 
 #[test]
+#[allow(clippy::zombie_processes)] // Fixture intentionally lets descendant outlive direct child.
 fn controlled_child() {
     let Ok(marker) = std::env::var(CHILD_MARKER_ENV) else {
         return;
@@ -68,13 +69,17 @@ fn controlled_child() {
                 ])
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
-                .env(CHILD_MARKER_ENV, descendant_marker)
+                .env(CHILD_MARKER_ENV, &descendant_marker)
                 .env(CHILD_MODE_ENV, "descendant-hold-stream")
                 .spawn()
                 .unwrap();
+            assert!(
+                wait_for_file(Path::new(&descendant_marker), Duration::from_secs(1)),
+                "descendant must start before direct child exits"
+            );
         }
         Ok("descendant-hold-stream") => {
-            let deadline = std::time::Instant::now() + Duration::from_millis(300);
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
             while std::time::Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -180,7 +185,7 @@ async fn compilation_timeout_reports_already_exited_direct_child_when_descendant
         );
 
     let result = CompilationGate
-        .run_command(spec, Duration::from_millis(100))
+        .run_command(spec, Duration::from_secs(1))
         .await;
 
     assert!(child_marker.exists(), "direct child must have started");

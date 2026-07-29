@@ -270,6 +270,9 @@ async fn auto_background_completion_wins_same_poll_parent_cancel() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial]
 async fn task_completion_wins_before_late_stop() {
+    let executor = executor();
+    executor.delay_ms.store(0, Ordering::SeqCst);
+    executor.wait_for_cancel.store(false, Ordering::SeqCst);
     let result = TaskCreateTool
         .execute(prompted_task("late stop", true), &context(None))
         .await;

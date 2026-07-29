@@ -219,12 +219,100 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
 }
 
 #[tokio::test]
+async fn closed_tui_prevents_stage_success_publication() {
+    let client = Arc::new(CompletionBlockedAgentClient {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let (tui_tx, mut tui_rx) =
+        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(4);
+    let stage_runner = PipelineWorkflowRunner {
+        llm: client.clone(),
+        tui_tx,
+        agent_names: Vec::new(),
+        workspace_boundary_supported: false,
+    };
+    let handle = tokio::spawn(async move { stage_runner.run_stage(request(json!({}))).await });
+
+    client.started.notified().await;
+    let _running = tui_rx.recv().await.expect("running activity");
+    drop(tui_rx);
+    client.release.notify_one();
+
+    handle
+        .await
+        .expect("stage join")
+        .expect_err("closed TUI must prevent stage success publication");
+}
+
+#[tokio::test]
+async fn closed_tui_prevents_item_output_repair_launch() {
+    let client = Arc::new(BlockedInvalidItemsAgentClient {
+        calls: AtomicUsize::new(0),
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let (tui_tx, mut tui_rx) =
+        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(4);
+    let stage_runner = PipelineWorkflowRunner {
+        llm: client.clone(),
+        tui_tx,
+        agent_names: Vec::new(),
+        workspace_boundary_supported: false,
+    };
+    let req = StageRunRequest {
+        stage_id: "discover".into(),
+        stage_kind: StageKind::Agent,
+        provider_tier: ProviderTier::Planner,
+        task: "Produce implementation items.".into(),
+        ..request(json!({
+            "stage_extra": { "outputs": ["items"] }
+        }))
+    };
+
+    let handle = tokio::spawn(async move { stage_runner.run_stage(req).await });
+    let _running = tui_rx.recv().await.expect("initial running activity");
+    client.started.notified().await;
+    drop(tui_rx);
+    client.release.notify_one();
+
+    handle
+        .await
+        .expect("stage join")
+        .expect_err("closed TUI must prevent item-output repair launch");
+    assert_eq!(client.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn closed_tui_prevents_stage_agent_launch() {
+    let client = Arc::new(FlakyAgentClient {
+        calls: AtomicUsize::new(0),
+        first_error: "unused",
+    });
+    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+    drop(tui_rx);
+    let stage_runner = PipelineWorkflowRunner {
+        llm: client.clone(),
+        tui_tx,
+        agent_names: Vec::new(),
+        workspace_boundary_supported: false,
+    };
+
+    stage_runner
+        .run_stage(request(json!({})))
+        .await
+        .expect_err("closed TUI must prevent stage agent launch");
+
+    assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn workflow_live_retries_transient_agent_decode_errors() {
     let client = Arc::new(FlakyAgentClient {
         calls: AtomicUsize::new(0),
         first_error: "HTTP error: http_error: HTTP error: error decoding response body",
     });
-    let stage_runner = runner(client.clone());
+    let (stage_runner, _tui_rx) = runner(client.clone());
 
     let output = stage_runner
         .run_stage(request(json!({
@@ -243,7 +331,7 @@ async fn workflow_live_does_not_retry_permission_errors() {
         calls: AtomicUsize::new(0),
         first_error: "bypassPermissions requires --allow-dangerously-skip-permissions flag",
     });
-    let stage_runner = runner(client.clone());
+    let (stage_runner, _tui_rx) = runner(client.clone());
 
     let err = stage_runner
         .run_stage(request(json!({})))
@@ -263,7 +351,7 @@ async fn workflow_live_repairs_invalid_item_producer_output_once() {
         calls: AtomicUsize::new(0),
         requests: Mutex::new(Vec::new()),
     });
-    let stage_runner = runner(client.clone());
+    let (stage_runner, _tui_rx) = runner(client.clone());
     let req = StageRunRequest {
         stage_id: "discover".into(),
         stage_kind: StageKind::Agent,

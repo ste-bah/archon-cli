@@ -175,7 +175,7 @@ pub(super) async fn build_session_agent(
     let metrics = Arc::new(archon_tui::observability::ChannelMetrics::default());
     if let Err(e) = super::spawn_metrics_exporter(cli.metrics_port, Arc::clone(&metrics)) {
         let audit_result = super::drain_startup_sandbox_audit(sandbox_audit_drain).await;
-        let error = super::finish_startup_failure(e.into(), audit_result);
+        let error = super::finish_startup_failure(e, audit_result);
         eprintln!("Metrics exporter failed: {error}");
         return Err(archon_core::print_mode::EXIT_ERROR);
     }

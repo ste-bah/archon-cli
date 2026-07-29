@@ -40,7 +40,8 @@ pub(super) async fn handle_completed_turn(
                     adapter,
                     queue,
                     *guardrail,
-                );
+                )
+                .await;
             }
         }
         Some(PostTurnAction::SkillComplete {
@@ -52,7 +53,12 @@ pub(super) async fn handle_completed_turn(
                 registry.reload(&cmd_ctx.working_dir);
                 tracing::info!("agent registry reloaded");
             }
-            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+            if let Err(error) = input_tui_tx
+                .send_async(TuiEvent::SlashCommandComplete)
+                .await
+            {
+                tracing::warn!(%error, "skill command completion delivery failed");
+            }
         }
         None => {}
     }
@@ -79,7 +85,7 @@ async fn persist_session_messages(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn maybe_spawn_guardrail_repair(
+async fn maybe_spawn_guardrail_repair(
     outcome: archon_tui::TurnOutcome,
     config: &archon_core::config::ArchonConfig,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
@@ -101,9 +107,15 @@ fn maybe_spawn_guardrail_repair(
         })
         && let Some(repair_prompt) = crate::command::world_model::forced_repair_prompt(&guardrail)
     {
-        let _ = input_tui_tx.send(TuiEvent::TextDelta(
-            "\nWorld model guardrail: required verification is missing; starting a repair turn before this can be marked complete.\n".into(),
-        ));
+        if let Err(error) = input_tui_tx
+            .send_async(TuiEvent::TextDelta(
+                "\nWorld model guardrail: required verification is missing; starting a repair turn before this can be marked complete.\n".into(),
+            ))
+            .await
+        {
+            tracing::error!(%error, "guardrail repair notification delivery failed");
+            return;
+        }
         match dispatcher.lock().unwrap().spawn_turn(
             repair_prompt,
             adapter.scoped_turn_runner(guardrail.action.action_id.clone()),

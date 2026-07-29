@@ -125,21 +125,16 @@ async fn handle_exit(ctx: &SlashDispatchContext<'_>) {
     }
     .await;
     ctx.agent.lock().await.clear_watch_paths();
-    let _ = ctx
+    if let Err(error) = ctx
         .input_tui_tx
-        .send(TuiEvent::TextDelta("\nGoodbye.\n".into()));
-    let _ = ctx.input_tui_tx.send(TuiEvent::Done);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::SlashDispatchResult;
-
-    #[test]
-    fn exit_result_is_handled_and_terminating() {
-        assert!(SlashDispatchResult::Exit.is_handled());
-        assert!(SlashDispatchResult::Exit.should_exit());
-        assert!(!SlashDispatchResult::Handled.should_exit());
+        .send_async(TuiEvent::TextDelta("\nGoodbye.\n".into()))
+        .await
+    {
+        tracing::warn!(%error, "exit status delivery failed");
+        return;
+    }
+    if let Err(error) = ctx.input_tui_tx.send_async(TuiEvent::Done).await {
+        tracing::warn!(%error, "exit completion delivery failed");
     }
 }
 
@@ -183,10 +178,21 @@ async fn handle_compact(trimmed: &str, ctx: &SlashDispatchContext<'_>) {
         tracing::warn!("replace_messages after /compact failed: {e}");
     }
     let msg = outcome.into_status();
-    let _ = ctx
+    if let Err(error) = ctx
         .input_tui_tx
-        .send(TuiEvent::TextDelta(format!("\n{msg}\n")));
-    let _ = ctx.input_tui_tx.send(TuiEvent::SlashCommandComplete);
+        .send_async(TuiEvent::TextDelta(format!("\n{msg}\n")))
+        .await
+    {
+        tracing::warn!(%error, "compact status delivery failed");
+        return;
+    }
+    if let Err(error) = ctx
+        .input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "compact command completion delivery failed");
+    }
 }
 
 async fn handle_skill_fallback(input: &str, ctx: SlashDispatchContext<'_>) -> bool {
@@ -221,7 +227,14 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
                 let mut resp = ctx.cmd_ctx.last_assistant_response.lock().await;
                 resp.clear();
             }
-            let _ = ctx.input_tui_tx.send(TuiEvent::GenerationStarted);
+            if let Err(error) = ctx
+                .input_tui_tx
+                .send_async(TuiEvent::GenerationStarted)
+                .await
+            {
+                tracing::error!(%error, "skill generation-start delivery failed");
+                return;
+            }
             match ctx.dispatcher.lock().unwrap().spawn_turn(
                 prompt,
                 ctx.adapter.clone() as Arc<dyn archon_tui::TurnRunner>,
@@ -242,16 +255,50 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
                 });
         }
         SkillOutput::Text(text) | SkillOutput::Markdown(text) => {
-            let _ = ctx
+            if let Err(error) = ctx
                 .input_tui_tx
-                .send(TuiEvent::TextDelta(format!("\n{text}\n")));
-            let _ = ctx.input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                .send_async(TuiEvent::TextDelta(format!("\n{text}\n")))
+                .await
+            {
+                tracing::warn!(%error, "skill output delivery failed");
+                return;
+            }
+            if let Err(error) = ctx
+                .input_tui_tx
+                .send_async(TuiEvent::SlashCommandComplete)
+                .await
+            {
+                tracing::warn!(%error, "skill command completion delivery failed");
+            }
         }
         SkillOutput::Error(error) => {
-            let _ = ctx
+            if let Err(delivery_error) = ctx
                 .input_tui_tx
-                .send(TuiEvent::TextDelta(format!("\nError: {error}\n")));
-            let _ = ctx.input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                .send_async(TuiEvent::TextDelta(format!("\nError: {error}\n")))
+                .await
+            {
+                tracing::warn!(%delivery_error, "skill error delivery failed");
+                return;
+            }
+            if let Err(delivery_error) = ctx
+                .input_tui_tx
+                .send_async(TuiEvent::SlashCommandComplete)
+                .await
+            {
+                tracing::warn!(%delivery_error, "skill command completion delivery failed");
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SlashDispatchResult;
+
+    #[test]
+    fn exit_result_is_handled_and_terminating() {
+        assert!(SlashDispatchResult::Exit.is_handled());
+        assert!(SlashDispatchResult::Exit.should_exit());
+        assert!(!SlashDispatchResult::Handled.should_exit());
     }
 }

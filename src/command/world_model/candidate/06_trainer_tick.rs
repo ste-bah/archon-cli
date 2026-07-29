@@ -1,3 +1,6 @@
+type TrainerStopCallback<'a> = dyn Fn() -> bool + 'a;
+type TrainerProgressCallback<'a> = dyn Fn(&str, &str) + 'a;
+
 pub(super) fn render_trainer_tick(
     config: &archon_core::config::ArchonConfig,
     root: &Path,
@@ -24,7 +27,7 @@ pub(super) fn render_trainer_tick_controlled(
     last_training_age_ms: Option<u64>,
     battery_percent: Option<u8>,
     unplugged: bool,
-    should_stop: Option<&dyn Fn() -> bool>,
+    should_stop: Option<&TrainerStopCallback>,
 ) -> Result<String> {
     render_trainer_tick_observed(
         config,
@@ -45,8 +48,8 @@ pub(super) fn render_trainer_tick_observed(
     last_training_age_ms: Option<u64>,
     battery_percent: Option<u8>,
     unplugged: bool,
-    should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    should_stop: Option<&TrainerStopCallback>,
+    progress: Option<&TrainerProgressCallback>,
 ) -> Result<String> {
     if config.learning.world_model.jepa.enabled
         || config.learning.world_model.model_kind == JEPA_MODEL_KIND
@@ -81,8 +84,8 @@ fn render_latent_trainer_tick(
     last_training_age_ms: Option<u64>,
     battery_percent: Option<u8>,
     unplugged: bool,
-    should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    should_stop: Option<&TrainerStopCallback>,
+    progress: Option<&TrainerProgressCallback>,
 ) -> Result<String> {
     let backend = selected_training_backend(config);
     let auto = &config.learning.world_model.auto_trainer;
@@ -108,22 +111,22 @@ fn render_latent_trainer_tick(
         build_embedding_adapter(config)?,
     );
     emit_trainer_progress(progress, "latent_train_start", "running latent trainer tick");
-    let run = archon_world_model::trainer::run_dynamic_training_once_controlled(
+    let request = archon_world_model::trainer::DynamicTrainingRequest {
         root,
-        config.learning.world_model.state_dim,
-        backend.selected,
-        config.learning.world_model.training.allow_cpu_fallback,
-        &adapter,
-        config.learning.world_model.jepa.context_window_rows,
+        state_dim: config.learning.world_model.state_dim,
+        backend: backend.selected,
+        allow_cpu_fallback: config.learning.world_model.training.allow_cpu_fallback,
+        adapter: &adapter,
+        context_rows: config.learning.world_model.jepa.context_window_rows,
         policy,
         trigger_policy,
-        archon_world_model::trainer::TrainerRuntimeSnapshot {
+        runtime: archon_world_model::trainer::TrainerRuntimeSnapshot {
             last_activity_age_ms: last_activity_age_ms.unwrap_or(auto.idle_required_ms),
             last_training_age_ms: schedule.last_training_age_ms,
             battery_percent,
             unplugged,
         },
-        archon_world_model::trainer::DynamicTrainerTriggerSnapshot {
+        triggers: archon_world_model::trainer::DynamicTrainerTriggerSnapshot {
             total_rows: stats.rows,
             candidate_count: schedule.candidate_count,
             new_rows_since_training: schedule.new_rows_since_training,
@@ -131,6 +134,9 @@ fn render_latent_trainer_tick(
             corrections_since_training: 0,
             elapsed_since_training_ms: schedule.last_training_age_ms,
         },
+    };
+    let run = archon_world_model::trainer::run_dynamic_training_once_controlled(
+        &request,
         should_stop,
     )?;
     emit_trainer_progress(progress, "latent_train_complete", "latent trainer tick finished");
@@ -183,8 +189,8 @@ fn render_jepa_trainer_tick_observed(
     last_training_age_ms: Option<u64>,
     battery_percent: Option<u8>,
     unplugged: bool,
-    should_stop: Option<&dyn Fn() -> bool>,
-    progress: Option<&dyn Fn(&str, &str)>,
+    should_stop: Option<&TrainerStopCallback>,
+    progress: Option<&TrainerProgressCallback>,
 ) -> Result<String> {
     let auto = &config.learning.world_model.auto_trainer;
     let policy = archon_world_model::trainer::DynamicTrainerPolicy {
@@ -312,13 +318,13 @@ fn render_jepa_trainer_tick_observed(
     ))
 }
 
-fn emit_trainer_progress(progress: Option<&dyn Fn(&str, &str)>, stage: &str, summary: &str) {
+fn emit_trainer_progress(progress: Option<&TrainerProgressCallback>, stage: &str, summary: &str) {
     if let Some(progress) = progress {
         progress(stage, summary);
     }
 }
 
-fn check_trainer_stop(should_stop: Option<&dyn Fn() -> bool>, stage: &str) -> Result<()> {
+fn check_trainer_stop(should_stop: Option<&TrainerStopCallback>, stage: &str) -> Result<()> {
     if should_stop.is_some_and(|check| check()) {
         bail!("world-model trainer stopped or timed out during {stage}");
     }

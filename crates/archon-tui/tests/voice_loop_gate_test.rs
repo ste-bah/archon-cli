@@ -17,6 +17,59 @@ use archon_tui::voice::pipeline::{
 use archon_tui::voice::stt::{MockStt, SttProvider};
 use tokio::sync::mpsc;
 
+struct StopFailingAudio;
+
+#[async_trait::async_trait]
+impl AudioSource for StopFailingAudio {
+    async fn start(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn stop(&self) -> anyhow::Result<Vec<f32>> {
+        anyhow::bail!("stop fixture failure")
+    }
+
+    async fn cancel(&self) -> anyhow::Result<()> {
+        anyhow::bail!("cancel fixture failure")
+    }
+}
+
+#[tokio::test]
+async fn voice_loop_reports_stop_and_cancel_errors() {
+    let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);
+    let (evt_tx, mut evt_rx) = mpsc::channel::<TuiEvent>(2);
+    let pipeline = VoicePipeline::new(
+        Arc::new(StopFailingAudio),
+        Arc::new(MockStt {
+            response: String::new(),
+        }),
+        0.0,
+    );
+    let handle = tokio::spawn(voice_loop(trig_rx, evt_tx, pipeline));
+
+    trig_tx.send(VoiceTrigger::Toggle).await.unwrap();
+    tokio::task::yield_now().await;
+    trig_tx.send(VoiceTrigger::Toggle).await.unwrap();
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(TuiEvent::VoiceText(text)) if text.contains("stop fixture failure")
+    ));
+
+    trig_tx.send(VoiceTrigger::Toggle).await.unwrap();
+    tokio::task::yield_now().await;
+    trig_tx.send(VoiceTrigger::Cancel).await.unwrap();
+    assert!(matches!(
+        evt_rx.recv().await,
+        Some(TuiEvent::VoiceText(text)) if text.contains("cancel fixture failure")
+    ));
+
+    drop(trig_tx);
+    tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("voice loop should exit")
+        .expect("voice loop task");
+}
+
 #[tokio::test]
 async fn voice_loop_toggle_emits_voice_text_event() {
     let (trig_tx, trig_rx) = mpsc::channel::<VoiceTrigger>(4);

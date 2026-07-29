@@ -104,7 +104,7 @@ impl LearningStatusHandler {
             ),
         };
 
-        let _ = ctx.tui_tx.send(TuiEvent::TextDelta(status));
+        ctx.emit(TuiEvent::TextDelta(status));
         Ok(())
     }
 
@@ -112,7 +112,7 @@ impl LearningStatusHandler {
         let db = match &ctx.cozo_db {
             Some(db) => db,
             None => {
-                let _ = ctx.tui_tx.send(TuiEvent::TextDelta(
+                ctx.emit(TuiEvent::TextDelta(
                     "## GNN Retrain — ERROR\n\nCozoDB learning store is not available.\n\
                      Check that the learning database file exists and is writable."
                         .to_string(),
@@ -136,7 +136,7 @@ impl LearningStatusHandler {
             match archon_pipeline::learning::gnn::auto_trainer_runtime::query_trajectories_for_training(db, gnn_cfg.input_dim) {
                 Ok(trajs) => trajs,
                 Err(e) => {
-                    let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!(
+                    ctx.emit(TuiEvent::TextDelta(format!(
                         "## GNN Retrain — ERROR\n\nFailed to query trajectories: {e}"
                     )));
                     return Ok(());
@@ -144,7 +144,7 @@ impl LearningStatusHandler {
             };
 
         if trajectories.len() < 3 {
-            let _ = ctx.tui_tx.send(TuiEvent::TextDelta(format!(
+            ctx.emit(TuiEvent::TextDelta(format!(
                 "## GNN Retrain — SKIPPED\n\nNot enough trajectories with quality scores.\n\
                  Found {} trajectory(s); need at least 3 to build triplets.\n\
                  Have a conversation with quality feedback first.",
@@ -283,7 +283,7 @@ impl LearningStatusHandler {
             verdict = verdict,
         );
 
-        let _ = ctx.tui_tx.send(TuiEvent::TextDelta(report));
+        ctx.emit(TuiEvent::TextDelta(report));
         Ok(())
     }
 }

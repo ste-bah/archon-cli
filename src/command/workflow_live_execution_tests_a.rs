@@ -32,6 +32,62 @@ async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
 }
 
 #[tokio::test]
+async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
+    let planner = Arc::new(PlannerRepairRetryClient {
+        calls: AtomicUsize::new(0),
+        repair_started: tokio::sync::Notify::new(),
+        release_repair: tokio::sync::Notify::new(),
+    });
+    let (tui_tx, mut tui_rx) =
+        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(8);
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowStore::project(temp.path());
+    let run_planner = planner.clone();
+    let handle = tokio::spawn(async move {
+        plan_live(
+            &store,
+            "Inspect the repository",
+            run_planner,
+            tui_tx,
+            &default_generated_workflow_config(),
+        )
+        .await
+    });
+
+    planner.repair_started.notified().await;
+    while tui_rx.try_recv().is_ok() {}
+    drop(tui_rx);
+    planner.release_repair.notify_one();
+
+    handle
+        .await
+        .expect("planner join")
+        .expect_err("rejected retry notification must abort planner repair retry");
+    assert_eq!(planner.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn transient_planner_retry_aborts_when_notification_is_rejected() {
+    let planner = Arc::new(FlakyPlanner {
+        calls: AtomicUsize::new(0),
+        first_error: "LLM stream error (server_error): temporary upstream failure",
+    });
+
+    super::workflow_live_retry::send_message_with_transient_retry(
+        &(planner.clone() as Arc<dyn LlmClient>),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        "sonnet",
+        |_| async { anyhow::bail!("retry notification rejected") },
+    )
+    .await
+    .expect_err("rejected notification must prevent transient planner retry");
+
+    assert_eq!(planner.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn live_planner_retries_transient_stream_server_errors() {
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
     let temp = tempfile::tempdir().expect("tempdir");

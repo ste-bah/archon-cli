@@ -32,6 +32,9 @@ use archon_workflow::CommandAction;
 
 use super::{LiveApprovalMode, run_live_action};
 
+#[path = "workflow_live_canary_usage_tests.rs"]
+mod usage_tests;
+
 const CANARY_TASK_ID: &str = "TASK-TDL-001";
 const CANARY_ARTIFACT_REL: &str = ".archon/artifacts/TASK-TDL-001/gap-audit.md";
 

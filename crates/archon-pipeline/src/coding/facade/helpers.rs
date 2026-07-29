@@ -36,10 +36,7 @@ pub(super) fn display_name_from_key(key: &str) -> String {
 ///
 /// `_models` is retained for API stability (existing call sites pass an
 /// `AnthropicModelsConfig`) but is unused — resolution moved to the provider.
-pub(super) fn agent_to_info(
-    agent: &CodingAgent,
-    _models: &AnthropicModelsConfig,
-) -> AgentInfo {
+pub(super) fn agent_to_info(agent: &CodingAgent, _models: &AnthropicModelsConfig) -> AgentInfo {
     AgentInfo {
         key: agent.key.to_string(),
         display_name: display_name_from_key(agent.key),
@@ -60,9 +57,6 @@ pub(super) fn find_coding_agent(key: &str) -> Option<&'static CodingAgent> {
     AGENTS.iter().find(|a| a.key == key)
 }
 
-pub(super) fn dependencies_satisfied(
-    agent: &CodingAgent,
-    completed: &HashSet<&str>,
-) -> bool {
+pub(super) fn dependencies_satisfied(agent: &CodingAgent, completed: &HashSet<&str>) -> bool {
     agent.depends_on.iter().all(|dep| completed.contains(*dep))
 }

@@ -1,15 +1,14 @@
 use regex::Regex;
 use std::collections::BTreeSet;
 
-
 #[derive(Debug, Default)]
 pub(super) struct Extracted {
     pub(super) entities: BTreeSet<String>,
-    pub(super) decisions: Vec<(String, String)>,     // (choice, context)
+    pub(super) decisions: Vec<(String, String)>, // (choice, context)
     pub(super) relationships: Vec<(String, String)>, // (from, to)
-    pub(super) patterns: Vec<(String, String)>,      // (name, role)
+    pub(super) patterns: Vec<(String, String)>,  // (name, role)
     pub(super) corrections: Vec<String>,
-    pub(super) verdicts: Vec<(String, String)>,         // (phase/label, verdict)
+    pub(super) verdicts: Vec<(String, String)>, // (phase/label, verdict)
     pub(super) phase_entities: Vec<(u32, Vec<String>)>, // (phase, entities)
 }
 

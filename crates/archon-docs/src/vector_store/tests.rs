@@ -5,7 +5,7 @@ fn cached_stores_reuse_one_handle_for_the_same_canonical_path() {
     let temp = tempfile::tempdir().unwrap();
 
     let first = DocVectorStore::acquire(temp.path()).unwrap();
-    let second = DocVectorStore::acquire(&temp.path().join(".")).unwrap();
+    let second = DocVectorStore::acquire(temp.path().join(".")).unwrap();
 
     assert!(std::sync::Arc::ptr_eq(&first, &second));
 }

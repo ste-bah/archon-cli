@@ -79,6 +79,11 @@ impl WorkflowScriptHost {
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
         );
+        poll_v2_run_control(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            &execution.call.id,
+        )?;
         if let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? {
             // Restart/resume from a task: a call whose tasks are ALL already
             // recorded complete must be reused directly — including its
@@ -116,6 +121,26 @@ impl WorkflowScriptHost {
             if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
             {
+                self.runner
+                    .client
+                    .tui_tx
+                    .send_async(TuiEvent::TextDelta(format!(
+                        "Workflow V2 script call reused: {} via w.{}\n",
+                        execution.call.id,
+                        execution.call.method.as_str()
+                    )))
+                    .await
+                    .map_err(|error| {
+                        WorkflowError::NotificationDelivery(format!(
+                            "workflow call reuse status delivery failed: run_id={} stage_id={} status=reused: {error}",
+                            self.runner.run_id, execution.call.id
+                        ))
+                    })?;
+                poll_v2_run_control(
+                    &self.runner.workflow_store,
+                    &self.runner.run_id,
+                    &execution.call.id,
+                )?;
                 self.mark_reused(&record).await?;
                 return result_view_json(&record.result);
             }
@@ -133,6 +158,21 @@ impl WorkflowScriptHost {
             return result_view_json(&record.result);
         }
 
+        self.runner
+            .client
+            .tui_tx
+            .send_async(TuiEvent::TextDelta(format!(
+                "Workflow V2 script call running: {} via w.{}\n",
+                execution.call.id,
+                execution.call.method.as_str()
+            )))
+            .await
+            .map_err(|error| {
+                WorkflowError::NotificationDelivery(format!(
+                    "workflow call status delivery failed: run_id={} stage_id={} status=running: {error}",
+                    self.runner.run_id, execution.call.id
+                ))
+            })?;
         poll_v2_run_control(
             &self.runner.workflow_store,
             &self.runner.run_id,
@@ -151,11 +191,6 @@ impl WorkflowScriptHost {
                 "method": execution.call.method.as_str(),
             }),
         );
-        let _ = self.runner.client.tui_tx.send(TuiEvent::TextDelta(format!(
-            "Workflow V2 script call running: {} via w.{}\n",
-            execution.call.id,
-            execution.call.method.as_str()
-        )));
         let attempt = self
             .runner
             .v2_store
@@ -189,7 +224,9 @@ impl WorkflowScriptHost {
             Err(err) => {
                 if matches!(
                     &err,
-                    WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_)
+                    WorkflowError::ControlPaused(_)
+                        | WorkflowError::ControlCancelled(_)
+                        | WorkflowError::NotificationDelivery(_)
                 ) {
                     return Err(err);
                 }

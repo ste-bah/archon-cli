@@ -75,25 +75,25 @@ run_checks() {
         FAILED=1
     fi
 
-    # --- Check 4: AGT-025 race structure in agent_tool.rs ---
-    local AGENT_TOOL="$BASE_DIR/crates/archon-tools/src/agent_tool.rs"
+    # --- Check 4: AGT-025 race structure in agent_tool/run.rs ---
+    local AGENT_TOOL="$BASE_DIR/crates/archon-tools/src/agent_tool/run.rs"
     if [[ ! -f "$AGENT_TOOL" ]]; then
         echo "MISSING: $AGENT_TOOL"
         diag
         FAILED=1
     else
         if ! grep -q "tokio::select!" "$AGENT_TOOL"; then
-            echo "MISSING: tokio::select! anchor in agent_tool.rs"
+            echo "MISSING: tokio::select! anchor in agent_tool/run.rs"
             diag
             FAILED=1
         fi
-        if ! grep -q "join_handle" "$AGENT_TOOL"; then
-            echo "MISSING: join_handle anchor in agent_tool.rs"
+        if ! grep -q "r = &mut join" "$AGENT_TOOL"; then
+            echo "MISSING: r = &mut join anchor in agent_tool/run.rs"
             diag
             FAILED=1
         fi
         if ! grep -q "tokio::time::sleep(Duration::from_millis(auto_bg_ms))" "$AGENT_TOOL"; then
-            echo "MISSING: tokio::time::sleep(Duration::from_millis(auto_bg_ms)) anchor in agent_tool.rs"
+            echo "MISSING: tokio::time::sleep(Duration::from_millis(auto_bg_ms)) anchor in agent_tool/run.rs"
             diag
             FAILED=1
         fi
@@ -146,7 +146,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     trap 'rm -rf "$TMP"' EXIT
 
     mkdir -p "$TMP/crates/archon-core/src/agents"
-    mkdir -p "$TMP/crates/archon-tools/src"
+    mkdir -p "$TMP/crates/archon-tools/src/agent_tool"
     mkdir -p "$TMP/src"
 
     # Synthetic violation for check 1 (must be actual code, not a comment)
@@ -154,9 +154,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
 
     # Stubs so the other checks pass
     echo "pub const AUTO_BACKGROUND_MS: u64 = 120_000;" > "$TMP/crates/archon-core/src/subagent.rs"
-    cat > "$TMP/crates/archon-tools/src/agent_tool.rs" <<'EOF'
+    cat > "$TMP/crates/archon-tools/src/agent_tool/run.rs" <<'EOF'
 tokio::select! {
-    _ = join_handle => {},
+    r = &mut join => {},
     _ = tokio::time::sleep(Duration::from_millis(auto_bg_ms)) => {},
 }
 EOF

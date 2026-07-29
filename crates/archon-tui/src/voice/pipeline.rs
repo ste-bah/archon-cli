@@ -28,10 +28,15 @@ pub fn install_trigger_sender(tx: mpsc::Sender<VoiceTrigger>) {
 }
 
 /// Fire a voice trigger (does nothing if no voice loop is active).
-pub fn fire_trigger(trigger: VoiceTrigger) {
-    if let Some(tx) = VOICE_TRIGGER_TX.get() {
-        let _ = tx.try_send(trigger);
-    }
+pub fn fire_trigger(trigger: VoiceTrigger) -> Result<(), String> {
+    let Some(tx) = VOICE_TRIGGER_TX.get() else {
+        return Ok(());
+    };
+    tx.try_send(trigger).map_err(|error| {
+        let message = format!("voice trigger delivery failed: {error}");
+        tracing::warn!("{message}");
+        message
+    })
 }
 
 use crate::app::TuiEvent;
@@ -93,13 +98,13 @@ pub fn fire_trigger_for_hotkey() {
     let mode = VOICE_TOGGLE_MODE.get().copied().unwrap_or(true);
     match hotkey_action_for_mode(mode) {
         HotkeyAction::Toggle => {
-            fire_trigger(VoiceTrigger::Toggle);
+            let _ = fire_trigger(VoiceTrigger::Toggle);
         }
         HotkeyAction::PushToTalk => {
-            fire_trigger(VoiceTrigger::Toggle);
+            let _ = fire_trigger(VoiceTrigger::Toggle);
             crate::observability::spawn_named("voice-push-to-talk-auto-stop", async {
                 tokio::time::sleep(PUSH_TO_TALK_WINDOW).await;
-                fire_trigger(VoiceTrigger::Toggle);
+                let _ = fire_trigger(VoiceTrigger::Toggle);
             });
         }
     }
@@ -243,6 +248,13 @@ pub async fn voice_loop(
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!("voice: stop failed: {e}");
+                        if tui_event_tx
+                            .send(TuiEvent::VoiceText(format!("[voice stop error: {e}]")))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
                         continue;
                     }
                 };
@@ -279,6 +291,13 @@ pub async fn voice_loop(
                     recording = false;
                     if let Err(e) = pipeline.audio.cancel().await {
                         tracing::warn!("voice: cancel failed: {e}");
+                        if tui_event_tx
+                            .send(TuiEvent::VoiceText(format!("[voice cancel error: {e}]")))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
                     } else {
                         tracing::info!("voice: recording cancelled");
                     }

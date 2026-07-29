@@ -213,6 +213,9 @@ async fn run_single_v2_agent_call_in_repository(
         Err(err) if generated_prd_contract_repairable_reduce(&execution.call, &err) => {
             Ok(repairable_generated_reduce_result(&execution.call.id, &err))
         }
+        Err(err) if err.is_notification_delivery() => {
+            Err(WorkflowError::NotificationDelivery(err.to_string()))
+        }
         Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
     }
 }
@@ -363,7 +366,7 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
             repairable_agent_contract_error(first_error)
                 && repairable_agent_contract_error(repair_error)
         }
-        WorkflowV2AgentError::Transport(_)
+        WorkflowV2AgentError::Transport(_) | WorkflowV2AgentError::NotificationDelivery(_)
         | WorkflowV2AgentError::PlanOnlyImplementation
         | WorkflowV2AgentError::ImplementationAcceptedWithoutChanges
         | WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage

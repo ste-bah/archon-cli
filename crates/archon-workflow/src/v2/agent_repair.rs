@@ -53,6 +53,8 @@ pub enum WorkflowV2AgentError {
     ReadOnlyChangedFiles,
     #[error("agent transport failed: {0}")]
     Transport(String),
+    #[error("required notification delivery failed: {0}")]
+    NotificationDelivery(String),
     #[error("schema repair failed after bounded retries: root={first_error}; last={repair_error}")]
     RepairExhausted {
         first_error: Box<WorkflowV2AgentError>,
@@ -61,6 +63,17 @@ pub enum WorkflowV2AgentError {
 }
 
 impl WorkflowV2AgentError {
+    pub fn is_notification_delivery(&self) -> bool {
+        match self {
+            Self::NotificationDelivery(_) => true,
+            Self::RepairExhausted {
+                first_error,
+                repair_error,
+            } => first_error.is_notification_delivery() || repair_error.is_notification_delivery(),
+            _ => false,
+        }
+    }
+
     pub fn differs_from(&self, other: &Self) -> bool {
         self.repair_class() != other.repair_class()
     }
@@ -70,7 +83,7 @@ impl WorkflowV2AgentError {
             Self::ImplementationChangedFilesOutsideOwnership(_) | Self::ReadOnlyChangedFiles => {
                 RepairErrorClass::Ownership
             }
-            Self::Transport(_) => RepairErrorClass::Execution,
+            Self::Transport(_) | Self::NotificationDelivery(_) => RepairErrorClass::Execution,
             _ => RepairErrorClass::Contract,
         }
     }
