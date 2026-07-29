@@ -119,6 +119,8 @@ fn get_memory_updates_access_stats_from_the_current_database_row() {
 
 #[cfg(test)]
 mod delta;
+#[cfg(test)]
+mod delta_validation;
 
 #[test]
 fn update_memory_content_and_tags() {

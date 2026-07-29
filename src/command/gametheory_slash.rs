@@ -138,7 +138,7 @@ fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
             ),
             Err(err) => format!("Game-theory run failed: {err}\n"),
         };
-        let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+        let _ = tui_tx.send_async(TuiEvent::TextDelta(msg)).await;
     });
     Ok(())
 }
@@ -184,7 +184,7 @@ fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> Result<()> 
 
         let msg =
             result.unwrap_or_else(|err: anyhow::Error| format!("Classification failed: {err}\n"));
-        let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+        let _ = tui_tx.send_async(TuiEvent::TextDelta(msg)).await;
     });
     Ok(())
 }
@@ -276,7 +276,7 @@ fn start_async_replay(
         .await;
 
         let msg = result.unwrap_or_else(|err: anyhow::Error| format!("Replay failed: {err}\n"));
-        let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+        let _ = tui_tx.send_async(TuiEvent::TextDelta(msg)).await;
     });
     Ok(())
 }

@@ -50,7 +50,7 @@ impl CommandHandler for CliMirrorHandler {
                 Ok(rendered) => format!("`{label}` completed\n\n{rendered}"),
                 Err(err) => format!("`{label}` failed to launch: {err}\n"),
             };
-            let _ = tui_tx.send(TuiEvent::TextDelta(rendered));
+            let _ = tui_tx.send_async(TuiEvent::TextDelta(rendered)).await;
         });
         Ok(())
     }

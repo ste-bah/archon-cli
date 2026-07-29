@@ -80,13 +80,17 @@ impl CommandHandler for RunAgentHandler {
                 .await
             {
                 Ok(task_id) => {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!(
-                        "\nTask submitted: {task_id}\n\
+                    let _ = tui_tx
+                        .send_async(TuiEvent::TextDelta(format!(
+                            "\nTask submitted: {task_id}\n\
                          Task: {task}\n"
-                    )));
+                        )))
+                        .await;
                 }
                 Err(e) => {
-                    let _ = tui_tx.send(TuiEvent::Error(format!("Task submission failed: {e}")));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::Error(format!("Task submission failed: {e}")))
+                        .await;
                 }
             }
         });

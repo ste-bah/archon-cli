@@ -59,9 +59,13 @@ pub fn handle_config_command<'a>(
         if key == "sources" {
             let output = archon_core::config_source::format_sources(&ctx.config_sources);
             if output.is_empty() {
-                let _ = tui_tx.send(TuiEvent::TextDelta("\nNo config sources tracked.\n".into()));
+                let _ = tui_tx
+                    .send_async(TuiEvent::TextDelta("\nNo config sources tracked.\n".into()))
+                    .await;
             } else {
-                let _ = tui_tx.send(TuiEvent::TextDelta(format!("\nConfig sources:\n{output}")));
+                let _ = tui_tx
+                    .send_async(TuiEvent::TextDelta(format!("\nConfig sources:\n{output}")))
+                    .await;
             }
             return;
         }
@@ -75,15 +79,19 @@ pub fn handle_config_command<'a>(
                     .unwrap_or_else(|| "(unknown)".into());
                 lines.push_str(&format!("  {k} = {val}\n"));
             }
-            let _ = tui_tx.send(TuiEvent::TextDelta(lines));
+            let _ = tui_tx.send_async(TuiEvent::TextDelta(lines)).await;
         } else if value.is_empty() {
             // Get a single key
             match archon_tools::config_tool::get_config_value(key) {
                 Some(val) => {
-                    let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{key} = {val}\n")));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::TextDelta(format!("\n{key} = {val}\n")))
+                        .await;
                 }
                 None => {
-                    let _ = tui_tx.send(TuiEvent::Error(format!("Unknown config key: {key}")));
+                    let _ = tui_tx
+                        .send_async(TuiEvent::Error(format!("Unknown config key: {key}")))
+                        .await;
                 }
             }
         } else {
@@ -104,9 +112,11 @@ pub fn handle_config_command<'a>(
             )
             .await;
             if result.is_error {
-                let _ = tui_tx.send(TuiEvent::Error(result.content));
+                let _ = tui_tx.send_async(TuiEvent::Error(result.content)).await;
             } else {
-                let _ = tui_tx.send(TuiEvent::TextDelta(format!("\n{}\n", result.content)));
+                let _ = tui_tx
+                    .send_async(TuiEvent::TextDelta(format!("\n{}\n", result.content)))
+                    .await;
             }
         }
     })
