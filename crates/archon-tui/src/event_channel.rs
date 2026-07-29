@@ -156,6 +156,56 @@ impl TuiEventSender {
         Ok(())
     }
 
+    pub async fn send_atomic_async(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        let frames = ContentFrames::new(event).collect::<Vec<_>>();
+        if let Some(frame) = frames.iter().find(|frame| frame_is_oversized(frame)) {
+            crate::observability::record_tui_event_oversized_rejected();
+            return Err(SendError(frame.clone()));
+        }
+        if frames.len() == 1 {
+            return self
+                .send_frame_async(frames.into_iter().next().expect("single frame"))
+                .await;
+        }
+        self.send_frames_async(frames).await
+    }
+
+    async fn send_frames_async(&self, frames: Vec<TuiEvent>) -> Result<(), SendError<TuiEvent>> {
+        let rejected_event = || frames.first().cloned().expect("multi-frame event");
+        if frames.len() > self.inner.capacity {
+            crate::observability::record_tui_event_full_send_failure();
+            return Err(SendError(rejected_event()));
+        }
+        loop {
+            let notified = self.inner.not_full.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let mut queue = self.inner.queue.lock().expect("tui event queue lock");
+                if self.inner.closed.load(Ordering::Acquire) {
+                    crate::observability::record_tui_event_closed_send_failure();
+                    return Err(SendError(rejected_event()));
+                }
+                if queue.len().saturating_add(frames.len()) <= self.inner.capacity {
+                    for frame in &frames {
+                        let Some(frame) = coalesce_with_metrics(&mut queue, frame.clone()) else {
+                            continue;
+                        };
+                        let bytes = crate::event_payload_size::heap_bytes(&frame);
+                        queue.push_back(frame);
+                        crate::observability::record_tui_event_enqueued(bytes);
+                    }
+                    drop(queue);
+                    self.inner.notify.notify_waiters();
+                    return Ok(());
+                }
+            }
+            let blocked_at = std::time::Instant::now();
+            notified.await;
+            crate::observability::record_tui_event_blocked_send(blocked_at.elapsed());
+        }
+    }
+
     async fn send_frame_async(&self, mut event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
         loop {
             let notified = self.inner.not_full.notified();

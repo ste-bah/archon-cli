@@ -6,18 +6,34 @@ use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
     LifecycleAction, LifecycleController, WorkflowApprovalDecision, WorkflowApprovalInspection,
     WorkflowApprovalRecord, WorkflowApprovalStore, WorkflowBundle, WorkflowBundleOrigin,
-    WorkflowRun, WorkflowStore,
+    WorkflowError, WorkflowRun, WorkflowStore,
 };
 
 use super::LiveApprovalMode;
 
 pub(super) enum LiveApprovalOutcome {
-    Proceed { run: Box<WorkflowRun>, note: String },
+    Proceed(Box<WorkflowRun>),
     Pending(String),
     Denied(String),
 }
 
-pub(super) fn gate_live_approval(
+async fn send_approval_notification(
+    tui_tx: &TuiEventSender,
+    run_id: &str,
+    phase: &str,
+    message: String,
+) -> Result<()> {
+    tui_tx
+        .send_async(TuiEvent::TextDelta(message))
+        .await
+        .map_err(|error| {
+            anyhow::Error::from(WorkflowError::NotificationDelivery(format!(
+                "workflow approval notification delivery failed: run_id={run_id} phase={phase}: {error}"
+            )))
+        })
+}
+
+pub(super) async fn gate_live_approval(
     cwd: &Path,
     store: &WorkflowStore,
     run: WorkflowRun,
@@ -34,13 +50,11 @@ pub(super) fn gate_live_approval(
     }
     let approvals = WorkflowApprovalStore::project(cwd);
     if approval_mode == LiveApprovalMode::CliYes {
-        let record = approvals.approve_run_once(cwd, store, &run, approval_mode.decided_by())?;
-        let note = render_approval_note(&record, approvals.path());
-        let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-        return Ok(LiveApprovalOutcome::Proceed {
-            run: Box::new(run),
-            note,
-        });
+        let inspection = approvals.inspect_run(cwd, store, &run)?;
+        let note = render_cli_approval_note(&inspection, approvals.path());
+        send_approval_notification(tui_tx, &run.id, "cli-yes", note).await?;
+        approvals.approve_run_once(cwd, store, &run, approval_mode.decided_by())?;
+        return Ok(LiveApprovalOutcome::Proceed(Box::new(run)));
     }
 
     let inspection = approvals.inspect_run(cwd, store, &run)?;
@@ -48,11 +62,8 @@ pub(super) fn gate_live_approval(
         Some(WorkflowApprovalDecision::AlwaysForProject) => {
             let record = inspection.decision.as_ref().expect("decision exists");
             let note = render_approval_note(record, approvals.path());
-            let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            Ok(LiveApprovalOutcome::Proceed {
-                run: Box::new(run),
-                note,
-            })
+            send_approval_notification(tui_tx, &run.id, "always-for-project", note.clone()).await?;
+            Ok(LiveApprovalOutcome::Proceed(Box::new(run)))
         }
         Some(WorkflowApprovalDecision::RunOnce)
             if inspection
@@ -63,27 +74,45 @@ pub(super) fn gate_live_approval(
         {
             let record = inspection.decision.as_ref().expect("decision exists");
             let note = render_approval_note(record, approvals.path());
-            let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            Ok(LiveApprovalOutcome::Proceed {
-                run: Box::new(run),
-                note,
-            })
+            send_approval_notification(tui_tx, &run.id, "run-once", note.clone()).await?;
+            Ok(LiveApprovalOutcome::Proceed(Box::new(run)))
         }
         Some(WorkflowApprovalDecision::Denied) => {
-            let cancelled =
-                LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Cancel)?;
-            let message = render_denied_note(&inspection, approvals.path(), &cancelled.id);
-            let _ = tui_tx.send(TuiEvent::TextDelta(message.clone()));
+            let message = render_denied_note(&inspection, approvals.path(), &run.id);
+            send_approval_notification(tui_tx, &run.id, "denied", message.clone()).await?;
+            LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Cancel)?;
             Ok(LiveApprovalOutcome::Denied(message))
         }
         _ => {
-            let paused =
-                LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Pause)?;
-            let message = render_approval_request(&inspection, approvals.path(), &paused.id);
-            let _ = tui_tx.send(TuiEvent::TextDelta(message.clone()));
+            let message = render_approval_request(&inspection, approvals.path(), &run.id);
+            send_approval_notification(tui_tx, &run.id, "pending", message.clone()).await?;
+            LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Pause)?;
             Ok(LiveApprovalOutcome::Pending(message))
         }
     }
+}
+
+fn render_cli_approval_note(
+    inspection: &WorkflowApprovalInspection,
+    approvals_path: &Path,
+) -> String {
+    format!(
+        "Workflow approval accepted; recording run-once decision.\n{}",
+        render_approval_request_summary(inspection, approvals_path)
+    )
+}
+
+fn render_approval_request_summary(
+    inspection: &WorkflowApprovalInspection,
+    approvals_path: &Path,
+) -> String {
+    format!(
+        "Workflow: {}\nApproval subject: {}\nRaw script: {}\nApproval store: {}\nCost/rate-limit: live provider token and rate limits apply.\n",
+        inspection.workflow_name,
+        inspection_hash_summary(inspection),
+        inspection.raw_script_path,
+        approvals_path.display()
+    )
 }
 
 fn render_approval_note(record: &WorkflowApprovalRecord, approvals_path: &Path) -> String {
@@ -319,4 +348,70 @@ fn raw_script_preview(path: &str) -> String {
         .map(|line| format!("  {line}"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archon_workflow::WorkflowSpec;
+
+    #[tokio::test]
+    async fn closed_tui_does_not_pause_pending_approval() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowStore::project(root.path());
+        let spec = WorkflowSpec::from_yaml(
+            "schema: archon.workflow.v1\nname: approval\ntask: test\nstages:\n  - id: run\n    kind: agent\n",
+        )
+        .expect("workflow spec");
+        let run = store.create_run(spec).expect("workflow run");
+        let (tui_tx, rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        drop(rx);
+
+        let result = gate_live_approval(
+            root.path(),
+            &store,
+            run.clone(),
+            LiveApprovalMode::InteractiveSurface,
+            &tui_tx,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let current = store.load_state(&run.id).expect("load run state");
+        assert_eq!(current.status, archon_workflow::RunStatus::Planned);
+    }
+
+    #[tokio::test]
+    async fn closed_tui_blocks_cli_approval() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowStore::project(root.path());
+        let spec = WorkflowSpec::from_yaml(
+            "schema: archon.workflow.v1\nname: approval\ntask: test\nstages:\n  - id: run\n    kind: agent\n",
+        )
+        .expect("workflow spec");
+        let run = store.create_run(spec).expect("workflow run");
+        let (tui_tx, rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        drop(rx);
+
+        let result = gate_live_approval(
+            root.path(),
+            &store,
+            run.clone(),
+            LiveApprovalMode::CliYes,
+            &tui_tx,
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "approval proceeded without status delivery"
+        );
+        let inspection = WorkflowApprovalStore::project(root.path())
+            .inspect_run(root.path(), &store, &run)
+            .expect("approval inspection");
+        assert!(
+            inspection.decision.is_none(),
+            "approval persisted after status delivery failed"
+        );
+    }
 }

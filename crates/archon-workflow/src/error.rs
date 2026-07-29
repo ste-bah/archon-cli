@@ -46,6 +46,8 @@ pub enum WorkflowError {
     StageBlocked(String),
     #[error("workflow stage failed: {0}")]
     StageFailed(String),
+    #[error("required workflow notification delivery failed: {0}")]
+    NotificationDelivery(String),
     #[error("workflow paused by run control: {0}")]
     ControlPaused(String),
     #[error("workflow cancelled by run control: {0}")]

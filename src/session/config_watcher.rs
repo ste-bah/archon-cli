@@ -44,10 +44,14 @@ pub(super) fn spawn_config_watcher(
                                 "\nConfig reloaded. Non-reloadable changes (require restart): {}\n",
                                 non_reloadable.join(", ")
                             );
-                            let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+                            if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(msg)).await {
+                                tracing::warn!(%error, "config reload notification delivery failed");
+                            }
                         } else if !changed_keys.is_empty() {
                             let msg = format!("\nConfig reloaded: {}\n", changed_keys.join(", "));
-                            let _ = tui_tx.send(TuiEvent::TextDelta(msg));
+                            if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(msg)).await {
+                                tracing::warn!(%error, "config reload notification delivery failed");
+                            }
                         }
                     }
                 }

@@ -4,9 +4,8 @@ use std::sync::Arc;
 use archon_pipeline::runner::{
     AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel,
 };
-use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
-use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
+use archon_tui::events::AgentActivityStatus;
 use archon_workflow::{
     ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowStageRunner,
     WriteBoundaryProbe,
@@ -16,6 +15,7 @@ use super::workflow_agent_select::select_workflow_agent_key;
 use super::workflow_live_items::{item_output_needs_schema_repair, repair_item_output};
 use super::workflow_live_prompt::workflow_prompt;
 use super::workflow_live_retry;
+use super::workflow_live_runner_activity::required_activity;
 
 pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn LlmClient>,
@@ -52,14 +52,16 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             .unwrap_or_else(|| "active-provider".to_string());
         let agent = workflow_agent(&request, &model_alias, &self.agent_names);
         let agent_name = agent.key.clone();
-        self.emit_activity(
+        required_activity(
+            &self.tui_tx,
             &request,
             &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Running,
             "stage running",
-        );
+        )
+        .await?;
         let agent_request = AgentExecutionRequest {
             session_id: workflow_agent_session_id(&request),
             pipeline_type: PipelineType::Workflow,
@@ -86,82 +88,108 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             &self.llm,
             agent_request.clone(),
             |attempt| {
-                self.emit_activity(
-                    &request,
-                    &agent_name,
-                    &provider_id,
-                    &resolved_model,
-                    AgentActivityStatus::Running,
-                    &format!("stage retrying after transient provider error ({attempt}/3)"),
-                );
+                let tui_tx = self.tui_tx.clone();
+                let request = request.clone();
+                let agent_name = agent_name.clone();
+                let provider_id = provider_id.clone();
+                let resolved_model = resolved_model.clone();
+                async move {
+                    required_activity(
+                        &tui_tx,
+                        &request,
+                        &agent_name,
+                        &provider_id,
+                        &resolved_model,
+                        AgentActivityStatus::Running,
+                        &format!("stage retrying after transient provider error ({attempt}/3)"),
+                    )
+                    .await
+                }
             },
         )
         .await
         {
             Ok(response) => response,
             Err(err) => {
-                self.emit_activity(
+                required_activity(
+                    &self.tui_tx,
                     &request,
                     &agent_name,
                     &provider_id,
                     &resolved_model,
                     AgentActivityStatus::Failed,
                     "stage failed",
-                );
+                )
+                .await?;
                 return Err(err);
             }
         };
         let response = if item_output_needs_schema_repair(&request, &response.content) {
-            self.emit_activity(
+            required_activity(
+                &self.tui_tx,
                 &request,
                 &agent_name,
                 &provider_id,
                 &resolved_model,
                 AgentActivityStatus::Running,
                 "stage repairing invalid item output",
-            );
+            )
+            .await?;
             match repair_item_output(
                 &self.llm,
                 &request,
                 &agent_request,
                 response,
                 |attempt| {
-                    self.emit_activity(
-                        &request,
-                        &agent_name,
-                        &provider_id,
-                        &resolved_model,
-                        AgentActivityStatus::Running,
-                        &format!("stage item-output repair retrying after transient provider error ({attempt}/3)"),
-                    );
+                    let tui_tx = self.tui_tx.clone();
+                    let request = request.clone();
+                    let agent_name = agent_name.clone();
+                    let provider_id = provider_id.clone();
+                    let resolved_model = resolved_model.clone();
+                    async move {
+                        required_activity(
+                            &tui_tx,
+                            &request,
+                            &agent_name,
+                            &provider_id,
+                            &resolved_model,
+                            AgentActivityStatus::Running,
+                            &format!("stage item-output repair retrying after transient provider error ({attempt}/3)"),
+                        )
+                        .await
+                    }
                 },
             )
             .await
             {
                 Ok(response) => response,
                 Err(err) => {
-                    self.emit_activity(
+                    required_activity(
+                        &self.tui_tx,
                         &request,
                         &agent_name,
                         &provider_id,
                         &resolved_model,
                         AgentActivityStatus::Failed,
                         "stage failed item-output repair",
-                    );
+                    )
+                    .await?;
                     return Err(err);
                 }
             }
         } else {
             response
         };
-        self.emit_activity(
+        required_activity(
+            &self.tui_tx,
             &request,
             &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Complete,
             "stage complete",
-        );
+        )
+        .await?;
         let mut output = StageRunOutput::markdown(response.content);
         output.provider_id = Some(provider_id);
         output.resolved_model = Some(resolved_model);
@@ -239,56 +267,6 @@ pub(crate) fn request_target_repository_root(request: &StageRunRequest) -> Optio
         .and_then(|value| value.as_str())
         .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
-}
-
-impl PipelineWorkflowRunner {
-    fn emit_activity(
-        &self,
-        request: &StageRunRequest,
-        agent_name: &str,
-        provider_id: &str,
-        model: &str,
-        status: AgentActivityStatus,
-        detail: &str,
-    ) {
-        let _ = self
-            .tui_tx
-            .send(TuiEvent::AgentActivity(AgentActivityUpdate {
-                id: format!("workflow:{}:{}", request.run_id, request.stage_id),
-                name: agent_name.to_string(),
-                role: AgentActivityRole::Subagent,
-                status,
-                current_tool: None,
-                detail: Some(activity_detail(request, detail)),
-                run_id: Some(request.run_id.clone()),
-                parent_id: None,
-                artifact_id: None,
-                provider: Some(provider_id.to_string()),
-                model: Some(model.to_string()),
-                cost_usd: None,
-            }));
-    }
-}
-
-pub(super) fn activity_detail(request: &StageRunRequest, detail: &str) -> String {
-    let cwd = request_target_repository_root(request)
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "default".to_string());
-    format!(
-        "{detail} stage={} provider_tier={:?} cwd={} tool_mode={}",
-        request.stage_id,
-        request.provider_tier,
-        cwd,
-        workflow_tool_mode(request)
-    )
-}
-
-fn workflow_tool_mode(request: &StageRunRequest) -> &'static str {
-    if matches!(request.stage_kind, StageKind::Implementation) || command_execution_stage(request) {
-        "full"
-    } else {
-        "read_only"
-    }
 }
 
 pub(crate) fn workflow_agent(

@@ -93,10 +93,21 @@ pub(super) async fn handle_clear_command(
             .await
             .add_watch_paths(clear_start_agg.watch_paths);
     }
-    let _ = input_tui_tx.send(TuiEvent::TextDelta(
-        "\nConversation cleared. Session reset.\n".into(),
-    ));
-    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::TextDelta(
+            "\nConversation cleared. Session reset.\n".into(),
+        ))
+        .await
+    {
+        tracing::warn!(%error, "clear command status delivery failed");
+        return;
+    }
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "clear command completion delivery failed");
+    }
 }
 
 /// Handle `/refresh-identity` — clears beta caches and re-runs discovery
@@ -106,19 +117,6 @@ pub(super) async fn handle_refresh_identity_command(
     api_url: &Option<String>,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
 ) {
-    // Clear the validated beta cache
-    let validated_cache = dirs::config_dir()
-        .unwrap_or_default()
-        .join("archon")
-        .join("validated_betas.json");
-    let _ = std::fs::remove_file(&validated_cache);
-    // Clear the raw discovered cache
-    let raw_cache = dirs::config_dir()
-        .unwrap_or_default()
-        .join("archon")
-        .join("discovered_betas.json");
-    let _ = std::fs::remove_file(&raw_cache);
-
     // Fetch auth + identity providers under a single guard
     let (refresh_auth, refresh_identity) = {
         let guard = agent.lock().await;
@@ -129,13 +127,33 @@ pub(super) async fn handle_refresh_identity_command(
             (Some(a), Some(i)) => (a, i),
             _ => {
                 drop(guard);
-                let _ = input_tui_tx.send(TuiEvent::TextDelta(
-                    "\nIdentity refresh not supported for this provider.\n".into(),
-                ));
+                if let Err(error) = input_tui_tx
+                    .send_async(TuiEvent::TextDelta(
+                        "\nIdentity refresh not supported for this provider.\n".into(),
+                    ))
+                    .await
+                {
+                    tracing::warn!(%error, "identity refresh status delivery failed");
+                }
                 return;
             }
         }
     };
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::TextDelta(
+            "\nIdentity cache will be cleared. Re-discovering beta headers in background...\n"
+                .into(),
+        ))
+        .await
+    {
+        tracing::warn!(%error, "identity refresh start delivery failed");
+        return;
+    }
+
+    let config_dir = dirs::config_dir().unwrap_or_default().join("archon");
+    let _ = std::fs::remove_file(config_dir.join("validated_betas.json"));
+    let _ = std::fs::remove_file(config_dir.join("discovered_betas.json"));
+
     let refresh_api_url = api_url.clone();
     let refresh_tui_tx = input_tui_tx.clone();
     archon_observability::spawn_named("identity-refresh", async move {
@@ -150,15 +168,22 @@ pub(super) async fn handle_refresh_identity_command(
             "Identity refresh complete: {} betas validated",
             validated.len()
         );
-        let _ = refresh_tui_tx.send(TuiEvent::TextDelta(format!(
-            "\nIdentity refresh complete: {} betas validated and cached.\n\
-             Restart archon to apply the updated beta headers.\n",
-            validated.len()
-        )));
+        if let Err(error) = refresh_tui_tx
+            .send_async(TuiEvent::TextDelta(format!(
+                "\nIdentity refresh complete: {} betas validated and cached.\n\
+                 Restart archon to apply the updated beta headers.\n",
+                validated.len()
+            )))
+            .await
+        {
+            tracing::warn!(%error, "identity refresh result delivery failed");
+        }
     });
 
-    let _ = input_tui_tx.send(TuiEvent::TextDelta(
-        "\nIdentity cache cleared. Re-discovering beta headers in background...\n".into(),
-    ));
-    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "identity refresh command completion delivery failed");
+    }
 }

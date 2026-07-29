@@ -1,3 +1,4 @@
+
     #[tokio::test]
     async fn awaited_host_call_time_does_not_trip_js_watchdog() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -206,6 +207,7 @@ async function workflow(w) {
             })
         }
     }
+
 
     struct SlowAcceptedLlm {
         delay: Duration,

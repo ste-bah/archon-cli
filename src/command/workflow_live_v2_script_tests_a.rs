@@ -12,6 +12,57 @@
 
     use super::*;
 
+    #[tokio::test]
+    async fn closed_tui_prevents_script_host_call_execution() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let spec = test_spec();
+        let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = workflow_store.create_run(spec.clone()).expect("run");
+        let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+        let (tui_tx, tui_rx) = bounded_tui_event_channel();
+        drop(tui_rx);
+        let client = LiveV2AgentClient::new(
+            Arc::new(PanicLlm),
+            tui_tx,
+            Vec::new(),
+            run.id.clone(),
+            None,
+            None,
+        );
+        let runner = WorkflowV2ScriptRunner::new(
+            "closed tui".to_string(),
+            test_runtime(&spec),
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store,
+            run.id.clone(),
+            true,
+            None,
+            None,
+        );
+
+        let error = runner
+            .run(
+                r#"
+	async function workflow(w) {
+	  await w.checkpoint("must-not-run");
+	}
+	"#,
+            )
+            .await
+            .expect_err("closed TUI must reject the script call");
+
+        assert!(matches!(error, WorkflowError::NotificationDelivery(_)));
+        assert!(
+            v2_store
+                .load_call_record("must-not-run")
+                .expect("call record lookup")
+                .is_none(),
+            "host call persisted after status delivery failed"
+        );
+    }
+
     #[test]
     fn script_source_injects_saved_workflow_args() {
         let source = script_source(

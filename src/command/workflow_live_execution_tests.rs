@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use archon_pipeline::runner::LlmClient;
 use archon_workflow::{
     CommandAction, GeneratedWorkflowKind, LifecycleAction, LifecycleController, ProviderTier,
     RunStatus, StageKind, StageRunRequest, WorkflowApprovalStore, WorkflowBundle,
@@ -14,10 +15,12 @@ use archon_workflow::{
 use serde_json::json;
 
 use super::workflow_live_retry::transient_live_agent_error;
+use super::workflow_live_runner::PipelineWorkflowRunner;
 use super::workflow_live_test_support::{
-    AlwaysInvalidItemsAgentClient, FlakyAgentClient, FlakyPlanner, GeneratedV2FanoutRunClient,
-    GeneratedV2RunClient, GeneratedV2SlowFanoutRunClient, GeneratedV2WorktreeRunClient,
-    GuttedImplementationPlanner, InvalidItemsThenRepairAgentClient, InvalidPlanner,
+    AlwaysInvalidItemsAgentClient, BlockedInvalidItemsAgentClient, CompletionBlockedAgentClient,
+    FlakyAgentClient, FlakyPlanner, GeneratedV2FanoutRunClient, GeneratedV2RunClient,
+    GeneratedV2SlowFanoutRunClient, GeneratedV2WorktreeRunClient, GuttedImplementationPlanner,
+    InvalidItemsThenRepairAgentClient, InvalidPlanner, PlannerRepairRetryClient,
     SavedV2TemplateRunClient, request, runner,
 };
 use super::{LiveApprovalMode, plan_live, run_live_action};

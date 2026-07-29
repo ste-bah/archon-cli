@@ -96,10 +96,12 @@ pub(crate) fn run_session_loop(
         fire_session_startup_hooks(&agent).await;
 
         if let Some(ref def) = agent_def {
-            let _ = input_tui_tx.send(TuiEvent::SetAgentInfo {
-                name: def.agent_type.clone(),
-                color: def.color.clone(),
-            });
+            input_tui_tx
+                .send_async(TuiEvent::SetAgentInfo {
+                    name: def.agent_type.clone(),
+                    color: def.color.clone(),
+                })
+                .await?;
         }
 
         let mut initial_prompt_pending: Option<String> =
@@ -218,11 +220,23 @@ pub(crate) fn run_session_loop(
                         input_len = slash_input.len(),
                         "slash command rejected because slash commands are disabled"
                     );
-                    let _ = input_tui_tx.send(TuiEvent::Error(format!(
-                        "Slash command `{}` was not run because slash commands are disabled.",
-                        slash_command_name(slash_input)
-                    )));
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                    if let Err(error) = input_tui_tx
+                        .send_async(TuiEvent::Error(format!(
+                            "Slash command `{}` was not run because slash commands are disabled.",
+                            slash_command_name(slash_input)
+                        )))
+                        .await
+                    {
+                        loop_error = Some(error.into());
+                        break;
+                    }
+                    if let Err(error) = input_tui_tx
+                        .send_async(TuiEvent::SlashCommandComplete)
+                        .await
+                    {
+                        loop_error = Some(error.into());
+                        break;
+                    }
                     continue;
                 } else {
                     tracing::info!(
@@ -265,11 +279,23 @@ pub(crate) fn run_session_loop(
                         command = slash_command_name(slash_input),
                         "slash command dispatch unhandled"
                     );
-                    let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                        "\nUnknown slash command `{}`. Type /help for available commands.\n",
-                        slash_command_name(slash_input)
-                    )));
-                    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+                    if let Err(error) = input_tui_tx
+                        .send_async(TuiEvent::TextDelta(format!(
+                            "\nUnknown slash command `{}`. Type /help for available commands.\n",
+                            slash_command_name(slash_input)
+                        )))
+                        .await
+                    {
+                        loop_error = Some(error.into());
+                        break;
+                    }
+                    if let Err(error) = input_tui_tx
+                        .send_async(TuiEvent::SlashCommandComplete)
+                        .await
+                    {
+                        loop_error = Some(error.into());
+                        break;
+                    }
                     continue;
                 }
             }

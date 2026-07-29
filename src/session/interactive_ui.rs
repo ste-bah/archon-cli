@@ -233,7 +233,7 @@ pub(super) async fn run(
     );
 
     if config.tui.vim_mode {
-        let _ = tui_event_tx.send(TuiEvent::SetVimMode(true));
+        tui_event_tx.send_async(TuiEvent::SetVimMode(true)).await?;
     }
 
     let command_catalog: Vec<CommandInfo> = crate::command::registry::default_registry()

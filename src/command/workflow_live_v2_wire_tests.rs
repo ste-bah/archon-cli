@@ -26,6 +26,7 @@ struct WireHarness {
     _project: tempfile::TempDir,
     learning_db_path: std::path::PathBuf,
     client: LiveV2AgentClient,
+    _tui_rx: archon_tui::event_channel::TuiEventReceiver,
     captured: tokio::sync::oneshot::Receiver<Vec<Vec<u8>>>,
 }
 
@@ -202,7 +203,7 @@ async fn wire_harness() -> WireHarness {
         },
         provider,
     );
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     let client = LiveV2AgentClient::new(
         Arc::new(llm),
         tui_tx,
@@ -215,6 +216,7 @@ async fn wire_harness() -> WireHarness {
         _project: project,
         learning_db_path,
         client,
+        _tui_rx: tui_rx,
         captured,
     }
 }

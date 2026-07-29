@@ -9,7 +9,6 @@ use std::{
 use anyhow::Result;
 use archon_core::config::GeneratedWorkflowConfig;
 use archon_pipeline::runner::LlmClient;
-use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
     GeneratedWorkflowKind, GeneratedWorkflowLearningContext, LifecycleAction, LifecycleController,

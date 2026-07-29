@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
-use archon_tui::event_channel::bounded_tui_event_channel_with_capacity;
+use archon_tui::event_channel::{TuiEventReceiver, bounded_tui_event_channel_with_capacity};
 use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
 
 use super::workflow_live_runner::PipelineWorkflowRunner;
@@ -18,9 +18,20 @@ pub(crate) struct FlakyPlanner {
     pub(crate) first_error: &'static str,
 }
 
+pub(crate) struct PlannerRepairRetryClient {
+    pub(crate) calls: AtomicUsize,
+    pub(crate) repair_started: tokio::sync::Notify,
+    pub(crate) release_repair: tokio::sync::Notify,
+}
+
 pub(crate) struct FlakyAgentClient {
     pub(crate) calls: AtomicUsize,
     pub(crate) first_error: &'static str,
+}
+
+pub(crate) struct CompletionBlockedAgentClient {
+    pub(crate) started: tokio::sync::Notify,
+    pub(crate) release: tokio::sync::Notify,
 }
 
 pub(crate) struct GeneratedV2RunClient {
@@ -56,6 +67,12 @@ pub(crate) struct GuttedImplementationPlanner {
 pub(crate) struct InvalidItemsThenRepairAgentClient {
     pub(crate) calls: AtomicUsize,
     pub(crate) requests: Mutex<Vec<AgentExecutionRequest>>,
+}
+
+pub(crate) struct BlockedInvalidItemsAgentClient {
+    pub(crate) calls: AtomicUsize,
+    pub(crate) started: tokio::sync::Notify,
+    pub(crate) release: tokio::sync::Notify,
 }
 
 pub(crate) struct AlwaysInvalidItemsAgentClient {
@@ -113,6 +130,41 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
+impl LlmClient for PlannerRepairRetryClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> Result<LlmResponse> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        match call {
+            0 => Ok(LlmResponse {
+                content: "export default async function workflow(w) { invalid(); }".to_string(),
+                tool_uses: Vec::new(),
+                tokens_in: 1,
+                tokens_out: 1,
+            }),
+            1 => {
+                self.repair_started.notify_one();
+                self.release_repair.notified().await;
+                anyhow::bail!("LLM stream error (server_error): temporary repair failure")
+            }
+            _ => Ok(LlmResponse {
+                content: r#"export default async function workflow(w) {
+  await w.agent("discover", { role: "researcher", task: "inspect" });
+}"#
+                .to_string(),
+                tool_uses: Vec::new(),
+                tokens_in: 1,
+                tokens_out: 1,
+            }),
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl LlmClient for GuttedImplementationPlanner {
     async fn send_message(
         &self,
@@ -157,6 +209,30 @@ impl LlmClient for FlakyAgentClient {
         if call == 0 {
             anyhow::bail!(self.first_error);
         }
+        Ok(LlmResponse {
+            content: "status: completed".to_string(),
+            tool_uses: Vec::new(),
+            tokens_in: 1,
+            tokens_out: 1,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for CompletionBlockedAgentClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> Result<LlmResponse> {
+        unreachable!("test uses run_agent")
+    }
+
+    async fn run_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
+        self.started.notify_one();
+        self.release.notified().await;
         Ok(LlmResponse {
             content: "status: completed".to_string(),
             tool_uses: Vec::new(),
@@ -331,19 +407,23 @@ pub(crate) fn request(input: serde_json::Value) -> StageRunRequest {
     }
 }
 
-pub(crate) fn runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
-    let (tui_tx, _rx) = bounded_tui_event_channel_with_capacity(16);
-    PipelineWorkflowRunner {
-        llm,
-        tui_tx,
-        agent_names: Vec::new(),
-        workspace_boundary_supported: false,
-    }
+pub(crate) fn runner(llm: Arc<dyn LlmClient>) -> (PipelineWorkflowRunner, TuiEventReceiver) {
+    let (tui_tx, tui_rx) = bounded_tui_event_channel_with_capacity(16);
+    (
+        PipelineWorkflowRunner {
+            llm,
+            tui_tx,
+            agent_names: Vec::new(),
+            workspace_boundary_supported: false,
+        },
+        tui_rx,
+    )
 }
 
-pub(crate) fn boundary_runner(llm: Arc<dyn LlmClient>) -> PipelineWorkflowRunner {
-    PipelineWorkflowRunner {
-        workspace_boundary_supported: true,
-        ..runner(llm)
-    }
+pub(crate) fn boundary_runner(
+    llm: Arc<dyn LlmClient>,
+) -> (PipelineWorkflowRunner, TuiEventReceiver) {
+    let (mut runner, tui_rx) = runner(llm);
+    runner.workspace_boundary_supported = true;
+    (runner, tui_rx)
 }

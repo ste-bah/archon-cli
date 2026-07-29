@@ -22,8 +22,12 @@ pub(super) async fn handle_resume_session(
 ) {
     if let Ok(meta) = store.get_session(session_id)
         && let Some(name) = meta.name
+        && let Err(error) = input_tui_tx
+            .send_async(TuiEvent::SessionRenamed(name))
+            .await
     {
-        let _ = input_tui_tx.send(TuiEvent::SessionRenamed(name));
+        tracing::warn!(%error, "resumed session name delivery failed");
+        return;
     }
 
     match store.load_messages(session_id) {
@@ -31,18 +35,30 @@ pub(super) async fn handle_resume_session(
             let messages = parse_raw_messages(&raw_messages);
             let count = messages.len();
             let banner = format!("\n━━━ Resumed session {session_id} ({count} messages) ━━━\n\n");
-            if send_history(input_tui_tx, &banner, &messages).is_ok() {
+            if send_history(input_tui_tx, &banner, &messages).await.is_ok() {
                 agent.lock().await.clear_conversation_detached().await;
                 agent.lock().await.restore_conversation(messages);
             } else {
                 tracing::error!("failed to replay resumed session history");
+                return;
             }
         }
         Err(e) => {
-            let _ = input_tui_tx.send(TuiEvent::Error(format!("Failed to load session: {e}")));
+            if let Err(error) = input_tui_tx
+                .send_async(TuiEvent::Error(format!("Failed to load session: {e}")))
+                .await
+            {
+                tracing::warn!(%error, "session load failure delivery failed");
+                return;
+            }
         }
     }
-    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "resume command completion delivery failed");
+    }
 }
 
 pub(super) async fn handle_truncate_session(
@@ -55,17 +71,39 @@ pub(super) async fn handle_truncate_session(
     let idx: u64 = match idx_str.trim().parse() {
         Ok(n) => n,
         Err(_) => {
-            let _ = input_tui_tx.send(TuiEvent::TextDelta(format!(
-                "\n[rewind: invalid index '{idx_str}']\n"
-            )));
-            let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+            if let Err(error) = input_tui_tx
+                .send_async(TuiEvent::TextDelta(format!(
+                    "\n[rewind: invalid index '{idx_str}']\n"
+                )))
+                .await
+            {
+                tracing::warn!(%error, "rewind validation delivery failed");
+                return;
+            }
+            if let Err(error) = input_tui_tx
+                .send_async(TuiEvent::SlashCommandComplete)
+                .await
+            {
+                tracing::warn!(%error, "rewind command completion delivery failed");
+            }
             return;
         }
     };
 
     if let Err(e) = store.truncate_messages_after(target_session_id, idx) {
-        let _ = input_tui_tx.send(TuiEvent::Error(format!("Failed to truncate session: {e}")));
-        let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+        if let Err(error) = input_tui_tx
+            .send_async(TuiEvent::Error(format!("Failed to truncate session: {e}")))
+            .await
+        {
+            tracing::warn!(%error, "session truncate failure delivery failed");
+            return;
+        }
+        if let Err(error) = input_tui_tx
+            .send_async(TuiEvent::SlashCommandComplete)
+            .await
+        {
+            tracing::warn!(%error, "rewind command completion delivery failed");
+        }
         return;
     }
 
@@ -74,20 +112,32 @@ pub(super) async fn handle_truncate_session(
             let messages = parse_raw_messages(&raw_messages);
             let count = messages.len();
             let banner = format!("\n━━━ Rewound to message {idx} ({count} messages kept) ━━━\n\n");
-            if send_history(input_tui_tx, &banner, &messages).is_ok() {
+            if send_history(input_tui_tx, &banner, &messages).await.is_ok() {
                 agent.lock().await.clear_conversation_detached().await;
                 agent.lock().await.restore_conversation(messages);
             } else {
                 tracing::error!("failed to replay rewound session history");
+                return;
             }
         }
         Err(e) => {
-            let _ = input_tui_tx.send(TuiEvent::Error(format!(
-                "Failed to reload session after truncate: {e}"
-            )));
+            if let Err(error) = input_tui_tx
+                .send_async(TuiEvent::Error(format!(
+                    "Failed to reload session after truncate: {e}"
+                )))
+                .await
+            {
+                tracing::warn!(%error, "rewound session reload failure delivery failed");
+                return;
+            }
         }
     }
-    let _ = input_tui_tx.send(TuiEvent::SlashCommandComplete);
+    if let Err(error) = input_tui_tx
+        .send_async(TuiEvent::SlashCommandComplete)
+        .await
+    {
+        tracing::warn!(%error, "rewind command completion delivery failed");
+    }
 }
 
 fn parse_raw_messages(raw_messages: &[String]) -> Vec<serde_json::Value> {
@@ -114,15 +164,17 @@ pub(crate) fn history_text(messages: &[serde_json::Value]) -> String {
     history
 }
 
-pub(crate) fn send_history(
+pub(crate) async fn send_history(
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
     banner: &str,
     messages: &[serde_json::Value],
 ) -> Result<(), HistorySendError> {
     let mut text = banner.to_string();
     text.push_str(&history_text(messages));
+    let event = TuiEvent::TextDelta(text);
     input_tui_tx
-        .send(TuiEvent::TextDelta(text))
+        .send_atomic_async(event)
+        .await
         .map_err(|_| HistorySendError)
 }
 
@@ -140,18 +192,61 @@ fn message_text_content(msg: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn display_history_rejects_atomically_when_capacity_is_insufficient() {
+    #[tokio::test]
+    async fn display_history_waits_for_capacity() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+        tx.send(archon_tui::app::TuiEvent::Done)
+            .expect("fill event channel");
+        let delivery =
+            tokio::spawn(async move { super::send_history(&tx, "history\n", &[]).await });
+        tokio::task::yield_now().await;
+
+        assert!(
+            !delivery.is_finished(),
+            "full queue must backpressure history"
+        );
+        assert!(matches!(
+            rx.recv().await,
+            Some(archon_tui::app::TuiEvent::Done)
+        ));
+        delivery
+            .await
+            .expect("history task")
+            .expect("history delivery");
+        assert!(matches!(
+            rx.recv().await,
+            Some(archon_tui::app::TuiEvent::TextDelta(text)) if text.starts_with("history")
+        ));
+    }
+
+    #[tokio::test]
+    async fn display_history_waits_for_atomic_multiframe_capacity() {
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(2);
+        tx.send(archon_tui::app::TuiEvent::Done)
+            .expect("fill one queue slot");
         let messages = vec![serde_json::json!({
             "role": "assistant",
             "content": "x".repeat(archon_tui::event_channel::MAX_COALESCED_CONTENT_BYTES + 1)
         })];
+        let delivery = tokio::spawn(async move { super::send_history(&tx, "", &messages).await });
+        tokio::task::yield_now().await;
 
-        let result = super::send_history(&tx, "", &messages);
+        assert!(
+            !delivery.is_finished(),
+            "multi-frame history must wait for capacity for the whole batch"
+        );
+        assert!(matches!(
+            rx.recv().await,
+            Some(archon_tui::app::TuiEvent::Done)
+        ));
+        delivery
+            .await
+            .expect("history task")
+            .expect("history delivery");
 
-        let error = result.expect_err("oversized history must be rejected");
-        assert_eq!(error.to_string(), "TUI event could not be queued");
-        assert!(rx.try_recv().is_err(), "partial history must not be queued");
+        let first = rx.recv().await.expect("first history frame");
+        let second = rx.recv().await.expect("second history frame");
+        assert!(matches!(first, archon_tui::app::TuiEvent::TextDelta(_)));
+        assert!(matches!(second, archon_tui::app::TuiEvent::TextDelta(_)));
     }
 }

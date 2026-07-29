@@ -203,7 +203,9 @@ impl WorkflowV2ScriptRunner {
                 let workflow_error = workflow_js_error(error.clone());
                 if matches!(
                     workflow_error,
-                    WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_)
+                    WorkflowError::ControlPaused(_)
+                        | WorkflowError::ControlCancelled(_)
+                        | WorkflowError::NotificationDelivery(_)
                 ) {
                     return Err(workflow_error);
                 }
@@ -253,6 +255,11 @@ fn workflow_js_error(error: String) -> WorkflowError {
     if let Some(message) = extract_run_control_message(&error, "workflow cancelled by run control:")
     {
         return WorkflowError::ControlCancelled(message);
+    }
+    if let Some(message) =
+        extract_run_control_message(&error, "required workflow notification delivery failed:")
+    {
+        return WorkflowError::NotificationDelivery(message);
     }
     WorkflowError::SpecInvalid(format!("workflow.js execution failed: {error}"))
 }

@@ -14,9 +14,10 @@ use super::workflow_live_v2_artifact_paths::stamp_project_artifact_paths;
 
 use super::super::workflow_live_retry;
 use super::super::workflow_live_runner::{
-    activity_detail, allowed_tools, request_target_repository_root, tier_model_alias,
-    workflow_agent, workflow_agent_ordinal, workflow_agent_session_id,
+    allowed_tools, request_target_repository_root, tier_model_alias, workflow_agent,
+    workflow_agent_ordinal, workflow_agent_session_id,
 };
+use super::super::workflow_live_runner_activity::activity_detail;
 
 #[derive(Clone)]
 pub(super) struct LiveV2AgentClient {
@@ -97,7 +98,31 @@ impl LiveV2AgentClient {
         self.fanout_parallelism(requested)
     }
 
-    fn emit_activity(
+    fn activity_event(
+        request: &StageRunRequest,
+        agent_name: &str,
+        provider_id: &str,
+        model: &str,
+        status: AgentActivityStatus,
+        detail: &str,
+    ) -> TuiEvent {
+        TuiEvent::AgentActivity(AgentActivityUpdate {
+            id: format!("workflow:{}:{}", request.run_id, request.stage_id),
+            name: agent_name.to_string(),
+            role: AgentActivityRole::Subagent,
+            status,
+            current_tool: None,
+            detail: Some(activity_detail(request, detail)),
+            run_id: Some(request.run_id.clone()),
+            parent_id: None,
+            artifact_id: None,
+            provider: Some(provider_id.to_string()),
+            model: Some(model.to_string()),
+            cost_usd: None,
+        })
+    }
+
+    async fn emit_required_activity(
         &self,
         request: &StageRunRequest,
         agent_name: &str,
@@ -105,23 +130,23 @@ impl LiveV2AgentClient {
         model: &str,
         status: AgentActivityStatus,
         detail: &str,
-    ) {
-        let _ = self
-            .tui_tx
-            .send(TuiEvent::AgentActivity(AgentActivityUpdate {
-                id: format!("workflow:{}:{}", request.run_id, request.stage_id),
-                name: agent_name.to_string(),
-                role: AgentActivityRole::Subagent,
+    ) -> std::result::Result<(), WorkflowV2AgentError> {
+        self.tui_tx
+            .send_async(Self::activity_event(
+                request,
+                agent_name,
+                provider_id,
+                model,
                 status,
-                current_tool: None,
-                detail: Some(activity_detail(request, detail)),
-                run_id: Some(request.run_id.clone()),
-                parent_id: None,
-                artifact_id: None,
-                provider: Some(provider_id.to_string()),
-                model: Some(model.to_string()),
-                cost_usd: None,
-            }));
+                detail,
+            ))
+            .await
+            .map_err(|error| {
+                WorkflowV2AgentError::NotificationDelivery(format!(
+                    "workflow V2 agent activity delivery failed: run_id={} stage_id={} status={status:?} provider={} model={}: {error}",
+                    request.run_id, request.stage_id, provider_id, model
+                ))
+            })
     }
 }
 
@@ -161,14 +186,15 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             .unwrap_or_else(|| "active-provider".to_string());
         let agent = workflow_agent(&stage_request, &model_alias, &self.agent_names);
         let agent_name = agent.key.clone();
-        self.emit_activity(
+        self.emit_required_activity(
             &stage_request,
             &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Running,
             "v2 call running",
-        );
+        )
+        .await?;
         let prompt_parts =
             archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
         let agent_request = AgentExecutionRequest {
@@ -201,39 +227,62 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             &self.llm,
             agent_request,
             |attempt| {
-                self.emit_activity(
-                    &stage_request,
-                    &agent_name,
-                    &provider_id,
-                    &resolved_model,
-                    AgentActivityStatus::Running,
-                    &format!("v2 call retrying after transient provider error ({attempt}/3)"),
-                );
+                let client = self.clone();
+                let stage_request = stage_request.clone();
+                let agent_name = agent_name.clone();
+                let provider_id = provider_id.clone();
+                let resolved_model = resolved_model.clone();
+                async move {
+                    client
+                        .emit_required_activity(
+                            &stage_request,
+                            &agent_name,
+                            &provider_id,
+                            &resolved_model,
+                            AgentActivityStatus::Running,
+                            &format!(
+                                "v2 call retrying after transient provider error ({attempt}/3)"
+                            ),
+                        )
+                        .await
+                        .map_err(|error| {
+                            archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
+                        })
+                }
             },
         )
         .await
         {
             Ok(response) => response,
             Err(err) => {
-                self.emit_activity(
+                let notification_delivery = matches!(
+                    &err,
+                    archon_workflow::WorkflowError::NotificationDelivery(_)
+                );
+                self.emit_required_activity(
                     &stage_request,
                     &agent_name,
                     &provider_id,
                     &resolved_model,
                     AgentActivityStatus::Failed,
                     "v2 call failed",
-                );
+                )
+                .await?;
+                if notification_delivery {
+                    return Err(WorkflowV2AgentError::NotificationDelivery(err.to_string()));
+                }
                 return Err(WorkflowV2AgentError::Transport(err.to_string()));
             }
         };
-        self.emit_activity(
+        self.emit_required_activity(
             &stage_request,
             &agent_name,
             &provider_id,
             &resolved_model,
             AgentActivityStatus::Complete,
             "v2 call complete",
-        );
+        )
+        .await?;
         Ok(response.content)
     }
 
@@ -410,6 +459,10 @@ fn stage_kind_for_v2_agent(request: &WorkflowV2AgentRequest) -> StageKind {
 fn v2_system_context() -> &'static str {
     "You are an Archon dynamic workflow stage agent. Return exactly one JSON object matching the Workflow V2 result envelope from the user message."
 }
+
+#[cfg(test)]
+#[path = "workflow_live_v2_delivery_tests.rs"]
+mod delivery_tests;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_client_tests.rs"]

@@ -357,6 +357,31 @@ fn read_only_fanout_parallelism_uses_default_subagent_cap_when_executor_missing(
 }
 
 #[tokio::test]
+async fn closed_tui_prevents_v2_agent_launch() {
+    let recorder = Arc::new(RecordingClient::default());
+    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    drop(tui_rx);
+    let client = LiveV2AgentClient::new(
+        recorder.clone(),
+        tui_tx,
+        Vec::new(),
+        "wf-test".to_string(),
+        Some("/repo".to_string()),
+        Some(17),
+    );
+
+    client
+        .run_agent_request(
+            &request(WorkflowV2HostMethod::Agent, None),
+            "inspect".to_string(),
+        )
+        .await
+        .expect_err("closed TUI must prevent V2 agent launch");
+
+    assert!(recorder.requests.lock().expect("requests lock").is_empty());
+}
+
+#[tokio::test]
 async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
     let recorder = Arc::new(RecordingClient::default());
     let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();

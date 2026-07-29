@@ -23,7 +23,9 @@ pub(super) fn spawn_btw_loop(
             observability::spawn_named("btw-response", async move {
                 let response =
                     answer_btw_question(provider, model, max_tokens, sys_prompt, question).await;
-                let _ = tui_tx.send(TuiEvent::BtwResponse(response));
+                if let Err(error) = tui_tx.send_async(TuiEvent::BtwResponse(response)).await {
+                    tracing::warn!(%error, "BTW response delivery failed");
+                }
             });
         }
     });

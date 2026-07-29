@@ -8,7 +8,7 @@ use archon_memory::MemoryTrait;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 
-fn display_initial_resume_history(
+async fn display_initial_resume_history(
     tui_event_tx: &TuiEventSender,
     messages: &[serde_json::Value],
 ) -> Result<(), crate::session_loop::session_history::HistorySendError> {
@@ -16,14 +16,14 @@ fn display_initial_resume_history(
         "\n━━━ Resumed session history ({} messages) ━━━\n\n",
         messages.len()
     );
-    crate::session_loop::session_history::send_history(tui_event_tx, &banner, messages)
+    crate::session_loop::session_history::send_history(tui_event_tx, &banner, messages).await
 }
 
-fn replay_resumed_conversation(
+async fn replay_resumed_conversation(
     tui_event_tx: &TuiEventSender,
     messages: Vec<serde_json::Value>,
 ) -> Option<Vec<serde_json::Value>> {
-    if let Err(error) = display_initial_resume_history(tui_event_tx, &messages) {
+    if let Err(error) = display_initial_resume_history(tui_event_tx, &messages).await {
         tracing::error!("failed to replay resumed session history: {error}");
         return None;
     }
@@ -199,7 +199,7 @@ pub(super) async fn finish(
 
     if let Some(messages) = resume_messages {
         let count = messages.len();
-        let replayed = replay_resumed_conversation(&tui_event_tx, messages);
+        let replayed = replay_resumed_conversation(&tui_event_tx, messages).await;
         if let Some(messages) = replayed {
             agent.restore_conversation(messages);
             tracing::info!("restored {count} messages from previous session");
@@ -207,8 +207,11 @@ pub(super) async fn finish(
         if let Some(Some(ref resume_id)) = cli.resume
             && let Ok(meta) = session_store.get_session(resume_id)
             && let Some(name) = meta.name
+            && let Err(error) = tui_event_tx
+                .send_async(TuiEvent::SessionRenamed(name))
+                .await
         {
-            let _ = tui_event_tx.send(TuiEvent::SessionRenamed(name));
+            tracing::warn!(%error, "resumed session name delivery failed");
         }
         if archon_consciousness::inner_voice::InnerVoice::is_enabled(
             config.consciousness.inner_voice,
@@ -291,29 +294,31 @@ pub(super) async fn finish(
 mod tests {
     use archon_tui::app::TuiEvent;
 
-    #[test]
-    fn explicit_resume_rejects_history_atomically_when_capacity_is_insufficient() {
+    #[tokio::test]
+    async fn explicit_resume_rejects_history_atomically_when_capacity_is_insufficient() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
         let messages = vec![serde_json::json!({
             "role": "assistant",
             "content": "x".repeat(archon_tui::event_channel::MAX_COALESCED_CONTENT_BYTES + 1)
         })];
 
-        let result = super::replay_resumed_conversation(&tx, messages);
+        let result = super::replay_resumed_conversation(&tx, messages).await;
 
         assert!(result.is_none());
         assert!(rx.try_recv().is_err(), "partial history must not be queued");
     }
 
-    #[test]
-    fn explicit_resume_replays_history_into_tui() {
+    #[tokio::test]
+    async fn explicit_resume_replays_history_into_tui() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
         let messages = vec![serde_json::json!({
             "role": "assistant",
             "content": "TAIL-SENTINEL-界🙂e\u{301}"
         })];
 
-        super::display_initial_resume_history(&tx, &messages).expect("queue history");
+        super::display_initial_resume_history(&tx, &messages)
+            .await
+            .expect("queue history");
 
         let mut text = String::new();
         while let Ok(event) = rx.try_recv() {

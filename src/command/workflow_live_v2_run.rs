@@ -65,11 +65,8 @@ async fn run_v2_workflow_with_origin(
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan)?;
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
-        LiveApprovalOutcome::Proceed { run, note } => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
-            *run
-        }
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+        LiveApprovalOutcome::Proceed(run) => *run,
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
             return Ok(message);
         }
@@ -117,9 +114,8 @@ pub(super) async fn resume_generated_v2_workflow(
         }
         _ => {}
     }
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx)? {
-        LiveApprovalOutcome::Proceed { run, note } => {
-            let _ = tui_tx.send(TuiEvent::TextDelta(note.clone()));
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+        LiveApprovalOutcome::Proceed(run) => {
             if matches!(run.status, RunStatus::Paused) {
                 LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Resume)?
             } else {
