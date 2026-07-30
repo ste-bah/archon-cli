@@ -77,32 +77,34 @@ impl CommandHandler for ArchonResearchHandler {
         ctx.emit(TuiEvent::TextDelta(format!(
             "Starting research pipeline for topic: {topic}\n",
         )));
-        let world_context = loaded_config.map(|config| {
-            let guardrail = crate::command::world_model::begin_guarded_action(
-                &config,
-                archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
-                "archon-research",
-                "tui_archon_research_start",
-                &format!("research pipeline: {topic}"),
-            );
-            let advisory = guardrail
-                .as_ref()
-                .map(|record| record.advisory.clone())
-                .unwrap_or_else(|| {
-                    crate::command::world_model::record_runtime_advisory(
-                        &config,
-                        archon_world_model::integration::WorldAdvisorSurface::Pipeline,
-                        "archon-research",
-                        "tui_archon_research_start",
-                        &format!("research pipeline: {topic}"),
-                    )
-                });
-            tracing::debug!(
-                continue_foreground_flow = advisory.continue_foreground_flow,
-                "world_model.tui_archon_research_advisory"
-            );
-            (config, guardrail, advisory)
-        });
+        let world_context = loaded_config
+            .map(|config| {
+                let guardrail = crate::command::world_model::begin_guarded_action(
+                    &config,
+                    archon_world_model::integration::WorldAdvisorSurface::PipelineStep,
+                    "archon-research",
+                    "tui_archon_research_start",
+                    &format!("research pipeline: {topic}"),
+                )?;
+                let advisory = guardrail
+                    .as_ref()
+                    .map(|record| record.advisory.clone())
+                    .unwrap_or_else(|| {
+                        crate::command::world_model::record_runtime_advisory(
+                            &config,
+                            archon_world_model::integration::WorldAdvisorSurface::Pipeline,
+                            "archon-research",
+                            "tui_archon_research_start",
+                            &format!("research pipeline: {topic}"),
+                        )
+                    });
+                tracing::debug!(
+                    continue_foreground_flow = advisory.continue_foreground_flow,
+                    "world_model.tui_archon_research_advisory"
+                );
+                Ok::<_, anyhow::Error>((config, guardrail, advisory))
+            })
+            .transpose()?;
         if let Some((config, guardrail, _)) = world_context.as_ref() {
             if let Some(record) = guardrail
                 && !record.decision.allowed_to_finalize

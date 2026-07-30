@@ -15,4 +15,5 @@ mod tests {
     include!("guard/06_tests_status.rs");
     include!("guard/07_tests_manual_events.rs");
     include!("guard/08_tests_completion.rs");
+    include!("guard/09_tests_fail_closed.rs");
 }

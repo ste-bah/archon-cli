@@ -54,16 +54,38 @@ pub(crate) fn begin_guarded_action(
     session_id: &str,
     action_ref: &str,
     summary: &str,
-) -> Option<RuntimeGuardrailRecord> {
+) -> Result<Option<RuntimeGuardrailRecord>> {
+    begin_guarded_action_with_root(
+        config,
+        surface,
+        session_id,
+        action_ref,
+        summary,
+        super::world_model_root(),
+    )
+}
+
+fn begin_guarded_action_with_root(
+    config: &archon_core::config::ArchonConfig,
+    surface: archon_world_model::integration::WorldAdvisorSurface,
+    session_id: &str,
+    action_ref: &str,
+    summary: &str,
+    root: Result<std::path::PathBuf>,
+) -> Result<Option<RuntimeGuardrailRecord>> {
     let policy = policy_from_config(config);
     if !policy.enabled {
-        return None;
+        return Ok(None);
     }
     let mode = archon_world_model::guardrail::mode_for_surface(&policy, surface);
     if matches!(mode, archon_world_model::WorldGuardrailMode::Off) {
-        return None;
+        return Ok(None);
     }
-    let root = super::world_model_root().ok()?;
+    let root = match root {
+        Ok(root) => root,
+        Err(error) if mode.can_block() => return Err(error),
+        Err(_) => return Ok(None),
+    };
     let task_class = archon_world_model::guardrail::classify_task(summary, surface);
     let action_kind = match surface {
         archon_world_model::integration::WorldAdvisorSurface::PipelineStep => {
@@ -118,15 +140,19 @@ pub(crate) fn begin_guarded_action(
         task_class,
         classified_from_tool: false,
     };
-    if let Err(error) = persist_and_remember_guardrail(&root, &record) {
-        tracing::warn!(
-            %error,
-            action_id = %record.action.action_id,
-            "failed to persist initial guardrail state"
-        );
-        return None;
+    match admit_guardrail_record_at_root(&root, record) {
+        Ok(record) => Ok(Some(record)),
+        Err(error) if mode.can_block() => Err(error),
+        Err(_) => Ok(None),
     }
-    Some(record)
+}
+
+fn admit_guardrail_record_at_root(
+    root: &std::path::Path,
+    record: RuntimeGuardrailRecord,
+) -> Result<RuntimeGuardrailRecord> {
+    persist_and_remember_guardrail(root, &record)?;
+    Ok(record)
 }
 
 fn persist_and_remember_guardrail(

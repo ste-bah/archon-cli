@@ -48,7 +48,7 @@ fn begin_non_interactive_guardrail(
     session_id: &str,
     content: &str,
     action_prefix: &str,
-) -> Option<crate::command::world_model::RuntimeGuardrailRecord> {
+) -> anyhow::Result<Option<crate::command::world_model::RuntimeGuardrailRecord>> {
     let task_class = archon_world_model::guardrail::classify_task(
         content,
         archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
@@ -125,8 +125,12 @@ pub(crate) async fn run_print_mode_session(
         permission_mode,
     );
 
-    let guardrail =
-        begin_non_interactive_guardrail(config, session_id, &print_config.query, "print-turn");
+    let Ok(guardrail) =
+        begin_non_interactive_guardrail(config, session_id, &print_config.query, "print-turn")
+    else {
+        tracing::error!("world-model guardrail admission failed");
+        return 1;
+    };
     if let Some(record) = &guardrail {
         apply_guardrail_record(&mut agent, session_id, record);
     }
@@ -333,7 +337,12 @@ async fn process_headless_message(
 ) -> bool {
     tracing::info!(len = content.len(), "headless: processing UserMessage");
 
-    let guardrail = begin_non_interactive_guardrail(config, session_id, content, "headless-turn");
+    let Ok(guardrail) =
+        begin_non_interactive_guardrail(config, session_id, content, "headless-turn")
+    else {
+        tracing::error!("world-model guardrail admission failed");
+        return false;
+    };
     if let Some(record) = &guardrail {
         apply_guardrail_record(agent, session_id, record);
     }
