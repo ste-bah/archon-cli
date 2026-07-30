@@ -17,11 +17,18 @@ impl Agent {
                 config.working_dir.join(".archon").join("settings.json"),
             ));
         let max_subagent_concurrency = config.max_subagent_concurrency;
+        let state = ConversationState {
+            max_tool_result_bytes: tool_result_context::resolved_max_tool_result_bytes(
+                config.context.max_tool_result_bytes,
+                client.as_ref(),
+            ),
+            ..ConversationState::default()
+        };
         Self {
             client,
             registry,
             config,
-            state: ConversationState::default(),
+            state,
             event_tx,
             checkpoint_store: None,
             plan_store: None,

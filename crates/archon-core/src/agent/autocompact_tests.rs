@@ -37,17 +37,6 @@ fn json_compaction_does_not_emit_system_role_or_orphan_tool_result() {
 }
 
 #[test]
-fn successful_compact_resets_failure_counter() {
-    let mut state = AutoCompactState::default();
-    state.on_real_failure();
-    assert_eq!(state.consecutive_failures, 1);
-    state.on_success(123);
-    state.on_real_failure();
-    assert_eq!(state.consecutive_failures, 1);
-    assert!(!state.disabled);
-}
-
-#[test]
 fn cancelled_stream_classification_is_specific() {
     assert!(is_cancelled_stream_error("request_cancelled", ""));
     assert!(is_cancelled_stream_error("", "operation cancelled by user"));

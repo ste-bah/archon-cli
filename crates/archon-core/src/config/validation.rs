@@ -89,6 +89,14 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             config.context.compact_threshold
         )));
     }
+    if config.context.max_tool_result_bytes
+        < crate::agent::tool_result_context::MIN_MAX_TOOL_RESULT_BYTES
+    {
+        return Err(ConfigError::ValidationError(format!(
+            "context.max_tool_result_bytes must be >= {}",
+            crate::agent::tool_result_context::MIN_MAX_TOOL_RESULT_BYTES,
+        )));
+    }
 
     // consciousness.energy_decay_rate
     if !(0.0..=1.0).contains(&config.consciousness.energy_decay_rate) {

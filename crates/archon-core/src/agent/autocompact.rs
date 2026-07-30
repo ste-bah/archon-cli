@@ -6,8 +6,13 @@ pub(crate) use request_pressure::*;
 #[path = "autocompact_agent.rs"]
 mod agent_impl;
 
+#[path = "autocompact_recovery.rs"]
+mod recovery;
+#[cfg(test)]
+use recovery::MAX_COMPACT_FAILURES;
+pub use recovery::*;
+
 const MICRO_COMPACT_FRACTION: f32 = 0.65;
-const MAX_COMPACT_FAILURES: u32 = 3;
 const COMPACTION_INPUT_BUDGET_BYTES: usize = 320_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,41 +20,6 @@ pub enum CompactAction {
     Micro,
     Full,
 }
-
-#[derive(Debug, Clone, Default)]
-pub struct AutoCompactState {
-    pub compaction_count: u32,
-    pub consecutive_failures: u32,
-    pub disabled: bool,
-    pub compact_in_flight: bool,
-    pub last_compact_at_tokens: u64,
-}
-
-impl AutoCompactState {
-    pub fn should_attempt(&self) -> bool {
-        !self.disabled && !self.compact_in_flight
-    }
-
-    pub fn on_success(&mut self, tokens: u64) {
-        self.compaction_count += 1;
-        self.consecutive_failures = 0;
-        self.compact_in_flight = false;
-        self.last_compact_at_tokens = tokens;
-    }
-
-    pub fn on_real_failure(&mut self) {
-        self.consecutive_failures += 1;
-        self.compact_in_flight = false;
-        if self.consecutive_failures >= MAX_COMPACT_FAILURES {
-            self.disabled = true;
-        }
-    }
-
-    pub fn on_cancel(&mut self) {
-        self.compact_in_flight = false;
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactionOutcome {
     Compacted {
@@ -114,22 +84,6 @@ pub fn estimate_messages_tokens(messages: &[serde_json::Value]) -> u64 {
 
 pub(crate) fn trigger_tokens(messages: &[serde_json::Value]) -> u64 {
     estimate_messages_tokens(messages)
-}
-
-pub fn classify_stream_error(
-    provider: &str,
-    error_type: &str,
-    message: &str,
-) -> archon_llm::provider::LlmError {
-    archon_llm::context_window::classify_context_window_error(
-        None,
-        Some(error_type),
-        None,
-        message,
-        Some(provider),
-        None,
-    )
-    .unwrap_or_else(|| archon_llm::provider::LlmError::Http(format!("{error_type}: {message}")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,6 +370,9 @@ fn from_context_messages(
 #[cfg(test)]
 #[path = "autocompact_attribution_tests.rs"]
 mod attribution_tests;
+#[cfg(test)]
+#[path = "autocompact_recovery_tests.rs"]
+mod recovery_tests;
 #[cfg(test)]
 #[path = "autocompact_tests.rs"]
 mod tests;

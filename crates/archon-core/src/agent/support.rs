@@ -10,6 +10,9 @@ pub enum AgentLoopError {
     #[error("tool dispatch error: {0}")]
     ToolError(String),
 
+    #[error("auto-compaction failed: {0}")]
+    Compaction(#[from] super::autocompact::CompactionError),
+
     #[error("turn finalization blocked: {0}")]
     FinalizationBlocked(String),
 }
@@ -132,4 +135,18 @@ pub(super) fn user_correction_excerpt(user_input: &str) -> String {
     // TODO(v0.1.52): use the shared secret-redaction regex once it is exposed
     // as a public helper outside archon-observability's tracing internals.
     user_input.chars().take(200).collect()
+}
+
+pub(super) fn message_text_content(message: &serde_json::Value) -> Option<String> {
+    let content = message.get("content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+    let text = content
+        .as_array()?
+        .iter()
+        .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some(text)
 }

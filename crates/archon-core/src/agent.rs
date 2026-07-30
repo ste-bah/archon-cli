@@ -77,7 +77,7 @@ pub use payloads::{
 };
 pub use runtime_attribution::RuntimeAttribution;
 pub use support::AgentLoopError;
-use support::{parse_plan_from_text, user_correction_excerpt};
+use support::{message_text_content, parse_plan_from_text, user_correction_excerpt};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
@@ -273,7 +273,7 @@ impl Agent {
                 Ok(false)
             }
             Err(err) => {
-                self.state.auto_compact.on_real_failure();
+                self.state.auto_compact.on_failure(&err);
                 tracing::warn!(
                     compaction.reason = reason,
                     trigger_tokens,

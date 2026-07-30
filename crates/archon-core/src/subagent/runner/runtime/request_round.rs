@@ -296,11 +296,7 @@ async fn maybe_compact_for_request_pressure(
 }
 
 fn current_trigger_tokens(messages: &[serde_json::Value], last_known_context_tokens: u64) -> u64 {
-    if last_known_context_tokens > 0 {
-        last_known_context_tokens
-    } else {
-        crate::agent::autocompact::trigger_tokens(messages)
-    }
+    last_known_context_tokens.max(crate::agent::autocompact::trigger_tokens(messages))
 }
 
 fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {
@@ -367,7 +363,7 @@ async fn compact_proactively(
             );
         }
         Err(error) => {
-            auto_compact.on_real_failure();
+            auto_compact.on_failure(&error);
             tracing::warn!(
                 compaction.outcome = "auto_failed",
                 provider_family = telemetry.provider_family,
@@ -383,5 +379,52 @@ async fn compact_proactively(
                 "{failure_message}",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod trigger_tests {
+    use super::current_trigger_tokens;
+
+    #[test]
+    fn fresh_message_burst_can_raise_stale_provider_usage() {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": "x".repeat(600_000),
+        })];
+        let fresh = crate::agent::autocompact::trigger_tokens(&messages);
+
+        assert_eq!(current_trigger_tokens(&messages, 10), fresh);
+    }
+
+    #[test]
+    fn five_tool_result_burst_raises_pressure_above_stale_usage() {
+        let messages: Vec<serde_json::Value> = (0..5)
+            .map(|index| {
+                serde_json::json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": format!("tool-{index}"),
+                        "content": "x".repeat(150 * 1024),
+                        "is_error": false,
+                    }],
+                })
+            })
+            .collect();
+        let fresh = crate::agent::autocompact::trigger_tokens(&messages);
+
+        assert!(
+            fresh > 150_000,
+            "five-result burst must create measurable pressure"
+        );
+        assert_eq!(current_trigger_tokens(&messages, 10), fresh);
+    }
+
+    #[test]
+    fn provider_usage_can_raise_low_fresh_estimate() {
+        let messages = vec![serde_json::json!({"role": "user", "content": "small"})];
+
+        assert_eq!(current_trigger_tokens(&messages, 900_000), 900_000);
     }
 }

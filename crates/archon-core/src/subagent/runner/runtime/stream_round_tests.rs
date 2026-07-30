@@ -1,110 +1,19 @@
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::projected_request;
+use super::{collect_stream_round, compact_messages_for_retry, projected_request};
 use crate::subagent::runner::SubagentRunner;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
-use archon_llm::provider::{LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature};
+use archon_llm::provider::{
+    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+};
 use archon_llm::streaming::StreamEvent;
 use archon_tools::tool::ToolContext;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-struct AnthropicTestProvider;
-
-struct StalledProvider {
-    started: Mutex<Option<oneshot::Sender<()>>>,
-    dropped: Mutex<Option<oneshot::Sender<()>>>,
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for StalledProvider {
-    fn name(&self) -> &str {
-        "stalled"
-    }
-
-    fn models(&self) -> Vec<ModelInfo> {
-        Vec::new()
-    }
-
-    fn supports_feature(&self, _: ProviderFeature) -> bool {
-        false
-    }
-
-    async fn stream(
-        &self,
-        _: LlmRequest,
-    ) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
-        let (tx, rx) = mpsc::channel(1);
-        let dropped = self.dropped.lock().unwrap().take().unwrap();
-        tokio::spawn(async move {
-            tx.closed().await;
-            let _ = dropped.send(());
-        });
-        self.started.lock().unwrap().take().unwrap().send(()).ok();
-        Ok(rx)
-    }
-
-    async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
-        unreachable!("stalled provider only streams")
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for AnthropicTestProvider {
-    fn name(&self) -> &str {
-        "anthropic"
-    }
-
-    fn models(&self) -> Vec<ModelInfo> {
-        Vec::new()
-    }
-
-    fn supports_anthropic_message_caching(&self) -> bool {
-        true
-    }
-
-    fn supports_feature(&self, _: ProviderFeature) -> bool {
-        false
-    }
-
-    async fn stream(
-        &self,
-        _: LlmRequest,
-    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-        unreachable!("projection tests do not open a stream")
-    }
-
-    async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
-        unreachable!("projection tests do not complete a request")
-    }
-}
-
-fn runner() -> SubagentRunner {
-    let mut config = crate::agent::AgentConfig::default();
-    config.context.prompt_cache = true;
-    config.context.prompt_cache_conversation = true;
-    SubagentRunner::new(
-        Arc::new(AnthropicTestProvider),
-        String::new(),
-        Vec::new(),
-        Arc::new(crate::dispatch::ToolRegistry::new()),
-        ToolContext::default(),
-        "claude-sonnet-4-6".into(),
-        1,
-        60,
-        Arc::new(config),
-        Arc::new(test_identity()),
-    )
-}
-
-fn test_identity() -> IdentityProvider {
-    IdentityProvider::new(
-        IdentityMode::Clean,
-        "session".into(),
-        "device".into(),
-        String::new(),
-    )
-}
+include!("stream_round_test_fixture.rs");
+include!("stream_round_recovery_tests.rs");
 
 #[tokio::test]
 async fn cancellation_drops_stalled_provider_stream_promptly() {

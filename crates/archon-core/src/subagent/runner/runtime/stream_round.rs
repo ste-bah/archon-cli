@@ -18,7 +18,13 @@ pub(super) async fn collect_stream_round(
     runner: &SubagentRunner,
     messages: &mut Vec<serde_json::Value>,
     auto_compact: &mut crate::agent::AutoCompactState,
-    (reactive_overflow_retried, reactive_rate_limit_retried, last_known_context_tokens): (
+    (
+        recovery_ladder,
+        emergency_projection_pending,
+        reactive_rate_limit_retried,
+        last_known_context_tokens,
+    ): (
+        &mut crate::agent::autocompact::RecoveryLadder,
         &mut bool,
         &mut bool,
         &mut u64,
@@ -29,14 +35,18 @@ pub(super) async fn collect_stream_round(
 ) -> anyhow::Result<StreamRoundResult> {
     let mut reconnected = false;
     let mut rx = loop {
-        let attempt_request = projected_request(runner, messages, &request);
+        let attempt_request = if std::mem::take(emergency_projection_pending) {
+            emergency_projected_request(runner, messages, &request)
+        } else {
+            projected_request(runner, messages, &request)
+        };
         match tokio::time::timeout(
             STREAM_IDLE_TIMEOUT,
             open_stream_with_retries(
                 runner,
                 messages,
                 auto_compact,
-                reactive_overflow_retried,
+                recovery_ladder,
                 reactive_rate_limit_retried,
                 last_known_context_tokens,
                 attempt_request,
@@ -152,12 +162,14 @@ pub(super) async fn collect_stream_round(
                 runner,
                 messages,
                 auto_compact,
-                reactive_overflow_retried,
+                recovery_ladder,
+                emergency_projection_pending,
                 reactive_rate_limit_retried,
                 last_known_context_tokens,
                 request_body_bytes,
                 large_retry_body_bytes,
                 telemetry,
+                &request,
                 error_type.clone(),
                 message.clone(),
             )
@@ -190,104 +202,13 @@ pub(super) async fn collect_stream_round(
     })
 }
 
-fn projected_request(
-    runner: &SubagentRunner,
-    messages: &[serde_json::Value],
-    request: &LlmRequest,
-) -> LlmRequest {
-    let mut request = LlmRequest {
-        messages: projected_messages(runner, messages),
-        ..request.clone()
-    };
-    crate::agent::request_cache::apply_conversation_cache(
-        &mut request,
-        runner.provider.as_ref(),
-        runner.agent_config.context.prompt_cache
-            && runner.agent_config.context.prompt_cache_conversation,
-        &runner.agent_config.context.prompt_cache_mode,
-        &runner.agent_config.context.prompt_cache_ttl,
-    );
-    request
-}
-
-fn projected_messages(
-    runner: &SubagentRunner,
-    messages: &[serde_json::Value],
-) -> Vec<serde_json::Value> {
-    crate::agent::tool_result_context::project_messages_for_request(
-        messages,
-        runner.agent_config.context.preserve_recent_turns,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn open_stream_with_retries(
-    runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
-    auto_compact: &mut crate::agent::AutoCompactState,
-    reactive_overflow_retried: &mut bool,
-    reactive_rate_limit_retried: &mut bool,
-    last_known_context_tokens: &mut u64,
-    request: LlmRequest,
-    request_body_bytes: usize,
-    large_retry_body_bytes: usize,
-    telemetry: &crate::agent::autocompact::CompactionTelemetry,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<StreamEvent>> {
-    match runner.provider.stream(request.clone()).await {
-        Ok(rx) => Ok(rx),
-        Err(e) if e.is_context_window_exceeded() && !*reactive_overflow_retried => {
-            *reactive_overflow_retried = true;
-            compact_messages_for_retry(
-                runner,
-                messages,
-                auto_compact,
-                last_known_context_tokens,
-                "reactive subagent compaction failed",
-            )
-            .await?;
-            runner
-                .provider
-                .stream(projected_request(runner, messages, &request))
-                .await
-                .map_err(anyhow::Error::new)
-        }
-        Err(e)
-            if crate::agent::autocompact::is_rate_limited_error(&e)
-                && !*reactive_rate_limit_retried
-                && request_body_bytes >= large_retry_body_bytes =>
-        {
-            *reactive_rate_limit_retried = true;
-            tracing::warn!(
-                compaction.reason = "rate_limit_large_request",
-                trigger_body_bytes = request_body_bytes,
-                threshold_body_bytes = large_retry_body_bytes,
-                provider_family = telemetry.provider_family,
-                wire_shape = telemetry.wire_shape,
-                native_context_window = telemetry.native_context_window,
-                runtime_context_budget = telemetry.runtime_context_budget,
-                context_source = telemetry.context_source,
-                compaction_backend = telemetry.compaction_backend,
-                scope = "subagent",
-                force = true,
-                "rate-limited subagent request is large; compacting before one retry"
-            );
-            compact_messages_for_retry(
-                runner,
-                messages,
-                auto_compact,
-                last_known_context_tokens,
-                "rate-limit subagent compaction failed",
-            )
-            .await?;
-            runner
-                .provider
-                .stream(projected_request(runner, messages, &request))
-                .await
-                .map_err(anyhow::Error::new)
-        }
-        Err(e) => Err(anyhow::Error::new(e)),
-    }
-}
+#[path = "stream_round_recovery.rs"]
+mod recovery;
+#[cfg(test)]
+use recovery::compact_messages_for_retry;
+use recovery::{
+    emergency_projected_request, handle_stream_error, open_stream_with_retries, projected_request,
+};
 
 #[allow(clippy::too_many_arguments)]
 fn record_content_block_start(
@@ -333,109 +254,6 @@ fn append_tool_input_delta(
             "received tool input JSON delta without matching tool block"
         );
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn handle_stream_error(
-    runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
-    auto_compact: &mut crate::agent::AutoCompactState,
-    reactive_overflow_retried: &mut bool,
-    reactive_rate_limit_retried: &mut bool,
-    last_known_context_tokens: &mut u64,
-    request_body_bytes: usize,
-    large_retry_body_bytes: usize,
-    telemetry: &crate::agent::autocompact::CompactionTelemetry,
-    error_type: String,
-    message: String,
-) -> anyhow::Result<bool> {
-    let err = crate::agent::autocompact::classify_stream_error(
-        runner.provider.name(),
-        &error_type,
-        &message,
-    );
-    if err.is_context_window_exceeded() && !*reactive_overflow_retried {
-        *reactive_overflow_retried = true;
-        compact_messages_for_retry(
-            runner,
-            messages,
-            auto_compact,
-            last_known_context_tokens,
-            "reactive subagent compaction failed",
-        )
-        .await?;
-        return Ok(true);
-    }
-    if crate::agent::autocompact::is_rate_limited_error(&err)
-        && !*reactive_rate_limit_retried
-        && request_body_bytes >= large_retry_body_bytes
-    {
-        *reactive_rate_limit_retried = true;
-        tracing::warn!(
-            compaction.reason = "rate_limit_large_request_stream",
-            trigger_body_bytes = request_body_bytes,
-            threshold_body_bytes = large_retry_body_bytes,
-            provider_family = telemetry.provider_family,
-            wire_shape = telemetry.wire_shape,
-            native_context_window = telemetry.native_context_window,
-            runtime_context_budget = telemetry.runtime_context_budget,
-            context_source = telemetry.context_source,
-            compaction_backend = telemetry.compaction_backend,
-            scope = "subagent",
-            force = true,
-            "rate-limited subagent stream is large; compacting before one retry"
-        );
-        compact_messages_for_retry(
-            runner,
-            messages,
-            auto_compact,
-            last_known_context_tokens,
-            "rate-limit subagent compaction failed",
-        )
-        .await?;
-        return Ok(true);
-    }
-    runner.emit_activity_stream("error", message, None, true);
-    Err(anyhow::Error::new(err))
-}
-
-async fn compact_messages_for_retry(
-    runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
-    auto_compact: &mut crate::agent::AutoCompactState,
-    last_known_context_tokens: &mut u64,
-    error_context: &str,
-) -> anyhow::Result<()> {
-    let attribution = runner.agent_config.runtime_attribution_extra(
-        "compaction",
-        "subagent_reactive_compaction",
-        None,
-        None,
-        None,
-    );
-    let (outcome, compacted) = crate::agent::autocompact::compact_json_messages_with_provider(
-        runner.provider.as_ref(),
-        &runner.model,
-        messages,
-        crate::agent::CompactAction::Full,
-        true,
-        attribution,
-    )
-    .await
-    .map_err(|err| anyhow::anyhow!("{error_context}: {err}"))?;
-    *messages = compacted;
-    let after_current_tokens = match outcome {
-        crate::agent::autocompact::CompactionOutcome::Compacted {
-            after_estimated_tokens,
-            ..
-        } => after_estimated_tokens,
-        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
-            crate::agent::autocompact::estimate_messages_tokens(messages)
-        }
-    };
-    *last_known_context_tokens = 0;
-    auto_compact.on_success(after_current_tokens);
-    Ok(())
 }
 
 fn record_message_start_usage(runner: &SubagentRunner, usage: &archon_llm::types::Usage) {

@@ -106,6 +106,7 @@ pub struct CompactionPolicy {
     pub wire_shape: WireShape,
     pub backend: CompactionBackend,
     pub generic_fallback: bool,
+    pub max_tool_result_bytes: Option<usize>,
 }
 
 pub const COMPACTION_POLICIES: &[CompactionPolicy] = &[
@@ -114,54 +115,63 @@ pub const COMPACTION_POLICIES: &[CompactionPolicy] = &[
         wire_shape: WireShape::AnthropicMessages,
         backend: CompactionBackend::Anthropic,
         generic_fallback: false,
+        max_tool_result_bytes: Some(10_485_760),
     },
     CompactionPolicy {
         provider_family: ProviderFamily::AnthropicOAuth,
         wire_shape: WireShape::AnthropicMessages,
         backend: CompactionBackend::Anthropic,
         generic_fallback: false,
+        max_tool_result_bytes: Some(10_485_760),
     },
     CompactionPolicy {
         provider_family: ProviderFamily::Bedrock,
         wire_shape: WireShape::BedrockConverse,
         backend: CompactionBackend::Anthropic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::Vertex,
         wire_shape: WireShape::VertexAnthropic,
         backend: CompactionBackend::Anthropic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::OpenAiNative,
         wire_shape: WireShape::OpenAiChatCompletions,
         backend: CompactionBackend::Generic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::OpenAiCompatible,
         wire_shape: WireShape::OpenAiChatCompletions,
         backend: CompactionBackend::Generic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::CodexOAuth,
         wire_shape: WireShape::OpenAiResponses,
         backend: CompactionBackend::Generic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::CodexAppServer,
         wire_shape: WireShape::CodexAppServerRpc,
         backend: CompactionBackend::Unsupported,
         generic_fallback: true,
+        max_tool_result_bytes: None,
     },
     CompactionPolicy {
         provider_family: ProviderFamily::Local,
         wire_shape: WireShape::OpenAiChatCompletions,
         backend: CompactionBackend::Generic,
         generic_fallback: false,
+        max_tool_result_bytes: None,
     },
 ];
 
