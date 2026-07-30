@@ -15,3 +15,23 @@
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/STACK:8388608"]
+
+# NASM-free Windows builds:
+#   `aws-lc-sys` assembles its crypto primitives with NASM, which is not part
+#   of any default Windows toolchain. Without it every cargo command in the
+#   workspace dies in the build script with "NASM command not found! Build
+#   cannot continue." — not just TLS-facing crates, because reqwest's
+#   `rustls-tls` feature pulls rustls 0.23, which defaults to the aws-lc-rs
+#   backend.
+#
+#   This flag tells aws-lc-sys to link the prebuilt NASM object files shipped
+#   inside the crate instead of assembling them locally. Only its Windows-MSVC
+#   build path reads the variable, so it is inert on Linux and macOS runners.
+#
+#   `force` is left at its default of false, so a developer or CI job that
+#   installs NASM and exports the variable themselves still wins. If you need
+#   the assembly built from source rather than trusting the bundled objects,
+#   install NASM (`winget install --id NASM.NASM -e`), put it on PATH, and set
+#   AWS_LC_SYS_PREBUILT_NASM=0 in your environment.
+[env]
+AWS_LC_SYS_PREBUILT_NASM = "1"
