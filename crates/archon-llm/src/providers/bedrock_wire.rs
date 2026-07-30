@@ -306,4 +306,3 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
         },
     }
 }
-

@@ -98,7 +98,9 @@ async fn fetch_imds_credentials() -> Result<Option<(AwsCredentials, DateTime<Utc
         .header("x-aws-ec2-metadata-token", &token)
         .send()
         .await
-        .map_err(|e| LlmError::Auth(format!("IMDS credential fetch failed for role {role}: {e}")))?;
+        .map_err(|e| {
+            LlmError::Auth(format!("IMDS credential fetch failed for role {role}: {e}"))
+        })?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();

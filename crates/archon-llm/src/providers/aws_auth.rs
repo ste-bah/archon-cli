@@ -376,7 +376,9 @@ mod tests {
         // otherwise the signature does not verify.
         let date = &headers.x_amz_date[..8];
         assert!(
-            headers.authorization.contains(&format!("/{date}/us-east-1/bedrock/aws4_request")),
+            headers
+                .authorization
+                .contains(&format!("/{date}/us-east-1/bedrock/aws4_request")),
             "x-amz-date disagrees with the signed credential scope: {headers:?}",
             headers = headers.authorization
         );
@@ -393,5 +395,4 @@ mod tests {
         );
         assert!(headers.security_token.is_none());
     }
-
 }
