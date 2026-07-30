@@ -1,7 +1,9 @@
 /// Provider implementations for the `LlmProvider` trait.
 pub mod anthropic;
 pub mod aws_auth;
+pub mod aws_imds;
 pub mod bedrock;
+pub mod bedrock_wire;
 pub mod capabilities;
 pub mod codex;
 pub mod gcp_auth;

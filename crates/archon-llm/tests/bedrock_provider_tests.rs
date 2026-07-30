@@ -204,6 +204,46 @@ fn bedrock_non_claude_no_thinking() {
 }
 
 // ---------------------------------------------------------------------------
+// Test 5c: Claude reached via a cross-region inference profile
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bedrock_inference_profile_id_is_still_claude() {
+    // Current Claude models are only reachable through a geo-prefixed inference
+    // profile; the prefix must not cost us the Claude feature flags.
+    for model_id in [
+        "us.anthropic.claude-sonnet-4-6-v1:0",
+        "eu.anthropic.claude-sonnet-4-6-v1:0",
+        "apac.anthropic.claude-sonnet-4-6-v1:0",
+        "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0",
+    ] {
+        let provider = BedrockProvider::new("us-east-1".to_string(), model_id.to_string());
+        assert!(
+            provider.supports_feature(ProviderFeature::Thinking),
+            "{model_id} should support thinking"
+        );
+        assert!(
+            provider.supports_feature(ProviderFeature::PromptCaching),
+            "{model_id} should support prompt caching"
+        );
+        assert!(
+            provider.supports_feature(ProviderFeature::Vision),
+            "{model_id} should support vision"
+        );
+    }
+}
+
+#[test]
+fn bedrock_geo_prefixed_non_claude_is_not_claude() {
+    let provider = BedrockProvider::new(
+        "us-east-1".to_string(),
+        "us.amazon.nova-pro-v1:0".to_string(),
+    );
+    assert!(!provider.supports_feature(ProviderFeature::Thinking));
+    assert!(!provider.supports_feature(ProviderFeature::PromptCaching));
+}
+
+// ---------------------------------------------------------------------------
 // Test 6: Missing credentials returns Err
 // ---------------------------------------------------------------------------
 
