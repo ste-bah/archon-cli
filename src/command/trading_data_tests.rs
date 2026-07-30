@@ -46,9 +46,11 @@ fn trading_data_list_json_dispatches_to_registry() {
     let registry: archon_trading::data_store::PersistentDatasetRegistry =
         serde_json::from_str(&output).unwrap();
     assert_eq!(registry.schema_version, "archon-trading-data-registry-v2");
-    assert!(registry
-        .datasets
-        .contains_key("manual-BTCUSD-1D-raw:20260101-fixture"));
+    assert!(
+        registry
+            .datasets
+            .contains_key("manual-BTCUSD-1D-raw:20260101-fixture")
+    );
 }
 
 #[test]
@@ -226,10 +228,12 @@ fn fetch_native_reports_yfinance_degraded_fallback() {
     assert_eq!(report["quality_status"], "degraded_fallback");
     assert_eq!(report["production_eligible"], false);
     assert_eq!(report["provider_blocked_or_unavailable"], true);
-    assert!(report["unavailable_reason"]
-        .as_str()
-        .unwrap()
-        .contains("unsupported native timeframe `5`"));
+    assert!(
+        report["unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported native timeframe `5`")
+    );
     assert!(!TradingDataLake::new(temp.path()).registry_path().exists());
 }
 
@@ -341,16 +345,20 @@ fn tradingview_snapshot_fails_closed_without_provider_state() {
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
     assert_eq!(report["can_fetch"], false);
-    assert!(report["unavailable_reason"]
-        .as_str()
-        .unwrap()
-        .contains("No such file"));
+    assert!(
+        report["unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("No such file")
+    );
     assert!(report["snapshot_path"].is_null());
     assert_eq!(report["required_mcp_tools"][2], "quote_get");
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/snapshots/tradingview/CME_MINI_ES1_.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/snapshots/tradingview/CME_MINI_ES1_.json")
+            .exists()
+    );
 }
 
 fn test_store_request() -> StoreOhlcvRequest {

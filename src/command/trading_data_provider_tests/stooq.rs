@@ -1,7 +1,7 @@
 use crate::command::trading_data_provider::fetch_native;
 
 use super::mock_openbb::raw_http_server;
-use super::openbb::{env_lock, EnvGuard};
+use super::openbb::{EnvGuard, env_lock};
 
 #[test]
 fn fetch_native_stooq_direct_csv_writes_non_production_artifacts() {
@@ -70,10 +70,12 @@ fn fetch_native_stooq_html_block_fails_closed_without_registry() {
     assert!(text.contains("provider_blocked_or_unavailable"));
     assert!(text.contains("non-data response"));
     assert!(text.contains("unavailable_manifest_path"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
     let dataset_root = temp
         .path()
         .join(".archon/trading-lab/data/datasets/stooq-SPY-1D-raw");
@@ -110,14 +112,17 @@ fn fetch_native_stooq_non_daily_refusal_writes_unavailable_manifest() {
     assert!(text.contains("provider_blocked_or_unavailable"));
     assert!(text.contains("resampling is refused"));
     assert!(text.contains("unavailable_manifest_path"));
-    assert!(temp
-        .path()
-        .join(".archon/trading-lab/data/provider-capabilities.json")
-        .exists());
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        temp.path()
+            .join(".archon/trading-lab/data/provider-capabilities.json")
+            .exists()
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
     let dataset_root = temp
         .path()
         .join(".archon/trading-lab/data/datasets/stooq-ES-240-raw");

@@ -328,10 +328,7 @@ fn request_declares_required_tools(input: &serde_json::Value) -> bool {
 /// `chart_get_state`, attempt 3 called it and was rejected for `quote_get`, and
 /// the task ran out of attempts at 3 having needed 4. The agent can only fix
 /// what the rejection told it about, so the rejection has to tell it everything.
-fn unexercised_required_tools(
-    input: &serde_json::Value,
-    result: &WorkflowV2Result,
-) -> Vec<String> {
+fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
     let mut required: Vec<String> = Vec::new();
     collect_required_tool_names(input, &mut required);
     if required.is_empty() {
@@ -522,11 +519,11 @@ pub(super) const RESULT_SCHEMA: &str = r#"{
 }"#;
 
 #[cfg(test)]
-#[path = "agent_adapter_envelope_tests.rs"]
-mod envelope_tests;
-#[cfg(test)]
 #[path = "agent_adapter_artifact_context_tests.rs"]
 mod artifact_context_tests;
+#[cfg(test)]
+#[path = "agent_adapter_envelope_tests.rs"]
+mod envelope_tests;
 #[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;

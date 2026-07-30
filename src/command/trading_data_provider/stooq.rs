@@ -6,7 +6,7 @@ use archon_trading::data_lake::{
     CoverageWindow, DataType, DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, GapSummary,
 };
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
-use archon_trading::ohlcv::{parse_ohlcv, OhlcvBar, OhlcvFormat};
+use archon_trading::ohlcv::{OhlcvBar, OhlcvFormat, parse_ohlcv};
 
 use crate::command::trading_data::data_error;
 use crate::command::trading_data_provider::unavailable_provider_report;

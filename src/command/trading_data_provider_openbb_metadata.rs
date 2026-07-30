@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::command::trading_io::write_or_render;
 
-use super::request::{is_crypto, is_future, FetchWindowSelection, OpenBbNativeRequest};
+use super::request::{FetchWindowSelection, OpenBbNativeRequest, is_crypto, is_future};
 
 pub(super) fn native_metadata_from_bars(
     dataset_id: &str,

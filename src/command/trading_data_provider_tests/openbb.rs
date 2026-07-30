@@ -185,14 +185,16 @@ fn fetch_native_openbb_stores_registered_dataset() {
 
     assert!(text.contains("\"can_fetch\": true"));
     assert!(text.contains("\"production_eligible\": false"));
-    assert!(temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
-    assert!(temp
-        .path()
-        .join(".archon/trading-lab/data/datasets/openbb-SPY-1D-raw")
-        .exists());
+    assert!(
+        temp.path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
+    assert!(
+        temp.path()
+            .join(".archon/trading-lab/data/datasets/openbb-SPY-1D-raw")
+            .exists()
+    );
     assert!(text.contains("raw/response.json"));
     assert!(text.contains("\"credential_state\""));
     assert!(text.contains("POLYGON_API_KEY"));
@@ -324,10 +326,12 @@ fn fetch_native_yfinance_interval_limitation_is_degraded_non_promotion() {
     assert!(text.contains("\"quality_status\": \"degraded_fallback\""));
     assert!(text.contains("\"production_eligible\": false"));
     assert!(text.contains("provider_blocked_or_unavailable"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -371,10 +375,12 @@ fn fetch_native_openbb_polygon_requires_openbb_api_url_fail_closed() {
     assert!(text.contains("OpenBB credentials unavailable for polygon"));
     assert!(text.contains("OPENBB_API_URL"));
     assert!(text.contains("provider_blocked_or_unavailable"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -396,10 +402,11 @@ fn fetch_native_stooq_unavailable_report_includes_capability_state() {
     assert!(text.contains("\"provider_blocked\": false"));
     assert!(text.contains("\"unsupported\": true"));
     assert!(text.contains("\"production_eligible\": false"));
-    assert!(temp
-        .path()
-        .join(".archon/trading-lab/data/provider-capabilities.json")
-        .exists());
+    assert!(
+        temp.path()
+            .join(".archon/trading-lab/data/provider-capabilities.json")
+            .exists()
+    );
 }
 
 pub(super) struct EnvGuard {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use archon_trading::ohlcv::OhlcvBar;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::span::TradingViewRequestSpan;
 

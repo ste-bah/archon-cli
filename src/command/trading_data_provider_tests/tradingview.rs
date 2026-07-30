@@ -12,17 +12,23 @@ fn coverage_refuses_to_publish_incomplete_required_universe() {
         None,
     )
     .expect_err("empty required universe must fail closed");
-    assert!(error
-        .to_string()
-        .contains("coverage matrix incomplete for trading-core-v1"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/coverage/latest.json")
-        .exists());
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/coverage/latest.md")
-        .exists());
+    assert!(
+        error
+            .to_string()
+            .contains("coverage matrix incomplete for trading-core-v1")
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/coverage/latest.json")
+            .exists()
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/coverage/latest.md")
+            .exists()
+    );
 }
 
 fn write_tradingview_fixture(
@@ -66,10 +72,12 @@ fn fetch_native_tradingview_unavailable_writes_no_registry_dataset() {
     assert!(text.contains("declared MCP tool invocation required"));
     assert!(text.contains("local TradingView CLI/Node shims are not accepted"));
     assert!(text.contains("no dataset registry entry is written"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -96,10 +104,12 @@ fn fetch_native_tradingview_ignores_local_cli_shim() {
     )
     .unwrap();
     assert!(text.contains("local TradingView CLI/Node shims are not accepted"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -157,10 +167,11 @@ fn fetch_native_tradingview_stores_complete_artifact_contract() {
     ] {
         assert!(dataset_root.join(artifact).exists());
     }
-    assert!(temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        temp.path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -180,10 +191,12 @@ fn fetch_native_tradingview_rejects_mismatched_chart_identity() {
     assert!(text.contains("response symbol mismatch"));
     let report: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(report["production_eligible"], false);
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -202,10 +215,12 @@ fn fetch_native_tradingview_rejects_row_shortfall() {
     .unwrap();
     assert!(text.contains("row shortfall"));
     assert!(text.contains("requested=5 actual=4"));
-    assert!(!temp
-        .path()
-        .join(".archon/trading-lab/data/registry.json")
-        .exists());
+    assert!(
+        !temp
+            .path()
+            .join(".archon/trading-lab/data/registry.json")
+            .exists()
+    );
 }
 
 #[test]

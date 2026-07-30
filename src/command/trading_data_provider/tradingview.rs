@@ -5,11 +5,11 @@ mod paging;
 #[path = "tradingview/span.rs"]
 mod span;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use archon_trading::data_lake::{CoverageWindow, DataType, DatasetMetadata, GapSummary};
 use archon_trading::data_store::{StoreOhlcvRequest, TradingDataLake};
-use archon_trading::ohlcv::{parse_ohlcv, validate_bars, OhlcvBar, OhlcvFormat};
-use serde_json::{json, Value};
+use archon_trading::ohlcv::{OhlcvBar, OhlcvFormat, parse_ohlcv, validate_bars};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -232,9 +232,7 @@ fn paged_tradingview_fetch(
         .map_err(|err| format!("{err:?}"))?;
     Ok(Ok(format!(
         "paged TradingView fetch stored {} bars for {symbol} {timeframe} across {} page(s); version={}; requested {start}..{end}",
-        record.bars,
-        series.pages_fetched,
-        record.version
+        record.bars, series.pages_fetched, record.version
     )))
 }
 
