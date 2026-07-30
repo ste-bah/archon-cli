@@ -22,11 +22,15 @@ pub(crate) async fn handle_team_command(
                 .map_err(|e| anyhow::anyhow!("Authentication failed for team execution: {e}"))?;
             let cwd = std::env::current_dir().unwrap_or_default();
             let team_agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&cwd)));
+            let session_store = Arc::new(crate::command::store_paths::open_session_store(
+                &crate::command::store_paths::session_db_path(config),
+            )?);
             let executor = Arc::new(RealSubtaskExecutor::new(
                 team_provider,
                 cwd,
                 config.api.default_model.clone(),
                 team_agent_registry,
+                session_store,
             ));
             let team_cfg = archon_core::orchestrator::config::TeamConfig {
                 name: team.clone(),

@@ -222,6 +222,7 @@ pub(super) async fn build(
         agent_registry,
     );
     super::world_model_callbacks::install(&mut agent, config, session_id);
+    agent.set_session_store(Arc::clone(&session_store));
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
     if let Some(store) = cognitive_store {

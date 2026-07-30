@@ -191,6 +191,9 @@ pub(super) async fn build_session_agent(
         agent_registry,
     );
     super::world_model_callbacks::install(&mut agent, config, session_id);
+    let session_store =
+        open_noninteractive_session_store(config, session_id, &working_dir, &selected_model)?;
+    agent.set_session_store(session_store);
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
     if let Some(store) = cognitive_store {
@@ -226,4 +229,26 @@ pub(super) async fn build_session_agent(
         permission_mode: permission_mode_for_built,
         sandbox_audit_drain,
     })
+}
+
+fn open_noninteractive_session_store(
+    config: &archon_core::config::ArchonConfig,
+    session_id: &str,
+    working_dir: &std::path::Path,
+    model: &str,
+) -> Result<Arc<archon_session::storage::SessionStore>, i32> {
+    let path = crate::command::store_paths::session_db_path(config);
+    let store = archon_session::storage::SessionStore::open(&path).map_err(|error| {
+        tracing::error!(%error, path = %path.display(), "failed to open session store");
+        archon_core::print_mode::EXIT_ERROR
+    })?;
+    if store.get_session(session_id).is_err() {
+        store
+            .register_session(session_id, &working_dir.display().to_string(), None, model)
+            .map_err(|error| {
+                tracing::error!(%error, "failed to register non-interactive session");
+                archon_core::print_mode::EXIT_ERROR
+            })?;
+    }
+    Ok(Arc::new(store))
 }

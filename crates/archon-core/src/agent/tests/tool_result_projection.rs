@@ -4,8 +4,9 @@ struct CapturingLlmProvider {
 
 #[derive(Clone, Copy)]
 enum FieldFailurePhase {
-    PreStream,
-    MidStream,
+    BeforeOpen,
+    DuringStream,
+    DuringThenBeforeOpen,
 }
 
 struct FieldLimitRecoveryProvider {
@@ -17,7 +18,7 @@ struct FieldLimitRecoveryProvider {
 
 impl FieldLimitRecoveryProvider {
     fn new() -> Self {
-        Self::with_phase(FieldFailurePhase::PreStream)
+        Self::with_phase(FieldFailurePhase::BeforeOpen)
     }
 
     fn with_phase(phase: FieldFailurePhase) -> Self {
@@ -65,7 +66,8 @@ impl LlmProvider for FieldLimitRecoveryProvider {
             .await);
         }
 
-        self.real_calls
+        let call = self
+            .real_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.requests
             .lock()
@@ -73,11 +75,11 @@ impl LlmProvider for FieldLimitRecoveryProvider {
             .push(request.clone());
         if largest_tool_result_field(&request) > 64_000 {
             return match self.phase {
-                FieldFailurePhase::PreStream => Err(LlmError::Http(
+                FieldFailurePhase::BeforeOpen => Err(LlmError::Http(
                     "messages.9.content.0.tool_result.content: String should have at most 64000 bytes"
                         .into(),
                 )),
-                FieldFailurePhase::MidStream => Ok(test_stream(vec![
+                FieldFailurePhase::DuringStream => Ok(test_stream(vec![
                     StreamEvent::Error {
                         error_type: "invalid_request_error".into(),
                         message: "messages.9.content.0.tool_result.content: String should have at most 64000 bytes".into(),
@@ -85,6 +87,18 @@ impl LlmProvider for FieldLimitRecoveryProvider {
                     StreamEvent::MessageStop,
                 ])
                 .await),
+                FieldFailurePhase::DuringThenBeforeOpen if call == 0 => Ok(test_stream(vec![
+                    StreamEvent::Error {
+                        error_type: "invalid_request_error".into(),
+                        message: "messages.9.content.0.tool_result.content: String should have at most 64000 bytes".into(),
+                    },
+                    StreamEvent::MessageStop,
+                ])
+                .await),
+                FieldFailurePhase::DuringThenBeforeOpen => Err(LlmError::Http(
+                    "messages.9.content.0.tool_result.content: String should have at most 64000 bytes"
+                        .into(),
+                )),
             };
         }
 
@@ -218,7 +232,7 @@ async fn no_safe_boundary_advances_to_emergency_projection() {
 #[tokio::test]
 async fn main_mid_stream_no_safe_boundary_advances_to_emergency_projection() {
     let provider = Arc::new(FieldLimitRecoveryProvider::with_phase(
-        FieldFailurePhase::MidStream,
+        FieldFailurePhase::DuringStream,
     ));
     let messages = vec![
         serde_json::json!({"role":"user","content":"inspect"}),
@@ -246,7 +260,7 @@ async fn main_mid_stream_no_safe_boundary_advances_to_emergency_projection() {
 #[tokio::test]
 async fn main_mid_stream_field_rejection_advances_to_emergency_projection() {
     let provider = Arc::new(FieldLimitRecoveryProvider::with_phase(
-        FieldFailurePhase::MidStream,
+        FieldFailurePhase::DuringStream,
     ));
     let activity = Arc::new(archon_observability::InMemoryActivitySink::new());
     let messages = vec![
@@ -291,6 +305,42 @@ async fn main_mid_stream_field_rejection_advances_to_emergency_projection() {
     assert_eq!(recovery.len(), 2);
     assert_eq!(recovery[0]["tier"], "full_compaction");
     assert_eq!(recovery[1]["tier"], "emergency_projection");
+}
+
+#[tokio::test]
+async fn main_compacted_retry_pre_stream_rejection_advances_to_emergency_projection() {
+    let provider = Arc::new(FieldLimitRecoveryProvider::with_phase(
+        FieldFailurePhase::DuringThenBeforeOpen,
+    ));
+    let messages = vec![
+        serde_json::json!({"role":"user","content":"old turn"}),
+        serde_json::json!({"role":"assistant","content":"old response"}),
+        serde_json::json!({"role":"user","content":"inspect"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"recent-tool","name":"Read","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"recent-tool",
+            "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
+        }]}),
+    ];
+    let canonical = messages.clone();
+    let mut agent = main_field_recovery_agent(provider.clone(), messages, None).await;
+
+    agent
+        .process_message("continue")
+        .await
+        .expect("pre-stream rejection of compacted retry should advance to emergency projection");
+
+    let requests = provider.real_requests();
+    assert_eq!(requests.len(), 3);
+    assert!(largest_tool_result_field(&requests[0]) > 64_000);
+    assert!(largest_tool_result_field(&requests[1]) > 64_000);
+    assert!(largest_tool_result_field(&requests[2]) <= 64_000);
+    assert_eq!(
+        &agent.state.messages[..canonical.len()],
+        canonical.as_slice()
+    );
 }
 
 #[tokio::test]

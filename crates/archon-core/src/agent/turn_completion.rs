@@ -48,6 +48,8 @@ impl Agent {
         })
         .await;
 
+        self.close_completed_compaction_segment(active_model);
+
         // CRIT-14 (ITEM 4): Decay rule scores every 50 turns.
         if self.turn_number.is_multiple_of(50)
             && let Some(ref graph) = self.memory

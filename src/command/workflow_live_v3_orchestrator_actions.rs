@@ -1,11 +1,11 @@
 //! Orchestrated lifecycle (v3) — typed actions the orchestrator model emits.
 //!
-//! The orchestrator is ONE persistent conversation per run (the Claude Code
-//! mechanism): it spawns focused subagents, reads their final reports and the
-//! host's typed gate verdicts verbatim, and decides routing with full memory.
-//! The host enforces; the orchestrator decides. A malformed action is
-//! corrected inside the same conversation — memory-based repair, never a
-//! stateless reducer re-ask.
+//! The orchestrator reconstructs each turn from the authoritative task universe,
+//! deterministic orchestration ledger, and a bounded recent transcript tail. It
+//! spawns focused subagents, reads their final reports and the host's typed gate
+//! verdicts verbatim, and decides routing from that bounded state. The host
+//! enforces; the orchestrator decides. Malformed actions are returned as typed
+//! repair feedback on the next bounded turn.
 
 use serde::{Deserialize, Serialize};
 

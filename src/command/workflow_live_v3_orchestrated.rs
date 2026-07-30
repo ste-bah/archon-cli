@@ -1,13 +1,12 @@
-// Orchestrated lifecycle (v3): ONE persistent orchestrator conversation per
-// run — the Claude Code mechanism. The orchestrator sees every subagent final
-// report and every host gate verdict verbatim, cumulatively, and decides
-// routing with full memory. The host enforces gates and budgets; it never
-// reshapes semantics. There are NO stateless reducer boundaries in this path.
+// Orchestrated lifecycle (v3): one orchestrator decision loop per run.
+// Each request reconstructs context from the authoritative task universe,
+// deterministic orchestration ledger, and a bounded recent transcript tail.
+// It is intentionally independent from main-agent compaction segments.
 
 use super::super::workflow_live_v3_orchestrator_actions as orchestrator_actions;
 use orchestrator_actions::{ActionOutcome, OrchestratorAction};
 
-const ORCHESTRATOR_TASK: &str = r#"You are the workflow orchestrator. You drive one decomposed task universe to completion by spawning focused subagents and adjudicating their results with full memory of this conversation.
+const ORCHESTRATOR_TASK: &str = r#"You are the workflow orchestrator. You drive one decomposed task universe to completion using the authoritative task universe, deterministic ledger, and bounded recent outcomes supplied on each turn.
 
 Rules:
 - You DECIDE; the host ENFORCES. You cannot accept work the gates rejected, and dishonest acceptance attempts are refused with a typed reason.
@@ -109,11 +108,14 @@ impl LifecycleDriver {
             let action = match orchestrator_actions::action_from_reply(&reply) {
                 Ok(action) => action,
                 Err(correction) => {
-                    transcript.push(serde_json::json!({
-                        "turn": ordinal,
-                        "reply": bounded_json(&reply, OUTCOME_JSON_MAX_CHARS),
-                        "outcome": { "status": "invalid_action", "correction": correction },
-                    }));
+                    push_bounded_orchestrator_turn(
+                        &mut transcript,
+                        serde_json::json!({
+                            "turn": ordinal,
+                            "reply": bounded_json(&reply, OUTCOME_JSON_MAX_CHARS),
+                            "outcome": { "status": "invalid_action", "correction": correction },
+                        }),
+                    );
                     continue;
                 }
             };
@@ -121,15 +123,14 @@ impl LifecycleDriver {
             let outcome = self
                 .dispatch_orchestrator_action(ordinal, &action, &mut ledger)
                 .await?;
-            transcript.push(serde_json::json!({
-                "turn": ordinal,
-                "decision": action,
-                "outcome": outcome_json(&outcome),
-            }));
-            if transcript.len() > TRANSCRIPT_TAIL {
-                let drop = transcript.len() - TRANSCRIPT_TAIL;
-                transcript.drain(..drop);
-            }
+            push_bounded_orchestrator_turn(
+                &mut transcript,
+                serde_json::json!({
+                    "turn": ordinal,
+                    "decision": action,
+                    "outcome": outcome_json(&outcome),
+                }),
+            );
             if finished {
                 return Ok(());
             }
@@ -178,7 +179,11 @@ impl LifecycleDriver {
             } => {
                 let state = ledger.tasks.entry(task_id.clone()).or_default();
                 if state.coder_attempts >= MAX_CODER_ATTEMPTS_PER_TASK {
-                    return Ok(refusal(ordinal, "spawn_coder", "coder attempt budget for this task is exhausted; block the task honestly or accept it on existing evidence"));
+                    return Ok(refusal(
+                        ordinal,
+                        "spawn_coder",
+                        "coder attempt budget for this task is exhausted; block the task honestly or accept it on existing evidence",
+                    ));
                 }
                 state.coder_attempts += 1;
                 let item = serde_json::json!({
@@ -213,7 +218,11 @@ impl LifecycleDriver {
             } => {
                 let state = ledger.tasks.entry(task_id.clone()).or_default();
                 if state.verifier_attempts >= MAX_VERIFIER_ATTEMPTS_PER_TASK {
-                    return Ok(refusal(ordinal, "spawn_verifier", "verifier attempt budget for this task is exhausted"));
+                    return Ok(refusal(
+                        ordinal,
+                        "spawn_verifier",
+                        "verifier attempt budget for this task is exhausted",
+                    ));
                 }
                 state.verifier_attempts += 1;
                 let item = serde_json::json!({
@@ -241,17 +250,23 @@ impl LifecycleDriver {
                         options,
                     )
                     .await;
-                Ok(self.wave_outcome(ordinal, "spawn_verifier", result, |status| {
-                    ledger
-                        .tasks
-                        .entry(task_id.clone())
-                        .or_default()
-                        .last_verifier_status = Some(status);
-                }))
+                Ok(
+                    self.wave_outcome(ordinal, "spawn_verifier", result, |status| {
+                        ledger
+                            .tasks
+                            .entry(task_id.clone())
+                            .or_default()
+                            .last_verifier_status = Some(status);
+                    }),
+                )
             }
             OrchestratorAction::SpawnExplorer { question } => {
                 if ledger.explorer_calls >= MAX_EXPLORER_CALLS {
-                    return Ok(refusal(ordinal, "spawn_explorer", "explorer budget exhausted"));
+                    return Ok(refusal(
+                        ordinal,
+                        "spawn_explorer",
+                        "explorer budget exhausted",
+                    ));
                 }
                 ledger.explorer_calls += 1;
                 let result = self
@@ -407,6 +422,17 @@ fn outcome_json(outcome: &ActionOutcome) -> serde_json::Value {
 
 /// Verbatim-but-bounded: serialize and truncate at a character budget without
 /// reshaping any field the model needs to read.
+fn push_bounded_orchestrator_turn(
+    transcript: &mut Vec<serde_json::Value>,
+    turn: serde_json::Value,
+) {
+    transcript.push(turn);
+    if transcript.len() > TRANSCRIPT_TAIL {
+        let drop = transcript.len() - TRANSCRIPT_TAIL;
+        transcript.drain(..drop);
+    }
+}
+
 fn bounded_json(value: &serde_json::Value, max_chars: usize) -> serde_json::Value {
     let text = value.to_string();
     if text.chars().count() <= max_chars {

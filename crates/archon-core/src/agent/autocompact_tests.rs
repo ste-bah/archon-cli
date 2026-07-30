@@ -314,6 +314,7 @@ async fn reactive_compaction_provider_error_remains_fatal() {
 enum RateLimitFailureMode {
     PreStream,
     MidStream,
+    ContextPressure,
 }
 
 struct RateLimitThenSuccessProvider {
@@ -397,6 +398,18 @@ impl LlmProvider for RateLimitThenSuccessProvider {
                 StreamEvent::MessageStop,
             ])
             .await),
+            (RateLimitFailureMode::ContextPressure, 0) => Ok(stream_from_events(vec![
+                StreamEvent::ThinkingDelta {
+                    index: 0,
+                    thinking: "rejected preview".into(),
+                },
+                StreamEvent::Error {
+                    error_type: "context_length_exceeded".into(),
+                    message: "maximum context length exceeded".into(),
+                },
+                StreamEvent::MessageStop,
+            ])
+            .await),
             _ => Ok(stream_from_events(vec![
                 StreamEvent::ThinkingDelta {
                     index: 0,
@@ -429,18 +442,6 @@ async fn stream_from_events(events: Vec<StreamEvent>) -> tokio::sync::mpsc::Rece
     rx
 }
 
-fn compaction_ready_messages(prefix: &str) -> Vec<serde_json::Value> {
-    (0..8)
-        .map(|i| {
-            let role = if i % 2 == 0 { "user" } else { "assistant" };
-            serde_json::json!({
-                "role": role,
-                "content": format!("{prefix} history message {i}: {}", "x".repeat(512)),
-            })
-        })
-        .collect()
-}
-
 async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailureMode) {
     let provider = Arc::new(RateLimitThenSuccessProvider::new(mode));
     let (tx, mut rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
@@ -458,6 +459,7 @@ async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailure
     agent.config.context.large_request_retry_body_bytes = Some(1);
     agent.config.context.context_window_override = Some(1_000_000);
     agent.state.messages = compaction_ready_messages("main");
+    let canonical = agent.state.messages.clone();
 
     agent
         .process_message("trigger rate-limit retry")
@@ -478,7 +480,8 @@ async fn assert_main_rate_limit_compacts_before_one_retry(mode: RateLimitFailure
         bodies[0],
         bodies[1]
     );
-    assert_eq!(agent.state.auto_compact.compaction_count, 1);
+    assert_eq!(agent.state.messages[..canonical.len()], canonical);
+    assert_eq!(agent.state.auto_compact.compaction_count, 0);
     assert_eq!(agent.state.auto_compact.consecutive_failures, 0);
     assert!(!agent.state.auto_compact.disabled);
     assert!(!agent.state.auto_compact.compact_in_flight);

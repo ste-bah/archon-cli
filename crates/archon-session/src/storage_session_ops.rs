@@ -126,18 +126,46 @@ impl SessionStore {
     }
 
     pub fn delete_session(&self, session_id: &str) -> Result<(), SessionError> {
+        let transaction = self.db.multi_transaction(true);
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
-        for script in [
-            "?[session_id, message_index] := *messages{session_id, message_index}, session_id = $sid :rm messages {session_id, message_index}",
-            "?[session_id, tag] := *session_tags{session_id, tag}, session_id = $sid :rm session_tags {session_id, tag}",
-            "?[id] := id = $sid :rm sessions {id}",
-        ] {
-            self.db
-                .run_script(script, params.clone(), ScriptMutability::Mutable)
-                .map_err(db_err)?;
+        let result = (|| {
+            for script in [
+                "?[id] := *compaction_segments{id, session_id}, session_id = $sid :rm compaction_segment_bodies {id}",
+                "?[id] := *compaction_segments{id, session_id}, session_id = $sid :rm compaction_segments {id}",
+                "?[id] := *compaction_ledger{id, session_id}, session_id = $sid :rm compaction_ledger {id}",
+                "?[id] := *compaction_telemetry{id, session_id}, session_id = $sid :rm compaction_telemetry {id}",
+            ] {
+                transaction
+                    .run_script(script, params.clone())
+                    .map_err(db_err)?;
+            }
+            #[cfg(test)]
+            if self
+                .fail_next_delete_after_compaction
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(SessionError::DbError(
+                    "injected delete failure after compaction cleanup".into(),
+                ));
+            }
+            for script in [
+                "?[session_id, message_index] := *messages{session_id, message_index}, session_id = $sid :rm messages {session_id, message_index}",
+                "?[session_id, tag] := *session_tags{session_id, tag}, session_id = $sid :rm session_tags {session_id, tag}",
+                "?[id] := id = $sid :rm sessions {id}",
+            ] {
+                transaction
+                    .run_script(script, params.clone())
+                    .map_err(db_err)?;
+            }
+            Ok(())
+        })();
+        if result.is_ok() {
+            transaction.commit().map_err(db_err)?;
+        } else {
+            let _ = transaction.abort();
         }
-        Ok(())
+        result
     }
 
     pub fn verify_wal_mode(&self) -> Result<bool, SessionError> {

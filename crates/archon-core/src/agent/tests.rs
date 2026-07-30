@@ -86,6 +86,7 @@ async fn auto_extraction_prune_keeps_only_unfinished_tasks() {
 }
 
 include!("tests/correction_matching.rs");
+include!("segment_compaction_runtime_tests.rs");
 
 #[tokio::test]
 async fn process_message_fires_runtime_lifecycle_hooks() {

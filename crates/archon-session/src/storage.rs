@@ -99,6 +99,12 @@ pub struct SessionStore {
     db: SessionDb,
     #[cfg(test)]
     fail_next_replace_after_rows: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_next_delete_after_compaction: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_next_compaction_close_after_body: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    delete_before_compaction_close_transaction: std::sync::atomic::AtomicBool,
 }
 
 impl SessionStore {
@@ -122,6 +128,12 @@ impl SessionStore {
             db: SessionDb::new(db),
             #[cfg(test)]
             fail_next_replace_after_rows: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_next_delete_after_compaction: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_next_compaction_close_after_body: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            delete_before_compaction_close_transaction: std::sync::atomic::AtomicBool::new(false),
         };
         store.init_schema()?;
         Ok(store)
@@ -153,6 +165,27 @@ impl SessionStore {
         self.create_relation(":create session_names { session_id: String => name: String }")?;
         self.create_relation(
             ":create session_parents { session_id: String => parent_session_id: String }",
+        )?;
+        self.create_relation(
+            ":create compaction_segments {
+                id: String => session_id: String, start_index: Int, end_index: Int,
+                status: String, summary: String, model: String, attribution: String,
+                failure: String, input_tokens: Int, output_tokens: Int, cost: Float,
+                created_at: String, updated_at: String
+            }",
+        )?;
+        self.create_relation(":create compaction_segment_bodies { id: String => body: String }")?;
+        self.create_relation(
+            ":create compaction_ledger {
+                id: String => session_id: String, kind: String, payload: String,
+                start_index: Int, end_index: Int, created_at: String
+            }",
+        )?;
+        self.create_relation(
+            ":create compaction_telemetry {
+                id: String => session_id: String, action: String, payload: String,
+                created_at: String
+            }",
         )
     }
 
@@ -173,6 +206,24 @@ impl SessionStore {
     #[cfg(test)]
     pub(crate) fn fail_next_replace_after_rows_are_written(&self) {
         self.fail_next_replace_after_rows
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_delete_after_compaction_rows(&self) {
+        self.fail_next_delete_after_compaction
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_compaction_close_after_body(&self) {
+        self.fail_next_compaction_close_after_body
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delete_before_next_compaction_close_transaction(&self) {
+        self.delete_before_compaction_close_transaction
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -199,6 +250,17 @@ pub fn default_db_path() -> PathBuf {
         .join("sessions.db")
 }
 
+#[path = "storage_compaction.rs"]
+mod storage_compaction;
+#[path = "storage_compaction_close.rs"]
+mod storage_compaction_close;
+#[path = "storage_compaction_codec.rs"]
+mod storage_compaction_codec;
+#[path = "storage_compaction_lifecycle.rs"]
+mod storage_compaction_lifecycle;
+pub use storage_compaction::{
+    CompactionLedgerRecord, CompactionSegment, CompactionSummaryStatus, CompactionTelemetryRecord,
+};
 #[path = "storage_listing.rs"]
 mod storage_listing;
 #[path = "storage_messages.rs"]
@@ -211,3 +273,9 @@ mod storage_session_ops;
 #[cfg(test)]
 #[path = "storage_atomicity_tests.rs"]
 mod storage_atomicity_tests;
+#[cfg(test)]
+#[path = "storage_compaction_close_tests.rs"]
+mod storage_compaction_close_tests;
+#[cfg(test)]
+#[path = "storage_compaction_tests.rs"]
+mod storage_compaction_tests;
