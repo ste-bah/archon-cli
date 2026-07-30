@@ -48,6 +48,125 @@ pub struct PdfImagesListEntry {
     pub height: u32,
     pub object_key: Option<String>,
     pub xobject_name: Option<String>,
+    /// Effective horizontal resolution AS DRAWN (`x-ppi` column of `pdfimages -list`). `None` when
+    /// the column is absent/unparsable; `0`/`1` for JBIG2/CCITT images poppler can't rate. Used by
+    /// the coverage classifier ([`crate::pdf_scan`]) to recover the drawn size in points.
+    pub x_ppi: Option<u32>,
+    /// Effective vertical resolution as drawn (`y-ppi` column). See [`Self::x_ppi`].
+    pub y_ppi: Option<u32>,
+    /// In-PDF (compressed) byte size from the `size` column (e.g. `479K`, `1620B`). `None` when
+    /// absent/unparsable. A close proxy for the extracted-PNG size that the pipeline's
+    /// `min_image_bytes` filter uses, so the pre-ingest classifier can approximate that filter
+    /// without extracting bytes.
+    pub bytes: Option<u64>,
+}
+
+/// A lightweight pre-ingest classification of how the pipeline will treat a PDF's images —
+/// computed from `pdfimages -list` (dims + ppi), `pdfinfo` (page count), and `lopdf` (page dims)
+/// ONLY, with no byte extraction and no Marker. Lets the CLI show a loud report + confirm before
+/// committing to the ingest. Carries BOTH detector verdicts (aspect + coverage) so the A/B
+/// comparison is visible before any OCR/VLM runs.
+#[derive(Debug, Clone)]
+pub struct EnrichmentClassification {
+    pub page_count: u32,
+    pub embedded_images: usize,
+    /// Page-scan count under the ACTIVE detector (selected by policy `scan_detector`).
+    pub page_scans: usize,
+    /// ACTIVE verdict — what the ingest pipeline will actually do.
+    pub is_scanned_book: bool,
+    /// Images that WILL be enriched (OCR + VLM): 0 for a scanned book, else all embedded images.
+    pub will_enrich: usize,
+    /// Which detector produced the active verdict: `"aspect"` | `"coverage"`.
+    pub detector: &'static str,
+    /// A/B: aspect-heuristic verdict + its page-scan count (always computed).
+    pub aspect_scanned: bool,
+    pub aspect_page_scans: usize,
+    /// A/B: coverage verdict + page-scan count + peak page coverage. `None` when page dims were
+    /// unavailable (no `lopdf` parse / no MediaBox in ancestry) so coverage could not be computed.
+    pub coverage_scanned: Option<bool>,
+    pub coverage_page_scans: Option<usize>,
+    pub coverage_max: Option<f64>,
+    /// Coverage produced a verdict but deferred ≥1 image to aspect (unusable ppi / missing page
+    /// dims) — the coverage verdict is advisory; the report flags the doc for review.
+    pub coverage_low_confidence: bool,
+    /// The two detectors disagree on the scanned/born-digital verdict.
+    pub divergent: bool,
+    /// Whether `pdftotext` finds a usable text layer. A scanned book WITH a text layer skips image
+    /// enrichment (Marker/text owns the pages); one WITHOUT (image-only) OCRs its page scans for
+    /// content, so the report must not claim "skipped" for those.
+    pub has_text_layer: bool,
+}
+
+/// Classify a PDF for image enrichment without extracting image bytes or running Marker. Runs BOTH
+/// the aspect heuristic (the shipped detector) and the coverage classifier
+/// ([`crate::pdf_scan`]), selecting the active verdict from `pdf_policy.scan_detector`, so the
+/// pre-ingest report matches what the pipeline will actually do and surfaces any A/B divergence.
+pub fn classify_pdf_enrichment(path: &Path, pdf_policy: &PdfPolicy) -> EnrichmentClassification {
+    let detector = crate::pdf_scan::ScanDetector::parse(&pdf_policy.scan_detector);
+    let scan = crate::pdf_scan::classify_scan(path, detector, pdf_policy);
+    let embedded_images = scan.embedded_images;
+    let is_scanned_book = scan.active_scanned;
+    EnrichmentClassification {
+        page_count: scan.page_count,
+        embedded_images,
+        page_scans: scan.active_page_scans,
+        is_scanned_book,
+        will_enrich: if is_scanned_book { 0 } else { embedded_images },
+        detector: scan.detector.as_str(),
+        aspect_scanned: scan.aspect_scanned,
+        aspect_page_scans: scan.aspect_page_scans,
+        coverage_scanned: scan.coverage.as_ref().map(|c| c.scanned),
+        coverage_page_scans: scan.coverage.as_ref().map(|c| c.page_scans),
+        coverage_max: scan.coverage.as_ref().map(|c| c.max_coverage),
+        coverage_low_confidence: scan
+            .coverage
+            .as_ref()
+            .map(|c| c.low_confidence)
+            .unwrap_or(false),
+        divergent: scan.divergent,
+        has_text_layer: pdf_has_text_layer(path),
+    }
+}
+
+/// Quick pre-ingest probe: does `pdftotext` extract a non-trivial text layer? Used only to make the
+/// enrichment report honest about image-only scans (which get OCR'd, not skipped). A handful of
+/// characters (stray artifacts on an otherwise image-only scan) do not count as a text layer.
+fn pdf_has_text_layer(path: &Path) -> bool {
+    let Ok(output) = std::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
+        .arg("-layout")
+        .arg(path)
+        .arg("-")
+        .output()
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .count()
+            >= 16
+}
+
+pub(crate) fn pdf_page_count(path: &Path) -> Option<u32> {
+    let output = std::process::Command::new(command_path("pdfinfo", "ARCHON_PDFINFO_BIN"))
+        .arg(path)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("Pages:")?.trim().parse::<u32>().ok())
+}
+
+pub(crate) fn list_embedded_image_dims(path: &Path) -> Vec<PdfImagesListEntry> {
+    match std::process::Command::new(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
+        .arg("-list")
+        .arg(path)
+        .output()
+    {
+        Ok(o) if o.status.success() => parse_pdfimages_list(&String::from_utf8_lossy(&o.stdout)),
+        _ => Vec::new(),
+    }
 }
 
 pub async fn extract_pdf_unified(
@@ -343,6 +462,11 @@ pub fn parse_pdfimages_list(output: &str) -> Vec<PdfImagesListEntry> {
         } else {
             None
         };
+        // `pdfimages -list` columns: … object(10) ID(11) x-ppi(12) y-ppi(13) size(14) ratio(15).
+        // Keep the ppi (dropped historically) for the coverage classifier; tolerate short rows.
+        let x_ppi = cols.get(12).and_then(|c| c.parse::<u32>().ok());
+        let y_ppi = cols.get(13).and_then(|c| c.parse::<u32>().ok());
+        let bytes = cols.get(14).and_then(|c| parse_pdfimages_size(c));
         entries.push(PdfImagesListEntry {
             source_page: page,
             source_pages: vec![page],
@@ -350,9 +474,31 @@ pub fn parse_pdfimages_list(output: &str) -> Vec<PdfImagesListEntry> {
             height,
             object_key: object_key.clone(),
             xobject_name: object_key,
+            x_ppi,
+            y_ppi,
+            bytes,
         });
     }
     entries
+}
+
+/// Parse a `pdfimages -list` `size` cell (`1620B`, `479K`, `3.9M`, or a bare number) into bytes.
+fn parse_pdfimages_size(cell: &str) -> Option<u64> {
+    let cell = cell.trim();
+    let last = cell.chars().last()?;
+    let (num, mult) = match last {
+        'B' | 'b' => (&cell[..cell.len() - 1], 1.0),
+        'K' | 'k' => (&cell[..cell.len() - 1], 1024.0),
+        'M' | 'm' => (&cell[..cell.len() - 1], 1024.0 * 1024.0),
+        'G' | 'g' => (&cell[..cell.len() - 1], 1024.0 * 1024.0 * 1024.0),
+        d if d.is_ascii_digit() => (cell, 1.0),
+        _ => return None,
+    };
+    let value: f64 = num.parse().ok()?;
+    if value < 0.0 {
+        return None;
+    }
+    Some((value * mult) as u64)
 }
 
 fn dedupe_entries_by_object(entries: Vec<PdfImagesListEntry>) -> Vec<PdfImagesListEntry> {

@@ -48,6 +48,8 @@ impl Drop for PdfCommandEnvGuard {
             std::env::remove_var("ARCHON_PDFTOTEXT_BIN");
             std::env::remove_var("ARCHON_PDFIMAGES_BIN");
             std::env::remove_var("ARCHON_PDFTOPPM_BIN");
+            // Harmless when unset; some tests also mock pdfinfo (page count for the scan detector).
+            std::env::remove_var("ARCHON_PDFINFO_BIN");
         }
     }
 }
@@ -225,6 +227,10 @@ impl LocalEmbeddingProvider for MultimodalMockProvider {
 
     fn embed_image(&self, _image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
         Ok(Some(vec![0.25_f32, 0.25, 0.25, 0.25][..self.dim].to_vec()))
+    }
+
+    fn image_dimension(&self) -> Option<usize> {
+        Some(self.dim)
     }
 
     fn dimension(&self) -> usize {

@@ -74,6 +74,12 @@ hello.txt
 !/docs/integrations/**
 !/docs/cookbook/
 !/docs/cookbook/**
+# Exception: ingestion parity + device-layer design docs (Port #2).
+!/docs/ingestion/
+!/docs/ingestion/**
+# Exception: dissertation-port overview / platform-agnostic / setup docs.
+!/docs/dissertation-port/
+!/docs/dissertation-port/**
 !/docs/operations/
 !/docs/operations/**
 !/docs/maintenance/
@@ -96,3 +102,8 @@ FORENSIC-TASK-DECOMPOSITION.yaml
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap.new
 crates/archon-tui/tests/snapshots/tui_snapshots__splash_with_activity.snap.new
 archon
+
+# machine-specific Archon policy (real paths); template is policy.example.toml
+.archon/policy.toml
+.backups/
+/parity-ref/  # portability copy of god-agent markdown_chunker.py for scripts/chunk_parity_check.py

@@ -65,6 +65,31 @@ fn pdfimages_list_parser_handles_shared_xobject() {
 }
 
 #[test]
+fn pdfimages_list_parser_extracts_ppi_and_size() {
+    // Real Uexküll-shaped row: x-ppi/y-ppi at cols[12]/[13], size at col[14].
+    let entries = parse_pdfimages_list(
+        "   1   0 image  1303  2064  gray  1   8  image  no        12  0   241  241  479K 18%\n",
+    );
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].x_ppi, Some(241));
+    assert_eq!(entries[0].y_ppi, Some(241));
+    assert_eq!(entries[0].bytes, Some(479 * 1024));
+}
+
+#[test]
+fn pdfimages_size_parser_handles_units() {
+    assert_eq!(parse_pdfimages_size("1620B"), Some(1620));
+    assert_eq!(parse_pdfimages_size("479K"), Some(479 * 1024));
+    assert_eq!(
+        parse_pdfimages_size("3.9M"),
+        Some((3.9 * 1024.0 * 1024.0) as u64)
+    );
+    assert_eq!(parse_pdfimages_size("512"), Some(512)); // bare number → bytes
+    assert_eq!(parse_pdfimages_size("weird"), None);
+    assert_eq!(parse_pdfimages_size(""), None);
+}
+
+#[test]
 fn image_filter_skips_below_min_dimension() {
     let policy = PdfPolicy::default();
     assert!(!image_survives_filter(100, 100, 8192, &policy));

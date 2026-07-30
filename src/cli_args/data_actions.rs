@@ -103,6 +103,13 @@ pub enum DocsAction {
     Ingest {
         /// Path to file or directory to ingest
         path: String,
+        /// Skip the pre-ingest enrichment-classification confirmation prompt (batch/scripted use)
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Image-enrichment concurrency: "auto" (derive from free VRAM, confirm when
+        /// interactive) or a number 1..=16. Unset -> the policy value (default 1 = serial).
+        #[arg(long)]
+        jobs: Option<String>,
     },
     /// Re-run OCR/VLM/image enrichment for an existing document ID or source path/prefix
     Reprocess {
@@ -141,6 +148,14 @@ pub enum DocsAction {
         /// Show debug output (embedding details, distances, provenance)
         #[arg(long)]
         debug: bool,
+    },
+    /// Search images/frames by a text description (cross-modal CLIP text→image)
+    SearchImages {
+        /// Text description to match against image embeddings
+        query: String,
+        /// Maximum results
+        #[arg(long, default_value = "10")]
+        limit: usize,
     },
     /// Answer a question using document evidence
     Answer {
@@ -223,6 +238,29 @@ pub enum DocsAction {
     },
     /// Report embedding model and backend status
     ModelStatus,
+    /// Verify a quote against the corpus — locate its source document, page(s), and bbox(es)
+    VerifyQuote {
+        /// The quote text to locate (verbatim; smart quotes + whitespace are normalized)
+        quote: String,
+        /// Restrict the search to a single document ID
+        #[arg(long)]
+        doc: Option<String>,
+        /// Maximum number of source locations to report
+        #[arg(long, default_value = "3")]
+        limit: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify chunk-integrity (chunks_root) for one document or all documents
+    VerifyIntegrity {
+        /// Restrict verification to a single document ID (default: all documents)
+        #[arg(long)]
+        doc: Option<String>,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -326,6 +364,28 @@ pub enum MemoryAction {
         /// accidentally re-running an expensive operation).
         #[arg(long)]
         all: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum StyleAction {
+    /// Train an output-style from sample prose by measuring its Lanham style
+    /// (POS-free, fully offline). Writes a `.md` Archon output-style.
+    Train {
+        /// Sample text file(s) to learn the style from (omit to read stdin)
+        files: Vec<String>,
+        /// Name for the output-style (basename of the `.md` + style id)
+        #[arg(long, default_value = "trained-style")]
+        name: String,
+        /// Genre register frame (academic, narrative, journalistic, technical, general)
+        #[arg(long, default_value = "academic")]
+        genre: String,
+        /// Output path (default: ~/.archon/output-styles/<name>.md)
+        #[arg(long)]
+        out: Option<String>,
+        /// Print the rendered output-style to stdout instead of writing a file
+        #[arg(long)]
+        stdout: bool,
     },
 }
 

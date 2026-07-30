@@ -130,7 +130,7 @@ mod tests {
     fn migrates_legacy_cozo_vectors_to_rocksdb() {
         let db = DbInstance::new("mem", "", Default::default()).unwrap();
         ensure_doc_schema(&db).unwrap();
-        ensure_vec_schema(&db, 2).unwrap();
+        ensure_vec_schema(&db, 2, None).unwrap();
         let chunk = ChunkArtifact {
             chunk_id: "chunk-a".into(),
             document_id: "doc-a".into(),

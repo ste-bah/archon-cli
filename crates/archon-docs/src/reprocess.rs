@@ -114,6 +114,7 @@ pub async fn reprocess_document_with_policy(
             pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
             pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
             pdf_pages_rendered: outcome.pdf_pages_rendered,
+            pdf_coord: outcome.pdf_coord,
         },
     })
 }
@@ -150,6 +151,39 @@ fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsE
         params.clone(),
         "vec_text_chunks",
     )?;
+    // CLIP image/figure embeddings are page-keyed (page-{doc}-N and per-figure {page_id}-imgM),
+    // all sharing the "page-{document_id}-" prefix. Remove them so reprocess doesn't leak/orphan
+    // image vectors (which `search-images` would otherwise still return as stale results).
+    {
+        let mut image_params = params.clone();
+        image_params.insert(
+            "img_prefix".into(),
+            DataValue::from(format!("page-{document_id}-").as_str()),
+        );
+        run_rm_optional(
+            db,
+            "?[page_id] := *vec_page_images{page_id}, starts_with(page_id, $img_prefix)
+             :rm vec_page_images { page_id }",
+            image_params,
+            "vec_page_images",
+        )?;
+    }
+    // Chunk-keyed satellites have no document_id column → join through doc_chunks and
+    // remove BEFORE the doc_chunks rows are deleted below (else the join finds nothing).
+    run_rm_optional(
+        db,
+        "?[chunk_id] := *doc_chunks{chunk_id, document_id}, document_id = $did
+         :rm doc_chunk_spatial { chunk_id }",
+        params.clone(),
+        "doc_chunk_spatial",
+    )?;
+    run_rm_optional(
+        db,
+        "?[chunk_id] := *doc_chunks{chunk_id, document_id}, document_id = $did
+         :rm doc_chunk_hashes { chunk_id }",
+        params.clone(),
+        "doc_chunk_hashes",
+    )?;
     for (relation, key) in [
         ("doc_artifacts", "artifact_id"),
         ("doc_pages", "page_id"),
@@ -163,6 +197,7 @@ fn remove_generated_rows(db: &DbInstance, document_id: &str) -> Result<(), DocsE
         ("doc_pdf_metrics", "document_id"),
         ("doc_processing_jobs", "job_id"),
         ("doc_ocr_runs", "ocr_run_id"),
+        ("doc_locators", "locator_id"),
         ("doc_pages", "page_id"),
         ("doc_artifacts", "artifact_id"),
         ("doc_chunks", "chunk_id"),
@@ -336,7 +371,12 @@ mod tests {
         db
     }
 
+    // Serial with the docs_global_state group: ingest touches the process-global OCR/VLM/embedding
+    // provider registries (and cozo's shared in-memory engine), so running concurrently with the
+    // serial PDF tests let a mock provider's output leak into this doc's chunks — a flaky content
+    // assertion. Serializing removes the race.
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
     async fn reprocess_preserves_source_and_kb_membership() {
         let db = test_db();
         let dir = tempfile::tempdir().unwrap();
@@ -368,6 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
     async fn reprocess_rejects_changed_source_content() {
         let db = test_db();
         let dir = tempfile::tempdir().unwrap();

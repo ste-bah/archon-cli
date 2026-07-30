@@ -4,8 +4,8 @@ use super::{
     AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CognitiveAction,
     CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
     MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
-    ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, TeamAction,
-    TradingCliAction, VideoAction, WorkflowAction, WorldAction,
+    ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, StyleAction,
+    TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -263,6 +263,11 @@ pub enum Commands {
     Memory {
         #[command(subcommand)]
         action: MemoryAction,
+    },
+    /// Train and manage prose output-styles via Lanham style analysis
+    Style {
+        #[command(subcommand)]
+        action: StyleAction,
     },
     /// Inspect Archon's self-calibration records
     #[command(name = "self")]

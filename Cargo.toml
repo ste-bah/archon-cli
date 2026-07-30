@@ -56,6 +56,7 @@ urlencoding = "2"
 which = "7"
 notify = "7"
 pulldown-cmark = "0.12"
+lopdf = "0.36"
 tree-sitter = "0.25"
 tree-sitter-highlight = "0.25"
 tree-sitter-rust = "0.24"
@@ -136,6 +137,7 @@ name = "archon"
 path = "src/main.rs"
 
 [dependencies]
+archon-accel = { path = "crates/archon-accel" }
 archon-core = { path = "crates/archon-core" }
 archon-consciousness = { path = "crates/archon-consciousness" }
 archon-llm = { path = "crates/archon-llm" }
@@ -165,6 +167,7 @@ archon-observability = { path = "crates/archon-observability" }
 archon-world-model = { path = "crates/archon-world-model" }
 archon-reasoning-quality = { path = "crates/archon-reasoning-quality" }
 archon-workflow = { path = "crates/archon-workflow" }
+archon-lanham = { path = "crates/archon-lanham" }
 reqwest.workspace = true
 openssl.workspace = true
 chrono.workspace = true

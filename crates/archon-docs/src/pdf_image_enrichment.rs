@@ -12,22 +12,32 @@ use crate::ingest_multimodal::persist_vlm_description;
 use crate::models::{ChunkArtifact, PageArtifact, PageOffset, ProvenanceEdgeType};
 use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
-use crate::pdf::PdfImage;
+use crate::pdf::{PdfImage, PdfImageOrigin};
 use crate::pdf_image_progress::{emit_pdf_image_progress, emit_pdf_progress};
 use crate::pdf_image_vlm::{VlmImageResult, describe_image};
 use crate::provenance::make_edge;
 use crate::store;
 
+#[allow(clippy::too_many_arguments)] // db + doc context + policy + mutable outcome are all needed
 pub(crate) async fn enrich_pdf_images(
     db: &DbInstance,
     document_id: &str,
     images: &[PdfImage],
+    page_count: u32,
     policy: &archon_policy::EffectivePolicy,
     page_ids_by_number: &BTreeMap<u32, String>,
     pages_by_number: &mut BTreeMap<u32, PageArtifact>,
     outcome: &mut PipelineOutcome,
-) -> Result<(), DocsError> {
+    // Pre-resolved scanned-book verdict from the active detector (`Some` for coverage/union;
+    // `None` → fall back to the in-memory aspect heuristic).
+    scanned_override: Option<bool>,
+    // Whether the doc produced a text seal (a text layer or Marker OCR owns the pages). A scanned
+    // book WITH text content skips enrichment; one WITHOUT (image-only) must OCR its page scans.
+    has_text_content: bool,
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     let total = images.len();
+    // Image-OCR + VLM-description chunks, returned so the caller can fold them into chunks_root.
+    let mut collected: Vec<ChunkArtifact> = Vec::new();
     emit_pdf_progress(format!(
         "PDF image enrichment: doc={document_id} images={total} ocr=enabled vlm={} provider={} workers={}",
         policy.docs.pdf.vlm_per_page_image,
@@ -68,12 +78,54 @@ pub(crate) async fn enrich_pdf_images(
         });
     }
 
+    // Scanned-book guard. Full-page-scan images ARE the pages, so how we treat them depends on
+    // whether a text layer / Marker already owns those pages (`has_text_content`):
+    //   scanned + text content  → OCR/VLM would duplicate + waste → skip enrichment entirely.
+    //   scanned + NO text layer → the scans are the ONLY content → OCR them (below), but VLM is
+    //                             useless on a page reproduction, so run OCR-only.
+    //   not scanned             → born-digital figures → enrich normally (OCR + VLM per policy).
+    // `scanned_override` carries the coverage/union verdict; else the in-memory aspect heuristic.
+    let is_scanned = scanned_override.unwrap_or_else(|| is_scanned_page_images(images, page_count));
+    if is_scanned && has_text_content {
+        let scans = images
+            .iter()
+            .filter(|i| matches!(i.origin, PdfImageOrigin::Embedded { .. }))
+            .count();
+        emit_pdf_progress(format!(
+            "PDF image enrichment: doc={document_id} SKIPPED {scans} full-page scan(s) — scanned book, text layer owns the pages"
+        ));
+        outcome.warnings.push(format!(
+            "scanned-book: skipped enrichment of {scans} full-page scan image(s)"
+        ));
+        return Ok(collected);
+    }
+    // Image-only scanned book: OCR the page scans (the only content) but force VLM off — a full-page
+    // scan is a page reproduction, not a discrete figure, so a VLM description adds no value and (on
+    // a 100+ page book) is very expensive. Born-digital docs enrich with the policy unchanged.
+    let effective_policy = if is_scanned {
+        let mut p = policy.clone();
+        p.docs.pdf.vlm_per_page_image = false;
+        p
+    } else {
+        policy.clone()
+    };
+    let policy = &effective_policy;
+
     if image_workers(policy) <= 1 {
         for item in work_items {
-            let result = process_image(document_id.to_string(), item, policy.clone()).await;
-            persist_image_result(db, document_id, result, outcome)?;
+            match tokio::time::timeout(
+                per_image_timeout(),
+                process_image(document_id.to_string(), item.clone(), policy.clone()),
+            )
+            .await
+            {
+                Ok(result) => {
+                    persist_image_result(db, document_id, result, outcome, &mut collected)?
+                }
+                Err(_elapsed) => record_image_timeout(document_id, &item, outcome),
+            }
         }
-        return Ok(());
+        return Ok(collected);
     }
 
     let mut next = 0usize;
@@ -84,10 +136,24 @@ pub(crate) async fn enrich_pdf_images(
             let item = work_items[next].clone();
             let policy = policy.clone();
             let doc = document_id.to_string();
-            tasks.spawn(async move { process_image(doc, item, policy).await });
+            // On timeout, `process_image` never returns — hand the work back so the caller can
+            // synthesize a per-image skip (JoinSet gives no task identity at join time).
+            tasks.spawn(async move {
+                let work = item.clone();
+                match tokio::time::timeout(per_image_timeout(), process_image(doc, item, policy))
+                    .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(_elapsed) => Err(work),
+                }
+            });
             next += 1;
         }
         let Some(joined) = tasks.join_next().await else {
+            // Defensive: an emptied set with no work left must exit, never spin.
+            if next >= work_items.len() {
+                break;
+            }
             continue;
         };
         let result = joined.map_err(|e| DocsError::VlmProvider {
@@ -95,12 +161,45 @@ pub(crate) async fn enrich_pdf_images(
             message: format!("PDF image worker join failed: {e}"),
             status_code: None,
         })?;
-        if let Err(error) = persist_image_result(db, document_id, result, outcome) {
-            tasks.abort_all();
-            return Err(error);
+        match result {
+            Ok(result) => {
+                if let Err(error) =
+                    persist_image_result(db, document_id, result, outcome, &mut collected)
+                {
+                    tasks.abort_all();
+                    return Err(error);
+                }
+            }
+            // A wall-clock timeout skips just this image; the run continues.
+            Err(work) => record_image_timeout(document_id, &work, outcome),
         }
     }
-    Ok(())
+    Ok(collected)
+}
+
+/// Per-image wall-clock backstop over the WHOLE `process_image` (OCR + VLM) of one image. A
+/// LOOSE budget by design: the default 600s sits well above legitimate worst-case VLM time
+/// (the 120s per-request reqwest timeout × retries + backoff), so it only fires on a truly
+/// wedged external call (the observed 0-CPU ingest hang), never on slow-but-progressing work.
+fn per_image_timeout() -> std::time::Duration {
+    let secs = std::env::var("ARCHON_PDF_IMAGE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(600);
+    std::time::Duration::from_secs(secs)
+}
+
+/// The per-image backstop fired: record a per-image SKIP (progress line + failure counter +
+/// warning) and move on — a hung image must never be fatal to the document.
+fn record_image_timeout(document_id: &str, work: &ImageWork, outcome: &mut PipelineOutcome) {
+    let warning = format!(
+        "PDF image enrichment timed out after {}s on page {} (image skipped)",
+        per_image_timeout().as_secs(),
+        work.image.source_page
+    );
+    outcome.pdf_image_vlm_failures += 1;
+    outcome.warnings.push(warning.clone());
+    emit_vlm_skip(document_id, work, &warning);
 }
 
 #[derive(Clone)]
@@ -166,10 +265,25 @@ fn persist_image_result(
     document_id: &str,
     result: ImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
-    persist_ocr_result(db, document_id, &result, outcome)?;
+    persist_ocr_result(db, document_id, &result, outcome, collected)?;
     if let Some(vlm) = result.vlm {
-        persist_vlm_result(db, document_id, &result.work, vlm, outcome)?;
+        persist_vlm_result(db, document_id, &result.work, vlm, outcome, collected)?;
+    }
+    // Full coverage: CLIP-embed each embedded PDF figure so they are visually searchable
+    // alongside standalone images. Key per-figure ("{page_id}-img{N}") so multiple figures
+    // on one page don't collide; `retrieval_image::resolve_page` strips the suffix back to
+    // the page for result resolution. (Suppress the per-figure "not multimodal" warning.)
+    if let Some(page_id) = result.work.page_ids.first() {
+        let fig_key = format!("{}-img{}", page_id, result.work.current);
+        crate::ingest_multimodal::store_image_embedding_if_supported(
+            db,
+            &[fig_key],
+            &result.work.image.bytes,
+            true,
+            outcome,
+        );
     }
     Ok(())
 }
@@ -179,6 +293,7 @@ fn persist_ocr_result(
     document_id: &str,
     result: &ImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
     let work = &result.work;
     match &result.ocr {
@@ -198,13 +313,13 @@ fn persist_ocr_result(
                 work.image.source_page,
                 text.len()
             ));
-            persist_image_ocr_chunks(
+            collected.extend(persist_image_ocr_chunks(
                 db,
                 document_id,
                 work.image.source_page,
                 &work.page_ids,
                 text,
-            )?;
+            )?);
         }
         OcrImageResult::NoText => emit_pdf_image_progress(
             document_id,
@@ -241,10 +356,16 @@ fn persist_vlm_result(
     work: &ImageWork,
     result: VlmImageResult,
     outcome: &mut PipelineOutcome,
+    collected: &mut Vec<ChunkArtifact>,
 ) -> Result<(), DocsError> {
     match result {
         VlmImageResult::Described(description) => {
-            persist_vlm_description(db, document_id, &work.page_ids, &description)?;
+            collected.extend(persist_vlm_description(
+                db,
+                document_id,
+                &work.page_ids,
+                &description,
+            )?);
             outcome.warnings.push(format!(
                 "image description ok via {}/{} ({}ms, ${:.4})",
                 description.provider,
@@ -326,9 +447,9 @@ fn persist_image_ocr_chunks(
     source_page: u32,
     page_ids: &[String],
     text: &str,
-) -> Result<(), DocsError> {
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     if text.trim().is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let artifact_id = format!("pdf-image-ocr-{}", uuid::Uuid::new_v4());
     let chunks = image_ocr_chunks(db, document_id, source_page, text, &artifact_id)?;
@@ -344,7 +465,7 @@ fn persist_image_ocr_chunks(
         }
     }
     index_chunks_if_provider_available(db, &chunks);
-    Ok(())
+    Ok(chunks)
 }
 
 fn image_ocr_chunks(
@@ -428,4 +549,290 @@ fn mark_page_image_metadata(
 
 fn image_workers(policy: &archon_policy::EffectivePolicy) -> usize {
     policy.docs.pdf.image_enrichment_workers.clamp(1, 16) as usize
+}
+
+// ---- `--jobs auto`: derive the worker count from FREE VRAM ----
+
+/// Marginal VRAM per concurrent VLM slot (MiB). The model weights are resident ONCE (the
+/// ollama server shares them across requests — see [`VLM_MODEL_RESERVE_MB`]); each
+/// *additional* in-flight request costs roughly its KV cache + activations + image tensors.
+/// 2500 MiB is a conservative envelope for qwen2.5vl:7b processing a single page-figure image.
+pub const VLM_SLOT_MB: u64 = 2500;
+
+/// Resident weights (MiB) of the configured VLM (qwen2.5vl:7b, ~6.5 GB). We must reserve this
+/// EXPLICITLY because the free-VRAM probe (`archon_accel::detect`) runs at ingest start, BEFORE
+/// ollama lazy-loads the model on its first request (and ollama unloads again after
+/// `keep_alive`). On a cold/idle card the probe therefore sees the weights' VRAM as "free"; if
+/// we budgeted worker slots against that number we would recommend N slots that only fit once
+/// the 6.5 GB model is NOT loaded — then the load happens and the card OOMs. Subtracting the
+/// reserve up front makes the recommendation survive the lazy load. Tied to the VLM model: if
+/// the configured model changes, this must track its weight footprint.
+///
+/// Trade-off (intentional, safe direction): if the model happens to be ALREADY resident when we
+/// probe (a warm card, another job holding it under keep_alive), we double-count its weights and
+/// under-recommend slightly. Under-parallelizing is safe; OOMing is not.
+pub const VLM_MODEL_RESERVE_MB: u64 = 6500;
+
+/// Safety margin (MiB) left free on the card: driver/display churn, allocator fragmentation,
+/// and co-tenant processes growing under us mid-ingest. The probe is taken once at ingest
+/// start, so the margin must absorb drift over the whole run.
+pub const VLM_HEADROOM_MB: u64 = 2048;
+
+/// Hard cap on unified-memory (Apple Silicon) hosts. GPU and CPU share one pool there, so
+/// over-committing shows up as OS memory *pressure* (a soft, uncatchable slowdown/kill), not
+/// a CUDA-style OOM we could detect and back off from. Stay conservative regardless of pool
+/// size.
+const UNIFIED_MEMORY_MAX_WORKERS: u64 = 2;
+
+/// Derive the image-enrichment worker count for `--jobs auto` from an accelerator probe.
+/// Driven by *free* VRAM, not card size — a 32 GB card with 139 MB free under co-tenancy
+/// must run serial. Pure function of the report so it is unit-testable without hardware.
+/// Always returns at least 1 (serial); never exceeds the enrichment engine's cap of 16
+/// (the same cap `image_workers` applies to the policy value).
+pub fn auto_image_workers(report: &archon_accel::AcceleratorReport) -> u32 {
+    let Some(gpu) = report.best_gpu() else {
+        // No CUDA/Metal device: the VLM is running on CPU (or a remote endpoint); parallel
+        // slots would only contend for the same cores. Stay serial.
+        return 1;
+    };
+    // Budget slots against what remains AFTER the model's resident weights (which the cold-card
+    // probe counts as free — see VLM_MODEL_RESERVE_MB) and the safety margin are set aside.
+    let usable = gpu
+        .free_mb
+        .saturating_sub(VLM_MODEL_RESERVE_MB + VLM_HEADROOM_MB);
+    let n = (usable / VLM_SLOT_MB).clamp(1, 16);
+    let n = if report.unified_memory {
+        n.min(UNIFIED_MEMORY_MAX_WORKERS)
+    } else {
+        n
+    };
+    n as u32
+}
+
+/// Is this embedded image a full-page SCAN — **large AND page-shaped**? The aspect gate is what
+/// separates a page scan from a large figure: a page's long/short side ratio is ~1.2–1.7 (Letter
+/// 1.29, A4 1.41, US Legal 1.65, and taller book formats — e.g. the Uexküll scans measure ~1.58,
+/// some crops up to ~1.61), and that range holds for either orientation. A large *square* diagram
+/// or a *wide* chart is large but not page-shaped, so it is NOT counted as a scan (closing the
+/// false positive of the size-only check). No page dimensions are available yet — a follow-up can
+/// replace this proxy with a true coverage % via the page MediaBox (also removes the DPI coupling
+/// in the size floor).
+pub(crate) fn is_page_scale(img: &PdfImage) -> bool {
+    if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) || img.width == 0 || img.height == 0 {
+        return false;
+    }
+    let large = img.width.min(img.height) >= 1000;
+    let long = img.width.max(img.height) as f64;
+    let short = img.width.min(img.height) as f64;
+    let page_shaped = (1.2..=1.7).contains(&(long / short));
+    large && page_shaped
+}
+
+/// Heuristic: do these embedded images look like a SELF-SCANNED book — most pages carry exactly one
+/// full-page SCAN (see [`is_page_scale`])? Such images ARE the page scans (Marker already OCRs them
+/// via the text layer), so enriching them duplicates OCR + wastes the VLM.
+///
+/// The signal is the DISTRIBUTION, not the raw count: a born-digital doc clusters figures (many
+/// pages with zero, some with several), so its fraction of "one page-scan, nothing else" pages stays
+/// low — the King&Salvo article has 17 clustered, non-page-shaped figures (~24% of pages), while a
+/// 281 pp scanned Uexküll has one page-scan per page (100%). Threshold 70% cleanly separates them.
+pub(crate) fn is_scanned_page_images(images: &[PdfImage], page_count: u32) -> bool {
+    if page_count == 0 {
+        return false;
+    }
+    // (page-scale count, total embedded count) per page.
+    let mut per_page: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+    for img in images {
+        if !matches!(img.origin, PdfImageOrigin::Embedded { .. }) {
+            continue;
+        }
+        let entry = per_page.entry(img.source_page).or_insert((0, 0));
+        entry.1 += 1;
+        if is_page_scale(img) {
+            entry.0 += 1;
+        }
+    }
+    // A "scanned page" carries exactly one embedded image and it is a page scan.
+    let scanned_pages = per_page
+        .values()
+        .filter(|(page_scale, embedded)| *page_scale == 1 && *embedded == 1)
+        .count();
+    scanned_pages as f64 / page_count as f64 >= 0.70
+}
+
+#[cfg(test)]
+mod scan_detection_tests {
+    use super::*;
+
+    fn embedded(page: u32, w: u32, h: u32) -> PdfImage {
+        PdfImage {
+            bytes: vec![],
+            mime: "image/png",
+            source_page: page,
+            source_pages: vec![page],
+            width: w,
+            height: h,
+            origin: PdfImageOrigin::Embedded { xobject_name: None },
+        }
+    }
+
+    #[test]
+    fn scanned_book_one_large_image_per_page_is_detected() {
+        // 5 pages, one ~full-page scan each → scanned book.
+        let imgs: Vec<_> = (1..=5).map(|p| embedded(p, 2000, 3000)).collect();
+        assert!(is_scanned_page_images(&imgs, 5));
+    }
+
+    #[test]
+    fn born_digital_clustered_figures_are_not_scans() {
+        // 17 pages, figures clustered on a few pages (some pages multiple) → NOT a scanned book.
+        let mut imgs = vec![embedded(5, 1200, 800), embedded(5, 900, 600)];
+        imgs.push(embedded(8, 1200, 700));
+        imgs.push(embedded(8, 800, 600));
+        imgs.push(embedded(8, 800, 600));
+        imgs.push(embedded(12, 1000, 800));
+        imgs.push(embedded(12, 1000, 800));
+        imgs.push(embedded(6, 1100, 700)); // a lone figure page
+        assert!(!is_scanned_page_images(&imgs, 17));
+    }
+
+    #[test]
+    fn per_page_small_icons_are_not_scans() {
+        // One SMALL image per page (e.g. a header logo) is not a full-page scan.
+        let imgs: Vec<_> = (1..=5).map(|p| embedded(p, 120, 60)).collect();
+        assert!(!is_scanned_page_images(&imgs, 5));
+    }
+
+    #[test]
+    fn empty_is_not_a_scan() {
+        assert!(!is_scanned_page_images(&[], 0));
+        assert!(!is_scanned_page_images(&[], 10));
+    }
+
+    // ---- aspect-ratio gate (adoption #1): large but non-page-shaped images are NOT scans ----
+
+    #[test]
+    fn large_square_figures_per_page_are_not_scans() {
+        // One LARGE ~square diagram per page — size-only would false-positive; the aspect gate
+        // (ratio 1.0 ∉ [1.2,1.6]) correctly rejects it as a page-scan.
+        let imgs: Vec<_> = (1..=6).map(|p| embedded(p, 1500, 1500)).collect();
+        assert!(imgs.iter().all(|i| !is_page_scale(i)));
+        assert!(!is_scanned_page_images(&imgs, 6));
+    }
+
+    #[test]
+    fn large_wide_charts_per_page_are_not_scans() {
+        // One LARGE 16:9 chart per page (ratio 1.78) — not page-shaped → not a scan.
+        let imgs: Vec<_> = (1..=6).map(|p| embedded(p, 1920, 1080)).collect();
+        assert!(imgs.iter().all(|i| !is_page_scale(i)));
+        assert!(!is_scanned_page_images(&imgs, 6));
+    }
+
+    #[test]
+    fn page_shaped_large_image_is_page_scale() {
+        // Letter/A4/book ratios in [1.2,1.7] + large → page-scale (either orientation).
+        assert!(is_page_scale(&embedded(1, 1275, 1650))); // Letter portrait 1.29
+        assert!(is_page_scale(&embedded(1, 1650, 1275))); // Letter landscape
+        assert!(is_page_scale(&embedded(1, 1200, 1860))); // ~book 1.55
+        assert!(is_page_scale(&embedded(1, 1303, 2041))); // real Uexküll scan 1.566
+        assert!(is_page_scale(&embedded(1, 1270, 2049))); // Uexküll crop 1.613 (was missed at 1.6)
+        assert!(!is_page_scale(&embedded(1, 900, 1400))); // page-shaped but too small
+        assert!(!is_page_scale(&embedded(1, 1000, 2000))); // 2.0 too tall → figure, not page
+    }
+
+    #[test]
+    fn uexkull_like_scans_are_detected() {
+        // 20 pages, one book-format scan each (varied crops 1.56–1.61) → scanned book.
+        let dims = [(1303u32, 2041u32), (1270, 2049), (1309, 2049), (1274, 2045)];
+        let imgs: Vec<_> = (1..=20)
+            .map(|p| {
+                let (w, h) = dims[(p as usize) % dims.len()];
+                embedded(p, w, h)
+            })
+            .collect();
+        assert!(is_scanned_page_images(&imgs, 20));
+    }
+}
+
+#[cfg(test)]
+mod auto_workers_tests {
+    use super::*;
+    use archon_accel::{AccelKind, Accelerator, AcceleratorReport};
+
+    fn report(accelerators: Vec<Accelerator>, unified_memory: bool) -> AcceleratorReport {
+        AcceleratorReport {
+            platform: "test".into(),
+            arch: "test".into(),
+            accelerators,
+            host_ram_total_mb: 32768,
+            host_ram_free_mb: 16384,
+            unified_memory,
+            notes: vec![],
+        }
+    }
+
+    fn gpu(kind: AccelKind, total_mb: u64, free_mb: u64) -> Accelerator {
+        Accelerator {
+            kind,
+            index: 0,
+            name: "test-gpu".into(),
+            total_mb,
+            free_mb,
+        }
+    }
+
+    #[test]
+    fn no_gpu_is_serial() {
+        // CPU-only host (or only a Cpu accelerator entry): the VLM has no card to pack; serial.
+        assert_eq!(auto_image_workers(&report(vec![], false)), 1);
+        assert_eq!(
+            auto_image_workers(&report(vec![gpu(AccelKind::Cpu, 32768, 16384)], false)),
+            1
+        );
+    }
+
+    #[test]
+    fn co_tenancy_starved_card_is_serial() {
+        // The 5090 co-tenancy case: 32 GB card with 139 MB free → free-driven math floors at 1.
+        let r = report(vec![gpu(AccelKind::Cuda, 32768, 139)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn laptop_8gb_cold_card_is_serial() {
+        // RTX 5070 laptop-class, COLD card: probe sees ~8192 MB free, but the 6.5 GB VLM
+        // weights are NOT loaded yet. Budgeting slots against 8192 and THEN loading the model
+        // would OOM. Reserving weights+headroom: 8192.saturating_sub(6500+2048)=0 → N=1 (SAFE).
+        let r = report(vec![gpu(AccelKind::Cuda, 8192, 8192)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn laptop_8gb_post_marker_is_serial() {
+        // Realistic mid-run 8 GB state (Marker/other tenants already resident, ~1.5 GB free):
+        // well under the model reserve → serial.
+        let r = report(vec![gpu(AccelKind::Cuda, 8192, 1500)], false);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
+
+    #[test]
+    fn thirty_gb_free_scales_up_and_huge_card_caps_at_16() {
+        // 5090-class, 29887 MB free → (29887 - 6500 - 2048) / 2500 = 8 workers.
+        let r = report(vec![gpu(AccelKind::Cuda, 32768, 29887)], false);
+        assert_eq!(auto_image_workers(&r), 8);
+        // 64 GB free → (65536 - 8548) / 2500 = 22, clamped to the engine's cap of 16.
+        let r = report(vec![gpu(AccelKind::Cuda, 65536, 65536)], false);
+        assert_eq!(auto_image_workers(&r), 16);
+    }
+
+    #[test]
+    fn unified_memory_caps_at_two() {
+        // Mac 24 GB unified, 20480 MB free → (20480 - 8548) / 2500 = 4 raw, but memory
+        // pressure is uncatchable there — hard cap 2.
+        let r = report(vec![gpu(AccelKind::Metal, 24576, 20480)], true);
+        assert_eq!(auto_image_workers(&r), 2);
+        // Unified but tiny free pool still floors at 1, not 2.
+        let r = report(vec![gpu(AccelKind::Metal, 8192, 1024)], true);
+        assert_eq!(auto_image_workers(&r), 1);
+    }
 }

@@ -75,7 +75,7 @@ fn semantic_search_without_vector_schema_returns_empty() {
 #[test]
 fn semantic_search_rejects_top_k_above_cozo_integer_range() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    archon_docs::schema::ensure_vec_schema(&db, 2, None).unwrap();
     insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
     archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
     let engine = engine(db);
@@ -101,7 +101,7 @@ fn semantic_search_rejects_top_k_above_cozo_integer_range() {
 #[test]
 fn semantic_search_finds_vector_indexed_chunk() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    archon_docs::schema::ensure_vec_schema(&db, 2, None).unwrap();
     insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
     insert_chunk(&db, "c2", "doc-2", "Different vector chunk.");
     archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
@@ -125,7 +125,7 @@ fn semantic_search_finds_vector_indexed_chunk() {
 #[test]
 fn semantic_search_filter_overfetches_before_post_filtering() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    archon_docs::schema::ensure_vec_schema(&db, 2, None).unwrap();
     for index in 0..3 {
         let chunk_id = format!("excluded-{index}");
         insert_chunk(&db, &chunk_id, "doc-other", "Closer excluded vector.");
@@ -155,7 +155,7 @@ fn semantic_search_filter_overfetches_before_post_filtering() {
 #[test]
 fn semantic_search_respects_document_filter() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    archon_docs::schema::ensure_vec_schema(&db, 2, None).unwrap();
     insert_chunk(&db, "c1", "doc-1", "Filtered vector chunk.");
     insert_chunk(&db, "c2", "doc-2", "Closer global vector chunk.");
     archon_docs::store::insert_chunk_embedding(&db, "c1", &[0.8, 0.2], "test").unwrap();
@@ -180,7 +180,7 @@ fn semantic_search_respects_document_filter() {
 #[test]
 fn semantic_search_with_empty_document_filter_returns_empty() {
     let db = db_with_doc_schema();
-    archon_docs::schema::ensure_vec_schema(&db, 2).unwrap();
+    archon_docs::schema::ensure_vec_schema(&db, 2, None).unwrap();
     insert_chunk(&db, "c1", "doc-1", "Semantic target chunk.");
     archon_docs::store::insert_chunk_embedding(&db, "c1", &[1.0, 0.0], "test").unwrap();
     let engine = engine(db);

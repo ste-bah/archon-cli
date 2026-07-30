@@ -40,6 +40,30 @@ pub trait OcrProvider: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
+/// Wall-clock bound on one local OCR-path subprocess (tesseract / RapidOCR / poppler). A wedged
+/// external binary must error out (and be killed via `kill_on_drop`), not hang an ingest worker
+/// forever. 120s is generous for a single image/page; override with `ARCHON_OCR_TIMEOUT_SECS`.
+pub(crate) fn ocr_timeout() -> std::time::Duration {
+    let secs = std::env::var("ARCHON_OCR_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(120);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Wall-clock bound on a WHOLE-DOCUMENT `pdftoppm` render (one invocation rasterizes every page,
+/// no page-range). This is NOT a per-page op, so it must NOT use [`ocr_timeout`]: a 300–600 page
+/// scan renders at ~0.5–2s/page and would false-timeout at 120s (total OCR data loss). 1800s
+/// still bounds a genuinely wedged render while covering large scans; override with
+/// `ARCHON_PDF_RENDER_TIMEOUT_SECS`.
+pub(crate) fn pdf_render_timeout() -> std::time::Duration {
+    let secs = std::env::var("ARCHON_PDF_RENDER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1800);
+    std::time::Duration::from_secs(secs)
+}
+
 static PROVIDER: RwLock<Option<Arc<dyn OcrProvider>>> = RwLock::new(None);
 
 /// Get the currently configured OCR provider, if one has been installed.

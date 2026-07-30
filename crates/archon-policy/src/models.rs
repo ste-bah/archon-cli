@@ -226,6 +226,63 @@ pub struct PdfPolicy {
     pub vlm_per_page_image: bool,
     pub render_text_pdf_pages: bool,
     pub image_enrichment_workers: u32,
+    /// Chunking strategy: "token_aware" (default — Marker-block / token-budget chunker
+    /// carrying bboxes) or "page_anchor" (the legacy naive paragraph splitter, kept for
+    /// comparison/fallback). Unknown values fall back to token_aware.
+    #[serde(default = "default_chunker")]
+    pub chunker: String,
+    /// Optional path to the Marker sidecar (`scripts/archon_marker_sidecar.py`). When set
+    /// (with token_aware), PDF ingest uses Marker for real bboxes; absent → flat-text blocks.
+    #[serde(default)]
+    pub marker_sidecar: Option<String>,
+    /// Device override for the Marker sidecar (cuda|mps|cpu); None → sidecar auto-detects.
+    #[serde(default)]
+    pub marker_device: Option<String>,
+    /// Python interpreter for the Marker sidecar (e.g. a venv's python where marker-pdf is
+    /// installed). None → "python3" on PATH. Lets the sidecar use an isolated env without
+    /// touching the system interpreter.
+    #[serde(default)]
+    pub marker_python: Option<String>,
+    /// Optional hard cap (MiB) on GPU memory the placement planner may use for Marker; clamps
+    /// detected free VRAM. None → use detected free VRAM as-is. (archon-accel DeviceOverrides.)
+    #[serde(default)]
+    pub marker_memory_budget_mb: Option<u64>,
+    /// Persistent Marker HTTP server base URL (e.g. "http://127.0.0.1:8010"); when set, PDF
+    /// ingest uses the warm server instead of the per-doc subprocess sidecar — models stay
+    /// resident, no per-doc reload. Takes precedence over `marker_sidecar`. None (default) →
+    /// today's subprocess behavior, unchanged.
+    #[serde(default)]
+    pub marker_url: Option<String>,
+    /// Scanned-book detector for the image-enrichment skip decision: "union" (default — a page is a
+    /// scan if the aspect pixel-heuristic OR the coverage % flags it; corpus-validated as strictly
+    /// best), "aspect" (shipped pixel-dims heuristic alone), or "coverage" (page-coverage % via ppi
+    /// + MediaBox alone). The aspect + coverage verdicts always run for the pre-ingest report +
+    /// divergence log; this selects which one is ACTIVE (governs whether page-scan images are
+    /// enriched). Unknown values fall back to the default (union).
+    #[serde(default = "default_scan_detector")]
+    pub scan_detector: String,
+    /// Opt-in: VLM-describe Marker's detected FIGURE regions by cropping them from a page render.
+    /// For scanned books, figures are baked into the page scans (no discrete embedded image to
+    /// describe), so this is the only way to caption them. Default false (adds a render + VLM call
+    /// per figure). Requires a Marker sidecar + an enabled VLM.
+    #[serde(default)]
+    pub figure_region_vlm: bool,
+}
+
+fn default_chunker() -> String {
+    "token_aware".to_string()
+}
+
+fn default_scan_detector() -> String {
+    "union".to_string()
+}
+
+impl PdfPolicy {
+    /// True unless explicitly set to "page_anchor" — so the default and any unknown value
+    /// use the token-aware (bbox-carrying) chunker (best-system default).
+    pub fn use_token_aware_chunker(&self) -> bool {
+        self.chunker != "page_anchor"
+    }
 }
 
 impl Default for PdfPolicy {
@@ -237,6 +294,14 @@ impl Default for PdfPolicy {
             vlm_per_page_image: true,
             render_text_pdf_pages: false,
             image_enrichment_workers: 1,
+            chunker: default_chunker(),
+            marker_sidecar: None,
+            marker_device: None,
+            marker_python: None,
+            marker_memory_budget_mb: None,
+            marker_url: None,
+            scan_detector: default_scan_detector(),
+            figure_region_vlm: false,
         }
     }
 }
@@ -290,6 +355,19 @@ pub struct OllamaVlmPolicy {
     pub endpoint: String,
     pub model: String,
     pub timeout_secs: u64,
+    /// Constrained-VRAM knobs (Ollama request options). `None` = omit the key entirely →
+    /// identical behavior to today (Ollama server defaults).
+    /// Context window; smaller = less VRAM (image description needs ~2-4K, not the 32K default).
+    #[serde(default)]
+    pub num_ctx: Option<u32>,
+    /// How long Ollama keeps the model resident after a request. `"0"` unloads immediately (frees
+    /// VRAM for the next document's Marker on constrained hosts); `"5m"` is the server default.
+    #[serde(default)]
+    pub keep_alive: Option<String>,
+    /// GPU layers to offload. `0` forces CPU (Marker keeps the GPU on ≤8 GB hosts); `None` lets
+    /// Ollama decide. `0` is meaningful and distinct from unset, hence `Option`.
+    #[serde(default)]
+    pub num_gpu: Option<u32>,
 }
 
 impl Default for OllamaVlmPolicy {
@@ -298,6 +376,9 @@ impl Default for OllamaVlmPolicy {
             endpoint: "http://localhost:11434".into(),
             model: "gemma4:e4b".into(),
             timeout_secs: 120,
+            num_ctx: None,
+            keep_alive: None,
+            num_gpu: None,
         }
     }
 }

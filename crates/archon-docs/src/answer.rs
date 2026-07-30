@@ -301,7 +301,7 @@ mod tests {
 
     fn setup(db: &DbInstance) {
         crate::schema::ensure_doc_schema(db).unwrap();
-        crate::schema::ensure_vec_schema(db, 4).unwrap();
+        crate::schema::ensure_vec_schema(db, 4, None).unwrap();
         crate::embed::set_provider(Box::new(MockProvider { dim: 4 }));
     }
 

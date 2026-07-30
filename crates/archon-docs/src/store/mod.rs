@@ -10,6 +10,7 @@ mod counts;
 mod documents;
 mod embeddings;
 mod images;
+mod locators;
 mod pages;
 
 pub use artifacts::*;
@@ -18,6 +19,7 @@ pub use counts::*;
 pub use documents::*;
 pub use embeddings::*;
 pub use images::*;
+pub use locators::*;
 pub use pages::*;
 
 #[cfg(test)]

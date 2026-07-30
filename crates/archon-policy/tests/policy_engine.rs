@@ -352,11 +352,13 @@ fn world_model_cloud_embeddings_require_policy_worker_and_network() {
 
 #[test]
 fn repository_policy_template_parses_all_vlm_provider_fields() {
+    // The shipped/committed template is policy.example.toml; the real .archon/policy.toml is
+    // gitignored (machine-specific paths + local overrides), so validate the template instead.
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join(".archon")
-        .join("policy.toml");
+        .join("policy.example.toml");
     let load = load_policy_from_sources(&[PolicySource {
         label: "workspace",
         path: path.clone(),
@@ -366,8 +368,8 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     // User-customizable fields: assert validity/presence, not exact value, so
     // local overrides (e.g. pointing openai_compat at a self-hosted LM Studio
     // instance) don't break the template-parses test. The exact template
-    // values still ship in .archon/policy.toml; CI checks them implicitly by
-    // running this test against the committed file.
+    // values ship in .archon/policy.example.toml; CI checks them implicitly by
+    // running this test against the committed template.
     assert!(
         matches!(
             load.policy.docs.vlm.provider.as_str(),

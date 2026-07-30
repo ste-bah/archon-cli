@@ -1,0 +1,15 @@
+[package]
+name = "archon-accel"
+version = "0.1.0"
+edition = "2021"
+
+# Archon accelerator + resource detection and a pure placement planner (Port #2 device layer).
+# RUNTIME (not compile-feature-gated) detection of CUDA / Apple-Metal-unified / CPU plus FREE
+# memory, and a deterministic planner that fits the Marker sidecar — with a forward seam for
+# embedding / whisper / frame-VLM consumers — to the host's *free* VRAM (not card size).
+# Degrade-safe: always yields a valid CPU answer, never panics.
+# See plans/archon-ingestion-port-finish-plan-2026-06-30.md §4.
+
+[dependencies]
+serde.workspace = true
+sysinfo.workspace = true

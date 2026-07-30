@@ -9,13 +9,23 @@ use crate::models::PageOffset;
 
 pub async fn extract_image_with_rapidocr(path: &Path) -> Result<OcrExtractResult, DocsError> {
     let started = Instant::now();
-    let output = tokio::process::Command::new(python_bin())
+    let mut command = tokio::process::Command::new(python_bin());
+    command
         .arg("-c")
         .arg(RAPID_OCR_SCRIPT)
         .arg(path)
         .arg(min_score().to_string())
-        .output()
+        // Bounded: a wedged interpreter is killed on the timeout drop, not left hanging a worker.
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(super::provider::ocr_timeout(), command.output())
         .await
+        .map_err(|_elapsed| DocsError::OcrApi {
+            message: format!(
+                "RapidOCR timed out after {}s",
+                super::provider::ocr_timeout().as_secs()
+            ),
+            status_code: None,
+        })?
         .map_err(|e| DocsError::OcrApi {
             message: format!("start RapidOCR Python fallback: {e}"),
             status_code: None,
@@ -60,10 +70,21 @@ pub fn allow_rapidocr_fallback() -> bool {
 }
 
 fn python_bin() -> String {
-    std::env::var("ARCHON_RAPIDOCR_PYTHON")
+    if let Some(value) = std::env::var("ARCHON_RAPIDOCR_PYTHON")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "python3".into())
+    {
+        return value;
+    }
+    // Standalone fallback: the conventional archon helper venv (created during setup) bundles
+    // rapidocr, so RapidOCR works with no env/config. Override with ARCHON_RAPIDOCR_PYTHON.
+    if let Some(home) = dirs::home_dir() {
+        let venv_py = home.join(".archon-marker-venv").join("bin").join("python");
+        if venv_py.exists() {
+            return venv_py.to_string_lossy().into_owned();
+        }
+    }
+    "python3".into()
 }
 
 fn min_score() -> f32 {
@@ -238,6 +259,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial(docs_global_state)] // shares ARCHON_RAPIDOCR_PYTHON with the timeout test
     async fn rapidocr_new_output_object_shape_is_supported() {
         if std::process::Command::new("python3")
             .arg("--version")
@@ -273,6 +295,30 @@ class RapidOCR:
 
         let result = extract_image_with_rapidocr(&image).await.unwrap();
         assert_eq!(result.full_text, "Keep this text");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(docs_global_state)]
+    async fn rapidocr_wedged_subprocess_times_out() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // A "python" that hangs forever must be bounded by ARCHON_OCR_TIMEOUT_SECS, not hang
+        // the worker (kill_on_drop reaps it when the timeout drops the output future).
+        let temp = tempfile::tempdir().unwrap();
+        let hang = temp.path().join("hang.sh");
+        fs::write(&hang, "#!/usr/bin/env bash\nsleep 300\n").unwrap();
+        let mut perms = fs::metadata(&hang).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hang, perms).unwrap();
+        let image = temp.path().join("image.png");
+        fs::write(&image, b"not-really-an-image").unwrap();
+
+        let _python_guard =
+            EnvGuard::set("ARCHON_RAPIDOCR_PYTHON", hang.to_string_lossy().as_ref());
+        let _timeout_guard = EnvGuard::set("ARCHON_OCR_TIMEOUT_SECS", "1");
+
+        let err = extract_image_with_rapidocr(&image).await.unwrap_err();
+        assert!(err.to_string().contains("timed out"), "got: {err}");
     }
 
     struct EnvGuard {

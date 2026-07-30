@@ -81,7 +81,7 @@ pub(crate) fn persist_vlm_description(
     document_id: &str,
     page_ids: &[String],
     description: &vlm::VlmDescription,
-) -> Result<(), DocsError> {
+) -> Result<Vec<ChunkArtifact>, DocsError> {
     let description_text = description.text.trim();
     let artifact_id = format!("vlm-description-{}", uuid::Uuid::new_v4());
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -171,7 +171,8 @@ pub(crate) fn persist_vlm_description(
         message: e.to_string(),
     })?;
 
-    Ok(())
+    // Return the chunks so the caller can fold them into the document's chunks_root (V-1).
+    Ok(chunks)
 }
 
 fn page_number_from_id(page_id: &str) -> Option<u32> {
@@ -197,7 +198,9 @@ pub(crate) fn store_image_embedding_if_supported(
             .push("image embedding skipped: no embedding provider configured".into());
         return;
     };
-    if let Err(e) = crate::schema::ensure_vec_schema(db, provider.dimension()) {
+    if let Err(e) =
+        crate::schema::ensure_vec_schema(db, provider.dimension(), provider.image_dimension())
+    {
         outcome.warnings.push(format!(
             "image embedding skipped: vector schema unavailable: {e}"
         ));

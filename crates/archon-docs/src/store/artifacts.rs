@@ -178,3 +178,53 @@ pub fn insert_processing_job(db: &DbInstance, job: &ProcessingJob) -> Result<()>
     .map_err(|e| anyhow::anyhow!("insert processing job failed: {e}"))?;
     Ok(())
 }
+
+/// Look up a single artifact by id.
+pub fn get_artifact(db: &DbInstance, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
+    let mut params = BTreeMap::new();
+    params.insert("aid".into(), DataValue::from(artifact_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
+         := *doc_artifacts{artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id}, \
+         artifact_id = $aid",
+        params,
+        ScriptMutability::Immutable,
+        "get doc_artifacts",
+    )
+    .map_err(|e| anyhow::anyhow!("get artifact failed: {e}"))?;
+    if result.rows.is_empty() {
+        return Ok(None);
+    }
+    let row = &result.rows[0];
+    Ok(Some(ArtifactRecord {
+        artifact_id: row[0].get_str().unwrap_or("").to_string(),
+        document_id: row[1].get_str().unwrap_or("").to_string(),
+        artifact_type: row[2].get_str().unwrap_or("").to_string(),
+        content_hash: row[3].get_str().unwrap_or("").to_string(),
+        created_at: row[4].get_str().unwrap_or("").to_string(),
+        provenance_record_id: row[5].get_str().unwrap_or("").to_string(),
+    }))
+}
+
+/// Point an existing artifact's `provenance_record_id` at a provenance record (closes the
+/// previously-empty-string gap). `:update` touches only that column for the existing key.
+pub fn set_artifact_provenance_record(
+    db: &DbInstance,
+    artifact_id: &str,
+    record_id: &str,
+) -> Result<()> {
+    let mut params = BTreeMap::new();
+    params.insert("aid".into(), DataValue::from(artifact_id));
+    params.insert("rid".into(), DataValue::from(record_id));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, provenance_record_id] <- [[$aid, $rid]] \
+         :update doc_artifacts { artifact_id => provenance_record_id }",
+        params,
+        ScriptMutability::Mutable,
+        "update doc_artifacts provenance_record_id",
+    )
+    .map_err(|e| anyhow::anyhow!("update doc_artifacts provenance_record_id failed: {e}"))?;
+    Ok(())
+}

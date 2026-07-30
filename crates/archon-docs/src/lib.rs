@@ -6,6 +6,7 @@ pub mod store;
 
 mod docs_db_cache;
 
+pub mod block_chunking;
 pub mod chunking;
 mod cozo_retry;
 pub mod indexing;
@@ -24,12 +25,22 @@ mod ingest_multimodal;
 mod ingest_pdf;
 pub mod ingest_text;
 pub mod inspect;
+pub mod marker_source;
 pub mod ocr;
 pub mod pdf;
+mod pdf_figure_vlm;
 mod pdf_image_enrichment;
+// The `--jobs auto` VRAM→worker derivation lives beside the enrichment engine's own worker
+// knob (`image_workers`) so the two 1..=16 clamps can never drift apart; the CLI needs it to
+// resolve the flag before ingest, hence this single-purpose re-export from an otherwise
+// private module.
+pub use pdf_image_enrichment::{VLM_HEADROOM_MB, VLM_SLOT_MB, auto_image_workers};
 mod pdf_image_progress;
 mod pdf_image_vlm;
+pub mod pdf_scan;
 pub mod provenance;
+pub mod provenance_chunks;
+pub mod quote_verify;
 pub mod reprocess;
 pub mod status;
 mod tool_path;
@@ -49,6 +60,7 @@ mod index_queue_tests;
 pub mod rerank;
 pub mod retrieval;
 mod retrieval_exact;
+pub mod retrieval_image;
 mod retrieval_query;
 mod retrieval_semantic;
 #[cfg(test)]

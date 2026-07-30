@@ -1,0 +1,12 @@
+[package]
+name = "archon-ingest-ext"
+version = "0.1.0"
+edition = "2021"
+
+# Surgical ingestion extensions for Archon (Port #2): the token-aware, bbox-carrying
+# chunker (spine), plus the table gate + locators (forthcoming). Pure-Rust, deterministic,
+# unit-tested. Additive: NOT yet wired into the live ingest path — see the morning handoff.
+
+[dependencies]
+serde_json.workspace = true
+regex.workspace = true

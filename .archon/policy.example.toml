@@ -1,12 +1,15 @@
 # ============================================================================
-# Archon Policy — workspace defaults
+# Archon Policy — EXAMPLE TEMPLATE (safe to commit / share on GitHub)
 # ============================================================================
-# Loaded by archon-policy. See docs/policy.md for the full schema.
+# This is the shareable template — it contains NO machine-specific paths.
+# To use it:  cp .archon/policy.example.toml .archon/policy.toml
+# then edit your copy (your real .archon/policy.toml is gitignored so your
+# absolute paths never get uploaded). See docs/policy.md for the full schema.
 #
 # Load order (later overrides earlier):
 #   1. /etc/archon/policy.toml           — system (lowest)
 #   2. ~/.archon/policy.toml             — user
-#   3. <workspace>/.archon/policy.toml   — project (this file, highest)
+#   3. <workspace>/.archon/policy.toml   — project (highest)
 #
 # Defaults below give new users a working setup with web search + MCP
 # enabled for agents (the common ask). Tighten by setting values to "deny"
@@ -33,10 +36,13 @@ allow_mcp_server_exposure = true
 # [policy.workers] — Per-worker enablement
 # ----------------------------------------------------------------------------
 # Modes per worker: "allow-local" | "allow-cloud" | "deny"
+# NOTE: these are the MASTER gates. `vlm`/`ocr` here must be enabled IN ADDITION to the detailed
+# [policy.docs.vlm] config below — a "deny" here overrides docs.vlm.enabled=true and the VLM never
+# runs (you'll see "denied by policy.workers.vlm" in ingest logs).
 [policy.workers]
-ocr = "allow-local"           # local OCR via pdftotext / tesseract
+ocr = "allow-local"           # local OCR via pdftotext / tesseract (install `tesseract-ocr` for image OCR)
 embedding = "allow-local"     # fastembed (local) or OpenAI (cloud)
-vlm = "deny"                  # set allow-local for Ollama or allow-cloud for Gemini/Anthropic
+vlm = "deny"                  # MASTER gate for figure VLM — set "allow-local" for Ollama (also set [policy.docs.vlm])
 web_fetch = "allow-local"     # WebFetch tool enabled
 
 
@@ -140,9 +146,22 @@ auto_migrate_reasoning_quality = false
 # ----------------------------------------------------------------------------
 # [policy.docs.vlm] — Document VLM (image description) gates
 # ----------------------------------------------------------------------------
-# Off by default. Flip enabled + mode to "local" once you have a local VLM,
-# or to "cloud" + allow_cloud = true if you've reviewed the privacy
-# implications of sending image bytes to a third-party API.
+# Off by default. Adds a natural-language DESCRIPTION of each figure (separate
+# from OCR, which always extracts text inside images).
+#
+# RECOMMENDED for copyrighted material: run a LOCAL vision model so image bytes
+# never leave the box. Install Ollama, `ollama pull qwen2.5vl:7b` (7B for >=16 GB
+# VRAM runs it on GPU; ~8 GB runs it on CPU, see the guide), then set below:
+#     enabled = true
+#     mode = "local"
+#     provider = "ollama"
+#     [policy.docs.vlm.ollama] model = "qwen2.5vl:7b"
+# ALSO REQUIRED: set [policy.workers] vlm = "allow-local" (the master gate above) — otherwise
+# this whole section is ignored. And `sudo apt install tesseract-ocr` for the figure-text OCR.
+# NB: qwen2.5vl works on both old and new Ollama; llama3.2-vision (mllama) only
+# runs on older Ollama builds. See docs/ingestion/hardware-vram-guide.md for VRAM tiers.
+# Cloud (best quality, but uploads image bytes): mode="cloud", provider="anthropic"
+# | "gemini", allow_cloud = true, and set the matching *_API_KEY env var.
 [policy.docs.vlm]
 enabled = false
 mode = "disabled"  # "disabled" | "local" | "cloud" | "hybrid"
@@ -154,6 +173,10 @@ require_user_confirmation_for_cloud = true
 endpoint = "http://localhost:11434"
 model = "gemma4:e4b"
 timeout_secs = 120
+# Constrained-VRAM knobs (omit for Ollama defaults). See docs/ingestion/hardware-vram-guide.md.
+# num_ctx = 2048       # smaller context window = much less VRAM (default 32K is wasteful here)
+# keep_alive = "0"     # unload the model immediately after each doc (frees VRAM for Marker); "5m" default
+# num_gpu = 0          # 0 = force CPU (Marker keeps the GPU on <=8 GB hosts); omit to let Ollama decide
 
 [policy.docs.vlm.gemini]
 api_key_env = "GOOGLE_API_KEY"
@@ -188,6 +211,31 @@ min_image_bytes = 4096
 vlm_per_page_image = true
 render_text_pdf_pages = false
 image_enrichment_workers = 1
+# Scanned-book detector for the image-enrichment skip decision:
+#   "union"    = a page is a scan if aspect OR coverage flags it. SHIPPED DEFAULT. Corpus dry-run
+#                (161 PDFs) showed it is strictly best — it catches the low-DPI scans aspect misses
+#                AND the margin-cropped scans coverage misses.
+#   "aspect"   = pixel-dims heuristic alone (large AND page-shaped). Misses low-DPI scans.
+#   "coverage" = page-coverage % via image ppi + page MediaBox alone. Misses margin-cropped scans.
+# aspect + coverage ALWAYS run for the pre-ingest report + divergence log regardless of this setting;
+# this selects which verdict is ACTIVE (governs whether full-page-scan images are skipped).
+scan_detector = "union"
+# Opt-in: VLM-describe Marker's detected FIGURE regions by cropping them from a page render. For
+# scanned books, figures are baked into the page scans (no discrete embedded image to describe), so
+# this is the only way to caption them. Adds a page render + one VLM call per figure. Requires a
+# Marker sidecar (below) + an enabled VLM ([policy.docs.vlm]). Default false.
+figure_region_vlm = false
+
+# --- Device-adaptive Marker layout + bbox (LOCAL, OPT-IN) --------------------
+# Uncomment + point at YOUR local Marker install to get bbox-carrying ingestion:
+# `archon docs ingest` then auto-runs Marker on the best device (free-VRAM
+# CUDA -> MPS -> CPU), page-range-chunks big docs onto the GPU, and emits real
+# per-block bboxes. Leave commented -> ingestion uses pdftotext (text only, no
+# bboxes). Requires a venv with `pip install marker-pdf`.
+#   marker_sidecar = "/ABSOLUTE/PATH/TO/archon-cli/scripts/archon_marker_sidecar.py"
+#   marker_python  = "/ABSOLUTE/PATH/TO/marker-venv/bin/python3"
+#   marker_device  = "auto"           # auto = free-VRAM CUDA -> MPS -> CPU (default)
+#   marker_memory_budget_mb = 6000    # optional VRAM cap; also forces page-range chunking
 
 # ----------------------------------------------------------------------------
 # [policy.docs.retrieval] — Hybrid search weighting

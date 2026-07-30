@@ -9,9 +9,15 @@ use crate::errors::DocsError;
 const PREFIX_DOCUMENT: &str = "search_document: ";
 const PREFIX_QUERY: &str = "search_query: ";
 const BGE_BASE_DIM: usize = 768;
+/// CLIP ViT-B/32 image+text embedding dimension (shared cross-modal space).
+pub const CLIP_IMAGE_DIM: usize = 512;
 
 pub struct FastembedProvider {
     model: Mutex<Option<fastembed::TextEmbedding>>,
+    /// CLIP ViT-B/32 VISION encoder (lazy) — embeds image bytes → 512-dim.
+    image_model: Mutex<Option<fastembed::ImageEmbedding>>,
+    /// CLIP ViT-B/32 TEXT encoder (lazy) — embeds text queries into the image space.
+    clip_text_model: Mutex<Option<fastembed::TextEmbedding>>,
     cache_dir: PathBuf,
     load_timeout: Duration,
 }
@@ -27,6 +33,8 @@ impl FastembedProvider {
         })?;
         Ok(Self {
             model: Mutex::new(None),
+            image_model: Mutex::new(None),
+            clip_text_model: Mutex::new(None),
             cache_dir,
             load_timeout,
         })
@@ -44,6 +52,41 @@ impl FastembedProvider {
                 "loading local embedding model BGE-base-en-v1.5"
             );
             *guard = Some(load_fastembed_with_timeout(
+                self.cache_dir.clone(),
+                self.load_timeout,
+            )?);
+        }
+        Ok(guard)
+    }
+
+    fn ensure_image_model(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<fastembed::ImageEmbedding>>, DocsError> {
+        let mut guard = self.image_model.lock().map_err(|e| DocsError::Embedding {
+            message: format!("image model lock poisoned: {e}"),
+        })?;
+        if guard.is_none() {
+            tracing::info!("loading CLIP ViT-B/32 image encoder");
+            *guard = Some(load_image_model_with_timeout(
+                self.cache_dir.clone(),
+                self.load_timeout,
+            )?);
+        }
+        Ok(guard)
+    }
+
+    fn ensure_clip_text_model(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<fastembed::TextEmbedding>>, DocsError> {
+        let mut guard = self
+            .clip_text_model
+            .lock()
+            .map_err(|e| DocsError::Embedding {
+                message: format!("clip text model lock poisoned: {e}"),
+            })?;
+        if guard.is_none() {
+            tracing::info!("loading CLIP ViT-B/32 text encoder");
+            *guard = Some(load_clip_text_with_timeout(
                 self.cache_dir.clone(),
                 self.load_timeout,
             )?);
@@ -84,6 +127,37 @@ impl LocalEmbeddingProvider for FastembedProvider {
                 message: format!("fastembed embed_query failed: {e}"),
             })?;
         Ok(normalise(&raw[0]))
+    }
+
+    fn embed_image(&self, image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
+        let guard = self.ensure_image_model()?;
+        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+            message: "image model not loaded".into(),
+        })?;
+        let raw = model
+            .embed_bytes(&[image_bytes], None)
+            .map_err(|e| DocsError::Embedding {
+                message: format!("fastembed embed_image failed: {e}"),
+            })?;
+        Ok(Some(normalise(&raw[0])))
+    }
+
+    fn embed_image_query(&self, query: &str) -> Result<Option<Vec<f32>>, DocsError> {
+        let guard = self.ensure_clip_text_model()?;
+        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+            message: "clip text model not loaded".into(),
+        })?;
+        // CLIP text encoder takes the raw query (no BGE search_query prefix).
+        let raw = model
+            .embed(vec![query.to_string()], None)
+            .map_err(|e| DocsError::Embedding {
+                message: format!("fastembed embed_image_query failed: {e}"),
+            })?;
+        Ok(Some(normalise(&raw[0])))
+    }
+
+    fn image_dimension(&self) -> Option<usize> {
+        Some(CLIP_IMAGE_DIM)
     }
 
     fn dimension(&self) -> usize {
@@ -128,6 +202,18 @@ impl LocalEmbeddingProvider for MultiFastembedProvider {
         self.providers[0].embed_query(query)
     }
 
+    fn embed_image(&self, image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
+        self.providers[0].embed_image(image_bytes)
+    }
+
+    fn embed_image_query(&self, query: &str) -> Result<Option<Vec<f32>>, DocsError> {
+        self.providers[0].embed_image_query(query)
+    }
+
+    fn image_dimension(&self) -> Option<usize> {
+        self.providers[0].image_dimension()
+    }
+
     fn dimension(&self) -> usize {
         BGE_BASE_DIM
     }
@@ -170,6 +256,57 @@ fn load_fastembed_with_timeout(
         }),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(DocsError::Embedding {
             message: "fastembed model loader thread exited without a result".into(),
+        }),
+    }
+}
+
+fn load_image_model_with_timeout(
+    cache_dir: PathBuf,
+    timeout: Duration,
+) -> Result<fastembed::ImageEmbedding, DocsError> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let options = fastembed::ImageInitOptions::new(fastembed::ImageEmbeddingModel::ClipVitB32)
+            .with_cache_dir(cache_dir)
+            .with_show_download_progress(false);
+        let _ = tx.send(fastembed::ImageEmbedding::try_new(options));
+    });
+    recv_model(rx, timeout, "CLIP image")
+}
+
+fn load_clip_text_with_timeout(
+    cache_dir: PathBuf,
+    timeout: Duration,
+) -> Result<fastembed::TextEmbedding, DocsError> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let options = fastembed::InitOptions::new(fastembed::EmbeddingModel::ClipVitB32)
+            .with_cache_dir(cache_dir)
+            .with_show_download_progress(false);
+        let _ = tx.send(fastembed::TextEmbedding::try_new(options));
+    });
+    recv_model(rx, timeout, "CLIP text")
+}
+
+/// Receive a model-load result from a loader thread, mapping timeouts/errors uniformly.
+fn recv_model<T>(
+    rx: std::sync::mpsc::Receiver<anyhow::Result<T>>,
+    timeout: Duration,
+    label: &str,
+) -> Result<T, DocsError> {
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(model)) => Ok(model),
+        Ok(Err(error)) => Err(DocsError::Embedding {
+            message: format!("failed to load {label} model: {error}"),
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(DocsError::Embedding {
+            message: format!(
+                "timed out loading {label} model after {}s",
+                timeout.as_secs()
+            ),
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(DocsError::Embedding {
+            message: format!("{label} model loader thread exited without a result"),
         }),
     }
 }

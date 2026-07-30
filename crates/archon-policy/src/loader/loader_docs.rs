@@ -27,6 +27,9 @@ struct RawOllamaVlmPolicy {
     endpoint: Option<String>,
     model: Option<String>,
     timeout_secs: Option<u64>,
+    num_ctx: Option<u32>,
+    keep_alive: Option<String>,
+    num_gpu: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -60,6 +63,14 @@ struct RawPdfPolicy {
     vlm_per_page_image: Option<bool>,
     render_text_pdf_pages: Option<bool>,
     image_enrichment_workers: Option<u32>,
+    chunker: Option<String>,
+    marker_sidecar: Option<String>,
+    marker_device: Option<String>,
+    marker_python: Option<String>,
+    marker_memory_budget_mb: Option<u64>,
+    marker_url: Option<String>,
+    scan_detector: Option<String>,
+    figure_region_vlm: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -119,6 +130,15 @@ fn apply_ollama_vlm(policy: &mut OllamaVlmPolicy, raw: RawOllamaVlmPolicy) {
     }
     if let Some(value) = raw.timeout_secs {
         policy.timeout_secs = value;
+    }
+    if raw.num_ctx.is_some() {
+        policy.num_ctx = raw.num_ctx;
+    }
+    if raw.keep_alive.is_some() {
+        policy.keep_alive = raw.keep_alive;
+    }
+    if raw.num_gpu.is_some() {
+        policy.num_gpu = raw.num_gpu;
     }
 }
 
@@ -183,6 +203,36 @@ fn apply_pdf(policy: &mut PdfPolicy, raw: RawPdfPolicy) {
     if let Some(value) = raw.image_enrichment_workers {
         policy.image_enrichment_workers = value.clamp(1, 16);
     }
+    if let Some(value) = raw.chunker {
+        // Only accept known strategies; anything else keeps the default (token_aware).
+        if value == "page_anchor" || value == "token_aware" {
+            policy.chunker = value;
+        }
+    }
+    if raw.marker_sidecar.is_some() {
+        policy.marker_sidecar = raw.marker_sidecar;
+    }
+    if raw.marker_device.is_some() {
+        policy.marker_device = raw.marker_device;
+    }
+    if raw.marker_python.is_some() {
+        policy.marker_python = raw.marker_python;
+    }
+    if raw.marker_memory_budget_mb.is_some() {
+        policy.marker_memory_budget_mb = raw.marker_memory_budget_mb;
+    }
+    if raw.marker_url.is_some() {
+        policy.marker_url = raw.marker_url;
+    }
+    if let Some(value) = raw.scan_detector {
+        // Only accept known detectors; anything else keeps the default (union).
+        if value == "aspect" || value == "coverage" || value == "union" {
+            policy.scan_detector = value;
+        }
+    }
+    if let Some(value) = raw.figure_region_vlm {
+        policy.figure_region_vlm = value;
+    }
 }
 
 fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
@@ -191,5 +241,64 @@ fn apply_retrieval(policy: &mut RetrievalPolicy, raw: RawRetrievalPolicy) {
     }
     if let Some(value) = raw.semantic_weight {
         policy.semantic_weight = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_detector_coverage_is_applied() {
+        let mut pdf = PdfPolicy::default();
+        assert_eq!(pdf.scan_detector, "union", "default guard");
+        apply_pdf(
+            &mut pdf,
+            RawPdfPolicy {
+                scan_detector: Some("coverage".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(pdf.scan_detector, "coverage");
+    }
+
+    #[test]
+    fn scan_detector_unknown_value_keeps_default() {
+        let mut pdf = PdfPolicy::default();
+        apply_pdf(
+            &mut pdf,
+            RawPdfPolicy {
+                scan_detector: Some("nonsense".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            pdf.scan_detector, "union",
+            "unknown detectors are rejected → default kept"
+        );
+    }
+
+    #[test]
+    fn marker_url_from_toml_flows_through_raw_docs() {
+        let raw: RawDocsPolicy =
+            toml::from_str("[pdf]\nmarker_url = \"http://127.0.0.1:8010\"\n").expect("parse");
+        let mut docs = DocsPolicy::default();
+        assert_eq!(docs.pdf.marker_url, None, "default guard");
+        apply_docs(&mut docs, raw);
+        assert_eq!(
+            docs.pdf.marker_url,
+            Some("http://127.0.0.1:8010".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_detector_from_toml_flows_through_raw_docs() {
+        // The toml → Raw → apply path must carry scan_detector (the field was previously dropped
+        // because the loader layers through Raw structs, not PdfPolicy directly).
+        let raw: RawDocsPolicy =
+            toml::from_str("[pdf]\nscan_detector = \"coverage\"\n").expect("parse");
+        let mut docs = DocsPolicy::default();
+        apply_docs(&mut docs, raw);
+        assert_eq!(docs.pdf.scan_detector, "coverage");
     }
 }

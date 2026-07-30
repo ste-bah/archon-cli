@@ -69,7 +69,7 @@ fn index_pending_builds_current_persisted_snapshot() {
 fn parallel_indexing_builds_current_persisted_snapshot() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    crate::schema::ensure_vec_schema(&db, 4).unwrap();
+    crate::schema::ensure_vec_schema(&db, 4, None).unwrap();
     crate::embed::set_provider(Box::new(ParallelMockProvider { dim: 4 }));
     insert_test_chunk(&db, "chunk-parallel-a", "parallel snapshot a");
     insert_test_chunk(&db, "chunk-parallel-b", "parallel snapshot b");

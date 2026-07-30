@@ -114,6 +114,66 @@ pub struct ChunkArtifact {
     pub embedding_status: String,
 }
 
+/// Per-chunk spatial provenance (verbatim-provenance spec §2). Keyed by `chunk_id`,
+/// joined at query time — never migrates `doc_chunks`. `super_box`/`blocks` are
+/// JSON-encoded (Cozo has no Json column → String, resolution #2). `coord_space`
+/// records the origin/scale provenance ("marker" | "pdf_topleft" | "none").
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChunkSpatial {
+    pub chunk_id: String,
+    pub page_num: u32,
+    pub super_box: String,
+    pub blocks: String,
+    pub coord_space: String,
+    pub spatial_hash: String,
+}
+
+/// Per-chunk integrity hashes (verbatim-provenance spec §2). Resolution #4: Archon does
+/// no text cleaning, so `clean_sha256 == doc_chunks.content_hash` and is referenced there,
+/// not duplicated here. `commit_hash` binds text + spatial into the provenance chain.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChunkHashes {
+    pub chunk_id: String,
+    pub raw_sha256: String,
+    pub cleaning_version: String,
+    pub commit_hash: String,
+}
+
+/// What kind of running-head locator was captured (ingestion-ports spec §4b).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LocatorKind {
+    PageNumber,
+    Bekker,
+}
+
+impl LocatorKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PageNumber => "PageNumber",
+            Self::Bekker => "Bekker",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "Bekker" => Self::Bekker,
+            _ => Self::PageNumber,
+        }
+    }
+}
+
+/// A citation locator captured from a page's running head (Bekker number e.g. "1147a",
+/// or a plain page number) and removed from body text. Anchors verbatim citations.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Locator {
+    pub locator_id: String,
+    pub document_id: String,
+    pub page_num: u32,
+    pub kind: LocatorKind,
+    pub value: String,
+    pub bbox: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageDescription {
     pub artifact_id: String,

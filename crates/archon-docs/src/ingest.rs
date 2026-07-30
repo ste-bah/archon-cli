@@ -45,6 +45,11 @@ pub struct IngestFileResult {
     pub pdf_image_vlm_failures: usize,
     pub pdf_image_ocr_failures: usize,
     pub pdf_pages_rendered: usize,
+    /// For a PDF through the token-aware chunker: which coordinate space the chunks got —
+    /// `COORD_MARKER` (real per-block bboxes) or `COORD_NONE` (bbox-less text fallback). `None`
+    /// when no coord was assigned (non-PDF, page_anchor chunker, or skipped). Drives the
+    /// end-of-run COORD integrity summary so a silent degradation to text fallback is visible.
+    pub pdf_coord: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -58,6 +63,9 @@ pub(crate) struct PipelineOutcome {
     pub(crate) pdf_image_vlm_failures: usize,
     pub(crate) pdf_image_ocr_failures: usize,
     pub(crate) pdf_pages_rendered: usize,
+    /// Coordinate space the PDF's chunks landed in (`COORD_MARKER`/`COORD_NONE`); see
+    /// `IngestFileResult::pdf_coord`.
+    pub(crate) pdf_coord: Option<&'static str>,
 }
 
 /// Detect media type from file extension.
@@ -182,6 +190,7 @@ pub async fn ingest_file_with_policy(
             pdf_image_vlm_failures: 0,
             pdf_image_ocr_failures: 0,
             pdf_pages_rendered: 0,
+            pdf_coord: None,
         });
     }
 
@@ -291,6 +300,7 @@ pub async fn ingest_file_with_policy(
         pdf_image_vlm_failures: outcome.pdf_image_vlm_failures,
         pdf_image_ocr_failures: outcome.pdf_image_ocr_failures,
         pdf_pages_rendered: outcome.pdf_pages_rendered,
+        pdf_coord: outcome.pdf_coord,
     })
 }
 
@@ -345,10 +355,11 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         language_hint: None,
     };
 
+    let mut image_ocr_failed = false;
     let extract_result = match provider.extract(request).await {
         Ok(result) => result,
         Err(e) => {
-            // Mark OCR run as Failed before propagating
+            // Mark OCR run as Failed
             let _ = store::update_ocr_run_completion(
                 db,
                 &ocr_run_id,
@@ -356,22 +367,47 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
                 &chrono::Utc::now().to_rfc3339(),
                 0,
             );
-            return Err(e);
+            // For IMAGES, OCR is best-effort — the CLIP visual embedding is the primary
+            // value (e.g. game frames carry little/no text), so a failed OCR must NOT abort
+            // the document. Proceed with empty text + a single page so the image still gets
+            // embedded and stored. For all other media, propagate the failure.
+            if is_image_media_type(media_type) {
+                image_ocr_failed = true;
+                outcome.warnings.push(format!(
+                    "image OCR failed (continuing to image embedding): {e}"
+                ));
+                crate::ocr::provider::OcrExtractResult {
+                    full_text: String::new(),
+                    page_count: 1,
+                    page_offsets: vec![crate::models::PageOffset {
+                        page: 1,
+                        char_start: 0,
+                        char_end: 0,
+                    }],
+                    processing_duration_ms: 0,
+                }
+            } else {
+                return Err(e);
+            }
         }
     };
 
-    // Update OCR run to Completed
-    let completed_at = chrono::Utc::now().to_rfc3339();
-    store::update_ocr_run_completion(
-        db,
-        &ocr_run_id,
-        &OcrStatus::Completed,
-        &completed_at,
-        extract_result.processing_duration_ms,
-    )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    // Update OCR run to Completed — UNLESS image OCR failed above. In that case the run is
+    // already (correctly) recorded as Failed; the document still proceeds to image embedding,
+    // but the OCR run's provenance status must not be relabeled Completed.
+    if !image_ocr_failed {
+        let completed_at = chrono::Utc::now().to_rfc3339();
+        store::update_ocr_run_completion(
+            db,
+            &ocr_run_id,
+            &OcrStatus::Completed,
+            &completed_at,
+            extract_result.processing_duration_ms,
+        )
+        .map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+    }
 
     let full_text = extract_result.full_text;
     let page_offsets = extract_result.page_offsets;

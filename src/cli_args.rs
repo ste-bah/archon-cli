@@ -25,6 +25,7 @@ pub use data_actions::{
     BehaviourAction, ConstellationAction, DocsAction, DocsIndexDaemonAction, KbAction,
     LearningAction, LearningGnnAction, MeaningAction, MemoryAction, PluginAction, ProvAction,
     RemoteAction, RetrospectiveAnalyzerArg, SelfAction, SelfPlansAction, SelfTrustAction,
+    StyleAction,
 };
 pub use permissions_actions::PermissionsAction;
 pub use reasoning_actions::{BriefingAction, ReasoningAction, ReasoningCostAction};

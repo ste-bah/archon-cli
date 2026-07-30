@@ -107,7 +107,7 @@ mod tests {
     fn cache_reuses_same_hash_embedding() {
         let db = DbInstance::new("mem", "", Default::default()).unwrap();
         ensure_doc_schema(&db).unwrap();
-        ensure_vec_schema(&db, 2).unwrap();
+        ensure_vec_schema(&db, 2, None).unwrap();
         let source = chunk("source", "indexed");
         let target = chunk("target", "pending");
         store::insert_chunk(&db, &source).unwrap();
@@ -137,7 +137,7 @@ mod tests {
     fn cache_reuses_hits_in_bulk_and_keeps_misses() {
         let db = DbInstance::new("mem", "", Default::default()).unwrap();
         ensure_doc_schema(&db).unwrap();
-        ensure_vec_schema(&db, 2).unwrap();
+        ensure_vec_schema(&db, 2, None).unwrap();
         let source = chunk("source", "indexed");
         let target_a = chunk("target-a", "pending");
         let target_b = chunk("target-b", "pending");
