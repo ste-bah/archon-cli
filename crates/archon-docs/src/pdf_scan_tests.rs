@@ -70,8 +70,10 @@ fn retained_images_keeps_real_figures_and_unparsable_size() {
 
 #[test]
 fn retained_images_honors_extract_embedded_images_false() {
-    let mut policy = PdfPolicy::default();
-    policy.extract_embedded_images = false;
+    let policy = PdfPolicy {
+        extract_embedded_images: false,
+        ..PdfPolicy::default()
+    };
     let kept = retained_images(vec![entry(1, 1500, 2400, Some(150))], &policy);
     assert!(
         kept.is_empty(),

@@ -324,9 +324,11 @@ async function workflow(w) {{
 }
 
 fn failed_record_with_summary(call_id: &str, summary: &str) -> WorkflowV2CallRecord {
-    let mut result = WorkflowV2Result::default();
-    result.status = WorkflowV2Status::Failed;
-    result.summary = summary.to_string();
+    let result = WorkflowV2Result {
+        status: WorkflowV2Status::Failed,
+        summary: summary.to_string(),
+        ..WorkflowV2Result::default()
+    };
     WorkflowV2CallRecord::new(
         "run",
         WorkflowV2HostCall {

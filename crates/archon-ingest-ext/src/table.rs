@@ -43,7 +43,7 @@ fn ncols(rows: &[Vec<String>]) -> usize {
     rows.iter().map(|r| r.len()).max().unwrap_or(0)
 }
 
-fn cell<'a>(rows: &'a [Vec<String>], r: usize, c: usize) -> &'a str {
+fn cell(rows: &[Vec<String>], r: usize, c: usize) -> &str {
     rows[r].get(c).map(|s| s.trim()).unwrap_or("")
 }
 
@@ -58,9 +58,9 @@ pub fn is_real_table(rows: &[Vec<String>], title_markers: &[String]) -> bool {
     let dlen = (nrows - 1) as f64; // data = rows[1..]
     let mut col_content = vec![0usize; cols];
     for r in 1..nrows {
-        for c in 0..cols {
+        for (c, count) in col_content.iter_mut().enumerate() {
             if !cell(rows, r, c).is_empty() {
-                col_content[c] += 1;
+                *count += 1;
             }
         }
     }

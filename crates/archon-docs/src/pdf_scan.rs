@@ -226,7 +226,7 @@ fn retained_images(
         .into_iter()
         .filter(|e| {
             e.width.max(e.height) >= pdf_policy.min_image_dimension
-                && e.bytes.map_or(true, |b| b >= pdf_policy.min_image_bytes)
+                && e.bytes.is_none_or(|b| b >= pdf_policy.min_image_bytes)
         })
         .collect()
 }

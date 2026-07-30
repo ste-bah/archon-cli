@@ -50,8 +50,9 @@ pub fn analyze_noun_verb(text: &str) -> NounVerbMetrics {
     for sent in &sentences {
         let lower = sent.to_lowercase();
         let sw: Vec<&str> = WHITESPACE.split(&lower).collect();
-        for i in 0..sw.len().saturating_sub(1) {
-            let cleaned: String = sw[i].chars().filter(|c| c.is_ascii_lowercase()).collect();
+        // Last word can't head a phrase, so stop one short.
+        for word in sw.iter().take(sw.len().saturating_sub(1)) {
+            let cleaned: String = word.chars().filter(|c| c.is_ascii_lowercase()).collect();
             if PREPOSITIONS.contains(cleaned.as_str()) {
                 prep_phrase_count += 1;
             }

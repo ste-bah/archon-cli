@@ -91,7 +91,7 @@ pub(crate) async fn enrich_figure_regions(
                     collected.extend(persist_vlm_description(
                         db,
                         document_id,
-                        &[page_id.clone()],
+                        std::slice::from_ref(&page_id),
                         &description,
                     )?);
                     outcome.vlm_descriptions += 1;

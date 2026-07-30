@@ -120,8 +120,6 @@ pub fn analyze_periodic(text: &str) -> PeriodicMetrics {
             }
         }
         let is_short = words.len() < 10;
-        let is_long = words.len() >= 30;
-        let has_coord_chain = AND_RE.find_iter(sent).count() >= 3;
         if starts_with_subord || starts_with_participle || early_commas > late_commas {
             periodic_signals += 1.0;
             if starts_with_subord || starts_with_participle {
@@ -129,9 +127,9 @@ pub fn analyze_periodic(text: &str) -> PeriodicMetrics {
             }
         } else if is_short {
             running_signals += 1.2;
-        } else if is_long && has_coord_chain {
-            running_signals += 1.0;
         } else {
+            // A long sentence with a coordinating chain scored the same 1.0 as any
+            // other running sentence, so the branch distinguishing it was dead.
             running_signals += 1.0;
         }
     }

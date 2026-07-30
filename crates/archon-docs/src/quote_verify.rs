@@ -173,20 +173,20 @@ pub fn find_fragment_bboxes(
             best = Some((i, sim));
         }
     }
-    if let Some((i, sim)) = best {
-        if sim >= REPORT_FLOOR {
-            let hit = &chunks[i];
-            return Ok(Some(build_location(
-                db,
-                document_id,
-                &source_path,
-                &chunks,
-                &[i],
-                hit.content.clone(),
-                sim,
-                MatchKind::Fuzzy,
-            )));
-        }
+    if let Some((i, sim)) = best
+        && sim >= REPORT_FLOOR
+    {
+        let hit = &chunks[i];
+        return Ok(Some(build_location(
+            db,
+            document_id,
+            &source_path,
+            &chunks,
+            &[i],
+            hit.content.clone(),
+            sim,
+            MatchKind::Fuzzy,
+        )));
     }
     Ok(None)
 }

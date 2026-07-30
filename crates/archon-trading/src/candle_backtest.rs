@@ -155,7 +155,7 @@ fn ahdm_entry(bars: &[OhlcvBar], index: usize) -> bool {
         bars[index].low < prior_low(bars, index, 10) && bars[index].close > bars[index - 1].close;
     let vector_volume = bars[index].volume > volume_sma(bars, index, 20) * 1.15;
     let range_ok = bar_range_at(&bars[index]) <= average_range(bars, index, 14) * 1.8;
-    let session_ok = !bars[index].timestamp.contains("T00:00:00Z") || index % 5 != 0;
+    let session_ok = !bars[index].timestamp.contains("T00:00:00Z") || !index.is_multiple_of(5);
     (trend && liquidity_reclaim && vector_volume && range_ok && session_ok) || index == 20
 }
 

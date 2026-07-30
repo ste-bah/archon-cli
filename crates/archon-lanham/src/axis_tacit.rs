@@ -46,8 +46,8 @@ pub fn detect_tacit(text: &str) -> TacitPatterns {
     let mut alliteration_count = 0i64;
     for i in 0..content_words.len().saturating_sub(2) {
         if let Some(a) = content_words[i].chars().next() {
-            if Some(a) == content_words[i + 1].chars().next()
-                && Some(a) == content_words[i + 2].chars().next()
+            if content_words[i + 1].starts_with(a)
+                && content_words[i + 2].starts_with(a)
                 && CONSONANTS.contains(a)
             {
                 alliteration_count += 1;

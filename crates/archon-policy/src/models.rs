@@ -255,10 +255,10 @@ pub struct PdfPolicy {
     pub marker_url: Option<String>,
     /// Scanned-book detector for the image-enrichment skip decision: "union" (default — a page is a
     /// scan if the aspect pixel-heuristic OR the coverage % flags it; corpus-validated as strictly
-    /// best), "aspect" (shipped pixel-dims heuristic alone), or "coverage" (page-coverage % via ppi
-    /// + MediaBox alone). The aspect + coverage verdicts always run for the pre-ingest report +
-    /// divergence log; this selects which one is ACTIVE (governs whether page-scan images are
-    /// enriched). Unknown values fall back to the default (union).
+    /// best), "aspect" (shipped pixel-dims heuristic alone), or "coverage" (page-coverage % via
+    /// ppi + MediaBox alone). The aspect + coverage verdicts always run for the pre-ingest
+    /// report + divergence log; this selects which one is ACTIVE (governs whether page-scan
+    /// images are enriched). Unknown values fall back to the default (union).
     #[serde(default = "default_scan_detector")]
     pub scan_detector: String,
     /// Opt-in: VLM-describe Marker's detected FIGURE regions by cropping them from a page render.

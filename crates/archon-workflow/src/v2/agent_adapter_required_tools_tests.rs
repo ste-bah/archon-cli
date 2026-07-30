@@ -31,9 +31,11 @@ fn write_request_with_input(input: serde_json::Value) -> WorkflowV2AgentRequest 
 }
 
 fn noop_result() -> WorkflowV2Result {
-    let mut result = WorkflowV2Result::default();
-    result.status = WorkflowV2Status::Noop;
-    result.summary = "already complete: artifacts present".to_string();
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::Noop,
+        summary: "already complete: artifacts present".to_string(),
+        ..WorkflowV2Result::default()
+    };
     result.task_coverage.push(WorkflowV2TaskCoverage {
         task_id: "TASK-TDL-120".to_string(),
         status: WorkflowV2TaskCoverageStatus::Noop,

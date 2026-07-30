@@ -172,7 +172,7 @@ fn merge_two(a: ChunkOut, b: ChunkOut) -> ChunkOut {
     let page_start = a.page_start.min(b.page_start);
     let page_end = a.page_end.max(b.page_end);
     let mut pages: Vec<(u32, Vec<[f32; 4]>)> = Vec::new();
-    for pb in a.bboxes.into_iter().chain(b.bboxes.into_iter()) {
+    for pb in a.bboxes.into_iter().chain(b.bboxes) {
         if let Some(e) = pages.iter_mut().find(|(p, _)| *p == pb.page_num) {
             e.1.extend(pb.blocks);
         } else {

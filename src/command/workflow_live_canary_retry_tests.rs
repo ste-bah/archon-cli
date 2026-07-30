@@ -11,18 +11,21 @@ use super::{LiveApprovalMode, run_live_action};
 const TASK_ID: &str = "TASK-RETRY-001";
 const ARTIFACT_REL: &str = ".archon/artifacts/TASK-RETRY-001/proof.txt";
 
-static LIFECYCLE_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+// tokio's Mutex, not std's: the guard is held for the whole of an async test
+// (it serialises ARCHON_SCRIPT_LIFECYCLE mutation), and a std guard held across
+// an await point is a deadlock risk clippy rightly rejects.
+static LIFECYCLE_ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 struct DecomposedLifecycleEnvGuard {
     previous: Option<String>,
 }
 
 impl DecomposedLifecycleEnvGuard {
-    fn set() -> (std::sync::MutexGuard<'static, ()>, Self) {
+    async fn set() -> (tokio::sync::MutexGuard<'static, ()>, Self) {
         let guard = LIFECYCLE_ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
+            .get_or_init(|| tokio::sync::Mutex::new(()))
             .lock()
-            .expect("lifecycle env lock");
+            .await;
         let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
         unsafe {
             std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", "0");
@@ -338,7 +341,7 @@ fn git(repo: &std::path::Path, args: &[&str]) {
 
 #[tokio::test]
 async fn triage_retry_items_launch_retry_verification() {
-    let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set();
+    let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set().await;
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path();
