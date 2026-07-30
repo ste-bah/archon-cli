@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::client::McpClient;
+use crate::tool_bridge::qualified_tool_name;
 use crate::types::{McpError, ServerConfig, ServerState};
 
 mod connect;
@@ -307,7 +308,7 @@ impl McpServerManager {
         match client.list_tools().await {
             Ok(tools) => tools
                 .iter()
-                .map(|t| format!("mcp__{}_{}", server_name, t.name))
+                .map(|t| snapshot_tool_name(server_name, &t.name))
                 .collect(),
             Err(_) => Vec::new(),
         }
@@ -388,6 +389,10 @@ impl Default for McpServerManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn snapshot_tool_name(server_name: &str, tool_name: &str) -> String {
+    qualified_tool_name(server_name, tool_name)
 }
 
 /// Calculate exponential backoff delay capped at [`MAX_BACKOFF`].

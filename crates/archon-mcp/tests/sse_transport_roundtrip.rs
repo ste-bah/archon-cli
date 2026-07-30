@@ -29,7 +29,7 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc};
 
-use archon_mcp::lifecycle::connect_server_for_test;
+use archon_mcp::lifecycle::{McpServerManager, connect_server_for_test};
 use archon_mcp::types::ServerConfig;
 
 // ---------------------------------------------------------------------------
@@ -219,6 +219,34 @@ async fn sse_transport_full_initialize_and_tools_list_roundtrip() {
     // which in turn drops the reqwest POST client and aborts the SSE stream.
     client.shutdown().await.expect("shutdown");
 
+    server.abort();
+}
+
+#[tokio::test]
+async fn manager_snapshot_qualifies_live_sse_tools() {
+    let (addr, server) = spawn_mock_server().await;
+    let manager = McpServerManager::new();
+    let config = ServerConfig {
+        name: "sse-mock".into(),
+        command: String::new(),
+        args: vec![],
+        env: HashMap::new(),
+        disabled: false,
+        transport: "sse".into(),
+        url: Some(format!("http://{addr}/sse")),
+        headers: None,
+        allow_insecure_ws: false,
+        tool_policy: Default::default(),
+    };
+
+    let errors = manager.start_all(vec![config]).await;
+    assert!(errors.is_empty(), "MCP server failed to start: {errors:?}");
+    assert_eq!(
+        manager.list_tools_for("sse-mock").await,
+        vec!["mcp__sse-mock__echo"]
+    );
+
+    assert!(manager.shutdown_all().await.is_empty());
     server.abort();
 }
 
