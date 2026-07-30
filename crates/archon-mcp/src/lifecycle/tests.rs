@@ -6,6 +6,21 @@
 use std::collections::HashMap;
 
 use super::*;
+use crate::tool_bridge::qualified_tool_name;
+
+#[test]
+fn lifecycle_snapshot_name_matches_runtime_qualification() {
+    for (server, tool) in [
+        ("memorygraph", "store_memory"),
+        ("my-server", "tool_name"),
+        ("server_name", "tool-with-hyphen"),
+    ] {
+        assert_eq!(
+            snapshot_tool_name(server, tool),
+            qualified_tool_name(server, tool)
+        );
+    }
+}
 
 #[test]
 fn backoff_delay_values() {
