@@ -6,9 +6,37 @@ pub(crate) fn admit_tool_run_attempt(
     config: &archon_core::config::ArchonConfig,
     request: ToolRunAdmissionRequest,
 ) -> ToolRunAdmission {
-    let Ok(root) = super::world_model_root() else {
+    admit_tool_run_attempt_with_root(config, super::world_model_root(), request)
+}
+
+fn admit_tool_run_attempt_with_root(
+    config: &archon_core::config::ArchonConfig,
+    root: anyhow::Result<std::path::PathBuf>,
+    request: ToolRunAdmissionRequest,
+) -> ToolRunAdmission {
+    let policy = policy_from_config(config);
+    let mode = archon_world_model::guardrail::mode_for_surface(
+        &policy,
+        archon_world_model::integration::WorldAdvisorSurface::ToolRun,
+    );
+    if !policy.enabled || matches!(mode, archon_world_model::WorldGuardrailMode::Off) {
         return ToolRunAdmission::Allowed;
+    }
+    let Ok(root) = root else {
+        return if mode.can_block() {
+            tool_run_storage_block("world-model root is unavailable")
+        } else {
+            ToolRunAdmission::Allowed
+        };
     };
+    admit_tool_run_attempt_at_root(config, &root, request)
+}
+
+fn admit_tool_run_attempt_at_root(
+    config: &archon_core::config::ArchonConfig,
+    root: &Path,
+    request: ToolRunAdmissionRequest,
+) -> ToolRunAdmission {
     let policy = policy_from_config(config);
     let mode = archon_world_model::guardrail::mode_for_surface(
         &policy,
@@ -19,9 +47,12 @@ pub(crate) fn admit_tool_run_attempt(
     }
 
     let started_at = std::time::Instant::now();
-    if let Err(error) = persist_tool_run_candidate_at_root(&root, &request) {
-        tracing::warn!(%error, "failed to persist ToolRun candidate trace; allowing attempt");
-        return ToolRunAdmission::Allowed;
+    if persist_tool_run_candidate_at_root(root, &request).is_err() {
+        return if mode.can_block() {
+            tool_run_storage_block("candidate trace could not be persisted")
+        } else {
+            ToolRunAdmission::Allowed
+        };
     }
     let action_id = tool_run_action_id(&request);
     let summary = tool_run_summary(&request);
@@ -32,7 +63,7 @@ pub(crate) fn admit_tool_run_attempt(
         &action_id,
         &summary,
     );
-    admit_tool_run_with_policy_at_root(&root, &request, policy, mode, advisory, started_at)
+    admit_tool_run_with_policy_at_root(root, &request, policy, mode, advisory, started_at)
 }
 
 #[cfg(test)]
@@ -96,14 +127,19 @@ fn admit_tool_run_with_policy_at_root(
     );
     action.verification_plan = verification_plan_for_decision(&action.action_id, &decision);
     let revision_key = format!("world_guardrail:revision:{}:initial", action.action_id);
-    if let Err(error) = archon_world_model::guardrail::append_guardrail_revision(
+    if archon_world_model::guardrail::append_guardrail_revision(
         root,
         action,
         decision.clone(),
         revision_key,
-    ) {
-        tracing::warn!(%error, "failed to persist ToolRun admission; allowing attempt");
-        return ToolRunAdmission::Allowed;
+    )
+    .is_err()
+    {
+        return if mode.can_block() {
+            tool_run_storage_block("admission storage could not be persisted")
+        } else {
+            ToolRunAdmission::Allowed
+        };
     }
 
     if decision.allowed_to_continue {
@@ -112,6 +148,12 @@ fn admit_tool_run_with_policy_at_root(
         ToolRunAdmission::Blocked {
             reason: tool_run_block_reason(&decision),
         }
+    }
+}
+
+fn tool_run_storage_block(reason: &str) -> ToolRunAdmission {
+    ToolRunAdmission::Blocked {
+        reason: format!("ToolRun guardrail admission storage failure: {reason}"),
     }
 }
 

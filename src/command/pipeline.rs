@@ -145,7 +145,7 @@ async fn handle_code(
         "pipeline-code",
         "pipeline_code_start",
         &format!("coding pipeline: {task}"),
-    );
+    )?;
     let world_record = world_guardrail
         .as_ref()
         .map(|record| record.advisory.clone());
@@ -273,7 +273,7 @@ async fn handle_research(
         "pipeline-research",
         "pipeline_research_start",
         &format!("research pipeline: {topic}"),
-    );
+    )?;
     let world_record = world_guardrail
         .as_ref()
         .map(|record| record.advisory.clone());

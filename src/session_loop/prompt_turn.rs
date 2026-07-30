@@ -23,7 +23,18 @@ pub(super) async fn dispatch_user_prompt(
     if !notify_generation_started(input_tui_tx).await {
         return;
     }
-    let guardrail = begin_prompt_guardrail(config, session_id, &input);
+    let guardrail = match begin_prompt_guardrail(config, session_id, &input) {
+        Ok(guardrail) => guardrail,
+        Err(error) => {
+            tracing::error!(%error, "world-model guardrail admission failed");
+            let _ = input_tui_tx
+                .send_async(TuiEvent::Error(format!(
+                    "World model guardrail admission failed: {error}"
+                )))
+                .await;
+            return;
+        }
+    };
     if let Some(record) = &guardrail
         && !record.decision.allowed_to_finalize
         && !record.decision.required_actions.is_empty()
@@ -103,7 +114,7 @@ fn begin_prompt_guardrail(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
     input: &str,
-) -> Option<crate::command::world_model::RuntimeGuardrailRecord> {
+) -> anyhow::Result<Option<crate::command::world_model::RuntimeGuardrailRecord>> {
     let task_class = archon_world_model::guardrail::classify_task(
         input,
         archon_world_model::integration::WorldAdvisorSurface::InteractiveSession,
