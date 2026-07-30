@@ -36,6 +36,7 @@ fn empty_toml_produces_valid_defaults() {
     assert_eq!(config.context.rate_limit_pressure_tokens, Some(120_000));
     assert_eq!(config.context.rate_limit_pressure_body_bytes, Some(320_000));
     assert_eq!(config.context.large_request_retry_body_bytes, Some(320_000));
+    assert_eq!(config.context.max_tool_result_bytes, 1_000_000);
 
     // MemoryConfig defaults
     assert!(config.memory.enabled);
@@ -166,6 +167,29 @@ fn compact_threshold_out_of_range_fails_validation() {
             other => panic!("expected ValidationError, got: {other:?}"),
         }
     }
+}
+
+#[test]
+fn max_tool_result_bytes_parses_and_too_small_fails_validation() {
+    let config: ArchonConfig = toml::from_str(
+        r#"
+[context]
+max_tool_result_bytes = 262144
+"#,
+    )
+    .expect("context byte cap should parse");
+    assert_eq!(config.context.max_tool_result_bytes, 262_144);
+    validate(&config).expect("positive tool result byte cap should validate");
+
+    let invalid: ArchonConfig = toml::from_str(
+        r#"
+[context]
+max_tool_result_bytes = 255
+"#,
+    )
+    .expect("small cap should parse before validation");
+    let error = validate(&invalid).expect_err("too-small tool result byte cap must fail");
+    assert!(error.to_string().contains("max_tool_result_bytes"));
 }
 
 #[test]

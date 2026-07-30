@@ -71,7 +71,7 @@ impl Agent {
         self.begin_process_turn(user_input).await;
         let trivial_response = self.try_complete_trivial_cognitive_turn().await;
         let mut agentic_iterations: u32 = 0;
-        let mut reactive_overflow_retried = false;
+        let mut recovery_ladder = autocompact::RecoveryLadder::default();
         let mut reactive_rate_limit_retried = false;
         let mut proactive_pressure_attempted = false;
         let mut finalization_repair_attempted = false;
@@ -123,7 +123,7 @@ impl Agent {
             let StreamOpenOutcome::Stream(rx) = self
                 .open_turn_stream(
                     &prepared,
-                    &mut reactive_overflow_retried,
+                    &mut recovery_ladder,
                     &mut reactive_rate_limit_retried,
                 )
                 .await?;
@@ -132,18 +132,36 @@ impl Agent {
                 .collect_stream_round(
                     rx,
                     &prepared,
-                    &mut reactive_overflow_retried,
+                    &mut recovery_ladder,
                     &mut reactive_rate_limit_retried,
                 )
                 .await?
             {
                 StreamRoundOutcome::Completed(round) => round,
                 StreamRoundOutcome::RetryAgentLoop => continue 'agent_loop,
+                StreamRoundOutcome::RetryStream(retry_rx) => match self
+                    .collect_stream_round(
+                        retry_rx,
+                        &prepared,
+                        &mut recovery_ladder,
+                        &mut reactive_rate_limit_retried,
+                    )
+                    .await?
+                {
+                    StreamRoundOutcome::Completed(round) => round,
+                    StreamRoundOutcome::RetryAgentLoop => continue 'agent_loop,
+                    StreamRoundOutcome::RetryStream(_) => {
+                        return Err(AgentLoopError::ApiError(
+                            "request pressure recovery exhausted after two bounded retries".into(),
+                        ));
+                    }
+                },
             };
-            reactive_overflow_retried = false;
+            recovery_ladder = autocompact::RecoveryLadder::default();
             reactive_rate_limit_retried = false;
 
             let usage = self.record_stream_usage(&round.usage_acc);
+            self.state.auto_compact.on_ordinary_success();
 
             if !round.pending_tools.is_empty() {
                 let assistant_message_index = self.state.messages.len();

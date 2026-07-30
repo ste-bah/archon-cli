@@ -59,6 +59,26 @@ pub enum LlmError {
 }
 
 impl LlmError {
+    pub fn request_pressure_kind(&self) -> Option<crate::context_window::RequestPressureKind> {
+        match self {
+            Self::ContextWindowExceeded { .. } => {
+                Some(crate::context_window::RequestPressureKind::AggregateContext)
+            }
+            Self::Http(message) => {
+                crate::context_window::classify_request_pressure_error(None, None, None, message)
+            }
+            Self::Server { status, message } => {
+                crate::context_window::classify_request_pressure_error(
+                    Some(*status),
+                    None,
+                    None,
+                    message,
+                )
+            }
+            _ => None,
+        }
+    }
+
     pub fn is_context_window_exceeded(&self) -> bool {
         match self {
             Self::ContextWindowExceeded { .. } => true,

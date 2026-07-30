@@ -2,6 +2,134 @@ struct CapturingLlmProvider {
     captured: Arc<std::sync::Mutex<Vec<LlmRequest>>>,
 }
 
+#[derive(Clone, Copy)]
+enum FieldFailurePhase {
+    PreStream,
+    MidStream,
+}
+
+struct FieldLimitRecoveryProvider {
+    phase: FieldFailurePhase,
+    real_calls: std::sync::atomic::AtomicU32,
+    compaction_calls: std::sync::atomic::AtomicU32,
+    requests: std::sync::Mutex<Vec<LlmRequest>>,
+}
+
+impl FieldLimitRecoveryProvider {
+    fn new() -> Self {
+        Self::with_phase(FieldFailurePhase::PreStream)
+    }
+
+    fn with_phase(phase: FieldFailurePhase) -> Self {
+        Self {
+            phase,
+            real_calls: std::sync::atomic::AtomicU32::new(0),
+            compaction_calls: std::sync::atomic::AtomicU32::new(0),
+            requests: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn real_requests(&self) -> Vec<LlmRequest> {
+        self.requests.lock().expect("request lock").clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for FieldLimitRecoveryProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![]
+    }
+
+    fn supports_feature(&self, _: ProviderFeature) -> bool {
+        false
+    }
+
+    async fn stream(
+        &self,
+        request: LlmRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        if request.request_origin.as_deref() == Some("compaction_summary") {
+            self.compaction_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Ok(test_stream(vec![
+                StreamEvent::TextDelta {
+                    index: 0,
+                    text: "Compacted history summary.".into(),
+                },
+                StreamEvent::MessageStop,
+            ])
+            .await);
+        }
+
+        self.real_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.requests
+            .lock()
+            .expect("request lock")
+            .push(request.clone());
+        if largest_tool_result_field(&request) > 64_000 {
+            return match self.phase {
+                FieldFailurePhase::PreStream => Err(LlmError::Http(
+                    "messages.9.content.0.tool_result.content: String should have at most 64000 bytes"
+                        .into(),
+                )),
+                FieldFailurePhase::MidStream => Ok(test_stream(vec![
+                    StreamEvent::Error {
+                        error_type: "invalid_request_error".into(),
+                        message: "messages.9.content.0.tool_result.content: String should have at most 64000 bytes".into(),
+                    },
+                    StreamEvent::MessageStop,
+                ])
+                .await),
+            };
+        }
+
+        Ok(test_stream(vec![
+            StreamEvent::TextDelta {
+                index: 0,
+                text: "recovered".into(),
+            },
+            StreamEvent::MessageStop,
+        ])
+        .await)
+    }
+
+    async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
+        unreachable!("tests use streaming")
+    }
+}
+
+fn largest_tool_result_field(request: &LlmRequest) -> usize {
+    request
+        .messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter(|block| {
+            block.get("type").and_then(serde_json::Value::as_str) == Some("tool_result")
+        })
+        .filter_map(|block| block.get("content").and_then(serde_json::Value::as_str))
+        .map(|content| {
+            serde_json::to_vec(&serde_json::Value::String(content.to_string()))
+                .expect("serialize tool result")
+                .len()
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+async fn test_stream(events: Vec<StreamEvent>) -> tokio::sync::mpsc::Receiver<StreamEvent> {
+    let (tx, rx) = tokio::sync::mpsc::channel(events.len() + 1);
+    for event in events {
+        tx.send(event).await.expect("send stream event");
+    }
+    rx
+}
+
 #[async_trait::async_trait]
 impl LlmProvider for CapturingLlmProvider {
     fn name(&self) -> &str {
@@ -35,22 +163,21 @@ impl LlmProvider for CapturingLlmProvider {
     }
 }
 
-#[tokio::test]
-async fn main_request_tool_definitions_are_byte_stable_across_turns() {
-    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+async fn main_field_recovery_agent(
+    provider: Arc<FieldLimitRecoveryProvider>,
+    messages: Vec<serde_json::Value>,
+    activity_sink: Option<Arc<dyn archon_observability::AgentActivitySink>>,
+) -> Agent {
     let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let config = AgentConfig {
-        tools: vec![serde_json::json!({
-            "name":"Read",
-            "description":"read",
-            "input_schema":{"type":"object"}
-        })],
+    let mut config = AgentConfig {
+        activity_sink,
         ..AgentConfig::default()
     };
+    config.context.preserve_recent_turns = 2;
+    config.context.max_tool_result_bytes = 256_000;
+    config.context.context_window_override = Some(1_000_000);
     let mut agent = Agent::new(
-        Arc::new(CapturingLlmProvider {
-            captured: Arc::clone(&captured),
-        }),
+        provider,
         ToolRegistry::new(),
         config,
         tx,
@@ -58,203 +185,128 @@ async fn main_request_tool_definitions_are_byte_stable_across_turns() {
             &std::env::temp_dir(),
         ))),
     );
-
-    agent.state.add_user_message("first turn");
-    let first = agent
-        .prepare_turn_request("first turn", 0)
-        .await
-        .expect("first request");
-    agent.state.add_user_message("second turn");
-    let second = agent
-        .prepare_turn_request("second turn", 0)
-        .await
-        .expect("second request");
-
-    let first_tools = archon_llm::providers::OpenAiProvider::map_tools_to_openai(
-        &first.request.tools,
-    );
-    let second_tools = archon_llm::providers::OpenAiProvider::map_tools_to_openai(
-        &second.request.tools,
-    );
-    assert_eq!(
-        serde_json::to_vec(&first_tools).unwrap(),
-        serde_json::to_vec(&second_tools).unwrap()
-    );
-}
-
-#[tokio::test]
-async fn main_anthropic_request_marks_latest_conversation_block() {
-    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.context.prompt_cache_conversation = true;
-    let mut agent = Agent::new(
-        Arc::new(CapturingLlmProvider {
-            captured: Arc::clone(&captured),
-        }),
-        ToolRegistry::new(),
-        config,
-        tx,
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-            &std::env::temp_dir(),
-        ))),
-    );
-    agent.state.add_user_message("latest turn");
-
-    let prepared = agent
-        .prepare_turn_request("latest turn", 0)
-        .await
-        .expect("prepare request");
-
-    assert_eq!(
-        prepared.request.messages[0]["content"][0]["cache_control"]["type"],
-        "ephemeral"
-    );
-    assert_eq!(agent.state.messages[0]["content"], "latest turn");
-}
-
-#[tokio::test]
-async fn main_request_trims_old_tool_result_without_mutating_canonical_history() {
-    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.context.preserve_recent_turns = 1;
-    let mut agent = Agent::new(
-        Arc::new(CapturingLlmProvider {
-            captured: Arc::clone(&captured),
-        }),
-        ToolRegistry::new(),
-        config,
-        tx,
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-            &std::env::temp_dir(),
-        ))),
-    );
-    let old_content = "old-result".repeat(20_000);
-    agent.state.messages = vec![
-        serde_json::json!({"role":"user","content":"first turn"}),
-        serde_json::json!({"role":"assistant","content":[{
-            "type":"tool_use","id":"tool-1","name":"Bash","input":{}
-        }]}),
-        serde_json::json!({"role":"user","content":[{
-            "type":"tool_result","tool_use_id":"tool-1","content":old_content,"is_error":false
-        }]}),
-        serde_json::json!({"role":"user","content":"latest turn"}),
-    ];
-
-    let prepared = agent
-        .prepare_turn_request("latest turn", 0)
-        .await
-        .expect("prepare request");
-
-    let projected = prepared.request.messages[2]["content"][0]["content"]
-        .as_str()
-        .expect("projected tool result");
-    assert!(projected.contains("tool output trimmed"));
-    assert_eq!(
-        agent.state.messages[2]["content"][0]["content"],
-        serde_json::Value::String(old_content)
-    );
-}
-
-#[tokio::test]
-async fn eight_tool_rounds_send_trimmed_history_but_reopen_with_full_results() {
-    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.context.preserve_recent_turns = 3;
-    let mut agent = Agent::new(
-        Arc::new(CapturingLlmProvider {
-            captured: Arc::clone(&captured),
-        }),
-        ToolRegistry::new(),
-        config,
-        tx,
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-            &std::env::temp_dir(),
-        ))),
-    );
-    let full_results: Vec<String> = (0..8)
-        .map(|round| format!("round-{round}-{}", "x".repeat(100_000)))
-        .collect();
-    for (round, result) in full_results.iter().enumerate() {
-        agent
-            .state
-            .messages
-            .push(serde_json::json!({"role":"user","content":format!("turn {round}")}));
-        agent.state.messages.push(serde_json::json!({"role":"assistant","content":[{
-            "type":"tool_use","id":format!("tool-{round}"),"name":"Bash","input":{}
-        }]}));
-        agent.state.messages.push(serde_json::json!({"role":"user","content":[{
-            "type":"tool_result","tool_use_id":format!("tool-{round}"),
-            "content":result,"is_error":false
-        }]}));
-    }
-    agent.state.add_user_message("ninth turn");
-
-    let prepared = agent
-        .prepare_turn_request("ninth turn", 0)
-        .await
-        .expect("prepare request");
+    agent.state.messages = messages;
     agent
-        .client
-        .stream(prepared.request)
-        .await
-        .expect("send captured request");
-
-    let request = captured.lock().unwrap().pop().expect("captured request");
-    for round in 0..6 {
-        assert!(request.messages[round * 3 + 2]["content"][0]["content"]
-            .as_str()
-            .expect("old tool result")
-            .contains("tool output trimmed"));
-    }
-    for (round, full) in full_results.iter().enumerate().take(8).skip(6) {
-        assert_eq!(
-            request.messages[round * 3 + 2]["content"][0]["content"],
-            *full,
-            "recent round {round} should remain byte-identical",
-        );
-    }
-
-    let temp = tempfile::tempdir().expect("create temp directory");
-    let path = temp.path().join("sessions.db");
-    let session_id = {
-        let store = archon_session::storage::SessionStore::open(&path).expect("open session store");
-        let session = store
-            .create_session("/tmp", None, "mock")
-            .expect("create session");
-        let messages = agent
-            .state
-            .messages
-            .iter()
-            .map(serde_json::to_string)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("serialize canonical messages");
-        store
-            .replace_messages(&session.id, &messages)
-            .expect("persist canonical messages");
-        session.id
-    };
-    let reopened =
-        archon_session::storage::SessionStore::open(&path).expect("reopen session store");
-    let persisted = reopened
-        .load_messages(&session_id)
-        .expect("reload messages");
-    for round in 0..8 {
-        let message: serde_json::Value =
-            serde_json::from_str(&persisted[round * 3 + 2]).expect("deserialize tool result");
-        assert_eq!(message["content"][0]["content"], full_results[round]);
-    }
 }
 
 #[tokio::test]
-async fn canonical_tool_result_survives_session_store_reopen_after_request_projection() {
+async fn no_safe_boundary_advances_to_emergency_projection() {
+    let provider = Arc::new(FieldLimitRecoveryProvider::new());
+    let messages = vec![
+        serde_json::json!({"role":"user","content":"inspect"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"recent-tool","name":"Read","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"recent-tool",
+            "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
+        }]}),
+    ];
+    let mut agent = main_field_recovery_agent(provider.clone(), messages, None).await;
+
+    agent
+        .process_message("continue")
+        .await
+        .expect("NoSafeBoundary must advance to emergency projection");
+
+    let requests = provider.real_requests();
+    assert_eq!(requests.len(), 2, "initial request and emergency retry");
+    assert!(largest_tool_result_field(&requests[0]) > 64_000);
+    assert!(largest_tool_result_field(&requests[1]) <= 64_000);
+}
+
+#[tokio::test]
+async fn main_mid_stream_no_safe_boundary_advances_to_emergency_projection() {
+    let provider = Arc::new(FieldLimitRecoveryProvider::with_phase(
+        FieldFailurePhase::MidStream,
+    ));
+    let messages = vec![
+        serde_json::json!({"role":"user","content":"inspect"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"recent-tool","name":"Read","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"recent-tool",
+            "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
+        }]}),
+    ];
+    let mut agent = main_field_recovery_agent(provider.clone(), messages, None).await;
+
+    agent
+        .process_message("continue")
+        .await
+        .expect("mid-stream NoSafeBoundary must advance to emergency projection");
+
+    let requests = provider.real_requests();
+    assert_eq!(requests.len(), 2, "initial request and emergency retry");
+    assert!(largest_tool_result_field(&requests[0]) > 64_000);
+    assert!(largest_tool_result_field(&requests[1]) <= 64_000);
+}
+
+#[tokio::test]
+async fn main_mid_stream_field_rejection_advances_to_emergency_projection() {
+    let provider = Arc::new(FieldLimitRecoveryProvider::with_phase(
+        FieldFailurePhase::MidStream,
+    ));
+    let activity = Arc::new(archon_observability::InMemoryActivitySink::new());
+    let messages = vec![
+        serde_json::json!({"role":"user","content":"old turn"}),
+        serde_json::json!({"role":"assistant","content":"old response"}),
+        serde_json::json!({"role":"user","content":"inspect"}),
+        serde_json::json!({"role":"assistant","content":[{
+            "type":"tool_use","id":"recent-tool","name":"Read","input":{}
+        }]}),
+        serde_json::json!({"role":"user","content":[{
+            "type":"tool_result","tool_use_id":"recent-tool",
+            "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
+        }]}),
+    ];
+    let canonical = messages.clone();
+    let mut agent =
+        main_field_recovery_agent(provider.clone(), messages, Some(activity.clone())).await;
+
+    agent
+        .process_message("continue")
+        .await
+        .expect("mid-stream emergency projection should recover the field rejection");
+
+    let requests = provider.real_requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "initial, full-compaction retry, emergency retry"
+    );
+    assert!(largest_tool_result_field(&requests[0]) > 64_000);
+    assert!(largest_tool_result_field(&requests[1]) > 64_000);
+    assert!(largest_tool_result_field(&requests[2]) <= 64_000);
+    assert_eq!(
+        &agent.state.messages[..canonical.len()],
+        canonical.as_slice()
+    );
+    let recovery: Vec<serde_json::Value> = activity
+        .events()
+        .into_iter()
+        .filter_map(|event| serde_json::from_str(&event.message).ok())
+        .collect();
+    assert_eq!(recovery.len(), 2);
+    assert_eq!(recovery[0]["tier"], "full_compaction");
+    assert_eq!(recovery[1]["tier"], "emergency_projection");
+}
+
+#[tokio::test]
+async fn main_pre_stream_field_rejection_advances_to_emergency_projection() {
+    let provider = Arc::new(FieldLimitRecoveryProvider::new());
+    let activity = Arc::new(archon_observability::InMemoryActivitySink::new());
     let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig::default();
-    config.context.preserve_recent_turns = 1;
+    let mut config = AgentConfig {
+        activity_sink: Some(activity.clone()),
+        ..AgentConfig::default()
+    };
+    config.context.preserve_recent_turns = 2;
+    config.context.max_tool_result_bytes = 256_000;
+    config.context.context_window_override = Some(1_000_000);
     let mut agent = Agent::new(
-        Arc::new(MockLlmProvider),
+        provider.clone(),
         ToolRegistry::new(),
         config,
         tx,
@@ -262,58 +314,55 @@ async fn canonical_tool_result_survives_session_store_reopen_after_request_proje
             &std::env::temp_dir(),
         ))),
     );
-    let old_content = "persisted-result".repeat(20_000);
     agent.state.messages = vec![
-        serde_json::json!({"role":"user","content":"first turn"}),
+        serde_json::json!({"role":"user","content":"old turn"}),
+        serde_json::json!({"role":"assistant","content":"old response"}),
+        serde_json::json!({"role":"user","content":"inspect"}),
         serde_json::json!({"role":"assistant","content":[{
-            "type":"tool_use","id":"tool-1","name":"Bash","input":{}
+            "type":"tool_use","id":"recent-tool","name":"Read","input":{}
         }]}),
         serde_json::json!({"role":"user","content":[{
-            "type":"tool_result","tool_use_id":"tool-1","content":old_content,"is_error":false
+            "type":"tool_result","tool_use_id":"recent-tool",
+            "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
         }]}),
-        serde_json::json!({"role":"user","content":"latest turn"}),
     ];
+    let canonical = agent.state.messages.clone();
 
-    let prepared = agent
-        .prepare_turn_request("latest turn", 0)
+    agent
+        .process_message("continue")
         .await
-        .expect("prepare request");
-    assert!(
-        prepared.request.messages[2]["content"][0]["content"]
-            .as_str()
-            .expect("projected tool result")
-            .contains("tool output trimmed")
-    );
+        .expect("emergency projection should recover the field rejection");
 
-    let temp = tempfile::tempdir().expect("create temp directory");
-    let path = temp.path().join("sessions.db");
-    let session_id = {
-        let store = archon_session::storage::SessionStore::open(&path).expect("open session store");
-        let session = store
-            .create_session("/tmp", None, "mock")
-            .expect("create session");
-        let messages = agent
-            .state
-            .messages
-            .iter()
-            .map(serde_json::to_string)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("serialize canonical messages");
-        store
-            .replace_messages(&session.id, &messages)
-            .expect("persist canonical messages");
-        session.id
-    };
-
-    let reopened =
-        archon_session::storage::SessionStore::open(&path).expect("reopen session store");
-    let persisted = reopened
-        .load_messages(&session_id)
-        .expect("reload messages");
-    let persisted_tool_result: serde_json::Value =
-        serde_json::from_str(&persisted[2]).expect("deserialize tool result");
+    let requests = provider.real_requests();
     assert_eq!(
-        persisted_tool_result["content"][0]["content"],
-        serde_json::Value::String(old_content)
+        requests.len(),
+        3,
+        "initial, full-compaction retry, emergency retry"
     );
+    assert!(largest_tool_result_field(&requests[0]) > 64_000);
+    assert!(largest_tool_result_field(&requests[1]) > 64_000);
+    assert!(largest_tool_result_field(&requests[2]) <= 64_000);
+    assert_eq!(
+        provider
+            .compaction_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        &agent.state.messages[..canonical.len()],
+        canonical.as_slice()
+    );
+
+    let recovery: Vec<serde_json::Value> = activity
+        .events()
+        .into_iter()
+        .filter_map(|event| serde_json::from_str(&event.message).ok())
+        .collect();
+    assert_eq!(recovery.len(), 2);
+    assert_eq!(recovery[0]["classification"], "tool_result_field");
+    assert_eq!(recovery[0]["tier"], "full_compaction");
+    assert_eq!(recovery[1]["tier"], "emergency_projection");
+    assert_eq!(recovery[1]["reduced"], true);
 }
+
+include!("tool_result_persistence.rs");

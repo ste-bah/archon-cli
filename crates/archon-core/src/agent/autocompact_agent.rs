@@ -36,11 +36,10 @@ impl Agent {
         active_model: &str,
     ) -> Result<(), AgentLoopError> {
         let window = self.context_window_for(active_model);
-        let tokens = if self.state.last_known_context_tokens > 0 {
-            self.state.last_known_context_tokens
-        } else {
-            trigger_tokens(&self.state.messages)
-        };
+        let tokens = self
+            .state
+            .last_known_context_tokens
+            .max(trigger_tokens(&self.state.messages));
         let effective_window = window.saturating_sub(self.config.context.output_reserve_tokens);
         let threshold = (self.config.context.compact_threshold
             - self.config.context.preflight_safety_margin)
@@ -139,7 +138,7 @@ impl Agent {
                 Ok(())
             }
             Err(err) if !force => {
-                self.state.auto_compact.on_real_failure();
+                self.state.auto_compact.on_failure(&err);
                 let consecutive_failures = self.state.auto_compact.consecutive_failures;
                 tracing::warn!(
                     compaction.outcome = "auto_failed",
@@ -158,10 +157,8 @@ impl Agent {
                 Ok(())
             }
             Err(err) => {
-                self.state.auto_compact.on_real_failure();
-                Err(AgentLoopError::ApiError(format!(
-                    "auto-compaction failed: {err}"
-                )))
+                self.state.auto_compact.on_failure(&err);
+                Err(AgentLoopError::Compaction(err))
             }
         }
     }

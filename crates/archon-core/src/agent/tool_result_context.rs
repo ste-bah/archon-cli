@@ -4,78 +4,159 @@ pub(crate) struct ContextToolOutput {
     pub original_chars: usize,
     pub stored_chars: usize,
     pub limit_chars: usize,
+    pub original_bytes: usize,
+    pub stored_bytes: usize,
+    pub limit_bytes: usize,
     pub truncated: bool,
 }
 
-const DEFAULT_TOOL_RESULT_CONTEXT_CHARS: usize = 64_000;
-const SHELL_TOOL_RESULT_CONTEXT_CHARS: usize = 24_000;
-const SUBAGENT_TOOL_RESULT_CONTEXT_CHARS: usize = 32_000;
+pub(crate) const DEFAULT_MAX_TOOL_RESULT_BYTES: usize = 1_000_000;
+pub(crate) const MIN_MAX_TOOL_RESULT_BYTES: usize = 256;
 
-/// Hard ceiling applied when a tool result is FIRST recorded.
+pub(crate) fn resolved_max_tool_result_bytes(
+    configured_max: usize,
+    provider: &dyn archon_llm::provider::LlmProvider,
+) -> usize {
+    resolve_max_tool_result_bytes(
+        configured_max,
+        provider.compaction_policy().max_tool_result_bytes,
+    )
+}
+
+fn resolve_max_tool_result_bytes(configured_max: usize, provider_max: Option<usize>) -> usize {
+    provider_max.map_or(configured_max, |limit| configured_max.min(limit))
+}
+const DEFAULT_TOOL_RESULT_CONTEXT_BYTES: usize = 64_000;
+const SHELL_TOOL_RESULT_CONTEXT_BYTES: usize = 24_000;
+const SUBAGENT_TOOL_RESULT_CONTEXT_BYTES: usize = 32_000;
+
+/// Hard ceiling for a tool result when it is first recorded.
 ///
-/// Deliberately not one of the constants above. Those are a *replay* budget —
-/// how much of an old turn is worth re-sending once context has accumulated.
-/// This is a different question: how large may a single block ever be. The two
-/// happen to share a unit, and reusing one for the other would silently cost
-/// every agent the recent-turn fidelity the preserve window exists to give it
-/// (a `Bash` result would drop from `bash.rs`'s 102_400-byte cap to 24_000
-/// chars the moment it was recorded).
-///
-/// Sized against the defect, not against the replay budget. The observed
-/// failure was a single 18_031_035-char result against a provider per-field
-/// limit of 10_485_760. 1_000_000 chars sits ~18x under the defect and ~10x
-/// under the provider limit, while still being ~10x the largest legitimate
-/// result the toolset can produce (`bash.rs` and `mcp_resources.rs` both stop
-/// at 102_400 bytes) — so in practice nothing real is truncated here, and the
-/// tool-aware limits above still do the actual context management on replay.
-const INGEST_TOOL_RESULT_CEILING_CHARS: usize = 1_000_000;
+/// Replay budgets below are intentionally smaller: they manage accumulated
+/// context, while this ceiling only blocks pathological single results. The
+/// 1 MB default stays below known provider field limits without truncating
+/// legitimate built-in tool output (currently capped near 100 KB).
+pub(crate) fn emergency_tool_result_bytes(configured_max: usize) -> usize {
+    configured_max.min(DEFAULT_TOOL_RESULT_CONTEXT_BYTES)
+}
 
 /// Cap a tool result at the moment it is recorded.
 ///
 /// Separate entry point from `cap_tool_output_for_context` so the ingest
 /// ceiling and the replay budget cannot drift into each other by accident.
-pub(crate) fn cap_tool_output_for_ingest(content: &str) -> ContextToolOutput {
-    cap_to_limit(content, INGEST_TOOL_RESULT_CEILING_CHARS)
-}
-
 pub(crate) fn cap_tool_output_for_context(tool_name: &str, content: &str) -> ContextToolOutput {
-    cap_to_limit(content, context_limit_for_tool(tool_name))
+    cap_tool_output_to_bytes(content, context_limit_for_tool(tool_name))
 }
 
-fn cap_to_limit(content: &str, limit_chars: usize) -> ContextToolOutput {
+pub(crate) fn cap_tool_output_to_bytes(content: &str, limit_bytes: usize) -> ContextToolOutput {
     let original_chars = content.chars().count();
-    if original_chars <= limit_chars {
+    let original_bytes = content.len();
+    let serialized_bytes = serialized_string_bytes(content);
+    if serialized_bytes <= limit_bytes {
         return ContextToolOutput {
             content: content.to_string(),
             original_chars,
             stored_chars: original_chars,
-            limit_chars,
+            limit_chars: limit_bytes,
+            original_bytes,
+            stored_bytes: original_bytes,
+            limit_bytes,
             truncated: false,
         };
     }
 
-    let marker = format!(
-        "\n\n[Archon context note: tool output trimmed from {original_chars} chars before replaying it to the model. Full output was emitted to UI/logs.]\n\n"
-    );
-    let marker_chars = marker.chars().count();
-    let body_budget = limit_chars.saturating_sub(marker_chars).max(1);
-    let head_chars = body_budget / 2;
-    let tail_chars = body_budget.saturating_sub(head_chars);
+    let mut low = 0;
+    let mut high = original_chars;
+    while low < high {
+        let retained = low + (high - low).div_ceil(2);
+        let candidate = capped_content(content, retained);
+        if serialized_string_bytes(&candidate) <= limit_bytes {
+            low = retained;
+        } else {
+            high = retained - 1;
+        }
+    }
 
-    let head: String = content.chars().take(head_chars).collect();
-    let mut tail_vec: Vec<char> = content.chars().rev().take(tail_chars).collect();
-    tail_vec.reverse();
-    let tail: String = tail_vec.into_iter().collect();
-    let trimmed = format!("{head}{marker}{tail}");
-    let stored_chars = trimmed.chars().count();
-
+    let content = capped_content(content, low);
+    let content = if serialized_string_bytes(&content) > limit_bytes {
+        truncate_utf8_to_serialized_limit(&content, limit_bytes)
+    } else {
+        content
+    };
+    let stored_chars = content.chars().count();
+    let stored_bytes = content.len();
     ContextToolOutput {
-        content: trimmed,
+        content,
         original_chars,
         stored_chars,
-        limit_chars,
+        limit_chars: limit_bytes,
+        original_bytes,
+        stored_bytes,
+        limit_bytes,
         truncated: true,
     }
+}
+
+fn serialized_string_bytes(content: &str) -> usize {
+    serde_json::to_vec(&serde_json::Value::String(content.to_string()))
+        .expect("serializing a string cannot fail")
+        .len()
+}
+
+fn capped_content(content: &str, retained_chars: usize) -> String {
+    let head_chars = retained_chars / 2;
+    let tail_chars = retained_chars - head_chars;
+    let head: String = content.chars().take(head_chars).collect();
+    let mut tail: Vec<char> = content.chars().rev().take(tail_chars).collect();
+    tail.reverse();
+    let tail: String = tail.into_iter().collect();
+    let omitted_bytes = content.len().saturating_sub(head.len() + tail.len());
+    let marker = format!(
+        "\n\n[Archon context note: tool output trimmed; retained {} head bytes and {} tail bytes; omitted {omitted_bytes} bytes before replaying tool output to the model.]\n\n",
+        head.len(),
+        tail.len(),
+    );
+    format!("{head}{marker}{tail}")
+}
+
+fn truncate_utf8_to_serialized_limit(content: &str, limit_bytes: usize) -> String {
+    let mut output = String::new();
+    for ch in content.chars() {
+        output.push(ch);
+        if serialized_string_bytes(&output) > limit_bytes {
+            output.pop();
+            break;
+        }
+    }
+    output
+}
+
+pub(crate) fn project_messages_for_emergency_retry(
+    messages: &[serde_json::Value],
+    max_serialized_field_bytes: usize,
+) -> Vec<serde_json::Value> {
+    let mut projected = messages.to_vec();
+    for message in &mut projected {
+        let Some(blocks) = message
+            .get_mut("content")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for block in blocks {
+            if block.get("type").and_then(serde_json::Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let Some(content) = block.get("content").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let output = cap_tool_output_to_bytes(content, max_serialized_field_bytes);
+            if output.truncated {
+                block["content"] = serde_json::Value::String(output.content);
+            }
+        }
+    }
+    projected
 }
 
 pub(crate) fn project_messages_for_request(
@@ -169,15 +250,101 @@ fn tool_names_by_id(messages: &[serde_json::Value]) -> std::collections::HashMap
 
 fn context_limit_for_tool(tool_name: &str) -> usize {
     match tool_name {
-        "Bash" | "Shell" => SHELL_TOOL_RESULT_CONTEXT_CHARS,
-        "Agent" | "SendMessage" | "TaskCreate" | "TaskOutput" => SUBAGENT_TOOL_RESULT_CONTEXT_CHARS,
-        _ => DEFAULT_TOOL_RESULT_CONTEXT_CHARS,
+        "Bash" | "Shell" => SHELL_TOOL_RESULT_CONTEXT_BYTES,
+        "Agent" | "SendMessage" | "TaskCreate" | "TaskOutput" => SUBAGENT_TOOL_RESULT_CONTEXT_BYTES,
+        _ => DEFAULT_TOOL_RESULT_CONTEXT_BYTES,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_limit_is_capped_by_known_provider_policy() {
+        assert_eq!(
+            resolve_max_tool_result_bytes(1_000_000, Some(256_000)),
+            256_000
+        );
+        assert_eq!(
+            resolve_max_tool_result_bytes(128_000, Some(256_000)),
+            128_000
+        );
+    }
+
+    #[test]
+    fn configured_limit_is_used_when_provider_has_no_known_limit() {
+        assert_eq!(resolve_max_tool_result_bytes(320_000, None), 320_000);
+    }
+
+    #[test]
+    fn byte_cap_preserves_utf8_head_tail_and_reports_omitted_bytes() {
+        let content = format!("HEAD{}TAIL", "é".repeat(200));
+        let output = cap_tool_output_to_bytes(&content, 256);
+
+        assert!(output.truncated);
+        assert!(output.content.len() <= 256);
+        assert!(output.content.starts_with("HEAD"));
+        assert!(output.content.ends_with("TAIL"));
+        let (head, marker_and_tail) = output
+            .content
+            .split_once("\n\n[Archon context note: tool output trimmed; ")
+            .expect("visible truncation marker");
+        let (marker, tail) = marker_and_tail
+            .split_once("]\n\n")
+            .expect("marker terminator");
+        let omitted_bytes = content.len() - head.len() - tail.len();
+        assert_eq!(
+            marker,
+            format!(
+                "retained {} head bytes and {} tail bytes; omitted {omitted_bytes} bytes before replaying tool output to the model.",
+                head.len(),
+                tail.len(),
+            )
+        );
+        assert_eq!(output.original_bytes, content.len());
+        assert_eq!(output.stored_bytes, output.content.len());
+        assert_eq!(output.limit_bytes, 256);
+    }
+
+    #[test]
+    fn byte_cap_is_exact_at_limit_and_truncates_one_byte_over() {
+        let exact = "x".repeat(126);
+        let exact_output = cap_tool_output_to_bytes(&exact, 128);
+        assert!(!exact_output.truncated);
+        assert_eq!(exact_output.content, exact);
+
+        let over = format!("{}y", "x".repeat(126));
+        let over_output = cap_tool_output_to_bytes(&over, 128);
+        assert!(over_output.truncated);
+        assert!(over_output.content.len() <= 128);
+    }
+
+    #[test]
+    fn byte_cap_accounts_for_final_serialized_provider_field() {
+        let content = "\\\"\n".repeat(100);
+        assert!(content.len() < 512);
+
+        let output = cap_tool_output_to_bytes(&content, 512);
+        let serialized = serde_json::to_vec(&serde_json::Value::String(output.content.clone()))
+            .expect("serialize provider field");
+
+        assert!(output.truncated);
+        assert!(
+            serialized.len() <= 512,
+            "serialized bytes={}",
+            serialized.len()
+        );
+    }
+
+    #[test]
+    fn byte_cap_handles_tiny_limits_without_exceeding_them() {
+        for limit in 0..32 {
+            let output = cap_tool_output_to_bytes("éééééééé", limit);
+            assert!(output.content.len() <= limit, "limit={limit}");
+            assert!(std::str::from_utf8(output.content.as_bytes()).is_ok());
+        }
+    }
 
     #[test]
     fn short_tool_output_is_left_unchanged() {
@@ -195,9 +362,9 @@ mod tests {
         let output = cap_tool_output_for_context("Agent", &content);
 
         assert!(output.truncated);
-        assert_eq!(output.limit_chars, SUBAGENT_TOOL_RESULT_CONTEXT_CHARS);
-        assert!(output.stored_chars <= SUBAGENT_TOOL_RESULT_CONTEXT_CHARS);
-        assert!(output.content.contains("tool output trimmed"));
+        assert_eq!(output.limit_chars, SUBAGENT_TOOL_RESULT_CONTEXT_BYTES);
+        assert!(output.stored_bytes <= SUBAGENT_TOOL_RESULT_CONTEXT_BYTES);
+        assert!(output.content.contains("tool output"));
         assert!(output.content.starts_with('a'));
         assert!(output.content.ends_with('z'));
     }
@@ -230,7 +397,7 @@ mod tests {
         let old = projected[2]["content"][0]["content"]
             .as_str()
             .expect("projected old tool result");
-        assert!(old.contains("tool output trimmed"));
+        assert!(old.contains("tool output"));
         assert!(old.len() < messages[2]["content"][0]["content"].as_str().unwrap().len());
         assert_eq!(
             projected[5]["content"][0]["content"],
@@ -238,6 +405,56 @@ mod tests {
         );
         assert_eq!(projected[5]["content"][0]["is_error"], true);
         assert_eq!(projected[5]["content"][0]["tool_use_id"], "recent-tool");
+    }
+
+    #[test]
+    fn emergency_projection_caps_recent_tool_results_without_mutating_canonical_history() {
+        let recent_content = format!("HEAD{}TAIL", "é".repeat(100_000));
+        let messages = vec![
+            serde_json::json!({"role": "user", "content": "inspect"}),
+            serde_json::json!({"role": "assistant", "content": [{
+                "type": "tool_use", "id": "recent-tool", "name": "Read", "input": {}
+            }]}),
+            serde_json::json!({"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "recent-tool",
+                "content": recent_content, "is_error": false
+            }]}),
+        ];
+        let original = messages.clone();
+
+        let projected = project_messages_for_emergency_retry(&messages, 4_096);
+
+        let content = projected[2]["content"][0]["content"]
+            .as_str()
+            .expect("projected recent tool result");
+        assert!(
+            serde_json::to_vec(&serde_json::Value::String(content.to_string()))
+                .expect("serialize provider field")
+                .len()
+                <= 4_096
+        );
+        assert!(content.starts_with("HEAD"));
+        assert!(content.ends_with("TAIL"));
+        assert!(content.contains("omitted"));
+        assert_eq!(messages, original);
+    }
+
+    #[test]
+    fn emergency_projection_leaves_small_recent_results_byte_identical() {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "small output",
+                "is_error": false
+            }]
+        })];
+
+        assert_eq!(
+            project_messages_for_emergency_retry(&messages, 4_096),
+            messages
+        );
     }
 
     #[test]
@@ -266,9 +483,9 @@ mod tests {
         let output = cap_tool_output_for_context("Bash", &content);
 
         assert!(output.truncated);
-        assert_eq!(output.limit_chars, SHELL_TOOL_RESULT_CONTEXT_CHARS);
-        assert!(output.stored_chars <= SHELL_TOOL_RESULT_CONTEXT_CHARS);
-        assert!(output.content.contains("tool output trimmed"));
+        assert_eq!(output.limit_chars, SHELL_TOOL_RESULT_CONTEXT_BYTES);
+        assert!(output.stored_bytes <= SHELL_TOOL_RESULT_CONTEXT_BYTES);
+        assert!(output.content.contains("tool output"));
         assert!(output.content.starts_with('h'));
         assert!(output.content.ends_with('t'));
     }

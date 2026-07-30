@@ -183,15 +183,10 @@ fn record_tool_results(
     prepared: &[PreparedTool],
     exec_results: Vec<ToolResult>,
 ) {
-    let mut tool_results: Vec<serde_json::Value> = Vec::with_capacity(prepared.len());
-    for (prepared_tool, result) in prepared.iter().zip(exec_results) {
+    for prepared_tool in prepared {
         record_tool_progress(runner, prepared_tool);
-        tool_results.push(serde_json::json!({
-            "type": "tool_result",
-            "tool_use_id": prepared_tool.id,
-            "content": result.content,
-            "is_error": result.is_error,
-        }));
+    }
+    for (prepared_tool, result) in prepared.iter().zip(&exec_results) {
         runner.emit_activity_stream(
             "tool_result",
             summarize_tool_output(&result.content),
@@ -199,12 +194,55 @@ fn record_tool_results(
             result.is_error,
         );
     }
-    let tool_result_msg = serde_json::json!({
-        "role": "user",
-        "content": tool_results,
-    });
-    runner.record_transcript(&tool_result_msg);
-    messages.push(tool_result_msg);
+    let (raw_transcript, canonical) = build_tool_result_messages(
+        prepared,
+        exec_results,
+        crate::agent::tool_result_context::resolved_max_tool_result_bytes(
+            runner.agent_config.context.max_tool_result_bytes,
+            runner.provider.as_ref(),
+        ),
+    );
+    runner.record_transcript(&raw_transcript);
+    messages.push(canonical);
+}
+
+fn build_tool_result_messages(
+    prepared: &[PreparedTool],
+    exec_results: Vec<ToolResult>,
+    max_tool_result_bytes: usize,
+) -> (serde_json::Value, serde_json::Value) {
+    let mut raw_results = Vec::with_capacity(prepared.len());
+    let mut canonical_results = Vec::with_capacity(prepared.len());
+    for (prepared_tool, result) in prepared.iter().zip(exec_results) {
+        let raw = serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": prepared_tool.id,
+            "content": result.content,
+            "is_error": result.is_error,
+        });
+        let capped = crate::agent::tool_result_context::cap_tool_output_to_bytes(
+            raw["content"].as_str().unwrap_or_default(),
+            max_tool_result_bytes,
+        );
+        if capped.truncated {
+            tracing::warn!(
+                tool = %prepared_tool.name,
+                tool_use_id = %prepared_tool.id,
+                original_bytes = capped.original_bytes,
+                stored_bytes = capped.stored_bytes,
+                limit_bytes = capped.limit_bytes,
+                "subagent tool result exceeded provider field policy"
+            );
+        }
+        let mut canonical = raw.clone();
+        canonical["content"] = serde_json::Value::String(capped.content);
+        raw_results.push(raw);
+        canonical_results.push(canonical);
+    }
+    (
+        serde_json::json!({"role": "user", "content": raw_results}),
+        serde_json::json!({"role": "user", "content": canonical_results}),
+    )
 }
 
 fn record_tool_progress(runner: &SubagentRunner, prepared_tool: &PreparedTool) {
@@ -230,5 +268,86 @@ async fn drain_pending_user_turns(runner: &SubagentRunner, messages: &mut Vec<se
     for msg in pending {
         runner.record_transcript(&msg);
         messages.push(msg);
+    }
+}
+
+#[cfg(test)]
+mod result_boundary_tests {
+    use super::*;
+
+    fn prepared_tool() -> PreparedTool {
+        PreparedTool {
+            id: "tool-1".into(),
+            name: "Read".into(),
+            input: serde_json::json!({}),
+            parse_error: None,
+        }
+    }
+
+    #[test]
+    fn raw_transcript_keeps_full_result_while_canonical_message_is_byte_bounded() {
+        let raw_content = format!("HEAD{}TAIL", "é".repeat(100_000));
+        let (raw_transcript, canonical) = build_tool_result_messages(
+            &[prepared_tool()],
+            vec![ToolResult::success(raw_content.clone())],
+            4_096,
+        );
+
+        assert_eq!(
+            raw_transcript["content"][0]["content"],
+            serde_json::Value::String(raw_content)
+        );
+        let canonical_content = canonical["content"][0]["content"]
+            .as_str()
+            .expect("canonical tool result content");
+        assert!(canonical_content.contains("omitted"));
+        assert!(
+            serde_json::to_vec(&serde_json::Value::String(canonical_content.into()))
+                .expect("serialize canonical provider field")
+                .len()
+                <= 4_096
+        );
+    }
+
+    #[test]
+    fn raw_transcript_reopens_with_full_result_while_canonical_stays_capped() {
+        let raw_content = format!("HEAD{}TAIL", "é".repeat(100_000));
+        let (raw_transcript, canonical) = build_tool_result_messages(
+            &[prepared_tool()],
+            vec![ToolResult::success(raw_content.clone())],
+            4_096,
+        );
+        let temp = tempfile::tempdir().expect("create transcript directory");
+        let store = crate::agents::transcript::AgentTranscriptStore::with_base_dir(
+            temp.path().to_path_buf(),
+        );
+
+        store.record_message("agent-1", &raw_transcript);
+        let reopened = crate::agents::transcript::AgentTranscriptStore::with_base_dir(
+            temp.path().to_path_buf(),
+        );
+        let persisted = reopened
+            .get_transcript("agent-1")
+            .expect("reload raw transcript");
+
+        assert_eq!(persisted[0]["content"][0]["content"], raw_content);
+        assert_ne!(canonical["content"][0]["content"], raw_content);
+        assert!(
+            canonical["content"][0]["content"]
+                .as_str()
+                .expect("canonical content")
+                .contains("omitted")
+        );
+    }
+
+    #[test]
+    fn ordinary_tool_result_is_identical_in_raw_and_canonical_messages() {
+        let (raw_transcript, canonical) = build_tool_result_messages(
+            &[prepared_tool()],
+            vec![ToolResult::success("small output")],
+            4_096,
+        );
+
+        assert_eq!(raw_transcript, canonical);
     }
 }

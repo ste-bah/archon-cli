@@ -38,6 +38,7 @@ pub(super) enum StreamOpenOutcome {
 pub(super) enum StreamRoundOutcome {
     Completed(StreamRound),
     RetryAgentLoop,
+    RetryStream(Receiver<StreamEvent>),
 }
 
 pub(super) enum ToolLoopAction {
@@ -108,11 +109,10 @@ impl Agent {
         let request_body_bytes = autocompact::request_body_bytes(&request);
         let large_retry_body_bytes =
             autocompact::large_request_retry_body_bytes(&self.config.context);
-        let trigger_tokens = if self.state.last_known_context_tokens > 0 {
-            self.state.last_known_context_tokens
-        } else {
-            autocompact::trigger_tokens(&self.state.messages)
-        };
+        let trigger_tokens = self
+            .state
+            .last_known_context_tokens
+            .max(autocompact::trigger_tokens(&self.state.messages));
         let context_window = self.context_window_for(&active_model);
 
         Ok(PreparedTurnRequest {
@@ -145,15 +145,19 @@ impl Agent {
     pub(super) async fn open_turn_stream(
         &mut self,
         prepared: &PreparedTurnRequest,
-        reactive_overflow_retried: &mut bool,
+        recovery_ladder: &mut autocompact::RecoveryLadder,
         reactive_rate_limit_retried: &mut bool,
     ) -> Result<StreamOpenOutcome, AgentLoopError> {
         match self.client.stream(prepared.request.clone()).await {
             Ok(rx) => Ok(StreamOpenOutcome::Stream(rx)),
-            Err(e) if e.is_context_window_exceeded() => {
-                *reactive_overflow_retried = true;
-                self.force_reactive_compact().await?;
-                self.retry_stream(prepared, "reactive compaction retry failed")
+            Err(e)
+                if autocompact::request_pressure_kind_for_request(&e, &prepared.request)
+                    .is_some() =>
+            {
+                let classification =
+                    autocompact::request_pressure_kind_for_request(&e, &prepared.request)
+                        .expect("guarded pressure kind");
+                self.recover_request_pressure(prepared, recovery_ladder, classification)
                     .await
                     .map(StreamOpenOutcome::Stream)
             }
@@ -165,9 +169,17 @@ impl Agent {
                 *reactive_rate_limit_retried = true;
                 self.warn_large_rate_limit(prepared, "rate_limit_large_request");
                 self.force_reactive_compact().await?;
-                self.retry_stream(prepared, "rate-limit compaction retry failed")
-                    .await
-                    .map(StreamOpenOutcome::Stream)
+                let messages = tool_result_context::project_messages_for_request(
+                    &self.state.messages,
+                    self.config.context.preserve_recent_turns,
+                );
+                self.retry_stream_with_messages(
+                    prepared,
+                    messages,
+                    "rate-limit compaction retry failed",
+                )
+                .await
+                .map(StreamOpenOutcome::Stream)
             }
             Err(e) => {
                 self.discard_thinking_preview().await;
@@ -181,7 +193,7 @@ impl Agent {
         &mut self,
         mut rx: Receiver<StreamEvent>,
         prepared: &PreparedTurnRequest,
-        reactive_overflow_retried: &mut bool,
+        recovery_ladder: &mut autocompact::RecoveryLadder,
         reactive_rate_limit_retried: &mut bool,
     ) -> Result<StreamRoundOutcome, AgentLoopError> {
         let mut round = StreamRound::default();
@@ -248,7 +260,7 @@ impl Agent {
                             error_type,
                             message,
                             prepared,
-                            reactive_overflow_retried,
+                            recovery_ladder,
                             reactive_rate_limit_retried,
                         )
                         .await;

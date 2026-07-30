@@ -38,7 +38,8 @@ impl SubagentRunner {
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
         let mut reasoning_encrypted: Option<String> = None;
-        let mut reactive_overflow_retried = false;
+        let mut recovery_ladder = crate::agent::autocompact::RecoveryLadder::default();
+        let mut emergency_projection_pending = false;
         let mut reactive_rate_limit_retried = false;
         let mut proactive_pressure_attempted = false;
 
@@ -111,7 +112,8 @@ impl SubagentRunner {
                         &mut messages,
                         &mut auto_compact,
                         (
-                            &mut reactive_overflow_retried,
+                            &mut recovery_ladder,
+                            &mut emergency_projection_pending,
                             &mut reactive_rate_limit_retried,
                             &mut last_known_context_tokens,
                         ),
@@ -141,8 +143,10 @@ impl SubagentRunner {
                 continue;
             }
             reasoning_encrypted = stream.reasoning_encrypted;
-            reactive_overflow_retried = false;
+            recovery_ladder = crate::agent::autocompact::RecoveryLadder::default();
+            emergency_projection_pending = false;
             reactive_rate_limit_retried = false;
+            auto_compact.on_ordinary_success();
             cumulative_billable_tokens += stream.context_input_tokens;
             last_known_context_tokens = stream.context_input_tokens;
             tracing::trace!(cumulative_billable_tokens, "subagent billable input tokens");

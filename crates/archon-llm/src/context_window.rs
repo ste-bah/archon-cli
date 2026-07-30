@@ -35,6 +35,55 @@ pub struct ContextWindowResolution {
     pub source: ContextWindowSource,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestPressureKind {
+    ToolResultField,
+    AggregateContext,
+    OpeningPrompt,
+}
+
+pub fn classify_request_pressure_error(
+    status: Option<u16>,
+    error_type: Option<&str>,
+    code: Option<&str>,
+    message: &str,
+) -> Option<RequestPressureKind> {
+    let status_matches = status.is_none_or(|value| matches!(value, 400 | 413 | 422));
+    if !status_matches {
+        return None;
+    }
+    let mut text = String::new();
+    if let Some(error_type) = error_type {
+        text.push_str(error_type);
+        text.push(' ');
+    }
+    if let Some(code) = code {
+        text.push_str(code);
+        text.push(' ');
+    }
+    text.push_str(message);
+    let lower = text.to_ascii_lowercase();
+    let field_limit = [
+        "string should have at most",
+        "string too long",
+        "maximum length",
+        "max string length",
+        "field too long",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if field_limit
+        && ["tool_result", "tool result", ".output", ".content"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+    {
+        return Some(RequestPressureKind::ToolResultField);
+    }
+    classify_context_window_error(status, error_type, code, message, None, None)
+        .map(|_| RequestPressureKind::AggregateContext)
+}
+
 pub fn classify_context_window_error(
     status: Option<u16>,
     error_type: Option<&str>,
@@ -255,6 +304,38 @@ mod tests {
     fn openai_overflow_body_classifies() {
         let body = r#"{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded"}}"#;
         assert!(classify_context_window_body(400, body, Some("openai"), Some("gpt")).is_some());
+    }
+
+    #[test]
+    fn provider_field_length_rejection_classifies_separately_from_aggregate_overflow() {
+        let field = classify_request_pressure_error(
+            Some(400),
+            Some("invalid_request_error"),
+            None,
+            "messages.3.content.0.tool_result.content: String should have at most 10485760 characters",
+        );
+        assert_eq!(field, Some(RequestPressureKind::ToolResultField));
+
+        let aggregate = classify_request_pressure_error(
+            Some(400),
+            Some("invalid_request_error"),
+            Some("context_length_exceeded"),
+            "maximum context length exceeded",
+        );
+        assert_eq!(aggregate, Some(RequestPressureKind::AggregateContext));
+    }
+
+    #[test]
+    fn ordinary_bad_request_is_not_request_pressure() {
+        assert_eq!(
+            classify_request_pressure_error(
+                Some(400),
+                Some("invalid_request_error"),
+                None,
+                "invalid bearer token shape",
+            ),
+            None
+        );
     }
 
     #[test]
