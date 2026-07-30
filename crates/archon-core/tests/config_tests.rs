@@ -37,6 +37,7 @@ fn empty_toml_produces_valid_defaults() {
     assert_eq!(config.context.rate_limit_pressure_body_bytes, Some(320_000));
     assert_eq!(config.context.large_request_retry_body_bytes, Some(320_000));
     assert_eq!(config.context.max_tool_result_bytes, 1_000_000);
+    assert!(config.context.compaction_model.is_none());
 
     // MemoryConfig defaults
     assert!(config.memory.enabled);
@@ -67,6 +68,24 @@ fn empty_toml_produces_valid_defaults() {
 
     // Defaults must also pass validation
     validate(&config).expect("default config should pass validation");
+}
+
+#[test]
+fn compaction_model_parses_as_explicit_context_policy() {
+    let config: ArchonConfig = toml::from_str(
+        r#"
+[context]
+compaction_model = "claude-haiku-4-5-20251001"
+"#,
+    )
+    .expect("compaction model config should parse");
+
+    assert_eq!(
+        config.context.compaction_model.as_deref(),
+        Some("claude-haiku-4-5-20251001")
+    );
+    validate(&config)
+        .expect("explicit compaction model is resolved against provider availability at runtime");
 }
 
 #[test]

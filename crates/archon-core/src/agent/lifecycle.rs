@@ -39,6 +39,8 @@ impl Agent {
             extraction_state: ExtractionState::default(),
             auto_extractor: None,
             auto_extraction_tasks: Vec::new(),
+            session_store: None,
+            compaction_summary_tasks: Vec::new(),
             auto_evaluator: None,
             subagent_manager: Arc::new(Mutex::new(SubagentManager::new(max_subagent_concurrency))),
             show_thinking: Arc::new(AtomicBool::new(true)),

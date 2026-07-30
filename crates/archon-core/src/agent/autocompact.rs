@@ -6,6 +6,13 @@ pub(crate) use request_pressure::*;
 #[path = "autocompact_agent.rs"]
 mod agent_impl;
 
+#[path = "segment_compaction.rs"]
+mod segment_compaction;
+pub use segment_compaction::*;
+#[path = "segment_compaction_validation.rs"]
+mod segment_compaction_validation;
+pub use segment_compaction_validation::validate_compaction_source;
+
 #[path = "autocompact_recovery.rs"]
 mod recovery;
 #[cfg(test)]
@@ -174,12 +181,49 @@ pub async fn compact_json_messages_with_provider(
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedCompactionSummary {
+    pub text: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 pub async fn generate_compaction_summary_structured(
     provider: &dyn archon_llm::provider::LlmProvider,
     model: &str,
     messages: &[serde_json::Value],
     attribution: serde_json::Value,
 ) -> Result<String, CompactionError> {
+    generate_compaction_summary_with_usage(provider, model, messages, attribution)
+        .await
+        .map(|summary| summary.text)
+}
+
+pub async fn generate_compaction_summary_with_usage(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
+    messages: &[serde_json::Value],
+    attribution: serde_json::Value,
+) -> Result<GeneratedCompactionSummary, CompactionError> {
+    generate_summary_with_usage(provider, model, messages, attribution, true).await
+}
+
+pub async fn generate_segment_summary_with_usage(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
+    messages: &[serde_json::Value],
+    attribution: serde_json::Value,
+) -> Result<GeneratedCompactionSummary, CompactionError> {
+    generate_summary_with_usage(provider, model, messages, attribution, false).await
+}
+
+async fn generate_summary_with_usage(
+    provider: &dyn archon_llm::provider::LlmProvider,
+    model: &str,
+    messages: &[serde_json::Value],
+    attribution: serde_json::Value,
+    preserve_recent: bool,
+) -> Result<GeneratedCompactionSummary, CompactionError> {
     use crate::commands::build_compact_summary_request;
 
     let mut working_messages = messages.to_vec();
@@ -198,11 +242,12 @@ pub async fn generate_compaction_summary_structured(
 
     let mut context_messages = super::summary_text::to_summary_context_messages(&working_messages);
     for attempt in 0..3 {
-        let summary_messages = build_compact_summary_request(&context_messages);
-        let request_messages: Vec<serde_json::Value> = summary_messages
-            .iter()
-            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-            .collect();
+        let summary_messages = if preserve_recent {
+            build_compact_summary_request(&context_messages)
+        } else {
+            archon_context::compact::build_summary_request(&context_messages, 0)
+        };
+        let request_messages = bound_summary_request_messages(summary_messages)?;
         let request = archon_llm::provider::LlmRequest {
             model: model.to_string(),
             max_tokens: 2048,
@@ -235,7 +280,9 @@ pub async fn generate_compaction_summary_structured(
             Err(err) => return Err(CompactionError::Provider(err)),
         };
         let mut response = String::new();
+        let mut usage = archon_llm::usage::UsageAccumulator::default();
         while let Some(event) = rx.recv().await {
+            usage.record_event(&event);
             match event {
                 archon_llm::streaming::StreamEvent::TextDelta { text, .. } => {
                     response.push_str(&text);
@@ -264,12 +311,80 @@ pub async fn generate_compaction_summary_structured(
         }
         let summary = response.trim();
         if !summary.is_empty() {
-            return Ok(summary.to_string());
+            return Ok(GeneratedCompactionSummary {
+                text: summary.to_string(),
+                input_tokens: usage.context_input_tokens,
+                output_tokens: usage.output_tokens,
+            });
         }
     }
     Err(CompactionError::InvalidSummary(
         "provider returned empty summary".into(),
     ))
+}
+
+fn bound_summary_request_messages(
+    messages: Vec<archon_context::messages::ContextMessage>,
+) -> Result<Vec<serde_json::Value>, CompactionError> {
+    let mut request_messages: Vec<serde_json::Value> = messages
+        .into_iter()
+        .map(|message| serde_json::json!({ "role": message.role, "content": message.content }))
+        .collect();
+    if serialized_summary_request_len(&request_messages)? <= COMPACTION_INPUT_BUDGET_BYTES {
+        return Ok(request_messages);
+    }
+
+    let string_content_count = request_messages
+        .iter()
+        .filter(|message| {
+            message
+                .get("content")
+                .is_some_and(serde_json::Value::is_string)
+        })
+        .count()
+        .max(1);
+    let overhead = serialized_summary_request_overhead(&request_messages)?;
+    let content_budget = COMPACTION_INPUT_BUDGET_BYTES.saturating_sub(overhead);
+    let per_message_budget = content_budget / string_content_count + 2;
+    for message in &mut request_messages {
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        message["content"] = serde_json::json!(
+            super::tool_result_context::cap_tool_output_to_bytes(content, per_message_budget)
+                .content
+        );
+    }
+
+    if serialized_summary_request_len(&request_messages)? > COMPACTION_INPUT_BUDGET_BYTES {
+        return Err(CompactionError::InvalidSummary(format!(
+            "summary request exceeds {COMPACTION_INPUT_BUDGET_BYTES}-byte input budget"
+        )));
+    }
+    Ok(request_messages)
+}
+
+fn serialized_summary_request_len(
+    messages: &[serde_json::Value],
+) -> Result<usize, CompactionError> {
+    serde_json::to_vec(messages)
+        .map(|messages| messages.len())
+        .map_err(|error| CompactionError::InvalidSummary(error.to_string()))
+}
+
+fn serialized_summary_request_overhead(
+    messages: &[serde_json::Value],
+) -> Result<usize, CompactionError> {
+    let mut messages = messages.to_vec();
+    for message in &mut messages {
+        if message
+            .get("content")
+            .is_some_and(serde_json::Value::is_string)
+        {
+            message["content"] = serde_json::Value::String(String::new());
+        }
+    }
+    serialized_summary_request_len(&messages)
 }
 
 fn compaction_attempt_attribution(base: &serde_json::Value, round: u64) -> serde_json::Value {
@@ -373,6 +488,9 @@ mod attribution_tests;
 #[cfg(test)]
 #[path = "autocompact_recovery_tests.rs"]
 mod recovery_tests;
+#[cfg(test)]
+#[path = "segment_compaction_tests.rs"]
+mod segment_compaction_tests;
 #[cfg(test)]
 #[path = "autocompact_tests.rs"]
 mod tests;

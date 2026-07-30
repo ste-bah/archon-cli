@@ -11,7 +11,6 @@ pub(super) struct PreparedTurnRequest {
     pub(super) request: LlmRequest,
     pub(super) request_body_bytes: usize,
     pub(super) large_retry_body_bytes: usize,
-    pub(super) trigger_tokens: u64,
     pub(super) context_window: u64,
 }
 
@@ -37,7 +36,6 @@ pub(super) enum StreamOpenOutcome {
 
 pub(super) enum StreamRoundOutcome {
     Completed(StreamRound),
-    RetryAgentLoop,
     RetryStream(Receiver<StreamEvent>),
 }
 
@@ -74,16 +72,13 @@ impl Agent {
         let active_model = self.active_model().await;
         let effort = self.turn_effort(user_input).await;
         let (max_tokens, thinking, speed) = self.config.build_base_request_fields(&active_model);
-        self.maybe_auto_compact(&active_model).await?;
+        let messages = self.messages_for_turn_request(&active_model)?;
 
         let mut request = LlmRequest {
             model: active_model.clone(),
             max_tokens,
             system,
-            messages: tool_result_context::project_messages_for_request(
-                &self.state.messages,
-                self.config.context.preserve_recent_turns,
-            ),
+            messages,
             tools: self.config.tools.clone(),
             thinking,
             speed,
@@ -109,10 +104,6 @@ impl Agent {
         let request_body_bytes = autocompact::request_body_bytes(&request);
         let large_retry_body_bytes =
             autocompact::large_request_retry_body_bytes(&self.config.context);
-        let trigger_tokens = self
-            .state
-            .last_known_context_tokens
-            .max(autocompact::trigger_tokens(&self.state.messages));
         let context_window = self.context_window_for(&active_model);
 
         Ok(PreparedTurnRequest {
@@ -120,7 +111,6 @@ impl Agent {
             request,
             request_body_bytes,
             large_retry_body_bytes,
-            trigger_tokens,
             context_window,
         })
     }
@@ -168,11 +158,7 @@ impl Agent {
             {
                 *reactive_rate_limit_retried = true;
                 self.warn_large_rate_limit(prepared, "rate_limit_large_request");
-                self.force_reactive_compact().await?;
-                let messages = tool_result_context::project_messages_for_request(
-                    &self.state.messages,
-                    self.config.context.preserve_recent_turns,
-                );
+                let messages = self.force_reactive_compact().await?;
                 self.retry_stream_with_messages(
                     prepared,
                     messages,

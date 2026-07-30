@@ -408,5 +408,8 @@ mod workflow_live_v2_lifecycle_verify_outcome_repair_tests;
 #[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation_tests;
 #[cfg(test)]
+#[path = "workflow_live_v3_boundary_tests.rs"]
+mod workflow_live_v3_boundary_tests;
+#[cfg(test)]
 #[path = "workflow_live_v3_compaction_tests.rs"]
 mod workflow_live_v3_compaction_tests;

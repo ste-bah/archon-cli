@@ -31,34 +31,43 @@ impl Agent {
             .unwrap_or(resolved.context_window)
     }
 
-    pub(in crate::agent) async fn maybe_auto_compact(
+    pub(in crate::agent) async fn force_reactive_compact(
         &mut self,
-        active_model: &str,
-    ) -> Result<(), AgentLoopError> {
-        let window = self.context_window_for(active_model);
-        let tokens = self
-            .state
-            .last_known_context_tokens
-            .max(trigger_tokens(&self.state.messages));
-        let effective_window = window.saturating_sub(self.config.context.output_reserve_tokens);
-        let threshold = (self.config.context.compact_threshold
-            - self.config.context.preflight_safety_margin)
-            .max(0.0);
-        let Some(action) = evaluate_compaction(
-            tokens,
-            effective_window,
-            &self.state.auto_compact,
-            threshold,
-        ) else {
-            return Ok(());
-        };
-        self.run_auto_compaction(action, false).await
+    ) -> Result<Vec<serde_json::Value>, AgentLoopError> {
+        self.run_reactive_compaction(CompactAction::Full).await
     }
 
-    pub(in crate::agent) async fn force_reactive_compact(&mut self) -> Result<(), AgentLoopError> {
-        self.run_auto_compaction(CompactAction::Full, true).await
+    async fn run_reactive_compaction(
+        &mut self,
+        action: CompactAction,
+    ) -> Result<Vec<serde_json::Value>, AgentLoopError> {
+        let active_model = self.active_model().await;
+        let attribution = self.config.runtime_attribution_extra(
+            "compaction",
+            "reactive_request_projection",
+            None,
+            None,
+            None,
+        );
+        match compact_json_messages_with_provider(
+            self.client.as_ref(),
+            &active_model,
+            &self.state.messages,
+            action,
+            true,
+            attribution,
+        )
+        .await
+        {
+            Ok((_, compacted)) => Ok(compacted),
+            Err(error) => {
+                self.state.auto_compact.on_failure(&error);
+                Err(AgentLoopError::Compaction(error))
+            }
+        }
     }
 
+    #[cfg(test)]
     pub(in crate::agent) async fn run_auto_compaction(
         &mut self,
         action: CompactAction,

@@ -59,6 +59,31 @@ fn list_sessions_uses_one_query_for_empty_and_populated_results() {
 }
 
 #[test]
+fn delete_session_rolls_back_compaction_cleanup_on_failure() {
+    let (dir, store) = temp_store();
+    let session = store
+        .register_session("delete-rollback", "/rollback", None, "test")
+        .unwrap();
+    store.save_message(&session.id, 0, "message").unwrap();
+    let segment = store
+        .close_compaction_segment(&session.id, 0, 0, &["source".into()])
+        .unwrap();
+
+    store.fail_next_delete_after_compaction_rows();
+    assert!(store.delete_session(&session.id).is_err());
+
+    assert!(store.get_session(&session.id).is_ok());
+    assert_eq!(store.load_messages(&session.id).unwrap(), vec!["message"]);
+    assert!(store.get_compaction_segment(&segment.id).unwrap().is_some());
+    assert_eq!(
+        store.load_compaction_segment_body(&segment.id).unwrap(),
+        vec!["source"]
+    );
+
+    fs::remove_dir_all(dir).expect("remove temp directory");
+}
+
+#[test]
 fn replace_messages_rolls_back_rows_and_count_when_post_write_step_fails() {
     let (dir, store) = temp_store();
     let session = store

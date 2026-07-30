@@ -73,7 +73,6 @@ impl Agent {
         let mut agentic_iterations: u32 = 0;
         let mut recovery_ladder = autocompact::RecoveryLadder::default();
         let mut reactive_rate_limit_retried = false;
-        let mut proactive_pressure_attempted = false;
         let mut finalization_repair_attempted = false;
         if let Some(response) = trivial_response {
             match self.finalization_verdict(&response) {
@@ -105,20 +104,6 @@ impl Agent {
             let prepared = self
                 .prepare_turn_request(user_input, agentic_iterations)
                 .await?;
-            if !proactive_pressure_attempted
-                && self
-                    .maybe_request_pressure_compact(
-                        &prepared.active_model,
-                        prepared.trigger_tokens,
-                        prepared.request_body_bytes,
-                        prepared.context_window,
-                    )
-                    .await?
-            {
-                proactive_pressure_attempted = true;
-                continue 'agent_loop;
-            }
-
             self.emit_turn_request_started(&prepared).await;
             let StreamOpenOutcome::Stream(rx) = self
                 .open_turn_stream(
@@ -128,34 +113,20 @@ impl Agent {
                 )
                 .await?;
 
-            let round = match self
-                .collect_stream_round(
-                    rx,
-                    &prepared,
-                    &mut recovery_ladder,
-                    &mut reactive_rate_limit_retried,
-                )
-                .await?
-            {
-                StreamRoundOutcome::Completed(round) => round,
-                StreamRoundOutcome::RetryAgentLoop => continue 'agent_loop,
-                StreamRoundOutcome::RetryStream(retry_rx) => match self
+            let mut round_rx = rx;
+            let round = loop {
+                match self
                     .collect_stream_round(
-                        retry_rx,
+                        round_rx,
                         &prepared,
                         &mut recovery_ladder,
                         &mut reactive_rate_limit_retried,
                     )
                     .await?
                 {
-                    StreamRoundOutcome::Completed(round) => round,
-                    StreamRoundOutcome::RetryAgentLoop => continue 'agent_loop,
-                    StreamRoundOutcome::RetryStream(_) => {
-                        return Err(AgentLoopError::ApiError(
-                            "request pressure recovery exhausted after two bounded retries".into(),
-                        ));
-                    }
-                },
+                    StreamRoundOutcome::Completed(round) => break round,
+                    StreamRoundOutcome::RetryStream(retry_rx) => round_rx = retry_rx,
+                }
             };
             recovery_ladder = autocompact::RecoveryLadder::default();
             reactive_rate_limit_retried = false;

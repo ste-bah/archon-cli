@@ -46,11 +46,13 @@ mod message_delivery;
 mod payloads;
 mod permission_gate;
 mod process_message;
+mod process_message_recovery;
 mod process_message_steps;
 mod process_message_support;
 pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;
+mod segment_compaction_runtime;
 mod summary_text;
 mod support;
 #[cfg(test)]
@@ -124,6 +126,8 @@ pub struct Agent {
     // v0.1.23: AutoExtraction (LLM-based) learning system.
     auto_extractor: Option<Arc<AutoExtractor>>,
     auto_extraction_tasks: Vec<tokio::task::JoinHandle<()>>,
+    session_store: Option<Arc<archon_session::storage::SessionStore>>,
+    compaction_summary_tasks: Vec<tokio::task::JoinHandle<()>>,
     // GAP 6: Auto-mode permission evaluator
     auto_evaluator: Option<AutoModeEvaluator>,
     // GAP 8: Subagent manager
@@ -182,118 +186,4 @@ pub struct Agent {
     cognitive_store: Option<Arc<std::sync::Mutex<archon_cognitive::PersistentCognitiveStore>>>,
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
-}
-
-impl Agent {
-    async fn maybe_request_pressure_compact(
-        &mut self,
-        active_model: &str,
-        trigger_tokens: u64,
-        trigger_body_bytes: usize,
-        context_window: u64,
-    ) -> Result<bool, AgentLoopError> {
-        let token_pressure = self
-            .config
-            .context
-            .rate_limit_pressure_tokens
-            .is_some_and(|threshold| trigger_tokens >= threshold);
-        let body_pressure = self
-            .config
-            .context
-            .rate_limit_pressure_body_bytes
-            .is_some_and(|threshold| trigger_body_bytes as u64 >= threshold);
-        if (!token_pressure && !body_pressure) || !self.state.auto_compact.should_attempt() {
-            return Ok(false);
-        }
-
-        let reason = match (token_pressure, body_pressure) {
-            (true, true) => "request_pressure_tokens_and_bytes",
-            (true, false) => "request_pressure_tokens",
-            (false, true) => "request_pressure_bytes",
-            (false, false) => unreachable!(),
-        };
-        let telemetry = self.compaction_telemetry_for(active_model);
-        tracing::info!(
-            compaction.reason = reason,
-            trigger_tokens,
-            trigger_body_bytes,
-            context_window,
-            provider_family = telemetry.provider_family,
-            wire_shape = telemetry.wire_shape,
-            native_context_window = telemetry.native_context_window,
-            runtime_context_budget = telemetry.runtime_context_budget,
-            context_source = telemetry.context_source,
-            compaction_backend = telemetry.compaction_backend,
-            scope = "main_session",
-            force = false,
-            consecutive_failures = self.state.auto_compact.consecutive_failures,
-            "request pressure threshold reached; attempting proactive compaction"
-        );
-
-        let before = self.state.messages.clone();
-        self.state.auto_compact.compact_in_flight = true;
-        let attribution = self.config.runtime_attribution_extra(
-            "compaction",
-            "request_pressure_compaction",
-            None,
-            None,
-            None,
-        );
-        let result = autocompact::compact_json_messages_with_provider(
-            self.client.as_ref(),
-            active_model,
-            &self.state.messages,
-            CompactAction::Full,
-            false,
-            attribution,
-        )
-        .await;
-
-        match result {
-            Ok((
-                autocompact::CompactionOutcome::Compacted {
-                    after_estimated_tokens,
-                    ..
-                },
-                compacted,
-            )) => {
-                self.state.messages = compacted;
-                self.state.last_known_context_tokens = 0;
-                self.memory_injector.invalidate_cache();
-                self.state.auto_compact.on_success(after_estimated_tokens);
-                self.send_event(AgentEvent::CompactionTriggered).await;
-                Ok(self.state.messages != before)
-            }
-            Ok((autocompact::CompactionOutcome::Skipped { .. }, _)) => {
-                self.state.auto_compact.on_cancel();
-                Ok(false)
-            }
-            Err(autocompact::CompactionError::Cancelled) => {
-                self.state.auto_compact.on_cancel();
-                Ok(false)
-            }
-            Err(err) => {
-                self.state.auto_compact.on_failure(&err);
-                tracing::warn!(
-                    compaction.reason = reason,
-                    trigger_tokens,
-                    trigger_body_bytes,
-                    context_window,
-                    provider_family = telemetry.provider_family,
-                    wire_shape = telemetry.wire_shape,
-                    native_context_window = telemetry.native_context_window,
-                    runtime_context_budget = telemetry.runtime_context_budget,
-                    context_source = telemetry.context_source,
-                    compaction_backend = telemetry.compaction_backend,
-                    scope = "main_session",
-                    force = false,
-                    consecutive_failures = self.state.auto_compact.consecutive_failures,
-                    breaker_tripped = self.state.auto_compact.disabled,
-                    error = %err,
-                    "request-pressure compaction failed; continuing turn"
-                );
-                Ok(false)
-            }
-        }
-    }
 }
