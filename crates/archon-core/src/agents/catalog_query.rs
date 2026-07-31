@@ -4,7 +4,6 @@ use super::catalog_state::DiscoveryCatalog;
 use super::catalog_types::{AgentFilter, AgentInfoView, AgentKey, FilterLogic};
 use crate::agents::metadata::{AgentMetadata, AgentState};
 
-#[allow(clippy::result_large_err)]
 impl DiscoveryCatalog {
     /// All registered agent names (for suggestions and listing).
     pub fn all_names(&self) -> Vec<String> {
