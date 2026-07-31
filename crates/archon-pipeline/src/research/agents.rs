@@ -14,7 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[path = "agent_definitions/mod.rs"]
 mod agent_definitions;
+#[path = "phase_definitions.rs"]
 mod phase_definitions;
 
 // ---------------------------------------------------------------------------
@@ -238,7 +240,8 @@ pub static RESEARCH_AGENTS: &[ResearchAgent] = &RESEARCH_AGENT_DEFINITIONS;
 // ---------------------------------------------------------------------------
 
 /// All 8 research-pipeline phases in order.
-static RESEARCH_PHASE_DEFINITIONS: [ResearchPhase; 8] = phase_definitions::RESEARCH_PHASE_DEFINITIONS;
+static RESEARCH_PHASE_DEFINITIONS: [ResearchPhase; 8] =
+    phase_definitions::RESEARCH_PHASE_DEFINITIONS;
 
 pub static RESEARCH_PHASES: &[ResearchPhase] = &RESEARCH_PHASE_DEFINITIONS;
 

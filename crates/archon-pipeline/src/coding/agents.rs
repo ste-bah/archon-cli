@@ -12,6 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[path = "agent_definitions/mod.rs"]
 mod agent_definitions;
 
 // ---------------------------------------------------------------------------
