@@ -12,6 +12,12 @@ pub struct DiscoveryCatalog {
     cached_snapshot: ArcSwap<CatalogSnapshot>,
 }
 
+/// The entries rejected during one bulk insertion.
+#[derive(Debug, Default)]
+pub struct BulkInsertResult {
+    pub rejected: Vec<DiscoveryError>,
+}
+
 impl DiscoveryCatalog {
     /// Create an empty catalog.
     pub fn new() -> Self {
@@ -31,16 +37,24 @@ impl DiscoveryCatalog {
     }
 
     /// Insert entries under one writer lock and publish once for bulk discovery.
-    pub fn insert_all(&self, entries: Vec<AgentMetadata>) -> Result<(), DiscoveryError> {
-        for meta in &entries {
-            self.validate_metadata(meta)?;
-        }
-        let mut staging = self.staging.lock().expect("catalog staging lock poisoned");
+    /// Invalid entries are rejected individually; accepted entries share one publication.
+    pub fn insert_all(&self, entries: Vec<AgentMetadata>) -> BulkInsertResult {
+        let mut accepted = Vec::with_capacity(entries.len());
+        let mut rejected = Vec::new();
         for meta in entries {
-            self.insert_staged(&mut staging, meta);
+            match self.validate_metadata(&meta) {
+                Ok(()) => accepted.push(meta),
+                Err(error) => rejected.push(error),
+            }
         }
-        self.publish(&staging);
-        Ok(())
+        if !accepted.is_empty() {
+            let mut staging = self.staging.lock().expect("catalog staging lock poisoned");
+            for meta in accepted {
+                self.insert_staged(&mut staging, meta);
+            }
+            self.publish(&staging);
+        }
+        BulkInsertResult { rejected }
     }
 
     fn validate_metadata(&self, meta: &AgentMetadata) -> Result<(), DiscoveryError> {

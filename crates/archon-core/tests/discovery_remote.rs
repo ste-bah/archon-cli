@@ -120,6 +120,44 @@ async fn malformed_json_returns_parse_error() {
 }
 
 #[tokio::test]
+async fn remote_load_keeps_valid_entries_when_metadata_entry_is_oversized() {
+    let agents = serde_json::json!([
+        {
+            "name": "accepted-remote-agent",
+            "version": "1.0.0",
+            "description": "Valid agent",
+            "resource_requirements": { "cpu": 1.0, "memory_mb": 128, "timeout_sec": 30 }
+        },
+        {
+            "name": "oversized-remote-agent",
+            "version": "1.0.0",
+            "description": "x".repeat(10 * 1024 * 1024),
+            "resource_requirements": { "cpu": 1.0, "memory_mb": 128, "timeout_sec": 30 }
+        }
+    ]);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(agents))
+        .mount(&server)
+        .await;
+
+    let validator = Arc::new(AgentSchemaValidator::new().unwrap());
+    let catalog = DiscoveryCatalog::new();
+    let source = RemoteDiscoverySource::new(server.uri(), 3600, validator);
+
+    let report = source.load_all(&catalog).await.unwrap();
+
+    assert_eq!(report.loaded, 2);
+    assert_eq!(report.invalid, 0);
+    assert_eq!(catalog.len(), 1);
+    assert!(
+        catalog
+            .get(&("accepted-remote-agent".into(), "1.0.0".parse().unwrap()))
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn mixed_valid_and_invalid_elements() {
     let agents = serde_json::json!([
         {

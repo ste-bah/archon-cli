@@ -28,7 +28,7 @@ pub use catalog_types::{
 // Concurrent state and secondary-index maintenance.
 #[path = "catalog_state.rs"]
 mod catalog_state;
-pub use catalog_state::DiscoveryCatalog;
+pub use catalog_state::{BulkInsertResult, DiscoveryCatalog};
 
 // Version/dependency resolution and read-side queries.
 #[path = "catalog_resolution.rs"]
