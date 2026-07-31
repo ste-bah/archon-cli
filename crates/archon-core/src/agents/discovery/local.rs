@@ -69,20 +69,15 @@ impl LocalDiscoverySource {
         let mut loaded = 0;
         let mut invalid = 0;
 
-        for opt in parsed {
-            let meta = match opt {
-                Some(m) => m,
-                None => continue, // no frontmatter .md file, silently skipped
-            };
-            match &meta.state {
-                AgentState::Valid => loaded += 1,
+        let entries = parsed
+            .into_iter()
+            .flatten()
+            .inspect(|meta| match &meta.state {
+                AgentState::Valid | AgentState::Stale => loaded += 1,
                 AgentState::Invalid(_) => invalid += 1,
-                AgentState::Stale => loaded += 1,
-            }
-            if let Err(e) = catalog.insert(meta) {
-                warn!("failed to insert agent: {e}");
-            }
-        }
+            })
+            .collect();
+        catalog.insert_all(entries)?;
 
         Ok(LoadReport {
             loaded,
