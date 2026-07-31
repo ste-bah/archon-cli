@@ -67,6 +67,41 @@ fn load_all_valid_agents() {
 }
 
 #[test]
+fn load_all_keeps_valid_entries_when_metadata_entry_is_oversized() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("agents");
+    fs::create_dir_all(&dir).unwrap();
+    write_valid_agent(&dir, "accepted-agent");
+
+    let oversized = serde_json::json!({
+        "name": "oversized-agent",
+        "version": "1.0.0",
+        "description": "x".repeat(10 * 1024 * 1024),
+        "resource_requirements": {
+            "cpu": 1.0,
+            "memory_mb": 256,
+            "timeout_sec": 60
+        }
+    });
+    fs::write(dir.join("oversized-agent.json"), oversized.to_string()).unwrap();
+
+    let validator = Arc::new(AgentSchemaValidator::new().unwrap());
+    let catalog = DiscoveryCatalog::new();
+    let source = LocalDiscoverySource::new(tmp.path().to_path_buf(), validator);
+
+    let report = source.load_all(&catalog).unwrap();
+
+    assert_eq!(report.loaded, 2);
+    assert_eq!(report.invalid, 0);
+    assert_eq!(catalog.len(), 1);
+    assert!(
+        catalog
+            .get(&("accepted-agent".into(), "1.0.0".parse().unwrap()))
+            .is_some()
+    );
+}
+
+#[test]
 fn load_all_with_invalid_files() {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().join("agents");

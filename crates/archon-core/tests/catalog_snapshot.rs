@@ -126,31 +126,36 @@ fn different_path_collision_preserves_first_entry_without_contender_indexes() {
 
 #[test]
 fn concurrent_distinct_path_collision_keeps_consistent_winner_indexes() {
-    let catalog = Arc::new(DiscoveryCatalog::new());
-    let handles = (0..16)
-        .map(|id| {
-            let catalog = catalog.clone();
-            std::thread::spawn(move || {
-                let mut entry = metadata("concurrent-collision");
-                entry.tags = vec![format!("tag-{id}")];
-                entry.capabilities = vec![format!("capability-{id}")];
-                entry.source_path = format!("/agents/{id}").into();
-                catalog.insert(entry).unwrap();
+    for _round in 0..8 {
+        let catalog = Arc::new(DiscoveryCatalog::new());
+        let barrier = Arc::new(std::sync::Barrier::new(16));
+        let handles = (0..16)
+            .map(|id| {
+                let catalog = catalog.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let mut entry = metadata("concurrent-collision");
+                    entry.tags = vec![format!("tag-{id}")];
+                    entry.capabilities = vec![format!("capability-{id}")];
+                    entry.source_path = format!("/agents/{id}").into();
+                    barrier.wait();
+                    catalog.insert(entry).unwrap();
+                })
             })
-        })
-        .collect::<Vec<_>>();
-    for handle in handles {
-        handle.join().unwrap();
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let winner = catalog
+            .get(&("concurrent-collision".into(), "1.0.0".parse().unwrap()))
+            .unwrap();
+        assert_eq!(names(&catalog, &winner.tags[0]), ["concurrent-collision"]);
+        assert_eq!(
+            names_for_capability(&catalog, &winner.capabilities[0]),
+            ["concurrent-collision"]
+        );
+        assert_snapshot_invariant(&catalog);
     }
-    let winner = catalog
-        .get(&("concurrent-collision".into(), "1.0.0".parse().unwrap()))
-        .unwrap();
-    assert_eq!(names(&catalog, &winner.tags[0]), ["concurrent-collision"]);
-    assert_eq!(
-        names_for_capability(&catalog, &winner.capabilities[0]),
-        ["concurrent-collision"]
-    );
-    assert_snapshot_invariant(&catalog);
 }
 
 #[test]
@@ -220,9 +225,8 @@ fn bulk_insert_publishes_all_entries_and_reconciles_replacements() {
     original.tags = vec!["old".into()];
     let mut replacement = metadata("bulk-replaced");
     replacement.tags = vec!["new".into()];
-    catalog
-        .insert_all(vec![original, replacement, metadata("bulk-new")])
-        .unwrap();
+    let result = catalog.insert_all(vec![original, replacement, metadata("bulk-new")]);
+    assert!(result.rejected.is_empty());
     assert_eq!(catalog.len(), 2);
     assert!(names(&catalog, "old").is_empty());
     assert_eq!(names(&catalog, "new"), ["bulk-replaced"]);

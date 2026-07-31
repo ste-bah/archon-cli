@@ -70,7 +70,10 @@ impl RemoteDiscoverySource {
                 AgentState::Invalid(_) => invalid += 1,
             })
             .collect();
-        catalog.insert_all(entries)?;
+        let result = catalog.insert_all(entries);
+        for error in result.rejected {
+            warn!("failed to insert remote agent: {error}");
+        }
 
         Ok(RemoteLoadReport {
             loaded,
