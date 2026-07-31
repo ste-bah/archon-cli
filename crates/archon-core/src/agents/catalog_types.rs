@@ -89,6 +89,14 @@ pub enum DiscoveryError {
     #[error("parse error: {0}")]
     Parse(String),
 
+    #[error("unresolved dependency: {required_by:?} requires {name} ({version_req})")]
+    UnresolvedDependency {
+        required_by: AgentKey,
+        name: String,
+        version_req: semver::VersionReq,
+        suggestions: Vec<String>,
+    },
+
     #[error("agent not found: {name} (did you mean: {suggestions:?})")]
     AgentNotFound {
         name: String,

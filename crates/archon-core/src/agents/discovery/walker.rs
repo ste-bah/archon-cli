@@ -24,6 +24,7 @@ const ALLOWED_EXTENSIONS: &[&str] = &["json", "yaml", "yml", "toml", "md"];
 /// Category derivation: first path component below root. Files directly
 /// in root get category "uncategorized". Hidden directories (starting
 /// with `.`) are skipped.
+#[allow(clippy::result_large_err)]
 pub fn walk_agents_dir(root: &Path) -> Result<Vec<DiscoveredFile>, DiscoveryError> {
     if !root.exists() {
         return Ok(Vec::new());

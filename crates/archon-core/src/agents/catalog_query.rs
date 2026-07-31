@@ -4,6 +4,7 @@ use super::catalog_state::DiscoveryCatalog;
 use super::catalog_types::{AgentFilter, AgentInfoView, AgentKey, FilterLogic};
 use crate::agents::metadata::{AgentMetadata, AgentState};
 
+#[allow(clippy::result_large_err)]
 impl DiscoveryCatalog {
     /// All registered agent names (for suggestions and listing).
     pub fn all_names(&self) -> Vec<String> {
@@ -116,7 +117,7 @@ impl DiscoveryCatalog {
     ) -> Result<AgentInfoView, super::catalog_types::DiscoveryError> {
         let selected = self.resolve(name, version_req)?;
         let all_versions = self.versions(name);
-        let dependency_graph = self.resolve_dependencies(name).unwrap_or_default();
+        let dependency_graph = self.resolve_metadata_dependencies(selected.clone())?;
         Ok(AgentInfoView {
             selected,
             all_versions,

@@ -114,6 +114,7 @@ impl RemoteDiscoverySource {
     }
 
     /// Return stale cache data if available, otherwise error.
+    #[allow(clippy::result_large_err)]
     fn try_stale_fallback(&self) -> Result<(Vec<u8>, bool), DiscoveryError> {
         // moka evicts after TTL, so stale data may not be available.
         // We re-check in case it hasn't been evicted yet.

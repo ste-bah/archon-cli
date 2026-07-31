@@ -57,6 +57,7 @@ impl LocalDiscoverySource {
 
     /// Walk the directory, parse all files in parallel, insert into catalog.
     /// Invalid files become AgentState::Invalid(reason) per EC-DISCOVERY-001.
+    #[allow(clippy::result_large_err)]
     pub fn load_all(&self, catalog: &DiscoveryCatalog) -> Result<LoadReport, DiscoveryError> {
         let start = std::time::Instant::now();
 

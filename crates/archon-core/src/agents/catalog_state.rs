@@ -17,6 +17,7 @@ pub struct DiscoveryCatalog {
     cached_snapshot: ArcSwap<CatalogSnapshot>,
 }
 
+#[allow(clippy::result_large_err)]
 impl DiscoveryCatalog {
     /// Create an empty catalog.
     pub fn new() -> Self {
