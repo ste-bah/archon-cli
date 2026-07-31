@@ -30,3 +30,8 @@ crates/archon-draft/tests/fixtures/** text eol=lf
 # python heredoc, where CRLF breaks the heredoc terminator and indentation.
 src/command/*.js text eol=lf
 src/command/*.sh text eol=lf
+
+# Generated docs are asserted equal to the generator's output, which emits \n.
+# Without this a Windows checkout fails generated_provider_capabilities_doc_
+# matches_code on line endings alone, while macOS and Linux CI pass.
+docs/generated/** text eol=lf
