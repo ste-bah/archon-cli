@@ -413,15 +413,61 @@ pub(crate) fn runtime_prediction_context(
         },
         stats,
     );
+    // Archon's own behaviour is part of the data-generating process, so a model
+    // trained against a different build learned a feature -> outcome
+    // relationship that no longer holds. Such a model keeps returning confident
+    // predictions while being quietly wrong, which is the failure this check
+    // exists to prevent.
+    let build_matches = active_model_trained_on_current_build(active_model_id.as_deref());
+    if active_model_id.is_some() && !build_matches {
+        tracing::warn!(
+            active_model_id = ?active_model_id,
+            running_build = %archon_world_model::build_stamp(),
+            "active world model was trained against a different archon build; \
+             holding it in shadow until it is retrained and re-evaluated"
+        );
+    }
+
+    // Live scoring is still gated on an evaluation that has never been run, so
+    // everything stays in shadow regardless. Kept as a named binding rather than
+    // a literal so that lifting it is a single deliberate edit which cannot
+    // accidentally bypass the build check above.
+    let promoted_for_runtime = false;
+
     let state = archon_cognitive::WorldModelState {
         active_model_kind: active_model_id
             .as_ref()
             .map(|_| archon_cognitive::ModelKind::LatentTransition),
         active_model_id,
         jepa_promoted: false,
-        shadow_only: true,
+        shadow_only: !promoted_for_runtime || !build_matches,
     };
     Some((advisor, state))
+}
+
+/// Whether the active checkpoint was trained against the running archon build.
+///
+/// Read once at session wiring rather than per turn. Anything unreadable — no
+/// active model, a missing or corrupt checkpoint, or a checkpoint predating
+/// `trained_on_build` — is treated as "does not match", which keeps the model
+/// in shadow. Failing closed is right here: the cost of a needless shadow is a
+/// lost opportunity, while the cost of trusting a stale model is silently wrong
+/// risk scores steering real decisions.
+fn active_model_trained_on_current_build(active_model_id: Option<&str>) -> bool {
+    let Some(model_id) = active_model_id else {
+        return false;
+    };
+    let Ok(root) = super::world_model_root() else {
+        return false;
+    };
+    let Ok(registry) = archon_world_model::registry::ModelRegistry::open(root) else {
+        return false;
+    };
+    let Ok(record) = registry.load_cpu_candidate(model_id) else {
+        return false;
+    };
+    record.model.metadata.trained_on_build.as_deref()
+        == Some(archon_world_model::build_stamp().as_str())
 }
 
 #[cfg(test)]
@@ -453,5 +499,33 @@ mod tests {
             evidence_refs,
             vec!["prediction_outcome_unavailable:stored_trace_unavailable"]
         );
+    }
+
+    /// No active model means nothing to trust, so the guard must not report a
+    /// match — otherwise a fresh install would start out looking validated.
+    #[test]
+    fn build_guard_reports_no_match_without_an_active_model() {
+        assert!(!super::active_model_trained_on_current_build(None));
+    }
+
+    /// An unreadable or absent checkpoint must fail closed. The cost of a
+    /// needless shadow is a lost opportunity; the cost of trusting a stale
+    /// model is silently wrong risk scores steering real decisions.
+    #[test]
+    fn build_guard_fails_closed_when_the_checkpoint_cannot_be_read() {
+        assert!(!super::active_model_trained_on_current_build(Some(
+            "world-model-candidate-does-not-exist"
+        )));
+    }
+
+    /// The stamp must carry the commit, not just the release version: six
+    /// commits can share a version, and a corpus spanning them would not be
+    /// segmentable by version alone.
+    #[test]
+    fn build_stamp_identifies_the_commit_not_just_the_release() {
+        let stamp = archon_world_model::build_stamp();
+        let (version, commit) = stamp.split_once('+').expect("stamp is <version>+<commit>");
+        assert!(!version.is_empty());
+        assert!(!commit.is_empty());
     }
 }
