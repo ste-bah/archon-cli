@@ -61,6 +61,54 @@ Guardrail prediction remains fail-open. If prediction or guardrail storage is un
 
 **Encoder input.** `TraceWindow` and `TraceAction` each carry an optional `embedding` — a dense vector sized to the latent dimension, supplied by the caller. When present it is the base of the feature vector and the structured features are added on top. When absent, excerpt text falls back to lexical hashing.
 
+```mermaid
+flowchart TB
+    ROW["WorldTraceRow<br/>excerpt, provider, model, agent,<br/>scalars, evidence, labels"]
+    WINDOW["TraceWindow / TraceAction<br/>rows + graph context + horizon"]
+    ROW --> WINDOW
+
+    subgraph CALLER["Caller — outside jepa/, keeps the encoder adapter-free"]
+        TEXT["row_text(row)"]
+        ADAPTER["build_embedding_adapter(config)<br/>fastembed · deterministic-hash · openai"]
+        TEXT --> ADAPTER
+    end
+    WINDOW --> TEXT
+    ADAPTER -->|"dense vector, latent_dim"| EMB
+
+    EMB{"embedding<br/>present?"}
+    WINDOW --> EMB
+
+    BASE["Base = embedding<br/>every dimension independently meaningful"]
+    ZERO["Base = zeros<br/>excerpt tokens hashed into latent_dim buckets"]
+    EMB -->|yes| BASE
+    EMB -->|"no — fallback"| ZERO
+
+    STRUCT["Add structured features<br/>horizon · graph counts · action kind<br/>source · provider · model · agent<br/>scalars · evidence source"]
+    BASE --> STRUCT
+    ZERO --> STRUCT
+
+    DROP["Excluded: session id · anchor row id · action ref<br/>evidence ids · plan ids · memory ids<br/>single-occurrence, cannot generalise"]
+    DROP -.->|"never hashed in"| STRUCT
+
+    NORM["normalize"]
+    STRUCT --> NORM
+
+    subgraph ENCODER["JepaTraceEncoder::project"]
+        L1["hidden = GELU(W_in · features + b_h)<br/>W_in: latent_dim x latent_dim"]
+        L2["out = residual·features<br/>+ (1-residual)·(W_out · hidden + b_out)"]
+        LN["layer norm"]
+        L1 --> L2 --> LN
+    end
+    NORM --> L1
+
+    LATENT["Latent vector"]
+    LN --> LATENT
+
+    LATENT --> AUX["Auxiliary heads<br/>logistic regression per label<br/>risk · retry · verification need"]
+    LATENT --> PRED["Predictor<br/>training objective only,<br/>not used at inference"]
+    LATENT --> TRANS["Persisted transition model<br/>runtime next-state prediction"]
+```
+
 The distinction matters because the fallback is weak, not equivalent. Hashing folds every token into `latent_dim` buckets by `hash(token) % latent_dim`; at the default 384 an open vocabulary collides heavily, so each bucket ends up a sum of unrelated features. The dense path gives every dimension an independent meaning instead.
 
 Unbounded identifiers are deliberately excluded from the hashed features — session id, anchor row id, action ref, evidence ids, prior plan and memory ids. Each value occurs once and never recurs, so it cannot generalise to an unseen row; it only consumed bucket capacity. Graph *counts* and the evidence *source* are kept, being low-cardinality and repeatable.
