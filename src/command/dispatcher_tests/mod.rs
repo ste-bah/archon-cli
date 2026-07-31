@@ -152,8 +152,9 @@ fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow
 /// (v1.2.0 reasoning quality: /reasoning + /briefing) → 81
 /// (v1.3.3 video evidence: /video) → 82 (PRD-008 cognitive loop: /cognitive)
 /// → 83 (PRD-009 dynamic workflows: /workflow)
-/// → 84 (v1.3.11 Trading Lab: /trading).
-const EXPECTED_PRIMARY_COUNT: usize = 84;
+/// → 84 (v1.3.11 Trading Lab: /trading)
+/// → 85 (FCDP in-session drafting: /draft).
+const EXPECTED_PRIMARY_COUNT: usize = 85;
 
 /// Drain every currently-queued event from `rx` using `try_recv`
 /// until the channel reports empty, returning the drained events

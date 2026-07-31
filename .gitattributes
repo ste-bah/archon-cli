@@ -22,11 +22,28 @@ tests/fixtures/agents/generated/** linguist-generated=true
 # scripts/lint/ and scripts/ci/ unpinned. Match on basename instead.
 *.sh text eol=lf
 
-# Golden-file fixtures are compared byte-for-byte, so their line endings must
-# not vary by platform. Without this the archon-draft gauntlet goldens fail on
-# a Windows checkout purely on 
-, while passing on macOS and Linux CI.
-crates/archon-draft/tests/fixtures/** text eol=lf
+# Golden-file fixtures are compared byte-for-byte, or parsed on literal "\n\n"
+# block boundaries, so their line endings must not vary by platform. Without
+# this they fail on a Windows checkout purely on \r\n while passing on macOS
+# and Linux CI. Generalised from the archon-draft gauntlet goldens after the
+# same failure appeared in archon-llm (SSE frames split on "\n\n"),
+# archon-lanham (byte-for-byte .mjs reference) and archon-video (VTT/SRT cue
+# blocks separated by blank lines, which parsed to zero segments and surfaced
+# as NoEvidenceExtracted).
+**/tests/fixtures/** text eol=lf
+crates/archon-lanham/tests/** text eol=lf
+
+# Generated TypeScript DTOs are asserted equal to the generator's output.
+web/src/api/generated/** text eol=lf
+
+# Rust sources are LF because this repo asserts on its own source text. Many
+# guards `include_str!` a .rs file and search for embedded "\n" — e.g.
+# pipeline_slash's ordering check and session_tests' signal-delegation check.
+# rustc normalises CRLF inside string literals but include_str! does NOT, so a
+# CRLF checkout makes those searches miss and the guards fail on Windows while
+# passing on Linux CI. The stored blobs are already LF; this only changes what
+# lands in the working tree.
+*.rs text eol=lf
 
 # Scripts embedded via include_str!. Unlike a string literal in a .rs file,
 # include_str! does not normalise CRLF, so a Windows checkout would hand the
