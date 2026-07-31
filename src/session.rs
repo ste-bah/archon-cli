@@ -38,6 +38,7 @@ mod reasoning_quality;
 mod slash_context_builder;
 mod splash;
 mod web_runtime;
+mod world_model_backend;
 mod world_model_callbacks;
 use activity::{session_activity_sink, session_activity_sink_with_tui};
 pub(super) use model_selection::active_session_model;

@@ -20,6 +20,33 @@ pub(super) fn wire_runtime(
         return;
     }
     agent.set_cognitive_executive(config.learning.cognitive.clone(), policy, ledger_dir);
+    wire_world_model(agent, config, working_dir);
+}
+
+/// Inject the world-model prediction backend behind the executive advisory.
+///
+/// Fail-open by design: if the world model is disabled, has no active model, or
+/// its store cannot be read, the agent keeps the heuristic scorer and the turn
+/// is unaffected.
+fn wire_world_model(
+    agent: &mut archon_core::agent::Agent,
+    config: &archon_core::config::ArchonConfig,
+    working_dir: &Path,
+) {
+    let Some((advisor, state)) = crate::command::world_model::runtime_prediction_context(config)
+    else {
+        return;
+    };
+    let session_id = working_dir.display().to_string();
+    let backend: archon_cognitive::SharedPredictionBackend = std::sync::Arc::new(
+        super::world_model_backend::WorldModelPredictionBackend::new(advisor, session_id),
+    );
+    tracing::debug!(
+        active_model_id = ?state.active_model_id,
+        shadow_only = state.shadow_only,
+        "world-model prediction backend wired into cognitive advisory"
+    );
+    agent.set_cognitive_world_model(backend, state);
 }
 
 fn runtime_policy(

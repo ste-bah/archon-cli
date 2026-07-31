@@ -36,7 +36,7 @@ pub use decision_store::DecisionStore;
 pub use executive_loop::{
     ActionExecution, ActionExecutor, ActionOutcome, ExecutiveAdvisoryInput, ExecutiveLoop,
     ExecutiveRunOutcome, ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
-    plan_runtime_advisory,
+    plan_runtime_advisory, plan_runtime_advisory_with,
 };
 pub use governed_autonomous_apply::{
     ApplyResult, BehaviourManifestKind, CanaryOutcome, GovernedAutonomousApply, Proposal,
@@ -65,5 +65,5 @@ pub use verification_contracts::{
 };
 pub use world_model_scoring::{
     ModelKind, ModelPrediction, PredictionBackend, PredictionDimensions, ScoredCandidates,
-    WorldModelScorer, WorldModelState,
+    SharedPredictionBackend, WorldModelScorer, WorldModelState,
 };

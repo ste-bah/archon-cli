@@ -5,7 +5,7 @@ use cozo::DbInstance;
 
 use crate::executive_support::*;
 use crate::self_model::{MemoryContext, SelfModelProfile, SelfModelStore};
-use crate::world_model_scoring::NoopPredictionBackend;
+use crate::world_model_scoring::{NoopPredictionBackend, PredictionBackend};
 use crate::{
     Candidate, CandidatePlanner, ClassifyInput, CognitiveConfig, CognitiveError, DecisionRecord,
     ExecutiveStateSnapshot, LessonSink, NoopLessonSink, OutcomeSummary, PolicyGate, ReflectInput,
@@ -31,10 +31,30 @@ pub struct ExecutiveAdvisoryInput {
     pub world_model_state: WorldModelState,
 }
 
+/// Plan a runtime advisory using heuristics only.
+///
+/// Equivalent to [`plan_runtime_advisory_with`] passing
+/// [`WorldModelScorer::heuristic_only`]; kept so callers that have no world
+/// model wired do not have to name a backend.
 pub fn plan_runtime_advisory(
     config: &CognitiveConfig,
     policy: CognitivePolicy,
     input: ExecutiveAdvisoryInput,
+) -> Result<ExecutiveRunOutcome, CognitiveError> {
+    plan_runtime_advisory_with(config, policy, input, &WorldModelScorer::heuristic_only())
+}
+
+/// Plan a runtime advisory, scoring candidates with the supplied scorer.
+///
+/// The scorer decides whether model predictions are consulted at all: with a
+/// `shadow_only` or model-less [`WorldModelState`] it falls back to heuristic
+/// scores, so passing a live backend is safe before the model has been
+/// validated.
+pub fn plan_runtime_advisory_with<B: PredictionBackend>(
+    config: &CognitiveConfig,
+    policy: CognitivePolicy,
+    input: ExecutiveAdvisoryInput,
+    scorer: &WorldModelScorer<B>,
 ) -> Result<ExecutiveRunOutcome, CognitiveError> {
     if !config.enabled || input.situation.kind.is_trivial() {
         return Ok(direct_outcome(&input.situation, "not_required", Vec::new()));
@@ -46,7 +66,7 @@ pub fn plan_runtime_advisory(
         &profile,
         &MemoryContext::default(),
     )?;
-    let scored = WorldModelScorer::heuristic_only().score(&candidates, &input.world_model_state);
+    let scored = scorer.score(&candidates, &input.world_model_state);
     let gate = PolicyGate::new(Some(policy));
     let (allowed, denied) = gate.filter(scored.candidates.clone());
     let Some(selected) = select_candidate(allowed.clone(), &input.situation) else {

@@ -80,6 +80,8 @@ impl Agent {
             cognitive_policy: None,
             cognitive_ledger_dir: None,
             cognitive_executive_reminder: None,
+            cognitive_prediction_backend: None,
+            cognitive_world_model_state: archon_cognitive::WorldModelState::default(),
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
@@ -273,6 +275,22 @@ impl Agent {
         self.cognitive_config = Some(config);
         self.cognitive_policy = Some(policy);
         self.cognitive_ledger_dir = Some(ledger_dir);
+    }
+
+    /// Inject the world-model prediction backend and declare which model is
+    /// live.
+    ///
+    /// Safe to call with a real backend before the model has been validated:
+    /// `WorldModelScorer` consults predictions only when `state` names an
+    /// active model AND `shadow_only` is false, so a shadow state records
+    /// nothing but leaves every decision on the heuristic path.
+    pub fn set_cognitive_world_model(
+        &mut self,
+        backend: archon_cognitive::SharedPredictionBackend,
+        state: archon_cognitive::WorldModelState,
+    ) {
+        self.cognitive_prediction_backend = Some(backend);
+        self.cognitive_world_model_state = state;
     }
 
     /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).

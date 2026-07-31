@@ -188,6 +188,15 @@ pub struct Agent {
     cognitive_policy: Option<archon_cognitive::CognitivePolicy>,
     cognitive_ledger_dir: Option<std::path::PathBuf>,
     cognitive_executive_reminder: Option<String>,
+    /// World-model prediction backend, injected by the binary crate (the only
+    /// one that can see both `archon-cognitive` and `archon-world-model`).
+    /// `None` means advisories fall back to heuristic scoring.
+    cognitive_prediction_backend: Option<archon_cognitive::SharedPredictionBackend>,
+    /// Which world model is live. Defaults to "no model", and should be left
+    /// `shadow_only` until an eval report says the candidate beats the
+    /// nearest-neighbour baseline — the scorer ignores predictions in that
+    /// state, so shadow wiring cannot change any decision.
+    cognitive_world_model_state: archon_cognitive::WorldModelState,
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }

@@ -1,7 +1,7 @@
 use archon_cognitive::{
     ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput,
-    SituationClassifier, ToolGateInput, ToolUseGate, ToolVerdict, WorldModelState,
-    direct_response_for, plan_runtime_advisory,
+    SituationClassifier, ToolGateInput, ToolUseGate, ToolVerdict, WorldModelScorer,
+    direct_response_for, plan_runtime_advisory, plan_runtime_advisory_with,
 };
 
 use super::*;
@@ -35,15 +35,25 @@ impl Agent {
             return;
         };
         let ledger_dir = ledger_dir.clone();
-        let outcome = match plan_runtime_advisory(
-            &config,
-            policy,
-            ExecutiveAdvisoryInput {
-                situation,
-                working_dir: self.config.working_dir.clone(),
-                world_model_state: WorldModelState::default(),
-            },
-        ) {
+        let input = ExecutiveAdvisoryInput {
+            situation,
+            working_dir: self.config.working_dir.clone(),
+            world_model_state: self.cognitive_world_model_state.clone(),
+        };
+        // With a backend injected the scorer may consult model predictions;
+        // whether it actually does is decided by `world_model_state`, so a
+        // shadow-only state still takes the heuristic path. Without a backend
+        // there is nothing to consult and we skip the generic entirely.
+        let planned = match self.cognitive_prediction_backend.clone() {
+            Some(backend) => plan_runtime_advisory_with(
+                &config,
+                policy,
+                input,
+                &WorldModelScorer::new(backend, true, true),
+            ),
+            None => plan_runtime_advisory(&config, policy, input),
+        };
+        let outcome = match planned {
             Ok(outcome) => outcome,
             Err(error) => {
                 tracing::warn!(%error, "cognitive executive advisory planning failed");

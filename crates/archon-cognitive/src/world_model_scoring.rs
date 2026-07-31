@@ -71,6 +71,26 @@ pub trait PredictionBackend {
     ) -> Result<ModelPrediction, CognitiveError>;
 }
 
+/// A shared, type-erased backend.
+///
+/// The concrete backend lives in the binary crate — it is the only one that
+/// depends on both `archon-cognitive` and `archon-world-model` — so the agent
+/// holds it behind a trait object and this alias keeps that spelling in one
+/// place.
+pub type SharedPredictionBackend = std::sync::Arc<dyn PredictionBackend + Send + Sync>;
+
+/// Lets `WorldModelScorer<SharedPredictionBackend>` be built from an injected
+/// backend without the scorer needing to know the concrete type.
+impl PredictionBackend for SharedPredictionBackend {
+    fn predict(
+        &self,
+        candidate: &Candidate,
+        state: &WorldModelState,
+    ) -> Result<ModelPrediction, CognitiveError> {
+        (**self).predict(candidate, state)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NoopPredictionBackend;
 

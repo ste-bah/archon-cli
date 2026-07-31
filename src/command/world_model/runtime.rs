@@ -386,6 +386,44 @@ pub(crate) fn record_provider_runtime_advisory(session_id: &str, action_ref: &st
     );
 }
 
+/// Build the world-model prediction context for the live cognitive advisory.
+///
+/// Returns the advisor plus the state describing which model is live. The
+/// state is deliberately `shadow_only`: predictions are recorded and can be
+/// compared against outcomes, but `WorldModelScorer` will not let them
+/// influence any decision until that flag is cleared — which should happen
+/// only once `archon world eval` reports the candidate beating the
+/// nearest-neighbour baseline.
+pub(crate) fn runtime_prediction_context(
+    config: &archon_core::config::ArchonConfig,
+) -> Option<(
+    archon_world_model::WorldAdvisor,
+    archon_cognitive::WorldModelState,
+)> {
+    if !config.learning.world_model.enabled {
+        return None;
+    }
+    let stats = super::load_world_model_stats().ok()?;
+    let active_model_id = super::active_model_id().ok().flatten();
+    let advisor = archon_world_model::WorldAdvisor::new(
+        archon_world_model::WorldAdvisorConfig {
+            thresholds: super::cold_start_thresholds(config),
+            active_model_id: active_model_id.clone(),
+            training_in_progress: false,
+        },
+        stats,
+    );
+    let state = archon_cognitive::WorldModelState {
+        active_model_kind: active_model_id
+            .as_ref()
+            .map(|_| archon_cognitive::ModelKind::LatentTransition),
+        active_model_id,
+        jepa_promoted: false,
+        shadow_only: true,
+    };
+    Some((advisor, state))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

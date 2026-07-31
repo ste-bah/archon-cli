@@ -28,7 +28,7 @@ pub(crate) use guard::{
 };
 pub(crate) use runtime::{
     record_provider_runtime_advisory, record_runtime_advisory,
-    record_runtime_counterfactual_advice, record_runtime_outcome,
+    record_runtime_counterfactual_advice, record_runtime_outcome, runtime_prediction_context,
 };
 pub(super) use status::load_world_model_stats;
 pub(crate) use status::render_world_status;
