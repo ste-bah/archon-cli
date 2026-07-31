@@ -62,15 +62,10 @@ fn missing_exact_dependency_reports_parent_and_requirement() {
 
     assert!(matches!(
         catalog.resolve_dependencies("root"),
-        Err(DiscoveryError::UnresolvedDependency {
-            required_by: (name, version),
-            name: dependency,
-            version_req,
-            ..
-        }) if name == "root"
-            && version == "1.0.0".parse().unwrap()
-            && dependency == "missing"
-            && version_req == "=2.3.4".parse().unwrap()
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("root".into(), "1.0.0".parse().unwrap())
+                && details.name == "missing"
+                && details.version_req == "=2.3.4".parse().unwrap()
     ));
 }
 
@@ -89,8 +84,8 @@ fn mismatched_dependency_requirement_is_unresolved() {
 
     assert!(matches!(
         catalog.resolve_dependencies("root"),
-        Err(DiscoveryError::UnresolvedDependency { name, version_req, .. })
-            if name == "child" && version_req == "^2".parse().unwrap()
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.name == "child" && details.version_req == "^2".parse().unwrap()
     ));
 }
 
@@ -112,13 +107,9 @@ fn transitive_missing_dependency_reports_immediate_parent() {
 
     assert!(matches!(
         catalog.resolve_dependencies("root"),
-        Err(DiscoveryError::UnresolvedDependency {
-            required_by: (name, version),
-            name: dependency,
-            ..
-        }) if name == "middle"
-            && version == "1.2.0".parse().unwrap()
-            && dependency == "missing"
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("middle".into(), "1.2.0".parse().unwrap())
+                && details.name == "missing"
     ));
 }
 
@@ -197,14 +188,75 @@ fn info_uses_selected_root_version_and_propagates_dependency_errors() {
     let v2 = semver::VersionReq::parse("=2.0.0").unwrap();
     assert!(matches!(
         catalog.info("root", Some(&v2)),
-        Err(DiscoveryError::UnresolvedDependency {
-            required_by: (name, version),
-            name: dependency,
-            ..
-        }) if name == "root"
-            && version == "2.0.0".parse().unwrap()
-            && dependency == "missing"
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("root".into(), "2.0.0".parse().unwrap())
+                && details.name == "missing"
     ));
+}
+
+#[test]
+fn shared_dependency_is_deduplicated_in_deterministic_post_order() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root = metadata("root", "1.0.0");
+    root.dependencies = vec![
+        DependencyRef {
+            name: "left".into(),
+            version_req: semver::VersionReq::STAR,
+        },
+        DependencyRef {
+            name: "right".into(),
+            version_req: semver::VersionReq::STAR,
+        },
+    ];
+    let mut left = metadata("left", "1.0.0");
+    left.dependencies = vec![DependencyRef {
+        name: "shared".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    let mut right = metadata("right", "1.0.0");
+    right.dependencies = left.dependencies.clone();
+    for agent in [root, left, right, metadata("shared", "1.0.0")] {
+        catalog.insert(agent).expect("insert DAG agent");
+    }
+
+    assert_eq!(
+        catalog.resolve_dependencies("root").expect("resolve DAG"),
+        vec![
+            ("shared".into(), "1.0.0".parse().unwrap()),
+            ("left".into(), "1.0.0".parse().unwrap()),
+            ("right".into(), "1.0.0".parse().unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn same_name_different_versions_do_not_form_a_false_cycle() {
+    let catalog = DiscoveryCatalog::new();
+    let mut a_v1 = metadata("a", "1.0.0");
+    a_v1.dependencies = vec![DependencyRef {
+        name: "b".into(),
+        version_req: "=1.0.0".parse().unwrap(),
+    }];
+    let mut b_v1 = metadata("b", "1.0.0");
+    b_v1.dependencies = vec![DependencyRef {
+        name: "a".into(),
+        version_req: "=2.0.0".parse().unwrap(),
+    }];
+    for agent in [a_v1, b_v1, metadata("a", "2.0.0")] {
+        catalog.insert(agent).expect("insert versioned agent");
+    }
+
+    let a_v1_req = "=1.0.0".parse().unwrap();
+    assert_eq!(
+        catalog
+            .info("a", Some(&a_v1_req))
+            .expect("resolve acyclic version path")
+            .dependency_graph,
+        vec![
+            ("a".into(), "2.0.0".parse().unwrap()),
+            ("b".into(), "1.0.0".parse().unwrap()),
+        ]
+    );
 }
 
 // Characterizes quirk tracked in #108; do not fix in #91.

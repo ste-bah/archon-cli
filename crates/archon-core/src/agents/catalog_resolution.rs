@@ -3,9 +3,8 @@ use std::collections::HashSet;
 use crate::agents::metadata::{AgentMetadata, AgentState};
 
 use super::catalog_state::DiscoveryCatalog;
-use super::catalog_types::{AgentKey, DiscoveryError};
+use super::catalog_types::{AgentKey, DiscoveryError, UnresolvedDependency};
 
-#[allow(clippy::result_large_err)]
 impl DiscoveryCatalog {
     /// Resolve the best matching agent by name and optional version requirement.
     ///
@@ -91,14 +90,20 @@ impl DiscoveryCatalog {
         visiting.insert(key.clone());
         path.push(meta.name.clone());
         for dep in &meta.dependencies {
-            let dep_meta = self
-                .resolve(&dep.name, Some(&dep.version_req))
-                .map_err(|_| DiscoveryError::UnresolvedDependency {
-                    required_by: key.clone(),
-                    name: dep.name.clone(),
-                    version_req: dep.version_req.clone(),
-                    suggestions: self.suggest_names(&dep.name),
-                })?;
+            let dep_meta = match self.resolve(&dep.name, Some(&dep.version_req)) {
+                Ok(metadata) => metadata,
+                Err(DiscoveryError::AgentNotFound { suggestions, .. }) => {
+                    return Err(DiscoveryError::UnresolvedDependency(Box::new(
+                        UnresolvedDependency {
+                            required_by: key.clone(),
+                            name: dep.name.clone(),
+                            version_req: dep.version_req.clone(),
+                            suggestions,
+                        },
+                    )));
+                }
+                Err(error) => return Err(error),
+            };
             let dep_key = (dep_meta.name.clone(), dep_meta.version.clone());
             if !resolved.contains(&dep_key) {
                 self.dfs_dependencies(dep_meta, resolved, visiting, path)?;

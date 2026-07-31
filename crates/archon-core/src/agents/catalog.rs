@@ -22,7 +22,7 @@
 mod catalog_types;
 pub use catalog_types::{
     AgentFilter, AgentInfoView, AgentKey, CatalogSnapshot, DiscoveryError, DiscoverySourceConfig,
-    DiscoverySourceKind, FilterLogic,
+    DiscoverySourceKind, FilterLogic, UnresolvedDependency,
 };
 
 // Concurrent state and secondary-index maintenance.
