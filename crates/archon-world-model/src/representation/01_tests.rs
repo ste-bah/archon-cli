@@ -4,6 +4,53 @@ mod tests {
     use crate::embedding::DeterministicHashEmbeddingAdapter;
     use crate::schema::{WorldActionKind, WorldTraceRow};
 
+    /// With an adapter, windows and actions carry dense vectors; without one
+    /// they stay `None` and the encoder falls back to hashing excerpt text into
+    /// `latent_dim` buckets.
+    ///
+    /// The field existed before this was wired and nothing ever populated it —
+    /// exactly the state of the schema's `state_embedding`, which is declared
+    /// and never written. A field nobody fills is indistinguishable from a
+    /// missing feature, so this pins that it is actually populated.
+    #[test]
+    fn builder_populates_embeddings_only_when_an_adapter_is_supplied() {
+        let mut first = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("a");
+        first.redacted_excerpt = Some("run the integration tests".into());
+        let mut second =
+            WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("b");
+        second.redacted_excerpt = Some("tests passed".into());
+        let rows = [first, second];
+
+        let without = TraceWindowBuilder::new(&rows)
+            .adjacent_transitions(2, 1, 1)
+            .unwrap();
+        assert!(
+            without[0].action.embedding.is_none(),
+            "no adapter must leave the encoder on the hashed fallback"
+        );
+
+        let adapter = DeterministicHashEmbeddingAdapter::new(16).unwrap();
+        let with = TraceWindowBuilder::new(&rows)
+            .with_embedding_adapter(&adapter)
+            .adjacent_transitions(2, 1, 1)
+            .unwrap();
+
+        let action_embedding = with[0]
+            .action
+            .embedding
+            .as_ref()
+            .expect("adapter must populate the action embedding");
+        assert_eq!(action_embedding.len(), 16);
+        assert!(action_embedding.iter().all(|value| value.is_finite()));
+
+        let target_embedding = with[0]
+            .target
+            .embedding
+            .as_ref()
+            .expect("adapter must populate the target window embedding");
+        assert_eq!(target_embedding.len(), 16);
+    }
+
     #[test]
     fn builder_orders_rows_and_respects_session_boundaries() {
         let first = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("a");

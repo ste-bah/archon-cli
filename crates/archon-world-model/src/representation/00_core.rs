@@ -197,12 +197,19 @@ impl WorldRepresentationAdapter for GenericEmbeddingRepresentationAdapter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TraceWindowBuilder {
+pub struct TraceWindowBuilder<'a> {
     rows: Vec<WorldTraceRow>,
+    /// Fills each window's and action's `embedding`.
+    ///
+    /// Lives here rather than in `jepa/` on purpose: the encoder path is gated
+    /// to stay free of embedding adapters, so the dependency has to point
+    /// outward. Without an adapter every window is built with `embedding:
+    /// None`, and the encoder falls back to hashing excerpt text into
+    /// `latent_dim` buckets.
+    embedder: Option<&'a dyn WorldEmbeddingAdapter>,
 }
 
-impl TraceWindowBuilder {
+impl<'a> TraceWindowBuilder<'a> {
     pub fn new(rows: &[WorldTraceRow]) -> Self {
         let mut rows = rows.to_vec();
         rows.sort_by(|left, right| {
@@ -211,7 +218,54 @@ impl TraceWindowBuilder {
                 .then_with(|| left.created_at.cmp(&right.created_at))
                 .then_with(|| left.row_id.cmp(&right.row_id))
         });
-        Self { rows }
+        Self {
+            rows,
+            embedder: None,
+        }
+    }
+
+    /// Build windows with dense embeddings instead of hashed excerpt text.
+    pub fn with_embedding_adapter(mut self, embedder: &'a dyn WorldEmbeddingAdapter) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    /// Embed the joined row text of a window.
+    ///
+    /// Returns `None` on any embedding failure rather than propagating: an
+    /// unavailable provider must degrade to the hashed fallback, not abort a
+    /// training run that would otherwise succeed.
+    fn embed_rows(&self, rows: &[WorldTraceRow]) -> Option<Vec<f32>> {
+        let embedder = self.embedder?;
+        if rows.is_empty() {
+            return None;
+        }
+        let text = rows.iter().map(row_text).collect::<Vec<_>>().join("\n");
+        // Keyed on the window's span so the adapter's cache can distinguish two
+        // windows that share an anchor but cover different rows.
+        let source_hash = format!(
+            "window:{}:{}:{}",
+            rows[0].session_id,
+            rows[0].row_id,
+            rows.len()
+        );
+        embed_text(embedder, source_hash, &text)
+    }
+
+    /// `TraceAction::from_row`, plus the action's own embedding when an adapter
+    /// is configured. The action is embedded separately from its window: the
+    /// encoder scores the two independently, and reusing the window vector
+    /// would make every action in a window look identical.
+    fn action_from_row(&self, row: &WorldTraceRow) -> TraceAction {
+        let mut action = TraceAction::from_row(row);
+        action.embedding = self.embedder.and_then(|embedder| {
+            embed_text(
+                embedder,
+                format!("action:{}", action.action_ref),
+                &action_embedding_text(&action),
+            )
+        });
+        action
     }
 
     pub fn context_window(&self, anchor_row_id: &str, context_rows: usize) -> Result<TraceWindow> {
@@ -259,7 +313,7 @@ impl TraceWindowBuilder {
 
             transitions.push(TraceTransition {
                 context: self.prior_context_window_at(index, context_rows)?,
-                action: TraceAction::from_row(current),
+                action: self.action_from_row(current),
                 target: self.target_window_at(index, target_rows, horizon)?,
                 labels: target.labels.clone(),
             });
@@ -322,13 +376,15 @@ impl TraceWindowBuilder {
             bail!("invalid trace window range");
         }
         let anchor = &self.rows[anchor_index];
+        let rows = self.rows[start..end].to_vec();
+        let embedding = self.embed_rows(&rows);
         Ok(TraceWindow {
             session_id: anchor.session_id.clone(),
             anchor_row_id: anchor.row_id.clone(),
-            rows: self.rows[start..end].to_vec(),
+            rows,
             horizon,
             graph_context: graph_context_for_row(&self.rows, anchor),
-            embedding: None,
+            embedding,
         })
     }
 
@@ -424,6 +480,26 @@ fn action_embedding_text(action: &TraceAction) -> String {
             .unwrap_or_default(),
         action.summary
     )
+}
+
+/// Embed `text`, discarding any failure.
+///
+/// Every caller wants "a vector if one is available", never an error: the
+/// encoder has a working fallback, so a missing model or an offline provider
+/// should cost representation quality, not the whole run.
+fn embed_text(embedder: &dyn WorldEmbeddingAdapter, source_hash: String, text: &str) -> Option<Vec<f32>> {
+    let request = EmbeddingRequest {
+        text: text.to_string(),
+        source_hash,
+        // The excerpt was already redacted when the row was ingested, so this
+        // records that rather than requesting further redaction.
+        redaction_policy: "row-redacted".to_string(),
+    };
+    embedder
+        .embed(&request)
+        .ok()
+        .map(|vector| vector.values)
+        .filter(|values| !values.is_empty() && values.iter().all(|value| value.is_finite()))
 }
 
 fn row_text(row: &WorldTraceRow) -> String {
