@@ -105,7 +105,14 @@ fn counterfactual_gate_from_heldout(examples: &[LatentTransitionExample], min_nd
     if examples.is_empty() {
         return false;
     }
-    let mut scores = examples
+    let known = examples
+        .iter()
+        .filter(|example| example.labels.success.is_some())
+        .collect::<Vec<_>>();
+    if known.is_empty() {
+        return false;
+    }
+    let mut scores = known
         .iter()
         .enumerate()
         .map(|(idx, example)| {
@@ -119,7 +126,7 @@ fn counterfactual_gate_from_heldout(examples: &[LatentTransitionExample], min_nd
         })
         .collect::<Vec<_>>();
     scores.sort_by(|left, right| right.advisory_score.total_cmp(&left.advisory_score));
-    let relevance = examples
+    let relevance = known
         .iter()
         .enumerate()
         .map(|(idx, example)| {
@@ -147,11 +154,10 @@ fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
 }
 
 fn label_success(labels: &WorldLabelSet) -> f32 {
-    match labels.success {
-        Some(true) => 1.0,
-        Some(false) => 0.0,
-        None if labels.failure => 0.0,
-        None => 0.5,
+    if labels.success == Some(true) {
+        1.0
+    } else {
+        0.0
     }
 }
 

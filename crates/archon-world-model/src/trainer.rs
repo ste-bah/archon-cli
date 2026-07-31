@@ -206,7 +206,7 @@ pub fn run_dynamic_training_once_controlled(
     }
 
     check_training_stop(should_stop, "world-model row load")?;
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     check_training_stop(should_stop, "world-model example build")?;
     let examples = crate::train::examples_from_rows_with_representation_adapter_controlled(
         &rows,

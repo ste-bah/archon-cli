@@ -101,6 +101,8 @@ pub struct ScalarFeatures {
 #[serde(default)]
 pub struct WorldTraceRow {
     pub row_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_attempt_id: Option<String>,
     pub session_id: String,
     pub run_id: Option<String>,
     pub source: WorldTraceSource,
@@ -122,6 +124,7 @@ impl Default for WorldTraceRow {
     fn default() -> Self {
         Self {
             row_id: String::new(),
+            action_attempt_id: None,
             session_id: String::new(),
             run_id: None,
             source: WorldTraceSource::default(),
@@ -150,6 +153,11 @@ impl WorldTraceRow {
             created_at: Utc::now(),
             ..Self::default()
         }
+    }
+
+    pub fn with_action_attempt_id(mut self, action_attempt_id: impl Into<String>) -> Self {
+        self.action_attempt_id = Some(action_attempt_id.into());
+        self
     }
 
     pub fn with_evidence(mut self, evidence: EvidenceRef) -> Self {

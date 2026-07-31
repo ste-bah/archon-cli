@@ -5,7 +5,7 @@ pub(super) fn render_train(
     max_runtime_ms: Option<u64>,
 ) -> Result<String> {
     let backend = selected_training_backend(config);
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     let state_dim = config.learning.world_model.state_dim;
     let adapter = GenericEmbeddingRepresentationAdapter::new(build_embedding_adapter(config)?);
     let examples =
@@ -62,7 +62,7 @@ pub(super) fn render_train_jepa(
     candidate_flag: bool,
     max_runtime_ms: Option<u64>,
 ) -> Result<String> {
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     let jepa_config = jepa_training_config(config)?;
     let state_dim = config.learning.world_model.state_dim;
     if jepa_config.latent_dim != state_dim {
@@ -193,7 +193,7 @@ pub(super) fn render_eval(
     let candidate_id = candidate_id.ok_or_else(|| anyhow::anyhow!("candidate id is required"))?;
     let registry = ModelRegistry::open(root)?;
     let candidate = registry.load_cpu_candidate(candidate_id)?;
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     let adapter = GenericEmbeddingRepresentationAdapter::new(build_embedding_adapter(config)?);
     let examples =
         archon_world_model::train::examples_from_rows_with_representation_adapter_and_context(

@@ -105,6 +105,40 @@ impl WorldModelStore {
         )
     }
 
+    pub fn load_verified_training_rows(&self) -> Result<Vec<WorldTraceRow>> {
+        crate::materialize::with_materialization_lock(&self.root, || {
+            self.load_verified_training_rows_locked()
+        })
+    }
+
+    fn load_verified_training_rows_locked(&self) -> Result<Vec<WorldTraceRow>> {
+        let mut rows = self.load_rows()?;
+        let actions = crate::guardrail::load_guarded_actions(&self.root)?;
+        let outcomes = crate::guardrail::load_guardrail_outcomes(&self.root)?;
+        let verifications = crate::guardrail::load_verification_outcomes(&self.root)?;
+        let prediction_attempts = prediction_attempts(&self.root)?;
+        let materialized = crate::materialize::materialize_verified_labels(
+            &rows,
+            &actions,
+            &outcomes,
+            &verifications,
+            &prediction_attempts,
+        )?;
+        crate::materialize::append_materialized_labels_locked(&self.root, &materialized.records)?;
+        let labels = materialized
+            .records
+            .into_iter()
+            .map(|record| (record.trace_row_id, record.labels))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for row in &mut rows {
+            row.labels.success = labels.get(&row.row_id).and_then(|labels| labels.success);
+            if let Some(labels) = labels.get(&row.row_id) {
+                row.labels = labels.clone();
+            }
+        }
+        Ok(rows)
+    }
+
     pub fn row_ids(&self) -> Result<HashSet<String>> {
         archon_cozo::run_guarded(
             "load world-model row ids",
@@ -117,6 +151,38 @@ impl WorldModelStore {
     fn cozo_config(&self) -> archon_cozo::CozoGuardConfig {
         cozo_config(&self.db_path)
     }
+}
+
+fn prediction_attempts(root: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+    let directory = root.join("predictions");
+    if !directory.exists() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    let mut predictions = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let prediction_id = value
+            .get("prediction_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                anyhow::anyhow!("prediction missing prediction_id: {}", path.display())
+            })?;
+        let action_ref = value
+            .get("action_ref")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("prediction missing action_ref: {}", path.display()))?;
+        if let Some(previous) =
+            predictions.insert(prediction_id.to_string(), action_ref.to_string())
+            && previous != action_ref
+        {
+            anyhow::bail!("conflicting persisted prediction: {prediction_id}");
+        }
+    }
+    Ok(predictions)
 }
 
 fn cozo_config(db_path: &Path) -> archon_cozo::CozoGuardConfig {

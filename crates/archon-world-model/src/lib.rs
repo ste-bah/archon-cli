@@ -20,6 +20,7 @@ pub mod integration;
 pub mod jepa;
 pub mod labeler;
 pub mod labels;
+pub mod materialize;
 pub mod model;
 pub mod registry;
 pub mod representation;

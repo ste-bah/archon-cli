@@ -16,7 +16,7 @@ pub(super) fn render_eval_jepa(
         "Stage: load_rows ({:.1}s elapsed)",
         stage_start.elapsed().as_secs_f64()
     );
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
 
     // Compute proper fingerprints before constructing the eval record.
     // corpus_fingerprint: hash of row content — catches corpus mutations since eval.
@@ -82,9 +82,9 @@ pub(super) fn render_eval_jepa(
         mode: PersistedEvalMode::Full,
         baseline_skipped: false,
         skipped_reason: None,
-        corpus_fingerprint,   // populated from actual corpus hash
-        config_fingerprint,   // populated from current config (matches promotion guard)
-        eval_schema_version,  // populated from config (not hardcoded 0)
+        corpus_fingerprint,  // populated from actual corpus hash
+        config_fingerprint,  // populated from current config (matches promotion guard)
+        eval_schema_version, // populated from config (not hardcoded 0)
         comparison: Some(comparison),
         collapse: candidate.outcome.collapse.clone(),
         horizon: candidate.outcome.horizon.clone(),
@@ -121,11 +121,31 @@ pub(super) fn render_eval_jepa(
          Comparison report: {}",
         candidate.model.metadata.model_kind,
         candidate.model.metadata.example_count,
-        record.comparison.as_ref().map(|c| c.heldout_examples).unwrap_or(0),
-        record.comparison.as_ref().map(|c| c.baseline_backend.as_str()).unwrap_or("none"),
-        record.comparison.as_ref().map(|c| c.baseline_available).unwrap_or(false),
-        record.comparison.as_ref().map(|c| c.relative_improvement * 100.0).unwrap_or(0.0),
-        record.comparison.as_ref().map(|c| c.brier_regressed).unwrap_or(false),
+        record
+            .comparison
+            .as_ref()
+            .map(|c| c.heldout_examples)
+            .unwrap_or(0),
+        record
+            .comparison
+            .as_ref()
+            .map(|c| c.baseline_backend.as_str())
+            .unwrap_or("none"),
+        record
+            .comparison
+            .as_ref()
+            .map(|c| c.baseline_available)
+            .unwrap_or(false),
+        record
+            .comparison
+            .as_ref()
+            .map(|c| c.relative_improvement * 100.0)
+            .unwrap_or(0.0),
+        record
+            .comparison
+            .as_ref()
+            .map(|c| c.brier_regressed)
+            .unwrap_or(false),
         record.gates.corpus_sufficient,
         record.gates.representation_collapse,
         record.gates.multi_horizon_consistency,

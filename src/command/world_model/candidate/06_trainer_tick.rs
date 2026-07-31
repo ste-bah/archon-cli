@@ -105,12 +105,20 @@ fn render_latent_trainer_tick(
     let store = WorldModelStore::open(root)?;
     let stats = store.cold_start_stats()?;
     let registry = ModelRegistry::open(root)?;
-    let schedule =
-        latent_training_schedule(root, stats.rows, registry.candidate_count()? as u64, last_training_age_ms)?;
+    let schedule = latent_training_schedule(
+        root,
+        stats.rows,
+        registry.candidate_count()? as u64,
+        last_training_age_ms,
+    )?;
     let adapter = archon_world_model::GenericEmbeddingRepresentationAdapter::new(
         build_embedding_adapter(config)?,
     );
-    emit_trainer_progress(progress, "latent_train_start", "running latent trainer tick");
+    emit_trainer_progress(
+        progress,
+        "latent_train_start",
+        "running latent trainer tick",
+    );
     let request = archon_world_model::trainer::DynamicTrainingRequest {
         root,
         state_dim: config.learning.world_model.state_dim,
@@ -135,11 +143,13 @@ fn render_latent_trainer_tick(
             elapsed_since_training_ms: schedule.last_training_age_ms,
         },
     };
-    let run = archon_world_model::trainer::run_dynamic_training_once_controlled(
-        &request,
-        should_stop,
-    )?;
-    emit_trainer_progress(progress, "latent_train_complete", "latent trainer tick finished");
+    let run =
+        archon_world_model::trainer::run_dynamic_training_once_controlled(&request, should_stop)?;
+    emit_trainer_progress(
+        progress,
+        "latent_train_complete",
+        "latent trainer tick finished",
+    );
     let auto_promotion = run
         .candidate_id
         .as_deref()
@@ -245,7 +255,7 @@ fn render_jepa_trainer_tick_observed(
     if decision.should_train {
         check_trainer_stop(should_stop, "jepa row load")?;
         emit_trainer_progress(progress, "jepa_row_load_start", "loading world-model rows");
-        let rows = WorldModelStore::open(root)?.load_rows()?;
+        let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
         rows_loaded = rows.len();
         emit_trainer_progress(
             progress,
@@ -255,14 +265,15 @@ fn render_jepa_trainer_tick_observed(
         let jepa_config = jepa_training_config(config)?;
         let backend = selected_training_backend(config);
         let started = std::time::Instant::now();
-        let (model, outcome) = archon_world_model::jepa::train_jepa_candidate_with_backend_observed(
-            &rows,
-            &jepa_config,
-            backend.requested,
-            config.learning.world_model.training.allow_cpu_fallback,
-            should_stop,
-            progress,
-        )?;
+        let (model, outcome) =
+            archon_world_model::jepa::train_jepa_candidate_with_backend_observed(
+                &rows,
+                &jepa_config,
+                backend.requested,
+                config.learning.world_model.training.allow_cpu_fallback,
+                should_stop,
+                progress,
+            )?;
         if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
             bail!("jepa world-model training exceeded max_runtime_ms");
         }
@@ -279,7 +290,11 @@ fn render_jepa_trainer_tick_observed(
                 .checkpoint
                 .path,
         );
-        emit_trainer_progress(progress, "jepa_candidate_write_complete", "candidate written");
+        emit_trainer_progress(
+            progress,
+            "jepa_candidate_write_complete",
+            "candidate written",
+        );
     }
     let auto_promotion = candidate_id
         .as_deref()

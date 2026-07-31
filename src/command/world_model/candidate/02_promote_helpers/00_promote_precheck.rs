@@ -34,9 +34,7 @@ pub(super) fn render_promote(root: &Path, model_id: &str) -> Result<String> {
 /// Computes the sha256 fingerprint of the gate-affecting subset of
 /// [learning.world_model.jepa] config, per PRD §11.
 /// EXCLUDED: performance keys (batch_size, max_runtime_ms, cache_max_mb, mode, etc.)
-pub fn compute_config_fingerprint(
-    jepa: &archon_core::config::WorldModelJepaConfig,
-) -> String {
+pub fn compute_config_fingerprint(jepa: &archon_core::config::WorldModelJepaConfig) -> String {
     use hex::ToHex;
     use sha2::{Digest, Sha256};
 
@@ -67,7 +65,7 @@ pub fn compute_config_fingerprint(
 /// against an eval record's corpus_fingerprint field.
 fn compute_current_corpus_fingerprint(root: &std::path::Path) -> anyhow::Result<String> {
     let store = archon_world_model::storage::WorldModelStore::open(root)?;
-    let rows = store.load_rows()?;
+    let rows = store.load_verified_training_rows()?;
     Ok(archon_world_model::jepa::JepaEvalPlanner::compute_corpus_fingerprint(&rows))
 }
 
@@ -187,8 +185,7 @@ pub(super) fn render_promote_jepa(
 
     // Compute current corpus fingerprint; if corpus can't be loaded pass None so
     // check 5 will produce a clear error (eval.corpus_fingerprint won't match None).
-    let current_corpus_fingerprint: Option<String> =
-        compute_current_corpus_fingerprint(root).ok();
+    let current_corpus_fingerprint: Option<String> = compute_current_corpus_fingerprint(root).ok();
 
     check_pre_promotion_conditions(
         &eval,
