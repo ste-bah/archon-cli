@@ -62,16 +62,15 @@ impl RemoteDiscoverySource {
         let mut loaded = 0;
         let mut invalid = 0;
 
-        for element in arr {
-            let meta = self.parse_element(element, fresh);
-            match &meta.state {
+        let entries = arr
+            .iter()
+            .map(|element| self.parse_element(element, fresh))
+            .inspect(|meta| match &meta.state {
                 AgentState::Valid | AgentState::Stale => loaded += 1,
                 AgentState::Invalid(_) => invalid += 1,
-            }
-            if let Err(e) = catalog.insert(meta) {
-                warn!("failed to insert remote agent: {e}");
-            }
-        }
+            })
+            .collect();
+        catalog.insert_all(entries)?;
 
         Ok(RemoteLoadReport {
             loaded,
