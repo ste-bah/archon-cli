@@ -109,19 +109,12 @@ jobs:
           JSCPD_THRESHOLD: '5'
         run: bash scripts/ci/check-duplicate-code.sh
 
-  tui-lint-bounded-channel:
-    name: TUI lint — bounded AgentEvent channel (REQUIRED)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && sudo apt-get install -y ripgrep
-      - name: Run grep-bounded-channel.sh
-        run: bash scripts/ci/grep-bounded-channel.sh
-
-  tui-lint-await-send:
-    name: TUI lint — .send().await on agent_event_tx (REQUIRED)
+  # `tui-lint-bounded-channel` (grep-bounded-channel.sh) was removed here: it
+  # required the AgentEvent transport to be unbounded, which TASK-AGS-102
+  # reversed. The surviving invariant — the transport stays bounded — is what
+  # the job below now checks.
+  tui-lint-agent-event-transport:
+    name: TUI lint — AgentEvent transport is bounded (REQUIRED)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

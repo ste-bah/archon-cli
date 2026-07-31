@@ -7,8 +7,7 @@ Lint and validation scripts invoked by `.github/workflows/*.yml` (wired in TASK-
 | `check-tui-file-sizes.sh` | Fail if any `crates/archon-tui/src/**/*.rs` > 500 lines | TECH-TUI-OBSERVABILITY line 1252, NFR-TUI-QUAL-001 |
 | `check-cycles.sh` | Fail if workspace dep graph has any SCC > 1 (circular dep) | TECH-TUI-OBSERVABILITY line 1129, NFR-TUI-MOD-002 |
 | `check-duplicate-code.sh` | Fail if jscpd reports >=5% code duplication in archon-tui/src | TECH-TUI-OBSERVABILITY line 1130, NFR-TUI-MOD-003 |
-| `grep-bounded-channel.sh` | Fail if any `mpsc::channel::<AgentEvent>` (bounded) exists | TECH-TUI-OBSERVABILITY line 1131 |
-| `grep-await-send.sh` | Fail if any `agent_event_tx.send(...).await` exists | TECH-TUI-OBSERVABILITY line 1132 |
+| `grep-await-send.sh` | Fail if the AgentEvent transport is constructed unbounded | TASK-AGS-102 (supersedes TECH-TUI-OBSERVABILITY lines 1131-1132) |
 | `check-complexity.sh` | Fail on any function with clippy cognitive_complexity >= 60 in `crates/archon-tui` | TECH-TUI-OBSERVABILITY line 1128, AC-OBSERVABILITY-02, NFR-TUI-QUAL-002 |
 | `check-coverage.sh` | Fail if `cargo llvm-cov --package archon-tui` line coverage < `$COVERAGE_THRESHOLD` (default 80) | TECH-TUI-OBSERVABILITY line 1134, AC-OBSERVABILITY-04, NFR-TUI-QUAL-003 |
 | `check-coverage-observability.sh` | Fail if `cargo llvm-cov --package archon-observability` line coverage < `$COVERAGE_THRESHOLD` (default 80) | TASK-AGS-OBS-913 |
@@ -27,7 +26,7 @@ Lint and validation scripts invoked by `.github/workflows/*.yml` (wired in TASK-
 - `JSCPD_TARGET_DIR` (default `crates/archon-tui/src`) — target directory for jscpd scan
 - `JSCPD_THRESHOLD` (default `5`) — duplication percentage threshold (script fails when `>=` threshold)
 - `JSCPD_REPORT_DIR` (default `/tmp/jscpd-report`) — output dir for the jscpd JSON report
-- `TUI_GREP_ROOT` (default `crates/ src/`) — search root(s) for `grep-bounded-channel.sh` and `grep-await-send.sh`, space-separated
+- `TUI_GREP_ROOT` (default `crates/ src/`) — search root(s) for `grep-await-send.sh`, space-separated
 - `COVERAGE_THRESHOLD` (default `80`) — minimum line-coverage percentage for `check-coverage.sh` (passed to `cargo llvm-cov --fail-under-lines`)
 
 ## Self-Tests
@@ -57,8 +56,7 @@ paths under `crates/archon-tui/**` or `scripts/ci/**` change.
 | `check-complexity.sh` | `tui-lint-complexity` | allowed-to-fail |
 | `check-cycles.sh` | `tui-lint-cycles` | allowed-to-fail |
 | `check-duplicate-code.sh` | `tui-lint-duplication` | allowed-to-fail |
-| `grep-bounded-channel.sh` | `tui-lint-bounded-channel` | **required** |
-| `grep-await-send.sh` | `tui-lint-await-send` | **required** |
+| `grep-await-send.sh` | `tui-lint-agent-event-transport` | **required** |
 | `check-coverage.sh` | `tui-coverage` | allowed-to-fail |
 | `check-coverage-observability.sh` | `observability-coverage` | allowed-to-fail |
 | `cargo test -p archon-tui --features load-tests ...` | `tui-load-tests` | allowed-to-fail |

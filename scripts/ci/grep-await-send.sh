@@ -1,46 +1,36 @@
 #!/usr/bin/env bash
-# Lint: fail if any code awaits on an AgentEvent producer `.send(...).await`.
-# The AgentEvent channel is unbounded — send() is synchronous (returns
-# Result<(), SendError<_>>), so `.await` on it is a bug either way:
-#   * For tokio::sync::mpsc::UnboundedSender::send, `.await` won't compile
-#     (send returns a value, not a future) — but refactors that accidentally
-#     switch to bounded `mpsc::Sender` DO compile with `.await` and then
-#     deadlock the TUI when the agent lock is held across it.
+# Lint: fail if the AgentEvent transport is constructed UNBOUNDED.
 #
-# Spec: 02-technical-spec.md line 1132 — "grep 'agent_event_tx\.send\(.*\)\.await' -> 0 hits"
+# History. This script used to ban `.send(...).await` on AgentEvent producers,
+# on the premise that "the AgentEvent channel is unbounded, so send() is
+# synchronous". That premise was retired by TASK-AGS-102 (d5e8ec1a2,
+# 2026-07-26, "restore bounded lossless event delivery"), which deliberately
+# converted the transport to a bounded `mpsc::Sender<TimestampedEvent>` so a
+# full channel applies backpressure instead of dropping events.
 #
-# We expand the naive literal-name pattern to catch:
-#   - renamed producers (agent_tx, event_tx, tx, producer, self.tx, ...)
-#   - multi-line `.send(\n   payload\n).await`
-#   - chained `.send(x).await?`, `.send(x).await.ok()`, etc.
+# Awaiting a bounded sender is now the REQUIRED shape, asserted in three
+# places:
+#   * crates/archon-core/src/agent/events.rs  (the call itself)
+#   * tests/task_ags_102.rs                   (agent_event_send_awaits_capacity)
+#   * tests/tc_arch_05_grep_agent_event_send.rs
+# Left unchanged, this lint contradicted all three and could never pass.
 #
-# Scope is deliberately any send-then-await in source that declares
-# `AgentEvent` — `rg --type-add` lets us use `-t rust` to skip generated or
-# build artifacts. Test files are included: a `.send(...).await` inside a
-# test counts as a latent bug waiting to graduate into prod.
+# The real hazard the old lint pointed at survives the change: a bounded send
+# awaited while the agent lock is held deadlocks the TUI. That is a
+# lock-ordering property this grep cannot see, and it is covered by
+# TC-ARCH-04's backpressure test rather than by pattern matching.
 #
-# False-positive escape hatch (#230):
-#   The two-pass narrowing (file mentions AgentEvent → match producer name)
-#   is coarse — a file can mention AgentEvent in an unrelated import or
-#   comment while the .send().await is on a channel of a DIFFERENT event
-#   type. To exclude such call sites without disabling the whole lint,
-#   add a comment marker on the line IMMEDIATELY PRECEDING the producer
-#   reference:
-#       // agent-event-tx-lint: ignore — channel holds OrchestratorEvent
-#       let _ = event_tx.send(OrchestratorEvent::X).await;
-#   Use sparingly. Prefer narrowing the producer name pattern below or
-#   refactoring the channel type. The marker is matched as a substring
-#   (case-sensitive). The lint reads the (lineno-1) of each hit and
-#   suppresses the report when the marker is present.
+# What this lint guards now is the invariant that DID survive: the transport
+# must stay bounded. A silent regression to `unbounded_channel` would restore
+# unbounded memory growth and make the `.await` sites misleading, so those
+# constructions are what fail here.
 #
-#   Limitations of the marker filter:
-#     - The marker MUST be on exactly the line directly above the producer
-#       reference. A two-line gap will not be detected.
-#     - Two single-line `.send(...).await` matches at adjacent linenos in
-#       the same file are treated as a single multi-line match by the
-#       continuation-detection heuristic; the second inherits the first's
-#       suppression decision. Annotate both individually if both need
-#       suppression and they happen to be on consecutive lines.
+# Escape hatch (#230): add a marker comment on the line IMMEDIATELY PRECEDING
+# the offending line to suppress a single site:
+#     // agent-event-tx-lint: ignore — bespoke non-AgentEvent transport
+#     let (tx, rx) = mpsc::unbounded_channel::<TimestampedEvent>();
+# Use sparingly. The marker is matched as a case-sensitive substring and MUST
+# sit on exactly the line directly above; a two-line gap is not detected.
 set -euo pipefail
 
 ROOT="${TUI_GREP_ROOT:-crates/ src/}"
@@ -60,66 +50,32 @@ for r in "${ROOT_ARR[@]}"; do
     fi
 done
 
-# Two-pass narrowing:
-#   1) only consider Rust files that mention `AgentEvent` (type-gated scope).
-#   2) inside those, flag any `.send(...)` followed by `.await` across lines.
-#
-# `rg -U` enables multiline matching; `--multiline-dotall` lets `.` cross
-# newlines. We grep on the producer-style patterns seen in the codebase
-# (tx, producer, sender, self.tx, etc.) rather than any `.send(...).await`
-# to avoid false positives on unrelated futures APIs like `request.send().await`
-# from reqwest. If a new producer variable name appears it must be added here.
-PRODUCER_PATTERN='\b(agent_event_tx|agent_tx|event_tx|events_tx|tx|producer|sender|self\.tx|self\.sender|self\.event_tx|self\.events_tx)\b\s*\.send\s*\([^)]*?(?:\n[^)]*?)*\)\s*\.await'
+# Unbounded constructions of the Agent event transport. Both the channel
+# factory and the sender type are matched, so neither half of a regression
+# slips through on its own.
+UNBOUNDED_PATTERN='(unbounded_channel\s*::\s*<\s*(TimestampedEvent|AgentEvent)\s*>|UnboundedSender\s*<\s*(TimestampedEvent|AgentEvent)\s*>|UnboundedReceiver\s*<\s*(TimestampedEvent|AgentEvent)\s*>)'
 
-# Restrict to files in rust type that also import/mention AgentEvent.
-AGENT_EVENT_FILES=$(rg -l --type rust 'AgentEvent' "${ROOT_ARR[@]}" 2>&1) || {
-    rc=$?
-    # rc=1 from rg means "no matches", which is fine (nothing to lint).
-    # Any other rc is a real error.
-    if [[ $rc -ne 1 ]]; then
-        echo "ERROR: rg scanning for AgentEvent failed (rc=$rc):" >&2
-        echo "$AGENT_EVENT_FILES" >&2
-        exit 2
-    fi
-    AGENT_EVENT_FILES=""
-}
-
-if [[ -z "$AGENT_EVENT_FILES" ]]; then
-    echo "OK: no AgentEvent-mentioning files in scope"
-    exit 0
-fi
-
-# Pipe file list to rg via -F (fixed strings; file names, not a pattern).
-# `--with-filename` forces rg to prefix each row with the file path even when
-# only a single file is passed (rg's default omits the path prefix in that
-# case, which would break the marker filter's path:lineno parsing).
-# shellcheck disable=SC2086
-HITS=$(printf '%s\n' "$AGENT_EVENT_FILES" | xargs -r rg -n --no-heading --with-filename -U --multiline-dotall "$PRODUCER_PATTERN" 2>&1) || {
+# Production sources only. Unlike the `.send().await` ban this replaced, an
+# unbounded channel inside a test is not a latent production bug: the TUI load
+# and channel-memory harnesses build their own unbounded channels on purpose to
+# measure growth, and `preserve_no_await_on_send_gate.rs` asserts on the
+# forbidden type as a string. Those are fixtures, not the shipped transport.
+HITS=$(rg -n --no-heading --with-filename --type rust \
+    --glob '!**/tests/**' --glob '!**/*_tests.rs' --glob '!**/*_test.rs' \
+    "$UNBOUNDED_PATTERN" "${ROOT_ARR[@]}" 2>&1) || {
     rc=$?
     if [[ $rc -eq 1 ]]; then
         HITS=""
     else
-        echo "ERROR: rg multiline scan failed (rc=$rc):" >&2
+        echo "ERROR: rg scan failed (rc=$rc):" >&2
         echo "$HITS" >&2
         exit 2
     fi
 }
 
-# Filter out hits whose immediately-preceding line contains the
-# `agent-event-tx-lint: ignore` marker (#230 escape hatch).
-#
-# rg multi-line output prints ONE row per source-line spanning the match
-# (e.g., a 6-line `.send(...).await` produces 6 rows with consecutive
-# linenos). The marker check MUST be applied to the FIRST row of each
-# match (the producer reference), and continuation rows MUST inherit the
-# suppression decision. We detect match starts by lineno discontinuity:
-# any row whose path changed OR whose lineno is not previous+1 is a new
-# match start.
+# Filter out hits whose immediately-preceding line carries the ignore marker.
 FILTERED_HITS=""
 if [[ -n "$HITS" ]]; then
-    last_path=""
-    last_lineno=-2
-    suppress_current=false
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         # rg -n format: <path>:<lineno>:<text>
@@ -131,23 +87,11 @@ if [[ -n "$HITS" ]]; then
             FILTERED_HITS+="$line"$'\n'
             continue
         fi
-        # Detect match-start vs continuation: a continuation has same path
-        # AND lineno = last_lineno + 1.
-        if [[ "$path" != "$last_path" || "$lineno" -ne "$((last_lineno + 1))" ]]; then
-            # New match start — re-evaluate the marker on (lineno - 1).
-            prev_line=""
-            if [[ "$lineno" -gt 1 && -f "$path" ]]; then
-                prev_line=$(sed -n "$((lineno - 1))p" "$path" 2>/dev/null || echo "")
-            fi
-            if [[ "$prev_line" == *"agent-event-tx-lint: ignore"* ]]; then
-                suppress_current=true
-            else
-                suppress_current=false
-            fi
+        prev_line=""
+        if [[ "$lineno" -gt 1 && -f "$path" ]]; then
+            prev_line=$(sed -n "$((lineno - 1))p" "$path" 2>/dev/null || echo "")
         fi
-        last_path="$path"
-        last_lineno="$lineno"
-        if [[ "$suppress_current" == true ]]; then
+        if [[ "$prev_line" == *"agent-event-tx-lint: ignore"* ]]; then
             continue
         fi
         FILTERED_HITS+="$line"$'\n'
@@ -156,10 +100,10 @@ if [[ -n "$HITS" ]]; then
 fi
 
 if [[ -n "$FILTERED_HITS" ]]; then
-    echo "FAIL: producer .send(...).await detected — AgentEvent channel sends are sync"
+    echo "FAIL: unbounded AgentEvent transport detected — TASK-AGS-102 requires a bounded sender"
     echo "$FILTERED_HITS"
     exit 1
 fi
 
-echo "OK: no producer .send(...).await in AgentEvent-scope files"
+echo "OK: AgentEvent transport is bounded"
 exit 0

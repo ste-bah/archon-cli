@@ -38,8 +38,7 @@ required_ids = {
     "tui-lint-complexity",
     "tui-lint-cycles",
     "tui-lint-duplication",
-    "tui-lint-bounded-channel",
-    "tui-lint-await-send",
+    "tui-lint-agent-event-transport",
     "tui-coverage",
     "tui-load-tests",
     "tui-unit",
@@ -49,15 +48,18 @@ if missing:
     sys.stderr.write(f"FAIL: missing expected job ids: {sorted(missing)}\n")
     sys.exit(1)
 
-# Count allowed-to-fail jobs; spec requires exactly 6.
+# Count allowed-to-fail jobs. Was 6; the observability-coverage job was added
+# as a 7th soft job without updating this assertion, so the self-test could not
+# pass. Soft: file-size, complexity, cycles, duplication, tui-coverage,
+# observability-coverage, load-tests. Required: agent-event-transport, tui-unit.
 soft = sum(1 for j in jobs.values() if j.get("continue-on-error") is True)
-if soft != 6:
+if soft != 7:
     sys.stderr.write(
-        f"FAIL: expected 6 jobs with continue-on-error: true, found {soft}\n"
+        f"FAIL: expected 7 jobs with continue-on-error: true, found {soft}\n"
     )
     sys.exit(1)
 
-print(f"YAML OK: {len(jobs)} jobs, {soft} allowed-to-fail, 3 required")
+print(f"YAML OK: {len(jobs)} jobs, {soft} allowed-to-fail, 2 required")
 PY
 
 echo "==> Running actionlint (if available)"

@@ -1,15 +1,9 @@
 {
   "rules": [
     {
-      "id": "BOUNDED_CHAN",
-      "regex": "mpsc::channel::<[^>]*>\\(\\s*256\\s*\\)",
-      "severity": "error",
-      "owner_phase": "phase-2",
-      "path_glob": ""
-    },
-    {
-      "id": "SEND_AWAIT",
-      "regex": "agent_event_tx\\s*\\.send\\([^)]*\\)\\s*\\.await",
+      "id": "UNBOUNDED_AGENT_CHAN",
+      "_comment": "Replaces BOUNDED_CHAN and SEND_AWAIT, which banned bounded channels and awaited sends. TASK-AGS-102 (d5e8ec1a2) made the AgentEvent transport bounded on purpose so a full channel backpressures instead of dropping events, so both rules encoded a retired design. They were dormant only because the regexes were literal (256, agent_event_tx) and the code now uses AGENT_EVENT_CHANNEL_CAPACITY and event_tx; a rename would have fired them. The surviving invariant is that the transport stays bounded.",
+      "regex": "unbounded_channel::<\\s*(TimestampedEvent|AgentEvent)\\s*>|UnboundedSender<\\s*(TimestampedEvent|AgentEvent)\\s*>",
       "severity": "error",
       "owner_phase": "phase-2",
       "path_glob": ""

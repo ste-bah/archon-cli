@@ -5,8 +5,8 @@
 # tests/fixtures/tui-banned-patterns/{pass,fail}, with a temporary config
 # that has an empty allowlist. Asserts:
 #   - pass fixture -> gate exits 0
-#   - fail fixture -> gate exits non-zero AND output mentions BOUNDED_CHAN
-#     and INLINE_AGENT_AWAIT
+#   - fail fixture -> gate exits non-zero AND output mentions
+#     UNBOUNDED_AGENT_CHAN and INLINE_AGENT_AWAIT
 
 set -euo pipefail
 
@@ -76,8 +76,11 @@ if [ "$FAIL_RC" -eq 0 ]; then
   exit 1
 fi
 
-if ! printf '%s\n' "$FAIL_OUT" | grep -q 'BOUNDED_CHAN'; then
-  echo "FAIL: gate output on fail fixture did not mention BOUNDED_CHAN" >&2
+# Matched as a whole word: UNBOUNDED_AGENT_CHAN replaced BOUNDED_CHAN, and a
+# bare `grep BOUNDED_CHAN` would still match the new id as a substring, so the
+# assertion would pass even if the rule had been dropped entirely.
+if ! printf '%s\n' "$FAIL_OUT" | grep -qw 'UNBOUNDED_AGENT_CHAN'; then
+  echo "FAIL: gate output on fail fixture did not mention UNBOUNDED_AGENT_CHAN" >&2
   echo "$FAIL_OUT" >&2
   exit 1
 fi

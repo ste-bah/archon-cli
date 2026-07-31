@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Self-test for grep-bounded-channel.sh and grep-await-send.sh
-# 4 cases:
-#   A. bounded hit     — tmp with mpsc::channel::<AgentEvent>(100) -> bounded script exit 1
-#   B. bounded clean   — tmp with mpsc::unbounded_channel::<AgentEvent>() -> bounded script exit 0
-#   C. await hit       — tmp with agent_event_tx.send(e).await -> await script exit 1
-#   D. await clean     — tmp without that pattern -> await script exit 0
+# Self-test for grep-await-send.sh.
+#
+# Formerly also covered grep-bounded-channel.sh, which required the AgentEvent
+# transport to be UNBOUNDED. TASK-AGS-102 (d5e8ec1a2) reversed that: the
+# transport is bounded on purpose so a full channel backpressures instead of
+# dropping events. That script and its cases were retired rather than left
+# mandating the opposite of the shipped design.
+#
+# 2 cases:
+#   A. unbounded hit   — tmp with mpsc::unbounded_channel::<AgentEvent>() -> exit 1
+#   B. bounded clean   — tmp with mpsc::channel::<AgentEvent>(256)        -> exit 0
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BOUNDED="${SCRIPT_DIR}/../grep-bounded-channel.sh"
 AWAITED="${SCRIPT_DIR}/../grep-await-send.sh"
 
-if [[ ! -x "$BOUNDED" ]]; then
-    echo "FAIL: grep-bounded-channel.sh not executable at $BOUNDED"
-    exit 1
-fi
 if [[ ! -x "$AWAITED" ]]; then
     echo "FAIL: grep-await-send.sh not executable at $AWAITED"
     exit 1
@@ -49,16 +49,11 @@ run_case() {
     echo "PASS $label (rc=$RC)"
 }
 
-# Case A: bounded channel hit
-run_case "A-bounded-hit" "$BOUNDED" 'let (tx, rx) = mpsc::channel::<AgentEvent>(100);' 1 "mpsc::channel::<AgentEvent>"
+# Case A: unbounded AgentEvent transport is the banned construction.
+run_case "A-unbounded-hit" "$AWAITED" 'let (tx, rx) = mpsc::unbounded_channel::<AgentEvent>();' 1 "unbounded_channel"
 
-# Case B: unbounded clean
-run_case "B-bounded-ok" "$BOUNDED" 'let (tx, rx) = mpsc::unbounded_channel::<AgentEvent>();' 0 "OK"
-
-# Case C: await on send hit
-run_case "C-await-hit" "$AWAITED" 'agent_event_tx.send(event).await.unwrap();' 1 "agent_event_tx"
-
-# Case D: await clean
-run_case "D-await-ok" "$AWAITED" 'agent_event_tx.send(event);' 0 "OK"
+# Case B: a bounded channel — and an awaited send on it — is the required shape.
+run_case "B-bounded-ok" "$AWAITED" 'let (tx, rx) = mpsc::channel::<AgentEvent>(256);
+self.event_tx.send(timestamped).await.ok();' 0 "OK"
 
 echo "ALL TESTS PASSED"
