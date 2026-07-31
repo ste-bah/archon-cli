@@ -31,10 +31,11 @@ mod catalog_state;
 pub use catalog_state::DiscoveryCatalog;
 
 // Version/dependency resolution and read-side queries.
-#[path = "catalog_query.rs"]
-mod catalog_query;
 #[path = "catalog_resolution.rs"]
 mod catalog_resolution;
+
+#[path = "catalog_query.rs"]
+mod catalog_query;
 
 #[cfg(test)]
 #[path = "catalog_tests.rs"]
