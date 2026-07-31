@@ -33,7 +33,7 @@
 
 - Modify `crates/archon-pipeline/tests/coding_agents.rs`: hardcoded ordered keys, full serialized fingerprints, phase order, dependencies.
 - Modify `crates/archon-pipeline/tests/research_agents.rs`: hardcoded ordered keys/fingerprints, phase metadata, adjacency/order.
-- Modify `crates/archon-core/src/agents/catalog.rs`: temporary location for catalog quirk characterizations until Task 4 moves all catalog tests unchanged.
+- Create `crates/archon-core/tests/catalog_characterization.rs`: public-API catalog quirk and deterministic-behavior characterizations, keeping the unsplit 909-line production file untouched in the tests-only commit.
 
 ### Coding motion
 
@@ -76,7 +76,7 @@
 **Files:**
 - Modify: `crates/archon-pipeline/tests/coding_agents.rs`
 - Modify: `crates/archon-pipeline/tests/research_agents.rs`
-- Modify: `crates/archon-core/src/agents/catalog.rs`
+- Create: `crates/archon-core/tests/catalog_characterization.rs`
 
 **Interfaces:**
 - Consumes: current unsplit `AGENTS`, `RESEARCH_AGENTS`, `RESEARCH_PHASES`, `DiscoveryCatalog` APIs.
@@ -151,7 +151,7 @@ Do not fix either behavior in #91.
 
 - [ ] **Step 5: Add deterministic catalog characterization**
 
-Add tests to existing `catalog.rs` test module. Reference the new issue numbers in comments:
+Add tests to new integration test `crates/archon-core/tests/catalog_characterization.rs`, using only current public catalog APIs. This keeps the oversized unsplit production file untouched in the tests-only commit. Reference the approved issue numbers in comments:
 
 ```rust
 // Characterizes quirk tracked in #107; do not fix in #91.
@@ -183,19 +183,19 @@ Run:
 ```bash
 CARGO_BUILD_JOBS=1 cargo test -p archon-pipeline --test coding_agents -- --test-threads=1
 CARGO_BUILD_JOBS=1 cargo test -p archon-pipeline --test research_agents -- --test-threads=1
-CARGO_BUILD_JOBS=1 cargo test -p archon-core agents::catalog::tests -- --test-threads=1
+CARGO_BUILD_JOBS=1 cargo test -p archon-core --test catalog_characterization -- --test-threads=1
 ```
 
 Expected: all new and existing tests pass while all three production files remain unsplit.
 
 - [ ] **Step 7: Verify tests-only scope and commit**
 
-Run `git diff --name-only`; only the three test-containing files may appear. Commit:
+Run `git diff --name-only`; only the two existing pipeline test files and new core integration test may appear. Commit:
 
 ```bash
 git add crates/archon-pipeline/tests/coding_agents.rs \
   crates/archon-pipeline/tests/research_agents.rs \
-  crates/archon-core/src/agents/catalog.rs
+  crates/archon-core/tests/catalog_characterization.rs
 git commit -m "test(audit): freeze Tier-2 agent definitions"
 ```
 
