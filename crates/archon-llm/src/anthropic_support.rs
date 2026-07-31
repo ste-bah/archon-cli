@@ -76,8 +76,13 @@ fn supports_speed(_model: &str) -> bool {
     false
 }
 
-fn supports_output_effort(_model: &str) -> bool {
-    false
+fn supports_output_effort(model: &str) -> bool {
+    // Current-generation Claude models accept `output_config.effort`. Previously a
+    // blanket `false` stub, which silently dropped the knob for every model; enabled
+    // here for the models that support it (needed by the FCDP drafting pipeline, which
+    // relies on effort:medium to cap runaway thinking). No other caller sets
+    // `request.effort` today, so the blast radius is limited to opt-in effort requests.
+    model.contains("opus-4") || model.contains("sonnet-5") || model.contains("fable-5")
 }
 
 fn warn_dropped_knob(model: &str, field: &str, value: &str) {

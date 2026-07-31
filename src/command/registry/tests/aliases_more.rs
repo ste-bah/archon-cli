@@ -323,6 +323,13 @@ fn command_effect_debug_and_clone() {
         CommandEffect::StartPipelineWork(_) => {
             unreachable!("this test only constructs SetModelOverride")
         }
+        // FCDP-DRAFT: RunDraft arrived with the /draft migration. This test
+        // only constructs SetModelOverride, so it is unreachable here; the arm
+        // exists to satisfy exhaustiveness and to fail loudly if a future
+        // variant is added without updating this pin.
+        CommandEffect::RunDraft { .. } => {
+            unreachable!("this test only constructs SetModelOverride")
+        }
     }
     // Debug impl must not panic — format! exercises it.
     let _ = format!("{e:?}");

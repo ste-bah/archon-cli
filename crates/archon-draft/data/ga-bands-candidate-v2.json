@@ -1,0 +1,381 @@
+{
+ "_meta": {
+  "method": "M0.1 variance-derived bands; 1000w windows step 250, per-doc; tiers = research prior \u222a empirical rel_spread>0.6; LOO-validated",
+  "windows": 137,
+  "date": "2026-07-07",
+  "status": "LOCKED 2026-07-07 (user re-lock; T1=pooled 1000w P10_P90 per-section, T2=2500w P5_P95 chapter-scale)",
+  "loo": {
+   "P5_P95": [
+    "    P5_P95 holdout='MA-veridissi' avg_sentence_length: 38.57 outside [23.83,34.88]"
+   ],
+   "P10_P90": [
+    "    P10_P90 holdout='MA-veridissi' avg_sentence_length: 38.57 outside [24.96,33.08]"
+   ]
+  },
+  "recommendation": {
+   "tier1_per_section": "pooled 1000w-window P10_P90; hard gate on 5 T1 metrics + categorical labels",
+   "tier2_chapter": "2500w-window P5_P95, gate at accumulated >=2500w; advisory per-section",
+   "known_marginals": [
+    "Virtual voiceScore doc-aggregate 0.53 vs chapter P95 0.52 \u2014 epsilon; Virtual is shortest doc (7.4k)",
+    "LOO avg_sentence_length fails when MA held out \u2014 real 2019-vs-2026 sentence-length drift (38.6 vs ~29), not window noise; pooled band spans both by design"
+   ],
+   "labels": "exact match on 5 labels; primaryRegister soft (high|middle) as before",
+   "tacit_figures": "presence checks, not bands (extensive counts)"
+  }
+ },
+ "metrics": {
+  "avg_sentence_length": {
+   "median": 32.806,
+   "P5_P95": [
+    25.31,
+    48.171
+   ],
+   "P10_P90": [
+    26.384,
+    44.756
+   ],
+   "nonoverlap_P5_P95": [
+    25.661,
+    46.743
+   ],
+   "rel_spread": 0.56,
+   "tier": 1,
+   "tier_source": "stable"
+  },
+  "short_share_lt15": {
+   "median": 0.143,
+   "P5_P95": [
+    0.0,
+    0.25
+   ],
+   "P10_P90": [
+    0.038,
+    0.229
+   ],
+   "nonoverlap_P5_P95": [
+    0.043,
+    0.248
+   ],
+   "rel_spread": 1.33,
+   "tier": 2,
+   "tier_source": "empirical"
+  },
+  "long_share_gt30": {
+   "median": 0.469,
+   "P5_P95": [
+    0.271,
+    0.667
+   ],
+   "P10_P90": [
+    0.297,
+    0.609
+   ],
+   "nonoverlap_P5_P95": [
+    0.271,
+    0.71
+   ],
+   "rel_spread": 0.66,
+   "tier": 2,
+   "tier_source": "empirical"
+  },
+  "nounVerbRatio": {
+   "median": 0.513,
+   "P5_P95": [
+    0.418,
+    0.676
+   ],
+   "P10_P90": [
+    0.431,
+    0.656
+   ],
+   "nonoverlap_P5_P95": [
+    0.416,
+    0.669
+   ],
+   "rel_spread": 0.44,
+   "tier": 1,
+   "tier_source": "stable"
+  },
+  "nominalizationDensity": {
+   "median": 4.95,
+   "P5_P95": [
+    3.011,
+    6.583
+   ],
+   "P10_P90": [
+    3.478,
+    6.259
+   ],
+   "nonoverlap_P5_P95": [
+    3.399,
+    6.373
+   ],
+   "rel_spread": 0.56,
+   "tier": 1,
+   "tier_source": "stable"
+  },
+  "prepositionalPhraseDensity": {
+   "median": 4.906,
+   "P5_P95": [
+    3.015,
+    7.2
+   ],
+   "P10_P90": [
+    3.321,
+    6.866
+   ],
+   "nonoverlap_P5_P95": [
+    3.048,
+    7.071
+   ],
+   "rel_spread": 0.72,
+   "tier": 2,
+   "tier_source": "empirical"
+  },
+  "beVerbRatio": {
+   "median": 0.247,
+   "P5_P95": [
+    0.157,
+    0.328
+   ],
+   "P10_P90": [
+    0.172,
+    0.32
+   ],
+   "nonoverlap_P5_P95": [
+    0.152,
+    0.323
+   ],
+   "rel_spread": 0.6,
+   "tier": 1,
+   "tier_source": "stable"
+  },
+  "latinateGermanicRatio": {
+   "median": 0.145,
+   "P5_P95": [
+    0.101,
+    0.207
+   ],
+   "P10_P90": [
+    0.109,
+    0.196
+   ],
+   "nonoverlap_P5_P95": [
+    0.106,
+    0.206
+   ],
+   "rel_spread": 0.6,
+   "tier": 2,
+   "tier_source": "empirical"
+  },
+  "opacityScore": {
+   "median": 0.705,
+   "P5_P95": [
+    0.595,
+    0.832
+   ],
+   "P10_P90": [
+    0.613,
+    0.813
+   ],
+   "nonoverlap_P5_P95": [
+    0.591,
+    0.803
+   ],
+   "rel_spread": 0.28,
+   "tier": 1,
+   "tier_source": "stable"
+  },
+  "parataxisHypotaxisRatio": {
+   "median": 0.291,
+   "P5_P95": [
+    0.187,
+    0.401
+   ],
+   "P10_P90": [
+    0.207,
+    0.384
+   ],
+   "nonoverlap_P5_P95": [
+    0.207,
+    0.399
+   ],
+   "rel_spread": 0.61,
+   "tier": 2,
+   "tier_source": "prior"
+  },
+  "periodicRunningRatio": {
+   "median": 0.42,
+   "P5_P95": [
+    0.289,
+    0.581
+   ],
+   "P10_P90": [
+    0.327,
+    0.565
+   ],
+   "nonoverlap_P5_P95": [
+    0.281,
+    0.585
+   ],
+   "rel_spread": 0.56,
+   "tier": 2,
+   "tier_source": "prior"
+  },
+  "preMainVerbClauseCount": {
+   "median": 0.205,
+   "P5_P95": [
+    0.083,
+    0.368
+   ],
+   "P10_P90": [
+    0.108,
+    0.327
+   ],
+   "nonoverlap_P5_P95": [
+    0.089,
+    0.35
+   ],
+   "rel_spread": 1.07,
+   "tier": 2,
+   "tier_source": "prior"
+  },
+  "voiceScore": {
+   "median": 0.372,
+   "P5_P95": [
+    0.2,
+    0.533
+   ],
+   "P10_P90": [
+    0.237,
+    0.51
+   ],
+   "nonoverlap_P5_P95": [
+    0.199,
+    0.544
+   ],
+   "rel_spread": 0.73,
+   "tier": 2,
+   "tier_source": "prior"
+  },
+  "dynamicRange": {
+   "median": 0.573,
+   "P5_P95": [
+    0.45,
+    0.81
+   ],
+   "P10_P90": [
+    0.467,
+    0.762
+   ],
+   "nonoverlap_P5_P95": [
+    0.466,
+    0.812
+   ],
+   "rel_spread": 0.52,
+   "tier": 2,
+   "tier_source": "prior"
+  }
+ },
+ "tier2_chapter_scale_2500w": {
+  "short_share_lt15": {
+   "median": 0.127,
+   "P10_P90": [
+    0.071,
+    0.188
+   ],
+   "P5_P95": [
+    0.045,
+    0.193
+   ]
+  },
+  "long_share_gt30": {
+   "median": 0.496,
+   "P10_P90": [
+    0.322,
+    0.568
+   ],
+   "P5_P95": [
+    0.307,
+    0.585
+   ]
+  },
+  "prepositionalPhraseDensity": {
+   "median": 5.054,
+   "P10_P90": [
+    3.452,
+    6.484
+   ],
+   "P5_P95": [
+    3.089,
+    6.654
+   ]
+  },
+  "latinateGermanicRatio": {
+   "median": 0.139,
+   "P10_P90": [
+    0.117,
+    0.195
+   ],
+   "P5_P95": [
+    0.115,
+    0.211
+   ]
+  },
+  "parataxisHypotaxisRatio": {
+   "median": 0.299,
+   "P10_P90": [
+    0.237,
+    0.338
+   ],
+   "P5_P95": [
+    0.229,
+    0.343
+   ]
+  },
+  "periodicRunningRatio": {
+   "median": 0.416,
+   "P10_P90": [
+    0.364,
+    0.5
+   ],
+   "P5_P95": [
+    0.337,
+    0.536
+   ]
+  },
+  "preMainVerbClauseCount": {
+   "median": 0.195,
+   "P10_P90": [
+    0.143,
+    0.29
+   ],
+   "P5_P95": [
+    0.14,
+    0.299
+   ]
+  },
+  "voiceScore": {
+   "median": 0.377,
+   "P10_P90": [
+    0.289,
+    0.502
+   ],
+   "P5_P95": [
+    0.275,
+    0.517
+   ]
+  },
+  "dynamicRange": {
+   "median": 0.589,
+   "P10_P90": [
+    0.508,
+    0.736
+   ],
+   "P5_P95": [
+    0.491,
+    0.751
+   ]
+  }
+ }
+}

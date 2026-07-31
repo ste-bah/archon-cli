@@ -1,0 +1,31 @@
+[package]
+name = "archon-draft"
+version = "0.1.0"
+edition = "2021"
+
+# FCDP (Fable Console Drafting Protocol) primitives — pack schema + G-P,
+# «Qnn» quote substitution, measurement over archon-lanham, two-tier G-A gate.
+# Validated in the standalone FCDP sandbox before promotion (docs/fcdp/).
+
+[dependencies]
+archon-lanham = { path = "../archon-lanham" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+# Orchestration ports (#2): fancy-regex for Python-faithful backtracking + lookaround
+# (G-D gendered-pronoun negative-lookahead, straight-quote lookbehind); sha2 for the
+# provenance hash chain; unicode-normalization for the G-F NFKD advisory. All three are
+# already pinned in the workspace lockfile.
+fancy-regex = "0.14"
+sha2 = { workspace = true }
+unicode-normalization = "0.1"
+# Model call (#2 P3): route through archon-llm's AnthropicClient so subscription (OAuth) and
+# API-key auth both work, with the Claude-Code identity/betas handled correctly. Requires the
+# effort-stub fix in archon-llm (supports_output_effort) so effort:medium reaches the wire.
+archon-llm = { path = "../archon-llm" }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[[bin]]
+name = "archon-fcdp"
+path = "src/bin/archon_fcdp.rs"

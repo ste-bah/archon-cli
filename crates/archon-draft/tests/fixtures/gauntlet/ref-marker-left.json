@@ -1,0 +1,11 @@
+{
+ "defects": [
+  "G-B: unsubstituted \u00abQnn\u00bb markers remain",
+  "G-B: assigned quote Q2 unused in draft"
+ ],
+ "advisories": [
+  "G-B: straight double-quote characters present \u2014 verify not quotation use",
+  "G-F: word count 13 vs target [220,340]"
+ ],
+ "pass": false
+}

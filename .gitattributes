@@ -16,3 +16,9 @@ tests/fixtures/agents/generated/** linguist-generated=true
 
 # Shell scripts — always LF regardless of checkout OS.
 scripts/*.sh text eol=lf
+
+# Golden-file fixtures are compared byte-for-byte, so their line endings must
+# not vary by platform. Without this the archon-draft gauntlet goldens fail on
+# a Windows checkout purely on 
+, while passing on macOS and Linux CI.
+crates/archon-draft/tests/fixtures/** text eol=lf

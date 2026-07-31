@@ -115,6 +115,25 @@ pub(crate) fn apply_effect<'a>(
             CommandEffect::StartPipelineWork(work) => {
                 crate::command::pipeline_slash::start_pipeline_work(slash_ctx, tui_tx, work).await;
             }
+            // FCDP-DRAFT (/draft), from PR #51. Spawns a DETACHED task that
+            // streams the subprocess output as TextDelta: drafting takes
+            // minutes, so it must not block this inline await.
+            CommandEffect::RunDraft {
+                pack,
+                workdir,
+                model,
+                gate_config,
+                cwd,
+            } => {
+                crate::command::slash::spawn_draft_command_tui(
+                    tui_tx.clone(),
+                    pack,
+                    workdir,
+                    model,
+                    gate_config,
+                    cwd,
+                );
+            }
         }
     })
 }

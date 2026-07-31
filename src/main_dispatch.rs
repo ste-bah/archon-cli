@@ -62,6 +62,15 @@ pub(crate) async fn handle_subcommand(
         command @ (Commands::SelfCmd { .. }
         | Commands::Gametheory { .. }
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
+        Commands::Draft {
+            pack,
+            workdir,
+            model,
+            gate_config,
+        } => {
+            crate::command::draft::handle_draft_command(pack, workdir, model, gate_config, config)
+                .await
+        }
     }
 }
 

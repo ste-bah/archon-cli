@@ -366,7 +366,7 @@ impl AnthropicClient {
         candidates
     }
 
-    pub(crate) fn build_request_body(&self, request: &MessageRequest) -> Result<String, ApiError> {
+    pub fn build_request_body(&self, request: &MessageRequest) -> Result<String, ApiError> {
         let mut body = serde_json::json!({
             "model": request.model,
             "max_tokens": request.max_tokens,

@@ -1,0 +1,39 @@
+{
+ "battery_order": [
+  "G3",
+  "G4",
+  "G2",
+  "G1"
+ ],
+ "defects": [
+  "GG/G3: 1. Locked terms are used consistently. VERDICT: NO",
+  "GG/G2: no clean verdict extracted \u2014 fail-closed",
+  "GG/G1: no clean verdict extracted \u2014 fail-closed"
+ ],
+ "transcript": [
+  {
+   "item": "G3",
+   "question": "Is each evidence item characterized with the same value/strength everywhere it appears?",
+   "line": "1. Locked terms are used consistently. VERDICT: NO",
+   "verdict": "NO"
+  },
+  {
+   "item": "G4",
+   "question": "Do any two passages characterize the same concept incompatibly?",
+   "line": "2. No later passage contradicts an earlier one. Verdict: no",
+   "verdict": "NO"
+  },
+  {
+   "item": "G2",
+   "question": "Does any later passage contradict an earlier passage's claim without explicit acknowledgment?",
+   "line": "3. Evidence characterization drifts between paragraphs \u2014 the answer is unclear.",
+   "verdict": null
+  },
+  {
+   "item": "G1",
+   "question": "Is every locked term used per its locked definition at every occurrence?",
+   "line": "4. Two passages treat the same concept compatibly.",
+   "verdict": null
+  }
+ ]
+}

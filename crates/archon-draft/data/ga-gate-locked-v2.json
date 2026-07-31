@@ -1,0 +1,147 @@
+{
+ "_meta": {
+  "method": "M0.1 variance-derived bands; 1000w windows step 250, per-doc; tiers = research prior \u222a empirical rel_spread>0.6; LOO-validated",
+  "windows": 137,
+  "date": "2026-07-07",
+  "status": "LOCKED 2026-07-07 (user re-lock; T1=pooled 1000w P10_P90 per-section, T2=2500w P5_P95 chapter-scale)",
+  "loo": {
+   "P5_P95": [
+    "    P5_P95 holdout='MA-veridissi' avg_sentence_length: 38.57 outside [23.83,34.88]"
+   ],
+   "P10_P90": [
+    "    P10_P90 holdout='MA-veridissi' avg_sentence_length: 38.57 outside [24.96,33.08]"
+   ]
+  },
+  "recommendation": {
+   "tier1_per_section": "pooled 1000w-window P10_P90; hard gate on 5 T1 metrics + categorical labels",
+   "tier2_chapter": "2500w-window P5_P95, gate at accumulated >=2500w; advisory per-section",
+   "known_marginals": [
+    "Virtual voiceScore doc-aggregate 0.53 vs chapter P95 0.52 \u2014 epsilon; Virtual is shortest doc (7.4k)",
+    "LOO avg_sentence_length fails when MA held out \u2014 real 2019-vs-2026 sentence-length drift (38.6 vs ~29), not window noise; pooled band spans both by design"
+   ],
+   "labels": "exact match on 5 labels; primaryRegister soft (high|middle) as before",
+   "tacit_figures": "presence checks, not bands (extensive counts)"
+  },
+  "label_tiering": "labels derived from Tier-2 metrics (voice<-voiceScore, parataxisHypotaxis, periodicRunning) enforce only at chapter scale \u2014 per-section they are advisory; fix 2026-07-07: exact-match labels had smuggled T2 metrics into the T1 hard gate"
+ },
+ "tier1_per_section": {
+  "avg_sentence_length": {
+   "target": 32.806,
+   "band": [
+    26.384,
+    44.756
+   ]
+  },
+  "nounVerbRatio": {
+   "target": 0.513,
+   "band": [
+    0.431,
+    0.656
+   ]
+  },
+  "nominalizationDensity": {
+   "target": 4.95,
+   "band": [
+    3.478,
+    6.259
+   ]
+  },
+  "beVerbRatio": {
+   "target": 0.247,
+   "band": [
+    0.172,
+    0.32
+   ]
+  },
+  "opacityScore": {
+   "target": 0.705,
+   "band": [
+    0.613,
+    0.813
+   ]
+  }
+ },
+ "tier2_chapter": {
+  "short_share_lt15": {
+   "target": 0.127,
+   "band": [
+    0.045,
+    0.193
+   ]
+  },
+  "long_share_gt30": {
+   "target": 0.496,
+   "band": [
+    0.307,
+    0.585
+   ]
+  },
+  "prepositionalPhraseDensity": {
+   "target": 5.054,
+   "band": [
+    3.089,
+    6.654
+   ]
+  },
+  "latinateGermanicRatio": {
+   "target": 0.139,
+   "band": [
+    0.115,
+    0.211
+   ]
+  },
+  "parataxisHypotaxisRatio": {
+   "target": 0.299,
+   "band": [
+    0.229,
+    0.343
+   ]
+  },
+  "periodicRunningRatio": {
+   "target": 0.416,
+   "band": [
+    0.337,
+    0.536
+   ]
+  },
+  "preMainVerbClauseCount": {
+   "target": 0.195,
+   "band": [
+    0.14,
+    0.299
+   ]
+  },
+  "voiceScore": {
+   "target": 0.377,
+   "band": [
+    0.275,
+    0.517
+   ]
+  },
+  "dynamicRange": {
+   "target": 0.589,
+   "band": [
+    0.491,
+    0.751
+   ]
+  }
+ },
+ "categorical_labels": {
+  "nounVerb": "balanced",
+  "parataxisHypotaxis": "predominantly paratactic",
+  "periodicRunning": "mixed",
+  "voice": "moderate voice",
+  "opacity": "opaque",
+  "primaryRegister": {
+   "accept": [
+    "high",
+    "middle"
+   ]
+  }
+ },
+ "tier2_labels": [
+  "voice",
+  "parataxisHypotaxis",
+  "periodicRunning"
+ ]
+}

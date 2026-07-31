@@ -111,4 +111,24 @@ pub(crate) enum CommandEffect {
     /// Start pipeline watcher/resume work only after synchronous handler events
     /// have drained through the bounded TUI channel.
     StartPipelineWork(PipelineWork),
+    /// FCDP-DRAFT (/draft): run the FCDP drafting protocol out-of-process —
+    /// the same `archon` binary's `draft` subcommand — against the given
+    /// pack + workdir, with the session's live model. Produced by
+    /// `DraftHandler::execute` (sync stash). Applied by
+    /// `command::context::apply_effect`, which hands it to
+    /// `crate::command::slash::spawn_draft_command_tui`; that spawns a
+    /// DETACHED task streaming the subprocess's stdout/stderr as
+    /// `TuiEvent::TextDelta` (drafting takes minutes, so it must NOT block
+    /// the inline `apply_effect` await). Carries owned data so no borrow on
+    /// `SlashCommandContext` leaks through the effect-slot. `cwd` is the
+    /// session working dir — set as the subprocess cwd so relative pack/
+    /// workdir paths and the provenance store (`<cwd>/.archon`) resolve as
+    /// the user expects.
+    RunDraft {
+        pack: PathBuf,
+        workdir: PathBuf,
+        model: String,
+        gate_config: Option<PathBuf>,
+        cwd: PathBuf,
+    },
 }

@@ -107,3 +107,8 @@ archon
 .archon/policy.toml
 .backups/
 /parity-ref/  # portability copy of god-agent markdown_chunker.py for scripts/chunk_parity_check.py
+__pycache__/
+# FCDP golden fixtures derived from unpublished private research content. Kept local
+# (data stays off the remote); transferred to other dev boxes out-of-band (scp/bundle).
+# The dependent tests skip when these are absent; synthetic fixtures ship in-repo.
+/crates/archon-draft/tests/fixtures/m6/

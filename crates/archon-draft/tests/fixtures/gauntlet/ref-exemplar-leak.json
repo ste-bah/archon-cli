@@ -1,0 +1,11 @@
+{
+ "defects": [
+  "G-B: assigned quote Q1 unused in draft",
+  "G-B: assigned quote Q2 unused in draft",
+  "G-B/exemplar-leak (theoretical-exposition): been calibrated and now stands ready to measure..."
+ ],
+ "advisories": [
+  "G-F: word count 25 vs target [220,340]"
+ ],
+ "pass": false
+}

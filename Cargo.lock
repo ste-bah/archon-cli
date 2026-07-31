@@ -324,6 +324,7 @@ dependencies = [
  "archon-core",
  "archon-cozo",
  "archon-docs",
+ "archon-draft",
  "archon-knowledge",
  "archon-lanham",
  "archon-leann",
@@ -582,6 +583,22 @@ dependencies = [
  "uuid",
  "walkdir",
  "wiremock",
+]
+
+[[package]]
+name = "archon-draft"
+version = "0.1.0"
+dependencies = [
+ "archon-lanham",
+ "archon-llm",
+ "fancy-regex",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]

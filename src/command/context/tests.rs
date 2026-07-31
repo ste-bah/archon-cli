@@ -157,6 +157,13 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
         CommandEffect::StartPipelineWork(_) => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
+        // FCDP-DRAFT: RunDraft belongs to /draft, added by PR #51. This
+        // harness only constructs SetModelOverride above, so it is
+        // unreachable here; the arm keeps the match exhaustive so a future
+        // variant cannot be added without this test being updated in step.
+        CommandEffect::RunDraft { .. } => {
+            unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+        }
     }
 
     let got = model_override_shared.lock().await.clone();

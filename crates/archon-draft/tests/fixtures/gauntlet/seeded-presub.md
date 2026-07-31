@@ -1,0 +1,3 @@
+As discussed above, the soul is best understood through its two actualities. Aristotle holds that «Q1+», a formulation whose force lies in the phantasmatic register it opens. It is important to note that the capacity to speak English precedes its exercise, just as Heidegger insists that attunement grounds discovery (Heidegger 253). The player finds that his world is disclosed before he chooses it.
+
+Gross frames affect ``as the very condition for the possibility of rational discourse, or logos'' (\textit{Heidegger and Rhetoric} 4), and the faculty of imagination completes what perception begins. "Ambience," we might add, does the rest.

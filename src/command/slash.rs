@@ -1,6 +1,9 @@
 //! Slash command handler. Extracted from main.rs.
 
 use std::path::PathBuf;
+use std::process::Stdio;
+
+use tokio::io::{AsyncBufReadExt, BufReader};
 // TASK-AGS-POST-6-BODIES-B19-RULES: /rules body migrated to
 // src/command/rules.rs (DIRECT-sync-via-MemoryTrait pattern). The
 // shipped `use archon_consciousness::rules::RulesEngine;` import is
@@ -201,9 +204,160 @@ pub(crate) fn handle_diff_command<'a>(
     })
 }
 
+// ---------------------------------------------------------------------------
+// /draft handler (streaming subprocess)
+// ---------------------------------------------------------------------------
+
+/// Spawn the FCDP drafting protocol as a DETACHED streaming subprocess.
+///
+/// `/draft` (via `CommandEffect::RunDraft` → `apply_effect`) calls this. Unlike
+/// `handle_diff_command`, a draft runs for MINUTES, so this must NOT block the
+/// inline `apply_effect` await in `handle_slash_command`. It runs the same
+/// `archon` binary's `draft` subcommand (`current_exe()`) with piped stdout/
+/// stderr, `tokio::spawn`s a task that streams each output line to the TUI as a
+/// `TextDelta`, and returns immediately. Out-of-process also keeps the CLI
+/// handler's `println!`/`eprintln!` off the TUI's terminal.
+pub(crate) fn spawn_draft_command_tui(
+    tui_tx: archon_tui::event_channel::TuiEventSender,
+    pack: PathBuf,
+    workdir: PathBuf,
+    model: String,
+    gate_config: Option<PathBuf>,
+    cwd: PathBuf,
+) {
+    tokio::spawn(async move {
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tui_tx.send(TuiEvent::Error(format!(
+                    "archon draft: cannot locate archon binary: {e}"
+                )));
+                return;
+            }
+        };
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.arg("draft")
+            .arg(&pack)
+            .arg(&workdir)
+            .arg("--model")
+            .arg(&model);
+        if let Some(gc) = &gate_config {
+            cmd.arg("--gate-config").arg(gc);
+        }
+        cmd.current_dir(&cwd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tui_tx.send(TuiEvent::Error(format!("archon draft: spawn failed: {e}")));
+                return;
+            }
+        };
+        stream_child_to_tui(child, tui_tx).await;
+    });
+}
+
+/// Stream a spawned child's stdout + stderr into the TUI line-by-line, then
+/// await exit and emit a terminal completion (`[/draft complete]`) or error
+/// event. Extracted from `spawn_draft_command_tui` so the streaming/wait
+/// plumbing can be exercised against a controlled subprocess in tests.
+async fn stream_child_to_tui(
+    mut child: tokio::process::Child,
+    tui_tx: archon_tui::event_channel::TuiEventSender,
+) {
+    // Stream stdout + stderr concurrently, line by line, into the TUI.
+    let out = child.stdout.take();
+    let err = child.stderr.take();
+    let tx_out = tui_tx.clone();
+    let out_task = tokio::spawn(async move {
+        if let Some(s) = out {
+            let mut lines = BufReader::new(s).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = tx_out.send(TuiEvent::TextDelta(format!("{line}\n")));
+            }
+        }
+    });
+    let tx_err = tui_tx.clone();
+    let err_task = tokio::spawn(async move {
+        if let Some(s) = err {
+            let mut lines = BufReader::new(s).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = tx_err.send(TuiEvent::TextDelta(format!("{line}\n")));
+            }
+        }
+    });
+    let _ = out_task.await;
+    let _ = err_task.await;
+
+    match child.wait().await {
+        Ok(status) if status.success() => {
+            let _ = tui_tx.send(TuiEvent::TextDelta("\n[/draft complete]\n".to_string()));
+        }
+        Ok(status) => {
+            let _ = tui_tx.send(TuiEvent::Error(format!(
+                "archon draft exited with {status}"
+            )));
+        }
+        Err(e) => {
+            let _ = tui_tx.send(TuiEvent::Error(format!("archon draft: wait failed: {e}")));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stream_child_to_tui_streams_stdout_stderr_and_completion() {
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo out-line; echo err-line 1>&2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        stream_child_to_tui(child, tx).await;
+
+        let mut joined = String::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let TuiEvent::TextDelta(t) = ev {
+                joined.push_str(&t);
+            }
+        }
+        assert!(joined.contains("out-line"), "stdout must stream: {joined}");
+        assert!(joined.contains("err-line"), "stderr must stream: {joined}");
+        assert!(
+            joined.contains("[/draft complete]"),
+            "success must emit the completion event: {joined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_child_to_tui_emits_error_on_nonzero_exit() {
+        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("exit 3")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        stream_child_to_tui(child, tx).await;
+
+        let mut saw_error = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let TuiEvent::Error(m) = ev
+                && m.contains("exited with")
+            {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "non-zero exit must emit an Error event");
+    }
 
     #[test]
     fn resolves_builtin_prd_skills_for_fallback() {
