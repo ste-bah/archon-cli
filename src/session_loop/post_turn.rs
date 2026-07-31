@@ -97,6 +97,7 @@ async fn maybe_spawn_guardrail_repair(
     let (completed, spawn_repair) = turn_completion_state(&outcome);
     let guardrail_outcome =
         crate::command::world_model::record_guardrail_turn_outcome(config, &guardrail, completed);
+    record_turn_world_model_outcome(config, &guardrail, &outcome);
     if spawn_repair
         && guardrail_outcome.as_ref().is_some_and(|outcome| {
             matches!(
@@ -133,6 +134,48 @@ async fn maybe_spawn_guardrail_repair(
         queue.push_back(PostTurnAction::PersistSession {
             guardrail: Some(Box::new(guardrail)),
         });
+    }
+}
+
+/// Close the world model's predict -> observe loop for an interactive turn.
+///
+/// `record_runtime_outcome` attaches the actual next-state summary to the
+/// persisted prediction and computes latent surprise. Until now it fired only
+/// on the pipeline surfaces, so interactive turns produced predictions that
+/// were never scored against reality — which is the half of the loop that
+/// makes the corpus trainable, and the gate on ever clearing `shadow_only`.
+///
+/// The advisory record is already threaded here on the guardrail record, so
+/// this needs no extra plumbing through the turn.
+fn record_turn_world_model_outcome(
+    config: &archon_core::config::ArchonConfig,
+    guardrail: &crate::command::world_model::RuntimeGuardrailRecord,
+    outcome: &archon_tui::TurnOutcome,
+) {
+    crate::command::world_model::record_runtime_outcome(
+        config,
+        &guardrail.advisory,
+        &turn_outcome_summary(outcome),
+        Some(&guardrail.action.action_id),
+    );
+}
+
+/// Summarise a turn outcome for the world model's actual-next-state field.
+///
+/// Deliberately records the failure modes distinctly rather than collapsing
+/// them to "not completed": a turn blocked on verification and a turn the user
+/// interrupted are different labels, and the labeler cannot recover the
+/// difference later.
+fn turn_outcome_summary(outcome: &archon_tui::TurnOutcome) -> String {
+    match outcome {
+        archon_tui::TurnOutcome::Completed => "interactive turn completed".to_string(),
+        archon_tui::TurnOutcome::Cancelled => "interactive turn cancelled by user".to_string(),
+        archon_tui::TurnOutcome::FinalizationBlocked(reason) => {
+            format!("interactive turn blocked at finalization: {reason}")
+        }
+        archon_tui::TurnOutcome::Failed(reason) => {
+            format!("interactive turn failed: {reason}")
+        }
     }
 }
 
