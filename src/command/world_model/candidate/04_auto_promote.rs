@@ -3,12 +3,12 @@ fn render_auto_promote_transition(
     root: &Path,
     candidate_id: &str,
 ) -> String {
-    match ensure_auto_promotion_allowed(config) {
-        Ok(()) => {}
-        Err(reason) => {
-            return record_auto_promotion_attempt(root, "latent_transition", candidate_id, &reason);
-        }
-    }
+    // Evaluate first, unconditionally. Evaluation is read-only and produces the
+    // evidence needed to decide whether promotion should ever be enabled, so
+    // gating it behind the promotion flag is backwards: with
+    // auto_promote_advisory=false a corpus accumulates candidates that were
+    // never scored against the nearest-neighbour baseline, which is precisely
+    // how a store ends up holding dozens of candidates and "Last eval: none".
     match render_eval(config, root, Some(candidate_id)) {
         Ok(_) => {}
         Err(error) => {
@@ -17,6 +17,18 @@ fn render_auto_promote_transition(
                 "latent_transition",
                 candidate_id,
                 &format!("eval failed: {error}"),
+            );
+        }
+    }
+    // Only the promotion itself is gated.
+    match ensure_auto_promotion_allowed(config) {
+        Ok(()) => {}
+        Err(reason) => {
+            return record_auto_promotion_attempt(
+                root,
+                "latent_transition",
+                candidate_id,
+                &format!("evaluated; promotion skipped: {reason}"),
             );
         }
     }
@@ -32,12 +44,9 @@ fn render_auto_promote_jepa(
     root: &Path,
     candidate_id: &str,
 ) -> String {
-    match ensure_auto_promotion_allowed(config) {
-        Ok(()) => {}
-        Err(reason) => {
-            return record_auto_promotion_attempt(root, "jepa_transition", candidate_id, &reason);
-        }
-    }
+    // Same ordering as the latent path: evaluate unconditionally, gate only the
+    // promotion. Evaluation is the evidence; withholding it until promotion is
+    // already enabled leaves a corpus of candidates nobody can judge.
     match render_eval_jepa(config, root, candidate_id) {
         Ok(_) => {}
         Err(error) => {
@@ -46,6 +55,17 @@ fn render_auto_promote_jepa(
                 "jepa_transition",
                 candidate_id,
                 &format!("promotion eval failed: {error}"),
+            );
+        }
+    }
+    match ensure_auto_promotion_allowed(config) {
+        Ok(()) => {}
+        Err(reason) => {
+            return record_auto_promotion_attempt(
+                root,
+                "jepa_transition",
+                candidate_id,
+                &format!("evaluated; promotion skipped: {reason}"),
             );
         }
     }
@@ -108,14 +128,46 @@ fn record_auto_promotion_attempt(
 mod auto_promote_tests {
     use super::*;
 
+    /// Evaluation must be attempted even when promotion is disabled.
+    ///
+    /// This previously short-circuited on the flag before reaching `render_eval`,
+    /// so a store with `auto_promote_advisory=false` accumulated candidates that
+    /// were never scored against the nearest-neighbour baseline — dozens of
+    /// candidates alongside "Last eval: none". Evaluation is read-only and is
+    /// the evidence needed to decide whether promotion should be enabled at all,
+    /// so it must not be gated behind the decision it informs.
+    ///
+    /// Against an empty root the eval itself cannot succeed; what matters is
+    /// that the failure comes from evaluation rather than from an early bail on
+    /// the flag.
     #[test]
-    fn auto_promote_reports_disabled_flag_before_policy_lookup() {
+    fn evaluation_is_attempted_even_when_promotion_is_disabled() {
         let mut config = archon_core::config::ArchonConfig::default();
         config.learning.world_model.auto_promote_advisory = false;
         let temp = tempfile::tempdir().expect("tempdir");
 
         let rendered = render_auto_promote_transition(&config, temp.path(), "candidate-1");
 
-        assert!(rendered.contains("auto_promote_advisory=false"));
+        assert!(
+            rendered.contains("eval failed"),
+            "expected an evaluation attempt, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("auto_promote_advisory=false"),
+            "must not short-circuit on the promotion flag before evaluating: {rendered}"
+        );
+    }
+
+    /// When evaluation succeeds but promotion is disabled, the flag is still
+    /// surfaced — just after the evidence has been produced, not instead of it.
+    #[test]
+    fn promotion_flag_is_reported_after_evaluation() {
+        let reason = ensure_auto_promotion_allowed(&{
+            let mut config = archon_core::config::ArchonConfig::default();
+            config.learning.world_model.auto_promote_advisory = false;
+            config
+        })
+        .expect_err("promotion should be refused when the flag is off");
+        assert!(reason.contains("auto_promote_advisory=false"));
     }
 }
