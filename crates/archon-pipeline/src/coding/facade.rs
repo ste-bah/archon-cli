@@ -201,7 +201,7 @@ impl PipelineFacade for CodingFacade {
         let system = vec![serde_json::json!({
             "type": "text",
             "text": format!(
-                "You are a pipeline agent in the Archon coding pipeline. Agent: {}. Phase: {}.",
+                "You are a pipeline agent in the Archon coding pipeline. Agent: {}. Phase: {}. Rust code is quality-scored only inside ```rust or ```rs fenced blocks; tag every Rust code fence.",
                 agent.display_name,
                 agent.phase,
             ),
