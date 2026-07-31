@@ -165,8 +165,12 @@ mod tests {
     use crate::models::ArtifactRecord;
 
     fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-provchunks-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+        // In-memory, matching every other test in this crate. A raw sqlite
+        // DbInstance has no entry in the Cozo guard registry, so the first
+        // guarded DDL fails with "database has no bound Cozo guard config" —
+        // production opens sqlite through `acquire_docs_db`, which registers
+        // it. It also leaked a db file into /tmp per test run.
+        DbInstance::new("mem", "", Default::default()).unwrap()
     }
 
     fn chunk(doc: &str, i: u32, content: &str) -> ChunkArtifact {
