@@ -70,16 +70,39 @@ pub(crate) fn render_world_status_with_stats(
         } else {
             "fail-open"
         };
+    // A trainer that has stopped is indistinguishable from one that is merely
+    // idle unless the age of its last tick is shown. `Auto-trainer: true`
+    // beside a tick from five weeks ago reads as healthy when it is not.
     let daemon_trainer = super::latest_daemon_trainer_event()
         .map(|event| {
+            let age = chrono::Utc::now().signed_duration_since(event.created_at);
+            let staleness = if age.num_days() >= 1 {
+                format!(" [STALE — {} day(s) ago]", age.num_days())
+            } else {
+                String::new()
+            };
             format!(
-                "{} {} — {}",
+                "{} {} — {}{staleness}",
                 event.created_at.to_rfc3339(),
                 event.status,
                 event.summary
             )
         })
         .unwrap_or_else(|| "no daemon trainer tick recorded".into());
+
+    // "none" is not a neutral fact here. With no active model the advisor is a
+    // no-op; with no eval nothing has ever been scored against the
+    // nearest-neighbour baseline. Both read as unremarkable when printed bare.
+    let active = if active == "none" {
+        "none [advisor inert — nothing promoted]".to_string()
+    } else {
+        active
+    };
+    let last_eval = if last_eval.trim() == "none" {
+        "none [no candidate scored against the baseline]".to_string()
+    } else {
+        last_eval
+    };
 
     format!(
         "World Model Status\n\
