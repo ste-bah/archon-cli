@@ -1,4 +1,4 @@
-use super::super::{ResearchAgent, BASE_TOOLS, WRITER_TOOLS};
+use super::super::{ResearchAgent, WRITER_TOOLS};
 
 pub(super) const CHAPTER_SYNTHESIZER: ResearchAgent = ResearchAgent {
         key: "chapter-synthesizer",
