@@ -7,6 +7,23 @@ world model when available, applies policy gates, records a compact decision,
 verifies meaningful actions, reflects on the outcome, and feeds governed
 learning proposals.
 
+**What "when available" currently means.** The loop runs per interactive turn
+and a world-model prediction backend is injected at session wiring, but the
+state it is given is `shadow_only`. The scorer consults model predictions only
+when the state names an active model *and* `shadow_only` is false, so today
+every candidate is scored heuristically while predictions are recorded for
+later comparison against observed outcomes. No candidate model has been
+evaluated against the nearest-neighbour baseline on a real corpus, so nothing
+is promoted and the flag should stay set until `archon world eval` says
+otherwise. A model trained against a different Archon build is held in shadow
+regardless of the flag.
+
+The executive advisory is also advisory in the strict sense: its output is a
+planning reminder injected into the turn, not a gate. Enforcement lives in the
+world-model guardrail, which consumes the same risk scores at the 0.45 / 0.70 /
+0.85 thresholds and can require plan review or verification, block a completion
+record, and spawn a repair turn.
+
 It is not a hidden chain-of-thought store. The persisted records are compact
 labels, hashes, candidate ids, verification contracts, outcomes, and lessons.
 Raw user text is not stored unless policy explicitly opts into it.
