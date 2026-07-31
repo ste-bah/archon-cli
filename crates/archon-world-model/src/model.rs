@@ -22,6 +22,19 @@ pub struct LatentWorldModelMetadata {
     pub precision: ModelPrecision,
     pub row_count: u64,
     pub parameter_count: u64,
+    /// Archon build this model was trained against.
+    ///
+    /// Archon's own behaviour — prompts, tools, guardrail thresholds — is part
+    /// of the data-generating process. When it changes, the relationship
+    /// between features and outcomes shifts underneath a model trained on the
+    /// old behaviour, and the model degrades while still returning confident
+    /// predictions. Recording the build is what lets that be detected rather
+    /// than silently tolerated.
+    ///
+    /// `Option` with a serde default so checkpoints written before this field
+    /// existed still load, reading as unknown provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trained_on_build: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -34,6 +47,7 @@ impl LatentWorldModelMetadata {
             precision: ModelPrecision::Fp32,
             row_count,
             parameter_count: 0,
+            trained_on_build: Some(crate::build_stamp()),
             created_at: Utc::now(),
         }
     }
@@ -431,5 +445,42 @@ mod tests {
         let predictions = model.predict_auxiliary(&[1.0, 0.0], &[0.0, 0.0]).unwrap();
 
         assert!(predictions.iter().any(|head| head.label == "failure"));
+    }
+}
+
+#[cfg(test)]
+mod trained_on_build_tests {
+    use super::*;
+
+    /// A candidate records the build it was trained against, so a later run can
+    /// tell whether the archon that produced its training data is the archon
+    /// now asking it for predictions.
+    #[test]
+    fn candidates_record_the_training_build() {
+        let meta = LatentWorldModelMetadata::candidate(384, BackendKind::Cpu, 100);
+        assert_eq!(
+            meta.trained_on_build.as_deref(),
+            Some(crate::build_stamp().as_str())
+        );
+    }
+
+    /// Checkpoints written before this field existed must still load, and must
+    /// read as unknown provenance rather than being credited to the running
+    /// build — which would defeat the point of the check.
+    #[test]
+    fn legacy_checkpoints_load_as_unknown_provenance() {
+        let mut value = serde_json::to_value(LatentWorldModelMetadata::candidate(
+            384,
+            BackendKind::Cpu,
+            100,
+        ))
+        .expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("trained_on_build");
+        let meta: LatentWorldModelMetadata =
+            serde_json::from_value(value).expect("deserialize legacy checkpoint");
+        assert_eq!(meta.trained_on_build, None);
     }
 }

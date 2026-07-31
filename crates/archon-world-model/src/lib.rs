@@ -56,5 +56,5 @@ pub use representation::{
     GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,
     TraceWindowBuilder, WorldRepresentationAdapter,
 };
-pub use schema::{EvidenceRef, WorldLabelSet, WorldTraceRow};
+pub use schema::{EvidenceRef, WorldLabelSet, WorldTraceRow, build_stamp};
 pub use trace::{ColdStartStats, ColdStartStatus, ColdStartThresholds};

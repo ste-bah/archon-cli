@@ -1,6 +1,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Identifier for the archon build currently running, as `<version>+<commit>`.
+///
+/// The commit is what actually identifies behaviour: `CARGO_PKG_VERSION` moves
+/// only on release, so a whole development period would otherwise carry one
+/// label and a corpus spanning it could not be segmented. Falls back to
+/// `<version>+unknown` when built outside a git checkout.
+pub fn build_stamp() -> String {
+    format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("ARCHON_BUILD_SHA"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceRef {
     pub source: String,
@@ -169,7 +179,7 @@ impl WorldTraceRow {
             action_kind,
             // Stamped here rather than at the call sites so every construction
             // path is tagged and none can be forgotten.
-            archon_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            archon_version: Some(build_stamp()),
             created_at: Utc::now(),
             ..Self::default()
         }
@@ -213,10 +223,10 @@ mod archon_version_tests {
     #[test]
     fn new_rows_are_stamped_with_the_running_build() {
         let row = WorldTraceRow::new("session-1", WorldActionKind::Unknown);
-        assert_eq!(
-            row.archon_version.as_deref(),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
+        assert_eq!(row.archon_version.as_deref(), Some(build_stamp().as_str()));
+        // The commit is the part that makes a corpus segmentable; the release
+        // version alone would collapse a whole development period to one label.
+        assert!(row.archon_version.unwrap().contains('+'));
     }
 
     /// Rows written before the field existed must still load, and must read as
