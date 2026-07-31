@@ -10,8 +10,28 @@ pub fn build_jepa_training_examples_controlled(
     config: &JepaTrainingConfig,
     should_stop: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<JepaTrainingExample>> {
+    build_jepa_training_examples_from_builder(&TraceWindowBuilder::new(rows), config, should_stop)
+}
+
+/// As above, but from a caller-configured window builder.
+///
+/// This is how embeddings reach the encoder. A builder carrying an embedding
+/// adapter yields windows and actions with dense vectors; a plain one yields
+/// `embedding: None` and the encoder falls back to hashing excerpt text into
+/// `latent_dim` buckets, which collides an open vocabulary into 384 slots at
+/// the default.
+///
+/// The builder is constructed by the caller rather than here because
+/// `jepa_module_keeps_encoder_path_free_of_embedding_adapters` forbids this
+/// module from naming an embedding provider at all. Taking an already-built
+/// `TraceWindowBuilder` keeps the choice of provider outside `jepa/` and the
+/// dependency pointing outward.
+pub fn build_jepa_training_examples_from_builder(
+    builder: &TraceWindowBuilder<'_>,
+    config: &JepaTrainingConfig,
+    should_stop: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<JepaTrainingExample>> {
     config.validate()?;
-    let builder = TraceWindowBuilder::new(rows);
     let mut examples = Vec::new();
     for horizon in &config.prediction_horizons {
         check_jepa_stop(should_stop, "jepa transition scan")?;

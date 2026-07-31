@@ -259,6 +259,14 @@ fn train_jepa_candidate_cpu(
         CpuJepaBackend,
         should_stop,
         progress,
+        // TODO: thread a caller-supplied `TraceWindowBuilder` down this chain so
+        // `archon world train-jepa` can pass one carrying an embedding adapter.
+        // Until then every training run builds plain windows and the encoder
+        // uses the hashed fallback. `build_jepa_training_examples_from_builder`
+        // and `train_jepa_candidate_with_tensor_backend` already accept it; what
+        // is missing is the parameter on the eight functions between here and
+        // `train_jepa_candidate_with_backend_observed`.
+        None,
     )
 }
 

@@ -5,11 +5,24 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     backend: B,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    // Supplied by the caller when windows should carry dense embeddings. `None`
+    // builds a plain builder from `rows`, leaving the encoder on the hashed
+    // fallback. The builder is constructed outside `jepa/` because this module
+    // is gated against naming an embedding provider.
+    window_builder: Option<&TraceWindowBuilder<'_>>,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
     check_jepa_training_stop(should_stop, "jepa example build")?;
     emit_jepa_progress(progress, "jepa_example_build_start", "building training examples");
-    let examples = build_jepa_training_examples_controlled(rows, config, should_stop)?;
+    let owned_builder;
+    let builder = match window_builder {
+        Some(builder) => builder,
+        None => {
+            owned_builder = TraceWindowBuilder::new(rows);
+            &owned_builder
+        }
+    };
+    let examples = build_jepa_training_examples_from_builder(builder, config, should_stop)?;
     if examples.is_empty() {
         bail!("not enough rows to train JEPA: need future rows in the same session");
     }
