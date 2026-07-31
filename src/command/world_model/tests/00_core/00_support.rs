@@ -1,18 +1,114 @@
 use super::*;
 
+/// Seed a corpus that survives verified-label materialisation.
+///
+/// Since 1d157a20 training and evaluation read `load_verified_training_rows()`,
+/// which discards any row whose success label cannot be proven from guardrail
+/// evidence. Rows alone therefore materialise `success: None`, which leaves no
+/// positives, no Brier improvement, and a failing promotion gate.
+///
+/// So each row is joined by `action_attempt_id` to a guarded action carrying a
+/// `required_for_final` verification requirement, plus an outcome and a
+/// verification result that together prove the claim. The seeded corpus mixes
+/// verified successes with a verified failure so the Brier comparison has both
+/// classes to work with.
 fn seed_training_rows(root: &std::path::Path) {
+    use archon_world_model::guardrail::{
+        GuardedActionKind, GuardrailFinalStatus, RuntimeTaskClass, VerificationKind,
+        VerificationOutcome, VerificationRequirement, VerificationStatus, WorldGuardedAction,
+        WorldGuardrailOutcome, append_guarded_action, append_guardrail_outcome,
+        append_verification_outcome,
+    };
+    use archon_world_model::integration::WorldAdvisorSurface;
     use archon_world_model::schema::{WorldActionKind, WorldTraceRow};
 
-    let store = archon_world_model::storage::WorldModelStore::open(root).unwrap();
-    let mut first = WorldTraceRow::new("session-1", WorldActionKind::ToolCall).with_row_id("r1");
-    first.redacted_excerpt = Some("run cargo test".into());
-    let mut second =
-        WorldTraceRow::new("session-1", WorldActionKind::Verification).with_row_id("r2");
-    second.redacted_excerpt = Some("cargo test failed".into());
-    let mut third = WorldTraceRow::new("session-1", WorldActionKind::Retry).with_row_id("r3");
-    third.redacted_excerpt = Some("fix test and rerun".into());
+    const REQUIREMENT_ID: &str = "required-tests";
 
-    store.persist_rows(&[first, second, third]).unwrap();
+    // (attempt id, row kind, excerpt, did the required verification pass)
+    let seeds: [(&str, WorldActionKind, &str, bool); 3] = [
+        ("attempt-1", WorldActionKind::ToolCall, "run cargo test", true),
+        (
+            "attempt-2",
+            WorldActionKind::Verification,
+            "cargo test failed",
+            false,
+        ),
+        (
+            "attempt-3",
+            WorldActionKind::Retry,
+            "fix test and rerun",
+            true,
+        ),
+    ];
+
+    let store = archon_world_model::storage::WorldModelStore::open(root).unwrap();
+    let mut rows = Vec::new();
+
+    for (index, (attempt_id, kind, excerpt, passed)) in seeds.into_iter().enumerate() {
+        let mut row = WorldTraceRow::new("session-1", kind)
+            .with_row_id(format!("r{}", index + 1))
+            .with_action_attempt_id(attempt_id);
+        row.redacted_excerpt = Some(excerpt.into());
+        rows.push(row);
+
+        let mut action = WorldGuardedAction::new(
+            "session-1",
+            WorldAdvisorSurface::ToolRun,
+            GuardedActionKind::PlanStep,
+            "test",
+            "test",
+        );
+        action.action_id = attempt_id.into();
+        action.idempotency_key = format!("world_guardrail:action:{attempt_id}");
+        // Without a requirement marked `required_for_final` the materialiser
+        // has nothing to prove against and returns `None` rather than a label.
+        action.verification_plan = vec![VerificationRequirement {
+            requirement_id: REQUIREMENT_ID.into(),
+            kind: VerificationKind::UnitTests,
+            required_for_final: true,
+            ..VerificationRequirement::default()
+        }];
+        append_guarded_action(root, &action).unwrap();
+
+        let status = if passed {
+            VerificationStatus::Passed
+        } else {
+            VerificationStatus::Failed
+        };
+        let verification = VerificationOutcome {
+            action_id: attempt_id.into(),
+            requirement_id: REQUIREMENT_ID.into(),
+            kind: VerificationKind::UnitTests,
+            status,
+            idempotency_key: format!("verification:{attempt_id}"),
+            ..VerificationOutcome::default()
+        };
+        append_verification_outcome(root, &verification).unwrap();
+
+        let outcome = WorldGuardrailOutcome {
+            outcome_id: format!("outcome-{attempt_id}"),
+            action_id: attempt_id.into(),
+            // No prediction history in this corpus. Naming one would make the
+            // materialiser demand a persisted prediction record that does not
+            // exist; labels do not need it.
+            prediction_id: None,
+            task_class: RuntimeTaskClass::CodingChange,
+            // Only `CompletedVerified` can yield a positive; a failed
+            // verification must present as failed or the two disagree and the
+            // materialiser records a contradiction instead of a label.
+            final_status: if passed {
+                GuardrailFinalStatus::CompletedVerified
+            } else {
+                GuardrailFinalStatus::BlockedFailedVerification
+            },
+            verification_outcomes: vec![verification],
+            idempotency_key: format!("world_guardrail:outcome:{attempt_id}"),
+            ..WorldGuardrailOutcome::default()
+        };
+        append_guardrail_outcome(root, &outcome).unwrap();
+    }
+
+    store.persist_rows(&rows).unwrap();
 }
 
 fn candidate_id_from(rendered: &str) -> String {
