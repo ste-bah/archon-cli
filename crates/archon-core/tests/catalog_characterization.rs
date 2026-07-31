@@ -26,8 +26,10 @@ fn metadata(name: &str, version: &str) -> AgentMetadata {
 }
 
 fn names(catalog: &DiscoveryCatalog, tag: &str) -> Vec<String> {
-    let mut filter = archon_core::agents::catalog::AgentFilter::default();
-    filter.tags = vec![tag.into()];
+    let filter = archon_core::agents::catalog::AgentFilter {
+        tags: vec![tag.into()],
+        ..Default::default()
+    };
     catalog
         .list(&filter)
         .into_iter()
@@ -36,8 +38,10 @@ fn names(catalog: &DiscoveryCatalog, tag: &str) -> Vec<String> {
 }
 
 fn names_for_capability(catalog: &DiscoveryCatalog, capability: &str) -> Vec<String> {
-    let mut filter = archon_core::agents::catalog::AgentFilter::default();
-    filter.capabilities = vec![capability.into()];
+    let filter = archon_core::agents::catalog::AgentFilter {
+        capabilities: vec![capability.into()],
+        ..Default::default()
+    };
     catalog
         .list(&filter)
         .into_iter()
