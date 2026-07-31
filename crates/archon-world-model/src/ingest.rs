@@ -260,8 +260,6 @@ fn normalize_activity_event(event: RawActivityEvent) -> WorldTraceRow {
     if status == "failed" || event.kind.ends_with("_failed") {
         row.labels.failure = true;
         row.labels.success = Some(false);
-    } else if status == "completed" {
-        row.labels.success = Some(true);
     }
 
     row
@@ -285,7 +283,11 @@ fn normalize_trace_export_row(trace: RawTraceExportRow) -> WorldTraceRow {
         quality_overall: trace.quality_overall,
         ..ScalarFeatures::default()
     };
-    row.labels.success = Some(trace.accepted);
+    row.labels.success = match trace.verifier_status.as_str() {
+        "verified" if trace.accepted => Some(true),
+        _ if !trace.accepted || trace.failure_reason.is_some() => Some(false),
+        _ => None,
+    };
     row.labels.failure = !trace.accepted || trace.failure_reason.is_some();
     row.labels.retry = trace.attempt > 1;
     row.labels.verification_needed = trace.verifier_status != "verified";

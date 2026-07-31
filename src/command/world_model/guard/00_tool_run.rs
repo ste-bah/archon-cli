@@ -343,7 +343,8 @@ fn persist_tool_run_candidate_at_root(
         &request.session_id,
         archon_world_model::schema::WorldActionKind::ToolCall,
     )
-    .with_row_id(tool_run_action_id(request));
+    .with_row_id(tool_run_action_id(request))
+    .with_action_attempt_id(tool_run_action_id(request));
     row.redacted_excerpt = Some(format!(
         "tool={} fields={} input={} permission={:?} attempt={}",
         request.tool_name, fields, redacted_input, request.permission_level, request.attempt

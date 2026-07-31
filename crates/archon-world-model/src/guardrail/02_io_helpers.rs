@@ -53,8 +53,13 @@ pub fn labels_from_guardrail_outcome(outcome: &WorldGuardrailOutcome) -> WorldLa
     }
     if matches!(
         outcome.final_status,
-        GuardrailFinalStatus::CompletedVerified | GuardrailFinalStatus::CompletedWithCaveat
-    ) {
+        GuardrailFinalStatus::CompletedVerified
+    ) && !outcome.verification_outcomes.is_empty()
+        && outcome
+            .verification_outcomes
+            .iter()
+            .all(|verification| verification.status == VerificationStatus::Passed)
+    {
         labels.success = Some(true);
     }
     if outcome.user_correction_observed {
@@ -145,10 +150,7 @@ pub fn load_guardrail_decisions(root: &Path) -> anyhow::Result<Vec<WorldGuardrai
     }
     let mut latest = latest_by_action.into_values().collect::<Vec<_>>();
     latest.sort_by_key(|(index, _)| *index);
-    Ok(latest
-        .into_iter()
-        .map(|(_, decision)| decision)
-        .collect())
+    Ok(latest.into_iter().map(|(_, decision)| decision).collect())
 }
 
 pub fn load_verification_outcomes(root: &Path) -> anyhow::Result<Vec<VerificationOutcome>> {

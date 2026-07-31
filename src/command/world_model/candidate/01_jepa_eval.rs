@@ -158,7 +158,7 @@ pub(super) fn render_compare_representations(
 ) -> Result<String> {
     let registry = ModelRegistry::open(root)?;
     let candidate = registry.load_jepa_candidate(candidate_id)?;
-    let rows = WorldModelStore::open(root)?.load_rows()?;
+    let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     let report = compare_jepa_representations(config, &candidate.model, &rows, baseline, false);
     let path = registry.write_jepa_representation_comparison(&report)?;
 

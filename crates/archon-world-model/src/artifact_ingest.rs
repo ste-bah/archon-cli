@@ -264,7 +264,7 @@ mod tests {
 
         assert_eq!(summary.row_count(), 1);
         assert_eq!(summary.rows[0].source, WorldTraceSource::AgentTranscript);
-        assert_eq!(summary.rows[0].labels.success, Some(true));
+        assert_eq!(summary.rows[0].labels.success, None);
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(summary.row_count(), 1);
         assert_eq!(summary.rows[0].source, WorldTraceSource::AgentOutput);
         assert_eq!(summary.rows[0].agent.as_deref(), Some("implementer"));
-        assert_eq!(summary.rows[0].labels.success, Some(true));
+        assert_eq!(summary.rows[0].labels.success, None);
     }
 
     #[test]

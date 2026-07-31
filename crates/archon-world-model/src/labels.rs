@@ -14,10 +14,6 @@ impl DeterministicLabelBuilder {
             labels.success = Some(false);
         }
 
-        if normalized.contains("success") || normalized.contains("completed") {
-            labels.success = Some(true);
-        }
-
         if matches!(row.action_kind, WorldActionKind::Retry) || normalized.contains("retry") {
             labels.retry = true;
         }
