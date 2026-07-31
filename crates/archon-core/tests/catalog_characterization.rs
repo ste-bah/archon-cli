@@ -259,9 +259,9 @@ fn same_name_different_versions_do_not_form_a_false_cycle() {
     );
 }
 
-// Characterizes quirk tracked in #108; do not fix in #91.
+// Regression coverage for #108: same-source replacement must reconcile indexes.
 #[test]
-fn replacement_preserves_current_stale_index_behavior() {
+fn replacement_reconciles_stale_indexes() {
     let catalog = DiscoveryCatalog::new();
     let mut original = metadata("replacement-agent", "1.0.0");
     original.tags = vec!["old-tag".into()];
@@ -275,15 +275,13 @@ fn replacement_preserves_current_stale_index_behavior() {
         .insert(replacement)
         .expect("replace same-path entry");
 
-    let mut old_tag_names = names(&catalog, "old-tag");
-    // DashMap iteration order is non-contractual; sort before comparing.
-    old_tag_names.sort();
-    assert_eq!(old_tag_names, ["replacement-agent"]);
-
-    let mut old_capability_names = names_for_capability(&catalog, "old-capability");
-    // DashMap iteration order is non-contractual; sort before comparing.
-    old_capability_names.sort();
-    assert_eq!(old_capability_names, ["replacement-agent"]);
+    assert!(names(&catalog, "old-tag").is_empty());
+    assert!(names_for_capability(&catalog, "old-capability").is_empty());
+    assert_eq!(names(&catalog, "new-tag"), ["replacement-agent"]);
+    assert_eq!(
+        names_for_capability(&catalog, "new-capability"),
+        ["replacement-agent"]
+    );
 }
 
 #[test]

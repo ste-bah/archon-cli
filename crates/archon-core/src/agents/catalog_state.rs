@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
 use tracing::warn;
@@ -6,96 +6,244 @@ use tracing::warn;
 use super::catalog_types::{AgentKey, CatalogSnapshot, DiscoveryError};
 use crate::agents::metadata::AgentMetadata;
 
-/// In-memory catalog of discovered agents, indexed by (name, version).
-///
-/// DashMaps provide concurrent-safe O(1) inserts and reads. The `snapshot()`
-/// method clones the current state into an Arc for torn-read-free iteration.
-/// Thread-safe for concurrent inserts without locks.
+/// In-memory catalog with a serialized staging state and published snapshots.
 pub struct DiscoveryCatalog {
-    pub(super) live: CatalogSnapshot,
-    /// Cached snapshot for readers — updated on each insert via ArcSwap.
+    staging: Mutex<CatalogSnapshot>,
     cached_snapshot: ArcSwap<CatalogSnapshot>,
+}
+
+/// The accepted and rejected records from one bulk insertion.
+#[derive(Debug, Default)]
+pub struct BulkInsertResult {
+    pub accepted: AcceptedInsertCounts,
+    pub rejected: Vec<BulkInsertRejection>,
+}
+
+/// State counts for records accepted by one bulk insertion.
+#[derive(Debug, Default)]
+pub struct AcceptedInsertCounts {
+    pub loaded: usize,
+    pub invalid: usize,
+}
+
+/// A metadata record rejected from one bulk insertion with its cause.
+#[derive(Debug)]
+pub struct BulkInsertRejection {
+    pub metadata: AgentMetadata,
+    pub error: DiscoveryError,
+}
+
+fn count_accepted_metadata(counts: &mut AcceptedInsertCounts, meta: &AgentMetadata) {
+    match &meta.state {
+        crate::agents::metadata::AgentState::Valid | crate::agents::metadata::AgentState::Stale => {
+            counts.loaded += 1;
+        }
+        crate::agents::metadata::AgentState::Invalid(_) => counts.invalid += 1,
+    }
+}
+
+fn decrement_accepted_count(counts: &mut AcceptedInsertCounts, meta: &AgentMetadata) {
+    match &meta.state {
+        crate::agents::metadata::AgentState::Valid | crate::agents::metadata::AgentState::Stale => {
+            counts.loaded -= 1;
+        }
+        crate::agents::metadata::AgentState::Invalid(_) => counts.invalid -= 1,
+    }
+}
+
+fn metadata_key(meta: &AgentMetadata) -> AgentKey {
+    (meta.name.clone(), meta.version.clone())
 }
 
 impl DiscoveryCatalog {
     /// Create an empty catalog.
     pub fn new() -> Self {
         Self {
-            live: CatalogSnapshot::default(),
+            staging: Mutex::new(CatalogSnapshot::default()),
             cached_snapshot: ArcSwap::from_pointee(CatalogSnapshot::default()),
         }
     }
 
-    /// Insert a metadata entry. Rejects entries > 10 MB (EC-DISCOVERY-006).
-    /// On same (name, version) collision with different source_path, keeps
-    /// first entry and logs WARN (per TECH-AGS-DISCOVERY versioning note).
+    /// Insert an entry and publish the resulting complete snapshot.
     pub fn insert(&self, meta: AgentMetadata) -> Result<(), DiscoveryError> {
+        self.validate_metadata(&meta)?;
+        let mut staging = self.staging.lock().expect("catalog staging lock poisoned");
+        self.insert_staged(&mut staging, meta);
+        self.publish(&staging);
+        Ok(())
+    }
+
+    /// Insert entries under one writer lock and publish once for bulk discovery.
+    /// Invalid entries are rejected individually; accepted entries share one publication.
+    pub fn insert_all(&self, entries: Vec<AgentMetadata>) -> BulkInsertResult {
+        let mut accepted = Vec::with_capacity(entries.len());
+        let mut rejected = Vec::new();
+        let mut accepted_counts = AcceptedInsertCounts::default();
+        for meta in entries {
+            match self.validate_metadata(&meta) {
+                Ok(()) => {
+                    count_accepted_metadata(&mut accepted_counts, &meta);
+                    accepted.push(meta);
+                }
+                Err(error) => rejected.push(BulkInsertRejection {
+                    metadata: meta,
+                    error,
+                }),
+            }
+        }
+        if !accepted.is_empty() {
+            let mut staging = self.staging.lock().expect("catalog staging lock poisoned");
+            for meta in accepted {
+                match self.insert_bulk_staged(&mut staging, meta) {
+                    Ok(()) => {}
+                    Err(rejected_insert) => {
+                        decrement_accepted_count(&mut accepted_counts, &rejected_insert.metadata);
+                        rejected.push(*rejected_insert);
+                    }
+                }
+            }
+            self.publish(&staging);
+        }
+        BulkInsertResult {
+            accepted: accepted_counts,
+            rejected,
+        }
+    }
+
+    fn validate_metadata(&self, meta: &AgentMetadata) -> Result<(), DiscoveryError> {
         let serialized =
-            serde_json::to_vec(&meta).map_err(|e| DiscoveryError::Parse(e.to_string()))?;
+            serde_json::to_vec(meta).map_err(|e| DiscoveryError::Parse(e.to_string()))?;
         if serialized.len() > 10 * 1024 * 1024 {
             return Err(DiscoveryError::MetadataTooLarge {
                 path: meta.source_path.clone(),
                 size: serialized.len(),
             });
         }
+        Ok(())
+    }
 
-        let key: AgentKey = (meta.name.clone(), meta.version.clone());
-        if let Some(existing) = self.live.entries.get(&key)
-            && existing.source_path != meta.source_path
+    fn insert_staged(&self, staging: &mut CatalogSnapshot, meta: AgentMetadata) {
+        if let Some(existing) = staging
+            .entries
+            .get(&metadata_key(&meta))
+            .map(|entry| entry.value().clone())
         {
-            warn!(
-                "agent collision: name={} version={} existing={:?} ignored={:?}",
-                meta.name, meta.version, existing.source_path, meta.source_path
-            );
-            return Ok(());
+            if existing.source_path != meta.source_path {
+                warn!(
+                    "agent collision: name={} version={} existing={:?} ignored={:?}",
+                    meta.name, meta.version, existing.source_path, meta.source_path
+                );
+                return;
+            }
+            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
         }
+        Self::store_staged(staging, meta);
+    }
 
-        self.live
+    /// Inserts bulk metadata while preserving rejected contenders for reporting.
+    fn insert_bulk_staged(
+        &self,
+        staging: &mut CatalogSnapshot,
+        meta: AgentMetadata,
+    ) -> Result<(), Box<BulkInsertRejection>> {
+        if let Some(existing) = staging
+            .entries
+            .get(&metadata_key(&meta))
+            .map(|entry| entry.value().clone())
+        {
+            if existing.source_path != meta.source_path {
+                return Err(Box::new(BulkInsertRejection {
+                    error: DiscoveryError::DuplicateAgent {
+                        name: meta.name.clone(),
+                        version: meta.version.clone(),
+                        existing_path: existing.source_path,
+                        rejected_path: meta.source_path.clone(),
+                    },
+                    metadata: meta,
+                }));
+            }
+            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
+        }
+        Self::store_staged(staging, meta);
+        Ok(())
+    }
+
+    fn store_staged(staging: &mut CatalogSnapshot, meta: AgentMetadata) {
+        let key = metadata_key(&meta);
+        staging.entries.insert(key.clone(), meta.clone());
+        staging
             .name_index
             .entry(meta.name.clone())
             .or_default()
             .insert(meta.version.clone());
+        Self::add_memberships(staging, &key, &meta);
+    }
+
+    fn remove_memberships(staging: &mut CatalogSnapshot, key: &AgentKey, meta: &AgentMetadata) {
         for tag in &meta.tags {
-            self.live
+            Self::remove_membership(&staging.tag_index, tag, key);
+        }
+        for capability in &meta.capabilities {
+            Self::remove_membership(&staging.capability_index, capability, key);
+        }
+    }
+
+    fn remove_membership(
+        index: &dashmap::DashMap<String, std::collections::HashSet<AgentKey>>,
+        membership: &str,
+        key: &AgentKey,
+    ) {
+        if let Some(mut bucket) = index.get_mut(membership) {
+            bucket.remove(key);
+            if bucket.is_empty() {
+                drop(bucket);
+                index.remove(membership);
+            }
+        }
+    }
+
+    fn add_memberships(staging: &mut CatalogSnapshot, key: &AgentKey, meta: &AgentMetadata) {
+        for tag in &meta.tags {
+            staging
                 .tag_index
                 .entry(tag.clone())
                 .or_default()
                 .insert(key.clone());
         }
-        for cap in &meta.capabilities {
-            self.live
+        for capability in &meta.capabilities {
+            staging
                 .capability_index
-                .entry(cap.clone())
+                .entry(capability.clone())
                 .or_default()
                 .insert(key.clone());
         }
-
-        self.live.entries.insert(key, meta);
-        Ok(())
     }
 
-    /// Look up a specific (name, version) entry.
+    fn publish(&self, staging: &CatalogSnapshot) {
+        self.cached_snapshot.store(Arc::new(staging.clone()));
+    }
+
+    /// Look up a specific entry from one published snapshot.
     pub fn get(&self, key: &AgentKey) -> Option<AgentMetadata> {
-        self.live.entries.get(key).map(|e| e.value().clone())
+        self.snapshot()
+            .entries
+            .get(key)
+            .map(|entry| entry.value().clone())
     }
 
-    /// Return a frozen snapshot of the current catalog state.
-    /// Clones the live DashMaps into a new Arc for torn-read-free access.
+    /// Return the current complete catalog snapshot.
     pub fn snapshot(&self) -> Arc<CatalogSnapshot> {
-        let snap = self.live.clone();
-        let arc = Arc::new(snap);
-        self.cached_snapshot.store(arc.clone());
-        arc
+        self.cached_snapshot.load_full()
     }
 
-    /// Number of entries in the catalog.
+    /// Number of entries in one published snapshot.
     pub fn len(&self) -> usize {
-        self.live.entries.len()
+        self.snapshot().entries.len()
     }
 
     /// Whether the catalog is empty.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.snapshot().entries.is_empty()
     }
 }
 

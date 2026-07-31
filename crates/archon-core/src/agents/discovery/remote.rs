@@ -59,23 +59,23 @@ impl RemoteDiscoverySource {
             DiscoveryError::Parse(format!("expected JSON array from {}", self.url))
         })?;
 
-        let mut loaded = 0;
-        let mut invalid = 0;
-
-        for element in arr {
-            let meta = self.parse_element(element, fresh);
-            match &meta.state {
-                AgentState::Valid | AgentState::Stale => loaded += 1,
-                AgentState::Invalid(_) => invalid += 1,
-            }
-            if let Err(e) = catalog.insert(meta) {
-                warn!("failed to insert remote agent: {e}");
-            }
+        let entries = arr
+            .iter()
+            .map(|element| self.parse_element(element, fresh))
+            .collect();
+        let result = catalog.insert_all(entries);
+        for rejected in result.rejected {
+            warn!(
+                path = ?rejected.metadata.source_path,
+                name = %rejected.metadata.name,
+                error = %rejected.error,
+                "failed to insert remote agent"
+            );
         }
 
         Ok(RemoteLoadReport {
-            loaded,
-            invalid,
+            loaded: result.accepted.loaded,
+            invalid: result.accepted.invalid,
             stale: !fresh,
         })
     }

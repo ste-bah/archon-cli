@@ -1,168 +1,131 @@
 use std::collections::HashSet;
 
+use super::catalog_resolution::{
+    resolve_metadata_dependencies_snapshot, resolve_snapshot, versions_snapshot,
+};
 use super::catalog_state::DiscoveryCatalog;
-use super::catalog_types::{AgentFilter, AgentInfoView, AgentKey, FilterLogic};
+use super::catalog_types::{AgentFilter, AgentInfoView, AgentKey, CatalogSnapshot, FilterLogic};
 use crate::agents::metadata::{AgentMetadata, AgentState};
 
 impl DiscoveryCatalog {
     /// All registered agent names (for suggestions and listing).
     pub fn all_names(&self) -> Vec<String> {
-        self.live
+        let snapshot = self.snapshot();
+        snapshot
             .name_index
             .iter()
-            .map(|e| e.key().clone())
+            .map(|entry| entry.key().clone())
             .collect()
     }
 
-    /// List agents matching the given filter.
-    ///
-    /// Uses tag_index and capability_index for O(1) index lookups,
-    /// then intersects (And) or unions (Or) the sets. Name pattern
-    /// and version_req are applied as post-filters. Invalid entries
-    /// are hidden unless `include_invalid` is set.
-    ///
-    /// Returns sorted by (name asc, version desc).
+    /// List agents matching the given filter, sorted by name then version.
     pub fn list(&self, filter: &AgentFilter) -> Vec<AgentMetadata> {
-        let candidates = self.filter_candidates(filter);
-        let mut results = self.collect_list_results(candidates, filter.include_invalid);
-        results.sort_by(|a, b| a.name.cmp(&b.name).then(b.version.cmp(&a.version)));
+        let snapshot = self.snapshot();
+        let candidates = filter_candidates(&snapshot, filter);
+        let mut results = collect_list_results(&snapshot, candidates, filter.include_invalid);
+        results.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then(right.version.cmp(&left.version))
+        });
         results
     }
 
-    fn filter_candidates(&self, filter: &AgentFilter) -> HashSet<AgentKey> {
-        let tag_keys = self.indexed_keys(&filter.tags, &filter.logic, |catalog, key| {
-            catalog.live.tag_index.get(key).map(|set| set.clone())
-        });
-        let cap_keys = self.indexed_keys(&filter.capabilities, &filter.logic, |catalog, key| {
-            catalog
-                .live
-                .capability_index
-                .get(key)
-                .map(|set| set.clone())
-        });
-        let mut candidates = self.combine_indexed_keys(tag_keys, cap_keys, &filter.logic);
-        self.apply_post_filters(&mut candidates, filter);
-        candidates
-    }
-
-    fn indexed_keys<F>(
-        &self,
-        keys: &[String],
-        logic: &FilterLogic,
-        lookup: F,
-    ) -> Option<HashSet<AgentKey>>
-    where
-        F: Fn(&Self, &String) -> Option<HashSet<AgentKey>>,
-    {
-        (!keys.is_empty()).then(|| {
-            let sets = keys
-                .iter()
-                .map(|key| lookup(self, key).unwrap_or_default())
-                .collect::<Vec<_>>();
-            combine_sets(&sets, logic)
-        })
-    }
-
-    fn combine_indexed_keys(
-        &self,
-        tag_keys: Option<HashSet<AgentKey>>,
-        cap_keys: Option<HashSet<AgentKey>>,
-        logic: &FilterLogic,
-    ) -> HashSet<AgentKey> {
-        match (tag_keys, cap_keys) {
-            (Some(t), Some(c)) => match logic {
-                FilterLogic::And => t.intersection(&c).cloned().collect(),
-                FilterLogic::Or => t.union(&c).cloned().collect(),
-            },
-            (Some(t), None) => t,
-            (None, Some(c)) => c,
-            (None, None) => self.live.entries.iter().map(|e| e.key().clone()).collect(),
-        }
-    }
-
-    fn apply_post_filters(&self, candidates: &mut HashSet<AgentKey>, filter: &AgentFilter) {
-        if let Some(ref glob) = filter.name_pattern {
-            let matcher = glob.compile_matcher();
-            candidates.retain(|(name, _)| matcher.is_match(name));
-        }
-        if let Some(ref req) = filter.version_req {
-            candidates.retain(|(_, version)| req.matches(version));
-        }
-    }
-
-    fn collect_list_results(
-        &self,
-        candidates: HashSet<AgentKey>,
-        include_invalid: bool,
-    ) -> Vec<AgentMetadata> {
-        candidates
-            .iter()
-            .filter_map(|key| {
-                let entry = self.live.entries.get(key)?;
-                let meta = entry.value().clone();
-                if !include_invalid && matches!(meta.state, AgentState::Invalid(_)) {
-                    return None;
-                }
-                Some(meta)
-            })
-            .collect()
-    }
-
-    /// Detailed info for a single agent: resolved metadata, all versions, dep graph.
+    /// Detailed info for a single agent from one complete snapshot.
     pub fn info(
         &self,
         name: &str,
         version_req: Option<&semver::VersionReq>,
     ) -> Result<AgentInfoView, super::catalog_types::DiscoveryError> {
-        let selected = self.resolve(name, version_req)?;
-        let all_versions = self.versions(name);
-        let dependency_graph = self.resolve_metadata_dependencies(selected.clone())?;
+        let snapshot = self.snapshot();
+        let selected = resolve_snapshot(&snapshot, name, version_req)?;
+        let all_versions = versions_snapshot(&snapshot, name);
+        let dependency_graph = resolve_metadata_dependencies_snapshot(&snapshot, selected.clone())?;
         Ok(AgentInfoView {
             selected,
             all_versions,
             dependency_graph,
         })
     }
+}
 
-    /// Find the 3 closest name matches using Levenshtein distance.
-    pub(super) fn suggest_names(&self, query: &str) -> Vec<String> {
-        let mut candidates: Vec<(String, usize)> = self
-            .all_names()
-            .into_iter()
-            .map(|name| {
-                let dist = strsim::levenshtein(query, &name);
-                (name, dist)
-            })
-            .filter(|(_, dist)| *dist <= 3)
-            .collect();
-        candidates.sort_by_key(|(_, dist)| *dist);
-        candidates
-            .into_iter()
-            .take(3)
-            .map(|(name, _)| name)
-            .collect()
+fn filter_candidates(snapshot: &CatalogSnapshot, filter: &AgentFilter) -> HashSet<AgentKey> {
+    let tags = indexed_keys(&snapshot.tag_index, &filter.tags, &filter.logic);
+    let capabilities = indexed_keys(
+        &snapshot.capability_index,
+        &filter.capabilities,
+        &filter.logic,
+    );
+    let mut candidates = combine_indexed_keys(snapshot, tags, capabilities, &filter.logic);
+    apply_post_filters(&mut candidates, filter);
+    candidates
+}
+
+fn indexed_keys(
+    index: &dashmap::DashMap<String, HashSet<AgentKey>>,
+    keys: &[String],
+    logic: &FilterLogic,
+) -> Option<HashSet<AgentKey>> {
+    (!keys.is_empty()).then(|| {
+        let sets = keys
+            .iter()
+            .map(|key| index.get(key).map(|set| set.clone()).unwrap_or_default())
+            .collect::<Vec<_>>();
+        combine_sets(&sets, logic)
+    })
+}
+
+fn combine_indexed_keys(
+    snapshot: &CatalogSnapshot,
+    tags: Option<HashSet<AgentKey>>,
+    capabilities: Option<HashSet<AgentKey>>,
+    logic: &FilterLogic,
+) -> HashSet<AgentKey> {
+    match (tags, capabilities) {
+        (Some(tags), Some(capabilities)) if matches!(logic, FilterLogic::And) => {
+            tags.intersection(&capabilities).cloned().collect()
+        }
+        (Some(tags), Some(capabilities)) => tags.union(&capabilities).cloned().collect(),
+        (Some(keys), None) | (None, Some(keys)) => keys,
+        (None, None) => snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect(),
     }
+}
+
+fn apply_post_filters(candidates: &mut HashSet<AgentKey>, filter: &AgentFilter) {
+    if let Some(glob) = &filter.name_pattern {
+        let matcher = glob.compile_matcher();
+        candidates.retain(|(name, _)| matcher.is_match(name));
+    }
+    if let Some(requirement) = &filter.version_req {
+        candidates.retain(|(_, version)| requirement.matches(version));
+    }
+}
+
+fn collect_list_results(
+    snapshot: &CatalogSnapshot,
+    candidates: HashSet<AgentKey>,
+    include_invalid: bool,
+) -> Vec<AgentMetadata> {
+    candidates
+        .iter()
+        .filter_map(|key| snapshot.entries.get(key).map(|entry| entry.value().clone()))
+        .filter(|metadata| include_invalid || !matches!(metadata.state, AgentState::Invalid(_)))
+        .collect()
 }
 
 /// Combine multiple sets using AND (intersection) or OR (union) logic.
 fn combine_sets(sets: &[HashSet<AgentKey>], logic: &FilterLogic) -> HashSet<AgentKey> {
-    if sets.is_empty() {
+    let Some(first) = sets.first() else {
         return HashSet::new();
-    }
-    match logic {
-        FilterLogic::And => {
-            let mut result = sets[0].clone();
-            for set in &sets[1..] {
-                result = result.intersection(set).cloned().collect();
-            }
-            result
-        }
-        FilterLogic::Or => {
-            let mut result = HashSet::new();
-            for set in sets {
-                result = result.union(set).cloned().collect();
-            }
-            result
-        }
-    }
+    };
+    sets.iter()
+        .skip(1)
+        .fold(first.clone(), |result, set| match logic {
+            FilterLogic::And => result.intersection(set).cloned().collect(),
+            FilterLogic::Or => result.union(set).cloned().collect(),
+        })
 }
