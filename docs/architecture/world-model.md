@@ -57,7 +57,19 @@ Guardrail prediction remains fail-open. If prediction or guardrail storage is un
 
 ## JEPA-Inspired Representation Layer
 
-`model_kind = "jepa_transition"` enables the compatibility model kind for Archon's JEPA-inspired representation path. The runtime surface reports `archon-jepa-inspired` because this is a local trace-representation learner layered under the existing advisory transition model: it consumes structured trace windows, action metadata, graph context, scalar features, and deterministic lexical hashes. It does not require FastEmbed, OpenAI, or any third-party embedding provider for its own encoder path.
+`model_kind = "jepa_transition"` enables the compatibility model kind for Archon's JEPA-inspired representation path. The runtime surface reports `archon-jepa-inspired` because this is a local trace-representation learner layered under the existing advisory transition model: it consumes structured trace windows, action metadata, graph context and scalar features.
+
+**Encoder input.** `TraceWindow` and `TraceAction` each carry an optional `embedding` — a dense vector sized to the latent dimension, supplied by the caller. When present it is the base of the feature vector and the structured features are added on top. When absent, excerpt text falls back to lexical hashing.
+
+The distinction matters because the fallback is weak, not equivalent. Hashing folds every token into `latent_dim` buckets by `hash(token) % latent_dim`; at the default 384 an open vocabulary collides heavily, so each bucket ends up a sum of unrelated features. The dense path gives every dimension an independent meaning instead.
+
+Unbounded identifiers are deliberately excluded from the hashed features — session id, anchor row id, action ref, evidence ids, prior plan and memory ids. Each value occurs once and never recurs, so it cannot generalise to an unseen row; it only consumed bucket capacity. Graph *counts* and the evidence *source* are kept, being low-cardinality and repeatable.
+
+The embedding is built by the caller, never inside the JEPA module, so the encoder path stays free of embedding adapters (a gate test enforces this) and the dependency points outward. The provider is whatever `learning.world_model.embeddings` selects, so `deterministic-hash` keeps the path free of FastEmbed, OpenAI or any third-party provider; `fastembed` (the default) runs locally.
+
+**Encoder shape.** Each encoder is two dense `latent_dim x latent_dim` layers with a GELU between them and a residual path around them, stored row-major and flattened into the checkpoint's existing `Vec<f32>` fields. At the default 384 that is roughly 295k parameters per encoder.
+
+They were per-dimension vectors — about 1,500 parameters — until the matrix rewrite. That form could only rescale each dimension in place: output `i` depended solely on input `i`. It could not combine two features, and could not rotate the embedding basis toward a direction worth predicting. A general-purpose sentence embedding's axes are not aligned to "this will need a retry"; that direction is a combination of many axes, and only a matrix can form it. Small initial weights keep the residual dominant, so an untrained encoder stays near the identity rather than scrambling its input.
 
 Training uses masked trace windows and future latent prediction. The context encoder is trained by gradient descent (AdamW, honouring `max_epochs` and `learning_rate`); the loss is computed in representation space, the target branch is detached so no gradient flows through it, and the target encoder follows the context encoder by EMA *inside* the training loop. An explicit per-dimension variance term pushes back against collapse, because a stop-gradient alone does not prevent it and an encoder that maps every input to one point drives the prediction loss toward zero while learning nothing. On collapse or any training error the run falls back to the untrained deterministic encoders and says so, rather than emitting a degenerate candidate.
 

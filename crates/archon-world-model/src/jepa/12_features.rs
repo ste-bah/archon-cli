@@ -2,17 +2,14 @@ fn window_features(window: &TraceWindow, dimensions: usize, role: &str) -> Resul
     if dimensions == 0 {
         bail!("jepa dimensions must be greater than zero");
     }
-    let mut features = vec![0.0; dimensions];
-    add_token(
-        &mut features,
-        &format!("{role}:session:{}", window.session_id),
-        0.10,
-    );
-    add_token(
-        &mut features,
-        &format!("{role}:anchor:{}", window.anchor_row_id),
-        0.05,
-    );
+    // Start from the dense semantic vector when the caller supplied one. Every
+    // dimension then means something on its own, and the structured features
+    // below are added on top rather than colliding with an open vocabulary.
+    let mut features = seed_features(window.embedding.as_deref(), dimensions);
+    // `session_id` and `anchor_row_id` are deliberately NOT hashed in. Both are
+    // unbounded identifiers whose values appear once and never recur, so they
+    // cannot generalise to a new row — they only consume bucket capacity and
+    // add noise proportional to the corpus size.
     add_numeric(
         &mut features,
         "horizon",
@@ -49,16 +46,16 @@ fn window_features(window: &TraceWindow, dimensions: usize, role: &str) -> Resul
         normalize_count(window.graph_context.prior_memory_surfaces),
         0.40,
     );
-    for plan_id in &window.graph_context.prior_plan_ids {
-        add_token(&mut features, &format!("graph.plan:{plan_id}"), 0.10);
-    }
-    for memory_id in &window.graph_context.prior_memory_ids {
-        add_token(&mut features, &format!("graph.memory:{memory_id}"), 0.10);
-    }
+    // Prior plan/memory *counts* are kept above; their *ids* are not. Same
+    // reason as session/anchor: one occurrence each, no generalisation.
 
+    // Hashing the excerpts too would scatter an open vocabulary across the same
+    // dimensions the embedding just filled, undoing it. Lexical hashing is the
+    // fallback for when there is no embedding, not a supplement to one.
+    let lexical = LexicalFallback::for_embedding(window.embedding.as_deref());
     let row_weight = 1.0 / window.rows.len().max(1) as f32;
     for row in &window.rows {
-        add_row_features(&mut features, row, row_weight, role);
+        add_row_features(&mut features, row, row_weight, role, lexical);
     }
     normalize(&mut features);
     Ok(features)
@@ -68,12 +65,9 @@ fn action_features(action: &TraceAction, dimensions: usize, role: &str) -> Resul
     if dimensions == 0 {
         bail!("jepa dimensions must be greater than zero");
     }
-    let mut features = vec![0.0; dimensions];
-    add_token(
-        &mut features,
-        &format!("{role}:action:{}", action.action_ref),
-        0.20,
-    );
+    let mut features = seed_features(action.embedding.as_deref(), dimensions);
+    // `action_ref` is a row id — unbounded and single-occurrence, so it cannot
+    // generalise. Dropped for the same reason as the window identifiers.
     add_token(
         &mut features,
         &format!("{role}:kind:{:?}", action.action_kind),
@@ -89,12 +83,44 @@ fn action_features(action: &TraceAction, dimensions: usize, role: &str) -> Resul
         add_token(&mut features, &format!("{role}:agent:{agent}"), 0.50);
     }
     add_scalar_features(&mut features, &action.scalar_features, 1.0);
-    add_lexical_features(&mut features, &action.summary, 0.20);
+    if LexicalFallback::for_embedding(action.embedding.as_deref()).is_enabled() {
+        add_lexical_features(&mut features, &action.summary, 0.20);
+    }
     normalize(&mut features);
     Ok(features)
 }
 
-fn add_row_features(features: &mut [f32], row: &WorldTraceRow, weight: f32, role: &str) {
+/// Whether excerpt text still needs hashing into the feature buckets.
+///
+/// Disabled once a dense embedding is present: the embedding already carries
+/// the text, and hashing it again would scatter an open vocabulary over the
+/// dimensions the embedding just set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LexicalFallback {
+    Enabled,
+    Disabled,
+}
+
+impl LexicalFallback {
+    fn for_embedding(embedding: Option<&[f32]>) -> Self {
+        match embedding {
+            Some(values) if !values.is_empty() => Self::Disabled,
+            _ => Self::Enabled,
+        }
+    }
+
+    fn is_enabled(self) -> bool {
+        self == Self::Enabled
+    }
+}
+
+fn add_row_features(
+    features: &mut [f32],
+    row: &WorldTraceRow,
+    weight: f32,
+    role: &str,
+    lexical: LexicalFallback,
+) {
     add_token(
         features,
         &format!("{role}:source:{:?}", row.source),
@@ -119,15 +145,37 @@ fn add_row_features(features: &mut [f32], row: &WorldTraceRow, weight: f32, role
         add_token(features, &format!("{role}:agent:{agent}"), 0.40 * weight);
     }
     add_scalar_features(features, &row.scalar_features, weight);
-    if let Some(excerpt) = &row.redacted_excerpt {
+    if let Some(excerpt) = row.redacted_excerpt.as_ref().filter(|_| lexical.is_enabled()) {
         add_lexical_features(features, excerpt, 0.15 * weight);
     }
+    // Evidence *ids* are not hashed in: unbounded and single-occurrence, so no
+    // generalisation. The evidence *source* is low-cardinality and does carry
+    // signal, so that stays.
     for evidence in &row.evidence_refs {
         add_token(
             features,
-            &format!("{role}:evidence:{}:{}", evidence.source, evidence.id),
+            &format!("{role}:evidence_source:{}", evidence.source),
             0.10 * weight,
         );
+    }
+}
+
+/// Base feature vector for an encoder input.
+///
+/// With a caller-supplied embedding of the right width, that vector *is* the
+/// base and the structured features are added on top. Otherwise the base is
+/// zeros and everything falls back to hashing, which is the pre-embedding
+/// behaviour.
+///
+/// A wrong-width embedding is ignored rather than truncated or padded: it means
+/// the corpus was embedded under a different projection than the model expects,
+/// and silently reshaping it would train on two incompatible representations.
+fn seed_features(embedding: Option<&[f32]>, dimensions: usize) -> Vec<f32> {
+    match embedding {
+        Some(values) if values.len() == dimensions && values.iter().all(|v| v.is_finite()) => {
+            values.to_vec()
+        }
+        _ => vec![0.0; dimensions],
     }
 }
 

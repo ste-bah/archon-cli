@@ -78,26 +78,31 @@ fn candle_project_encoder(
         bail!("jepa feature dimension mismatch");
     }
     let dim = encoder.latent_dim;
-    let features = candle_core::Tensor::from_slice(features, dim, device)?;
-    let input_weights = candle_core::Tensor::from_slice(&encoder.input_weights, dim, device)?;
-    let hidden_bias = candle_core::Tensor::from_slice(&encoder.hidden_bias, dim, device)?;
-    let output_weights = candle_core::Tensor::from_slice(&encoder.output_weights, dim, device)?;
-    let output_bias = candle_core::Tensor::from_slice(&encoder.output_bias, dim, device)?;
-    let residual = candle_core::Tensor::from_vec(vec![encoder.residual_weight; dim], dim, device)?;
-    let hidden_scale =
-        candle_core::Tensor::from_vec(vec![1.0 - encoder.residual_weight; dim], dim, device)?;
+    let expected = dim.saturating_mul(dim);
+    if encoder.input_weights.len() != expected || encoder.output_weights.len() != expected {
+        bail!(
+            "jepa encoder weight shape mismatch: expected {expected} elements for a {dim}x{dim} matrix, \
+             got input={} output={}",
+            encoder.input_weights.len(),
+            encoder.output_weights.len()
+        );
+    }
 
-    let hidden = features
-        .broadcast_mul(&input_weights)?
-        .broadcast_add(&hidden_bias)?
-        .gelu()?;
-    let projected = hidden
-        .broadcast_mul(&output_weights)?
-        .broadcast_add(&output_bias)?;
-    let output = features
-        .broadcast_mul(&residual)?
-        .broadcast_add(&projected.broadcast_mul(&hidden_scale)?)?;
-    candle_layer_norm_and_l2_normalize(output)
+    // Column vectors so the weight matrices multiply on the left, matching the
+    // row-major (row, col) -> row * dim + col layout in `JepaTraceEncoder`.
+    let features = candle_core::Tensor::from_slice(features, (dim, 1), device)?;
+    let input_weights =
+        candle_core::Tensor::from_slice(&encoder.input_weights, (dim, dim), device)?;
+    let hidden_bias = candle_core::Tensor::from_slice(&encoder.hidden_bias, (dim, 1), device)?;
+    let output_weights =
+        candle_core::Tensor::from_slice(&encoder.output_weights, (dim, dim), device)?;
+    let output_bias = candle_core::Tensor::from_slice(&encoder.output_bias, (dim, 1), device)?;
+    let residual = encoder.residual_weight as f64;
+
+    let hidden = input_weights.matmul(&features)?.add(&hidden_bias)?.gelu()?;
+    let projected = output_weights.matmul(&hidden)?.add(&output_bias)?;
+    let output = ((features * residual)? + (projected * (1.0 - residual))?)?;
+    candle_layer_norm_and_l2_normalize(output.flatten_all()?)
 }
 
 #[cfg(feature = "candle")]

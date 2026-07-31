@@ -90,23 +90,34 @@ fn mlx_project_encoder(encoder: &JepaTraceEncoder, features: &[f32]) -> Result<V
     if features.len() != encoder.latent_dim {
         bail!("jepa feature dimension mismatch");
     }
+    let expected = encoder.latent_dim.saturating_mul(encoder.latent_dim);
+    if encoder.input_weights.len() != expected || encoder.output_weights.len() != expected {
+        bail!(
+            "jepa encoder weight shape mismatch: expected {expected} elements for a {dim}x{dim} matrix, \
+             got input={} output={}",
+            encoder.input_weights.len(),
+            encoder.output_weights.len(),
+            dim = encoder.latent_dim
+        );
+    }
     Device::set_default(&Device::gpu());
     let dim = encoder.latent_dim as i32;
-    let features = Array::from_slice(features, &[dim]);
-    let input_weights = Array::from_slice(&encoder.input_weights, &[dim]);
-    let hidden_bias = Array::from_slice(&encoder.hidden_bias, &[dim]);
-    let output_weights = Array::from_slice(&encoder.output_weights, &[dim]);
-    let output_bias = Array::from_slice(&encoder.output_bias, &[dim]);
-    let residual = Array::from_slice(&vec![encoder.residual_weight; encoder.latent_dim], &[dim]);
-    let hidden_scale = Array::from_slice(
-        &vec![1.0 - encoder.residual_weight; encoder.latent_dim],
-        &[dim],
-    );
-    let hidden = gelu_approximate(features.multiply(&input_weights)?.add(&hidden_bias)?)?;
-    let projected = hidden.multiply(&output_weights)?.add(&output_bias)?;
+    // Column vector so the `(dim, dim)` weight matrices multiply on the left,
+    // matching the row-major `(row, col) -> row * dim + col` layout used by
+    // `JepaTraceEncoder::project`.
+    let features = Array::from_slice(features, &[dim, 1]);
+    let input_weights = Array::from_slice(&encoder.input_weights, &[dim, dim]);
+    let hidden_bias = Array::from_slice(&encoder.hidden_bias, &[dim, 1]);
+    let output_weights = Array::from_slice(&encoder.output_weights, &[dim, dim]);
+    let output_bias = Array::from_slice(&encoder.output_bias, &[dim, 1]);
+    let residual = Array::from_f32(encoder.residual_weight);
+    let hidden_scale = Array::from_f32(1.0 - encoder.residual_weight);
+    let hidden = gelu_approximate(input_weights.matmul(&features)?.add(&hidden_bias)?)?;
+    let projected = output_weights.matmul(&hidden)?.add(&output_bias)?;
     let output = features
         .multiply(&residual)?
-        .add(&projected.multiply(&hidden_scale)?)?;
+        .add(&projected.multiply(&hidden_scale)?)?
+        .reshape(&[dim])?;
     let output = mlx_layer_norm_and_l2_normalize(output)?;
     output.eval()?;
     Ok(output.try_as_slice::<f32>()?.to_vec())

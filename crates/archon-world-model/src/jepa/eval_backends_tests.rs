@@ -61,6 +61,7 @@ mod tests_eval_backends {
             rows: vec![row],
             horizon: 1,
             graph_context: make_graph_context(),
+            embedding: None,
         }
     }
 
@@ -75,6 +76,7 @@ mod tests_eval_backends {
                 model: None,
                 agent: None,
                 scalar_features: ScalarFeatures::default(),
+                embedding: None,
             },
             target: make_window(),
             labels: crate::schema::WorldLabelSet::default(),

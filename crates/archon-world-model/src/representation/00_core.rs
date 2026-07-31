@@ -5,6 +5,21 @@ pub struct TraceWindow {
     pub rows: Vec<WorldTraceRow>,
     pub horizon: usize,
     pub graph_context: GraphContextFeatures,
+    /// Dense semantic vector for this window, sized to the model's latent
+    /// dimension, or `None` when no embedding was available.
+    ///
+    /// Populated by the caller, never inside `jepa/`: the encoder path is
+    /// gated to stay free of embedding adapters, and this keeps the dependency
+    /// pointing the right way — the caller chooses a provider (including
+    /// `deterministic-hash`, which needs nothing external) and hands the
+    /// encoder plain numbers.
+    ///
+    /// Without it the encoder falls back to hashing every excerpt token into
+    /// `latent_dim` buckets, which at the default 384 collides an open
+    /// vocabulary into ~384 slots and hands the model a sum of unrelated
+    /// features.
+    #[serde(default)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,6 +31,9 @@ pub struct TraceAction {
     pub model: Option<String>,
     pub agent: Option<String>,
     pub scalar_features: ScalarFeatures,
+    /// Dense semantic vector for `summary`. See [`TraceWindow::embedding`].
+    #[serde(default)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 impl TraceAction {
@@ -28,6 +46,7 @@ impl TraceAction {
             model: row.model.clone(),
             agent: row.agent.clone(),
             scalar_features: row.scalar_features.clone(),
+            embedding: None,
         }
     }
 }
@@ -309,6 +328,7 @@ impl TraceWindowBuilder {
             rows: self.rows[start..end].to_vec(),
             horizon,
             graph_context: graph_context_for_row(&self.rows, anchor),
+            embedding: None,
         })
     }
 

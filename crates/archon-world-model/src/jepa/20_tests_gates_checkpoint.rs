@@ -149,6 +149,50 @@
         assert!((target.input_weights[0] - expected).abs() < f32::EPSILON);
     }
 
+    /// The encoder must be able to route input dimension j to output dimension
+    /// i != j.
+    ///
+    /// This is the whole reason the weights are matrices. The previous
+    /// elementwise form could only rescale each dimension in place, so it could
+    /// never build a direction out of several embedding axes — and "this will
+    /// need a retry" is such a direction, not any single axis. Nothing else in
+    /// the suite would fail if the weights were quietly reverted to vectors.
+    #[test]
+    fn encoder_mixes_dimensions_rather_than_scaling_them_in_place() {
+        let dim = 4;
+        let mut encoder = JepaTraceEncoder::new("context", dim);
+
+        // Route input j to hidden j+1 (mod dim); pass hidden through unchanged.
+        // Drop the residual so only the learned branch reaches the output.
+        encoder.input_weights = vec![0.0; dim * dim];
+        for col in 0..dim {
+            let row = (col + 1) % dim;
+            encoder.input_weights[row * dim + col] = 1.0;
+        }
+        encoder.output_weights = vec![0.0; dim * dim];
+        for idx in 0..dim {
+            encoder.output_weights[idx * dim + idx] = 1.0;
+        }
+        encoder.hidden_bias = vec![0.0; dim];
+        encoder.output_bias = vec![0.0; dim];
+        encoder.residual_weight = 0.0;
+
+        // Energy at input 0 only.
+        let mut features = vec![0.0; dim];
+        features[0] = 4.0;
+        let output = encoder.project(features).unwrap();
+
+        // It must surface at output 1. An elementwise encoder cannot do this:
+        // with input 0 the only non-zero, output 1 could never be the largest.
+        let argmax = (0..dim)
+            .max_by(|a, b| output[*a].partial_cmp(&output[*b]).unwrap())
+            .unwrap();
+        assert_eq!(
+            argmax, 1,
+            "input dimension 0 must reach output dimension 1; got {output:?}"
+        );
+    }
+
     #[test]
     fn collapse_gate_rejects_constant_latents() {
         let latents = vec![vec![0.5; 8]; 4];

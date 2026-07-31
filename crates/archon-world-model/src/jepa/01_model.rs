@@ -1,3 +1,16 @@
+/// Two-layer encoder with a residual path.
+///
+/// `input_weights` and `output_weights` are dense `latent_dim x latent_dim`
+/// matrices stored row-major: element `(row, col)` lives at
+/// `row * latent_dim + col`.
+///
+/// They were per-dimension vectors until the matrix rewrite. That form could
+/// only rescale each dimension independently — output `i` depended solely on
+/// input `i` — so it could not combine two features, and could not rotate the
+/// embedding basis into directions that predict anything. A general-purpose
+/// sentence embedding's axes are not aligned to "this will need a retry"; that
+/// direction is a combination of many axes, and only a matrix can form it.
+/// Without one the "encoder" was a diagonal gain control, not an encoder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JepaTraceEncoder {
     pub role: String,
@@ -12,9 +25,15 @@ pub struct JepaTraceEncoder {
 impl JepaTraceEncoder {
     pub fn new(role: impl Into<String>, latent_dim: usize) -> Self {
         let role = role.into();
-        let input_weights = deterministic_vector(&role, "input", latent_dim, 0.85, 1.15);
+        // Xavier-style bound for a square layer: sqrt(6 / (fan_in + fan_out)).
+        // Small weights keep the residual path dominant at initialisation, so
+        // an untrained encoder stays close to the identity instead of scrambling
+        // the embedding it was handed.
+        let limit = (6.0f32 / (latent_dim as f32 + latent_dim as f32)).sqrt();
+        let matrix_len = latent_dim.saturating_mul(latent_dim);
+        let input_weights = deterministic_vector(&role, "input", matrix_len, -limit, limit);
         let hidden_bias = deterministic_vector(&role, "hidden_bias", latent_dim, -0.03, 0.03);
-        let output_weights = deterministic_vector(&role, "output", latent_dim, 0.85, 1.15);
+        let output_weights = deterministic_vector(&role, "output", matrix_len, -limit, limit);
         let output_bias = deterministic_vector(&role, "output_bias", latent_dim, -0.03, 0.03);
         Self {
             role,
@@ -47,19 +66,44 @@ impl JepaTraceEncoder {
     }
 
     fn project(&self, features: Vec<f32>) -> Result<Vec<f32>> {
-        if features.len() != self.latent_dim {
+        let dim = self.latent_dim;
+        if features.len() != dim {
             bail!("jepa feature dimension mismatch");
         }
-        let mut hidden = vec![0.0; self.latent_dim];
-        for idx in 0..self.latent_dim {
-            hidden[idx] = gelu(features[idx] * self.input_weights[idx] + self.hidden_bias[idx]);
+        let expected = dim.saturating_mul(dim);
+        if self.input_weights.len() != expected || self.output_weights.len() != expected {
+            bail!(
+                "jepa encoder weight shape mismatch: expected {expected} elements for a {dim}x{dim} matrix, \
+                 got input={} output={}",
+                self.input_weights.len(),
+                self.output_weights.len()
+            );
         }
-        let mut output = vec![0.0; self.latent_dim];
-        for idx in 0..self.latent_dim {
-            output[idx] = self.residual_weight * features[idx]
-                + (1.0 - self.residual_weight)
-                    * (hidden[idx] * self.output_weights[idx] + self.output_bias[idx]);
-        }
+
+        let hidden: Vec<f32> = (0..dim)
+            .map(|row| {
+                let offset = row * dim;
+                let sum: f32 = (0..dim)
+                    .map(|col| self.input_weights[offset + col] * features[col])
+                    .sum();
+                gelu(sum + self.hidden_bias[row])
+            })
+            .collect();
+
+        let mut output: Vec<f32> = (0..dim)
+            .map(|row| {
+                let offset = row * dim;
+                let sum: f32 = (0..dim)
+                    .map(|col| self.output_weights[offset + col] * hidden[col])
+                    .sum();
+                // The residual carries the input through, so an untrained or
+                // lightly trained encoder degrades to the embedding it was
+                // given rather than to noise.
+                self.residual_weight * features[row]
+                    + (1.0 - self.residual_weight) * (sum + self.output_bias[row])
+            })
+            .collect();
+
         layer_norm(&mut output);
         Ok(output)
     }
