@@ -429,7 +429,6 @@ const EXPECTED_RESEARCH_PHASE_KEYS: &[&[&str]] = &[
         r###"file-length-manager"###,
     ],
     &[r###"chapter-synthesizer"###],
-    &[r###"ok"###],
 ];
 #[test]
 fn research_definitions_match_pre_split_baseline() {
@@ -451,6 +450,11 @@ fn research_phase_definitions_match_pre_split_baseline() {
         .map(|phase| serde_json::to_string(phase).expect("serialize research phase"))
         .collect::<Vec<_>>();
     assert_eq!(phase_json.as_slice(), EXPECTED_RESEARCH_PHASE_JSON);
+    assert_eq!(
+        RESEARCH_PHASES.len(),
+        EXPECTED_RESEARCH_PHASE_KEYS.len(),
+        "expected and runtime research phase counts must match",
+    );
     for (phase, expected_keys) in RESEARCH_PHASES.iter().zip(EXPECTED_RESEARCH_PHASE_KEYS) {
         assert_eq!(phase.agent_keys, *expected_keys);
     }

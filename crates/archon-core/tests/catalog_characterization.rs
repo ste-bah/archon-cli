@@ -79,10 +79,12 @@ fn replacement_preserves_current_stale_index_behavior() {
         .expect("replace same-path entry");
 
     let mut old_tag_names = names(&catalog, "old-tag");
+    // DashMap iteration order is non-contractual; sort before comparing.
     old_tag_names.sort();
     assert_eq!(old_tag_names, ["replacement-agent"]);
 
     let mut old_capability_names = names_for_capability(&catalog, "old-capability");
+    // DashMap iteration order is non-contractual; sort before comparing.
     old_capability_names.sort();
     assert_eq!(old_capability_names, ["replacement-agent"]);
 }
