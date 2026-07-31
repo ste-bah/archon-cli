@@ -137,6 +137,30 @@ async fn build_prompt_includes_base_task_and_algorithm() {
 }
 
 #[tokio::test]
+async fn coding_prompt_requires_tagged_rust_fences_for_scored_code() {
+    let facade = make_facade();
+    let session = facade.init_session("implement parser").await.unwrap();
+    let phase4_agent = AGENTS
+        .iter()
+        .find(|agent| agent.phase == Phase::Implementation)
+        .expect("implementation agent");
+    let info = agent_to_info(phase4_agent, &AnthropicModelsConfig::default());
+
+    let (messages, system, _) = facade.build_prompt(&session, &info).await.unwrap();
+    let rendered = format!("{messages:?}\n{system:?}").to_ascii_lowercase();
+
+    assert!(
+        rendered.contains("```rust"),
+        "prompt must require rust fences"
+    );
+    assert!(rendered.contains("```rs"), "prompt must allow rs fences");
+    assert!(
+        rendered.contains("quality-scored only"),
+        "prompt must disclose tagged-fence scoring exclusivity"
+    );
+}
+
+#[tokio::test]
 async fn inactive_learning_layers_produce_no_errors() {
     let facade = make_facade();
     let session = facade.init_session("any task").await.unwrap();

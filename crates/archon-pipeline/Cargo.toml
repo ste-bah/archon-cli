@@ -37,6 +37,7 @@ thiserror.workspace = true
 futures-util.workspace = true
 tokio-util.workspace = true
 dashmap.workspace = true
+process-wrap.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
