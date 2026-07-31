@@ -117,6 +117,19 @@ pub struct WorldTraceRow {
     pub labels: WorldLabelSet,
     pub evidence_refs: Vec<EvidenceRef>,
     pub redacted_excerpt: Option<String>,
+    /// Archon build that produced this row.
+    ///
+    /// A corpus collected while archon itself is changing is non-stationary —
+    /// the system generating the traces mutates underneath them — and a model
+    /// trained across that drift learns the churn rather than the task. Tagging
+    /// at write time lets a mixed corpus be filtered afterwards instead of
+    /// being discovered unusable later.
+    ///
+    /// `Option` with a serde default so rows written before this field existed
+    /// still deserialize; they read as `None`, which is itself the useful
+    /// signal that their provenance is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archon_version: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -139,6 +152,10 @@ impl Default for WorldTraceRow {
             labels: WorldLabelSet::default(),
             evidence_refs: Vec::new(),
             redacted_excerpt: None,
+            // Left unset in Default so a row built without `new()` is honestly
+            // marked as unknown-provenance rather than silently claiming the
+            // running build.
+            archon_version: None,
             created_at: Utc::now(),
         }
     }
@@ -150,6 +167,9 @@ impl WorldTraceRow {
             row_id: format!("world-row-{}", uuid::Uuid::new_v4()),
             session_id: session_id.into(),
             action_kind,
+            // Stamped here rather than at the call sites so every construction
+            // path is tagged and none can be forgotten.
+            archon_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             created_at: Utc::now(),
             ..Self::default()
         }
@@ -181,5 +201,36 @@ mod tests {
         assert!(row.row_id.starts_with("world-row-"));
         assert_eq!(row.session_id, "session-1");
         assert_eq!(row.action_kind, WorldActionKind::AgentAttempt);
+    }
+}
+
+#[cfg(test)]
+mod archon_version_tests {
+    use super::*;
+
+    /// Every row built through the constructor carries the build that made it,
+    /// so a mixed corpus can be filtered rather than discarded.
+    #[test]
+    fn new_rows_are_stamped_with_the_running_build() {
+        let row = WorldTraceRow::new("session-1", WorldActionKind::Unknown);
+        assert_eq!(
+            row.archon_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    /// Rows written before the field existed must still load, and must read as
+    /// unknown provenance rather than being attributed to the running build.
+    #[test]
+    fn rows_without_the_field_deserialize_as_unknown_provenance() {
+        let mut value =
+            serde_json::to_value(WorldTraceRow::new("session-1", WorldActionKind::Unknown))
+                .expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("archon_version");
+        let row: WorldTraceRow = serde_json::from_value(value).expect("deserialize legacy row");
+        assert_eq!(row.archon_version, None);
     }
 }
