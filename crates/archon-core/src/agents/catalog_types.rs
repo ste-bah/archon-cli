@@ -90,6 +90,16 @@ pub enum DiscoveryError {
     #[error("metadata too large: {path:?} ({size} bytes, max 10 MB)")]
     MetadataTooLarge { path: PathBuf, size: usize },
 
+    #[error(
+        "duplicate agent: {name}@{version} already loaded from {existing_path:?}; rejected {rejected_path:?}"
+    )]
+    DuplicateAgent {
+        name: String,
+        version: semver::Version,
+        existing_path: PathBuf,
+        rejected_path: PathBuf,
+    },
+
     #[error("circular dependency: {0:?}")]
     CircularDependency(Vec<String>),
 

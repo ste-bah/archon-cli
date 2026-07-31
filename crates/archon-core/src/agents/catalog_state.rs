@@ -12,10 +12,47 @@ pub struct DiscoveryCatalog {
     cached_snapshot: ArcSwap<CatalogSnapshot>,
 }
 
-/// The entries rejected during one bulk insertion.
+/// The accepted and rejected records from one bulk insertion.
 #[derive(Debug, Default)]
 pub struct BulkInsertResult {
-    pub rejected: Vec<DiscoveryError>,
+    pub accepted: AcceptedInsertCounts,
+    pub rejected: Vec<BulkInsertRejection>,
+}
+
+/// State counts for records accepted by one bulk insertion.
+#[derive(Debug, Default)]
+pub struct AcceptedInsertCounts {
+    pub loaded: usize,
+    pub invalid: usize,
+}
+
+/// A metadata record rejected from one bulk insertion with its cause.
+#[derive(Debug)]
+pub struct BulkInsertRejection {
+    pub metadata: AgentMetadata,
+    pub error: DiscoveryError,
+}
+
+fn count_accepted_metadata(counts: &mut AcceptedInsertCounts, meta: &AgentMetadata) {
+    match &meta.state {
+        crate::agents::metadata::AgentState::Valid | crate::agents::metadata::AgentState::Stale => {
+            counts.loaded += 1;
+        }
+        crate::agents::metadata::AgentState::Invalid(_) => counts.invalid += 1,
+    }
+}
+
+fn decrement_accepted_count(counts: &mut AcceptedInsertCounts, meta: &AgentMetadata) {
+    match &meta.state {
+        crate::agents::metadata::AgentState::Valid | crate::agents::metadata::AgentState::Stale => {
+            counts.loaded -= 1;
+        }
+        crate::agents::metadata::AgentState::Invalid(_) => counts.invalid -= 1,
+    }
+}
+
+fn metadata_key(meta: &AgentMetadata) -> AgentKey {
+    (meta.name.clone(), meta.version.clone())
 }
 
 impl DiscoveryCatalog {
@@ -41,20 +78,36 @@ impl DiscoveryCatalog {
     pub fn insert_all(&self, entries: Vec<AgentMetadata>) -> BulkInsertResult {
         let mut accepted = Vec::with_capacity(entries.len());
         let mut rejected = Vec::new();
+        let mut accepted_counts = AcceptedInsertCounts::default();
         for meta in entries {
             match self.validate_metadata(&meta) {
-                Ok(()) => accepted.push(meta),
-                Err(error) => rejected.push(error),
+                Ok(()) => {
+                    count_accepted_metadata(&mut accepted_counts, &meta);
+                    accepted.push(meta);
+                }
+                Err(error) => rejected.push(BulkInsertRejection {
+                    metadata: meta,
+                    error,
+                }),
             }
         }
         if !accepted.is_empty() {
             let mut staging = self.staging.lock().expect("catalog staging lock poisoned");
             for meta in accepted {
-                self.insert_staged(&mut staging, meta);
+                match self.insert_bulk_staged(&mut staging, meta) {
+                    Ok(()) => {}
+                    Err(rejected_insert) => {
+                        decrement_accepted_count(&mut accepted_counts, &rejected_insert.metadata);
+                        rejected.push(*rejected_insert);
+                    }
+                }
             }
             self.publish(&staging);
         }
-        BulkInsertResult { rejected }
+        BulkInsertResult {
+            accepted: accepted_counts,
+            rejected,
+        }
     }
 
     fn validate_metadata(&self, meta: &AgentMetadata) -> Result<(), DiscoveryError> {
@@ -69,11 +122,12 @@ impl DiscoveryCatalog {
         Ok(())
     }
 
-    // Helpers mutate guarded staging directly and never call public APIs, avoiding writer deadlocks.
     fn insert_staged(&self, staging: &mut CatalogSnapshot, meta: AgentMetadata) {
-        let key = (meta.name.clone(), meta.version.clone());
-        let existing = staging.entries.get(&key).map(|entry| entry.value().clone());
-        if let Some(existing) = existing {
+        if let Some(existing) = staging
+            .entries
+            .get(&metadata_key(&meta))
+            .map(|entry| entry.value().clone())
+        {
             if existing.source_path != meta.source_path {
                 warn!(
                     "agent collision: name={} version={} existing={:?} ignored={:?}",
@@ -81,8 +135,41 @@ impl DiscoveryCatalog {
                 );
                 return;
             }
-            Self::remove_memberships(staging, &key, &existing);
+            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
         }
+        Self::store_staged(staging, meta);
+    }
+
+    /// Inserts bulk metadata while preserving rejected contenders for reporting.
+    fn insert_bulk_staged(
+        &self,
+        staging: &mut CatalogSnapshot,
+        meta: AgentMetadata,
+    ) -> Result<(), Box<BulkInsertRejection>> {
+        if let Some(existing) = staging
+            .entries
+            .get(&metadata_key(&meta))
+            .map(|entry| entry.value().clone())
+        {
+            if existing.source_path != meta.source_path {
+                return Err(Box::new(BulkInsertRejection {
+                    error: DiscoveryError::DuplicateAgent {
+                        name: meta.name.clone(),
+                        version: meta.version.clone(),
+                        existing_path: existing.source_path,
+                        rejected_path: meta.source_path.clone(),
+                    },
+                    metadata: meta,
+                }));
+            }
+            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
+        }
+        Self::store_staged(staging, meta);
+        Ok(())
+    }
+
+    fn store_staged(staging: &mut CatalogSnapshot, meta: AgentMetadata) {
+        let key = metadata_key(&meta);
         staging.entries.insert(key.clone(), meta.clone());
         staging
             .name_index
