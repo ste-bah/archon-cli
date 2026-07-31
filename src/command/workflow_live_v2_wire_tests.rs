@@ -4,7 +4,9 @@ use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::create_default_registry;
 use archon_core::subagent::SubagentManager;
 use archon_core::subagent_executor::AgentSubagentExecutor;
-use archon_learning::llm_call_usage::{LlmCallUsageScope, UsageAvailability, list_llm_call_usage};
+use archon_learning::llm_call_usage::{
+    LlmCallUsageRecord, LlmCallUsageScope, UsageAvailability, list_llm_call_usage,
+};
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::AuthProvider;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
@@ -305,6 +307,23 @@ async fn run_wire_child() {
     assert_wire_usage(&harness.learning_db_path, &wire_model);
 }
 
+#[test]
+fn wire_usage_assertion_stays_within_function_size_limit() {
+    let source = include_str!("workflow_live_v2_wire_tests.rs");
+    let signature = ["fn assert_wire_", "usage(path:"].concat();
+    let start = source.find(&signature).expect("usage assertion");
+    let function = source[start..]
+        .split_once("\nfn assert_wire_usage_metadata")
+        .expect("next function")
+        .0;
+
+    assert!(
+        function.lines().count() < 50,
+        "assert_wire_usage spans {} lines",
+        function.lines().count()
+    );
+}
+
 fn assert_wire_usage(path: &std::path::Path, wire_model: &str) {
     let db = archon_learning::cozo_guard::open_sqlite_guarded(
         path.to_str().expect("UTF-8 learning path"),
@@ -316,6 +335,12 @@ fn assert_wire_usage(path: &std::path::Path, wire_model: &str) {
         &LlmCallUsageScope::new(Some("workflow-wire-test"), Some("workflow-wire-test")),
     )
     .expect("list workflow wire usage");
+    assert_wire_usage_metadata(&rows, wire_model);
+    assert_eq!(sorted_usage(&rows), expected_usage());
+    assert_eq!(usage_totals(&rows), (24, 3, 11, 16));
+}
+
+fn assert_wire_usage_metadata(rows: &[LlmCallUsageRecord], wire_model: &str) {
     assert_eq!(rows.len(), 2);
     assert!(
         rows.iter().all(|row| {
@@ -327,6 +352,16 @@ fn assert_wire_usage(path: &std::path::Path, wire_model: &str) {
         }),
         "unexpected workflow wire usage rows: {rows:#?}"
     );
+}
+
+fn sorted_usage(
+    rows: &[LlmCallUsageRecord],
+) -> Vec<(
+    UsageAvailability,
+    UsageAvailability,
+    UsageAvailability,
+    UsageAvailability,
+)> {
     let mut usage = rows
         .iter()
         .map(|row| {
@@ -342,32 +377,40 @@ fn assert_wire_usage(path: &std::path::Path, wire_model: &str) {
         UsageAvailability::Known(value) => value,
         UsageAvailability::Unavailable => u64::MAX,
     });
-    assert_eq!(
-        usage,
-        vec![
-            (
-                UsageAvailability::Known(11),
-                UsageAvailability::Known(3),
-                UsageAvailability::Known(0),
-                UsageAvailability::Known(7),
-            ),
-            (
-                UsageAvailability::Known(13),
-                UsageAvailability::Known(0),
-                UsageAvailability::Known(11),
-                UsageAvailability::Known(9),
-            ),
-        ]
-    );
-    let totals = rows.iter().fold((0, 0, 0, 0), |totals, row| {
+    usage
+}
+
+fn expected_usage() -> Vec<(
+    UsageAvailability,
+    UsageAvailability,
+    UsageAvailability,
+    UsageAvailability,
+)> {
+    vec![
+        (
+            UsageAvailability::Known(11),
+            UsageAvailability::Known(3),
+            UsageAvailability::Known(0),
+            UsageAvailability::Known(7),
+        ),
+        (
+            UsageAvailability::Known(13),
+            UsageAvailability::Known(0),
+            UsageAvailability::Known(11),
+            UsageAvailability::Known(9),
+        ),
+    ]
+}
+
+fn usage_totals(rows: &[LlmCallUsageRecord]) -> (u64, u64, u64, u64) {
+    rows.iter().fold((0, 0, 0, 0), |totals, row| {
         (
             totals.0 + known_usage(&row.input_tokens),
             totals.1 + known_usage(&row.cache_creation_input_tokens),
             totals.2 + known_usage(&row.cache_read_input_tokens),
             totals.3 + known_usage(&row.output_tokens),
         )
-    });
-    assert_eq!(totals, (24, 3, 11, 16));
+    })
 }
 
 fn known_usage(usage: &UsageAvailability) -> u64 {
