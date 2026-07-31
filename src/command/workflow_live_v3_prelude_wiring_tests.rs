@@ -29,7 +29,13 @@ mod primitive_binding_tests {
             .filter(|name| !name.is_empty())
             .collect();
 
-        let helpers = include_str!("workflow_live_v2_script_helpers.rs");
+        // The globals block moved into a sibling part in the file-size split.
+        let helpers = [
+            include_str!("workflow_live_v2_script_helpers.rs"),
+            include_str!("workflow_live_v2_script_helpers_a.rs"),
+            include_str!("workflow_live_v2_script_helpers_b.rs"),
+        ]
+        .concat();
         let bound: std::collections::BTreeSet<&str> = helpers
             .lines()
             .filter_map(|line| line.trim().strip_prefix("globalThis."))

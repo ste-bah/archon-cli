@@ -193,7 +193,16 @@ mod test_module_gating_tests {
     /// expensive to find.
     #[test]
     fn every_test_module_is_gated_behind_cfg_test() {
-        let source = include_str!("agent_adapter.rs");
+        // Read the assembled module, not just the parent. After the file-size
+        // split the parent holds only `include!` lines, so scanning it alone
+        // finds no `mod` at all and this guard passes vacuously — precisely
+        // the failure mode described above.
+        let source = [
+            include_str!("agent_adapter.rs"),
+            include_str!("agent_adapter_a.rs"),
+            include_str!("agent_adapter_b.rs"),
+        ]
+        .concat();
         let lines: Vec<&str> = source.lines().collect();
         let mut bare = Vec::new();
         for (index, line) in lines.iter().enumerate() {

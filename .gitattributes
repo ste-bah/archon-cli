@@ -14,8 +14,13 @@ tests/fixtures/baseline/*.txt text eol=lf
 # Generated discovery fixtures (TASK-AGS-004 produces 300 agent files).
 tests/fixtures/agents/generated/** linguist-generated=true
 
-# Shell scripts — always LF regardless of checkout OS.
-scripts/*.sh text eol=lf
+# Shell scripts — always LF regardless of checkout OS. A CRLF script fails at
+# the shebang/`set -euo pipefail\r` line, so `bash scripts/lint/arch-lint.sh`
+# exits non-zero on a Windows checkout and tc_arch_02/tc_arch_05 fail locally
+# while Linux CI passes. `scripts/*.sh` matched only the top level -- a pattern
+# containing a slash is anchored and `*` does not cross `/` -- which left
+# scripts/lint/ and scripts/ci/ unpinned. Match on basename instead.
+*.sh text eol=lf
 
 # Golden-file fixtures are compared byte-for-byte, so their line endings must
 # not vary by platform. Without this the archon-draft gauntlet goldens fail on

@@ -126,7 +126,15 @@ fn exhausted_transport_is_an_explicit_infrastructure_blocker() {
 
 #[test]
 fn every_lifecycle_reducer_uses_the_common_transport_retry_path() {
-    let lifecycle = include_str!("workflow_live_v2_lifecycle.rs");
+    // The driver's method bodies live in the sibling parts since the
+    // file-size split; the contract is module-wide, not file-wide.
+    let lifecycle = [
+        include_str!("workflow_live_v2_lifecycle.rs"),
+        include_str!("workflow_live_v2_lifecycle_driver_a.rs"),
+        include_str!("workflow_live_v2_lifecycle_driver_b.rs"),
+        include_str!("workflow_live_v2_lifecycle_driver_c.rs"),
+    ]
+    .concat();
     let reducer_call_sites = [
         "workflow_live_v2_lifecycle_impl.rs",
         "workflow_live_v2_lifecycle_review.rs",
