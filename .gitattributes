@@ -22,3 +22,11 @@ scripts/*.sh text eol=lf
 # a Windows checkout purely on 
 , while passing on macOS and Linux CI.
 crates/archon-draft/tests/fixtures/** text eol=lf
+
+# Scripts embedded via include_str!. Unlike a string literal in a .rs file,
+# include_str! does not normalise CRLF, so a Windows checkout would hand the
+# prelude \r\n and break the "\n  };\n" section slicing in
+# workflow_live_v3_prelude_review_tests.rs. The deliverable verifier is a
+# python heredoc, where CRLF breaks the heredoc terminator and indentation.
+src/command/*.js text eol=lf
+src/command/*.sh text eol=lf

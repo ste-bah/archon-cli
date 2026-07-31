@@ -1,0 +1,369 @@
+#[cfg(test)]
+pub(super) fn ahdm_position_size(account_equity: f64, entry: f64, stop: f64) -> Option<f64> {
+    let risk_per_unit = (entry - stop).abs();
+    if !account_equity.is_finite()
+        || !entry.is_finite()
+        || !stop.is_finite()
+        || account_equity <= 0.0
+        || entry <= 0.0
+        || risk_per_unit <= 0.0
+    {
+        return None;
+    }
+    Some(((account_equity * 0.005) / risk_per_unit).min((account_equity * 0.01) / entry))
+}
+
+use super::*;
+use crate::data_lake::{CoverageWindow, CurrentSnapshot, DataType, GapSummary};
+
+#[test]
+fn coverage_matrix_persists_latest_history_and_readable_markdown() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    store_complete_trading_core_coverage(&lake);
+    persist_trading_core_snapshots(&lake, 1_781_049_600);
+
+    let matrix = lake
+        .write_coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+
+    assert_eq!(matrix.cells.len(), 30);
+    assert!(matrix.gaps.is_empty());
+    assert!(matrix.cells.iter().all(|cell| {
+        cell.available
+            && cell.dataset_id.is_some()
+            && cell.production_eligible
+            && cell.row_count > 0
+    }));
+    assert!(matrix.cells.iter().any(|cell| {
+        cell.canonical_instrument == "SPY" && cell.timeframe == "1D" && cell.available
+    }));
+    let markdown = std::fs::read_to_string(lake.coverage_dir().join("latest.md")).unwrap();
+    assert!(markdown.contains("| SPY | 1D | tradingview | SPY | true | true | true | passed |"));
+}
+
+#[test]
+fn coverage_matrix_fails_closed_when_required_registry_cells_are_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    lake.store_ohlcv(spy_request()).unwrap();
+    persist_snapshot(&lake, "SPY", 1_781_049_600);
+
+    let result = lake.write_coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into());
+
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("coverage matrix incomplete for trading-core-v1")
+                && message.contains("ES:1W")
+                && message.contains("no provider-native validated registry dataset")
+    ));
+    assert!(!lake.coverage_dir().join("latest.json").exists());
+}
+
+#[test]
+fn coverage_cell_unavailable_reason_includes_selected_provider_and_capability() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "ES" && cell.timeframe == "1W")
+        .unwrap();
+    assert!(!cell.available);
+    assert_eq!(cell.selected_provider, "tradingview");
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("no provider-native validated registry dataset")
+    );
+}
+
+#[test]
+fn coverage_matrix_refuses_false_positive_non_native_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = spy_request();
+    request.metadata.native_interval = false;
+    request.metadata.production_eligible = true;
+    lake.store_ohlcv(request).unwrap();
+    persist_snapshot(&lake, "SPY", 1_781_049_600);
+
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "SPY" && cell.timeframe == "1D")
+        .unwrap();
+
+    assert!(!cell.available);
+    assert!(cell.dataset_id.is_none());
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("native_interval=false")
+    );
+}
+
+#[test]
+fn coverage_matrix_refuses_false_positive_failed_validation_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_snapshot(&lake, "SPY", 1_781_049_600);
+    let validation_path = temp.path().join(&record.validation_path);
+    let mut report: ValidationReport = read_json(&validation_path).unwrap();
+    report.status = ValidationStatus::Failed;
+    report.production_eligible = false;
+    report.checks[0].status = ValidationStatus::Failed;
+    report.checks[0].severity = ValidationSeverity::Error;
+    write_json(&validation_path, &report).unwrap();
+
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "SPY" && cell.timeframe == "1D")
+        .unwrap();
+
+    assert!(!cell.available);
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("checksum chain mismatch")
+    );
+}
+
+#[test]
+fn contradictory_validation_report_is_rejected_on_load() {
+    let value = serde_json::json!({
+        "schema": "archon-trading-validation-v1",
+        "dataset_id": "demo",
+        "version": "v1",
+        "status": "passed",
+        "native_interval": true,
+        "production_eligible": true,
+        "checks": [{
+            "id": "payload.integrity",
+            "status": "failed",
+            "severity": "error",
+            "message": "failed"
+        }],
+        "summary": {
+            "row_count": 1,
+            "duplicate_timestamp_count": 0,
+            "gap_count": 0,
+            "bad_ohlc_count": 0,
+            "missing_volume_count": 0
+        },
+        "validated_at": "2026-01-01T00:00:00Z"
+    });
+
+    let error = serde_json::from_value::<ValidationReport>(value)
+        .expect_err("contradictory validation must fail");
+
+    assert!(error.to_string().contains("contradicts its checks"));
+}
+
+#[test]
+fn registry_load_rejects_contradictory_validation_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(spy_request()).unwrap();
+    let validation_path = temp.path().join(&record.validation_path);
+    let mut validation: serde_json::Value = read_json(&validation_path).unwrap();
+    validation["status"] = serde_json::json!("passed");
+    validation["production_eligible"] = serde_json::json!(true);
+    validation["checks"][0]["status"] = serde_json::json!("failed");
+    validation["checks"][0]["severity"] = serde_json::json!("error");
+    write_json(&validation_path, &validation).unwrap();
+
+    let error = lake
+        .load_registry()
+        .expect_err("contradictory validation must fail closed");
+    assert!(matches!(
+        error,
+        DataStoreError::Json(message) if message.contains("contradicts its checks")
+    ));
+}
+
+#[test]
+fn coverage_matrix_refuses_false_positive_checksum_mismatch_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_snapshot(&lake, "SPY", 1_781_049_600);
+    let metadata_path = temp.path().join(&record.metadata_path);
+    let mut metadata: DatasetMetadata = read_json(&metadata_path).unwrap();
+    metadata.checksum = "wrong-checksum".into();
+    write_json(&metadata_path, &metadata).unwrap();
+
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "SPY" && cell.timeframe == "1D")
+        .unwrap();
+
+    assert!(!cell.available);
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("checksum chain mismatch")
+    );
+}
+
+#[test]
+fn coverage_matrix_refuses_false_positive_missing_artifact_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(spy_request()).unwrap();
+    persist_snapshot(&lake, "SPY", 1_781_049_600);
+    std::fs::remove_file(temp.path().join(&record.manifest_path)).unwrap();
+
+    let matrix = lake
+        .coverage_matrix("trading-core-v1", "2026-06-10T00:00:00Z".into())
+        .unwrap();
+    let cell = matrix
+        .cells
+        .iter()
+        .find(|cell| cell.canonical_instrument == "SPY" && cell.timeframe == "1D")
+        .unwrap();
+
+    assert!(!cell.available);
+    assert!(
+        cell.fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("missing artifact")
+    );
+}
+
+#[test]
+fn backtest_gate_enforces_required_raw_artifact_contract() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    std::fs::remove_file(temp.path().join(&record.provider_notes_path)).unwrap();
+
+    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("raw/provider-notes.md")
+    ));
+}
+
+#[test]
+fn d42_backtest_gate_refuses_manual_dataset_claiming_native_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    lake.store_ohlcv(request()).unwrap();
+
+    let result = lake.backtest_data_gate("manual-BTCUSD-1D-raw", "20260101-fixture", false);
+
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidMetadata(message))
+            if message.contains("manual datasets cannot satisfy provider-native")
+    ));
+}
+
+#[test]
+fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let existing = lake.store_ohlcv(request()).unwrap();
+    let mut registry = lake.load_registry().unwrap();
+    registry.schema_version = REGISTRY_SCHEMA_V1.into();
+    write_json(&lake.registry_path(), &registry).unwrap();
+
+    let mut next = request();
+    next.metadata.version = "20260105-fixture".into();
+    next.created_at = "2026-01-05T00:00:00Z".into();
+    lake.store_ohlcv(next).unwrap();
+
+    let migrated = lake.load_registry().unwrap();
+    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
+    assert!(
+        migrated
+            .datasets
+            .contains_key(&registry_key(&existing.dataset_id, &existing.version))
+    );
+
+    let mut unknown = migrated;
+    unknown.schema_version = "archon-trading-data-registry-v999".into();
+    write_json(&lake.registry_path(), &unknown).unwrap();
+    assert!(matches!(
+        lake.load_registry(),
+        Err(DataStoreError::InvalidRegistrySchema(schema))
+            if schema == "archon-trading-data-registry-v999"
+    ));
+}
+
+#[test]
+fn validation_fails_when_native_interval_metadata_is_not_provider_supported() {
+    let mut metadata = request().metadata;
+    metadata.provider = "stooq".into();
+    metadata.dataset_id = "stooq-BTCUSD-15-raw".into();
+    metadata.timeframe = "15".into();
+    metadata.symbol_map = BTreeMap::from([("BTCUSD".into(), "BTCUSD".into())]);
+    metadata.native_interval = true;
+    metadata.production_eligible = true;
+    metadata.coverage.start = "2026-01-01T00:00:00Z".into();
+    metadata.coverage.end = "2026-01-02T00:00:00Z".into();
+    metadata.checksum = "checksum".into();
+
+    let report = validation_report(&metadata, &request().bars, "now".into());
+    assert_eq!(report.status, ValidationStatus::Failed);
+    assert!(report.checks.iter().any(|check| {
+        check.id == "metadata.native_interval" && check.status == ValidationStatus::Failed
+    }));
+    assert!(!report.production_eligible);
+}
+
+#[test]
+fn validation_report_is_registry_referenced_and_passed_for_valid_native_bars() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+    let registry = lake.load_registry().unwrap();
+    let stored = registry
+        .datasets
+        .get(&registry_key(&record.dataset_id, &record.version))
+        .unwrap();
+    let report: ValidationReport = read_json(&temp.path().join(&stored.validation_path)).unwrap();
+
+    assert_eq!(stored.validation_path, record.validation_path);
+    assert_eq!(report.status, ValidationStatus::Passed);
+    assert!(report.production_eligible);
+}
+
+#[test]
+fn invalid_fixture_bars_are_rejected_before_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let mut request = request();
+    request.bars[1].timestamp = request.bars[0].timestamp.clone();
+
+    let result = lake.store_ohlcv(request);
+    assert!(matches!(
+        result,
+        Err(DataStoreError::InvalidOhlcv(message))
+            if message.contains("DuplicateTimestamp")
+    ));
+}
+
