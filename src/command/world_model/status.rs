@@ -147,7 +147,7 @@ pub(crate) fn render_world_status_with_stats(
         jepa_status = jepa_status,
         jepa_latent_dim = wm.jepa.latent_dim,
         jepa_candidate_count = jepa_candidate_count,
-        selected_backend = backend.selected,
+        selected_backend = backend.selected_label(),
         fallback = backend.fallback_reason.as_deref().unwrap_or("none"),
         auto_trainer = wm.auto_trainer.enabled,
         daemon_trainer = daemon_trainer,

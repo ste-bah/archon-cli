@@ -62,6 +62,31 @@ impl BackendStatus {
             fallback_reason: Some(reason.into()),
         }
     }
+
+    /// True when nothing was selected: the requested accelerator was
+    /// unavailable and CPU fallback was not permitted. `BackendKind` has no
+    /// "none" variant, so that arm parks the requested kind in `selected`;
+    /// `framework` is the field that actually distinguishes the case.
+    pub fn is_unavailable(&self) -> bool {
+        self.framework == "unavailable"
+    }
+
+    /// How the selection should be reported.
+    ///
+    /// Reading `selected` directly prints `Selected backend: metal` beside
+    /// `Backend fallback: backend_unavailable` — two lines that cannot both be
+    /// true, and which leave the eval parity gate (`fp32 cosine >= 0.95`)
+    /// untrustworthy because the reported backend is ambiguous.
+    pub fn selected_label(&self) -> String {
+        if self.is_unavailable() {
+            format!(
+                "none [{} unavailable, CPU fallback disabled]",
+                self.requested
+            )
+        } else {
+            self.selected.to_string()
+        }
+    }
 }
 
 pub trait WorldModelBackend: Send + Sync {
@@ -272,6 +297,45 @@ mod tests {
         assert_eq!(
             status.fallback_reason.as_deref(),
             Some("metal_backend_failed")
+        );
+    }
+
+    /// The unavailable arm parks the requested kind in `selected`, so reading
+    /// it directly printed `Selected backend: metal` beside
+    /// `Backend fallback: backend_unavailable` — two lines that cannot both be
+    /// true. Nothing was selected; the label must say so.
+    #[test]
+    fn unavailable_backend_is_not_reported_as_selected() {
+        let status = select_backend_status(BackendKind::Metal, false, false, false);
+
+        assert!(status.is_unavailable());
+        assert_eq!(
+            status.fallback_reason.as_deref(),
+            Some("backend_unavailable")
+        );
+        assert_eq!(
+            status.selected_label(),
+            "none [metal unavailable, CPU fallback disabled]"
+        );
+        assert_ne!(status.selected_label(), BackendKind::Metal.to_string());
+    }
+
+    /// A genuine selection still reports the bare kind, so the label is safe to
+    /// use at every render site.
+    #[test]
+    fn available_backend_reports_its_bare_kind() {
+        assert_eq!(
+            select_backend_status(BackendKind::Cpu, false, false, false).selected_label(),
+            "cpu"
+        );
+        assert_eq!(
+            select_backend_status(BackendKind::Cuda, true, false, false).selected_label(),
+            "cuda"
+        );
+        assert_eq!(
+            select_backend_status(BackendKind::Metal, false, false, true).selected_label(),
+            "cpu",
+            "a permitted CPU fallback did select cpu"
         );
     }
 

@@ -297,6 +297,38 @@ impl ModelRegistry {
         Ok(count)
     }
 
+    /// Newest candidate manifest by write time, or `None` when the store holds
+    /// no candidates. Backs `archon world eval` with no id: a store can
+    /// accumulate candidates faster than an operator names them, and the newest
+    /// is the one they almost always mean.
+    pub fn latest_candidate_id(&self) -> Result<Option<String>> {
+        let mut newest: Option<(std::time::SystemTime, String)> = None;
+        for entry in std::fs::read_dir(&self.paths.candidates_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            // Eval reports live beside their candidates as `<id>.eval.json`.
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+                || name.ends_with(".eval.json")
+            {
+                continue;
+            }
+            let modified = entry
+                .metadata()?
+                .modified()
+                .unwrap_or(std::time::UNIX_EPOCH);
+            if newest
+                .as_ref()
+                .is_none_or(|(current, _)| modified > *current)
+            {
+                newest = Some((modified, name.trim_end_matches(".json").to_string()));
+            }
+        }
+        Ok(newest.map(|(_, id)| id))
+    }
+
     pub fn latest_eval_report(&self) -> Result<Option<CandidateEvalRecord>> {
         let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
         for entry in std::fs::read_dir(&self.paths.candidates_dir)? {

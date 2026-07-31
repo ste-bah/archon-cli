@@ -172,7 +172,7 @@ fn render_latent_trainer_tick(
          Checkpoint: {}",
         run.decision.reason,
         run.decision.should_train,
-        backend.selected,
+        backend.selected_label(),
         backend.fallback_reason.as_deref().unwrap_or("none"),
         run.trigger
             .as_ref()

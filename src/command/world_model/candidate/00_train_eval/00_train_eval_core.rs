@@ -45,7 +45,7 @@ pub(super) fn render_train(
          Checkpoint: {}",
         if candidate_flag { " (--candidate)" } else { "" },
         model.metadata.model_id,
-        backend.selected,
+        backend.selected_label(),
         backend.fallback_reason.as_deref().unwrap_or("none"),
         rows.len(),
         examples.len(),
@@ -190,8 +190,22 @@ pub(super) fn render_eval(
     root: &Path,
     candidate_id: Option<&str>,
 ) -> Result<String> {
-    let candidate_id = candidate_id.ok_or_else(|| anyhow::anyhow!("candidate id is required"))?;
     let registry = ModelRegistry::open(root)?;
+    // No id means "the one I just trained". Erroring here made `archon world
+    // eval` unusable without first listing the store by hand, which is how a
+    // real install reached 51 candidates with `Last eval: none`.
+    let (candidate_id, defaulted) = match candidate_id {
+        Some(id) => (id.to_string(), false),
+        None => {
+            let id = registry.latest_candidate_id()?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no candidates to evaluate; run `archon world train --candidate` first"
+                )
+            })?;
+            (id, true)
+        }
+    };
+    let candidate_id = candidate_id.as_str();
     let candidate = registry.load_cpu_candidate(candidate_id)?;
     let rows = WorldModelStore::open(root)?.load_verified_training_rows()?;
     let adapter = GenericEmbeddingRepresentationAdapter::new(build_embedding_adapter(config)?);
@@ -255,7 +269,7 @@ pub(super) fn render_eval(
     Ok(format!(
         "World Model Eval\n\
          =================\n\
-         Candidate: {candidate_id}\n\
+         Candidate: {candidate_id}{}\n\
          Examples: {}\n\
          Heldout: {}\n\
          Next-state improvement: {:.2}%\n\
@@ -264,6 +278,13 @@ pub(super) fn render_eval(
          Primary gates pass: {}\n\
          Gate policy: all primary gates are mandatory\n\
          Eval report: {}",
+        // Name the choice when it was implicit, so the report never leaves
+        // ambiguous which candidate the numbers describe.
+        if defaulted {
+            " (most recent; pass an id to choose another)"
+        } else {
+            ""
+        },
         examples.len(),
         heldout.len(),
         record

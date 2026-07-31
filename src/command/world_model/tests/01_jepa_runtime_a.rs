@@ -1,0 +1,288 @@
+#[test]
+fn predict_next_does_not_persist_missing_runtime_action() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let config = test_config();
+    let trained = candidate::render_train(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let rows_before = store.load_rows().unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "runtime-session",
+        "runtime-action",
+        "execute the selected agent evolution command",
+    );
+
+    assert!(
+        rendered.contains("Unavailable: StoredTraceUnavailable"),
+        "{rendered}"
+    );
+    assert_eq!(store.load_rows().unwrap(), rows_before);
+}
+
+#[test]
+fn predict_next_uses_persisted_trace_context_and_planned_action() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let mut planned = archon_world_model::WorldTraceRow::new(
+        "session-1",
+        archon_world_model::schema::WorldActionKind::PlanUpdate,
+    )
+    .with_row_id("planned-action");
+    planned.redacted_excerpt = Some("apply the reviewed migration".into());
+    store.persist_rows(&[planned]).unwrap();
+
+    let config = jepa_test_config();
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    registry
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "session-1",
+        "planned-action",
+        "summary echo must not become model input",
+    );
+
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    assert_eq!(persisted.action_summary, "apply the reviewed migration");
+    assert!(
+        !persisted
+            .evidence_refs
+            .contains(&"world_row:planned-action".into())
+    );
+    assert!(persisted.evidence_refs.contains(&"world_row:r2".into()));
+    assert!(persisted.evidence_refs.contains(&"world_row:r3".into()));
+    assert!(!persisted.evidence_refs.contains(&"world_row:r1".into()));
+}
+
+#[test]
+fn predict_next_uses_active_jepa_model_when_configured() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let config = jepa_test_config();
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    let registry = archon_world_model::registry::ModelRegistry::open(temp.path()).unwrap();
+    registry
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id.clone()),
+        "session-1",
+        "r1",
+        "run tests",
+    );
+
+    assert!(rendered.contains(&format!("Model: {candidate_id}")));
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Representation: archon-jepa-inspired:"));
+    assert!(rendered.contains("Runtime backend: cpu"));
+    assert!(rendered.contains("Runtime native prediction: true"));
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    assert_eq!(
+        persisted
+            .jepa_runtime_backend_report
+            .as_ref()
+            .expect("jepa prediction should persist runtime backend proof")
+            .backend,
+        archon_world_model::BackendKind::Cpu
+    );
+    assert!(
+        persisted
+            .guardrail_scores
+            .expect("jepa prediction should include auxiliary guardrail scores")
+            .predicted_verification_needed
+            .is_some()
+    );
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires CUDA hardware"]
+fn predict_next_uses_active_jepa_cuda_model() {
+    let probe = archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Cuda);
+    assert!(
+        probe.available,
+        "CUDA prediction validation requested but CUDA probe failed: {probe:?}"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = jepa_test_config();
+    config.learning.world_model.training.backend = "cuda".into();
+    config.learning.world_model.training.allow_cpu_fallback = false;
+
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    assert!(trained.contains("Requested backend: cuda"));
+    assert!(trained.contains("Selected backend: cuda"));
+    assert!(trained.contains("Native runtime prediction: true"));
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "session-1",
+        "r1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Model kind: jepa_transition"));
+    assert!(rendered.contains("Runtime backend: cuda"));
+    assert!(rendered.contains("Runtime framework: candle"));
+    assert!(rendered.contains("Runtime native prediction: true"));
+    assert!(rendered.contains("Runtime host fallback count: 0"));
+    let prediction_id = prediction_id_from(&rendered);
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction should be persisted");
+    let report = persisted
+        .jepa_runtime_backend_report
+        .expect("jepa runtime backend proof should be persisted");
+    assert_eq!(report.backend, archon_world_model::BackendKind::Cuda);
+    assert_eq!(report.framework, "candle");
+    assert!(report.native_runtime_prediction);
+    assert_eq!(report.host_fallback_count, 0);
+}
+
+#[cfg(all(feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
+#[test]
+#[ignore = "requires Apple Silicon MLX Metal"]
+fn predict_next_uses_active_jepa_metal_model() {
+    let probe = archon_world_model::backend::probe_backend(archon_world_model::BackendKind::Metal);
+    assert!(
+        probe.available,
+        "MLX Metal prediction validation requested but Metal probe failed: {probe:?}"
+    );
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let mut config = jepa_test_config();
+    config.learning.world_model.training.backend = "metal".into();
+    config.learning.world_model.training.allow_cpu_fallback = false;
+
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    assert!(trained.contains("Requested backend: metal"));
+    assert!(trained.contains("Selected backend: metal"));
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "session-1",
+        "r1",
+        "run tests",
+    );
+
+    assert!(rendered.contains("Runtime backend: metal"));
+    assert!(rendered.contains("Runtime framework: mlx-rs"));
+    assert!(rendered.contains("Runtime native prediction: true"));
+    assert!(rendered.contains("Runtime host fallback count: 0"));
+}
+
+#[test]
+fn jepa_outcome_requires_recorded_target_trace() {
+    let temp = tempfile::tempdir().unwrap();
+    seed_training_rows(temp.path());
+    let store = archon_world_model::storage::WorldModelStore::open(temp.path()).unwrap();
+    let mut planned = archon_world_model::WorldTraceRow::new(
+        "outcome-session",
+        archon_world_model::schema::WorldActionKind::PlanUpdate,
+    )
+    .with_row_id("outcome-action");
+    planned.redacted_excerpt = Some("apply the reviewed migration".into());
+    store.persist_rows(&[planned]).unwrap();
+
+    let config = jepa_test_config();
+    let trained = candidate::render_train_jepa(&config, temp.path(), true, None).unwrap();
+    let candidate_id = candidate_id_from(&trained);
+    archon_world_model::registry::ModelRegistry::open(temp.path())
+        .unwrap()
+        .promote_model_kind(&candidate_id, "jepa_transition")
+        .unwrap();
+    let rendered = render_predict_next_with_state(
+        &config,
+        temp.path(),
+        archon_world_model::ColdStartStats {
+            rows: 1_000,
+            sessions: 50,
+            observed_days: 7,
+        },
+        Some(candidate_id),
+        "outcome-session",
+        "outcome-action",
+        "summary echo must not become model input",
+    );
+    let prediction_id = prediction_id_from(&rendered);
+
+    let error = predict::record_outcome_for_prediction(
+        &config,
+        temp.path(),
+        &prediction_id,
+        "migration completed",
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("StoredTraceUnavailable"),
+        "{error}"
+    );
+    let persisted = predict::load_prediction(temp.path(), &prediction_id)
+        .unwrap()
+        .expect("prediction remains persisted");
+    assert!(persisted.actual_next_state.is_none());
+    assert!(persisted.latent_surprise.is_none());
+}
+
