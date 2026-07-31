@@ -66,25 +66,20 @@ impl LocalDiscoverySource {
         let parsed: Vec<Option<AgentMetadata>> =
             files.par_iter().map(|f| self.parse_one(f)).collect();
 
-        let mut loaded = 0;
-        let mut invalid = 0;
-
-        let entries = parsed
-            .into_iter()
-            .flatten()
-            .inspect(|meta| match &meta.state {
-                AgentState::Valid | AgentState::Stale => loaded += 1,
-                AgentState::Invalid(_) => invalid += 1,
-            })
-            .collect();
+        let entries = parsed.into_iter().flatten().collect();
         let result = catalog.insert_all(entries);
-        for error in result.rejected {
-            warn!("failed to insert agent: {error}");
+        for rejected in result.rejected {
+            warn!(
+                path = ?rejected.metadata.source_path,
+                name = %rejected.metadata.name,
+                error = %rejected.error,
+                "failed to insert agent"
+            );
         }
 
         Ok(LoadReport {
-            loaded,
-            invalid,
+            loaded: result.accepted.loaded,
+            invalid: result.accepted.invalid,
             duration_ms: start.elapsed().as_millis(),
         })
     }

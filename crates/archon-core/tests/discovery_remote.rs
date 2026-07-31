@@ -147,7 +147,7 @@ async fn remote_load_keeps_valid_entries_when_metadata_entry_is_oversized() {
 
     let report = source.load_all(&catalog).await.unwrap();
 
-    assert_eq!(report.loaded, 2);
+    assert_eq!(report.loaded, 1);
     assert_eq!(report.invalid, 0);
     assert_eq!(catalog.len(), 1);
     assert!(

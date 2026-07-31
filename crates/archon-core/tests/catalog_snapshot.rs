@@ -1,6 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
-use archon_core::agents::{AgentMetadata, AgentState, DiscoveryCatalog, ResourceReq, SourceKind};
+use archon_core::agents::{
+    AgentMetadata, AgentState, DiscoveryCatalog, DiscoveryError, ResourceReq, SourceKind,
+};
 use chrono::Utc;
 
 fn metadata(name: &str) -> AgentMetadata {
@@ -219,6 +221,73 @@ fn obsolete_secondary_buckets_are_removed() {
 }
 
 #[test]
+fn bulk_insert_rejects_invalid_metadata_without_publishing_it() {
+    let catalog = DiscoveryCatalog::new();
+    let accepted = metadata("accepted");
+    let mut rejected = metadata("rejected");
+    rejected.description = "x".repeat(11 * 1024 * 1024);
+    let rejected_path = rejected.source_path.clone();
+
+    let result = catalog.insert_all(vec![accepted, rejected]);
+
+    assert_eq!(result.accepted.loaded, 1);
+    assert_eq!(result.accepted.invalid, 0);
+    assert_eq!(result.rejected.len(), 1);
+    assert_eq!(result.rejected[0].metadata.name, "rejected");
+    assert_eq!(result.rejected[0].metadata.source_path, rejected_path);
+    assert!(matches!(
+        result.rejected[0].error,
+        DiscoveryError::MetadataTooLarge { ref path, .. } if path == &rejected_path
+    ));
+    assert_eq!(catalog.len(), 1);
+}
+
+#[test]
+fn bulk_insert_excludes_rejected_invalid_metadata_from_state_counts() {
+    let catalog = DiscoveryCatalog::new();
+    let mut invalid = metadata("invalid");
+    invalid.state = AgentState::Invalid("missing required field".into());
+    invalid.description = "x".repeat(11 * 1024 * 1024);
+
+    let result = catalog.insert_all(vec![invalid]);
+
+    assert_eq!(result.accepted.loaded, 0);
+    assert_eq!(result.accepted.invalid, 0);
+    assert_eq!(result.rejected.len(), 1);
+    assert_eq!(catalog.len(), 0);
+}
+
+#[test]
+fn bulk_insert_rejects_same_key_contender_with_its_metadata_and_error() {
+    let catalog = DiscoveryCatalog::new();
+    let mut winner = metadata("collision");
+    winner.source_path = "/agents/winner".into();
+    catalog.insert(winner).unwrap();
+
+    let mut contender = metadata("collision");
+    contender.source_path = "/agents/contender".into();
+    let contender_path = contender.source_path.clone();
+    let result = catalog.insert_all(vec![contender]);
+
+    assert_eq!(result.accepted.loaded, 0);
+    assert_eq!(result.rejected.len(), 1);
+    assert_eq!(result.rejected[0].metadata.source_path, contender_path);
+    assert!(matches!(
+        result.rejected[0].error,
+        DiscoveryError::DuplicateAgent { ref existing_path, ref rejected_path, .. }
+            if existing_path == &PathBuf::from("/agents/winner")
+                && rejected_path == &contender_path
+    ));
+    assert_eq!(
+        catalog
+            .get(&("collision".into(), "1.0.0".parse().unwrap()))
+            .unwrap()
+            .source_path,
+        PathBuf::from("/agents/winner")
+    );
+}
+
+#[test]
 fn bulk_insert_publishes_all_entries_and_reconciles_replacements() {
     let catalog = DiscoveryCatalog::new();
     let mut original = metadata("bulk-replaced");
@@ -226,6 +295,8 @@ fn bulk_insert_publishes_all_entries_and_reconciles_replacements() {
     let mut replacement = metadata("bulk-replaced");
     replacement.tags = vec!["new".into()];
     let result = catalog.insert_all(vec![original, replacement, metadata("bulk-new")]);
+    assert_eq!(result.accepted.loaded, 3);
+    assert_eq!(result.accepted.invalid, 0);
     assert!(result.rejected.is_empty());
     assert_eq!(catalog.len(), 2);
     assert!(names(&catalog, "old").is_empty());

@@ -12,8 +12,9 @@ pub mod schema;
 pub mod transcript;
 
 pub use catalog::{
-    AgentInfoView, AgentKey, CatalogSnapshot, DiscoveryCatalog, DiscoveryError,
-    DiscoverySourceConfig, DiscoverySourceKind, UnresolvedDependency,
+    AcceptedInsertCounts, AgentInfoView, AgentKey, BulkInsertRejection, BulkInsertResult,
+    CatalogSnapshot, DiscoveryCatalog, DiscoveryError, DiscoverySourceConfig, DiscoverySourceKind,
+    UnresolvedDependency,
 };
 pub use definition::*;
 pub use metadata::{AgentMetadata, AgentState, DependencyRef, ResourceReq, SourceKind};
