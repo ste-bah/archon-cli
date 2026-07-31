@@ -1,4 +1,4 @@
-use super::super::{ResearchAgent, BASE_TOOLS, WRITER_TOOLS};
+use super::super::{ResearchAgent, BASE_TOOLS};
 
 pub(super) const SYSTEMATIC_REVIEWER: ResearchAgent = ResearchAgent {
         key: "systematic-reviewer",

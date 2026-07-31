@@ -1,4 +1,4 @@
-use super::super::{ResearchAgent, BASE_TOOLS, WRITER_TOOLS};
+use super::super::{ResearchAgent, BASE_TOOLS};
 
 pub(super) const METHOD_DESIGNER: ResearchAgent = ResearchAgent {
         key: "method-designer",
