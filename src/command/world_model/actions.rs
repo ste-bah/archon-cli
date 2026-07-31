@@ -66,10 +66,23 @@ pub(super) fn render_score_actions(
         let embedding = embed_text(adapter.as_ref(), &id, &text)?;
         scored.push(advisor.score(&id, &embedding)?);
     }
+    // Phase 4: let the learned dynamics model adjust the k-NN ranking.
+    //
+    // k-NN answers "what happened after actions that looked like this one".
+    // The transition model answers "what does this action lead to", which is
+    // the question worth asking when choosing between candidates rather than
+    // blocking one. Ranking uses both.
+    let model_penalties = model_risk_penalties(root, &scored, &actions, task, adapter.as_ref());
     scored.sort_by(|left, right| {
-        let left_score = left.estimated_success - left.estimated_risk;
-        let right_score = right.estimated_success - right.estimated_risk;
-        right_score.total_cmp(&left_score)
+        // Subtractive, exactly as in the cognitive scorer: an unvalidated model
+        // may lower a candidate but must never promote one on the strength of
+        // its own prediction.
+        let score_of = |s: &archon_world_model::counterfactual::CounterfactualScore| {
+            s.estimated_success
+                - s.estimated_risk
+                - model_penalties.get(&s.candidate_id).copied().unwrap_or(0.0)
+        };
+        score_of(right).total_cmp(&score_of(left))
     });
 
     let mut output = format!(
@@ -250,4 +263,61 @@ fn risk_score(row: &WorldTraceRow) -> f32 {
         risk += 0.15;
     }
     risk.min(1.0)
+}
+
+/// Per-candidate risk penalty from the active transition model.
+///
+/// Returns an empty map when there is no active model, the checkpoint cannot be
+/// read, or an embedding fails — ranking then falls back to the unmodified
+/// k-NN ordering. Fail-open is deliberate: the model is unvalidated, so its
+/// absence must cost nothing and its presence must not be required.
+fn model_risk_penalties(
+    root: &Path,
+    scored: &[archon_world_model::counterfactual::CounterfactualScore],
+    actions: &[ActionInput],
+    task: &str,
+    adapter: &dyn archon_world_model::embedding::WorldEmbeddingAdapter,
+) -> std::collections::BTreeMap<String, f32> {
+    let mut penalties = std::collections::BTreeMap::new();
+    let Some(model) = active_transition_model(root) else {
+        return penalties;
+    };
+    for (idx, action) in actions.iter().enumerate() {
+        let id = action.id.clone().unwrap_or_else(|| format!("action-{idx}"));
+        if !scored.iter().any(|score| score.candidate_id == id) {
+            continue;
+        }
+        let Ok(embedding) = embed_text(adapter, &id, &action_text(task, action)) else {
+            continue;
+        };
+        if embedding.len() != model.metadata.state_dim {
+            continue;
+        }
+        let Ok(predictions) = model.predict_auxiliary(&embedding, &embedding) else {
+            continue;
+        };
+        // Mean of the non-success heads: the risk the model attributes to
+        // taking this action. Success is excluded because it is the term the
+        // k-NN estimate already supplies.
+        let risk_heads: Vec<f32> = predictions
+            .iter()
+            .filter(|prediction| prediction.label != "success")
+            .map(|prediction| prediction.probability)
+            .collect();
+        if risk_heads.is_empty() {
+            continue;
+        }
+        let penalty = risk_heads.iter().sum::<f32>() / risk_heads.len() as f32;
+        penalties.insert(id, penalty.clamp(0.0, 1.0));
+    }
+    penalties
+}
+
+/// Load the promoted transition model, if there is one.
+fn active_transition_model(
+    root: &Path,
+) -> Option<archon_world_model::model::CpuLatentTransitionModel> {
+    let registry = archon_world_model::registry::ModelRegistry::open(root).ok()?;
+    let model_id = registry.active_model_id().ok().flatten()?;
+    Some(registry.load_cpu_candidate(&model_id).ok()?.model)
 }
