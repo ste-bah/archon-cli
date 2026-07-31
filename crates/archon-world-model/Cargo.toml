@@ -5,8 +5,13 @@ edition.workspace = true
 publish = false
 
 [features]
-default = []
-candle = ["dep:candle-core"]
+# candle-core/candle-nn are pure-Rust CPU tensor + autodiff crates with no
+# system dependencies; `cuda` and `mlx-metal` remain opt-in. Making this the
+# default is what gives the shipped build gradients at all — without it every
+# encoder path is frozen and `max_epochs`/`learning_rate` cannot be honoured.
+# `--no-default-features` still yields the lean, training-free build.
+default = ["candle"]
+candle = ["dep:candle-core", "dep:candle-nn"]
 cuda = ["candle", "candle-core/cuda"]
 mlx-metal = ["dep:mlx-rs"]
 
@@ -17,6 +22,7 @@ archon-memory = { path = "../archon-memory" }
 libc = "0.2"
 tracing.workspace = true
 candle-core = { version = "0.10.2", optional = true }
+candle-nn = { version = "0.10.2", optional = true }
 chrono.workspace = true
 cozo.workspace = true
 fd-lock.workspace = true
