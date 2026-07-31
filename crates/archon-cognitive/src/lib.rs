@@ -24,6 +24,7 @@ pub mod types;
 pub mod verification_contracts;
 pub mod world_model_scoring;
 
+pub use archon_policy::CognitivePolicy;
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use cognitive_tick::{CognitiveTick, TickReport};
 pub use config::{CognitiveConfig, CognitiveDaemonConfig};
@@ -33,8 +34,9 @@ pub use daemon::{
 };
 pub use decision_store::DecisionStore;
 pub use executive_loop::{
-    ActionExecution, ActionExecutor, ActionOutcome, ExecutiveLoop, ExecutiveRunOutcome,
-    ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
+    ActionExecution, ActionExecutor, ActionOutcome, ExecutiveAdvisoryInput, ExecutiveLoop,
+    ExecutiveRunOutcome, ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
+    plan_runtime_advisory,
 };
 pub use governed_autonomous_apply::{
     ApplyResult, BehaviourManifestKind, CanaryOutcome, GovernedAutonomousApply, Proposal,

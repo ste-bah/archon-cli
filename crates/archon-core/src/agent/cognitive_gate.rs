@@ -1,6 +1,7 @@
 use archon_cognitive::{
-    ClassifyInput, CognitiveDecision, CognitiveSurface, SituationClassifier, ToolGateInput,
-    ToolUseGate, ToolVerdict, direct_response_for,
+    ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput,
+    SituationClassifier, ToolGateInput, ToolUseGate, ToolVerdict, WorldModelState,
+    direct_response_for, plan_runtime_advisory,
 };
 
 use super::*;
@@ -21,6 +22,64 @@ impl Agent {
         );
         self.record_cognitive_situation(&situation);
         self.current_situation = Some(situation);
+    }
+
+    pub(super) async fn run_cognitive_executive_advisory(&mut self) {
+        self.cognitive_executive_reminder = None;
+        let (Some(config), Some(policy), Some(ledger_dir), Some(situation)) = (
+            self.cognitive_config.clone(),
+            self.cognitive_policy.clone(),
+            self.cognitive_ledger_dir.as_ref(),
+            self.current_situation.clone(),
+        ) else {
+            return;
+        };
+        let ledger_dir = ledger_dir.clone();
+        let outcome = match plan_runtime_advisory(
+            &config,
+            policy,
+            ExecutiveAdvisoryInput {
+                situation,
+                working_dir: self.config.working_dir.clone(),
+                world_model_state: WorldModelState::default(),
+            },
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                tracing::warn!(%error, "cognitive executive advisory planning failed");
+                return;
+            }
+        };
+        self.cognitive_executive_reminder = outcome.decision.as_ref().map(|decision| {
+            format!(
+                "Executive advisory: {}. Verification contract: {}. This is planning guidance only; execute through normal tool and permission gates.",
+                decision.user_visible_summary,
+                decision.verification_contract.as_deref().unwrap_or("none")
+            )
+        });
+        tracing::debug!(
+            stage = %outcome.snapshot.stage,
+            selected_action = ?outcome.snapshot.selected_action,
+            "cognitive executive advisory recorded"
+        );
+        if let Some(decision) = outcome.decision {
+            archon_observability::spawn_blocking_named(
+                "persist-cognitive-executive-advisory",
+                move || match archon_cognitive::PersistentCognitiveStore::open(&ledger_dir) {
+                    Ok(store) => {
+                        let path = ledger_dir.join("cognitive-decisions.jsonl");
+                        if let Err(error) = archon_cognitive::DecisionStore::new(store.db(), path)
+                            .and_then(|decision_store| decision_store.record(&decision))
+                        {
+                            tracing::warn!(%error, "cognitive executive decision persistence failed");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "cognitive executive persistence store unavailable");
+                    }
+                },
+            );
+        }
     }
 
     pub(super) async fn try_complete_trivial_cognitive_turn(&mut self) -> Option<String> {

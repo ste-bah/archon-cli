@@ -1,5 +1,34 @@
 use std::path::{Path, PathBuf};
 
+pub(super) fn wire_runtime(
+    agent: &mut archon_core::agent::Agent,
+    config: &archon_core::config::ArchonConfig,
+    working_dir: &Path,
+    store: archon_cognitive::PersistentCognitiveStore,
+) {
+    let ledger_dir = store.root().to_path_buf();
+    agent.set_cognitive_store(store);
+    let policy = match runtime_policy(working_dir) {
+        Ok(Some(policy)) => policy,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, "cognitive executive policy unavailable; advisory disabled");
+            return;
+        }
+    };
+    if !config.learning.cognitive.enabled {
+        return;
+    }
+    agent.set_cognitive_executive(config.learning.cognitive.clone(), policy, ledger_dir);
+}
+
+fn runtime_policy(
+    working_dir: &Path,
+) -> Result<Option<archon_cognitive::CognitivePolicy>, archon_policy::PolicyError> {
+    let policy = archon_policy::load_effective_policy(working_dir)?.cognitive;
+    Ok(policy.enabled.then_some(policy))
+}
+
 pub(super) async fn open(
     working_dir: &Path,
 ) -> anyhow::Result<Option<archon_cognitive::PersistentCognitiveStore>> {
@@ -51,6 +80,23 @@ where
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn disabled_cognitive_policy_does_not_enable_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert!(runtime_policy(temp.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn malformed_cognitive_policy_fails_closed() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join(".archon");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("policy.toml"), "[policy.cognitive\nenabled = true").unwrap();
+
+        assert!(runtime_policy(temp.path()).is_err());
+    }
 
     #[tokio::test]
     async fn panicking_store_open_is_a_startup_error() {
