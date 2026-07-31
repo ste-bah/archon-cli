@@ -7,30 +7,24 @@ use super::agent_adapter::{
 
 pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2PromptParts {
     let (stable_input, invocation_input) = split_stable_input(request);
-    let input = compact_json(&invocation_input);
-    let stable_input = compact_json(&stable_input);
-    let target_files = compact_json(&request.target_files);
-    let target_ownership_scopes = compact_json(&request.target_ownership_scopes);
-    let artifact_roots = compact_json(&request.project_artifacts.artifact_roots);
-    let constraints = compact_json(&request.constraints);
-    let write_rules = if request.is_write_capable() {
-        IMPLEMENTATION_RULES
-    } else {
-        READ_ONLY_RULES
-    };
-    let final_output_rule = if request.is_write_capable() {
-        FINAL_OUTPUT_RULE
-    } else {
-        ""
-    };
-    let project_artifact_paths = super::project_artifact_prompt::project_artifact_prompt_section(
-        &request.input,
-        &request.call.options.required_artifacts,
-        request.is_write_capable(),
-        &request.project_artifacts,
-    );
+    WorkflowV2PromptParts {
+        stable_prefix: build_stable_prefix(request, &stable_input),
+        invocation: build_invocation(request, &invocation_input),
+    }
+}
 
-    let stable_prefix = format!(
+fn build_stable_prefix(
+    request: &WorkflowV2AgentRequest,
+    stable_input: &serde_json::Value,
+) -> String {
+    let constraints = compact_json(&request.constraints);
+    let stable_input = compact_json(stable_input);
+    let (write_rules, final_output_rule) = if request.is_write_capable() {
+        (IMPLEMENTATION_RULES, FINAL_OUTPUT_RULE)
+    } else {
+        (READ_ONLY_RULES, "")
+    };
+    format!(
         "## Archon Workflow V2 Stable Context\n\
          ## Constraints\n```json\n{constraints}\n```\n\n\
          ## Task Universe\n```json\n{stable_input}\n```\n\n\
@@ -43,8 +37,21 @@ pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2
          ## Required JSON Result Envelope\n\
          {RESULT_SCHEMA}\n\n\
          {final_output_rule}",
+    )
+}
+
+fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value) -> String {
+    let input = compact_json(input);
+    let target_files = compact_json(&request.target_files);
+    let target_ownership_scopes = compact_json(&request.target_ownership_scopes);
+    let artifact_roots = compact_json(&request.project_artifacts.artifact_roots);
+    let project_artifact_paths = super::project_artifact_prompt::project_artifact_prompt_section(
+        &request.input,
+        &request.call.options.required_artifacts,
+        request.is_write_capable(),
+        &request.project_artifacts,
     );
-    let invocation = format!(
+    format!(
         "## Archon Workflow V2 Agent Call\n\
          call_id: {call_id}\n\
          role: {role}\n\
@@ -73,11 +80,7 @@ pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2
             .as_deref()
             .unwrap_or("<none>"),
         task = request.task,
-    );
-    WorkflowV2PromptParts {
-        stable_prefix,
-        invocation,
-    }
+    )
 }
 
 fn compact_json(value: &impl Serialize) -> String {

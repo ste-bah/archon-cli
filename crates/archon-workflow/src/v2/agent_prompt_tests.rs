@@ -21,6 +21,24 @@ fn request() -> WorkflowV2AgentRequest {
 }
 
 #[test]
+fn workflow_prompt_builder_stays_within_function_size_limit() {
+    let source = include_str!("agent_prompt.rs");
+    let start = source
+        .find("pub(super) fn build_prompt_parts")
+        .expect("prompt builder");
+    let function = source[start..]
+        .split_once("\nfn build_stable_prefix")
+        .expect("next function")
+        .0;
+
+    assert!(
+        function.lines().count() < 50,
+        "build_prompt_parts spans {} lines",
+        function.lines().count()
+    );
+}
+
+#[test]
 fn workflow_prompt_splits_stable_prefix_from_volatile_call_data() {
     let mut first = request();
     first.input = serde_json::json!({
