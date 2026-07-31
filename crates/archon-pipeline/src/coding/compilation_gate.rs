@@ -6,6 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
+#[cfg(windows)]
+use process_wrap::tokio::JobObject;
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
@@ -135,9 +140,15 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let mut command = CommandWrap::from(command);
+    command.wrap(KillOnDrop);
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
     let mut child = command.spawn()?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    let stdout = child.stdout().take();
+    let stderr = child.stderr().take();
 
     let completed = tokio::time::timeout(limit, async {
         let (stdout, stderr, status) =
@@ -156,18 +167,20 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
     }
 }
 
-async fn cleanup_child(child: &mut tokio::process::Child) -> CleanupOutcome {
-    // This only inspects, requests termination for, and reaps the direct child.
-    // Descendant processes may outlive it while retaining inherited output pipes.
+async fn cleanup_child(child: &mut Box<dyn ChildWrapper>) -> CleanupOutcome {
     match child.try_wait() {
-        Ok(Some(_)) => CleanupOutcome::AlreadyExited,
+        Ok(Some(_)) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            CleanupOutcome::AlreadyExited
+        }
         Ok(None) => cleanup_after_inspection(child, false).await,
         Err(_) => cleanup_after_inspection(child, true).await,
     }
 }
 
 async fn cleanup_after_inspection(
-    child: &mut tokio::process::Child,
+    child: &mut Box<dyn ChildWrapper>,
     inspection_failed: bool,
 ) -> CleanupOutcome {
     let termination = if child.start_kill().is_ok() {

@@ -13,10 +13,10 @@ const CHILD_MODE_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_MODE";
 const CHILD_GATE_RESULT_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_GATE_RESULT";
 const CHILD_INNER_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_INNER_MARKER";
 const CHILD_DESCENDANT_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_MARKER";
+const CHILD_DESCENDANT_SURVIVOR_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_SURVIVOR";
 const CHILD_STDIN_OUTCOME_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_STDIN_OUTCOME";
 
 #[test]
-#[allow(clippy::zombie_processes)] // Fixture intentionally lets descendant outlive direct child.
 fn controlled_child() {
     let Ok(marker) = std::env::var(CHILD_MARKER_ENV) else {
         return;
@@ -24,70 +24,86 @@ fn controlled_child() {
     std::fs::write(marker, "started").unwrap();
 
     match std::env::var(CHILD_MODE_ENV).as_deref() {
-        Ok("await-release") => {
-            let release = std::env::var(CHILD_RELEASE_ENV).unwrap();
-            let deadline = std::time::Instant::now() + Duration::from_secs(1);
-            while !Path::new(&release).exists() && std::time::Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
-        Ok("read-stdin") => {
-            let outcome = std::env::var(CHILD_STDIN_OUTCOME_ENV).unwrap();
-            let result = std::io::stdin().read_to_end(&mut Vec::new());
-            std::fs::write(outcome, if result.is_ok() { "eof" } else { "read-error" }).unwrap();
-        }
-        Ok("run-stdin-reader") => {
-            let inner_marker = std::env::var(CHILD_INNER_MARKER_ENV).unwrap();
-            let stdin_outcome = std::env::var(CHILD_STDIN_OUTCOME_ENV).unwrap();
-            let gate_result = std::env::var(CHILD_GATE_RESULT_ENV).unwrap();
-            let project_root = std::env::current_dir().unwrap();
-            let spec = controlled_child_spec(&project_root, Path::new(&inner_marker), None)
-                .with_env(CHILD_MODE_ENV, "read-stdin")
-                .with_env(CHILD_STDIN_OUTCOME_ENV, stdin_outcome);
-            let result = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(CompilationGate.run_command(spec, Duration::from_millis(100)));
-            std::fs::write(
-                gate_result,
-                if result.gate_passed {
-                    "passed"
-                } else {
-                    "failed"
-                },
-            )
-            .unwrap();
-        }
-        Ok("exit-after-spawning-descendant") => {
-            let descendant_marker = std::env::var(CHILD_DESCENDANT_MARKER_ENV).unwrap();
-            Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "coding::compilation_gate::compilation_gate_tests::controlled_child",
-                    "--nocapture",
-                ])
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .env(CHILD_MARKER_ENV, &descendant_marker)
-                .env(CHILD_MODE_ENV, "descendant-hold-stream")
-                .spawn()
-                .unwrap();
-            assert!(
-                wait_for_file(Path::new(&descendant_marker), Duration::from_secs(1)),
-                "descendant must start before direct child exits"
-            );
-        }
-        Ok("descendant-hold-stream") => {
-            let deadline = std::time::Instant::now() + Duration::from_secs(2);
-            while std::time::Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
+        Ok("await-release") => await_release(),
+        Ok("read-stdin") => read_stdin(),
+        Ok("run-stdin-reader") => run_stdin_reader(),
+        Ok("exit-after-spawning-descendant") => spawn_descendant(),
+        Ok("descendant-hold-stream") => hold_descendant_stream(),
         _ => loop {
             std::thread::sleep(Duration::from_millis(5));
         },
     }
+}
+
+fn await_release() {
+    let release = std::env::var(CHILD_RELEASE_ENV).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    while !Path::new(&release).exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn read_stdin() {
+    let outcome = std::env::var(CHILD_STDIN_OUTCOME_ENV).unwrap();
+    let result = std::io::stdin().read_to_end(&mut Vec::new());
+    std::fs::write(outcome, if result.is_ok() { "eof" } else { "read-error" }).unwrap();
+}
+
+fn run_stdin_reader() {
+    let inner_marker = std::env::var(CHILD_INNER_MARKER_ENV).unwrap();
+    let stdin_outcome = std::env::var(CHILD_STDIN_OUTCOME_ENV).unwrap();
+    let gate_result = std::env::var(CHILD_GATE_RESULT_ENV).unwrap();
+    let project_root = std::env::current_dir().unwrap();
+    let spec = controlled_child_spec(&project_root, Path::new(&inner_marker), None)
+        .with_env(CHILD_MODE_ENV, "read-stdin")
+        .with_env(CHILD_STDIN_OUTCOME_ENV, stdin_outcome);
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(CompilationGate.run_command(spec, Duration::from_millis(100)));
+    std::fs::write(
+        gate_result,
+        if result.gate_passed {
+            "passed"
+        } else {
+            "failed"
+        },
+    )
+    .unwrap();
+}
+
+#[allow(clippy::zombie_processes)] // Fixture intentionally lets descendant outlive direct child.
+fn spawn_descendant() {
+    let descendant_marker = std::env::var(CHILD_DESCENDANT_MARKER_ENV).unwrap();
+    let mut descendant = Command::new(std::env::current_exe().unwrap());
+    descendant
+        .args([
+            "--exact",
+            "coding::compilation_gate::compilation_gate_tests::controlled_child",
+            "--nocapture",
+        ])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .env(CHILD_MARKER_ENV, &descendant_marker)
+        .env(CHILD_MODE_ENV, "descendant-hold-stream");
+    if let Ok(survivor) = std::env::var(CHILD_DESCENDANT_SURVIVOR_ENV) {
+        descendant.env(CHILD_DESCENDANT_SURVIVOR_ENV, survivor);
+    }
+    descendant.spawn().unwrap();
+    assert!(
+        wait_for_file(Path::new(&descendant_marker), Duration::from_secs(1)),
+        "descendant must start before direct child exits"
+    );
+}
+
+fn hold_descendant_stream() {
+    let survivor = std::env::var(CHILD_DESCENDANT_SURVIVOR_ENV).ok();
+    std::thread::sleep(Duration::from_millis(1200));
+    if let Some(survivor) = survivor {
+        std::fs::write(survivor, "survived-timeout").unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(1500));
 }
 
 #[test]
@@ -173,7 +189,7 @@ fn cleanup_outcome_formats_only_observable_states() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn compilation_timeout_reports_already_exited_direct_child_when_descendant_holds_pipe() {
+async fn compilation_timeout_terminates_descendant_when_direct_child_exited() {
     let temp = tempfile::tempdir().unwrap();
     let child_marker = temp.path().join("child-started");
     let descendant_marker = temp.path().join("descendant-started");
@@ -200,8 +216,30 @@ async fn compilation_timeout_reports_already_exited_direct_child_when_descendant
             .evidence
             .contains("direct child already exited and was reaped")
     );
-    assert!(!result.evidence.contains("killed"));
-    assert!(!result.evidence.contains("termination request accepted"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn compilation_timeout_terminates_descendant_processes() {
+    let temp = tempfile::tempdir().unwrap();
+    let child_marker = temp.path().join("child-started");
+    let descendant_marker = temp.path().join("descendant-started");
+    let survivor_marker = temp.path().join("descendant-survived");
+    let spec = controlled_child_spec(temp.path(), &child_marker, None)
+        .with_env(CHILD_MODE_ENV, "exit-after-spawning-descendant")
+        .with_env(CHILD_DESCENDANT_MARKER_ENV, &descendant_marker)
+        .with_env(CHILD_DESCENDANT_SURVIVOR_ENV, &survivor_marker);
+
+    let result = CompilationGate
+        .run_command(spec, Duration::from_millis(500))
+        .await;
+    std::thread::sleep(Duration::from_millis(900));
+
+    assert!(!result.gate_passed);
+    assert!(descendant_marker.exists(), "descendant must have started");
+    assert!(
+        !survivor_marker.exists(),
+        "timed-out compilation descendant survived process-tree cleanup"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
