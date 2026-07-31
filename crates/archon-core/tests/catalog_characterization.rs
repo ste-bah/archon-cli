@@ -49,20 +49,213 @@ fn names_for_capability(catalog: &DiscoveryCatalog, capability: &str) -> Vec<Str
         .collect()
 }
 
-// Characterizes quirk tracked in #107; do not fix in #91.
+// Regression coverage for #107 unresolved dependency reporting.
 #[test]
-fn unresolved_dependencies_are_currently_omitted() {
+fn missing_exact_dependency_reports_parent_and_requirement() {
     let catalog = DiscoveryCatalog::new();
     let mut root = metadata("root", "1.0.0");
     root.dependencies = vec![DependencyRef {
         name: "missing".into(),
-        version_req: semver::VersionReq::STAR,
+        version_req: semver::VersionReq::parse("=2.3.4").unwrap(),
     }];
     catalog.insert(root).expect("insert root");
 
+    assert!(matches!(
+        catalog.resolve_dependencies("root"),
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("root".into(), "1.0.0".parse().unwrap())
+                && details.name == "missing"
+                && details.version_req == "=2.3.4".parse().unwrap()
+    ));
+}
+
+#[test]
+fn mismatched_dependency_requirement_is_unresolved() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root = metadata("root", "1.0.0");
+    root.dependencies = vec![DependencyRef {
+        name: "child".into(),
+        version_req: semver::VersionReq::parse("^2").unwrap(),
+    }];
+    catalog.insert(root).expect("insert root");
+    catalog
+        .insert(metadata("child", "1.0.0"))
+        .expect("insert child");
+
+    assert!(matches!(
+        catalog.resolve_dependencies("root"),
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.name == "child" && details.version_req == "^2".parse().unwrap()
+    ));
+}
+
+#[test]
+fn transitive_missing_dependency_reports_immediate_parent() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root = metadata("root", "1.0.0");
+    root.dependencies = vec![DependencyRef {
+        name: "middle".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    let mut middle = metadata("middle", "1.2.0");
+    middle.dependencies = vec![DependencyRef {
+        name: "missing".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    catalog.insert(root).expect("insert root");
+    catalog.insert(middle).expect("insert middle");
+
+    assert!(matches!(
+        catalog.resolve_dependencies("root"),
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("middle".into(), "1.2.0".parse().unwrap())
+                && details.name == "missing"
+    ));
+}
+
+#[test]
+fn absent_dependency_root_remains_not_found() {
+    let catalog = DiscoveryCatalog::new();
+
+    assert!(matches!(
+        catalog.resolve_dependencies("absent"),
+        Err(DiscoveryError::AgentNotFound { name, .. }) if name == "absent"
+    ));
+}
+
+#[test]
+fn constrained_intermediate_uses_selected_version_dependencies() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root = metadata("root", "1.0.0");
+    root.dependencies = vec![DependencyRef {
+        name: "middle".into(),
+        version_req: semver::VersionReq::parse("=1.0.0").unwrap(),
+    }];
+    let mut middle_v1 = metadata("middle", "1.0.0");
+    middle_v1.dependencies = vec![DependencyRef {
+        name: "leaf".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    let mut middle_v2 = metadata("middle", "2.0.0");
+    middle_v2.dependencies = vec![DependencyRef {
+        name: "missing-from-latest".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    catalog.insert(root).expect("insert root");
+    catalog.insert(middle_v1).expect("insert middle v1");
+    catalog.insert(middle_v2).expect("insert middle v2");
+    catalog
+        .insert(metadata("leaf", "1.0.0"))
+        .expect("insert leaf");
+
     assert_eq!(
         catalog.resolve_dependencies("root").expect("resolve root"),
-        Vec::<(String, semver::Version)>::new()
+        vec![
+            ("leaf".into(), "1.0.0".parse().unwrap()),
+            ("middle".into(), "1.0.0".parse().unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn info_uses_selected_root_version_and_propagates_dependency_errors() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root_v1 = metadata("root", "1.0.0");
+    root_v1.dependencies = vec![DependencyRef {
+        name: "leaf".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    let mut root_v2 = metadata("root", "2.0.0");
+    root_v2.dependencies = vec![DependencyRef {
+        name: "missing".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    catalog.insert(root_v1).expect("insert root v1");
+    catalog.insert(root_v2).expect("insert root v2");
+    catalog
+        .insert(metadata("leaf", "1.0.0"))
+        .expect("insert leaf");
+
+    let v1 = semver::VersionReq::parse("=1.0.0").unwrap();
+    assert_eq!(
+        catalog
+            .info("root", Some(&v1))
+            .expect("info root v1")
+            .dependency_graph,
+        vec![("leaf".into(), "1.0.0".parse().unwrap())]
+    );
+
+    let v2 = semver::VersionReq::parse("=2.0.0").unwrap();
+    assert!(matches!(
+        catalog.info("root", Some(&v2)),
+        Err(DiscoveryError::UnresolvedDependency(details))
+            if details.required_by == ("root".into(), "2.0.0".parse().unwrap())
+                && details.name == "missing"
+    ));
+}
+
+#[test]
+fn shared_dependency_is_deduplicated_in_deterministic_post_order() {
+    let catalog = DiscoveryCatalog::new();
+    let mut root = metadata("root", "1.0.0");
+    root.dependencies = vec![
+        DependencyRef {
+            name: "left".into(),
+            version_req: semver::VersionReq::STAR,
+        },
+        DependencyRef {
+            name: "right".into(),
+            version_req: semver::VersionReq::STAR,
+        },
+    ];
+    let mut left = metadata("left", "1.0.0");
+    left.dependencies = vec![DependencyRef {
+        name: "shared".into(),
+        version_req: semver::VersionReq::STAR,
+    }];
+    let mut right = metadata("right", "1.0.0");
+    right.dependencies = left.dependencies.clone();
+    for agent in [root, left, right, metadata("shared", "1.0.0")] {
+        catalog.insert(agent).expect("insert DAG agent");
+    }
+
+    assert_eq!(
+        catalog.resolve_dependencies("root").expect("resolve DAG"),
+        vec![
+            ("shared".into(), "1.0.0".parse().unwrap()),
+            ("left".into(), "1.0.0".parse().unwrap()),
+            ("right".into(), "1.0.0".parse().unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn same_name_different_versions_do_not_form_a_false_cycle() {
+    let catalog = DiscoveryCatalog::new();
+    let mut a_v1 = metadata("a", "1.0.0");
+    a_v1.dependencies = vec![DependencyRef {
+        name: "b".into(),
+        version_req: "=1.0.0".parse().unwrap(),
+    }];
+    let mut b_v1 = metadata("b", "1.0.0");
+    b_v1.dependencies = vec![DependencyRef {
+        name: "a".into(),
+        version_req: "=2.0.0".parse().unwrap(),
+    }];
+    for agent in [a_v1, b_v1, metadata("a", "2.0.0")] {
+        catalog.insert(agent).expect("insert versioned agent");
+    }
+
+    let a_v1_req = "=1.0.0".parse().unwrap();
+    assert_eq!(
+        catalog
+            .info("a", Some(&a_v1_req))
+            .expect("resolve acyclic version path")
+            .dependency_graph,
+        vec![
+            ("a".into(), "2.0.0".parse().unwrap()),
+            ("b".into(), "1.0.0".parse().unwrap()),
+        ]
     );
 }
 

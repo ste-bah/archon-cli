@@ -68,6 +68,16 @@ impl Clone for CatalogSnapshot {
     }
 }
 
+/// Structured evidence for a dependency that cannot be resolved.
+#[derive(Debug, thiserror::Error)]
+#[error("unresolved dependency: {required_by:?} requires {name} ({version_req})")]
+pub struct UnresolvedDependency {
+    pub required_by: AgentKey,
+    pub name: String,
+    pub version_req: semver::VersionReq,
+    pub suggestions: Vec<String>,
+}
+
 /// Errors from the discovery subsystem.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
@@ -88,6 +98,9 @@ pub enum DiscoveryError {
 
     #[error("parse error: {0}")]
     Parse(String),
+
+    #[error("{0}")]
+    UnresolvedDependency(Box<UnresolvedDependency>),
 
     #[error("agent not found: {name} (did you mean: {suggestions:?})")]
     AgentNotFound {

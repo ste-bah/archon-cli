@@ -116,7 +116,7 @@ impl DiscoveryCatalog {
     ) -> Result<AgentInfoView, super::catalog_types::DiscoveryError> {
         let selected = self.resolve(name, version_req)?;
         let all_versions = self.versions(name);
-        let dependency_graph = self.resolve_dependencies(name).unwrap_or_default();
+        let dependency_graph = self.resolve_metadata_dependencies(selected.clone())?;
         Ok(AgentInfoView {
             selected,
             all_versions,
