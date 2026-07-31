@@ -392,3 +392,78 @@ mod encoder_training_tests {
         assert_ne!(trained.target.input_weights, trained.context.input_weights);
     }
 }
+
+/// Train the encoders for a runtime training pass, or fall back to the
+/// untrained pair when the build has no tensor backend.
+///
+/// Split from `train_encoders` so the runtime has one call site regardless of
+/// features. Training failure is not fatal: the untrained encoders are exactly
+/// what the previous behaviour used, so a candidate is still produced and the
+/// eval gates still decide whether it is worth anything.
+#[cfg(feature = "candle")]
+pub(crate) fn train_encoders_for_runtime(
+    seed: &JepaTraceEncoder,
+    batch: &JepaFeatureBatch,
+    config: &JepaTrainingConfig,
+    progress: JepaProgressObserver,
+) -> Result<(JepaTraceEncoder, JepaTraceEncoder)> {
+    match train_encoders(seed, batch, config) {
+        Ok(outcome) => {
+            if outcome.collapsed {
+                // Loud, and it keeps the untrained encoders. A collapsed
+                // representation maps every input to one point, which drives the
+                // prediction loss toward zero while learning nothing — so a
+                // falling loss must never be read as success on its own.
+                emit_jepa_progress(
+                    progress,
+                    "jepa_encoder_training_collapsed",
+                    "representation collapsed; keeping untrained encoders",
+                );
+                return Ok((
+                    seed.clone(),
+                    JepaTraceEncoder::ema_target_from(seed, config.ema_decay),
+                ));
+            }
+            emit_jepa_progress(
+                progress,
+                "jepa_encoder_training_converged",
+                &format!(
+                    "loss {:.6} -> {:.6} over {} epoch(s)",
+                    outcome.initial_loss, outcome.final_loss, outcome.epochs_run
+                ),
+            );
+            Ok((outcome.context, outcome.target))
+        }
+        Err(error) => {
+            emit_jepa_progress(
+                progress,
+                "jepa_encoder_training_failed",
+                &format!("{error}; keeping untrained encoders"),
+            );
+            Ok((
+                seed.clone(),
+                JepaTraceEncoder::ema_target_from(seed, config.ema_decay),
+            ))
+        }
+    }
+}
+
+/// Fallback for builds without a tensor backend: the previous behaviour, where
+/// the encoders are deterministic and never move.
+#[cfg(not(feature = "candle"))]
+pub(crate) fn train_encoders_for_runtime(
+    seed: &JepaTraceEncoder,
+    _batch: &JepaFeatureBatch,
+    config: &JepaTrainingConfig,
+    progress: JepaProgressObserver,
+) -> Result<(JepaTraceEncoder, JepaTraceEncoder)> {
+    emit_jepa_progress(
+        progress,
+        "jepa_encoder_training_skipped",
+        "no tensor backend in this build; encoders remain untrained",
+    );
+    Ok((
+        seed.clone(),
+        JepaTraceEncoder::ema_target_from(seed, config.ema_decay),
+    ))
+}

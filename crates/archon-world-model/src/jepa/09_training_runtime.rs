@@ -24,9 +24,23 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     let feature_batch = JepaFeatureBatch::from_examples(&masked_examples, config.latent_dim)?;
     emit_jepa_progress(progress, "jepa_feature_batch_complete", "feature batch ready");
 
-    let context_encoder = JepaTraceEncoder::new("context", config.latent_dim);
+    let seed_encoder = JepaTraceEncoder::new("context", config.latent_dim);
     let action_encoder = JepaTraceEncoder::new("action", config.latent_dim);
-    let target_encoder = JepaTraceEncoder::ema_target_from(&context_encoder, config.ema_decay);
+
+    // Learn the representation before anything is fitted on top of it. Until
+    // this call existed the encoders were constructed and cloned into the model
+    // unchanged, so every head downstream was fitted on frozen features and
+    // `max_epochs`/`learning_rate` were read by nothing.
+    check_jepa_training_stop(should_stop, "jepa encoder training")?;
+    emit_jepa_progress(progress, "jepa_encoder_training_start", "training encoders");
+    let (context_encoder, target_encoder) =
+        train_encoders_for_runtime(&seed_encoder, &feature_batch, config, progress)?;
+    emit_jepa_progress(
+        progress,
+        "jepa_encoder_training_complete",
+        "encoder training complete",
+    );
+
     let encoders = JepaEncoderSet {
         context_encoder: context_encoder.clone(),
         action_encoder: action_encoder.clone(),
