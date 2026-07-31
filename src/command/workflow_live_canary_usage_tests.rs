@@ -446,12 +446,13 @@ async fn run_canary() {
     let harness = build_canary_harness(root).await;
     let output = run_live_action(
         root,
-        // `decomposed` was added by v3 (3c547dea) after this test was written.
-        // false preserves the behaviour this test was authored against: the
-        // script_lifecycle comes from the environment, not forced off.
+        // Pin the engine: `decomposed: false` defers to
+        // `script_lifecycle_from_env()`, whose default has since flipped to the
+        // v3 authored-script lifecycle, which `CanaryAgentClient` cannot script
+        // (no author branch => generic evidence => `authoring_failed`).
         CommandAction::Run {
             task,
-            decomposed: false,
+            decomposed: true,
         },
         harness.client,
         tui_tx,

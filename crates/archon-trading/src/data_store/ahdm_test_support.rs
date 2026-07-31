@@ -439,20 +439,36 @@ fn core_coverage_request(instrument: &str, timeframe: &str) -> StoreOhlcvRequest
         instrument.into(),
         provider_symbol(instrument, "tradingview"),
     )]);
-    request.metadata.coverage.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
-    request.metadata.gaps.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
-    request.bars = (0..COVERAGE_MINIMUM_ROWS)
+    // Production backtest history requires twice the coverage minimum, so a
+    // fixture sized at `COVERAGE_MINIMUM_ROWS` is rejected by the AHDM gate.
+    // The 28-day months roll past a year at this size; roll the year with them.
+    request.metadata.coverage.expected_bars = AHDM_BACKTEST_MINIMUM_ROWS as u64;
+    request.metadata.gaps.expected_bars = AHDM_BACKTEST_MINIMUM_ROWS as u64;
+    // A constant close delta trips `bars_have_linear_shape`, which rejects the
+    // dataset as placeholder evidence. Modulate the series the same way the
+    // AHDM fixtures in `data_store_ahdm_tests` do.
+    request.bars = (0..AHDM_BACKTEST_MINIMUM_ROWS)
         .map(|index| {
-            let month = (index / 28) + 1;
+            let year = 2026 + (index / 336);
+            let month = ((index / 28) % 12) + 1;
             let day = (index % 28) + 1;
+            let cycle = index as f64;
             bar(
-                &format!("2026-{month:02}-{day:02}T00:00:00Z"),
-                100.0 + index as f64,
+                &format!("{year}-{month:02}-{day:02}T00:00:00Z"),
+                100.0 + (cycle / 7.0).sin() * 3.0 + cycle * 0.03,
             )
         })
         .collect();
+    // The live-fetch provenance gate wants "live", "fetch" and "provider" in
+    // each captured artefact; the raw response body is checked too.
     request.raw_request = serde_json::json!({"source":"live provider fetch test capture"});
-    request.provider_notes = "captured live provider response".into();
+    request.raw_body = serde_json::to_vec(&serde_json::json!({
+        "source": "captured live provider fetch",
+        "provider": "tradingview",
+        "bar_count": AHDM_BACKTEST_MINIMUM_ROWS,
+    }))
+    .unwrap();
+    request.provider_notes = "captured live provider fetch response".into();
     request
 }
 

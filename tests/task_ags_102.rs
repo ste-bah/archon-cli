@@ -33,19 +33,27 @@ fn agent_event_send_awaits_capacity() {
 
 #[test]
 fn production_constructors_use_shared_capacity() {
-    for path in [
-        "src/session/build_agent.rs",
-        "src/session/interactive_agent.rs",
-        "crates/archon-core/src/orchestrator.rs",
+    // Each entry is one construction site. The orchestrator spans two files
+    // since the file-size split moved its agent construction into
+    // `orchestrator_executor.rs`, so the contract is checked per site, not
+    // per file.
+    for paths in [
+        &["src/session/build_agent.rs"][..],
+        &["src/session/interactive_agent.rs"][..],
+        &[
+            "crates/archon-core/src/orchestrator.rs",
+            "crates/archon-core/src/orchestrator_executor.rs",
+        ][..],
     ] {
-        let src = read(path);
+        let site = paths.join(", ");
+        let src: String = paths.iter().map(|path| read(path)).collect();
         assert!(
             src.contains("AGENT_EVENT_CHANNEL_CAPACITY"),
-            "{path} must use shared Agent event capacity"
+            "{site} must use shared Agent event capacity"
         );
         assert!(
             !src.contains("unbounded_channel::<TimestampedEvent>"),
-            "{path} must not create unbounded TimestampedEvent transport"
+            "{site} must not create unbounded TimestampedEvent transport"
         );
     }
 }

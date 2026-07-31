@@ -137,7 +137,12 @@ fn phase4_pipelines_use_provider_neutral_adapter() {
 #[test]
 fn phase3_subagents_and_team_use_active_provider() {
     let team = read("src/command/team.rs");
-    let orchestrator = read("crates/archon-core/src/orchestrator.rs");
+    // The orchestrator's agent construction lives in `orchestrator_executor.rs`
+    // since the file-size split; the contract is module-wide, not file-wide.
+    let orchestrator = read_all(&[
+        "crates/archon-core/src/orchestrator.rs",
+        "crates/archon-core/src/orchestrator_executor.rs",
+    ]);
     let agent = read_all(&[
         "crates/archon-core/src/agent.rs",
         "crates/archon-core/src/agent/lifecycle.rs",
@@ -153,6 +158,7 @@ fn phase3_subagents_and_team_use_active_provider() {
         "crates/archon-core/src/subagent/runner/runtime.rs",
         "crates/archon-core/src/subagent/runner/runtime/request_round.rs",
         "crates/archon-core/src/subagent/runner/runtime/stream_round.rs",
+        "crates/archon-core/src/subagent/runner/runtime/stream_round_recovery.rs",
     ]);
 
     assert!(team.contains("build_configured_llm_provider(config, env_vars, \"team\")"));
@@ -169,14 +175,14 @@ fn phase3_subagents_and_team_use_active_provider() {
     assert!(executor.contains("SubagentRunner::new("));
     assert!(executor.contains("self.client.clone()"));
     assert!(runner.contains("provider: Arc<dyn LlmProvider>"));
-    // Subagent runner streams via the injected provider. The auto-compaction
-    // refactor (v1.2.2) collapsed `.provider\n  .stream(request)` to a
-    // single-line `self.provider.stream(request.clone())` call. The contract
-    // is "the call goes through self.provider.stream(...)" — formatting
-    // varies, so accept either shape.
+    // Subagent runner streams via the injected provider. The contract is "the
+    // call goes through the runner's own `provider` field", not any particular
+    // spelling: the auto-compaction refactor (v1.2.2) collapsed
+    // `.provider\n  .stream(request)` onto one line, and the stream-round split
+    // moved the call off `self` onto a passed-in `runner`. Accept any receiver.
     assert!(
-        runner.contains("self.provider.stream(") || runner.contains(".provider\n"),
-        "subagent runner must call self.provider.stream(...)"
+        runner.contains(".provider.stream(") || runner.contains(".provider\n"),
+        "subagent runner must stream through its injected provider"
     );
     assert!(runner.contains("request_origin: Some(\"subagent\".into())"));
 }

@@ -368,9 +368,19 @@ fn tradingview_coverage_record(lake: &TradingDataLake) -> StoredDatasetRecord {
     request.metadata.provider = "tradingview".into();
     request.metadata.dataset_id = "tradingview-BTCUSD-1D-raw".into();
     request.metadata.provider_symbol = "BTCUSD".into();
-    request.metadata.coverage.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
-    request.metadata.gaps.expected_bars = COVERAGE_MINIMUM_ROWS as u64;
+    request.metadata.coverage.expected_bars = AHDM_BACKTEST_MINIMUM_ROWS as u64;
+    request.metadata.gaps.expected_bars = AHDM_BACKTEST_MINIMUM_ROWS as u64;
     request.bars = coverage_bars();
+    // The live-fetch provenance gate reads the captured request, response body
+    // and provider notes, and requires "live", "fetch" and "provider" in each.
+    request.raw_request = serde_json::json!({"source":"live provider fetch test capture"});
+    request.raw_body = serde_json::to_vec(&serde_json::json!({
+        "source": "captured live provider fetch",
+        "provider": "tradingview",
+        "bar_count": AHDM_BACKTEST_MINIMUM_ROWS,
+    }))
+    .unwrap();
+    request.provider_notes = "captured live provider fetch response".into();
     lake.store_ohlcv(request).unwrap()
 }
 
@@ -411,14 +421,20 @@ fn typed_coverage_verifier_rejects_quarantined_linked_metadata() {
 }
 
 fn coverage_bars() -> Vec<OhlcvBar> {
-    (0..COVERAGE_MINIMUM_ROWS)
+    // Sized to the production backtest minimum, not the coverage minimum: the
+    // AHDM gate rejects anything shorter. 28-day months exceed a year here.
+    (0..AHDM_BACKTEST_MINIMUM_ROWS)
         .map(|index| {
-            let month = (index / 28) + 1;
+            let year = 2026 + (index / 336);
+            let month = ((index / 28) % 12) + 1;
             let day = (index % 28) + 1;
-            let close = 10.0 + index as f64;
+            // Not a constant delta: a linear ramp is rejected as placeholder
+            // evidence by `bars_have_linear_shape`.
+            let cycle = index as f64;
+            let close = 10.0 + (cycle / 7.0).sin() * 3.0 + cycle * 0.03;
 
             OhlcvBar {
-                timestamp: format!("2026-{month:02}-{day:02}T00:00:00Z"),
+                timestamp: format!("{year}-{month:02}-{day:02}T00:00:00Z"),
                 open: close,
                 high: close + 1.0,
                 low: close - 1.0,

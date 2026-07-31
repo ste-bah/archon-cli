@@ -123,7 +123,7 @@ fn append_backtest_history_issues(
     }
 }
 
-const AHDM_BACKTEST_MINIMUM_ROWS: usize = COVERAGE_MINIMUM_ROWS * 2;
+pub(super) const AHDM_BACKTEST_MINIMUM_ROWS: usize = COVERAGE_MINIMUM_ROWS * 2;
 
 fn append_live_fetch_provenance_issues(
     root: &Path,
