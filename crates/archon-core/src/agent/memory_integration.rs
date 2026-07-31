@@ -27,6 +27,12 @@ impl Agent {
     }
 
     pub(super) fn inject_turn_requirements(&self, system: &mut Vec<serde_json::Value>) {
+        if let Some(ref reminder) = self.cognitive_executive_reminder {
+            system.push(serde_json::json!({
+                "type": "text",
+                "text": format!("<cognitive-executive>{reminder}</cognitive-executive>"),
+            }));
+        }
         if let Some(ref reminder) = self.turn_requirement_reminder {
             system.push(serde_json::json!({
                 "type": "text",

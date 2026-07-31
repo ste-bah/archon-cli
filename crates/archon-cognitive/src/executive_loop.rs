@@ -25,6 +25,97 @@ pub struct ExecutiveTurnInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct ExecutiveAdvisoryInput {
+    pub situation: Situation,
+    pub working_dir: PathBuf,
+    pub world_model_state: WorldModelState,
+}
+
+pub fn plan_runtime_advisory(
+    config: &CognitiveConfig,
+    policy: CognitivePolicy,
+    input: ExecutiveAdvisoryInput,
+) -> Result<ExecutiveRunOutcome, CognitiveError> {
+    if !config.enabled || input.situation.kind.is_trivial() {
+        return Ok(direct_outcome(&input.situation, "not_required", Vec::new()));
+    }
+    let started = std::time::Instant::now();
+    let profile = neutral_profile(input.situation.kind);
+    let candidates = CandidatePlanner::without_store(config.max_candidates).generate(
+        &input.situation,
+        &profile,
+        &MemoryContext::default(),
+    )?;
+    let scored = WorldModelScorer::heuristic_only().score(&candidates, &input.world_model_state);
+    let gate = PolicyGate::new(Some(policy));
+    let (allowed, denied) = gate.filter(scored.candidates.clone());
+    let Some(selected) = select_candidate(allowed.clone(), &input.situation) else {
+        return Ok(direct_outcome(
+            &input.situation,
+            "policy_blocked",
+            vec!["advisory_only:no_action_executed".into()],
+        ));
+    };
+    let contract = advisory_contract(&input.situation, &selected, &input.working_dir)?;
+    let mut decision = build_decision(
+        &input.situation,
+        &selected,
+        &allowed,
+        &scored.candidates,
+        &denied,
+        gate.verdict(&denied),
+    )?;
+    decision.verification_contract = contract_json(&contract)?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    if elapsed_ms > config.max_pipeline_ms {
+        return Err(CognitiveError::Store(format!(
+            "runtime advisory exceeded {}ms budget",
+            config.max_pipeline_ms
+        )));
+    }
+    Ok(ExecutiveRunOutcome {
+        snapshot: snapshot(SnapshotParams {
+            situation: &input.situation,
+            stage: "advisory",
+            selected: Some(&selected),
+            policy_summary: decision.policy_verdict.clone().unwrap_or_default(),
+            verification_summary: "not_run".into(),
+            prediction_available: scored.prediction_available,
+            reflection_id: None,
+            degraded: vec![
+                "advisory_only:no_action_executed".into(),
+                "prediction_unavailable".into(),
+            ],
+        }),
+        decision: Some(decision),
+        action_message: "advisory selection recorded; live agent retains execution authority"
+            .into(),
+        verification: VerificationVerdict::NotRun,
+    })
+}
+
+fn advisory_contract(
+    situation: &Situation,
+    candidate: &Candidate,
+    working_dir: &Path,
+) -> Result<Option<VerificationContract>, CognitiveError> {
+    let Some(kind) = verification_kind(situation.kind, candidate) else {
+        return Ok(None);
+    };
+    VerificationEngine
+        .require(&crate::ContractInput {
+            verification_kind: kind,
+            action_kind: candidate.action_kind,
+            files_touched: Vec::new(),
+            commands_planned: candidate.tool_name.clone().into_iter().collect(),
+            working_directory: working_dir.to_path_buf(),
+            situation_id: situation.id.clone(),
+            override_reason: Some("executive loop advisory".into()),
+        })
+        .map(Some)
+}
+
+#[derive(Debug, Clone)]
 pub struct PlannedActionInput {
     pub situation: Situation,
     pub candidates: Vec<Candidate>,
@@ -158,6 +249,74 @@ where
             working_dir: input.working_dir,
             world_model_state: input.world_model_state,
             degraded,
+        })
+    }
+
+    pub fn run_advisory(
+        &self,
+        input: ExecutiveAdvisoryInput,
+    ) -> Result<ExecutiveRunOutcome, CognitiveError> {
+        if !self.config.enabled || input.situation.kind.is_trivial() {
+            return Ok(direct_outcome(&input.situation, "not_required", Vec::new()));
+        }
+        let mut degraded = vec!["advisory_only:no_action_executed".into()];
+        let (profile, memory) = self.load_context(input.situation.kind, &mut degraded);
+        let candidates =
+            self.plan_candidates(&input.situation, &profile, &memory, &mut degraded)?;
+        self.plan_advisory(PlannedActionInput {
+            situation: input.situation,
+            candidates,
+            working_dir: input.working_dir,
+            world_model_state: input.world_model_state,
+            degraded,
+        })
+    }
+
+    fn plan_advisory(
+        &self,
+        input: PlannedActionInput,
+    ) -> Result<ExecutiveRunOutcome, CognitiveError> {
+        let scored = self
+            .scorer
+            .score(&input.candidates, &input.world_model_state);
+        let (allowed, denied) = self.policy_gate.filter(scored.candidates.clone());
+        let Some(selected) = select_candidate(allowed.clone(), &input.situation) else {
+            return Ok(direct_outcome(
+                &input.situation,
+                "policy_blocked",
+                input.degraded,
+            ));
+        };
+        let mut degraded = input.degraded;
+        if !scored.prediction_available {
+            degraded.push("prediction_unavailable".into());
+        }
+        let contract = self.contract_for(&input.situation, &selected, &input.working_dir)?;
+        let mut decision = build_decision(
+            &input.situation,
+            &selected,
+            &allowed,
+            &scored.candidates,
+            &denied,
+            self.policy_gate.verdict(&denied),
+        )?;
+        decision.verification_contract = contract_json(&contract)?;
+        record_decision(self, &decision, &mut degraded);
+        Ok(ExecutiveRunOutcome {
+            snapshot: snapshot(SnapshotParams {
+                situation: &input.situation,
+                stage: "advisory",
+                selected: Some(&selected),
+                policy_summary: decision.policy_verdict.clone().unwrap_or_default(),
+                verification_summary: "not_run".into(),
+                prediction_available: scored.prediction_available,
+                reflection_id: None,
+                degraded,
+            }),
+            decision: Some(decision),
+            action_message: "advisory selection recorded; live agent retains execution authority"
+                .into(),
+            verification: VerificationVerdict::NotRun,
         })
     }
 

@@ -197,7 +197,7 @@ pub(super) async fn build_session_agent(
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
     if let Some(store) = cognitive_store {
-        agent.set_cognitive_store(store);
+        super::cognitive_store::wire_runtime(&mut agent, config, &working_dir, store);
     }
 
     agent.set_hook_registry(Arc::clone(&hook_registry_arc));

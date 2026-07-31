@@ -76,6 +76,10 @@ impl Agent {
             reasoning_evidence_refs: Vec::new(),
             current_situation: None,
             cognitive_store: None,
+            cognitive_config: None,
+            cognitive_policy: None,
+            cognitive_ledger_dir: None,
+            cognitive_executive_reminder: None,
             // TASK #245: wired by the binary at startup; default None makes
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
@@ -258,6 +262,17 @@ impl Agent {
 
     pub fn set_cognitive_store(&mut self, store: archon_cognitive::PersistentCognitiveStore) {
         self.cognitive_store = Some(Arc::new(std::sync::Mutex::new(store)));
+    }
+
+    pub fn set_cognitive_executive(
+        &mut self,
+        config: archon_cognitive::CognitiveConfig,
+        policy: archon_cognitive::CognitivePolicy,
+        ledger_dir: std::path::PathBuf,
+    ) {
+        self.cognitive_config = Some(config);
+        self.cognitive_policy = Some(policy);
+        self.cognitive_ledger_dir = Some(ledger_dir);
     }
 
     /// Set the auto-extraction system (v0.1.23: LLM-driven fact extraction every N turns).

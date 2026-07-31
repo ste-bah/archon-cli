@@ -226,7 +226,7 @@ pub(super) async fn build(
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
     if let Some(store) = cognitive_store {
-        agent.set_cognitive_store(store);
+        super::cognitive_store::wire_runtime(&mut agent, config, &working_dir, store);
     }
 
     if let Some(store) = checkpoint_store {

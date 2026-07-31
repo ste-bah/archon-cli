@@ -184,6 +184,10 @@ pub struct Agent {
     reasoning_evidence_refs: Vec<ReasoningEvidenceEventPayload>,
     current_situation: Option<archon_cognitive::Situation>,
     cognitive_store: Option<Arc<std::sync::Mutex<archon_cognitive::PersistentCognitiveStore>>>,
+    cognitive_config: Option<archon_cognitive::CognitiveConfig>,
+    cognitive_policy: Option<archon_cognitive::CognitivePolicy>,
+    cognitive_ledger_dir: Option<std::path::PathBuf>,
+    cognitive_executive_reminder: Option<String>,
     #[allow(clippy::type_complexity)]
     inner_voice_change_callback: Option<Arc<dyn Fn(&InnerVoice) + Send + Sync>>,
 }
