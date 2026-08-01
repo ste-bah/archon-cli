@@ -8,7 +8,7 @@ use crate::agents::metadata::AgentMetadata;
 /// The catalog constructs this representation from mutable staging state at
 /// publication time. Its fields remain private so a published snapshot cannot
 /// be changed through the public API.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ImmutableCatalogSnapshot {
     entries: HashMap<AgentKey, AgentMetadata>,
     name_index: HashMap<String, BTreeSet<semver::Version>>,
@@ -17,29 +17,51 @@ pub struct ImmutableCatalogSnapshot {
 }
 
 impl ImmutableCatalogSnapshot {
-    /// Convert mutable compatibility state into one immutable publication.
-    pub(crate) fn from_legacy(snapshot: &CatalogSnapshot) -> Self {
-        Self {
-            entries: snapshot
-                .entries
-                .iter()
-                .map(|entry| (entry.key().clone(), entry.value().clone()))
-                .collect(),
-            name_index: snapshot
-                .name_index
-                .iter()
-                .map(|entry| (entry.key().clone(), entry.value().clone()))
-                .collect(),
-            tag_index: snapshot
-                .tag_index
-                .iter()
-                .map(|entry| (entry.key().clone(), entry.value().clone()))
-                .collect(),
-            capability_index: snapshot
-                .capability_index
-                .iter()
-                .map(|entry| (entry.key().clone(), entry.value().clone()))
-                .collect(),
+    /// Insert one metadata record and update every index.
+    pub(crate) fn insert(&mut self, key: AgentKey, metadata: AgentMetadata) {
+        self.entries.insert(key.clone(), metadata.clone());
+        self.name_index
+            .entry(metadata.name.clone())
+            .or_default()
+            .insert(metadata.version.clone());
+        self.add_memberships(&key, &metadata);
+    }
+
+    /// Remove memberships owned by one prior metadata record.
+    pub(crate) fn remove_memberships(&mut self, key: &AgentKey, metadata: &AgentMetadata) {
+        for tag in &metadata.tags {
+            Self::remove_membership(&mut self.tag_index, tag, key);
+        }
+        for capability in &metadata.capabilities {
+            Self::remove_membership(&mut self.capability_index, capability, key);
+        }
+    }
+
+    fn add_memberships(&mut self, key: &AgentKey, metadata: &AgentMetadata) {
+        for tag in &metadata.tags {
+            self.tag_index
+                .entry(tag.clone())
+                .or_default()
+                .insert(key.clone());
+        }
+        for capability in &metadata.capabilities {
+            self.capability_index
+                .entry(capability.clone())
+                .or_default()
+                .insert(key.clone());
+        }
+    }
+
+    fn remove_membership(
+        index: &mut HashMap<String, HashSet<AgentKey>>,
+        membership: &str,
+        key: &AgentKey,
+    ) {
+        if let Some(bucket) = index.get_mut(membership) {
+            bucket.remove(key);
+            if bucket.is_empty() {
+                index.remove(membership);
+            }
         }
     }
 

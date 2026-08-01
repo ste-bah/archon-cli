@@ -6,38 +6,31 @@
 //! read facades. Fixtures, `ArcSwap` targets, and equivalence checks are ready
 //! before Criterion begins timing.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use archon_bench::catalog_representation::{deterministic_index_checksum, metadata_digest};
 use archon_core::agents::{
-    AgentKey, AgentMetadata, AgentState, CatalogSnapshot, ResourceReq, SourceKind,
+    AgentKey, AgentMetadata, AgentState, CatalogSnapshot, DiscoveryCatalog,
+    ImmutableCatalogSnapshot, ResourceReq, SourceKind,
 };
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 const FIXTURE_SIZES: [usize; 3] = [100, 1_000, 10_000];
 const VERSIONS_PER_NAME: usize = 4;
 
-#[derive(Clone, Debug, Default)]
-struct StandardMapSnapshot {
-    entries: HashMap<AgentKey, AgentMetadata>,
-    name_index: HashMap<String, BTreeSet<semver::Version>>,
-    tag_index: HashMap<String, HashSet<AgentKey>>,
-    capability_index: HashMap<String, HashSet<AgentKey>>,
-}
-
 struct DashReadFacade {
     snapshot: ArcSwap<CatalogSnapshot>,
 }
 
 struct StandardReadFacade {
-    snapshot: ArcSwap<StandardMapSnapshot>,
+    snapshot: ArcSwap<ImmutableCatalogSnapshot>,
 }
 
 struct Fixture {
     dash: CatalogSnapshot,
-    standard: StandardMapSnapshot,
+    standard: ImmutableCatalogSnapshot,
     dash_reads: DashReadFacade,
     standard_reads: StandardReadFacade,
     exact_key: AgentKey,
@@ -89,11 +82,11 @@ impl Fixture {
         );
         assert_eq!(
             membership_index_checksum_dash(&self.dash.tag_index),
-            membership_index_checksum_standard(&self.standard.tag_index)
+            membership_index_checksum_standard(self.standard.tag_index())
         );
         assert_eq!(
             membership_index_checksum_dash(&self.dash.capability_index),
-            membership_index_checksum_standard(&self.standard.capability_index),
+            membership_index_checksum_standard(self.standard.capability_index()),
             "capability index checksum"
         );
         assert_eq!(dash_results(self), standard_results(self));
@@ -105,7 +98,7 @@ impl Fixture {
         assert_eq!(entry_digests_dash(&dash), entry_digests_standard(&standard));
         assert_eq!(
             membership_index_checksum_dash(&dash.capability_index),
-            membership_index_checksum_standard(&standard.capability_index),
+            membership_index_checksum_standard(standard.capability_index()),
             "complete capability index checksum"
         );
     }
@@ -135,7 +128,7 @@ impl DashReadFacade {
 }
 
 impl StandardReadFacade {
-    fn from_snapshot(snapshot: &StandardMapSnapshot) -> Self {
+    fn from_snapshot(snapshot: &ImmutableCatalogSnapshot) -> Self {
         Self {
             snapshot: ArcSwap::from(Arc::new(snapshot.clone())),
         }
@@ -157,16 +150,24 @@ impl StandardReadFacade {
     }
 }
 
-fn build_snapshots(agent_count: usize) -> (CatalogSnapshot, StandardMapSnapshot) {
-    let mut dash = CatalogSnapshot::default();
-    let mut standard = StandardMapSnapshot::default();
-    for index in 0..agent_count {
-        let metadata = fixture_metadata(index);
-        let key = (metadata.name.clone(), metadata.version.clone());
-        insert_dash(&mut dash, key.clone(), metadata.clone());
-        insert_standard(&mut standard, key, metadata);
-    }
+fn build_snapshots(agent_count: usize) -> (CatalogSnapshot, ImmutableCatalogSnapshot) {
+    let metadata: Vec<_> = (0..agent_count).map(fixture_metadata).collect();
+    let dash = build_dash_snapshot(&metadata);
+    let catalog = DiscoveryCatalog::new();
+    let result = catalog.insert_all(metadata);
+    assert!(result.rejected.is_empty(), "benchmark fixture rejections");
+    assert_eq!(result.accepted.loaded, agent_count);
+    let standard = catalog.snapshot_immutable().as_ref().clone();
     (dash, standard)
+}
+
+fn build_dash_snapshot(metadata: &[AgentMetadata]) -> CatalogSnapshot {
+    let mut dash = CatalogSnapshot::default();
+    for metadata in metadata {
+        let key = (metadata.name.clone(), metadata.version.clone());
+        insert_dash(&mut dash, key, metadata.clone());
+    }
+    dash
 }
 
 fn fixture_metadata(index: usize) -> AgentMetadata {
@@ -204,29 +205,8 @@ fn insert_dash(snapshot: &mut CatalogSnapshot, key: AgentKey, metadata: AgentMet
     insert_memberships_dash(&snapshot.capability_index, &metadata.capabilities, &key);
 }
 
-fn insert_standard(snapshot: &mut StandardMapSnapshot, key: AgentKey, metadata: AgentMetadata) {
-    snapshot.entries.insert(key.clone(), metadata.clone());
-    snapshot
-        .name_index
-        .entry(metadata.name.clone())
-        .or_default()
-        .insert(metadata.version.clone());
-    insert_memberships_standard(&mut snapshot.tag_index, &metadata.tags, &key);
-    insert_memberships_standard(&mut snapshot.capability_index, &metadata.capabilities, &key);
-}
-
 fn insert_memberships_dash(
     index: &dashmap::DashMap<String, HashSet<AgentKey>>,
-    labels: &[String],
-    key: &AgentKey,
-) {
-    for label in labels {
-        index.entry(label.clone()).or_default().insert(key.clone());
-    }
-}
-
-fn insert_memberships_standard(
-    index: &mut HashMap<String, HashSet<AgentKey>>,
     labels: &[String],
     key: &AgentKey,
 ) {
@@ -240,9 +220,9 @@ fn exact_dash(snapshot: &CatalogSnapshot, key: &AgentKey) -> AgentMetadata {
     valid_metadata(metadata, "exact DashMap fixture entry")
 }
 
-fn exact_standard(snapshot: &StandardMapSnapshot, key: &AgentKey) -> AgentMetadata {
+fn exact_standard(snapshot: &ImmutableCatalogSnapshot, key: &AgentKey) -> AgentMetadata {
     valid_metadata(
-        snapshot.entries.get(key).cloned(),
+        snapshot.get(key).cloned(),
         "exact standard-map fixture entry",
     )
 }
@@ -262,14 +242,12 @@ fn highest_dash(snapshot: &CatalogSnapshot, name: &str) -> AgentMetadata {
     valid_metadata(metadata, "DashMap highest-version fixture entry")
 }
 
-fn highest_standard(snapshot: &StandardMapSnapshot, name: &str) -> AgentMetadata {
+fn highest_standard(snapshot: &ImmutableCatalogSnapshot, name: &str) -> AgentMetadata {
     let versions = snapshot
-        .name_index
-        .get(name)
+        .versions_for(name)
         .expect("standard-map fixture versions");
     let metadata = versions.iter().rev().find_map(|version| {
         snapshot
-            .entries
             .get(&(name.to_owned(), version.clone()))
             .cloned()
             .filter(is_valid)
@@ -300,18 +278,16 @@ fn indexed_dash(snapshot: &CatalogSnapshot, tag: &str, capability: &str) -> Vec<
 }
 
 fn indexed_standard(
-    snapshot: &StandardMapSnapshot,
+    snapshot: &ImmutableCatalogSnapshot,
     tag: &str,
     capability: &str,
 ) -> Vec<AgentMetadata> {
     let tags = snapshot
-        .tag_index
-        .get(tag)
+        .tagged_keys(tag)
         .cloned()
         .expect("standard-map fixture tag index");
     let capabilities = snapshot
-        .capability_index
-        .get(capability)
+        .capability_keys(capability)
         .cloned()
         .expect("standard-map fixture capability index");
     collect_valid_standard(snapshot, indexed_keys(tags, capabilities))
@@ -329,11 +305,11 @@ fn collect_valid_dash(snapshot: &CatalogSnapshot, keys: HashSet<AgentKey>) -> Ve
 }
 
 fn collect_valid_standard(
-    snapshot: &StandardMapSnapshot,
+    snapshot: &ImmutableCatalogSnapshot,
     keys: HashSet<AgentKey>,
 ) -> Vec<AgentMetadata> {
     keys.iter()
-        .filter_map(|key| snapshot.entries.get(key).cloned())
+        .filter_map(|key| snapshot.get(key).cloned())
         .filter(|metadata| matches!(&metadata.state, AgentState::Valid))
         .collect()
 }
