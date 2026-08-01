@@ -1,18 +1,21 @@
-//! Catalog representation clone and indexed-filter-candidate benchmark for Issue #109.
+//! Catalog representation benchmark for Issue #109.
 //!
 //! This harness compares the current `DashMap`-backed `CatalogSnapshot` with an
 //! equivalent immutable representation built from standard `HashMap`s. It
-//! measures representation clone/preparation, exact lookup, highest-version lookup,
+//! measures complete representation deep clone/preparation plus `ArcSwap::store`
+//! (the production publication boundary), exact lookup, highest-version lookup,
 //! and `FilterLogic::And` candidate construction from one tag and one capability.
-//! It deliberately excludes `ArcSwap::store`, metadata collection, sorting, and
-//! complete catalog publication. Fixtures are deterministic and built before
-//! Criterion starts timing.
+//! Fixtures are deterministic and built before Criterion starts timing.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
-use archon_bench::catalog_representation::deterministic_index_checksum;
+use arc_swap::ArcSwap;
+use archon_bench::catalog_representation::{deterministic_index_checksum, metadata_digest};
 
-use archon_core::agents::{AgentKey, AgentMetadata, AgentState, CatalogSnapshot, ResourceReq, SourceKind};
+use archon_core::agents::{
+    AgentKey, AgentMetadata, AgentState, CatalogSnapshot, ResourceReq, SourceKind,
+};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 const FIXTURE_SIZES: [usize; 3] = [100, 1_000, 10_000];
@@ -63,16 +66,24 @@ impl Fixture {
         let fixture = Self {
             dash,
             standard,
-            exact_key: (format!("agent-{representative}"), semver::Version::new(1, 0, 0)),
+            exact_key: (
+                format!("agent-{representative}"),
+                semver::Version::new(1, 0, 0),
+            ),
             lookup_name: format!("agent-{representative}"),
             tag: "tag-2".to_owned(),
             capability: "capability-3".to_owned(),
         };
         fixture.validate_equivalence();
+        fixture.complete_clone_matches_standard();
         fixture
     }
 
     fn validate_equivalence(&self) {
+        assert_eq!(
+            entry_digests_dash(&self.dash),
+            entry_digests_standard(&self.standard)
+        );
         assert_eq!(snapshot_digest(&self.dash), standard_digest(&self.standard));
         assert_eq!(
             name_index_checksum_dash(&self.dash),
@@ -84,13 +95,14 @@ impl Fixture {
             membership_index_checksum_standard(&self.standard.tag_index),
             "tag index checksum"
         );
-        assert_eq!(
-            membership_index_checksum_dash(&self.dash.capability_index),
-            membership_index_checksum_standard(&self.standard.capability_index),
-            "capability index checksum"
-        );
         assert_eq!(dash_results(self), standard_results(self));
-        assert_eq!(snapshot_digest(&self.dash.clone()), standard_digest(&self.standard.clone()));
+    }
+
+    fn complete_clone_matches_standard(&self) {
+        assert_eq!(
+            entry_digests_dash(&self.dash.clone()),
+            entry_digests_standard(&self.standard.clone())
+        );
     }
 }
 
@@ -165,32 +177,44 @@ fn insert_standard(snapshot: &mut StandardMapSnapshot, key: AgentKey, metadata: 
 }
 
 fn metadata_checksum(metadata: &AgentMetadata) -> u64 {
-    let checksum = metadata
-        .tags
-        .iter()
-        .map(|tag| string_checksum(tag))
-        .fold(0_u64, u64::wrapping_add)
-        .wrapping_add(
-            metadata
-                .capabilities
-                .iter()
-                .map(|capability| string_checksum(capability))
-                .fold(0_u64, u64::wrapping_add),
-        );
-    string_checksum(&metadata.name)
-        .wrapping_add(string_checksum(&metadata.version.to_string()))
-        .wrapping_add(string_checksum(&metadata.description))
-        .wrapping_add(checksum)
+    let digest = metadata_digest(metadata);
+    u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("digest prefix"))
 }
 
 fn string_checksum(value: &str) -> u64 {
-    value
-        .bytes()
-        .fold(0_u64, |checksum, byte| checksum.wrapping_mul(31).wrapping_add(byte as u64))
+    value.bytes().fold(0_u64, |checksum, byte| {
+        checksum.wrapping_mul(31).wrapping_add(byte as u64)
+    })
 }
 
 fn key_checksum(key: &AgentKey) -> u64 {
     string_checksum(&key.0).wrapping_add(string_checksum(&key.1.to_string()))
+}
+
+fn entry_digests_dash(snapshot: &CatalogSnapshot) -> BTreeSet<(String, String)> {
+    snapshot
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                agent_key_string(entry.key()),
+                metadata_digest(entry.value()).to_hex().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn entry_digests_standard(snapshot: &StandardMapSnapshot) -> BTreeSet<(String, String)> {
+    snapshot
+        .entries
+        .iter()
+        .map(|(key, metadata)| {
+            (
+                agent_key_string(key),
+                metadata_digest(metadata).to_hex().to_string(),
+            )
+        })
+        .collect()
 }
 
 fn snapshot_digest(snapshot: &CatalogSnapshot) -> (usize, usize, usize, usize, u64) {
@@ -248,7 +272,10 @@ fn name_index_checksum_standard(snapshot: &StandardMapSnapshot) -> u64 {
         .map(|(name, versions)| {
             (
                 name.clone(),
-                versions.iter().map(ToString::to_string).collect::<BTreeSet<_>>(),
+                versions
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
             )
         })
         .collect();
@@ -288,7 +315,8 @@ fn dash_results(fixture: &Fixture) -> ResultChecks {
         .map(|entry| metadata_checksum(entry.value()))
         .expect("exact DashMap fixture entry");
     let highest_version = highest_dash(&fixture.dash, &fixture.lookup_name);
-    let (indexed_count, indexed_checksum) = indexed_dash(&fixture.dash, &fixture.tag, &fixture.capability);
+    let (indexed_count, indexed_checksum) =
+        indexed_dash(&fixture.dash, &fixture.tag, &fixture.capability);
     ResultChecks {
         exact,
         highest_version,
@@ -378,99 +406,10 @@ fn indexed_candidates(tags: HashSet<AgentKey>, capabilities: HashSet<AgentKey>) 
     (matching.len(), checksum)
 }
 
-fn bench_catalog_representations(criterion: &mut Criterion) {
-    for size in FIXTURE_SIZES {
-        let fixture = Fixture::new(size);
-        bench_clone_preparation(criterion, size, &fixture);
-        bench_exact_get(criterion, size, &fixture);
-        bench_highest_version_lookup(criterion, size, &fixture);
-        bench_tag_capability_read(criterion, size, &fixture);
-    }
-}
+mod catalog_representation_bench;
 
-fn bench_clone_preparation(criterion: &mut Criterion, size: usize, fixture: &Fixture) {
-    let mut group = criterion.benchmark_group("catalog_representation/clone_preparation");
-    group.bench_with_input(
-        BenchmarkId::new("dashmap", size),
-        fixture,
-        |bench, fixture| bench.iter(|| black_box(fixture.dash.clone())),
-    );
-    group.bench_with_input(
-        BenchmarkId::new("standard_hashmap", size),
-        fixture,
-        |bench, fixture| bench.iter(|| black_box(fixture.standard.clone())),
-    );
-    group.finish();
-}
-
-fn bench_exact_get(criterion: &mut Criterion, size: usize, fixture: &Fixture) {
-    let mut group = criterion.benchmark_group("catalog_representation/exact_get");
-    group.bench_with_input(BenchmarkId::new("dashmap", size), fixture, |bench, fixture| {
-        bench.iter(|| {
-            black_box(
-                fixture
-                    .dash
-                    .entries
-                    .get(&fixture.exact_key)
-                    .map(|entry| metadata_checksum(entry.value()))
-                    .expect("exact DashMap fixture entry"),
-            )
-        })
-    });
-    group.bench_with_input(
-        BenchmarkId::new("standard_hashmap", size),
-        fixture,
-        |bench, fixture| {
-            bench.iter(|| {
-                black_box(
-                    fixture
-                        .standard
-                        .entries
-                        .get(&fixture.exact_key)
-                        .map(metadata_checksum)
-                        .expect("exact standard-map fixture entry"),
-                )
-            })
-        },
-    );
-    group.finish();
-}
-
-fn bench_highest_version_lookup(criterion: &mut Criterion, size: usize, fixture: &Fixture) {
-    let mut group = criterion.benchmark_group("catalog_representation/highest_version_index_lookup");
-    group.bench_with_input(BenchmarkId::new("dashmap", size), fixture, |bench, fixture| {
-        bench.iter(|| black_box(highest_dash(&fixture.dash, &fixture.lookup_name)))
-    });
-    group.bench_with_input(
-        BenchmarkId::new("standard_hashmap", size),
-        fixture,
-        |bench, fixture| {
-            bench.iter(|| black_box(highest_standard(&fixture.standard, &fixture.lookup_name)))
-        },
-    );
-    group.finish();
-}
-
-fn bench_tag_capability_read(criterion: &mut Criterion, size: usize, fixture: &Fixture) {
-    let mut group = criterion.benchmark_group("catalog_representation/tag_capability_indexed_read");
-    group.bench_with_input(BenchmarkId::new("dashmap", size), fixture, |bench, fixture| {
-        bench.iter(|| black_box(indexed_dash(&fixture.dash, &fixture.tag, &fixture.capability)))
-    });
-    group.bench_with_input(
-        BenchmarkId::new("standard_hashmap", size),
-        fixture,
-        |bench, fixture| {
-            bench.iter(|| {
-                black_box(indexed_standard(
-                    &fixture.standard,
-                    &fixture.tag,
-                    &fixture.capability,
-                ))
-            })
-        },
-    );
-    group.finish();
-}
-
-criterion_group!(benches, bench_catalog_representations);
+criterion_group!(
+    benches,
+    catalog_representation_bench::bench_catalog_representations
+);
 criterion_main!(benches);

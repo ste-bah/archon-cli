@@ -1,10 +1,11 @@
 //! archon-bench harness crate.
 //!
-//! The three benches live under `benches/`:
+//! The four registered benches live under `benches/`:
 //!
-//! - `task_submit`    — NFR-PERF-001 (<100 ms p95 submit)
-//! - `discovery_scan` — NFR-PERF-002 (<1 s scan over 300 agents)
-//! - `fanout_100`     — NFR-SCALABILITY-001 (100 workers <1 s)
+//! - `task_submit`             — NFR-PERF-001 (<100 ms p95 submit)
+//! - `discovery_scan`          — NFR-PERF-002 (<1 s scan over 300 agents)
+//! - `fanout_100`              — NFR-SCALABILITY-001 (100 workers <1 s)
+//! - `catalog_representation`  — Issue #109 representation decision evidence
 //!
 //! Latency limits live in `threshold.toml` and are the single source of
 //! truth for "what counts as a regression". Benches read them via

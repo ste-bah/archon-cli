@@ -10,6 +10,9 @@ path = "src/lib.rs"
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+archon-core = { path = "../archon-core" }
 hdrhistogram.workspace = true
 toml = "0.8"
 
@@ -17,12 +20,11 @@ toml = "0.8"
 criterion.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 tempfile.workspace = true
-serde_json.workspace = true
 chrono.workspace = true
 semver.workspace = true
 dashmap.workspace = true
+arc-swap.workspace = true
 async-trait.workspace = true
-archon-core = { path = "../archon-core" }
 archon-pipeline = { path = "../archon-pipeline" }
 
 [[bench]]
