@@ -86,8 +86,12 @@ jobs:
             # Bumped to 45 to give headroom for the post-test phases.
             timeout-override: 45
           - os: windows-latest
-            # Windows has no mold, links MSVC, and additionally compiles
-            # vendored OpenSSL from source (see the Perl note below).
+            # Windows has no mold and links with MSVC link.exe, which dominates
+            # a workspace producing ~200 test binaries. (Vendored OpenSSL is
+            # NOT a Windows-specific cost -- `openssl` is pinned with the
+            # `vendored` feature untargeted, and the Linux job installs perl to
+            # build it too. An earlier version of this comment claimed
+            # otherwise.)
             #
             # 60 min was not enough: run 30695094906 built the workspace
             # successfully and was then cancelled mid-nextest at exactly

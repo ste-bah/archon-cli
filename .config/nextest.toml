@@ -1,0 +1,22 @@
+# cargo-nextest configuration.
+#
+# The point of this file is `terminate-after`. By default nextest prints SLOW
+# once a test passes `period` and then waits for it forever, so a single hung
+# test consumes the whole job budget and reports nothing useful. That is what
+# happened when Windows CI was re-enabled: runs 30695094906 and 30697135157
+# both built the workspace, entered the test phase, and were cancelled at the
+# wall (60 min, then 120 min) having never said which tests were responsible.
+# Linux finishes the same 9904 tests in 340s and macOS in 491s.
+#
+# Windows is the platform where this matters, because `.cargo/config.toml`
+# records that spawned-`archon` integration tests can crash during early init
+# there, and a test that blocks instead of failing is indistinguishable from a
+# slow one without a timeout.
+#
+# 60s x 4 = a hard 4 minute ceiling per test. The slowest legitimate test
+# observed is `training_reduces_loss_and_passes_three_property_gate` at 133s on
+# ubuntu, so this leaves nearly 2x headroom before a real test is at risk. A
+# test killed by this is reported as a failure with its name, which is the
+# whole point: a named failure beats a silent two-hour cancellation.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 4 }
