@@ -6,14 +6,20 @@
 # helpers (`ffmpeg`, `ffprobe`, `yt-dlp`, and `whisper-cli` where packaged),
 # and optional Docker/OpenShell sandbox runtime dependencies.
 #
-# Does NOT install Rust, Python RapidOCR/OpenCV packages, VLM/Whisper model
+# Also installs rustup (per-user, always as the *invoking* user — under sudo
+# the installer runs as $SUDO_USER so Rust never lands in root's home) unless
+# --no-rust is given. The repo pins its toolchain in rust-toolchain.toml;
+# rustup fetches the pinned version on first build.
+#
+# Does NOT install Python RapidOCR/OpenCV packages, VLM/Whisper model
 # files, cloud OCR keys, provider credentials, or enable sandbox backends in
 # config.toml. OpenShell gateway setup is opt-in.
 #
 # Usage:
-#   sudo scripts/install-system-deps.sh         # install everything
+#   sudo scripts/install-system-deps.sh         # install everything (incl. rustup)
 #   scripts/install-system-deps.sh --dry-run    # show what would run, no changes
 #   scripts/install-system-deps.sh --check      # verify deps already installed, no changes
+#   sudo scripts/install-system-deps.sh --no-rust   # skip the rustup install
 #   sudo scripts/install-system-deps.sh --with-docker
 #   sudo scripts/install-system-deps.sh --with-openshell
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
@@ -49,11 +55,13 @@ WITH_DOCKER=false
 WITH_OPENSHELL=false
 SETUP_OPENSHELL_GATEWAY=false
 WITH_TRADING_TOOLS=false
+WITH_RUST=true
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run)                  DRY_RUN=true ;;
         --check)                    CHECK_ONLY=true ;;
+        --no-rust)                  WITH_RUST=false ;;
         --with-docker)              WITH_DOCKER=true ;;
         --with-openshell)           WITH_OPENSHELL=true ;;
         --with-trading-tools)       WITH_TRADING_TOOLS=true ;;
@@ -111,6 +119,22 @@ if [ "$OS_FAMILY" = "macos" ]; then
     export PATH
 fi
 
+# ---------------------------------------------------------------------------
+# Rust target user — rustup is per-user. Under sudo, install as the invoking
+# user ($SUDO_USER), never root, so ~/.cargo lands in the right home.
+# ---------------------------------------------------------------------------
+RUST_USER=""
+RUST_HOME="$HOME"
+if [ "$(id -u 2>/dev/null || echo 1)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    RUST_USER="$SUDO_USER"
+    RUST_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+    [ -n "$RUST_HOME" ] || RUST_HOME="/home/$SUDO_USER"
+fi
+
+have_cargo() {
+    command -v cargo >/dev/null 2>&1 || [ -x "$RUST_HOME/.cargo/bin/cargo" ]
+}
+
 # Each variable below is a SPACE-SEPARATED list of package names appropriate
 # for the selected package manager. The runner concatenates all three groups
 # and runs them in a single pass for efficiency.
@@ -137,7 +161,7 @@ case "$DISTRO_ID" in
         PKG_MGR="apt"
         PKG_UPDATE_CMD="apt-get update"
         PKG_INSTALL_CMD="apt-get install -y"
-        PKG_BUILD="build-essential pkg-config libssl-dev git"
+        PKG_BUILD="build-essential pkg-config libssl-dev git curl"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
@@ -149,7 +173,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkg-config openssl-devel git"
+        PKG_BUILD="gcc pkg-config openssl-devel git curl"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg-free yt-dlp"
@@ -174,7 +198,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz"
+        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz curl"
         PKG_PDF="poppler-utils"
         PKG_OCR=""          # not packaged on AL2023 — see TESSERACT_UNPACKAGED
         PKG_VIDEO=""        # ffmpeg/yt-dlp via install_amzn_extras
@@ -188,7 +212,7 @@ case "$DISTRO_ID" in
         PKG_MGR="pacman"
         PKG_UPDATE_CMD="pacman -Sy"
         PKG_INSTALL_CMD="pacman -S --needed --noconfirm"
-        PKG_BUILD="base-devel openssl pkg-config git"
+        PKG_BUILD="base-devel openssl pkg-config git curl"
         PKG_PDF="poppler"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg yt-dlp whisper.cpp"
@@ -205,7 +229,7 @@ case "$DISTRO_ID" in
         PKG_MGR="zypper"
         PKG_UPDATE_CMD="zypper refresh"
         PKG_INSTALL_CMD="zypper install -y"
-        PKG_BUILD="gcc pkg-config libopenssl-devel git"
+        PKG_BUILD="gcc pkg-config libopenssl-devel git curl"
         PKG_PDF="poppler-tools"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
@@ -220,7 +244,7 @@ case "$DISTRO_ID" in
         PKG_MGR="apk"
         PKG_UPDATE_CMD=""   # apk add --no-cache pulls fresh index per call
         PKG_INSTALL_CMD="apk add --no-cache"
-        PKG_BUILD="build-base openssl-dev pkgconfig git"
+        PKG_BUILD="build-base openssl-dev pkgconfig git curl"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
@@ -324,6 +348,9 @@ if [ "$CHECK_ONLY" = true ]; then
             fi
         done
     fi
+    if [ "$WITH_RUST" = true ] && ! have_cargo; then
+        MISSING="$MISSING cargo"
+    fi
     # gcc OR cc satisfies the C compiler requirement
     if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
         :  # already in MISSING
@@ -358,6 +385,9 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
     if [ "$WITH_TRADING_TOOLS" = true ]; then
         PRESENT="$PRESENT, node, npm, python3"
+    fi
+    if [ "$WITH_RUST" = true ]; then
+        PRESENT="$PRESENT, cargo"
     fi
     echo "install-system-deps.sh: all requested binaries present ($PRESENT)"
     exit 0
@@ -443,6 +473,40 @@ install_macos_docker() {
         echo "install-system-deps.sh: Docker Desktop install failed" >&2
         exit 3
     }
+}
+
+install_rustup() {
+    if [ "$WITH_RUST" != true ]; then
+        return 0
+    fi
+    if have_cargo; then
+        echo "install-system-deps.sh: cargo already present (rustup install skipped)"
+        return 0
+    fi
+    RUSTUP_CMD="curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    if [ "$DRY_RUN" = true ]; then
+        if [ -n "$RUST_USER" ]; then
+            echo "[dry-run] sudo -u $RUST_USER -H sh -c \"$RUSTUP_CMD\""
+        else
+            echo "[dry-run] $RUSTUP_CMD"
+        fi
+        return 0
+    fi
+    if [ -n "$RUST_USER" ]; then
+        # Running under sudo: install as the invoking user so ~/.cargo lands
+        # in their home, not root's.
+        echo "+ installing rustup as user $RUST_USER"
+        sudo -u "$RUST_USER" -H sh -c "$RUSTUP_CMD" || {
+            echo "install-system-deps.sh: rustup install failed" >&2
+            exit 3
+        }
+    else
+        echo "+ installing rustup"
+        sh -c "$RUSTUP_CMD" || {
+            echo "install-system-deps.sh: rustup install failed" >&2
+            exit 3
+        }
+    fi
 }
 
 install_amzn_extras() {
@@ -531,6 +595,7 @@ fi
 
 install_macos_docker
 install_amzn_extras
+install_rustup
 install_openshell
 setup_openshell_gateway
 
@@ -564,9 +629,20 @@ if [ "$DRY_RUN" = false ]; then
             echo "  MISSING: $bin (post-install check failed)" >&2
         fi
     done
+    if [ "$WITH_RUST" = true ]; then
+        if have_cargo; then
+            echo "  ok: cargo    ($RUST_HOME/.cargo/bin/cargo)"
+        else
+            echo "  MISSING: cargo (rustup post-install check failed)" >&2
+        fi
+    fi
     echo
     echo "install-system-deps.sh: done. Next steps:"
-    echo "  1. Install rustup if not already (the repo pins its toolchain; rustup fetches it): curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    if [ "$WITH_RUST" = true ]; then
+        echo "  1. Load cargo into this shell: . \"$RUST_HOME/.cargo/env\"  (new shells pick it up automatically)"
+    else
+        echo "  1. Install rustup (--no-rust was given; the repo pins its toolchain; rustup fetches it): curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    fi
     echo "  2. Build archon-cli: cargo build --release --bin archon"
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
     echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"
