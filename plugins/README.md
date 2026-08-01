@@ -68,6 +68,10 @@ Hooks are **enabled by default at install** (matching Claude Code, where install
 
 These bundles were ported from the Claude Code originals with mechanical rules: commands and skills → `SKILL.md` skills; flat-frontmatter agents → 6-file agent dirs; `hooks.json` → `.archon/settings.json` snippets; `CLAUDE.md` → `ARCHON.md`; Task tool → Agent tool with `plugin:agent` names; `${CLAUDE_PLUGIN_ROOT}` → `.archon/plugins/<plugin>`. Every intentional deviation is listed in each plugin's README under "Differences from the Claude plugin". Original LICENSE files (Apache-2.0) ship with each plugin.
 
+## Licensing
+
+Archon itself is MIT-licensed, but the contents of this `plugins/` directory are derived from Apache-2.0 sources and remain **Apache-2.0** (the license does not permit relicensing derivatives as MIT). Each plugin directory carries its upstream LICENSE verbatim, attribution links in every ported file, and change documentation in its README — which together satisfy Apache-2.0's redistribution conditions. The collection-level tooling written from scratch for Archon (`install.sh`, `install.ps1`, `merge-hooks.js`, this README) is MIT like the rest of the repo.
+
 ## Not ported (yet)
 
 - **LSP plugins** (`*-lsp`) — thin wrappers around Claude Code's LSP client config; Archon has its own `lsp` tool.

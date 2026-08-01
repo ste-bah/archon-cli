@@ -229,6 +229,6 @@ See [`docs/development/contributing.md`](docs/development/contributing.md). Ever
 
 ## License
 
-See [`LICENSE`](LICENSE).
+See [`LICENSE`](LICENSE) (MIT). Exception: the [`plugins/`](plugins/README.md) collection is derived from Apache-2.0 sources and remains Apache-2.0 — see [its licensing section](plugins/README.md#licensing).
 
 archon-cli can proxy Anthropic Claude and OpenAI Codex-compatible APIs. You must have valid credentials or an active subscription and comply with the relevant provider usage policies.
