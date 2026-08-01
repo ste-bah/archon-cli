@@ -53,6 +53,12 @@ archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but buil
 > Sandbox backends remain opt-in after installation. Enable them in
 > `[sandbox]` only after reviewing [Sandboxing](../security/sandboxing.md).
 > The manual per-distro lists below are kept for reference and for unsupported distros.
+>
+> **Native Windows:** `install-system-deps.sh` is POSIX-only and exits 1 there.
+> Use `scripts\install-system-deps.ps1` instead — same `-Check`/`-DryRun`
+> behaviour and the same exit codes. It additionally verifies that the `perl`
+> on `PATH` can actually build vendored OpenSSL, which is the failure a plain
+> "is perl installed?" check misses.
 
 Optional local video/image fallbacks use Python packages rather than OS
 packages. Install them into the Python environment used to start Archon when
@@ -97,17 +103,36 @@ export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig"
 
 ### Windows (native)
 
+Use the PowerShell installer — the counterpart to `install-system-deps.sh`,
+which is POSIX-only and refuses to run here:
+
+```powershell
+scripts\install-system-deps.ps1              # install everything
+scripts\install-system-deps.ps1 -Check       # verify deps, change nothing
+scripts\install-system-deps.ps1 -DryRun      # show what would run
+scripts\install-system-deps.ps1 -WithDocker  # add the Docker sandbox backend
+```
+
+Or install by hand:
+
 ```powershell
 winget install Rustlang.Rustup
 winget install Microsoft.VisualStudio.2022.BuildTools
 # Select "Desktop development with C++" during install
 winget install Git.Git
 winget install --id StrawberryPerl.StrawberryPerl -e
+winget install --id oschwartz10612.Poppler -e
+winget install --id UB-Mannheim.TesseractOCR -e
 winget install Gyan.FFmpeg
 winget install yt-dlp.yt-dlp
 # Optional Docker sandbox backend:
 winget install Docker.DockerDesktop
 ```
+
+Poppler and Tesseract were previously missing from this list, so PDF ingest and
+image OCR did not work on native Windows even though every other platform
+installs them. After a winget install you may need a new shell before the
+binaries appear on `PATH` — `-Check` will tell you.
 
 **Perl is required, and it must be Strawberry Perl.** `openssl` is pinned with
 the `vendored` feature, so OpenSSL is compiled from source and its `./Configure`
