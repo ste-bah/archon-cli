@@ -280,7 +280,7 @@ enum ContractVerification {
 }
 
 async fn run_contract_verifier(command: &str) -> ContractVerification {
-    let run = tokio::process::Command::new("sh")
+    let run = tokio::process::Command::new(crate::command::posix_shell::posix_shell())
         .arg("-c")
         .arg(command)
         .kill_on_drop(true)

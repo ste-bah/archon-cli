@@ -173,6 +173,7 @@ pub(crate) mod sessions;
 pub(crate) mod session;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
 pub(crate) mod skills;
+pub(crate) mod posix_shell;
 pub(crate) mod slash;
 pub(crate) mod status;
 pub(crate) mod store_paths;

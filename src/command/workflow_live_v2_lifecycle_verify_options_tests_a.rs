@@ -94,13 +94,13 @@ fn parameterized_verifier(project: &std::path::Path) -> String {
 
 fn run_verifier(command: &str) -> std::process::Output {
     // `sh`, not `/bin/zsh`: production runs focused verifiers through
-    // `Command::new("sh")` (workflow_live_v2_verification.rs:287), as does every
+    // `Command::new(crate::command::posix_shell::posix_shell())` (workflow_live_v2_verification.rs:287), as does every
     // other verifier path in the workspace. Executing them under a different
     // shell here meant the tests were not exercising what ships, and an
     // absolute /bin/zsh made them fail outright on any host without zsh —
     // passing in CI only because the ubuntu runner image happens to include it.
     // The generated commands are plain POSIX.
-    std::process::Command::new("sh")
+    std::process::Command::new(crate::command::posix_shell::posix_shell())
         .args(["-c", command])
         .output()
         .expect("execute generated verifier")

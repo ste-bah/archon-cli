@@ -34,8 +34,21 @@ fn resolve_project_path(project_root: &str, raw: &str) -> Option<(String, String
             .starts_with(project_root)
             .then(|| (raw.to_string(), raw.to_string()));
     }
-    let absolute = PathBuf::from(project_root).join(path);
-    Some((raw.to_string(), absolute.display().to_string()))
+    Some((raw.to_string(), join_project_path(project_root, raw)))
+}
+
+/// Join a project root and a repo-relative artifact path as a `/`-separated
+/// string.
+///
+/// `PathBuf::join(..).display()` was used here, which emits native separators:
+/// on Windows the same workflow produced `/project\.archon/data/report.json`.
+/// These strings are embedded in prompt text and matched against artifact
+/// references elsewhere in the spec, all of which use `/`, so a native
+/// separator corrupts the reference rather than merely looking different.
+fn join_project_path(project_root: &str, relative: &str) -> String {
+    let root = project_root.trim_end_matches(['/', '\\']);
+    let relative = relative.trim_start_matches(['/', '\\']);
+    format!("{root}/{relative}")
 }
 
 fn has_parent_component(raw: &str) -> bool {
@@ -122,8 +135,8 @@ fn expand_token(token: &str, project_root: &str) -> String {
         .map(|offset| start + offset)
         .unwrap_or(token.len());
     let raw = &token[start..end];
-    let absolute = PathBuf::from(project_root).join(raw);
-    format!("{}{}{}", &token[..start], absolute.display(), &token[end..])
+    let absolute = join_project_path(project_root, raw);
+    format!("{}{}{}", &token[..start], absolute, &token[end..])
 }
 
 #[cfg(test)]

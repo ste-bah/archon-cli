@@ -172,7 +172,7 @@ fn verification_result(
         .cwd
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("cwd missing"))?;
-    let output = Command::new("sh")
+    let output = Command::new(crate::command::posix_shell::posix_shell())
         .arg("-c")
         .arg(command)
         .current_dir(cwd)

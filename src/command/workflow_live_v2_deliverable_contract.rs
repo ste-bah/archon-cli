@@ -1,6 +1,13 @@
 use serde_json::Value;
 
 pub(crate) fn verification_command(root: &str, contract: &Value) -> String {
+    // The generated verifier is executed by `sh`, so the project root has to be
+    // written the way a POSIX shell reads it. A native Windows root
+    // (`C:\Users\...`) reaches the shell with its separators consumed as escape
+    // characters, and the verifier then probes a path that does not exist —
+    // reporting a launch-ish failure instead of the "missing or empty" verdict
+    // the caller relies on. Git's sh accepts `C:/Users/...` unchanged.
+    let root = &root.replace('\\', "/");
     let root_literal = serde_json::to_string(root).expect("project root JSON");
     let contract_json = serde_json::to_string(contract).expect("deliverable contract JSON");
     let contract_literal =

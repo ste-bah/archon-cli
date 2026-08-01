@@ -123,7 +123,7 @@ fn neutral_declared_verifier_executes_for_clean_contract_driven_series() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let passing = std::process::Command::new("sh")
+    let passing = std::process::Command::new(crate::command::posix_shell::posix_shell())
         .args(["-c", command])
         .output()
         .expect("execute verifier");
@@ -177,7 +177,7 @@ fn declared_gap_rows_do_not_require_healthy_dataset_references() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let result = std::process::Command::new("sh")
+    let result = std::process::Command::new(crate::command::posix_shell::posix_shell())
         .args(["-c", command])
         .output()
         .expect("execute verifier");
@@ -279,7 +279,7 @@ fn wf9_contaminated_fixture_replay_fails_substantive_contract() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let failing = std::process::Command::new("sh")
+    let failing = std::process::Command::new(crate::command::posix_shell::posix_shell())
         .args(["-c", command])
         .output()
         .expect("execute contaminated verifier");

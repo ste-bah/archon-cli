@@ -374,7 +374,7 @@ fn run_declared_artifact_verifiers(
         .map(str::trim)
         .filter(|command| !command.is_empty());
     for command in commands {
-        let output = std::process::Command::new("sh")
+        let output = std::process::Command::new(crate::command::posix_shell::posix_shell())
             .arg("-lc")
             .arg(command)
             .current_dir(workspace_root)

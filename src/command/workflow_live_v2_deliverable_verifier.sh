@@ -1,4 +1,24 @@
-python3 - <<'PY'
+# Pick an interpreter that actually runs, rather than assuming `python3`.
+#
+# On Windows `python3` usually resolves to the Microsoft Store stub in
+# WindowsApps, which is not Python: it exists on PATH, exits non-zero, and runs
+# nothing. The verifier then failed without emitting its verdict, so callers saw
+# a launch-shaped failure instead of "missing or empty". Executing each
+# candidate is what distinguishes a real interpreter from the stub -- presence
+# on PATH does not.
+ARCHON_PY=""
+for candidate in python3 python py; do
+  if "$candidate" -c 'import sys' >/dev/null 2>&1; then
+    ARCHON_PY="$candidate"
+    break
+  fi
+done
+if [ -z "$ARCHON_PY" ]; then
+  echo "deliverable verification unavailable: no working python interpreter (tried python3, python, py)" >&2
+  exit 127
+fi
+
+"$ARCHON_PY" - <<'PY'
 import datetime
 import hashlib
 import itertools
