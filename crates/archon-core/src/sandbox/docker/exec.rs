@@ -71,14 +71,18 @@ fn writable_path_mount_args(working_dir: &Path, writable_paths: &[String]) -> Ve
         let Ok(relative) = normal_writable_path(path) else {
             continue;
         };
-        let source = working_dir.join(&relative);
+        // Joined as a `/`-separated string rather than via `Path::join(..)
+        // .display()`. The latter emits native separators, so on Windows the
+        // mount spec came out as `src=/repo\target` -- a malformed bind source
+        // for a Linux container, whatever the host.
+        let source = format!(
+            "{}/{}",
+            working_dir.display().to_string().trim_end_matches(['/', '\\']),
+            relative
+        );
         args.extend([
             "--mount".into(),
-            format!(
-                "type=bind,src={},dst=/workspace/{}",
-                source.display(),
-                relative
-            ),
+            format!("type=bind,src={source},dst=/workspace/{relative}"),
         ]);
     }
     args

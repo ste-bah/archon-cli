@@ -229,6 +229,14 @@ pub fn read_credentials_locked(path: &Path) -> Result<(OAuthCredentials, SystemT
 /// Write credentials to the file atomically (write to .tmp, then rename).
 ///
 /// Sets file permissions to 0600.
+/// What the locked section concluded, acted on after the lock is released.
+enum Decision {
+    /// Another writer already produced usable credentials.
+    UseExisting(OAuthCredentials),
+    /// Freshly refreshed credentials that still need writing to disk.
+    Persist(OAuthCredentials),
+}
+
 pub fn write_credentials_atomic(path: &Path, creds: &OAuthCredentials) -> Result<(), AuthError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -318,40 +326,54 @@ async fn refresh_with_policy(
         tracing::info!("OAuth token expired, refreshing...");
     }
 
-    // Retry loop for acquiring write lock
+    // Retry loop for acquiring write lock.
+    //
+    // The lock is held only to decide and to fetch; the file replace happens
+    // after it is released. `write_credentials_atomic` renames a temp file over
+    // this path, and Windows refuses to rename over a file that still has an
+    // open, byte-range-locked handle -- "another process has locked a portion
+    // of the file" (os error 33). Unix flock is advisory, so this only ever
+    // failed on Windows. The mtime re-check below is what actually guards
+    // against a concurrent refresher; the lock never made the replace atomic.
     for attempt in 0..MAX_RETRIES {
         let file = fs::OpenOptions::new().read(true).write(true).open(path)?;
-
         let mut lock = fd_lock::RwLock::new(file);
 
-        match lock.try_write() {
+        let decided = match lock.try_write() {
             Ok(_guard) => {
-                // Check if another process already refreshed
+                // Check if another process already refreshed.
                 let current_mtime = fs::metadata(path)
                     .and_then(|m| m.modified())
                     .unwrap_or(SystemTime::UNIX_EPOCH);
 
                 if current_mtime != initial_mtime {
-                    // Re-read -- another process may have refreshed
                     tracing::debug!("credential file changed, re-reading");
                     let content = fs::read_to_string(path)?;
                     let new_creds = parse_credentials_json(&content)?;
                     if !force && !new_creds.is_expired() {
-                        return Ok(new_creds);
+                        Some(Decision::UseExisting(new_creds))
+                    } else {
+                        let refreshed =
+                            refresh_token(&new_creds.refresh_token, client).await?;
+                        Some(Decision::Persist(refreshed))
                     }
-                    let refreshed = refresh_token(&new_creds.refresh_token, client).await?;
-                    write_credentials_atomic(path, &refreshed)?;
-                    tracing::info!("OAuth token refreshed successfully");
-                    return Ok(refreshed);
+                } else {
+                    let new_creds = refresh_token(&creds.refresh_token, client).await?;
+                    Some(Decision::Persist(new_creds))
                 }
+            }
+            Err(_) => None,
+        };
+        drop(lock);
 
-                // Perform the actual refresh
-                let new_creds = refresh_token(&creds.refresh_token, client).await?;
+        match decided {
+            Some(Decision::UseExisting(new_creds)) => return Ok(new_creds),
+            Some(Decision::Persist(new_creds)) => {
                 write_credentials_atomic(path, &new_creds)?;
                 tracing::info!("OAuth token refreshed successfully");
                 return Ok(new_creds);
             }
-            Err(_) => {
+            None => {
                 if attempt < MAX_RETRIES - 1 {
                     let delay = rand_delay();
                     tracing::debug!(
