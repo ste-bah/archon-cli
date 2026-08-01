@@ -44,26 +44,30 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Per-OS timeout (#237). Linux + macOS use 45 min.
+    # Per-OS timeout (#237). Linux + macOS use 45 min, Windows 60.
     #
-    # #244 Windows CI DISABLED: removed windows runner from the build+test
-    # matrix entirely. The BASH_FUNC_* env-var bug on the windows-latest
-    # runner image (and verified to also be present on windows-2022 stable
-    # label, ruling out our prior #242 hypothesis) causes bash's CVE-2014-6271
-    # Shellshock self-defense to abort dtolnay/rust-toolchain's composite
-    # `shell: bash` install steps with `::error::bash function injection ...
-    # is not allowed for security reasons`. Failed runs on commits 6cba44b
-    # (windows-latest, 2x) and dee8536 (windows-2022, 1x). Tracked upstream
-    # as actions/partner-runner-images#169.
+    # #244 Windows CI, re-enabled. The BASH_FUNC_* env-var bug on the windows
+    # runner image causes bash's CVE-2014-6271 Shellshock self-defense to abort
+    # any `shell: bash` step with `::error::bash function injection ... is not
+    # allowed for security reasons` (upstream actions/partner-runner-images#169,
+    # still open). Rather than wait for the image fix, Windows simply never
+    # touches bash:
     #
-    # Windows CI will be re-enabled once the upstream image is fixed,
-    # tracked as Phase 5 follow-up #243 in
-    # docs/executor-prompts/active/02-slash-command-parity-12.md.
+    #   * dtolnay/rust-toolchain is skipped — its composite steps are bash, and
+    #     the Windows images ship rustup already. rust-toolchain.toml pins the
+    #     version, and rustup installs it on the first cargo call, so the
+    #     preinstalled toolchain is not the one that ends up being used anyway.
+    #   * taiki-e/install-action is skipped for the same reason; nextest comes
+    #     from its official prebuilt Windows archive.
+    #   * every run step is split so Windows gets a pwsh variant.
+    #
+    # Keep it that way. A single unguarded `shell: bash` step, or one composite
+    # action that uses bash internally, re-breaks the whole Windows job.
     timeout-minutes: ${{ matrix.timeout-override }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
             # Ubuntu now needs more than 30 minutes after the RocksDB/HNSW
@@ -81,6 +85,12 @@ jobs:
             # the operation was canceled at 10:08:10Z mid-sccache upload.
             # Bumped to 45 to give headroom for the post-test phases.
             timeout-override: 45
+          - os: windows-latest
+            # Windows has no mold, links MSVC, and additionally compiles
+            # vendored OpenSSL from source (see the Perl note below). A local
+            # `cargo check --workspace` on a Windows dev box takes ~8 min cold,
+            # so the full build+nextest run gets a wider budget than the others.
+            timeout-override: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +108,21 @@ jobs:
           df -h
 
       - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'Windows'
+
+      # Windows equivalent of the step above. dtolnay/rust-toolchain installs
+      # via `shell: bash` composite steps, which the runner image's BASH_FUNC_*
+      # env vars make impossible (#244). The image already ships rustup, and
+      # rust-toolchain.toml pins the version, so rustup downloads and selects
+      # the pinned toolchain on the first cargo invocation inside the checkout
+      # — which is exactly what the action would have arranged anyway.
+      - name: Set up Rust (Windows, without bash)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup --version
+          cargo --version
+          rustc --version
 
       # macOS-runner workaround: GitHub's macOS image pre-ships
       # `/usr/local/bin/cargo` as a rustup-init shim that intercepts
@@ -144,11 +169,28 @@ jobs:
           shared-key: ci-${{ matrix.os }}
 
       - name: Install cargo-nextest
+        if: runner.os != 'Windows'
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
 
+      # taiki-e/install-action is also a bash composite, so Windows uses
+      # nextest's own prebuilt archive instead. get.nexte.st serves a zip for
+      # this target; unpacking it into the cargo bin directory puts it on PATH
+      # for later steps without touching GITHUB_PATH ordering.
+      - name: Install cargo-nextest (Windows, without bash)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dest = "$env:USERPROFILE\.cargo\bin"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Invoke-WebRequest -Uri 'https://get.nexte.st/latest/windows' -OutFile "$env:RUNNER_TEMP\nextest.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\nextest.zip" -DestinationPath $dest -Force
+          cargo nextest --version
+
       - name: Build workspace
+        if: runner.os != 'Windows'
+        shell: bash
         # Keep normal cargo diagnostics for real compiler failures, but avoid
         # `--verbose`: it emits every rustc invocation and can fill the
         # ubuntu runner log/disk before nextest gets to report failures.
@@ -157,7 +199,16 @@ jobs:
           cargo build --workspace
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
 
+      - name: Build workspace (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        # No `df` equivalent worth the noise here: the disk-pressure failures
+        # that motivated those snapshots (#236) were ubuntu link-time SIGBUS,
+        # which does not apply to the MSVC linker.
+        run: cargo build --workspace
+
       - name: Run tests (nextest)
+        if: runner.os != 'Windows'
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
@@ -196,11 +247,31 @@ jobs:
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
           exit "$status"
 
+      - name: Run tests (nextest, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: "1"
+        # No heartbeat loop: that exists on the POSIX side to keep long quiet
+        # phases diagnosable alongside disk snapshots, and reproducing bash job
+        # control in pwsh would buy nothing. --no-fail-fast so one failing crate
+        # still reports the rest, which matters most on the run that re-enables
+        # this platform after it was dark.
+        run: cargo nextest run --workspace --no-fail-fast
+
       - name: Run doctests
+        if: runner.os != 'Windows'
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
         # nextest does not execute doctests; preserve coverage here.
+        run: cargo test --workspace --doc -- --test-threads=1
+
+      - name: Run doctests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --doc -- --test-threads=1
 
   arch-lint:

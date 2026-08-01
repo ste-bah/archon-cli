@@ -62,9 +62,21 @@ $Packages = [ordered]@{
     'yt-dlp.yt-dlp'                          = @('yt-dlp')
 }
 
+# Extra winget arguments for packages that need more than a bare install.
+#
+# Installing the Build Tools bootstrapper alone gets you the installer shell and
+# no compiler: without a workload there is no MSVC toolchain, so linking fails
+# later with no obvious connection to this step. `--override` selects the C++
+# workload non-interactively, which is what the docs' "select Desktop
+# development with C++ during install" means for anyone clicking through.
+$PackageArgs = @{
+    'Microsoft.VisualStudio.2022.BuildTools' =
+        @('--override', '--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
+}
+
 if ($WithDocker)        { $Packages['Docker.DockerDesktop'] = @('docker') }
 if ($WithTradingTools)  {
-    $Packages['OpenJS.NodeJS']       = @('node')
+    $Packages['OpenJS.NodeJS']       = @('node', 'npm')
     $Packages['Python.Python.3.12']  = @('python')
 }
 
@@ -77,7 +89,7 @@ $RequiredBinaries = @(
     'tesseract', 'ffmpeg', 'ffprobe', 'yt-dlp'
 )
 if ($WithDocker)       { $RequiredBinaries += 'docker' }
-if ($WithTradingTools) { $RequiredBinaries += @('node', 'python') }
+if ($WithTradingTools) { $RequiredBinaries += @('node', 'npm', 'python') }
 
 # Whether the Perl on PATH can actually configure vendored OpenSSL.
 #
@@ -158,13 +170,16 @@ foreach ($id in $Packages.Keys) {
         }
     }
 
+    $extra = @()
+    if ($PackageArgs.ContainsKey($id)) { $extra = $PackageArgs[$id] }
+
     if ($DryRun) {
-        Write-Host "[dry-run] winget install --id $id -e --accept-package-agreements --accept-source-agreements"
+        Write-Host "[dry-run] winget install --id $id -e --accept-package-agreements --accept-source-agreements $($extra -join ' ')"
         continue
     }
 
-    Write-Host "+ winget install --id $id -e"
-    winget install --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity
+    Write-Host "+ winget install --id $id -e $($extra -join ' ')"
+    winget install --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity @extra
     # 0 = installed, -1978335189 = already installed. Anything else is a failure.
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
         Write-Host "  FAILED: $id (winget exit $LASTEXITCODE)" -ForegroundColor Red
