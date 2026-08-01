@@ -54,6 +54,10 @@ async fn null_asr_returns_structured_unavailable_error() {
     assert!(matches!(err, VideoError::AsrProviderUnavailable { .. }));
 }
 
+// Drives a `#!/bin/sh` mock spawned directly as a program. A shebang is not
+// executable on Windows, and this does not go through a shell, so pointing at
+// Git's sh would not help either.
+#[cfg(unix)]
 #[tokio::test]
 async fn extract_audio_track_uses_mock_ffmpeg() {
     let dir = tempfile::tempdir().unwrap();

@@ -3,6 +3,10 @@ use std::io::Write;
 use archon_video::errors::VideoError;
 use archon_video::metadata::{MetadataOpts, extract_metadata};
 
+// Drives a `#!/bin/sh` mock spawned directly as a program. A shebang is not
+// executable on Windows, and this does not go through a shell, so pointing at
+// Git's sh would not help either.
+#[cfg(unix)]
 #[tokio::test]
 async fn extract_metadata_parses_mock_ffprobe_json() {
     let dir = tempfile::tempdir().unwrap();
@@ -46,6 +50,10 @@ async fn extract_metadata_reports_missing_ffprobe() {
     assert!(matches!(err, VideoError::BinaryNotFound { .. }));
 }
 
+// Drives a `#!/bin/sh` mock spawned directly as a program. A shebang is not
+// executable on Windows, and this does not go through a shell, so pointing at
+// Git's sh would not help either.
+#[cfg(unix)]
 #[tokio::test]
 async fn extract_metadata_reports_nonzero_ffprobe_stderr() {
     let dir = tempfile::tempdir().unwrap();

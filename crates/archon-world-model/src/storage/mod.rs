@@ -335,9 +335,17 @@ mod tests {
 
     #[test]
     fn world_model_config_uses_db_sidecar_lock() {
-        let db_path = Path::new("/tmp/world-model.db");
-        let expected_parent = db_path.parent().unwrap().canonicalize().unwrap();
-        let config = cozo_config(db_path);
+        // A real temp directory, and the expectation built through the same
+        // resolver the production path uses. Hardcoding `/tmp` made the test's
+        // own `canonicalize().unwrap()` panic on Windows, where that resolves
+        // to a usually-absent `<drive>\tmp`; and raw `canonicalize` returns a
+        // verbatim `\\?\` path there, which `canonical_resource_path`
+        // deliberately simplifies.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("world-model.db");
+        let expected_parent =
+            archon_cozo::canonical_resource_path(temp.path()).expect("canonical parent");
+        let config = cozo_config(&db_path);
         assert_eq!(
             config.write_lock_path.unwrap(),
             expected_parent.join("world-model.db.archon-cozo-write.lock")
