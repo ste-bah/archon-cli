@@ -80,7 +80,7 @@ pub(crate) fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf>
                 };
                 path = absolute_normalized_path(&path)?;
             }
-            Ok(_) => return Ok(path.canonicalize()?),
+            Ok(_) => return Ok(simplified_path(path.canonicalize()?)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return canonicalize_missing_path(&path);
             }
@@ -110,7 +110,47 @@ fn canonicalize_missing_path(path: &Path) -> Result<PathBuf> {
     for component in unresolved.iter().rev() {
         normalized.push(component);
     }
-    Ok(normalized)
+    Ok(simplified_path(normalized))
+}
+
+/// Drop the Windows verbatim (`\\?\`) prefix that `canonicalize` adds.
+///
+/// A verbatim path is handed to the filesystem with no Win32 normalisation at
+/// all, which means a forward slash is no longer accepted as a separator. Any
+/// consumer that appends one then produces a path the OS rejects. RocksDB does
+/// exactly that — it opens `<root>/LOG` — so every vector-store test failed
+/// with "The filename, directory name, or volume label syntax is incorrect"
+/// against a path like `\\?\C:\...\.tmpRxzgNS/LOG`.
+///
+/// This is a no-op off Windows, and it deliberately leaves two cases alone:
+///   * non-disk verbatim prefixes (`\\?\UNC\...`, device paths), where the
+///     prefix is not merely decorative;
+///   * paths at or beyond `MAX_PATH`, where the prefix is the only reason the
+///     path works at all.
+#[cfg(windows)]
+fn simplified_path(path: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    const MAX_PATH: usize = 260;
+
+    if path.as_os_str().len() >= MAX_PATH {
+        return path;
+    }
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path;
+    };
+    let Prefix::VerbatimDisk(letter) = prefix.kind() else {
+        return path;
+    };
+    let mut simplified = PathBuf::from(format!("{}:\\", letter as char));
+    simplified.extend(components.filter(|component| !matches!(component, Component::RootDir)));
+    simplified
+}
+
+#[cfg(not(windows))]
+fn simplified_path(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn absolute_normalized_path(path: &Path) -> Result<PathBuf> {

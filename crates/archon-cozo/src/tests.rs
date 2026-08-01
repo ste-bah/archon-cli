@@ -11,8 +11,12 @@ use super::*;
 
 #[test]
 fn write_lock_path_is_sibling_sidecar() {
-    let path = PathBuf::from("/tmp/archon-data.db");
-    let expected_parent = path.parent().unwrap().canonicalize().unwrap();
+    // A real temp directory rather than a hardcoded `/tmp`: on Windows that
+    // resolves to `<current drive>\tmp`, which usually does not exist, so the
+    // test's own `canonicalize` panicked before it asserted anything.
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("archon-data.db");
+    let expected_parent = canonical_resource_path(temp.path()).unwrap();
     assert_eq!(
         write_lock_path_for_db(&path),
         expected_parent.join("archon-data.db.archon-cozo-write.lock")
@@ -27,9 +31,10 @@ fn deriving_write_lock_path_does_not_create_database_parent() {
 
     let lock_path = write_lock_path_for_db(&db_path);
 
-    let expected_parent = temp
-        .path()
-        .canonicalize()
+    // Built through the crate's own resolver, not raw `canonicalize`. On
+    // Windows the latter yields a verbatim `\\?\` path, which the resolver
+    // deliberately simplifies, so a raw expectation no longer matches.
+    let expected_parent = canonical_resource_path(temp.path())
         .unwrap()
         .join("missing")
         .join("nested");
