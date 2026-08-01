@@ -427,9 +427,31 @@ fn absolute_paths_from_text(text: &str) -> Vec<PathBuf> {
                 )
             })
         })
-        .filter(|part| part.starts_with('/'))
+        .filter(|part| is_absolute_path_token(part))
         .map(PathBuf::from)
         .collect()
+}
+
+/// Whether a whitespace-delimited token looks like an absolute path.
+///
+/// Previously this was `starts_with('/')`, which recognises POSIX paths only.
+/// On Windows a task description naturally carries `C:\work\tasks\...`, none of
+/// which matched, so no roots were ever extracted and every decomposed-PRD run
+/// failed with "requires local TASK-*.md evidence before planning" — the
+/// feature could not be used on that platform at all.
+///
+/// Accepting `C:\` and `C:/` on every platform is harmless: on Unix such a
+/// token is not a real path, and the callers all probe the filesystem
+/// (`is_dir`, `directory_has_task_files`) before believing it.
+fn is_absolute_path_token(part: &str) -> bool {
+    if part.starts_with('/') {
+        return true;
+    }
+    let bytes = part.as_bytes();
+    bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
 fn markdown_evidence_paths_from_text(text: &str) -> Vec<PathBuf> {
