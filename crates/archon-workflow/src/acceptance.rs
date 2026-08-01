@@ -120,7 +120,7 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
-    let output = Command::new("sh")
+    let output = Command::new(shell_program())
         .arg("-c")
         .arg(command)
         .current_dir(root)
@@ -132,6 +132,52 @@ pub(crate) fn run_verify_command_capture(
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }))
+}
+
+/// The shell used to run `verify_command`.
+///
+/// Plain `sh` everywhere it resolves. On Windows it usually does not: Git for
+/// Windows ships `sh.exe`, but its installer only adds `<git>\cmd` to PATH,
+/// which holds `git.exe` and not `sh.exe`. So a machine with Git properly
+/// installed still failed to launch any `verify_command`, and the feature was
+/// simply unavailable there.
+///
+/// Rather than require PATH surgery, locate `sh.exe` next to the `git.exe`
+/// that is already on PATH — `<git>\cmd\git.exe` puts it at `<git>\bin\sh.exe`.
+/// Falls back to bare `sh` so the error message stays the familiar one when no
+/// shell can be found at all.
+#[cfg(windows)]
+fn shell_program() -> std::ffi::OsString {
+    use std::path::PathBuf;
+
+    if Command::new("sh").arg("-c").arg("exit 0").output().is_ok() {
+        return "sh".into();
+    }
+    let Ok(output) = Command::new("where").arg("git").output() else {
+        return "sh".into();
+    };
+    let Some(first) = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(PathBuf::from)
+    else {
+        return "sh".into();
+    };
+    // <git>\cmd\git.exe -> <git>\bin\sh.exe
+    let candidate = first
+        .parent()
+        .and_then(|cmd_dir| cmd_dir.parent())
+        .map(|git_root| git_root.join("bin").join("sh.exe"));
+    match candidate {
+        Some(path) if path.is_file() => path.into_os_string(),
+        _ => "sh".into(),
+    }
+}
+
+#[cfg(not(windows))]
+fn shell_program() -> std::ffi::OsString {
+    "sh".into()
 }
 
 /// Combine the mutation check and verification into a single acceptance verdict.
@@ -237,12 +283,8 @@ mod tests {
         assert!(run_verify_command(&root, Some("   ")).is_ok());
     }
 
-    // The next three drive POSIX shell semantics directly -- `exit 3`,
-    // `printf`, `;` sequencing -- none of which cmd.exe provides. They assert
-    // how `run_verify_command` classifies shell output, not anything
-    // platform-specific about the classifier, so they are gated rather than
-    // rewritten twice.
-    #[cfg(unix)]
+    // These drive POSIX shell semantics (`exit 3`, `printf`, `;`). They run on
+    // Windows too now that `shell_program()` finds the `sh.exe` Git ships.
     #[test]
     fn verify_command_failure_is_reported() {
         let root = std::env::temp_dir();
@@ -250,7 +292,6 @@ mod tests {
         assert!(err.contains('3'), "reason should carry exit code: {err}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn verify_command_list_only_is_not_completion_evidence() {
         let root = std::env::temp_dir();
@@ -258,7 +299,6 @@ mod tests {
         assert!(err.contains("discovery/list-only"), "{err}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn verify_command_zero_work_output_is_not_completion_evidence() {
         let root = std::env::temp_dir();
