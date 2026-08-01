@@ -20,8 +20,8 @@
 # [api] — Anthropic API + model defaults
 # ----------------------------------------------------------------------------
 [api]
-# Model to use. Options: claude-sonnet-4-6, claude-opus-4-8, claude-opus-4-7, claude-haiku-4-5-20251001
-default_model = "claude-sonnet-4-6"
+# Model to use. Options: claude-opus-5, claude-sonnet-5, claude-sonnet-4-6, claude-opus-4-8, claude-opus-4-7, claude-haiku-4-5-20251001
+default_model = "claude-opus-5"
 # Extended-thinking token budget (0 = disabled)
 thinking_budget = 16384
 # Reasoning effort: "low" | "medium" | "high"
@@ -79,7 +79,7 @@ provider = "anthropic"
 # `opus` tracks the current highest-quality Claude Opus generation. Earlier
 # Opus IDs remain valid as literal `/model` overrides when you need a pin.
 [models.anthropic]
-opus = "claude-opus-4-8"
+opus = "claude-opus-5"
 sonnet = "claude-sonnet-4-6"
 haiku = "claude-haiku-4-5-20251001"
 
@@ -92,9 +92,9 @@ haiku = "claude-haiku-4-5-20251001"
 # model id, Archon maps Sonnet/Opus-tier defaults to `default` and Haiku-tier
 # defaults to `mini` before calling Codex. Concrete Codex model ids are kept.
 [models.openai-codex]
-default = "gpt-5.5"
+default = "gpt-5.6-sol"
 codex = "gpt-5.3-codex"
-mini = "gpt-5.4-mini"
+mini = "gpt-5.6-luna"
 
 
 # ----------------------------------------------------------------------------
@@ -121,7 +121,7 @@ app_server_transport = "websocket"
 # app_server_command = "codex"
 # app_server_args = ["app-server"]
 app_server_discovery_timeout_ms = 2500
-app_server_model_catalog = ["gpt-5.5", "gpt-5.4"]
+app_server_model_catalog = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"]
 
 [providers.openai-codex.spoof]
 # originator  = "openclaw"

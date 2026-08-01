@@ -6,6 +6,34 @@
 #   <workspace>/.archon/context.toml
 #   <workspace>/.archon/context.local.toml
 
+[providers.anthropic.models."claude-opus-5"]
+context_window = 1_000_000
+max_output_tokens = 128_000
+source = "anthropic-docs"
+
+[providers.anthropic.models."claude-opus-5".variants.claude_code]
+context_window = 1_000_000
+max_output_tokens = 128_000
+requires_identity = "spoof"
+source = "anthropic-docs"
+
+[providers.anthropic.models."claude-sonnet-5"]
+context_window = 1_000_000
+max_output_tokens = 128_000
+source = "anthropic-docs"
+
+[providers.anthropic.models."claude-sonnet-5".variants.claude_code]
+context_window = 1_000_000
+max_output_tokens = 128_000
+requires_identity = "spoof"
+source = "anthropic-docs"
+
+# Undated alias (proxies and newer deployments use the suffix-free id).
+[providers.anthropic.models."claude-haiku-4-5"]
+context_window = 200_000
+max_output_tokens = 64_000
+source = "anthropic-docs"
+
 [providers.anthropic.models."claude-opus-4-8"]
 context_window = 1_000_000
 max_output_tokens = 128_000
@@ -43,6 +71,27 @@ source = "claude-support-claude-code"
 [providers.anthropic.models."claude-haiku-4-5-20251001"]
 context_window = 200_000
 source = "bundled"
+
+# GPT-5.6 family (July 2026): Sol = flagship, Terra = mid tier, Luna =
+# fastest/cheapest. 1_050_000 ctx / 128K out; Codex runtime input budget
+# reduced 372k -> 272k by OpenAI on 2026-07-18.
+[providers.openai-codex.models."gpt-5.6-sol"]
+context_window = 1_050_000
+runtime_context_budget = 272_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.openai-codex.models."gpt-5.6-terra"]
+context_window = 1_050_000
+runtime_context_budget = 272_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.openai-codex.models."gpt-5.6-luna"]
+context_window = 1_050_000
+runtime_context_budget = 272_000
+max_output_tokens = 128_000
+source = "openai-docs"
 
 [providers.openai-codex.models."gpt-5.5"]
 context_window = 1_050_000
@@ -87,6 +136,38 @@ source = "bundled"
 [providers.openai.models."o3-mini"]
 context_window = 200_000
 source = "bundled"
+
+# GPT-5.6 ids as seen through anthropic-compatible proxies (claude-code-proxy
+# launchers use the [1m] context-hint suffix), mirroring the deepseek pattern.
+[providers.anthropic.models."gpt-5.6-sol"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.anthropic.models."gpt-5.6-sol[1m]"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.anthropic.models."gpt-5.6-terra"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.anthropic.models."gpt-5.6-terra[1m]"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.anthropic.models."gpt-5.6-luna"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
+
+[providers.anthropic.models."gpt-5.6-luna[1m]"]
+context_window = 1_050_000
+max_output_tokens = 128_000
+source = "openai-docs"
 
 [providers.anthropic.models."deepseek-v4-pro"]
 context_window = 1_000_000
