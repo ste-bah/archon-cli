@@ -73,6 +73,16 @@ fn first_run_does_not_fire_below_threshold() {
 fn memory_trigger_fires_after_threshold() {
     let config = AutoTrainerConfig {
         trigger_new_memories: 50,
+        // Throttle disabled rather than backdating `last_train_time`. The
+        // default throttle is 24h, and `Instant::now() - 24h` panics with
+        // "overflow when subtracting duration from instant" on any machine
+        // that has been up for less than a day: `Instant` counts from boot, so
+        // there is nothing to subtract from. Windows CI runners boot fresh and
+        // fail every time; Linux and macOS only passed because those runner
+        // VMs happen to have more uptime. A zero throttle expresses the same
+        // intent -- "throttle is not what is being tested here" -- without
+        // depending on the host's uptime.
+        min_throttle_ms: 0,
         ..Default::default()
     };
     let state = TrainerState::default();
@@ -80,9 +90,7 @@ fn memory_trigger_fires_after_threshold() {
     state.memories_at_last_train.store(5, Ordering::Relaxed);
     // Need at least one prior train so first-run doesn't interfere
     state.training_count.store(1, Ordering::Relaxed);
-    // Must pass throttle — set last_train_time far enough in the past
-    *state.last_train_time.write().unwrap() =
-        Some(Instant::now() - Duration::from_millis(config.min_throttle_ms + 1000));
+    *state.last_train_time.write().unwrap() = Some(Instant::now());
 
     assert!(AutoTrainer::check_triggers(&config, &state));
 }
@@ -92,14 +100,16 @@ fn memory_trigger_does_not_fire_below_threshold() {
     let config = AutoTrainerConfig {
         trigger_new_memories: 50,
         trigger_elapsed_ms: 172_800_000,
+        // See `memory_trigger_fires_after_threshold` for why the throttle is
+        // zeroed instead of backdating `last_train_time`.
+        min_throttle_ms: 0,
         ..Default::default()
     };
     let state = TrainerState::default();
     state.total_memories.store(60, Ordering::Relaxed);
     state.memories_at_last_train.store(20, Ordering::Relaxed);
     state.training_count.store(1, Ordering::Relaxed);
-    *state.last_train_time.write().unwrap() =
-        Some(Instant::now() - Duration::from_millis(config.min_throttle_ms + 1000));
+    *state.last_train_time.write().unwrap() = Some(Instant::now());
 
     assert!(!AutoTrainer::check_triggers(&config, &state));
 }
@@ -108,13 +118,15 @@ fn memory_trigger_does_not_fire_below_threshold() {
 fn correction_trigger_fires() {
     let config = AutoTrainerConfig {
         trigger_corrections: 5,
+        // See `memory_trigger_fires_after_threshold` for why the throttle is
+        // zeroed instead of backdating `last_train_time`.
+        min_throttle_ms: 0,
         ..Default::default()
     };
     let state = TrainerState::default();
     state.total_corrections.store(10, Ordering::Relaxed);
     state.training_count.store(1, Ordering::Relaxed);
-    *state.last_train_time.write().unwrap() =
-        Some(Instant::now() - Duration::from_millis(config.min_throttle_ms + 1000));
+    *state.last_train_time.write().unwrap() = Some(Instant::now());
 
     assert!(AutoTrainer::check_triggers(&config, &state));
 }
