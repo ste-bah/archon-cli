@@ -1,14 +1,15 @@
 # ============================================================================
-# Archon CLI — Project Configuration
+# Archon CLI — Example / Template Configuration
 # ============================================================================
-# Layer: PROJECT  (path: <workdir>/.archon/config.toml)
+# This file is the reference config shipped at the repo root. Copy it to one
+# of the following paths to activate it:
+#
+#   ~/.config/archon/config.toml          — USER layer (global, all projects)
+#   <workdir>/.archon/config.toml          — PROJECT layer (committed to repo)
+#   <workdir>/.archon/config.local.toml    — LOCAL layer (gitignored; secrets)
 #
 # Load order (lowest → highest priority; later overrides earlier):
-#   1. User      — ~/.config/archon/config.toml
-#   2. Project   — <workdir>/.archon/config.toml        ← THIS FILE
-#   3. Local     — <workdir>/.archon/config.local.toml  (gitignored, secrets)
-#   4. Worktree  — <workdir>/.archon/worktrees/<name>.toml
-#   5. Settings  — --settings <path> CLI overlay
+#   1. User  →  2. Project  →  3. Local  →  4. Worktree  →  5. --settings overlay
 #
 # Every field is listed with its default value and valid range.
 # Comment out (prefix with #) any field to fall back to the schema default.
@@ -27,8 +28,9 @@ thinking_budget = 16384
 default_effort = "high"
 # Max HTTP retry attempts on transient failures
 max_retries = 3
-# Override API endpoint (for LiteLLM / Ollama / proxies). Leave commented to use default.
+# Override API endpoint or base URL (for LiteLLM / Ollama / proxies). Leave commented to use default.
 # Resolution order: ANTHROPIC_BASE_URL env var > this field > https://api.anthropic.com/v1/messages
+# Base URLs such as https://api.deepseek.com/anthropic are expanded to /v1/messages.
 # base_url = "http://localhost:11434/v1/messages"
 
 
@@ -40,7 +42,7 @@ max_retries = 3
 # for swapping to another provider — uncomment only the one you want to use
 # AND change `provider` accordingly.
 [llm]
-# Active provider: "anthropic" | "openai-codex" | "openai" | "bedrock" | "vertex" | "local"
+# Active provider: "anthropic" | "openai-codex" | "openai" | "bedrock" | "vertex" | "local" | OpenAI-compatible IDs such as "deepseek"
 # Hybrid/LLM retrospectives (`archon self retrospective --analyzer hybrid|llm`)
 # use this active provider too; there is no separate retrospective provider key.
 provider = "anthropic"
@@ -72,39 +74,26 @@ provider = "anthropic"
 
 
 # ----------------------------------------------------------------------------
-# [models.*] — Per-provider model resolution (v1.2.0)
+# [models.anthropic] — Anthropic model aliases
 # ----------------------------------------------------------------------------
-# Pipelines and the chat surface emit semantic *tier aliases* — `opus`,
-# `sonnet`, `haiku` — rather than literal model IDs. Each provider owns its
-# own alias-to-model mapping, populated from the sections below at boot.
-#
-# These sections are OPTIONAL. If omitted, the defaults shown here are used.
-# Override only when you need to pin a specific model (e.g. a snapshot ID,
-# a fallback because the frontier model isn't available to your account, or
-# to evaluate a new release).
-#
-# Literal model IDs (e.g. "claude-sonnet-4-6", "gpt-5.5") pass through any
-# resolver unchanged, so call-sites that already use literal IDs keep working.
-#
-# Tier mapping (cross-provider neutrality):
-#   opus   → smartest available  (Anthropic: opus, Codex: default)
-#   sonnet → smart general-purpose (Anthropic: sonnet, Codex: default)
-#   haiku  → fast/cheap        (Anthropic: haiku, Codex: mini)
-
+# `opus` tracks the current highest-quality Claude Opus generation. Earlier
+# Opus IDs remain valid as literal `/model` overrides when you need a pin.
 [models.anthropic]
 opus = "claude-opus-4-8"
 sonnet = "claude-sonnet-4-6"
 haiku = "claude-haiku-4-5-20251001"
 
+
+# ----------------------------------------------------------------------------
+# [models.openai-codex] — Codex model aliases
+# ----------------------------------------------------------------------------
+# These aliases are used by Codex sessions, chat defaults, and subagents. When
+# [llm].provider = "openai-codex" and [api].default_model is still a Claude
+# model id, Archon maps Sonnet/Opus-tier defaults to `default` and Haiku-tier
+# defaults to `mini` before calling Codex. Concrete Codex model ids are kept.
 [models.openai-codex]
-# `default` is what Codex resolves `opus` and `sonnet` aliases to (the frontier
-# flagship). Per https://developers.openai.com/codex/models, gpt-5.5 is the
-# newest; gpt-5.4 is the documented fallback if 5.5 isn't reachable yet.
 default = "gpt-5.5"
-# `codex` is the Codex-specific software-engineering model, used when an
-# agent explicitly requests the "codex" alias.
 codex = "gpt-5.3-codex"
-# `mini` is the efficient/subagent variant — what `haiku` resolves to.
 mini = "gpt-5.4-mini"
 
 
@@ -210,7 +199,7 @@ personality_history_limit = 50
 # ----------------------------------------------------------------------------
 [tools]
 # Seconds before a Bash command is killed
-bash_timeout = 86400
+bash_timeout = 600
 # Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400
 # Max concurrent tool calls (1..=16)
@@ -255,7 +244,11 @@ always_ask = []
 # Current /sandbox toggle uses the logical policy gate. Docker/SSH/OpenShell are
 # separate isolation backends and require their matching enabled=true section.
 backend = "disabled"
-# Which commands route through the backend: "risky" | "all" | "shell"
+# Backend routing mode:
+#   "risky" / "shell" route Bash/Shell through the backend but leave normal
+#   host-side tools such as Write/Edit/WebFetch under permission preflight.
+#   "all" requires every tool to be backend-compatible, so unsupported
+#   host-side mutation/network/agent-spawn tools are blocked.
 mode = "risky"
 # Backend lifecycle: "session" | "turn" | "tool"
 scope = "session"
@@ -295,9 +288,12 @@ host_shell_fallback = false
 # Real Bash execution backend when sandbox.backend = "openshell" and enabled=true.
 enabled = false
 binary = "openshell"
-# "mirror" keeps the local workspace canonical; "remote" requires gateway.
-workspace_mode = "mirror"
-# gateway = "team-gateway"
+# "upload" stages the current workdir into /sandbox/<basename> before Bash.
+# "remote" runs from remote_workdir or /sandbox; "mirror" requires the same
+# absolute path to exist inside the OpenShell runtime.
+workspace_mode = "upload"
+gateway = "openshell"
+# remote_workdir = "/sandbox"
 # policy = "locked-down"
 providers = []
 gpu = false
@@ -318,6 +314,11 @@ compact_threshold = 0.80
 # max_tokens = 200000
 # Recent turns always preserved through compaction
 preserve_recent_turns = 3
+# Proactive pressure gates keep giant transcripts/tool outputs from being
+# replayed verbatim just because a model advertises a very large context window.
+rate_limit_pressure_tokens = 120000
+rate_limit_pressure_body_bytes = 320000
+large_request_retry_body_bytes = 320000
 # Use cache_control breakpoints on static system prompt blocks
 prompt_cache = true
 # Max characters of hierarchical ARCHON.md (alias: claudemd_max_tokens)
@@ -329,7 +330,7 @@ archonmd_max_tokens = 8192
 # ----------------------------------------------------------------------------
 [memory]
 enabled = true
-# CozoDB file path. None → default: ~/.archon/memory.db
+# CozoDB file path. None → default: platform data dir/archon/memory.db
 # db_path = "/custom/path/memory.db"
 
 # Embedding provider: "auto" | "local" | "openai"
@@ -474,11 +475,11 @@ max_runtime_ms = 300000        # 5 minutes max per training run
 # Set to false to disable autonomous retraining (only /learning-status retrain works).
 [learning.gnn.auto_trainer]
 enabled = true
-min_throttle_ms = 3600000      # 1 hour minimum between runs
-trigger_new_memories = 50      # fire when N new memories accrued
-trigger_elapsed_ms = 21600000  # 6 hours
-trigger_corrections = 5        # fire when N user corrections logged
-first_run_threshold = 100      # kickoff at startup if memory_count > this
+min_throttle_ms = 86400000     # 24 hours minimum between training runs
+trigger_new_memories = 20      # fire when N new memories accrued
+trigger_elapsed_ms = 86400000  # 24 hours
+trigger_corrections = 3        # fire when N user corrections logged
+first_run_threshold = 30       # kickoff at startup if memory_count >= this
 max_runtime_ms = 300000        # 5 minutes max per run
 tick_interval_ms = 60000       # background poll interval (1 minute)
 
@@ -486,6 +487,9 @@ tick_interval_ms = 60000       # background poll interval (1 minute)
 [learning.world_model]
 enabled = true
 model_kind = "latent_transition"
+# When the background trainer writes a candidate, run the relevant eval gates
+# and promote only if policy.world_model.allow_behavior_changes=true and all
+# mandatory gates pass. JEPA auto-promotion uses full promotion-grade eval.
 auto_promote_advisory = true
 require_approval_for_behavior_change = true
 state_dim = 384
@@ -511,13 +515,13 @@ external_api_key_env = ""
 
 [learning.world_model.labeler]
 analyzer = "hybrid"                # "heuristic" | "llm" | "hybrid"
-llm_enabled = false
+llm_enabled = true
 max_events_per_prompt = 30
 max_prompt_chars = 128000
 
 [learning.world_model.training]
-backend = "metal"                  # "auto" | "cpu" | "metal" | "cuda"
-allow_cpu_fallback = false
+backend = "auto"                   # "auto" | "cpu" | "metal" | "cuda"
+allow_cpu_fallback = true
 prefer_accelerator = true
 precision = "fp32"
 max_accelerator_memory_mb = 4096
@@ -527,26 +531,8 @@ validation_split = 0.2
 promotion_min_delta = 0.02
 max_runtime_ms = 300000
 
-[learning.world_model.auto_trainer]
-enabled = true
-idle_required_ms = 300000
-battery_suspend_below_percent = 30
-trigger_new_rows = 100
-trigger_surprises = 5
-trigger_corrections = 3
-trigger_elapsed_ms = 21600000
-first_run_threshold = 300
-max_runtime_ms = 300000
-tick_interval_ms = 60000
-
-[learning.world_model.retention]
-jsonl_rotate_mb = 500
-raw_retention_days = 90
-retain_cozo_summaries = true
-retain_checkpoint_count = 5
-
 [learning.world_model.jepa]
-enabled = true
+enabled = false
 latent_dim = 384
 context_window_rows = 8
 target_window_rows = 3
@@ -573,6 +559,7 @@ min_heldout_examples = 200
 min_training_examples = 2000
 require_native_accelerator_ops = true
 allow_accelerated_candidate_cpu_stage = false
+min_cuda_validation_examples = 512
 min_metal_validation_examples = 512
 backend_parity_cosine_floor = 0.99
 max_backend_prediction_latency_ms = 50
@@ -592,6 +579,34 @@ cache_max_mb = 2048               # ~680k BGE-base 768-dim f32 vectors
 background_default = false
 eval_schema_version = 1           # bump to invalidate ALL cache entries and keys
 
+[learning.world_model.eval]
+bootstrap_iterations = 1000
+confidence_level = 0.95
+parity_precision = "fp32"
+parity_min_cosine = 0.95
+next_state_baseline_min_delta = 0.10
+counterfactual_baseline_min_delta = 0.10
+surprise_ks_min_p = 0.05
+counterfactual_ndcg_min = 0.60
+
+[learning.world_model.cold_start]
+min_rows = 1000
+min_sessions = 50
+min_observed_days = 7
+
+[learning.world_model.auto_trainer]
+enabled = true
+min_throttle_ms = 86400000
+idle_required_ms = 300000
+battery_suspend_below_percent = 30
+trigger_new_rows = 100
+trigger_surprises = 5
+trigger_corrections = 3
+trigger_elapsed_ms = 86400000
+first_run_threshold = 300
+max_runtime_ms = 300000
+tick_interval_ms = 60000
+
 [learning.world_model.guardrails]
 enabled = true
 interactive_mode = "advisory"
@@ -608,9 +623,15 @@ require_typecheck_for_coding_high_risk = false
 require_plan_review_for_plan_drift = true
 require_source_check_for_research_high_risk = true
 require_manual_approval_for_critical = false
-max_guardrail_overhead_ms = 40
+max_guardrail_overhead_ms = 40     # guardrail logic only; prediction keeps its own max_prediction_latency_ms cap
 record_outcomes_without_prediction = true
 max_guardrail_events_per_session = 500
+
+[learning.world_model.retention]
+jsonl_rotate_mb = 500
+raw_retention_days = 90
+retain_cozo_summaries = true
+retain_checkpoint_count = 5
 
 # --- Reasoning Quality (visible claim/evidence learning signal) ---
 [learning.reasoning_quality]
@@ -629,7 +650,7 @@ feed_world_model = true
 feed_retrospective = true
 
 [learning.reasoning_quality.critic]
-mode = "hybrid"
+mode = "hybrid"                  # "heuristic" | "llm" | "hybrid"
 allow_llm = false
 provider = "default"
 model = ""
@@ -676,7 +697,7 @@ world_model_requires_ready = true
 # ----------------------------------------------------------------------------
 [cost]
 # Warn once session cost exceeds this amount
-warn_threshold = 30.0
+warn_threshold = 100.0
 # Hard stop when session cost reaches this amount (0.0 = disabled)
 hard_limit = 0.0
 
@@ -712,6 +733,8 @@ max_checkpoints = 10
 # [tui] — Terminal UI
 # ----------------------------------------------------------------------------
 [tui]
+# Vim modal-input keybindings. Default OFF — enable explicitly if you want
+# vim normal/insert mode keys. Toggle in-session via /vim.
 vim_mode = false
 # Verbose mode: show full turn-by-turn output (Ctrl+V toggles at runtime)
 verbose = true
@@ -782,6 +805,16 @@ max_retries = 2
 # agent pool.
 [subagent]
 max_concurrent = 4
+
+# ----------------------------------------------------------------------------
+# [workflow.generated] — Generated dynamic workflow repair/investigation caps
+# ----------------------------------------------------------------------------
+# Generated decomposed-PRD workflows keep orchestration in workflow.js. These
+# caps bound JS-owned semantic repair/investigation loops; runtime/safety
+# failures still stop terminally.
+[workflow.generated]
+max_repair_iterations = 3
+max_investigation_iterations = 3
 
 
 # ----------------------------------------------------------------------------
@@ -934,3 +967,15 @@ proposal_stale_days = 30
 #   [policy.gametheory]
 #   allow_web_tools = true             # gametheory specialists can use WebSearch/WebFetch
 #   enable_tier11 = false              # opt-in flag for Civilizational agents
+#
+#   [policy.world_model]
+#   allow_third_party_embeddings = false  # cloud embeddings require this plus workers.embedding/network gates
+#   allow_llm_labeler = false             # LLM-assisted semantic labeling opt-in
+#   allow_behavior_changes = false        # world model remains advisory unless explicitly enabled
+#
+#   [policy.web]
+#   allow_mutating_actions = false        # browser workbench remains inspect-only unless explicitly enabled
+#   allow_file_uploads = false            # attachment/upload intents require this plus allow_mutating_actions
+#   allow_pipeline_controls = false       # pause/resume/cancel buttons require this plus allow_mutating_actions
+#   allow_model_training_actions = false  # model training/promotion requires this plus world_model behavior gate
+#   allow_corpus_open_paths = false       # filesystem-open actions require this plus allow_mutating_actions
