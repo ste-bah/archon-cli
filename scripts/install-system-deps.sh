@@ -173,7 +173,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkg-config openssl-devel git curl"
+        PKG_BUILD="gcc pkg-config openssl-devel git"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg-free yt-dlp"
@@ -198,7 +198,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz curl"
+        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz"
         PKG_PDF="poppler-utils"
         PKG_OCR=""          # not packaged on AL2023 — see TESSERACT_UNPACKAGED
         PKG_VIDEO=""        # ffmpeg/yt-dlp via install_amzn_extras
@@ -430,6 +430,16 @@ if [ "$WITH_TRADING_TOOLS" = true ]; then
 fi
 # Trim leading space if PKG_BUILD was empty (macOS case)
 ALL_PKGS=$(echo "$ALL_PKGS" | sed 's/^ *//')
+
+# dnf-family systems (Fedora/RHEL 9+, Amazon Linux 2023) preinstall
+# curl-minimal, which CONFLICTS with the full `curl` package — requesting
+# `curl` fails the whole transaction with "conflicts with curl provided by
+# curl-minimal". curl-minimal already ships a fully HTTPS-capable curl
+# binary, so never request `curl` there; if no curl binary exists at all
+# (minimal containers), request the conflict-free curl-minimal flavor.
+if [ "$PKG_MGR" = "dnf" ] && ! command -v curl >/dev/null 2>&1; then
+    ALL_PKGS="$ALL_PKGS curl-minimal"
+fi
 
 run() {
     if [ "$DRY_RUN" = true ]; then
