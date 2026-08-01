@@ -472,11 +472,19 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Project-relative path for messages and gate output, always `/`-separated.
+///
+/// `Path::display` emits native separators, so the same repository produced
+/// `src/foo.rs` on Unix and `src\foo.rs` on Windows. These strings are compared
+/// against declared candidate paths and surfaced in gate reasons, so the
+/// platform leaked into both behaviour and output.
 fn display_path(project_root: &Path, path: &Path) -> String {
-    path.strip_prefix(project_root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    let relative = path.strip_prefix(project_root).unwrap_or(path);
+    relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn display_debug_path(path: &Path) -> String {

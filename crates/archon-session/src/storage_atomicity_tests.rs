@@ -55,6 +55,10 @@ fn list_sessions_uses_one_query_for_empty_and_populated_results() {
     assert_eq!(empty.parent_session_id.as_deref(), Some(""));
     assert_eq!(store.query_count(), 1);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -80,6 +84,10 @@ fn delete_session_rolls_back_compaction_cleanup_on_failure() {
         vec!["source"]
     );
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -105,5 +113,9 @@ fn replace_messages_rolls_back_rows_and_count_when_post_write_step_fails() {
     );
     assert_eq!(store.get_session(&session.id).unwrap().message_count, 3);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }

@@ -53,6 +53,10 @@ async fn mock_acquisition_adapter_returns_fixture_path() {
     );
 }
 
+// Drives a `#!/bin/sh` mock downloader spawned directly as a program.
+// A shebang is not executable on Windows -- and unlike `verify_command`,
+// this is not run through a shell, so pointing at Git's sh would not help.
+#[cfg(unix)]
 #[tokio::test]
 async fn external_downloader_reports_platform_blocks_honestly() {
     let dir = tempfile::tempdir().unwrap();
@@ -87,6 +91,10 @@ exit 1
     assert!(err.to_string().contains("does not attempt to bypass"));
 }
 
+// Drives a `#!/bin/sh` mock downloader spawned directly as a program.
+// A shebang is not executable on Windows -- and unlike `verify_command`,
+// this is not run through a shell, so pointing at Git's sh would not help.
+#[cfg(unix)]
 #[tokio::test]
 async fn external_downloader_returns_reported_output_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -125,6 +133,10 @@ printf '%s\n' '{}'
     assert_eq!(acquired.local_path, media);
 }
 
+// Drives a `#!/bin/sh` mock downloader spawned directly as a program.
+// A shebang is not executable on Windows -- and unlike `verify_command`,
+// this is not run through a shell, so pointing at Git's sh would not help.
+#[cfg(unix)]
 #[tokio::test]
 async fn external_downloader_requests_frame_friendly_video_format() {
     let dir = tempfile::tempdir().unwrap();

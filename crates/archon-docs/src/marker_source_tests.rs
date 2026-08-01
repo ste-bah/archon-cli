@@ -56,6 +56,10 @@ echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Pa
     script
 }
 
+// Runs a sidecar through `bash` and asserts POSIX signal semantics
+// (SIGKILL). Windows has neither: `bash` there is either absent or the
+// WSL launcher, which would execute in a different filesystem entirely.
+#[cfg(unix)]
 #[tokio::test]
 async fn signal_killed_gpu_attempt_advances_ladder_to_cpu() {
     // A signal-kill on the GPU rung must advance to the CPU rung (like OOM), not hard-fail.
@@ -73,6 +77,10 @@ async fn signal_killed_gpu_attempt_advances_ladder_to_cpu() {
     assert_eq!(blocks[0].text, "cpu ok");
 }
 
+// Runs a sidecar through `bash` and asserts POSIX signal semantics
+// (SIGKILL). Windows has neither: `bash` there is either absent or the
+// WSL launcher, which would execute in a different filesystem entirely.
+#[cfg(unix)]
 #[tokio::test]
 async fn signal_kill_on_last_rung_surfaces_killed_error() {
     // With no rung left to advance to, the recorded signal-kill surfaces as the error.
@@ -107,6 +115,8 @@ echo '{"block_type":"Document","children":[{"block_type":"Page","id":"/page/0/Pa
     script
 }
 
+// Runs a sidecar through `bash`; Windows has no usable one here.
+#[cfg(unix)]
 #[tokio::test]
 #[serial_test::serial(docs_global_state)]
 async fn marker_timeout_on_gpu_attempt_advances_ladder_to_cpu() {
@@ -139,6 +149,8 @@ async fn marker_timeout_on_gpu_attempt_advances_ladder_to_cpu() {
     assert_eq!(blocks[0].text, "cpu ok");
 }
 
+// Runs a sidecar through `bash`; Windows has no usable one here.
+#[cfg(unix)]
 #[tokio::test]
 #[serial_test::serial(docs_global_state)]
 async fn marker_timeout_on_last_rung_surfaces_error() {

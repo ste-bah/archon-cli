@@ -48,6 +48,10 @@ fn replace_messages_exactly_replaces_shorter_and_longer_lists() {
     assert_eq!(store.load_messages(&session.id).unwrap(), longer);
     assert_eq!(store.get_session(&session.id).unwrap().message_count, 5);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files. That is why this only ever failed on Windows.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -67,6 +71,10 @@ fn replace_messages_refuses_empty_without_mutating_existing_messages() {
     );
     assert_eq!(store.get_session(&session.id).unwrap().message_count, 2);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files. That is why this only ever failed on Windows.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -88,6 +96,10 @@ fn truncate_messages_after_overshoot_preserves_count_and_content() {
     );
     assert_eq!(store.get_session(&session.id).unwrap().message_count, 2);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files. That is why this only ever failed on Windows.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -109,6 +121,10 @@ fn truncate_messages_after_removes_only_the_suffix() {
     );
     assert_eq!(store.get_session(&session.id).unwrap().message_count, 2);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files. That is why this only ever failed on Windows.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
 
@@ -142,5 +158,9 @@ fn list_sessions_includes_optional_names_and_parents() {
     assert_eq!(plain.name, None);
     assert_eq!(plain.parent_session_id, None);
 
+    // Close the store before deleting its directory: Windows refuses to remove
+    // a directory that still has an open handle inside it, while Unix happily
+    // unlinks open files. That is why this only ever failed on Windows.
+    drop(store);
     fs::remove_dir_all(dir).expect("remove temp directory");
 }
