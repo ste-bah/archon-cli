@@ -19,6 +19,7 @@ include!("jepa/09_training_runtime.rs");
 include!("jepa/10_checkpoint_io.rs");
 include!("jepa/11_mask_encode_loss.rs");
 include!("jepa/12_features.rs");
+include!("jepa/12_features_categorical.rs");
 include!("jepa/13_aux_math_utils.rs");
 include!("jepa/22_encoder_training.rs");
 include!("jepa/eval_planner.rs");

@@ -133,6 +133,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.4.0](release-notes/v1.4.0.md) — Self-learning JEPA world model (trainable encoders, dense embedding input, live advisory loop, automatic candidate lifecycle), `archon draft` FCDP pipeline with provenance import, agent catalog snapshot fixes, and a repository-wide 500-line file ceiling
 - [v1.3.11](release-notes/v1.3.11.md) — Governed Trading Lab substrate with strategy specs, Pine prototypes, persistent OHLCV data, fill/candle/custom-rule backtests, paper/live gates, TradingView replay-paper evidence, workflow specs, risk/audit controls, learning hooks, and user/cookbook documentation
 - [v1.3.10](release-notes/v1.3.10.md) — Provider-neutral dynamic workflows, durable workflow bundles, live TUI Agent Activity, web Workflows page, learning ledgers, and `/workflow` CLI/TUI control
 - [v1.3.9](release-notes/v1.3.9.md) — RocksDB document vector store, resumable legacy-vector migration, Rust-HNSW compaction, durable index queue/daemon controls, and vector diagnostics

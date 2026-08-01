@@ -20,7 +20,15 @@
         };
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                false,
+                None,
+                None,
+                None,
+            )
                 .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Metal);
@@ -82,7 +90,15 @@
             fallback_reason: None,
         };
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                false,
+                None,
+                None,
+                None,
+            )
                 .unwrap();
         let examples = build_jepa_training_examples(&rows(), &config).unwrap();
         (model, outcome, examples)

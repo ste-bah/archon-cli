@@ -264,6 +264,25 @@ fn render_jepa_trainer_tick_observed(
         );
         let jepa_config = jepa_training_config(config)?;
         let backend = selected_training_backend(config);
+        // Same adapter the manual `archon world train-jepa` path uses. Without
+        // it this background tick would keep writing candidates trained on
+        // hashed excerpt text while the manual command wrote embedded ones.
+        //
+        // Only attached when the dimensions line up: the adapter projects to
+        // `state_dim` and the encoder needs `latent_dim` values, and a vector
+        // of the wrong length is discarded in favour of the hashed fallback.
+        // The manual path rejects that mismatch outright; a background tick
+        // should not die over it, but it should not pay a provider to embed
+        // every window and then throw the results away either.
+        let embedder = if jepa_config.latent_dim == config.learning.world_model.state_dim {
+            Some(build_embedding_adapter(config)?)
+        } else {
+            None
+        };
+        let mut window_builder = archon_world_model::representation::TraceWindowBuilder::new(&rows);
+        if let Some(embedder) = embedder.as_deref() {
+            window_builder = window_builder.with_embedding_adapter(embedder);
+        }
         let started = std::time::Instant::now();
         let (model, outcome) =
             archon_world_model::jepa::train_jepa_candidate_with_backend_observed(
@@ -273,6 +292,7 @@ fn render_jepa_trainer_tick_observed(
                 config.learning.world_model.training.allow_cpu_fallback,
                 should_stop,
                 progress,
+                Some(&window_builder),
             )?;
         if started.elapsed().as_millis() > u128::from(policy.max_runtime_ms) {
             bail!("jepa world-model training exceeded max_runtime_ms");

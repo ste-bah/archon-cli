@@ -17,7 +17,15 @@
         };
 
         let error =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                false,
+                None,
+                None,
+                None,
+            )
                 .unwrap_err();
 
         assert!(error.to_string().contains("JepaBackendProbeFailed"));

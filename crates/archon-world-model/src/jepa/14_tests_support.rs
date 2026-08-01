@@ -1,5 +1,5 @@
     use super::*;
-    use crate::schema::{WorldActionKind, WorldTraceRow};
+    use crate::schema::{WorldActionKind, WorldTraceRow, WorldTraceSource};
 
     fn jepa_test_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

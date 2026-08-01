@@ -205,8 +205,9 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.3.11** ([release notes](docs/release-notes/v1.3.11.md))
+- Current version: **v1.4.0** ([release notes](docs/release-notes/v1.4.0.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
+- v1.4.0 makes the JEPA world model actually learn: trainable encoders with stop-gradient and a live collapse gate, dense embedding input in place of hashed excerpt text, a pre-turn advisory hook in the live agent path, and an automatic candidate evaluate/shadow/promote/rollback lifecycle. Also adds the `archon draft` FCDP pipeline with provenance import.
 - v1.3.11 adds the governed Trading Lab substrate: strategy specs, Pine prototypes, data/backtest/paper/live gates, risk/audit controls, learning hooks, and detailed user/cookbook documentation.
 - v1.3.10 adds provider-neutral dynamic workflows: `/workflow` planning/running/resume controls, durable workflow bundles, live TUI activity rows, web workflow inspection, learning ledgers, sanitized events, reusable templates, and workflow docs.
 - v1.3.9 moves document embeddings out of the hot Cozo write path into a RocksDB raw-vector store, adds resumable legacy-vector migration, Rust-HNSW compaction, durable index-queue/daemon controls, and clearer vector-status diagnostics.

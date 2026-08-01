@@ -7,9 +7,8 @@ fn train_jepa_candidate_with_tensor_backend<B: JepaTensorBackend>(
     progress: JepaProgressObserver,
     // Supplied by the caller when windows should carry dense embeddings. `None`
     // builds a plain builder from `rows`, leaving the encoder on the hashed
-    // fallback. The builder is constructed outside `jepa/` because this module
-    // is gated against naming an embedding provider.
-    window_builder: Option<&TraceWindowBuilder<'_>>,
+    // fallback. See `JepaWindowBuilder`.
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     config.validate()?;
     check_jepa_training_stop(should_stop, "jepa example build")?;

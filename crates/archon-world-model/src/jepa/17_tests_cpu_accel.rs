@@ -108,7 +108,66 @@
         assert!(candle.execution_report.native_runtime_prediction);
         assert_eq!(candle.execution_report.host_fallback_count, 0);
         assert_eq!(candle.execution_report.latency_ms, candle.latency_ms);
-        assert_eq!(cpu.guardrail_scores, candle.guardrail_scores);
+        // Tolerance, not equality. The two backends do the same arithmetic in a
+        // different order, so the scores agree to about seven significant
+        // figures rather than bit for bit. Every other numeric comparison in
+        // this test already allows 0.001; this one asserted exact equality and
+        // happened to hold until a change to the feature layout moved the
+        // rounding by one ULP.
+        let left_scores = &cpu.guardrail_scores;
+        let right_scores = &candle.guardrail_scores;
+        for (label, left, right) in [
+            (
+                "failure",
+                left_scores.predicted_failure,
+                right_scores.predicted_failure,
+            ),
+            (
+                "retry",
+                left_scores.predicted_retry,
+                right_scores.predicted_retry,
+            ),
+            (
+                "provider_incident",
+                left_scores.predicted_provider_incident,
+                right_scores.predicted_provider_incident,
+            ),
+            (
+                "verification_needed",
+                left_scores.predicted_verification_needed,
+                right_scores.predicted_verification_needed,
+            ),
+            (
+                "user_correction",
+                left_scores.predicted_user_correction,
+                right_scores.predicted_user_correction,
+            ),
+            (
+                "plan_drift",
+                left_scores.predicted_plan_drift,
+                right_scores.predicted_plan_drift,
+            ),
+            (
+                "high_cost",
+                left_scores.predicted_high_cost,
+                right_scores.predicted_high_cost,
+            ),
+            (
+                "slow_run",
+                left_scores.predicted_slow_run,
+                right_scores.predicted_slow_run,
+            ),
+        ] {
+            match (left, right) {
+                (Some(left), Some(right)) => assert!(
+                    (left - right).abs() < 0.001,
+                    "{label}: cpu={left} candle={right}"
+                ),
+                // Structural mismatch — one backend scored it and the other
+                // did not — is still a hard failure.
+                (left, right) => assert_eq!(left, right, "{label}"),
+            }
+        }
         assert!(
             cosine_error(&cpu.predicted_next_state, &candle.predicted_next_state).unwrap() < 0.001
         );
@@ -134,8 +193,16 @@
             BackendStatus::cpu_fallback(BackendKind::Cuda, "cuda_probe_failed:not_compiled");
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
-                .unwrap();
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
@@ -183,13 +250,22 @@
                 false,
                 None,
                 None,
+                None,
             )
                 .unwrap_err();
         assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
-                .unwrap();
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
             outcome.metadata.backend_execution.selected_backend,
@@ -232,13 +308,22 @@
                 false,
                 None,
                 None,
+                None,
             )
                 .unwrap_err();
         assert!(error.to_string().contains("JepaBackendNativeStageFailed"));
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, true, None, None)
-                .unwrap();
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(
             outcome.metadata.backend_execution.selected_backend,
@@ -277,7 +362,15 @@
         };
 
         let (model, outcome) =
-            train_jepa_candidate_with_backend_status(&rows(), &config, status, false, None, None)
+            train_jepa_candidate_with_backend_status(
+                &rows(),
+                &config,
+                status,
+                false,
+                None,
+                None,
+                None,
+            )
                 .unwrap();
 
         assert_eq!(model.metadata.backend, BackendKind::Cuda);

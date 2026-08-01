@@ -73,11 +73,22 @@ pub(super) fn render_train_jepa(
     }
 
     let backend = selected_training_backend(config);
-    let (model, outcome) = archon_world_model::jepa::train_jepa_candidate_with_backend(
+    // Give the encoder dense vectors. Without an adapter every window is built
+    // with `embedding: None` and the encoder falls back to hashing excerpt text
+    // into `latent_dim` buckets, which collides an open vocabulary into 384
+    // slots at the default. The adapter is built here rather than inside
+    // `jepa/` because that module is gated against naming an embedding
+    // provider at all.
+    let embedder = build_embedding_adapter(config)?;
+    let window_builder = archon_world_model::representation::TraceWindowBuilder::new(&rows)
+        .with_embedding_adapter(embedder.as_ref());
+    let (model, outcome) = archon_world_model::jepa::train_jepa_candidate_with_backend_controlled(
         &rows,
         &jepa_config,
         backend.requested,
         config.learning.world_model.training.allow_cpu_fallback,
+        None,
+        Some(&window_builder),
     )?;
     enforce_jepa_checkpoint_cap(config, &model)?;
     let registry = ModelRegistry::open(root)?;

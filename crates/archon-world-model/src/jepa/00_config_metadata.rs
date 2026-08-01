@@ -17,7 +17,9 @@ use crate::model::{CpuLatentTransitionModel, LatentTransitionExample};
 use crate::representation::{
     TraceAction, TraceTransition, TraceWindow, TraceWindowBuilder, WorldRepresentationAdapter,
 };
-use crate::schema::{ScalarFeatures, WorldLabelSet, WorldTraceRow};
+use crate::schema::{
+    ScalarFeatures, WorldActionKind, WorldLabelSet, WorldTraceRow, WorldTraceSource,
+};
 use crate::train::TrainingStatus;
 
 pub const JEPA_MODEL_KIND: &str = "jepa_transition";

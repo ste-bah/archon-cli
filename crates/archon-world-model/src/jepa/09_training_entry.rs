@@ -1,6 +1,18 @@
 /// Optional (phase, detail) progress callback for JEPA training.
 pub type JepaProgressObserver<'a> = Option<&'a dyn Fn(&str, &str)>;
 
+/// Optional caller-configured window builder.
+///
+/// This is how dense embeddings reach the encoder. A builder carrying an
+/// embedding adapter yields windows and actions with real vectors; `None`
+/// builds a plain builder from `rows`, leaving the encoder on the hashed
+/// fallback that collides an open vocabulary into `latent_dim` buckets.
+///
+/// The builder is configured by the caller rather than here because
+/// `jepa_module_keeps_encoder_path_free_of_embedding_adapters` forbids this
+/// module from naming an embedding provider at all.
+pub type JepaWindowBuilder<'a> = Option<&'a TraceWindowBuilder<'a>>;
+
 pub fn train_jepa_candidate(
     rows: &[WorldTraceRow],
     config: &JepaTrainingConfig,
@@ -20,6 +32,7 @@ pub fn train_jepa_candidate_with_backend(
         requested_backend,
         allow_cpu_fallback,
         None,
+        None,
     )
 }
 
@@ -29,6 +42,7 @@ pub fn train_jepa_candidate_with_backend_controlled(
     requested_backend: BackendKind,
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_jepa_candidate_with_backend_observed(
         rows,
@@ -37,6 +51,7 @@ pub fn train_jepa_candidate_with_backend_controlled(
         allow_cpu_fallback,
         should_stop,
         None,
+        window_builder,
     )
 }
 
@@ -47,6 +62,7 @@ pub fn train_jepa_candidate_with_backend_observed(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     let status = crate::backend::select_runtime_backend(requested_backend, allow_cpu_fallback);
     emit_jepa_progress(
@@ -66,6 +82,7 @@ pub fn train_jepa_candidate_with_backend_observed(
         allow_cpu_fallback,
         should_stop,
         progress,
+        window_builder,
     )
 }
 
@@ -79,6 +96,7 @@ fn train_jepa_candidate_with_backend_status(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     #[cfg(all(test, feature = "mlx-metal", target_os = "macos", target_arch = "aarch64"))]
     let _jepa_training_test_lock = JEPA_TRAINING_TEST_LOCK
@@ -86,7 +104,7 @@ fn train_jepa_candidate_with_backend_status(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if status.selected == BackendKind::Cpu {
-        return train_jepa_candidate_cpu(rows, config, status, should_stop, progress);
+        return train_jepa_candidate_cpu(rows, config, status, should_stop, progress, window_builder);
     }
     if !allow_cpu_fallback
         && let Some(reason) = status.fallback_reason.as_deref()
@@ -97,10 +115,26 @@ fn train_jepa_candidate_with_backend_status(
         );
     }
     if status.selected == BackendKind::Cuda {
-        return train_cuda_or_fallback(rows, config, status, allow_cpu_fallback, should_stop, progress);
+        return train_cuda_or_fallback(
+            rows,
+            config,
+            status,
+            allow_cpu_fallback,
+            should_stop,
+            progress,
+            window_builder,
+        );
     }
     if status.selected == BackendKind::Metal {
-        return train_metal_or_fallback(rows, config, status, allow_cpu_fallback, should_stop, progress);
+        return train_metal_or_fallback(
+            rows,
+            config,
+            status,
+            allow_cpu_fallback,
+            should_stop,
+            progress,
+            window_builder,
+        );
     }
     if allow_cpu_fallback {
         let fallback = BackendStatus::cpu_fallback(
@@ -108,7 +142,14 @@ fn train_jepa_candidate_with_backend_status(
             format!("jepa_native_backend_not_implemented:{}", status.selected),
         );
         emit_jepa_progress(progress, "jepa_backend_fallback", &format_backend_status(&fallback));
-        return train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress);
+        return train_jepa_candidate_cpu(
+            rows,
+            config,
+            fallback,
+            should_stop,
+            progress,
+            window_builder,
+        );
     }
     bail!(
         "JepaBackendNativeStageFailed: native JEPA backend for {} is not implemented; refusing to write an accelerator-labelled candidate",
@@ -124,6 +165,7 @@ fn train_cuda_or_fallback(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     match train_jepa_candidate_with_tensor_backend(
         rows,
@@ -132,6 +174,7 @@ fn train_cuda_or_fallback(
         CandleCudaJepaBackend,
         should_stop,
         progress,
+        window_builder,
     ) {
         Ok(candidate) => Ok(candidate),
         Err(error) if allow_cpu_fallback => {
@@ -140,7 +183,7 @@ fn train_cuda_or_fallback(
                 format!("jepa_native_backend_failed:{}:{error}", status.selected),
             );
             emit_jepa_progress(progress, "jepa_backend_fallback", &format_backend_status(&fallback));
-            train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress)
+            train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress, window_builder)
         }
         Err(error) => bail!(
             "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
@@ -157,6 +200,7 @@ fn train_cuda_or_fallback(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_uncompiled_backend_or_fallback(
         rows,
@@ -165,7 +209,7 @@ fn train_cuda_or_fallback(
         allow_cpu_fallback,
         should_stop,
         progress,
-        "cuda",
+        window_builder,
     )
 }
 
@@ -177,6 +221,7 @@ fn train_metal_or_fallback(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     match train_jepa_candidate_with_tensor_backend(
         rows,
@@ -185,6 +230,7 @@ fn train_metal_or_fallback(
         MlxMetalJepaBackend,
         should_stop,
         progress,
+        window_builder,
     ) {
         Ok(candidate) => Ok(candidate),
         Err(error) if allow_cpu_fallback => {
@@ -193,7 +239,7 @@ fn train_metal_or_fallback(
                 format!("jepa_native_backend_failed:{}:{error}", status.selected),
             );
             emit_jepa_progress(progress, "jepa_backend_fallback", &format_backend_status(&fallback));
-            train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress)
+            train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress, window_builder)
         }
         Err(error) => bail!(
             "JepaBackendNativeStageFailed: native JEPA backend for {} failed; refusing to write an accelerator-labelled candidate: {error}",
@@ -210,6 +256,7 @@ fn train_metal_or_fallback(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_uncompiled_backend_or_fallback(
         rows,
@@ -218,7 +265,7 @@ fn train_metal_or_fallback(
         allow_cpu_fallback,
         should_stop,
         progress,
-        "metal",
+        window_builder,
     )
 }
 
@@ -229,7 +276,7 @@ fn train_uncompiled_backend_or_fallback(
     allow_cpu_fallback: bool,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
-    backend_name: &str,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     if !allow_cpu_fallback {
         bail!(
@@ -237,12 +284,14 @@ fn train_uncompiled_backend_or_fallback(
             status.selected
         );
     }
-    let fallback = BackendStatus::cpu_fallback(
-        status.requested,
-        format!("jepa_native_backend_not_compiled:{backend_name}"),
-    );
+    // `status.selected` already renders as "cuda"/"metal", so the reason is
+    // derived from it rather than passed in alongside. A separate name argument
+    // pushed this function past the argument-count lint and gave the caller a
+    // way to label the fallback with a backend the status disagreed with.
+    let reason = format!("jepa_native_backend_not_compiled:{}", status.selected);
+    let fallback = BackendStatus::cpu_fallback(status.requested, reason);
     emit_jepa_progress(progress, "jepa_backend_fallback", &format_backend_status(&fallback));
-    train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress)
+    train_jepa_candidate_cpu(rows, config, fallback, should_stop, progress, window_builder)
 }
 
 fn train_jepa_candidate_cpu(
@@ -251,6 +300,7 @@ fn train_jepa_candidate_cpu(
     backend_status: BackendStatus,
     should_stop: Option<&dyn Fn() -> bool>,
     progress: JepaProgressObserver,
+    window_builder: JepaWindowBuilder,
 ) -> Result<(JepaTraceModel, JepaTrainingOutcome)> {
     train_jepa_candidate_with_tensor_backend(
         rows,
@@ -259,14 +309,7 @@ fn train_jepa_candidate_cpu(
         CpuJepaBackend,
         should_stop,
         progress,
-        // TODO: thread a caller-supplied `TraceWindowBuilder` down this chain so
-        // `archon world train-jepa` can pass one carrying an embedding adapter.
-        // Until then every training run builds plain windows and the encoder
-        // uses the hashed fallback. `build_jepa_training_examples_from_builder`
-        // and `train_jepa_candidate_with_tensor_backend` already accept it; what
-        // is missing is the parameter on the eight functions between here and
-        // `train_jepa_candidate_with_backend_observed`.
-        None,
+        window_builder,
     )
 }
 

@@ -127,3 +127,136 @@
         assert!(outcome.metadata.backend_execution.native_loss_eval);
         assert_eq!(outcome.metadata.backend_execution.host_fallback_count, 0);
     }
+
+    /// An embedding the encoder cannot use must not silently delete the
+    /// excerpt text along with it.
+    ///
+    /// `seed_features` rejected a mismatched or non-finite vector and zeroed
+    /// the seed, while the lexical fallback only checked that the embedding was
+    /// non-empty and switched itself off. The two disagreed, so such a window
+    /// carried neither the embedding nor the hashed text — worse than either
+    /// path alone, and silent. Providers do return unexpected dimensions.
+    #[test]
+    fn an_unusable_embedding_keeps_the_lexical_fallback() {
+        let dim = 8;
+        let source = rows();
+        let builder = TraceWindowBuilder::new(&source);
+        let plain = builder.context_window("r2", 2).unwrap();
+        let baseline = window_features(&plain, dim, "context").unwrap();
+
+        let mut wrong_length = plain.clone();
+        wrong_length.embedding = Some(vec![0.5; dim + 1]);
+        assert_eq!(
+            window_features(&wrong_length, dim, "context").unwrap(),
+            baseline,
+            "a wrong-length embedding must fall back to hashed excerpt text"
+        );
+
+        let mut not_finite = plain.clone();
+        not_finite.embedding = Some(vec![f32::NAN; dim]);
+        assert_eq!(
+            window_features(&not_finite, dim, "context").unwrap(),
+            baseline,
+            "a non-finite embedding must fall back to hashed excerpt text"
+        );
+
+        let mut usable = plain.clone();
+        usable.embedding = Some((0..dim).map(|idx| idx as f32 / dim as f32).collect());
+        assert_ne!(
+            window_features(&usable, dim, "context").unwrap(),
+            baseline,
+            "a usable embedding must actually change the features"
+        );
+    }
+
+    fn row_categorical_weights() -> CategoricalWeights {
+        CategoricalWeights {
+            source: 0.45,
+            action_kind: 0.65,
+            provider: 0.55,
+            model: 0.40,
+            agent: 0.40,
+        }
+    }
+
+    /// Every closed-enum value must own a dimension, with no two sharing one.
+    #[test]
+    fn closed_enum_categoricals_have_distinct_slots() {
+        let sources = [
+            WorldTraceSource::ActivityEvent,
+            WorldTraceSource::PipelineBundle,
+            WorldTraceSource::ProviderRuntime,
+            WorldTraceSource::Plan,
+            WorldTraceSource::Conversation,
+            WorldTraceSource::AgentTranscript,
+            WorldTraceSource::AgentOutput,
+            WorldTraceSource::Workflow,
+            WorldTraceSource::Retrospective,
+            WorldTraceSource::Memory,
+            WorldTraceSource::AgentEvolution,
+            WorldTraceSource::ReasoningQuality,
+        ];
+        let slots: std::collections::HashSet<usize> = sources.iter().map(source_slot).collect();
+        assert_eq!(slots.len(), sources.len(), "two sources share a dimension");
+        assert_eq!(slots.len(), SOURCE_SLOTS, "SOURCE_SLOTS is out of step");
+        assert!(slots.iter().all(|slot| *slot < SOURCE_SLOTS));
+
+        let kinds = [
+            WorldActionKind::AgentAttempt,
+            WorldActionKind::ProviderCall,
+            WorldActionKind::ToolCall,
+            WorldActionKind::PlanUpdate,
+            WorldActionKind::MemorySurface,
+            WorldActionKind::Verification,
+            WorldActionKind::Retry,
+            WorldActionKind::Resume,
+            WorldActionKind::Unknown,
+        ];
+        let slots: std::collections::HashSet<usize> = kinds.iter().map(action_kind_slot).collect();
+        assert_eq!(slots.len(), kinds.len(), "two action kinds share a dimension");
+        assert_eq!(slots.len(), ACTION_KIND_SLOTS, "ACTION_KIND_SLOTS is out of step");
+    }
+
+    /// Two different sources must land on different dimensions rather than
+    /// colliding in a shared hash bucket.
+    #[test]
+    fn reserved_slots_keep_distinct_categoricals_apart() {
+        let dim = 384;
+        let base = categorical_base(dim).expect("384 dimensions should reserve a block");
+        assert!(base + CATEGORICAL_SLOTS <= dim, "reserved block runs off the end");
+
+        let build = |source: &WorldTraceSource| {
+            let mut features = vec![0.0_f32; dim];
+            add_categorical_features(
+                &mut features,
+                Categoricals {
+                    source: Some(source),
+                    action_kind: &WorldActionKind::Retry,
+                    provider: None,
+                    model: None,
+                    agent: None,
+                },
+                row_categorical_weights(),
+                1.0,
+                "context",
+            );
+            features
+        };
+
+        let memory = build(&WorldTraceSource::Memory);
+        let plan = build(&WorldTraceSource::Plan);
+        let memory_slot = base + SOURCE_BASE + source_slot(&WorldTraceSource::Memory);
+
+        assert_ne!(memory[memory_slot], 0.0, "source did not reach its own slot");
+        assert_eq!(
+            plan[memory_slot], 0.0,
+            "a different source wrote into the memory slot"
+        );
+    }
+
+    /// Small latent dimensions cannot spare the block and keep hashing.
+    #[test]
+    fn a_small_latent_dim_keeps_the_hashed_categoricals() {
+        assert!(categorical_base(8).is_none());
+        assert!(categorical_base(CATEGORICAL_SLOTS * 4).is_some());
+    }

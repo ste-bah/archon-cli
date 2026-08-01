@@ -52,7 +52,7 @@ fn window_features(window: &TraceWindow, dimensions: usize, role: &str) -> Resul
     // Hashing the excerpts too would scatter an open vocabulary across the same
     // dimensions the embedding just filled, undoing it. Lexical hashing is the
     // fallback for when there is no embedding, not a supplement to one.
-    let lexical = LexicalFallback::for_embedding(window.embedding.as_deref());
+    let lexical = LexicalFallback::for_embedding(window.embedding.as_deref(), dimensions);
     let row_weight = 1.0 / window.rows.len().max(1) as f32;
     for row in &window.rows {
         add_row_features(&mut features, row, row_weight, role, lexical);
@@ -68,22 +68,27 @@ fn action_features(action: &TraceAction, dimensions: usize, role: &str) -> Resul
     let mut features = seed_features(action.embedding.as_deref(), dimensions);
     // `action_ref` is a row id — unbounded and single-occurrence, so it cannot
     // generalise. Dropped for the same reason as the window identifiers.
-    add_token(
+    add_categorical_features(
         &mut features,
-        &format!("{role}:kind:{:?}", action.action_kind),
-        0.80,
+        Categoricals {
+            source: None,
+            action_kind: &action.action_kind,
+            provider: action.provider.as_ref(),
+            model: action.model.as_ref(),
+            agent: action.agent.as_ref(),
+        },
+        CategoricalWeights {
+            source: 0.0,
+            action_kind: 0.80,
+            provider: 0.65,
+            model: 0.50,
+            agent: 0.50,
+        },
+        1.0,
+        role,
     );
-    if let Some(provider) = &action.provider {
-        add_token(&mut features, &format!("{role}:provider:{provider}"), 0.65);
-    }
-    if let Some(model) = &action.model {
-        add_token(&mut features, &format!("{role}:model:{model}"), 0.50);
-    }
-    if let Some(agent) = &action.agent {
-        add_token(&mut features, &format!("{role}:agent:{agent}"), 0.50);
-    }
     add_scalar_features(&mut features, &action.scalar_features, 1.0);
-    if LexicalFallback::for_embedding(action.embedding.as_deref()).is_enabled() {
+    if LexicalFallback::for_embedding(action.embedding.as_deref(), dimensions).is_enabled() {
         add_lexical_features(&mut features, &action.summary, 0.20);
     }
     normalize(&mut features);
@@ -102,10 +107,10 @@ enum LexicalFallback {
 }
 
 impl LexicalFallback {
-    fn for_embedding(embedding: Option<&[f32]>) -> Self {
-        match embedding {
-            Some(values) if !values.is_empty() => Self::Disabled,
-            _ => Self::Enabled,
+    fn for_embedding(embedding: Option<&[f32]>, dimensions: usize) -> Self {
+        match usable_embedding(embedding, dimensions) {
+            Some(_) => Self::Disabled,
+            None => Self::Enabled,
         }
     }
 
@@ -121,29 +126,25 @@ fn add_row_features(
     role: &str,
     lexical: LexicalFallback,
 ) {
-    add_token(
+    add_categorical_features(
         features,
-        &format!("{role}:source:{:?}", row.source),
-        0.45 * weight,
+        Categoricals {
+            source: Some(&row.source),
+            action_kind: &row.action_kind,
+            provider: row.provider.as_ref(),
+            model: row.model.as_ref(),
+            agent: row.agent.as_ref(),
+        },
+        CategoricalWeights {
+            source: 0.45,
+            action_kind: 0.65,
+            provider: 0.55,
+            model: 0.40,
+            agent: 0.40,
+        },
+        weight,
+        role,
     );
-    add_token(
-        features,
-        &format!("{role}:action_kind:{:?}", row.action_kind),
-        0.65 * weight,
-    );
-    if let Some(provider) = &row.provider {
-        add_token(
-            features,
-            &format!("{role}:provider:{provider}"),
-            0.55 * weight,
-        );
-    }
-    if let Some(model) = &row.model {
-        add_token(features, &format!("{role}:model:{model}"), 0.40 * weight);
-    }
-    if let Some(agent) = &row.agent {
-        add_token(features, &format!("{role}:agent:{agent}"), 0.40 * weight);
-    }
     add_scalar_features(features, &row.scalar_features, weight);
     if let Some(excerpt) = row.redacted_excerpt.as_ref().filter(|_| lexical.is_enabled()) {
         add_lexical_features(features, excerpt, 0.15 * weight);
@@ -160,22 +161,35 @@ fn add_row_features(
     }
 }
 
+/// The embedding to build features from, or `None` when it cannot be used.
+///
+/// A vector of the wrong length, or one carrying a non-finite value, is not
+/// usable. Both the seed and the lexical-fallback decision go through here so
+/// that they cannot disagree. They used to apply different rules: an embedding
+/// of the wrong length zeroed the seed *and* suppressed lexical hashing, so the
+/// excerpt text contributed nothing at all and the result was worse than either
+/// path alone. Providers do return unexpected dimensions, so this is reachable
+/// rather than theoretical.
+///
+/// A wrong-width embedding is ignored rather than truncated or padded: it means
+/// the corpus was embedded under a different projection than the model expects,
+/// and silently reshaping it would train on two incompatible representations.
+fn usable_embedding(embedding: Option<&[f32]>, dimensions: usize) -> Option<&[f32]> {
+    embedding.filter(|values| {
+        values.len() == dimensions && values.iter().all(|value| value.is_finite())
+    })
+}
+
 /// Base feature vector for an encoder input.
 ///
 /// With a caller-supplied embedding of the right width, that vector *is* the
 /// base and the structured features are added on top. Otherwise the base is
 /// zeros and everything falls back to hashing, which is the pre-embedding
 /// behaviour.
-///
-/// A wrong-width embedding is ignored rather than truncated or padded: it means
-/// the corpus was embedded under a different projection than the model expects,
-/// and silently reshaping it would train on two incompatible representations.
 fn seed_features(embedding: Option<&[f32]>, dimensions: usize) -> Vec<f32> {
-    match embedding {
-        Some(values) if values.len() == dimensions && values.iter().all(|v| v.is_finite()) => {
-            values.to_vec()
-        }
-        _ => vec![0.0; dimensions],
+    match usable_embedding(embedding, dimensions) {
+        Some(values) => values.to_vec(),
+        None => vec![0.0; dimensions],
     }
 }
 

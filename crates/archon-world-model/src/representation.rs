@@ -8,4 +8,5 @@ use crate::features::{GraphContextFeatures, graph_context_for_row};
 use crate::schema::{ScalarFeatures, WorldActionKind, WorldLabelSet, WorldTraceRow};
 
 include!("representation/00_core.rs");
+include!("representation/02_window_builder.rs");
 include!("representation/01_tests.rs");
