@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) mod checks;
+
 type BenchGroup<'a> = criterion::BenchmarkGroup<'a, criterion::measurement::WallTime>;
 
 pub(super) fn bench_catalog_representations(criterion: &mut Criterion) {
