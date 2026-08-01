@@ -61,8 +61,14 @@ fn a_missing_textual_deliverable_still_fails() {
     assert!(!out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("missing or empty"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
+        "status={:?}
+stdout:
+{}
+stderr:
+{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -86,8 +92,14 @@ fn an_undeclared_json_extension_is_still_strictly_parsed() {
     assert!(!out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("not valid JSON"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
+        "status={:?}
+stdout:
+{}
+stderr:
+{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -151,7 +163,13 @@ fn a_missing_parameterized_instance_still_fails() {
     assert!(!out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("missing or empty"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
+        "status={:?}
+stdout:
+{}
+stderr:
+{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }

@@ -280,11 +280,40 @@ enum ContractVerification {
 }
 
 async fn run_contract_verifier(command: &str) -> ContractVerification {
-    let run = tokio::process::Command::new(crate::command::posix_shell::posix_shell())
-        .arg("-c")
-        .arg(command)
+    // Fed to the shell on stdin rather than as `-c <command>`.
+    //
+    // The generated deliverable verifier embeds a ~29 KB Python program, and
+    // Windows caps a whole command line at 32,767 characters. Passed as an
+    // argument it was silently truncated mid-script by CreateProcess, so the
+    // heredoc never met its terminator and Python died on a severed statement
+    // ("here-document delimited by end-of-file", then a SyntaxError). Linux
+    // allows roughly 2 MB, which is why this only ever failed on Windows.
+    //
+    // stdin has no such limit, and for a generated script the semantics are
+    // the same -- nothing here depends on `$0` or positional arguments.
+    let mut child = match tokio::process::Command::new(crate::command::posix_shell::posix_shell())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
-        .output();
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return ContractVerification::Failed(format!(
+                "host could not execute the declared contract verifier: {error}"
+            ));
+        }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt as _;
+        let script = command.to_string();
+        // Ignore write failures: the child may have exited already, and the
+        // output/exit status below is what decides the verdict either way.
+        let _ = stdin.write_all(script.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    }
+    let run = child.wait_with_output();
     let output = match tokio::time::timeout(CONTRACT_VERIFIER_TIMEOUT, run).await {
         Ok(Ok(output)) => output,
         // Fail closed: an unrunnable verifier is not evidence of success.

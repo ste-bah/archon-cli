@@ -100,9 +100,24 @@ fn run_verifier(command: &str) -> std::process::Output {
     // absolute /bin/zsh made them fail outright on any host without zsh —
     // passing in CI only because the ubuntu runner image happens to include it.
     // The generated commands are plain POSIX.
-    std::process::Command::new(crate::command::posix_shell::posix_shell())
-        .args(["-c", command])
-        .output()
+    // Fed on stdin, matching `run_contract_verifier`. The generated verifier
+    // embeds a ~29 KB Python program and Windows truncates any command line
+    // past 32,767 characters, which severed the heredoc mid-script.
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(crate::command::posix_shell::posix_shell())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn generated verifier");
+    child
+        .stdin
+        .take()
+        .expect("verifier stdin")
+        .write_all(command.as_bytes())
+        .expect("write verifier script");
+    child
+        .wait_with_output()
         .expect("execute generated verifier")
 }
 
