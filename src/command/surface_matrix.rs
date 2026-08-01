@@ -235,9 +235,9 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         cli: "archon plugin ...",
         slash_primary: Some("plugin"),
         tui_surface: "Plugin umbrella",
-        status: SurfaceStatus::Partial,
+        status: SurfaceStatus::Done,
         source_of_truth: "src/command/plugin_slash.rs",
-        notes: "List/info are live; enable/disable/install/reload emit guidance until persistent plugin state exists.",
+        notes: "The CLI exposes list and info; both are mirrored. The TUI additionally offers guided enable/disable/install/reload hints. Runtime plugin lifecycle management does not exist on either surface and is tracked as product work, not a parity gap.",
     },
     CommandSurfaceRow {
         cli: "archon self ...",
@@ -285,20 +285,14 @@ pub(crate) const COMMAND_SURFACE_EXCEPTIONS: &[SurfaceException] = &[
     SurfaceException {
         cli: "archon run-agent-async ...",
         owner: "archon-maintainers",
-        review_date: "2026-06-30",
+        review_date: "2026-09-30",
         reason: "Launch is TUI-native; richer async task verbs remain under `/tasks` until the task detail screen lands.",
     },
     SurfaceException {
         cli: "archon task-status/result/cancel/list/events",
         owner: "archon-maintainers",
-        review_date: "2026-06-30",
+        review_date: "2026-09-30",
         reason: "`/tasks` is the approved TUI entry point; per-id shell verbs stay richer until task drill-down UX is built.",
-    },
-    SurfaceException {
-        cli: "archon plugin ...",
-        owner: "archon-maintainers",
-        review_date: "2026-06-30",
-        reason: "List/info are live; mutating plugin operations remain guided until persistent plugin state is productized.",
     },
     SurfaceException {
         cli: "archon self ...",
@@ -315,20 +309,20 @@ pub(crate) const COMMAND_SURFACE_EXCEPTIONS: &[SurfaceException] = &[
     SurfaceException {
         cli: "archon team ...",
         owner: "archon-maintainers",
-        review_date: "2026-06-30",
+        review_date: "2026-09-30",
         reason: "Team execution is intentionally shell-only until a first-class team command-center workflow is designed.",
     },
     SurfaceException {
         cli: "archon serve/remote/web/ide-stdio",
         owner: "archon-maintainers",
-        review_date: "2026-06-30",
-        reason: "Host process control is intentionally shell-only and not part of the interactive command center.",
+        review_date: "2026-09-30",
+        reason: "Permanent by design: starting a host process from inside the TUI session it would host is a category error, not deferred work. Reviewed only to confirm no product need has appeared.",
     },
     SurfaceException {
         cli: "archon metrics/update",
         owner: "archon-maintainers",
-        review_date: "2026-06-30",
-        reason: "Operational maintenance commands are approved shell-only surfaces unless a product need appears.",
+        review_date: "2026-09-30",
+        reason: "Permanent by design: operational maintenance is a shell-first surface. Reviewed only to confirm no product need has appeared.",
     },
 ];
 
