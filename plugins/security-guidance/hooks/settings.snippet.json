@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": { "tool_name": "Edit|Write|MultiEdit|NotebookEdit" },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .archon/plugins/security-guidance/scripts/sg-python.sh .archon/plugins/security-guidance/scripts/security_warning_hook.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

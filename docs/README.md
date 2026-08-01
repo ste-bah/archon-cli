@@ -54,7 +54,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 ## Integrations
 
 - [MCP servers](integrations/mcp-servers.md) — Model Context Protocol transport, registration, discovery
-- [Plugins](integrations/plugins.md) — manifest format, lifecycle, packaging
+- [Plugins](integrations/plugins.md) — markdown bundles and WASM plugins: layout, lifecycle, packaging
 - [Hooks](integrations/hooks.md) — event-driven shell command triggers
 - [Identity & spoofing](integrations/identity-spoofing.md) — OAuth, API key, Claude Code mimicry
 - [VLM image descriptions](integrations/vlm.md) — Ollama, Gemini, and Anthropic vision providers for image ingest

@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "created_at": "2026-08-01T00:00:00Z",
+  "updated_at": "2026-08-01T00:00:00Z",
+  "invocation_count": 0,
+  "quality": {"applied_rate": 0.0, "completion_rate": 0.0},
+  "evolution_history": [],
+  "archived": false,
+  "color": "green"
+}

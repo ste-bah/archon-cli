@@ -258,13 +258,18 @@ jobs:
       - name: Run tests (nextest, Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          CARGO_BUILD_JOBS: "1"
-        # No heartbeat loop: that exists on the POSIX side to keep long quiet
-        # phases diagnosable alongside disk snapshots, and reproducing bash job
-        # control in pwsh would buy nothing. --no-fail-fast so one failing crate
-        # still reports the rest, which matters most on the run that re-enables
-        # this platform after it was dark.
+        # Deliberately NOT setting CARGO_BUILD_JOBS=1, unlike the POSIX step.
+        # That exists to keep peak link memory inside ubuntu-latest's 7GB
+        # ceiling (#225 SIGBUS). Windows runners have 16GB and a different
+        # linker, so the setting buys nothing there and costs enormously:
+        # nextest links ~200 test binaries, and serialising MSVC linking is why
+        # run 30697135157 spent ~100 minutes in this step and was cancelled at
+        # the 2h wall, against 8 minutes for the same suite on macOS.
+        #
+        # No heartbeat loop either: that exists on the POSIX side to keep long
+        # quiet phases diagnosable alongside disk snapshots, and reproducing
+        # bash job control in pwsh would buy nothing. --no-fail-fast so one
+        # failing crate still reports the rest.
         run: cargo nextest run --workspace --no-fail-fast
 
       - name: Run doctests

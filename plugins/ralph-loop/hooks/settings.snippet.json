@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .archon/plugins/ralph-loop/scripts/stop-hook.sh",
+            "timeout": 30,
+            "blocking": true
+          }
+        ]
+      }
+    ]
+  }
+}

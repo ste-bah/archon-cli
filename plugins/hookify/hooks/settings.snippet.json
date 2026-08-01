@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .archon/plugins/hookify/scripts/pretooluse.py",
+            "timeout": 10,
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .archon/plugins/hookify/scripts/posttooluse.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .archon/plugins/hookify/scripts/stop.py",
+            "timeout": 10,
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .archon/plugins/hookify/scripts/userpromptsubmit.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

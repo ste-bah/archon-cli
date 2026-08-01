@@ -1,8 +1,37 @@
 # Plugins
 
-Plugins are WebAssembly modules loaded with a `.archon-plugin/plugin.json` manifest. They can register tools, hooks, and slash commands when the manifest declares the matching structured capability and the operator grants it.
+Archon supports two kinds of plugins:
 
-## Plugin Layout
+1. **Markdown plugin bundles** — directories of subagents, SKILL.md skills, and hook snippets. No compilation, no manifest; pieces are discovered from well-known paths. This is the right format for prompt-driven workflows (reviews, git automation, guided development).
+2. **WASM plugins** — WebAssembly modules loaded with a `.archon-plugin/plugin.json` manifest. They can register tools, hooks, and slash commands when the manifest declares the matching structured capability and the operator grants it. This is the right format for plugins that need real code execution.
+
+## Markdown Plugin Bundles
+
+A bundle is a directory:
+
+```text
+.archon/plugins/
+|-- my-bundle/
+|   |-- agents/
+|   |   `-- my-agent/          # 6-file agent format
+|   |       |-- agent.md       # identity + ## INTENT (catalog description)
+|   |       |-- behavior.md    # process rules
+|   |       |-- context.md     # reference material
+|   |       |-- tools.md       # ## Primary Tools allowlist + guidance
+|   |       |-- memory-keys.json
+|   |       `-- meta.json
+|   |-- skills/                # copied into a skill root at install time
+|   |-- scripts/               # hook scripts
+|   `-- hooks/settings.snippet.json
+```
+
+- **Agents** under `<project>/.archon/plugins/<bundle>/agents/` and `~/.archon/plugins/<bundle>/agents/` are auto-discovered at startup and namespaced as `<bundle>:<agent>` (spawned via the Agent tool). Precedence: built-in < project plugin < user plugin < custom agents. Directories prefixed `_` are skipped.
+- **Skills** are not auto-discovered from bundle dirs — install them by copying each `skills/<name>/` into a [skill root](../reference/skills.md) such as `<project>/.archon/skills/`.
+- **Hooks** ship as a `settings.snippet.json` to merge manually into `.archon/settings.json` — see [Hooks](hooks.md). Never merged automatically.
+
+A curated collection of bundles ported from the official Claude Code plugins lives in [`plugins/`](../../plugins/README.md) at the repo root, with `install.sh` / `install.ps1` helpers.
+
+## WASM Plugin Layout
 
 ```text
 .archon/plugins/
