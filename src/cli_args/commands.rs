@@ -12,6 +12,8 @@ use super::{
 pub enum Commands {
     /// Authenticate with Anthropic via OAuth PKCE flow (deprecated alias for `auth login`)
     Login,
+    /// Sign out of Anthropic (deprecated alias for `auth logout`)
+    Logout,
     /// Manage provider authentication
     Auth(AuthArgs),
     /// Single-turn chat completion against a selected provider

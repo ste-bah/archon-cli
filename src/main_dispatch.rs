@@ -17,6 +17,7 @@ pub(crate) async fn handle_subcommand(
 ) -> Result<()> {
     match command {
         command @ (Commands::Login
+        | Commands::Logout
         | Commands::Auth(_)
         | Commands::Chat(_)
         | Commands::Providers { .. }
@@ -88,6 +89,17 @@ async fn handle_runtime_command(
                     command: AuthSubcommand::Login {
                         provider: AuthProviderKind::Anthropic,
                         accept_tos: true,
+                    },
+                },
+                config,
+            )
+            .await
+        }
+        Commands::Logout => {
+            crate::command::auth::handle_auth(
+                AuthArgs {
+                    command: AuthSubcommand::Logout {
+                        provider: Some(AuthProviderKind::Anthropic),
                     },
                 },
                 config,
