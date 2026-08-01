@@ -1,15 +1,30 @@
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use archon_video::frames::{
-    FrameExtractionMode, FrameExtractionOpts, compute_frame_hash, extract_frames,
-};
+use archon_video::frames::compute_frame_hash;
 
 fn write_test_image(path: &Path, color: [u8; 3]) {
     let image = image::RgbImage::from_pixel(8, 8, image::Rgb(color));
     image.save(path).unwrap();
 }
 
+// The interval-extraction test drives a `#!/bin/sh` mock ffmpeg made executable
+// with `chmod 0755`. Both halves of that are Unix-only: `PermissionsExt` does
+// not exist on Windows, and a shebang script is not executable there anyway.
+// Previously this file imported `PermissionsExt` at module scope, so the whole
+// test target failed to compile on Windows and took the entire workspace test
+// build down with it.
+//
+// Gating the mock rather than the file keeps `frame_hash_is_sha256_hex` — which
+// is pure Rust and platform-independent — running everywhere.
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::path::PathBuf;
+
+#[cfg(unix)]
+use archon_video::frames::{FrameExtractionMode, FrameExtractionOpts, extract_frames};
+
+#[cfg(unix)]
 fn write_mock_ffmpeg(dir: &Path, source_image: &Path) -> PathBuf {
     let script = dir.join("ffmpeg-mock.sh");
     let body = format!(
@@ -39,6 +54,7 @@ done
     script
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn interval_frame_extraction_respects_max_frames() {
     let dir = tempfile::tempdir().unwrap();

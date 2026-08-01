@@ -486,6 +486,10 @@ fn empty_page_offsets(page_count: u32) -> Vec<PageOffset> {
         .collect()
 }
 
-#[cfg(test)]
+// Unix-gated: every test in this module drives poppler through `#!/bin/sh`
+// mocks made executable with `chmod 0755`. `PermissionsExt` does not exist on
+// Windows and a shebang script is not executable there, so the module cannot
+// compile at all on that target.
+#[cfg(all(test, unix))]
 #[path = "pdf_tests.rs"]
 mod pdf_tests;

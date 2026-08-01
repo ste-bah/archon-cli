@@ -9,7 +9,7 @@
 use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Protocol unit tests (no binary needed)
@@ -174,6 +174,47 @@ fn archon_bin() -> Option<PathBuf> {
     std::env::var_os("CARGO_BIN_EXE_archon").map(PathBuf::from)
 }
 
+/// Read one line from the child's stdout, or give up after `budget`.
+///
+/// `BufReader::read_line` blocks until it has a line or hits EOF, so polling it
+/// in a retry loop cannot work. The previous version did exactly that and
+/// treated `Ok(0)` as "nothing yet, sleep and try again" — but `Ok(0)` *is*
+/// EOF. Once the child exited, every call returned instantly, the loop spun for
+/// the entire timeout, and the test then failed on an empty response. That is
+/// the shape of the 10.2s macOS CI failure: not a slow pong, a dead child that
+/// took ten seconds to be reported as one.
+///
+/// Blocking on a worker thread and bounding it with `recv_timeout` keeps the
+/// timeout meaningful and distinguishes the two causes, so a failure says which
+/// happened instead of leaving it to be guessed.
+fn read_line_with_timeout(
+    stdout: std::process::ChildStdout,
+    budget: Duration,
+) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        let outcome = match reader.read_line(&mut line) {
+            Ok(0) => Err("child closed stdout without writing a line (EOF)".to_string()),
+            Ok(_) => Ok(line),
+            Err(error) => Err(format!("read error: {error}")),
+        };
+        let _ = tx.send(outcome);
+    });
+    rx.recv_timeout(budget)
+        .unwrap_or_else(|_| Err(format!("no line within {budget:?}")))
+}
+
+/// Cold-start budget for the spawned binary.
+///
+/// The old 10s was measured against a warm local machine. A loaded CI runner
+/// starting a fresh process, reading config and initialising its runtime can
+/// legitimately need longer, and an under-budgeted wait is indistinguishable
+/// from a real protocol break.
+const HEADLESS_REPLY_BUDGET: Duration = Duration::from_secs(30);
+
 fn minimal_config() -> String {
     r#"
 [api]
@@ -281,7 +322,7 @@ fn headless_ping_pong_round_trip() {
         .expect("spawn archon");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
 
     // Send Ping
@@ -289,32 +330,17 @@ fn headless_ping_pong_round_trip() {
     writeln!(stdin, "{ping}").unwrap();
     stdin.flush().unwrap();
 
-    // Wait for Pong
-    let start = Instant::now();
-    let mut response = String::new();
-    loop {
-        if start.elapsed() > Duration::from_secs(10) {
-            break;
-        }
-        use std::io::BufRead;
-        response.clear();
-        match stdout.read_line(&mut response) {
-            Ok(0) => {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
-            Ok(_) => break,
-            Err(_) => {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
-        }
-    }
+    let result = read_line_with_timeout(stdout, HEADLESS_REPLY_BUDGET);
 
     let _ = child.kill();
     let status = child.wait().ok();
     let mut stderr_text = String::new();
     let _ = stderr.read_to_string(&mut stderr_text);
+
+    let response = match result {
+        Ok(line) => line,
+        Err(reason) => panic!("no Pong: {reason}; status={status:?}; stderr={stderr_text}"),
+    };
 
     assert!(
         response.contains("\"pong\""),
@@ -356,38 +382,24 @@ fn headless_invalid_json_returns_error() {
         .expect("spawn archon");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
 
     // Send invalid JSON
     writeln!(stdin, "this is not json at all").unwrap();
     stdin.flush().unwrap();
 
-    let start = Instant::now();
-    let mut response = String::new();
-    loop {
-        if start.elapsed() > Duration::from_secs(10) {
-            break;
-        }
-        use std::io::BufRead;
-        response.clear();
-        match stdout.read_line(&mut response) {
-            Ok(0) => {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
-            Ok(_) => break,
-            Err(_) => {
-                std::thread::sleep(Duration::from_millis(50));
-                continue;
-            }
-        }
-    }
+    let result = read_line_with_timeout(stdout, HEADLESS_REPLY_BUDGET);
 
     let _ = child.kill();
     let status = child.wait().ok();
     let mut stderr_text = String::new();
     let _ = stderr.read_to_string(&mut stderr_text);
+
+    let response = match result {
+        Ok(line) => line,
+        Err(reason) => panic!("no Error reply: {reason}; status={status:?}; stderr={stderr_text}"),
+    };
 
     assert!(
         response.contains("\"error\""),

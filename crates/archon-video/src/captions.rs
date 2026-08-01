@@ -75,7 +75,9 @@ fn largest_caption_file(dir: &Path) -> Result<Option<PathBuf>, VideoError> {
     Ok(candidates.into_iter().map(|(_, path)| path).next())
 }
 
-#[cfg(test)]
+// Unix-gated: the yt-dlp mock is a `#!/bin/sh` script made executable with
+// `chmod 0755`, which has no Windows equivalent.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;

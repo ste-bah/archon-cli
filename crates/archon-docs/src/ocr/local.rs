@@ -338,7 +338,9 @@ fn compute_pdf_page_offsets(text: &str) -> Vec<PageOffset> {
     offsets
 }
 
-#[cfg(test)]
+// Unix-gated: the OCR command mocks are `#!/bin/sh` scripts made executable
+// with `chmod 0755`, which has no Windows equivalent.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

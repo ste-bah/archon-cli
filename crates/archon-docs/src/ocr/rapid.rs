@@ -297,6 +297,9 @@ class RapidOCR:
         assert_eq!(result.full_text, "Keep this text");
     }
 
+    // Only this test in the module needs an executable mock, so it is gated
+    // rather than the whole module: the other three stay live on Windows.
+    #[cfg(unix)]
     #[tokio::test]
     #[serial_test::serial(docs_global_state)]
     async fn rapidocr_wedged_subprocess_times_out() {

@@ -1,3 +1,8 @@
+// Both tests here drive a `#!/usr/bin/env bash` fake archon binary made
+// executable with `chmod 0755`. Neither half works on Windows, and
+// `PermissionsExt` does not exist there, so the whole target is Unix-only.
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
