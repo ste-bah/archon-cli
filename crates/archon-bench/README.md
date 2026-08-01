@@ -12,9 +12,15 @@ from phase-0.
 | `task_submit`      | NFR-PERF-001         | 100 ms p95 | phase-1       | 02-technical-spec §374    |
 | `discovery_scan`   | NFR-PERF-002         | 1000 ms p95 | phase-3       | 02-technical-spec §546    |
 | `fanout_100`       | NFR-SCALABILITY-001  | 1000 ms p95 | phase-5       | 02-technical-spec §862    |
+| `catalog_representation` | Issue #109 decision evidence | none (measurement only) | Issue #109 | `benches/catalog_representation.rs` |
 
 Limits live in `threshold.toml` — the single source of truth. Bench
 bodies read that file at runtime and assert against it.
+
+`catalog_representation` uses deterministic 100-, 1,000-, and 10,000-agent
+fixtures and validates equivalent counts/checksums before timing. It compares
+only representation clone/preparation and separately measured read paths; it
+does not measure or claim complete catalog publication.
 
 ## Phase-0 stubs
 

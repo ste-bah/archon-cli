@@ -304,6 +304,7 @@ dependencies = [
  "chrono",
  "criterion",
  "hdrhistogram",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",
