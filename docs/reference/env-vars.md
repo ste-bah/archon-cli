@@ -24,6 +24,7 @@
 | `ARCHON_DOCS_HYBRID_ALWAYS_SEMANTIC` | Force hybrid docs search/answer to run semantic retrieval even when sanitized exact/FTS evidence is already strong; useful for diagnostics |
 | `ARCHON_DOC_VECTOR_STORE_DIR` | Override the RocksDB raw-vector store path; default is `<workspace>/.archon/doc-vector-store` |
 | `ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE` | Opt-in compatibility flag to also write new docs embeddings to legacy Cozo `vec_text_chunks` |
+| `ARCHON_DOCS_ADAPTIVE_BATCHING` | Set to `0` or `false` to disable adaptive embedding batch sizing during `docs index`; enabled by default |
 | `ARCHON_CODEX_DISABLED` | Disable Codex provider resolution when set to `1`, `true`, or `yes` |
 | `ARCHON_CODEX_BASE_URL` | Override Codex backend URL for local mocks or diagnostics |
 | `ARCHON_CODEX_APP_SERVER_URL` | Override configured Codex app-server WebSocket endpoint for local diagnostics |
@@ -37,8 +38,10 @@
 | `ARCHON_CODEX_SMOKE_PROMPT` | Manual Codex smoke prompt override |
 | `ARCHON_CODEX_SMOKE_EXPECTED` | Manual Codex smoke expected marker |
 | `ARCHON_CODEX_SMOKE_MODEL` | Manual Codex smoke model override |
-| `ARCHON_CONFIG` | Override config file path |
+| `ARCHON_CONFIG_DIR` | Override the config directory searched for `config.toml` |
+| `ARCHON_MODEL` | Override the session model; lower precedence than the `--model` flag |
 | `ARCHON_LOG` | Override log level |
+| `ARCHON_LOG_DIR` | Override the per-session log directory; otherwise the platform default log dir is used |
 | `RUST_LOG` | Tracing subscriber filter |
 | `ARCHON_DATA_DIR` | Override per-user state dir (default: platform data dir + `archon`) |
 | `ARCHON_EVIDENCE_DB_PATH` | Override the shared project evidence store; otherwise evidence surfaces use `<workspace>/.archon/archon-data.db` |
@@ -46,8 +49,7 @@
 | `ARCHON_DOCS_DB_PATH` | Override docs evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
 | `ARCHON_LEARNING_DB_PATH` | Override governed/pipeline-learning store path only; otherwise learning telemetry uses `<workspace>/.archon/learning-state.db` so idle TUI sessions do not pin the shared docs/video evidence DB |
 | `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path`, then platform data dir + `archon/sessions/sessions.db` |
-| `ARCHON_SESSIONS_DIR` | Override session directory |
-| `ARCHON_NO_TUI` | Force headless mode |
+| `ARCHON_GAMETHEORY_DB_PATH` | Override game-theory evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
 | `ARCHON_TRUST_USER_GRAMMARS` | Set to `1`, `true`, or `yes` to allow TUI syntax highlighting to load user-provided tree-sitter `.so` grammars |
 | `ARCHON_FFMPEG_BIN` | Override the `ffmpeg` binary used by video frame/audio extraction |
 | `ARCHON_FFPROBE_BIN` | Override the `ffprobe` binary used by video metadata extraction |
@@ -62,8 +64,48 @@
 | `ARCHON_OCR_ENGINE` | Set to `rapidocr` to prefer RapidOCR for image/frame OCR, or `tesseract` to disable RapidOCR fallback |
 | `ARCHON_RAPIDOCR_PYTHON` | Override the Python binary used for optional RapidOCR image/frame OCR |
 | `ARCHON_RAPIDOCR_MIN_SCORE` | Minimum RapidOCR confidence score, default `0.55` |
+| `ARCHON_OCR_TIMEOUT_SECS` | Per-image/page OCR timeout before the external binary is killed, default `120` |
+| `ARCHON_PDF_RENDER_TIMEOUT_SECS` | Timeout for a single PDF page render, default `1800` |
+| `ARCHON_PDF_IMAGE_TIMEOUT_SECS` | Timeout for a single PDF image-enrichment call, default `600` |
 | `ARCHON_VIDEO_FRAME_FALLBACK` | Set to `0`, `false`, `no`, or `off` to disable Python/OpenCV frame fallback |
 | `ARCHON_VIDEO_OPENCV_PYTHON` | Override the Python binary used for optional OpenCV frame fallback |
+| `ARCHON_EVIDENCE_TOOL_BIN` | Override the `archon` binary invoked by the evidence CLI tool |
+
+## TUI
+
+| Variable | Description |
+|---|---|
+| `ARCHON_THEME_PREFER` | Force the TUI theme; set to `light` for the light theme, otherwise the dark theme is used |
+| `ARCHON_TUI_MOUSE_CAPTURE` | Force TUI mouse capture on (`1`, `true`, `on`, `yes`) or off (`0`, `false`, `off`, `no`); when unset, capture defaults to on only under WSL |
+
+## Runtime and agent lifecycle
+
+| Variable | Description |
+|---|---|
+| `ARCHON_AUTO_BACKGROUND_TASKS` | Set to `1` or `true` to auto-convert long-running subagent tasks into background agents so the parent stops waiting synchronously |
+| `ARCHON_FORK_SUBAGENT` | Set to `1` or `true` to enable fork subagent mode |
+| `ARCHON_SCRIPT_LIFECYCLE` | Set to `0` or `false` to fall back to the decomposed workflow lifecycle; the scripted (v3) lifecycle is the default when unset |
+| `ARCHON_ORCHESTRATED_LIFECYCLE` | Set to `1` or `true` to opt into the single persistent orchestrator conversation instead of the v2 reducer relay |
+| `ARCHON_SPEC_PATH` | Explicit path to a game-theory routing spec, searched after the workspace-local location |
+| `ARCHON_PLUGIN_SEED_DIR` | Colon-separated list of directories seeded into the plugin search path |
+| `ARCHON_REGISTRY_URL` | Managed-agent registry URL surfaced in `/managed-agents` help and status output |
+| `ARCHON_REMOTE_URL` | Remote session URL used by `/session` to render the QR code; set automatically by the `--remote-url` flag |
+| `ARCHON_WEB_DEV` | Set to `1` to run the web workbench API in development mode |
+
+## Test and diagnostic fixtures
+
+Set these only for local diagnostics and offline tests; they bypass live provider calls.
+
+| Variable | Description |
+|---|---|
+| `ARCHON_STOOQ_CSV_URL` | Override the Stooq CSV endpoint used by trading data ingest |
+| `ARCHON_TRADINGVIEW_OHLCV_FIXTURE` | Read TradingView OHLCV responses from a local fixture file instead of the live MCP call |
+| `ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE` | Read TradingView snapshot payloads from a local fixture file instead of the live MCP call |
+
+## Inherited from the environment
+
+| Variable | Description |
+|---|---|
 | `EDITOR` | Used by `/commit` and skill workflows that open an editor |
 | `SHELL` | Inherited by `Bash` tool subprocesses |
 | `HOME` | Used to resolve `~/.config/archon/` and `~/.local/share/archon/` |

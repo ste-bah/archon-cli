@@ -32,8 +32,9 @@ XDG environment variable overrides (Linux/macOS):
 
 archon-cli specific overrides:
 - `ARCHON_DATA_DIR` overrides per-user state base
-- `ARCHON_SESSIONS_DIR` overrides session directory
-- `ARCHON_CONFIG` overrides config file path
+- `ARCHON_SESSION_DB_PATH` overrides the session database path
+- `ARCHON_LOG_DIR` overrides the per-session log directory
+- `ARCHON_CONFIG_DIR` overrides the config directory searched for `config.toml`
 
 ## Per-project state
 
