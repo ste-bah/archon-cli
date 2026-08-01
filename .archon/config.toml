@@ -20,7 +20,7 @@
 # [api] — Anthropic API + model defaults
 # ----------------------------------------------------------------------------
 [api]
-# Model to use. Options: claude-opus-5, claude-sonnet-4-6, claude-opus-4-8, claude-opus-4-7, claude-haiku-4-5-20251001
+# Model to use. Options: claude-opus-5, claude-sonnet-5, claude-sonnet-4-6, claude-opus-4-8, claude-opus-4-7, claude-haiku-4-5-20251001
 default_model = "claude-opus-5"
 # Extended-thinking token budget (0 = disabled)
 thinking_budget = 16384
@@ -80,8 +80,8 @@ provider = "anthropic"
 # Opus IDs remain valid as literal `/model` overrides when you need a pin.
 [models.anthropic]
 opus = "claude-opus-5"
-sonnet = "claude-sonnet-4-6"
-haiku = "claude-haiku-4-5-20251001"
+sonnet = "claude-sonnet-5"
+haiku = "claude-haiku-4-5"
 
 
 # ----------------------------------------------------------------------------
@@ -942,7 +942,7 @@ proposal_stale_days = 30
 #   rpm_limit = 12
 #
 #   [policy.docs.vlm.anthropic]
-#   model = "claude-sonnet-4-6"
+#   model = "claude-sonnet-5"
 #
 #   [policy.docs.vlm.openai_compat]
 #   endpoint = "http://localhost:1234/v1"

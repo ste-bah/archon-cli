@@ -185,7 +185,7 @@ endpoint_base = "https://generativelanguage.googleapis.com/v1beta"
 rpm_limit = 12
 
 [policy.docs.vlm.anthropic]
-model = "claude-sonnet-4-6"
+model = "claude-sonnet-5"
 
 [policy.docs.vlm.openai_compat]
 endpoint = "http://localhost:1234/v1"
