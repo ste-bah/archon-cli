@@ -476,6 +476,86 @@ Expected outcome: a specialist-routed strategic report with a 9-axis
 fingerprint, auditable routing decision, per-specialist outputs, report
 sections, cost tracking, and provenance.
 
+## Corpus Maintenance Workflow
+
+Real corpora need correcting. A source gets superseded, an ingest is interrupted,
+or a policy change means a PDF should be re-enriched. Two commands cover it, and
+both accept the same TARGET — a document ID, a source path, or a source path
+prefix.
+
+Repair a document in place when the source file is unchanged and you want a
+fresh pass under the current policy:
+
+```bash
+archon docs reprocess <document-id>
+archon docs reprocess .archon/docs/inbox/policy-pack --defer-index
+archon docs index --all
+```
+
+```text
+/docs reprocess <document-id>
+/docs reprocess .archon/docs/inbox/policy-pack --defer-index
+/docs index --all
+```
+
+Reprocess keeps the document ID and any `--kb` bucket membership, so downstream
+references stay valid. Use `--defer-index` across a batch and run `docs index`
+once at the end rather than after every document.
+
+Remove a document when it should leave the corpus entirely:
+
+```bash
+archon docs list
+archon docs delete <document-id>
+archon docs delete .archon/docs/inbox/superseded --yes
+archon docs status
+```
+
+```text
+/docs list
+/docs delete <document-id>
+/docs delete .archon/docs/inbox/superseded --yes
+/docs status
+```
+
+`--yes` is required only when a path prefix matches more than one document — a
+single unambiguous match deletes without it. Delete prints each removed document
+ID with its chunk count, so the output is worth capturing in a maintenance log.
+
+### Recovering From An Interrupted Ingest
+
+This is the case most likely to bite. Ingest registers a document by content hash
+*before* it processes it, so an ingest killed partway through leaves a document
+that is registered but incompletely processed. Re-running the same ingest then
+reports:
+
+```text
+Skipped: 1 duplicates
+```
+
+The fix is to delete the stranded document, which releases the content-hash
+registration, then ingest again:
+
+```bash
+archon docs list                      # find the partially-processed document
+archon docs delete <document-id>
+archon docs ingest .archon/docs/inbox/big-report.pdf
+archon docs index --all
+```
+
+```text
+/docs list
+/docs delete <document-id>
+/docs ingest .archon/docs/inbox/big-report.pdf
+/docs index --all
+```
+
+The re-ingest produces a new document ID. If the document belonged to a KB
+bucket, re-attach it with `archon kb ingest --kb <name>`, and re-run
+`archon kb process` if extracted claims need to match the current corpus —
+deleting a document does not retract claims already extracted from it. See
+[Knowledge Base](../knowledge.md#removing-documents-from-a-bucket).
+
 ## Turning Work Into Learning
 
 After meaningful runs, compile what Archon learned:

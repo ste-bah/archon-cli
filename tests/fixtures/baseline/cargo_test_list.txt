@@ -283,6 +283,7 @@ archon-cli-workspace::bin::archon::command::evidence_view::tests::docs_chunks_re
 archon-cli-workspace::bin::archon::command::evidence_view::tests::docs_status_reads_fresh_docs_db_not_ctx_cozo
 archon-cli-workspace::bin::archon::command::evidence_view::tests::docs_usage_lists_prd_command_family
 archon-cli-workspace::bin::archon::command::evidence_view::tests::docs_view_handler_reads_fresh_docs_db_not_ctx_cozo
+archon-cli-workspace::bin::archon::command::evidence_view::tests::every_docs_cli_subcommand_is_routed
 archon-cli-workspace::bin::archon::command::evidence_view::tests::learning_view_handler_reads_configured_learning_db_not_ctx_cozo
 archon-cli-workspace::bin::archon::command::exit::tests::alias_q_listed
 archon-cli-workspace::bin::archon::command::exit::tests::description_non_empty

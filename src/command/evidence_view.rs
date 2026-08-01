@@ -7,10 +7,16 @@ use std::sync::Arc;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
+/// Every `/docs` subcommand this handler routes.
+///
+/// `every_docs_cli_subcommand_is_routed` holds this to the clap definition of `archon docs`, so a
+/// new CLI subcommand cannot silently land in the `unknown subcommand` arm. `open`, `view`, and
+/// `help` are TUI-only and have no CLI counterpart.
 const DOCS_SUBCOMMANDS: &[&str] = &[
     "open",
     "view",
     "ingest",
+    "reprocess",
     "delete",
     "list",
     "status",
@@ -18,6 +24,7 @@ const DOCS_SUBCOMMANDS: &[&str] = &[
     "inspect",
     "chunks",
     "search",
+    "search-images",
     "answer",
     "provenance",
     "index",
@@ -27,7 +34,12 @@ const DOCS_SUBCOMMANDS: &[&str] = &[
     "index-resume",
     "index-cancel",
     "index-daemon",
+    "vector-status",
+    "vector-migrate",
+    "vector-compact",
     "model-status",
+    "verify-quote",
+    "verify-integrity",
 ];
 
 pub(crate) struct DocsViewHandler;
@@ -62,8 +74,10 @@ impl CommandHandler for DocsViewHandler {
             },
             // The mirror runs the CLI as a subprocess with no TTY, so anything needing
             // confirmation must carry its flag on the command line (`delete --yes`).
-            "ingest" | "delete" | "search" | "answer" | "index" | "index-retry-failed"
-            | "index-pause" | "index-resume" | "index-cancel" | "index-daemon" => {
+            "ingest" | "reprocess" | "delete" | "search" | "search-images" | "answer" | "index"
+            | "index-retry-failed" | "index-pause" | "index-resume" | "index-cancel"
+            | "index-daemon" | "vector-status" | "vector-migrate" | "vector-compact"
+            | "verify-quote" | "verify-integrity" => {
                 crate::command::cli_mirror::spawn_cli_mirror(ctx, "docs", args)
             }
             "index-status" => emit_docs_db(ctx, render_docs_index_status),
@@ -187,7 +201,7 @@ fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
 
 fn docs_usage() -> String {
     format!(
-        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs reprocess <document-id-or-path-prefix> [--defer-index]\n  /docs delete <document-id-or-path-prefix> [--yes]\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all] [--document <id>] [--batch-size <n>] [--limit <n>]\n  /docs index-status\n  /docs index-retry-failed [--limit <n>]\n  /docs index-pause|index-resume|index-cancel <job-id>\n  /docs index-daemon start|stop|status\n  /docs vector-status\n  /docs vector-migrate [--limit <n>] [--batch-size <n>] [--after <chunk-id>]\n  /docs vector-compact [--provider <name>] [--dimension <n>] [--limit <n>]\n  /docs model-status\n",
+        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs reprocess <document-id-or-path-prefix> [--defer-index]\n  /docs delete <document-id-or-path-prefix> [--yes]\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs search-images <description> [--limit <n>]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all] [--document <id>] [--batch-size <n>] [--limit <n>]\n  /docs index-status\n  /docs index-retry-failed [--limit <n>]\n  /docs index-pause|index-resume|index-cancel <job-id>\n  /docs index-daemon start|stop|status\n  /docs vector-status\n  /docs vector-migrate [--limit <n>] [--batch-size <n>] [--after <chunk-id>]\n  /docs vector-compact [--provider <name>] [--dimension <n>] [--limit <n>]\n  /docs model-status\n  /docs verify-quote <quote> [--doc <id>] [--limit <n>] [--json]\n  /docs verify-integrity [--doc <id>] [--json]\n",
         DOCS_SUBCOMMANDS.join(", ")
     )
 }

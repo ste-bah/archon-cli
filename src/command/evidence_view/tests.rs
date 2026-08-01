@@ -28,6 +28,33 @@ fn docs_usage_lists_prd_command_family() {
     }
 }
 
+/// The `unknown subcommand` arm fails silently: `/docs reprocess` answered "unknown subcommand"
+/// for as long as the CLI had that verb, because nothing tied the TUI routing table to the clap
+/// definition. This is that tie.
+#[test]
+fn every_docs_cli_subcommand_is_routed() {
+    use clap::CommandFactory;
+
+    let cli = crate::cli_args::Cli::command();
+    let docs = cli
+        .get_subcommands()
+        .find(|command| command.get_name() == "docs")
+        .expect("`archon docs` is a defined subcommand");
+
+    let unrouted = docs
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        // clap synthesizes `help`; DocsViewHandler routes it from its own match arm.
+        .filter(|name| *name != "help")
+        .filter(|name| !DOCS_SUBCOMMANDS.contains(name))
+        .collect::<Vec<_>>();
+
+    assert!(
+        unrouted.is_empty(),
+        "`archon docs` subcommands that /docs answers with `unknown subcommand`: {unrouted:?}"
+    );
+}
+
 #[test]
 fn docs_view_handler_reads_fresh_docs_db_not_ctx_cozo() {
     with_temp_env_db("ARCHON_DOCS_DB_PATH", |path| {

@@ -69,6 +69,47 @@ For large KB repairs, use `--defer-index` and run `archon docs index` once after
 the repair. That avoids repeating the global pending-vector sweep after every
 document.
 
+## Removing Documents From A Bucket
+
+`kb reprocess` repairs a document in place. To take one out of the corpus
+entirely, delete the underlying evidence document:
+
+```bash
+archon docs delete <document-id>
+archon docs delete ./research-pack/superseded          # path prefix
+archon docs delete ./research-pack/superseded --yes    # required for >1 match
+```
+
+```text
+/docs delete <document-id>
+/docs delete ./research-pack/superseded --yes
+```
+
+`--yes` is only required when the target is a path prefix that matches more than
+one document; a single unambiguous match deletes without it. The command prints
+each deleted document ID with its chunk count.
+
+Delete removes the document row, its pages, chunks, embeddings and vector-index
+entries, provenance/citation edges, pending index-queue jobs, and its
+`--kb` bucket membership. The bucket itself survives — it is just a grouping, so
+removing a member shrinks it rather than deleting it.
+
+Two consequences worth knowing:
+
+**Re-ingest is unblocked.** Ingest deduplicates on content hash, and that
+registration lives on the document row itself. While the row exists, re-ingesting
+the same bytes is skipped as a duplicate. Deleting the document releases the
+hash, so the same content can be ingested again as a new document. This is the
+supported recovery path when an ingest is interrupted partway and leaves a
+document that is registered but incompletely processed.
+
+**Extracted knowledge is not retracted.** Claims, entities, relations, and
+contradictions produced by `kb process` are separate rows that reference the
+document and chunk IDs. Deleting a document does not remove them, so
+`archon kb claims` can still list claims whose source document is gone. Re-run
+`kb process` after a round of deletions if downstream reasoning depends on the
+extracted set matching the current corpus.
+
 ## Full State Verification
 
 ```bash

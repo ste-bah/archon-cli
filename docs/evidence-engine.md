@@ -60,6 +60,8 @@ CLI form (e.g., scripted from a shell):
 
 ```bash
 archon docs ingest ./policy-pack
+archon docs reprocess <document-id> --defer-index
+archon docs delete <document-id>
 archon docs index --all
 archon docs index --document <document-id> --batch-size 64
 archon docs index-status
@@ -78,6 +80,8 @@ TUI form (same flow, driven from inside an interactive session):
 
 ```
 > /docs ingest ./policy-pack
+> /docs reprocess <document-id> --defer-index
+> /docs delete <document-id>
 > /docs index --all
 > /docs index --document <document-id> --batch-size 64
 > /docs index-status
@@ -109,6 +113,33 @@ The indexer uses adaptive batch sizing by default and a content-hash embedding
 cache. Cache hits copy an already stored vector for identical chunk text under
 the same provider, update the queue row to indexed, and avoid another embedding
 request.
+
+### Repair vs removal
+
+`docs reprocess` and `docs delete` take the same TARGET — a document ID, a
+source path, or a source path prefix — but differ in what survives:
+
+| | `docs reprocess` | `docs delete` |
+|---|---|---|
+| Generated evidence (pages, chunks, vectors, provenance edges, queue rows) | rebuilt from the source file | removed |
+| Document ID | preserved | gone |
+| KB bucket membership | preserved | removed |
+| Content-hash registration | preserved | released |
+| Source file on disk | required, must be unchanged | not touched |
+
+Reprocess is the repair path: it re-runs OCR/VLM/image enrichment under the
+current policy while keeping the document's identity and bucket membership, and
+it refuses to run if the source file's bytes have changed since ingest.
+
+Delete is the removal path. Because ingest deduplicates on content hash and that
+registration lives on the document row, deleting is also what makes identical
+content ingestable again — the supported recovery when an interrupted ingest
+leaves a registered but incompletely processed document that later re-ingests
+report as `Skipped: 1 duplicates`. Delete requires `--yes` when a path prefix
+matches more than one document, and prints the deleted document IDs with their
+chunk counts. Claims and entities already extracted by `kb process` reference
+the document but are stored separately and are not retracted; see
+[Knowledge Base](knowledge.md#removing-documents-from-a-bucket).
 
 For higher throughput, keep a single `docs index` process and increase the
 in-process embedding pool instead of starting multiple CLIs. The queue
