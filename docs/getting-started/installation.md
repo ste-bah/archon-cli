@@ -75,13 +75,13 @@ RapidOCR package is the preferred install path.
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev git curl libclang-dev poppler-utils tesseract-ocr ffmpeg yt-dlp
+sudo apt install -y build-essential pkg-config libssl-dev git curl libclang-dev perl cmake poppler-utils tesseract-ocr ffmpeg yt-dlp
 ```
 
 ### Fedora / RHEL / Rocky
 
 ```bash
-sudo dnf install -y gcc pkg-config openssl-devel git clang poppler-utils tesseract ffmpeg-free yt-dlp
+sudo dnf install -y gcc pkg-config openssl-devel git clang perl make cmake poppler-utils tesseract ffmpeg-free yt-dlp
 ```
 
 ### Amazon Linux 2023
@@ -91,7 +91,7 @@ installer script handles the fallbacks automatically (static ffmpeg build,
 official yt-dlp binary); manually that is:
 
 ```bash
-sudo dnf install -y gcc pkgconf-pkg-config openssl-devel git tar xz clang poppler-utils
+sudo dnf install -y gcc pkgconf-pkg-config openssl-devel git tar xz clang perl make cmake poppler-utils
 curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local/bin --wildcards '*/ffmpeg' '*/ffprobe'
 sudo curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
 ```
@@ -106,7 +106,7 @@ above. Amazon Linux 2 is end-of-life (2026-06-30) and not supported.
 ### Arch / Manjaro
 
 ```bash
-sudo pacman -S --needed base-devel openssl pkg-config git curl clang poppler tesseract ffmpeg yt-dlp whisper.cpp
+sudo pacman -S --needed base-devel openssl pkg-config git curl clang perl cmake poppler tesseract ffmpeg yt-dlp whisper.cpp
 ```
 
 ### macOS
