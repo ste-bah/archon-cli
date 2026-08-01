@@ -81,7 +81,7 @@ sudo apt install -y build-essential pkg-config libssl-dev git curl libclang-dev 
 ### Fedora / RHEL / Rocky
 
 ```bash
-sudo dnf install -y gcc pkg-config openssl-devel git clang-libs poppler-utils tesseract ffmpeg-free yt-dlp
+sudo dnf install -y gcc pkg-config openssl-devel git clang poppler-utils tesseract ffmpeg-free yt-dlp
 ```
 
 ### Amazon Linux 2023
@@ -91,7 +91,7 @@ installer script handles the fallbacks automatically (static ffmpeg build,
 official yt-dlp binary); manually that is:
 
 ```bash
-sudo dnf install -y gcc pkgconf-pkg-config openssl-devel git tar xz clang-libs poppler-utils
+sudo dnf install -y gcc pkgconf-pkg-config openssl-devel git tar xz clang poppler-utils
 curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local/bin --wildcards '*/ffmpeg' '*/ffprobe'
 sudo curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
 ```

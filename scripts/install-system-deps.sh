@@ -173,7 +173,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkg-config openssl-devel git clang-libs"
+        PKG_BUILD="gcc pkg-config openssl-devel git clang"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg-free yt-dlp"
@@ -198,7 +198,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz clang-libs"
+        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz clang"
         PKG_PDF="poppler-utils"
         PKG_OCR=""          # not packaged on AL2023 — see TESSERACT_UNPACKAGED
         PKG_VIDEO=""        # ffmpeg/yt-dlp via install_amzn_extras
@@ -244,7 +244,7 @@ case "$DISTRO_ID" in
         PKG_MGR="apk"
         PKG_UPDATE_CMD=""   # apk add --no-cache pulls fresh index per call
         PKG_INSTALL_CMD="apk add --no-cache"
-        PKG_BUILD="build-base openssl-dev pkgconfig git curl clang-libs"
+        PKG_BUILD="build-base openssl-dev pkgconfig git curl clang"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
