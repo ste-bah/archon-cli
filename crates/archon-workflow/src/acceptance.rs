@@ -237,6 +237,12 @@ mod tests {
         assert!(run_verify_command(&root, Some("   ")).is_ok());
     }
 
+    // The next three drive POSIX shell semantics directly -- `exit 3`,
+    // `printf`, `;` sequencing -- none of which cmd.exe provides. They assert
+    // how `run_verify_command` classifies shell output, not anything
+    // platform-specific about the classifier, so they are gated rather than
+    // rewritten twice.
+    #[cfg(unix)]
     #[test]
     fn verify_command_failure_is_reported() {
         let root = std::env::temp_dir();
@@ -244,6 +250,7 @@ mod tests {
         assert!(err.contains('3'), "reason should carry exit code: {err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn verify_command_list_only_is_not_completion_evidence() {
         let root = std::env::temp_dir();
@@ -251,6 +258,7 @@ mod tests {
         assert!(err.contains("discovery/list-only"), "{err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn verify_command_zero_work_output_is_not_completion_evidence() {
         let root = std::env::temp_dir();

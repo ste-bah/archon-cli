@@ -171,7 +171,7 @@ pub fn spec_yaml(canonical: &Path, targets: &[(&str, &[&str])]) -> WorkflowSpec 
 schema: archon.workflow.v1
 name: wc-009
 task: coordinated implementation fanout e2e
-target_repository_root: "{}"
+target_repository_root: '{}'
 stages:
   - id: implement
     kind: fanout

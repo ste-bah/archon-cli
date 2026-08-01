@@ -108,7 +108,13 @@ pub fn normalize_target(
         return Err(WritePlanError::EmptySegment(unified));
     }
     let path = PathBuf::from(&unified);
-    let rel = if path.is_absolute() {
+    // `has_root()` as well as `is_absolute()`: on Windows `/absolute/outside`
+    // is NOT absolute (it carries no drive letter) but it does have a root, so
+    // testing only `is_absolute()` sent it down the relative branch to be
+    // joined under the repository root instead of rejected. That is an escape
+    // guard failing open on one platform. On Unix the two are equivalent, so
+    // this only widens the check where it was too narrow.
+    let rel = if path.is_absolute() || path.has_root() {
         match path.strip_prefix(canonical_root) {
             Ok(rel) => rel.to_path_buf(),
             Err(_) => return Err(WritePlanError::AbsoluteEscape(unified)),
