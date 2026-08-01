@@ -15,5 +15,6 @@
 //! records per-iteration durations into an [`hdrhistogram::Histogram`]
 //! and asserts the p95 itself via [`p95::p95_ms`].
 
+pub mod catalog_representation;
 pub mod p95;
 pub mod thresholds;

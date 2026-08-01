@@ -303,6 +303,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "dashmap 6.1.0",
  "hdrhistogram",
  "semver",
  "serde",
