@@ -294,9 +294,31 @@ pub(super) fn safe_path(value: &str) -> String {
         .collect()
 }
 
+/// Stored dataset paths, always `/`-separated regardless of host.
+///
+/// `to_string_lossy` alone emits platform-native separators, so on Windows
+/// every path in a registry record came back with backslashes while every
+/// consumer split it on `/` and rebuilt it with `/` — `dataset_raw_path` and
+/// the two `metadata_path` splits in `migration.rs`. Those splits then cut at
+/// the wrong component and produced paths that do not exist, surfacing as
+/// `IncompleteArtifactContract` on ~64 Windows tests.
+///
+/// Joining components explicitly rather than string-replacing `\` keeps this
+/// correct on Unix, where a backslash is a legal character *inside* a file
+/// name and must not be treated as a separator. `Path::join` accepts
+/// `/`-separated input on Windows, so reading these back works on both.
+///
+/// It also makes the on-disk records portable: a data lake written on one
+/// platform now reads identically on the other.
 pub(super) fn relative(root: &Path, path: &Path) -> Result<String, DataStoreError> {
     path.strip_prefix(root)
-        .map(|path| path.to_string_lossy().to_string())
+        .map(|relative| {
+            relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
         .map_err(|_| DataStoreError::InvalidPath)
 }
 
