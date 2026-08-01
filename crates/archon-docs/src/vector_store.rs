@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 mod cache;
 mod config;
 mod generation;
+mod helpers;
 mod hnsw_ids;
 mod persisted_hnsw;
 mod search;
-mod helpers;
 // Re-exported so sibling modules keep resolving these as `super::*`.
 use helpers::*;
 #[cfg(test)]
