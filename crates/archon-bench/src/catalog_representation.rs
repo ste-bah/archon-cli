@@ -111,68 +111,43 @@ mod tests {
         }
     }
 
+    type MetadataMutation = Box<dyn Fn(&mut AgentMetadata)>;
+
     #[test]
     fn metadata_digest_changes_for_each_metadata_field() {
         let original = metadata();
-        let cases: Vec<(&str, Box<dyn Fn(&mut AgentMetadata)>)> = vec![
+        for (field, mutate) in metadata_mutations() {
+            assert_digest_changes(&original, field, mutate);
+        }
+    }
+
+    fn metadata_mutations() -> Vec<(&'static str, MetadataMutation)> {
+        vec![
             ("name", Box::new(|value| value.name.push('x'))),
             ("version", Box::new(|value| value.version.patch += 1)),
             ("description", Box::new(|value| value.description.push('x'))),
             ("category", Box::new(|value| value.category.push('x'))),
-            (
-                "tags",
-                Box::new(|value| value.tags.push("new-tag".to_owned())),
-            ),
-            (
-                "capabilities",
-                Box::new(|value| value.capabilities.push("new-capability".to_owned())),
-            ),
-            (
-                "input_schema",
-                Box::new(|value| value.input_schema = json!({"changed": true})),
-            ),
-            (
-                "output_schema",
-                Box::new(|value| value.output_schema = json!({"changed": true})),
-            ),
-            (
-                "resource_requirements",
-                Box::new(|value| value.resource_requirements.memory_mb += 1),
-            ),
-            (
-                "dependencies",
-                Box::new(|value| value.dependencies[0].name.push('x')),
-            ),
-            (
-                "source_path",
-                Box::new(|value| value.source_path.push("changed")),
-            ),
-            (
-                "source_kind",
-                Box::new(|value| value.source_kind = SourceKind::Remote),
-            ),
-            (
-                "state",
-                Box::new(|value| value.state = AgentState::Invalid("changed".to_owned())),
-            ),
-            (
-                "loaded_at",
-                Box::new(|value| {
-                    value.loaded_at = DateTime::<Utc>::from_timestamp(1_700_000_001, 0)
-                        .expect("valid fixed timestamp");
-                }),
-            ),
-        ];
+            ("tags", Box::new(|value| value.tags.push("new-tag".to_owned()))),
+            ("capabilities", Box::new(|value| value.capabilities.push("new-capability".to_owned()))),
+            ("input_schema", Box::new(|value| value.input_schema = json!({"changed": true}))),
+            ("output_schema", Box::new(|value| value.output_schema = json!({"changed": true}))),
+            ("resource_requirements", Box::new(|value| value.resource_requirements.memory_mb += 1)),
+            ("dependencies", Box::new(|value| value.dependencies[0].name.push('x'))),
+            ("source_path", Box::new(|value| value.source_path.push("changed"))),
+            ("source_kind", Box::new(|value| value.source_kind = SourceKind::Remote)),
+            ("state", Box::new(|value| value.state = AgentState::Invalid("changed".to_owned()))),
+            ("loaded_at", Box::new(|value| value.loaded_at = fixed_changed_timestamp())),
+        ]
+    }
 
-        for (field, mutate) in cases {
-            let mut changed = original.clone();
-            mutate(&mut changed);
-            assert_ne!(
-                metadata_digest(&original),
-                metadata_digest(&changed),
-                "{field}"
-            );
-        }
+    fn assert_digest_changes(original: &AgentMetadata, field: &str, mutate: MetadataMutation) {
+        let mut changed = original.clone();
+        mutate(&mut changed);
+        assert_ne!(metadata_digest(original), metadata_digest(&changed), "{field}");
+    }
+
+    fn fixed_changed_timestamp() -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp(1_700_000_001, 0).expect("valid fixed timestamp")
     }
 
     #[test]
