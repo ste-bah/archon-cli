@@ -563,11 +563,23 @@ install_amzn_extras() {
         fi
     fi
 
-    # yt-dlp: official standalone release binary (self-updatable via -U).
-    if command -v yt-dlp >/dev/null 2>&1; then
+    # yt-dlp: official standalone binary (self-updatable via -U). Use the
+    # arch-specific PyInstaller builds, NOT the generic `yt-dlp` zipapp —
+    # the zipapp runs on the system python3, and AL2023's default Python is
+    # older than yt-dlp supports (it tracebacks on --version). The health
+    # check below also replaces an existing-but-broken zipapp install.
+    if command -v yt-dlp >/dev/null 2>&1 && yt-dlp --version >/dev/null 2>&1; then
         echo "install-system-deps.sh: yt-dlp already present"
     else
-        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        if command -v yt-dlp >/dev/null 2>&1; then
+            echo "install-system-deps.sh: existing yt-dlp is broken (--version fails); reinstalling standalone build"
+        fi
+        case "$HOST_ARCH" in
+            x86_64)  YTDLP_ASSET="yt-dlp_linux" ;;
+            aarch64) YTDLP_ASSET="yt-dlp_linux_aarch64" ;;
+            *)       YTDLP_ASSET="yt-dlp" ;;   # zipapp fallback; needs modern python3
+        esac
+        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/$YTDLP_ASSET"
         if [ "$DRY_RUN" = true ]; then
             echo "[dry-run] curl -fsSL $YTDLP_URL -o /usr/local/bin/yt-dlp && chmod +x"
         else
@@ -633,7 +645,14 @@ if [ "$DRY_RUN" = false ]; then
     fi
     for bin in $VERIFY_BINS; do
         if command -v "$bin" >/dev/null 2>&1; then
-            VERSION=$("$bin" --version 2>&1 | head -n 1 || echo "(version check failed)")
+            # poppler utilities only understand -v (--version is read as a
+            # filename and errors); everything else takes --version.
+            case "$bin" in
+                pdftotext|pdfimages|pdftoppm)
+                    VERSION=$("$bin" -v 2>&1 | head -n 1 || echo "(version check failed)") ;;
+                *)
+                    VERSION=$("$bin" --version 2>&1 | head -n 1 || echo "(version check failed)") ;;
+            esac
             echo "  ok: $bin     $VERSION"
         else
             echo "  MISSING: $bin (post-install check failed)" >&2
