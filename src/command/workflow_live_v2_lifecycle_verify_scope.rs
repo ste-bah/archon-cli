@@ -42,8 +42,21 @@ fn manifest_paths(outcome: &Value) -> Vec<String> {
     support::array(outcome.get("completion_evidence"))
         .into_iter()
         .flat_map(|entry| support::strings_of(entry.get("artifact_paths")))
-        .filter(|path| path.contains("/write-coordination/") && path.contains("/manifests/"))
+        .filter(|path| is_write_coordination_manifest(path))
         .collect()
+}
+
+/// Whether a recorded artifact path points at a write-coordination manifest.
+///
+/// Matched against a separator-normalised copy. Recorded paths come from
+/// whatever produced them, so on Windows they arrive as
+/// `...\write-coordination\stages\write\manifests\branch.json` and the
+/// `/`-delimited markers never matched. The manifest then went unrecognised
+/// and verification items were built with no diff scope at all — a silent
+/// weakening of the check, not a visible failure.
+fn is_write_coordination_manifest(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized.contains("/write-coordination/") && normalized.contains("/manifests/")
 }
 
 fn load_scope(path: &str, fallback_id: &str, task_ids: &[String]) -> Option<ManifestScope> {

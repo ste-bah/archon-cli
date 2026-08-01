@@ -215,7 +215,13 @@ fn cited_artifact_paths(value: Option<&Value>) -> Vec<String> {
 /// path may be absolute — it is relativized against the artifact root first.
 fn templated_path_matches(template: &str, cited: &str, root: &str) -> bool {
     let cited_path = std::path::Path::new(cited);
-    let cited = if cited_path.is_absolute() {
+    // `has_root()` as well as `is_absolute()`, for the same reason as the
+    // write-plan guard: on Windows `/proj/.archon/x` is not absolute (no drive
+    // letter) but is rooted. Testing only `is_absolute()` skipped the
+    // strip_prefix, left the root on the cited path, and the segment counts
+    // then never matched the template — so no contract was ever bound on that
+    // platform.
+    let cited = if cited_path.is_absolute() || cited_path.has_root() {
         let Ok(relative) = cited_path.strip_prefix(std::path::Path::new(root)) else {
             return false;
         };
@@ -223,6 +229,9 @@ fn templated_path_matches(template: &str, cited: &str, root: &str) -> bool {
     } else {
         cited_path.to_string_lossy()
     };
+    // Compared segment-wise against a `/`-delimited template, so a
+    // native-separator path has to be normalised or it arrives as one segment.
+    let cited = cited.replace('\\', "/");
     let template_segments: Vec<&str> = template.split('/').filter(|s| !s.is_empty()).collect();
     let cited_segments: Vec<&str> = cited.split('/').filter(|s| !s.is_empty()).collect();
     if template_segments.is_empty() || template_segments.len() != cited_segments.len() {

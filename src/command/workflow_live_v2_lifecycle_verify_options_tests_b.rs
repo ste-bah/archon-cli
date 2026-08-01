@@ -123,10 +123,7 @@ fn neutral_declared_verifier_executes_for_clean_contract_driven_series() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let passing = std::process::Command::new(crate::command::posix_shell::posix_shell())
-        .args(["-c", command])
-        .output()
-        .expect("execute verifier");
+    let passing = run_verifier_script(command);
     assert!(
         passing.status.success(),
         "{}",
@@ -177,10 +174,7 @@ fn declared_gap_rows_do_not_require_healthy_dataset_references() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let result = std::process::Command::new(crate::command::posix_shell::posix_shell())
-        .args(["-c", command])
-        .output()
-        .expect("execute verifier");
+    let result = run_verifier_script(command);
     let stdout = String::from_utf8_lossy(&result.stdout);
 
     assert!(!result.status.success());
@@ -279,10 +273,7 @@ fn wf9_contaminated_fixture_replay_fails_substantive_contract() {
         .and_then(|item| item["focused_verification"].as_str())
         .expect("generated verifier");
 
-    let failing = std::process::Command::new(crate::command::posix_shell::posix_shell())
-        .args(["-c", command])
-        .output()
-        .expect("execute contaminated verifier");
+    let failing = run_verifier_script(command);
     let stdout = String::from_utf8_lossy(&failing.stdout);
 
     assert!(!failing.status.success());
@@ -449,3 +440,24 @@ fn records_dated_to_a_closed_session_are_rejected() {
     assert!(stdout.contains("when the venue was closed"), "{stdout}");
 }
 
+/// Run a generated verifier by piping it to the shell's stdin.
+///
+/// Not `sh -c <script>`: the generated verifier embeds a ~29 KB Python program
+/// and Windows truncates any command line beyond 32,767 characters, severing
+/// the heredoc mid-statement. stdin has no such limit.
+fn run_verifier_script(command: &str) -> std::process::Output {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(crate::command::posix_shell::posix_shell())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn verifier");
+    child
+        .stdin
+        .take()
+        .expect("verifier stdin")
+        .write_all(command.as_bytes())
+        .expect("write verifier script");
+    child.wait_with_output().expect("execute verifier")
+}
