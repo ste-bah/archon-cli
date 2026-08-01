@@ -1,12 +1,16 @@
-//! Catalog representation benchmark for Issue #109.
+//! Catalog representation clone and indexed-filter-candidate benchmark for Issue #109.
 //!
 //! This harness compares the current `DashMap`-backed `CatalogSnapshot` with an
 //! equivalent immutable representation built from standard `HashMap`s. It
-//! measures representation clone/preparation only: it deliberately excludes
-//! `ArcSwap::store` and is not a claim about end-to-end catalog publication.
-//! Fixtures are deterministic and built before Criterion starts timing.
+//! measures representation clone/preparation, exact lookup, highest-version lookup,
+//! and `FilterLogic::And` candidate construction from one tag and one capability.
+//! It deliberately excludes `ArcSwap::store`, metadata collection, sorting, and
+//! complete catalog publication. Fixtures are deterministic and built before
+//! Criterion starts timing.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use archon_bench::catalog_representation::deterministic_index_checksum;
 
 use archon_core::agents::{AgentKey, AgentMetadata, AgentState, CatalogSnapshot, ResourceReq, SourceKind};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -70,6 +74,21 @@ impl Fixture {
 
     fn validate_equivalence(&self) {
         assert_eq!(snapshot_digest(&self.dash), standard_digest(&self.standard));
+        assert_eq!(
+            name_index_checksum_dash(&self.dash),
+            name_index_checksum_standard(&self.standard),
+            "name index checksum"
+        );
+        assert_eq!(
+            membership_index_checksum_dash(&self.dash.tag_index),
+            membership_index_checksum_standard(&self.standard.tag_index),
+            "tag index checksum"
+        );
+        assert_eq!(
+            membership_index_checksum_dash(&self.dash.capability_index),
+            membership_index_checksum_standard(&self.standard.capability_index),
+            "capability index checksum"
+        );
         assert_eq!(dash_results(self), standard_results(self));
         assert_eq!(snapshot_digest(&self.dash.clone()), standard_digest(&self.standard.clone()));
     }
@@ -146,17 +165,22 @@ fn insert_standard(snapshot: &mut StandardMapSnapshot, key: AgentKey, metadata: 
 }
 
 fn metadata_checksum(metadata: &AgentMetadata) -> u64 {
-    string_checksum(&metadata.name)
-        .wrapping_add(string_checksum(&metadata.version.to_string()))
-        .wrapping_add(string_checksum(&metadata.description))
-        .wrapping_add(metadata.tags.iter().map(|tag| string_checksum(tag)).sum())
+    let checksum = metadata
+        .tags
+        .iter()
+        .map(|tag| string_checksum(tag))
+        .fold(0_u64, u64::wrapping_add)
         .wrapping_add(
             metadata
                 .capabilities
                 .iter()
                 .map(|capability| string_checksum(capability))
-                .sum(),
-        )
+                .fold(0_u64, u64::wrapping_add),
+        );
+    string_checksum(&metadata.name)
+        .wrapping_add(string_checksum(&metadata.version.to_string()))
+        .wrapping_add(string_checksum(&metadata.description))
+        .wrapping_add(checksum)
 }
 
 fn string_checksum(value: &str) -> u64 {
@@ -174,7 +198,7 @@ fn snapshot_digest(snapshot: &CatalogSnapshot) -> (usize, usize, usize, usize, u
         .entries
         .iter()
         .map(|entry| key_checksum(entry.key()).wrapping_add(metadata_checksum(entry.value())))
-        .sum();
+        .fold(0_u64, u64::wrapping_add);
     (
         snapshot.entries.len(),
         snapshot.name_index.len(),
@@ -189,7 +213,7 @@ fn standard_digest(snapshot: &StandardMapSnapshot) -> (usize, usize, usize, usiz
         .entries
         .iter()
         .map(|(key, metadata)| key_checksum(key).wrapping_add(metadata_checksum(metadata)))
-        .sum();
+        .fold(0_u64, u64::wrapping_add);
     (
         snapshot.entries.len(),
         snapshot.name_index.len(),
@@ -197,6 +221,63 @@ fn standard_digest(snapshot: &StandardMapSnapshot) -> (usize, usize, usize, usiz
         snapshot.capability_index.len(),
         checksum,
     )
+}
+
+fn name_index_checksum_dash(snapshot: &CatalogSnapshot) -> u64 {
+    let index = snapshot
+        .name_index
+        .iter()
+        .map(|bucket| {
+            (
+                bucket.key().clone(),
+                bucket
+                    .value()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+    deterministic_index_checksum(&index)
+}
+
+fn name_index_checksum_standard(snapshot: &StandardMapSnapshot) -> u64 {
+    let index = snapshot
+        .name_index
+        .iter()
+        .map(|(name, versions)| {
+            (
+                name.clone(),
+                versions.iter().map(ToString::to_string).collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+    deterministic_index_checksum(&index)
+}
+
+fn membership_index_checksum_dash(index: &dashmap::DashMap<String, HashSet<AgentKey>>) -> u64 {
+    let index = index
+        .iter()
+        .map(|bucket| {
+            (
+                bucket.key().clone(),
+                bucket.value().iter().map(agent_key_string).collect(),
+            )
+        })
+        .collect();
+    deterministic_index_checksum(&index)
+}
+
+fn membership_index_checksum_standard(index: &HashMap<String, HashSet<AgentKey>>) -> u64 {
+    let index = index
+        .iter()
+        .map(|(key, members)| (key.clone(), members.iter().map(agent_key_string).collect()))
+        .collect();
+    deterministic_index_checksum(&index)
+}
+
+fn agent_key_string(key: &AgentKey) -> String {
+    format!("{}@{}", key.0, key.1)
 }
 
 fn dash_results(fixture: &Fixture) -> ResultChecks {
@@ -271,19 +352,29 @@ fn indexed_dash(snapshot: &CatalogSnapshot, tag: &str, capability: &str) -> (usi
         .get(capability)
         .map(|bucket| bucket.clone())
         .expect("DashMap fixture capability index");
-    let matching: BTreeSet<_> = tags.intersection(&capabilities).cloned().collect();
-    let checksum = matching.iter().map(key_checksum).sum();
-    (matching.len(), checksum)
+    indexed_candidates(tags, capabilities)
 }
 
 fn indexed_standard(snapshot: &StandardMapSnapshot, tag: &str, capability: &str) -> (usize, u64) {
-    let tags = snapshot.tag_index.get(tag).expect("standard-map fixture tag index");
+    let tags = snapshot
+        .tag_index
+        .get(tag)
+        .cloned()
+        .expect("standard-map fixture tag index");
     let capabilities = snapshot
         .capability_index
         .get(capability)
+        .cloned()
         .expect("standard-map fixture capability index");
-    let matching: std::collections::HashSet<_> = tags.intersection(capabilities).cloned().collect();
-    let checksum = matching.iter().map(key_checksum).sum();
+    indexed_candidates(tags, capabilities)
+}
+
+fn indexed_candidates(tags: HashSet<AgentKey>, capabilities: HashSet<AgentKey>) -> (usize, u64) {
+    let matching: HashSet<_> = tags.intersection(&capabilities).cloned().collect();
+    let checksum = matching
+        .iter()
+        .map(key_checksum)
+        .fold(0_u64, u64::wrapping_add);
     (matching.len(), checksum)
 }
 

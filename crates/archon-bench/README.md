@@ -18,9 +18,12 @@ Limits live in `threshold.toml` — the single source of truth. Bench
 bodies read that file at runtime and assert against it.
 
 `catalog_representation` uses deterministic 100-, 1,000-, and 10,000-agent
-fixtures and validates equivalent counts/checksums before timing. It compares
-only representation clone/preparation and separately measured read paths; it
-does not measure or claim complete catalog publication.
+fixtures and validates deterministic, order-independent entry, name-index,
+tag-index, and capability-index checksums before timing. It compares clone,
+exact lookup, highest-version lookup, and tag/capability `AND` filter-candidate
+construction (including both bucket clones) for equivalent representations; it
+does not measure or claim `ArcSwap` publication, metadata collection, sorting,
+or complete catalog listing.
 
 ## Phase-0 stubs
 
