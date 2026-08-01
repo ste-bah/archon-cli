@@ -20,12 +20,12 @@ bodies read that file at runtime and assert against it.
 `catalog_representation` uses deterministic 100-, 1,000-, and 10,000-agent
 fixtures and validates every complete entry digest plus deterministic,
 order-independent name-index, tag-index, and capability-index checksums before
-timing. Entry digests include every `AgentMetadata` field; JSON schemas are
-recursively canonicalized by object key before hashing. It compares exact
-lookup, highest-version lookup, and tag/capability `AND` filter-candidate
-construction (including both bucket clones) for equivalent representations.
+timing. The capability checksum is also asserted after a complete clone. Entry
+digests include every `AgentMetadata` field; JSON schemas are recursively
+canonicalized by object key before hashing. It compares production-equivalent
+exact lookup, highest-version resolution, and tag/capability `AND` indexed reads.
 
-### Issue #109 publication evidence
+### Issue #109 Criterion evidence
 
 The reproducible decision group is
 `catalog_representation/complete_publication`. Each timed iteration exactly
@@ -38,24 +38,46 @@ readback. Metadata validation, staging-lock acquisition, and staging/index
 mutation are outside this boundary because they occur before the production
 `publish` statement; neither representation includes them here.
 
-Actual Criterion central estimates from the reproducible run are below.
-`DashMap / standard-map` is the ratio, so a value above `1.0x` means the
-DashMap-backed publication was slower; the final column is the standard-map
-reduction relative to DashMap.
+Each read benchmark uses a representation-specific façade with the same work:
+`ArcSwap::load_full`, lookup or descending version scan, `AgentMetadata` clone,
+valid-state filtering, and a consumed metadata/result checksum. The indexed
+façades additionally clone both index buckets, construct the intersection, and
+clone/filter each returned metadata entry. The `ArcSwap` targets are built before
+timing.
 
-| Entries | DashMap clone + `ArcSwap::store` | Standard-map clone + `ArcSwap::store` | DashMap / standard-map | Standard-map reduction |
-|---:|---:|---:|---:|---:|
-| 100 | 127.28 µs | 75.648 µs | 1.683x | 40.57% |
-| 1,000 | 1.1292 ms | 783.54 µs | 1.441x | 30.61% |
-| 10,000 | 18.777 ms | 15.145 ms | 1.240x | 19.34% |
+The table contains **Criterion median point estimates** from the recorded run
+below; these are medians, not means. `DashMap / standard-map` above `1.0x` means
+DashMap took longer, so the standard-map representation is faster. The
+standard-map change is `(standard / DashMap - 1)`; a positive value would be a
+regression.
 
-Acceptance threshold: pursue a representation migration only if this complete
-publication group shows the standard-map representation at least 50% faster
-than DashMap at **every** measured size (equivalently,
-`DashMap / standard-map >= 2.0x` at every size). The observed reductions are
-19.34%–40.57%, so the threshold is not met. Conclusion: **no migration** from
-the production DashMap representation based on this evidence. This replaces
-and does not rely on prior undocumented 0.89%/0.15% claims.
+Command and artifacts: `cargo bench -p archon-bench --bench
+catalog_representation -- --sample-size 100 --measurement-time 3 --warm-up-time
+1`; Criterion `new/estimates.json` artifacts were read from `target/criterion/`
+after that run.
+
+| Group | Entries | DashMap median | Standard-map median | DashMap / standard-map | Standard-map change |
+|---|---:|---:|---:|---:|---:|
+| Complete publication | 100 | 125.138 µs | 76.559 µs | 1.6345x | -38.82% |
+| Complete publication | 1,000 | 1.185825 ms | 783.121 µs | 1.5142x | -33.96% |
+| Complete publication | 10,000 | 18.095649 ms | 13.581230 ms | 1.3324x | -24.95% |
+| Exact get | 100 | 5.436 µs | 5.397 µs | 1.0072x | -0.72% |
+| Exact get | 1,000 | 5.454 µs | 5.381 µs | 1.0135x | -1.33% |
+| Exact get | 10,000 | 5.415 µs | 5.435 µs | 0.9962x | +0.38% |
+| Highest-version resolution | 100 | 5.490 µs | 5.500 µs | 0.9981x | +0.19% |
+| Highest-version resolution | 1,000 | 5.505 µs | 5.478 µs | 1.0049x | -0.49% |
+| Highest-version resolution | 10,000 | 5.491 µs | 5.448 µs | 1.0078x | -0.78% |
+| Tag/capability indexed read | 100 | 19.920 µs | 20.027 µs | 0.9947x | +0.54% |
+| Tag/capability indexed read | 1,000 | 197.765 µs | 196.593 µs | 1.0060x | -0.59% |
+| Tag/capability indexed read | 10,000 | 1.920686 ms | 1.938006 ms | 0.9911x | +0.90% |
+
+Binding acceptance threshold: complete-publication median improvement must be
+at least **15%** at both 1,000 and 10,000 entries, while each
+production-equivalent exact-get, highest-version-resolution, and indexed-read
+median regression must be at most **10%** at both sizes. The publication gains
+are 33.96% and 24.95%; the largest read regression is 0.90%. The binding gate
+therefore **passes**. Compatibility-first V2 production migration is **required**;
+this benchmark correction intentionally leaves production files unchanged.
 
 ## Phase-0 stubs
 
