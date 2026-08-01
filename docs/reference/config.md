@@ -24,6 +24,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[models.openai-codex]`](#modelsopenai-codex) — Codex model aliases
 - [`[providers.openai-codex]`](#providersopenai-codex) — Codex OAuth spoof manifest controls
 - [`[identity]`](#identity) — Claude Code spoofing
+- [`output_style`](#output_style) — active output style (top-level key)
 - [`[personality]`](#personality) — agent personality profile
 - [`[consciousness]`](#consciousness) — inner voice and rule engine
 - [`[tools]`](#tools) — tool execution defaults
@@ -1242,6 +1243,26 @@ verbose = true
 | `theme` | unset (uses personality.type) | Named color theme. Built-ins: `intj`, `intp`, `dark`, `light`, `ocean`, `fire`, `forest`, `mono`, `daltonized`, `auto`. When unset, the theme is auto-derived from `[personality] type`. |
 
 See [TUI customization](../operations/tui-customization.md) for the full theme catalog and vim keybindings.
+
+---
+
+## `output_style`
+
+Top-level key (not a section). Selects the active output style, which appends
+binding stylistic constraints to the session prompt.
+
+```toml
+output_style = "dalton-philosophical"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `output_style` | unset (`default`) | Name of the active output style. Resolved at startup against the output-style registry; unknown values fall back to `default` with a warning. Override per-invocation with `--output-style <name>`; list available styles with `--list-output-styles`. |
+
+Styles are `.md` files loaded from `~/.archon/output-styles/`. Non-`.md` files
+are ignored. `archon style train` generates one from a writing sample — see the
+[dissertation port overview](../dissertation-port/README.md) for the prose-style
+fingerprinting workflow.
 
 ---
 

@@ -59,6 +59,7 @@ staged copy remains available for review or `LargeEditAbort`.
 | Tool | Permission | Purpose |
 |---|---|---|
 | `Agent` | Safe* | Spawn a subagent. Concurrent invocations run in parallel via `join_all` |
+| `AgentCatalog` | Safe | List, search, and inspect available subagent types. Used to discover long-tail agents that are not declared inline in the `Agent` tool description |
 | `SendMessage` | Safe | Send a follow-up message to a running subagent by ID or name |
 | `AskUserQuestion` | Safe | Blocking user confirmation (structured choices) |
 

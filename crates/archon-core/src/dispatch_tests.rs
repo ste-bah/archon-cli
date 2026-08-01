@@ -240,10 +240,12 @@ fn docs_do_not_reference_unknown_tools() {
         .map(str::to_string)
         .collect();
 
-    // Session-wired tools need runtime dependencies (the memory graph);
-    // they are still real tools and are registered by src/session.rs.
+    // Session-wired tools need runtime dependencies (the memory graph, the
+    // resolved agent catalog); they are still real tools and are registered by
+    // src/session.rs.
     registered.insert("memory_store".to_string());
     registered.insert("memory_recall".to_string());
+    registered.insert("AgentCatalog".to_string());
 
     // LEANN tools are conditional because they require an available index
     // at startup. The docs explicitly mark them as conditional.

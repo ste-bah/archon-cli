@@ -15,6 +15,7 @@ Beyond the 85 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | Command | Aliases | Description |
 |---|---|---|
 | `/help` | `?`, `h` | Show available commands and shortcuts |
+| `/archon` | — | Generic CLI mirror: run any `archon <subcommand>` from inside the TUI. Use this to reach shell-only surfaces such as `archon world ...`, `archon self ...`, and `archon team ...` that have no dedicated slash primary |
 | `/clear` | `cls` | Clear conversation history |
 | `/exit` | `q` | Exit Archon (graceful shutdown) |
 | `/context` | — | Show current context window usage |

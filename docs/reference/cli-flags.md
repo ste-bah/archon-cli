@@ -133,6 +133,20 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `--no-resume` | Disable auto-resume for this invocation |
 | `--sessions [...]` | Session search & management |
 
+#### Session search filters
+
+These refine `--sessions`. `--branch` and `--dir` require `--sessions`.
+
+| Flag | Purpose |
+|---|---|
+| `--branch <BRANCH>` | Filter sessions by git branch |
+| `--dir <DIR>` | Filter sessions by directory |
+| `--after <DATE>` | Only sessions after date (RFC 3339 or `YYYY-MM-DD`) |
+| `--before <DATE>` | Only sessions before date (RFC 3339 or `YYYY-MM-DD`) |
+| `--search <QUERY>` | Full-text search in session messages |
+| `--stats` | Show session statistics |
+| `--delete <ID>` | Delete a session by ID |
+
 ### Model and behaviour
 
 | Flag | Purpose |
