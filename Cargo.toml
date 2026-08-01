@@ -221,6 +221,7 @@ regex.workspace = true
 wiremock.workspace = true
 tracing-test.workspace = true
 ratatui.workspace = true
+serial_test.workspace = true
 
 [features]
 test-support = []

@@ -11,6 +11,7 @@ const DOCS_SUBCOMMANDS: &[&str] = &[
     "open",
     "view",
     "ingest",
+    "delete",
     "list",
     "status",
     "show",
@@ -59,8 +60,10 @@ impl CommandHandler for DocsViewHandler {
                     docs_usage_line("provenance requires <chunk-or-artifact-id>"),
                 ),
             },
-            "ingest" | "search" | "answer" | "index" | "index-retry-failed" | "index-pause"
-            | "index-resume" | "index-cancel" | "index-daemon" => {
+            // The mirror runs the CLI as a subprocess with no TTY, so anything needing
+            // confirmation must carry its flag on the command line (`delete --yes`).
+            "ingest" | "delete" | "search" | "answer" | "index" | "index-retry-failed"
+            | "index-pause" | "index-resume" | "index-cancel" | "index-daemon" => {
                 crate::command::cli_mirror::spawn_cli_mirror(ctx, "docs", args)
             }
             "index-status" => emit_docs_db(ctx, render_docs_index_status),
@@ -184,7 +187,7 @@ fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
 
 fn docs_usage() -> String {
     format!(
-        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs reprocess <document-id-or-path-prefix> [--defer-index]\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all] [--document <id>] [--batch-size <n>] [--limit <n>]\n  /docs index-status\n  /docs index-retry-failed [--limit <n>]\n  /docs index-pause|index-resume|index-cancel <job-id>\n  /docs index-daemon start|stop|status\n  /docs vector-status\n  /docs vector-migrate [--limit <n>] [--batch-size <n>] [--after <chunk-id>]\n  /docs vector-compact [--provider <name>] [--dimension <n>] [--limit <n>]\n  /docs model-status\n",
+        "/docs subcommands: {}\n\nUsage:\n  /docs open\n  /docs ingest <path>\n  /docs reprocess <document-id-or-path-prefix> [--defer-index]\n  /docs delete <document-id-or-path-prefix> [--yes]\n  /docs list\n  /docs status\n  /docs show <document-id>\n  /docs inspect <document-id>\n  /docs chunks <document-id>\n  /docs search <query> [--mode hybrid|exact|semantic] [--debug]\n  /docs answer <question>\n  /docs provenance <chunk-or-artifact-id>\n  /docs index [--all] [--document <id>] [--batch-size <n>] [--limit <n>]\n  /docs index-status\n  /docs index-retry-failed [--limit <n>]\n  /docs index-pause|index-resume|index-cancel <job-id>\n  /docs index-daemon start|stop|status\n  /docs vector-status\n  /docs vector-migrate [--limit <n>] [--batch-size <n>] [--after <chunk-id>]\n  /docs vector-compact [--provider <name>] [--dimension <n>] [--limit <n>]\n  /docs model-status\n",
         DOCS_SUBCOMMANDS.join(", ")
     )
 }

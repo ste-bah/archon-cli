@@ -8,7 +8,7 @@ end-user capabilities:
 
 | Capability | New crates | CLI surface |
 |---|---|---|
-| **Corpus ingestion** — PDFs → Marker (surya) block trees with real bounding boxes → token-aware chunks → OCR/VLM enrichment → embedded vector index → tamper-evident integrity seal | `archon-accel` (device/VRAM placement), `archon-ingest-ext` (chunking + Marker parser); `archon-docs` heavily extended | `archon docs ingest / verify-integrity / reprocess / index / search / verify-quote` |
+| **Corpus ingestion** — PDFs → Marker (surya) block trees with real bounding boxes → token-aware chunks → OCR/VLM enrichment → embedded vector index → tamper-evident integrity seal | `archon-accel` (device/VRAM placement), `archon-ingest-ext` (chunking + Marker parser); `archon-docs` heavily extended | `archon docs ingest / verify-integrity / reprocess / delete / index / search / verify-quote` |
 | **Prose-style analytics** — Lanham prose-style fingerprinting that turns a writing sample into an enforceable Archon *output-style* | `archon-lanham` (pure-Rust analyzer + renderer) | `archon style train` |
 
 Companion docs:
@@ -90,6 +90,7 @@ PDF
 | `docs ingest <path> [--jobs auto\|N] [--yes]` | Ingest a file or directory. `--jobs auto` derives image-enrichment concurrency from free VRAM; `--yes` skips the pre-ingest confirmation. |
 | `docs verify-integrity [--doc <id>] [--json]` | Recompute + compare the `chunks_root`; classifies each doc pass / fail / no-record. |
 | `docs reprocess <target> [--defer-index]` | Re-run OCR/VLM/image enrichment for an existing document. |
+| `docs delete <target> [--yes]` | Permanently remove a document and all its evidence, including the content-hash registration so the same content can be re-ingested. `--yes` is required when `<target>` is a prefix matching several documents. |
 | `docs index [--all] [--document <id>] [--batch-size N]` | Embed + store chunk vectors (deferred-indexing path); plus `index-status`, `index-daemon`, … |
 | `docs search <query> [--mode exact\|semantic\|hybrid]` | Chunk retrieval (default hybrid); `--debug` prints distances + citation chains. |
 | `docs verify-quote <quote> [--doc <id>] [--json]` | Locate a quote's source document, page(s), and bbox(es). |

@@ -30,6 +30,9 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
             target,
             defer_index,
         } => crate::command::docs_reprocess::handle_reprocess(&target, defer_index).await,
+        DocsAction::Delete { target, yes } => {
+            crate::command::docs_delete::handle_delete(&target, yes)
+        }
         DocsAction::List => handle_list().await,
         DocsAction::Show { document_id } => handle_show(&document_id).await,
         DocsAction::Status => crate::command::docs_status::handle_status(open_db()?).await,

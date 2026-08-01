@@ -119,7 +119,12 @@ pub async fn reprocess_document_with_policy(
     })
 }
 
-fn clear_generated_evidence(
+/// Remove every row the ingest pipeline generated for `document_id`, leaving the registration
+/// rows (`doc_sources`, KB membership) intact so the document can be re-run in place.
+///
+/// Shared with [`crate::delete`], which clears the same evidence and then drops the registration
+/// rows this deliberately preserves.
+pub(crate) fn clear_generated_evidence(
     db: &DbInstance,
     document_id: &str,
 ) -> Result<ClearedEvidence, DocsError> {

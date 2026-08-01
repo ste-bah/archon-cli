@@ -373,6 +373,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "serial_test",
  "sha2 0.10.9",
  "strsim",
  "tempfile",

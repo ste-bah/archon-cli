@@ -167,6 +167,57 @@ impl DocVectorStore {
         Ok(written_keys.len())
     }
 
+    /// Remove raw vectors and their HNSW id mappings for `chunk_ids`, across every provider.
+    ///
+    /// The content-addressed `cache/` entries are deliberately left in place: they are keyed by
+    /// chunk content hash rather than chunk id, so they stay valid for any other document holding
+    /// the same text, and a re-ingest of this document reuses them instead of re-embedding.
+    pub fn delete_chunks(&self, chunk_ids: &[String]) -> Result<usize> {
+        if chunk_ids.is_empty() {
+            return Ok(0);
+        }
+        let targets = chunk_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+        let _snapshot_fence = self
+            .snapshot_fence
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let prefix = vector_prefix(None);
+        let mut batch = WriteBatch::default();
+        let mut mutated_providers = HashSet::new();
+        let mut removed = 0_usize;
+        for item in self.db.prefix_iterator(prefix.as_bytes()) {
+            let (key, _) = item.context("iterate RocksDB vector records")?;
+            if !key.starts_with(prefix.as_bytes()) {
+                break;
+            }
+            let Some((provider, chunk_id)) = parse_vector_key(&key) else {
+                continue;
+            };
+            if !targets.contains(chunk_id.as_str()) {
+                continue;
+            }
+            batch.delete(&key);
+            batch.delete(id_key(&provider, &chunk_id));
+            batch.delete(reverse_id_key(&provider, hnsw_id(&chunk_id)));
+            mutated_providers.insert(provider);
+            removed += 1;
+        }
+        if removed == 0 {
+            return Ok(0);
+        }
+        // A persisted HNSW dump still contains the deleted ids. Bumping the generation makes the
+        // manifest check in `search` reject that dump, so the deleted chunks stop consuming top-k
+        // slots that would otherwise resolve to nothing.
+        for provider in &mutated_providers {
+            let generation = generation::next(&self.db, provider)?;
+            batch.put(generation::key(provider), generation::encode(generation));
+        }
+        self.db
+            .write(batch)
+            .context("delete raw vectors from RocksDB vector store")?;
+        Ok(removed)
+    }
+
     pub fn has_vector(&self, provider: &str, chunk_id: &str) -> Result<bool> {
         validate_provider(provider)?;
         self.db

@@ -9,6 +9,7 @@ mod docs_db_cache;
 pub mod block_chunking;
 pub mod chunking;
 mod cozo_retry;
+pub mod delete;
 pub mod indexing;
 mod indexing_adaptive;
 mod indexing_cache;

@@ -252,6 +252,10 @@ archon-cli-workspace::bin::archon::command::dispatcher::tests::cases_b::dispatch
 archon-cli-workspace::bin::archon::command::dispatcher::tests::cases_b::dispatch_smoke_all_primaries_route_without_unknown_error
 archon-cli-workspace::bin::archon::command::dispatcher::tests::cases_b::recognizes_smoke_all_primaries_return_true
 archon-cli-workspace::bin::archon::command::dispatcher::tests::cases_b::registry_primary_count_matches_expected_count
+archon-cli-workspace::bin::archon::command::docs_delete::tests::delete_by_document_id_removes_the_document
+archon-cli-workspace::bin::archon::command::docs_delete::tests::delete_of_nonexistent_target_errors
+archon-cli-workspace::bin::archon::command::docs_delete::tests::deleted_content_reingests_as_new_and_search_forgets_it
+archon-cli-workspace::bin::archon::command::docs_delete::tests::prefix_delete_of_many_documents_requires_yes
 archon-cli-workspace::bin::archon::command::docs_drift::tests::docs_do_not_reference_unknown_slash_commands
 archon-cli-workspace::bin::archon::command::doctor::tests::dispatcher_routes_slash_doctor_with_snapshot_emits_textdelta
 archon-cli-workspace::bin::archon::command::doctor::tests::dispatcher_routes_slash_doctor_without_snapshot_returns_err
@@ -3430,6 +3434,9 @@ archon-docs::lib::archon_docs::chunking::tests::test_repeated_header_across_page
 archon-docs::lib::archon_docs::chunking::tests::test_repeated_paragraph_gets_correct_offset
 archon-docs::lib::archon_docs::chunking::tests::test_single_page_chunking
 archon-docs::lib::archon_docs::cozo_retry::tests::retryable_errors_include_sqlite_lock_and_reject_poison_messages
+archon-docs::lib::archon_docs::delete::tests::delete_clears_kb_membership_and_queue_rows
+archon-docs::lib::archon_docs::delete::tests::delete_of_unknown_document_errors
+archon-docs::lib::archon_docs::delete::tests::delete_releases_the_content_hash_so_identical_bytes_reingest
 archon-docs::lib::archon_docs::docs_db_cache::tests::concurrent_acquisition_waits_for_one_in_flight_open
 archon-docs::lib::archon_docs::docs_db_cache::tests::databases_retain_independent_write_lock_paths
 archon-docs::lib::archon_docs::docs_db_cache::tests::failed_open_can_be_retried

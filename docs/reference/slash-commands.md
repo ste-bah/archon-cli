@@ -120,7 +120,7 @@ Each command goes through the same persisted Cozo state as its `archon X` shell 
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/docs` | — | Document intelligence: `open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`, `vector-status`, `vector-migrate`, `vector-compact`, `ingest`, `reprocess`, `index`, `index-status`, `index-retry-failed`, `index-pause`, `index-resume`, `index-cancel`, `index-daemon`, `search`, `answer`; `reprocess` supports `--defer-index` for large repair batches |
+| `/docs` | — | Document intelligence: `open`, `list`, `status`, `show`, `inspect`, `chunks`, `provenance`, `model-status`, `vector-status`, `vector-migrate`, `vector-compact`, `ingest`, `reprocess`, `delete`, `index`, `index-status`, `index-retry-failed`, `index-pause`, `index-resume`, `index-cancel`, `index-daemon`, `search`, `answer`; `reprocess` supports `--defer-index` for large repair batches; `delete` needs `--yes` when a path prefix matches more than one document |
 | `/video` | — | Video evidence: `ingest`, `status`, `list`, `inspect`, `frames`, `transcript`, `summary`, `reprocess` through the CLI mirror, preserving CLI flags such as `--frames`, `--asr`, `--kb`, and `--yes` |
 | `/kb` | — | Knowledge base: `ingest`, `reprocess`, `list`, `search`, `process` (claims, entities, relations, contradictions), `claims`, `entities`, `relations`, `contradictions`, `stats`; `ingest`, `reprocess`, `list`, `search`, and `process` support named buckets with `--kb`; `reprocess` supports `--defer-index` |
 | `/prov` | — | Provenance: `trace <artifact-id>`, `export <artifact-id>` (W3C PROV JSON-LD), `verify <artifact-id>` |

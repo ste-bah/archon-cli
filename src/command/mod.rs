@@ -56,6 +56,7 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod docs;
+pub(crate) mod docs_delete;
 #[cfg(test)]
 pub(crate) mod docs_drift;
 pub(crate) mod docs_embedding;

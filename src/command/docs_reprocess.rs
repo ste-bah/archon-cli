@@ -91,7 +91,14 @@ pub(crate) async fn reprocess_documents(
     Ok(())
 }
 
-fn resolve_target_documents(db: &DbInstance, target: &str) -> Result<Vec<SourceDocument>> {
+/// Resolve a TARGET to documents: exact document ID first, then exact source path, then source
+/// path prefix (literal and canonicalized).
+///
+/// Shared with `docs delete` so the two commands can never disagree about what a TARGET means.
+pub(crate) fn resolve_target_documents(
+    db: &DbInstance,
+    target: &str,
+) -> Result<Vec<SourceDocument>> {
     if let Some(doc) = archon_docs::store::get_doc_source(db, target)? {
         return Ok(vec![doc]);
     }

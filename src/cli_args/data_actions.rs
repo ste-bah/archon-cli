@@ -117,6 +117,14 @@ pub enum DocsAction {
         #[arg(long)]
         defer_index: bool,
     },
+    /// Permanently delete an existing document ID or source path/prefix and all its evidence
+    Delete {
+        /// Document ID, source path, or source path prefix
+        target: String,
+        /// Confirm deletion when the target matches more than one document
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
     /// List all ingested documents
     List,
     /// Show detailed information about a document
