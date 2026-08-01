@@ -1,7 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
+use archon_core::agents::catalog::ImmutableCatalogSnapshot as CatalogImmutableCatalogSnapshot;
 use archon_core::agents::{
-    AgentMetadata, AgentState, DiscoveryCatalog, DiscoveryError, ResourceReq, SourceKind,
+    AgentMetadata, AgentState, DiscoveryCatalog, DiscoveryError, ImmutableCatalogSnapshot,
+    ResourceReq, SourceKind,
 };
 use chrono::Utc;
 
@@ -47,45 +49,145 @@ fn names_for_capability(catalog: &DiscoveryCatalog, capability: &str) -> Vec<Str
 }
 
 fn assert_snapshot_invariant(catalog: &DiscoveryCatalog) {
-    let snapshot = catalog.snapshot();
-    for bucket in snapshot.tag_index.iter() {
-        assert!(!bucket.is_empty());
-        assert!(bucket.iter().all(|key| {
+    assert_immutable_snapshot_invariant(&catalog.snapshot_immutable());
+}
+
+fn assert_immutable_snapshot_invariant(snapshot: &ImmutableCatalogSnapshot) {
+    for (tag, keys) in snapshot.tag_index() {
+        assert!(!keys.is_empty());
+        assert!(keys.iter().all(|key| {
             snapshot
-                .entries
                 .get(key)
-                .is_some_and(|entry| entry.tags.contains(bucket.key()))
+                .is_some_and(|entry| entry.tags.contains(tag))
         }));
     }
-    for bucket in snapshot.capability_index.iter() {
-        assert!(!bucket.is_empty());
-        assert!(bucket.iter().all(|key| {
+    for (capability, keys) in snapshot.capability_index() {
+        assert!(!keys.is_empty());
+        assert!(keys.iter().all(|key| {
             snapshot
-                .entries
                 .get(key)
-                .is_some_and(|entry| entry.capabilities.contains(bucket.key()))
+                .is_some_and(|entry| entry.capabilities.contains(capability))
         }));
     }
-    for entry in snapshot.entries.iter() {
+    for (key, entry) in snapshot.entries() {
         assert!(
             snapshot
-                .name_index
-                .get(&entry.name)
+                .versions_for(&entry.name)
                 .is_some_and(|versions| versions.contains(&entry.version))
         );
         assert!(entry.tags.iter().all(|tag| {
             snapshot
-                .tag_index
-                .get(tag)
-                .is_some_and(|keys| keys.contains(entry.key()))
+                .tagged_keys(tag)
+                .is_some_and(|keys| keys.contains(key))
         }));
         assert!(entry.capabilities.iter().all(|capability| {
             snapshot
-                .capability_index
-                .get(capability)
-                .is_some_and(|keys| keys.contains(entry.key()))
+                .capability_keys(capability)
+                .is_some_and(|keys| keys.contains(key))
         }));
     }
+}
+#[test]
+fn immutable_snapshot_is_exported_from_catalog_and_agents_paths() {
+    let catalog = DiscoveryCatalog::new();
+    let _: Arc<ImmutableCatalogSnapshot> = catalog.snapshot_immutable();
+    let _: Arc<CatalogImmutableCatalogSnapshot> = catalog.snapshot_immutable();
+}
+#[test]
+fn immutable_snapshot_read_your_writes_and_old_snapshot_isolation() {
+    let catalog = DiscoveryCatalog::new();
+    catalog.insert(metadata("before")).unwrap();
+    let old = catalog.snapshot_immutable();
+
+    catalog.insert_all(vec![metadata("after"), metadata("also-after")]);
+    let current = catalog.snapshot_immutable();
+
+    assert_eq!(old.len(), 1);
+    assert!(
+        old.get(&("before".into(), "1.0.0".parse().unwrap()))
+            .is_some()
+    );
+    assert!(
+        old.get(&("after".into(), "1.0.0".parse().unwrap()))
+            .is_none()
+    );
+    assert_eq!(current.len(), 3);
+    assert_immutable_snapshot_invariant(&current);
+}
+
+#[test]
+#[allow(deprecated)]
+fn legacy_snapshot_conversion_is_equal_and_mutation_isolated() {
+    let catalog = DiscoveryCatalog::new();
+    catalog.insert(metadata("legacy")).unwrap();
+    let immutable = catalog.snapshot_immutable();
+    let legacy = catalog.snapshot();
+    let key = ("legacy".into(), "1.0.0".parse().unwrap());
+
+    assert_eq!(immutable.len(), legacy.entries.len());
+    assert_eq!(
+        immutable.get(&key).map(|metadata| &metadata.name),
+        legacy
+            .entries
+            .get(&key)
+            .as_deref()
+            .map(|metadata| &metadata.name)
+    );
+    legacy.entries.remove(&key);
+
+    assert!(catalog.snapshot_immutable().get(&key).is_some());
+    assert!(immutable.get(&key).is_some());
+}
+
+#[test]
+fn immutable_snapshot_accessors_expose_complete_indexes() {
+    let catalog = DiscoveryCatalog::new();
+    let mut entry = metadata("indexed");
+    entry.tags = vec!["tag-a".into(), "tag-b".into()];
+    entry.capabilities = vec!["capability-a".into()];
+    catalog.insert(entry).unwrap();
+
+    let snapshot = catalog.snapshot_immutable();
+    assert_eq!(snapshot.entries().count(), 1);
+    assert_eq!(snapshot.name_index().count(), 1);
+    assert_eq!(snapshot.tag_index().count(), 2);
+    assert_eq!(snapshot.capability_index().count(), 1);
+    assert_immutable_snapshot_invariant(&snapshot);
+}
+
+#[test]
+fn immutable_published_snapshots_remain_consistent_with_concurrent_writers() {
+    let catalog = Arc::new(DiscoveryCatalog::new());
+    let writers = (0..4)
+        .map(|writer| {
+            let catalog = catalog.clone();
+            std::thread::spawn(move || {
+                for entry in 0..25 {
+                    catalog
+                        .insert(metadata(&format!("{writer}-{entry}")))
+                        .unwrap();
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let readers = (0..4)
+        .map(|_| {
+            let catalog = catalog.clone();
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    assert_immutable_snapshot_invariant(&catalog.snapshot_immutable());
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    assert_eq!(catalog.snapshot_immutable().len(), 100);
 }
 
 #[test]
@@ -194,9 +296,9 @@ fn completed_insert_is_visible_in_immediate_snapshot() {
     catalog.insert(metadata("immediate")).unwrap();
     assert!(
         catalog
-            .snapshot()
-            .entries
-            .contains_key(&("immediate".into(), "1.0.0".parse().unwrap()))
+            .snapshot_immutable()
+            .get(&("immediate".into(), "1.0.0".parse().unwrap()))
+            .is_some()
     );
 }
 
@@ -211,13 +313,9 @@ fn obsolete_secondary_buckets_are_removed() {
     replacement.tags = vec!["current-tag".into()];
     replacement.capabilities = vec!["current-capability".into()];
     catalog.insert(replacement).unwrap();
-    let snapshot = catalog.snapshot();
-    assert!(!snapshot.tag_index.contains_key("obsolete-tag"));
-    assert!(
-        !snapshot
-            .capability_index
-            .contains_key("obsolete-capability")
-    );
+    let snapshot = catalog.snapshot_immutable();
+    assert!(snapshot.tagged_keys("obsolete-tag").is_none());
+    assert!(snapshot.capability_keys("obsolete-capability").is_none());
 }
 
 #[test]

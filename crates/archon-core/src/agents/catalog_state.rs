@@ -3,13 +3,14 @@ use std::sync::{Arc, Mutex};
 use arc_swap::ArcSwap;
 use tracing::warn;
 
+use super::catalog_immutable::ImmutableCatalogSnapshot;
 use super::catalog_types::{AgentKey, CatalogSnapshot, DiscoveryError};
 use crate::agents::metadata::AgentMetadata;
 
 /// In-memory catalog with a serialized staging state and published snapshots.
 pub struct DiscoveryCatalog {
     staging: Mutex<CatalogSnapshot>,
-    cached_snapshot: ArcSwap<CatalogSnapshot>,
+    cached_snapshot: ArcSwap<ImmutableCatalogSnapshot>,
 }
 
 /// The accepted and rejected records from one bulk insertion.
@@ -60,7 +61,7 @@ impl DiscoveryCatalog {
     pub fn new() -> Self {
         Self {
             staging: Mutex::new(CatalogSnapshot::default()),
-            cached_snapshot: ArcSwap::from_pointee(CatalogSnapshot::default()),
+            cached_snapshot: ArcSwap::from_pointee(ImmutableCatalogSnapshot::default()),
         }
     }
 
@@ -220,30 +221,38 @@ impl DiscoveryCatalog {
     }
 
     fn publish(&self, staging: &CatalogSnapshot) {
-        self.cached_snapshot.store(Arc::new(staging.clone()));
+        self.cached_snapshot
+            .store(Arc::new(ImmutableCatalogSnapshot::from_legacy(staging)));
     }
 
     /// Look up a specific entry from one published snapshot.
     pub fn get(&self, key: &AgentKey) -> Option<AgentMetadata> {
-        self.snapshot()
-            .entries
-            .get(key)
-            .map(|entry| entry.value().clone())
+        self.snapshot_immutable().get(key).cloned()
     }
 
-    /// Return the current complete catalog snapshot.
-    pub fn snapshot(&self) -> Arc<CatalogSnapshot> {
+    /// Return the current immutable catalog snapshot without conversion.
+    pub fn snapshot_immutable(&self) -> Arc<ImmutableCatalogSnapshot> {
         self.cached_snapshot.load_full()
+    }
+
+    /// Return a mutable legacy compatibility snapshot converted from publication.
+    ///
+    /// This allocates and copies every published index. Mutating the returned
+    /// snapshot never affects this catalog, the current immutable publication,
+    /// or any future snapshot.
+    #[deprecated(note = "use snapshot_immutable() to avoid compatibility conversion")]
+    pub fn snapshot(&self) -> Arc<CatalogSnapshot> {
+        Arc::new(self.snapshot_immutable().to_legacy())
     }
 
     /// Number of entries in one published snapshot.
     pub fn len(&self) -> usize {
-        self.snapshot().entries.len()
+        self.snapshot_immutable().len()
     }
 
     /// Whether the catalog is empty.
     pub fn is_empty(&self) -> bool {
-        self.snapshot().entries.is_empty()
+        self.snapshot_immutable().is_empty()
     }
 }
 

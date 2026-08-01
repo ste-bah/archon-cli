@@ -14,7 +14,7 @@ use archon_bench::catalog_representation::{deterministic_index_checksum, metadat
 use archon_core::agents::{
     AgentKey, AgentMetadata, AgentState, CatalogSnapshot, ResourceReq, SourceKind,
 };
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 const FIXTURE_SIZES: [usize; 3] = [100, 1_000, 10_000];
 const VERSIONS_PER_NAME: usize = 4;

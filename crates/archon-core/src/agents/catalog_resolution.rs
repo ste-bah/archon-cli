@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use crate::agents::metadata::{AgentMetadata, AgentState};
 
+use super::catalog_immutable::ImmutableCatalogSnapshot;
 use super::catalog_state::DiscoveryCatalog;
-use super::catalog_types::{AgentKey, CatalogSnapshot, DiscoveryError, UnresolvedDependency};
+use super::catalog_types::{AgentKey, DiscoveryError, UnresolvedDependency};
 
 impl DiscoveryCatalog {
     /// Resolve the best matching valid agent by name and version requirement.
@@ -12,58 +13,59 @@ impl DiscoveryCatalog {
         name: &str,
         version_req: Option<&semver::VersionReq>,
     ) -> Result<AgentMetadata, DiscoveryError> {
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot_immutable();
         resolve_snapshot(&snapshot, name, version_req)
     }
 
     /// Return all known versions for a name, sorted descending.
     pub fn versions(&self, name: &str) -> Vec<semver::Version> {
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot_immutable();
         versions_snapshot(&snapshot, name)
     }
 
     /// Resolve transitive dependencies via DFS.
     pub fn resolve_dependencies(&self, root_name: &str) -> Result<Vec<AgentKey>, DiscoveryError> {
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot_immutable();
         let root = resolve_snapshot(&snapshot, root_name, None)?;
         resolve_metadata_dependencies_snapshot(&snapshot, root)
     }
 }
 
 pub(super) fn resolve_snapshot(
-    snapshot: &CatalogSnapshot,
+    snapshot: &ImmutableCatalogSnapshot,
     name: &str,
     version_req: Option<&semver::VersionReq>,
 ) -> Result<AgentMetadata, DiscoveryError> {
-    let Some(versions) = snapshot.name_index.get(name) else {
+    let Some(versions) = snapshot.versions_for(name) else {
         return Err(not_found(snapshot, name));
     };
     for version in versions.iter().rev() {
         if version_req.is_some_and(|requirement| !requirement.matches(version)) {
             continue;
         }
-        if let Some(entry) = snapshot.entries.get(&(name.to_string(), version.clone()))
+        if let Some(entry) = snapshot.get(&(name.to_string(), version.clone()))
             && matches!(entry.state, AgentState::Valid)
         {
-            return Ok(entry.value().clone());
+            return Ok(entry.clone());
         }
     }
     Err(not_found(snapshot, name))
 }
 
-pub(super) fn versions_snapshot(snapshot: &CatalogSnapshot, name: &str) -> Vec<semver::Version> {
+pub(super) fn versions_snapshot(
+    snapshot: &ImmutableCatalogSnapshot,
+    name: &str,
+) -> Vec<semver::Version> {
     snapshot
-        .name_index
-        .get(name)
+        .versions_for(name)
         .map(|versions| versions.iter().rev().cloned().collect())
         .unwrap_or_default()
 }
 
-fn not_found(snapshot: &CatalogSnapshot, name: &str) -> DiscoveryError {
+fn not_found(snapshot: &ImmutableCatalogSnapshot, name: &str) -> DiscoveryError {
     let mut suggestions: Vec<_> = snapshot
-        .name_index
-        .iter()
-        .map(|entry| entry.key().clone())
+        .name_index()
+        .map(|(candidate, _)| candidate.clone())
         .map(|candidate| (candidate.clone(), strsim::levenshtein(name, &candidate)))
         .filter(|(_, distance)| *distance <= 3)
         .collect();
@@ -79,7 +81,7 @@ fn not_found(snapshot: &CatalogSnapshot, name: &str) -> DiscoveryError {
 }
 
 pub(super) fn resolve_metadata_dependencies_snapshot(
-    snapshot: &CatalogSnapshot,
+    snapshot: &ImmutableCatalogSnapshot,
     root: AgentMetadata,
 ) -> Result<Vec<AgentKey>, DiscoveryError> {
     let mut resolved = Vec::new();
@@ -90,7 +92,7 @@ pub(super) fn resolve_metadata_dependencies_snapshot(
 }
 
 fn dfs_dependencies(
-    snapshot: &CatalogSnapshot,
+    snapshot: &ImmutableCatalogSnapshot,
     meta: AgentMetadata,
     resolved: &mut Vec<AgentKey>,
     visiting: &mut HashSet<AgentKey>,

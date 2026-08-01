@@ -188,10 +188,10 @@ async fn mixed_valid_and_invalid_elements() {
     assert_eq!(report.invalid, 1);
     assert_eq!(catalog.len(), 2); // Both stored, invalid one has state=Invalid
 
-    let snap = catalog.snapshot();
+    let snap = catalog.snapshot_immutable();
     let mut invalid_count = 0;
-    for entry in snap.entries.iter() {
-        if matches!(&entry.value().state, AgentState::Invalid(_)) {
+    for (_, entry) in snap.entries() {
+        if matches!(&entry.state, AgentState::Invalid(_)) {
             invalid_count += 1;
         }
     }

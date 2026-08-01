@@ -126,10 +126,10 @@ fn load_all_with_invalid_files() {
     assert_eq!(catalog.len(), 5);
 
     // Verify invalid entries have state=Invalid
-    let snap = catalog.snapshot();
+    let snap = catalog.snapshot_immutable();
     let mut invalid_count = 0;
-    for entry in snap.entries.iter() {
-        if matches!(&entry.value().state, AgentState::Invalid(_)) {
+    for (_, entry) in snap.entries() {
+        if matches!(&entry.state, AgentState::Invalid(_)) {
             invalid_count += 1;
         }
     }
