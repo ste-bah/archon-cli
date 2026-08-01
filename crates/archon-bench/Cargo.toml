@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync
 tempfile.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+semver.workspace = true
 async-trait.workspace = true
 archon-core = { path = "../archon-core" }
 archon-pipeline = { path = "../archon-pipeline" }
@@ -36,4 +37,9 @@ harness = false
 [[bench]]
 name = "fanout_100"
 path = "benches/fanout_100.rs"
+harness = false
+
+[[bench]]
+name = "catalog_representation"
+path = "benches/catalog_representation.rs"
 harness = false
