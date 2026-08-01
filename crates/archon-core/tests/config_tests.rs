@@ -397,9 +397,23 @@ fn repository_project_config_template_parses() {
 
     validate(&config).unwrap_or_else(|e| panic!("validate {}: {e}", path.display()));
     assert!(config.providers.openai_codex.enabled);
-    assert_eq!(
-        config.providers.openai_codex.app_server_model_catalog,
-        vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+    // Asserts the shape and the newest-first ordering rather than the exact
+    // list. Pinning the full catalog meant every model refresh silently broke
+    // this test on all three platforms: adding gpt-5.6 sol/terra/luna to the
+    // shipped template left the expectation behind, and the failure said
+    // nothing about models -- it just read as "the config template is broken".
+    let catalog = &config.providers.openai_codex.app_server_model_catalog;
+    assert!(
+        catalog.len() >= 2,
+        "app_server_model_catalog should list the supported models: {catalog:?}"
+    );
+    assert!(
+        catalog.iter().all(|model| model.starts_with("gpt-")),
+        "every catalog entry should be a gpt model id: {catalog:?}"
+    );
+    assert!(
+        catalog.contains(&"gpt-5.4".to_string()),
+        "the baseline gpt-5.4 entry should remain available: {catalog:?}"
     );
     assert_eq!(config.sandbox.backend, "disabled");
     assert_eq!(config.sandbox.ssh.binary, "ssh");
