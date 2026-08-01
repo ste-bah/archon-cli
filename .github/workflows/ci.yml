@@ -297,6 +297,20 @@ jobs:
       - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
         run: bash scripts/check-file-sizes.sh
 
+  config-sync:
+    name: config-sync (template vs shipped .archon config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: config.toml and .archon/config.toml must be identical
+        run: |
+          if ! diff -u config.toml .archon/config.toml; then
+            echo "::error::config.toml (root template) and .archon/config.toml (shipped project config) have drifted; they must be byte-identical."
+            echo "Update the stale side, normally: cp config.toml .archon/config.toml"
+            exit 1
+          fi
+
   preserve-invariants:
     name: preserve-invariants (TASK-AGS-OBS-918)
     runs-on: ubuntu-latest
