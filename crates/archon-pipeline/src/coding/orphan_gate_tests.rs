@@ -295,8 +295,13 @@ fn scanner_reports_dangling_source_symlinks() {
 
     let result = scan_orphan_references(&[candidate], tmp.path(), || {}, |_| {});
 
-    assert!(result.references.is_empty());
-    assert_eq!(result.errors.len(), 1);
+    assert!(
+        result.references.is_empty(),
+        "refs={:?} errors={:?}",
+        result.references.iter().map(|r| &r.candidate).collect::<Vec<_>>(),
+        result.errors
+    );
+    assert_eq!(result.errors.len(), 1, "errors={:?}", result.errors);
     assert!(result.errors[0].contains("Unable to inspect source symlink target"));
 }
 
@@ -448,13 +453,36 @@ fn scanner_reports_non_utf8_source_path() {
 
 #[cfg(not(unix))]
 #[test]
-fn scanner_reports_missing_candidate_stem() {
+fn dot_prefixed_candidate_file_name_is_scanned_by_its_full_name() {
+    // Was `scanner_reports_missing_candidate_stem`, asserting that `src/.rs`
+    // yields "Candidate file stem is absent". That can never happen:
+    // `Path::new(".rs").file_stem()` is `Some(".rs")` -- a name beginning with
+    // a dot and containing no other dot is entirely stem -- so the candidate is
+    // accepted with stem ".rs". `file_stem()` returns `None` only for a path
+    // with no final component, which `candidate_pattern` cannot receive, so the
+    // guard it aimed at is unreachable from here.
+    //
+    // The test is `cfg(not(unix))` and had therefore never executed once:
+    // Windows CI was disabled for the entire period it existed. It now asserts
+    // what the code actually does.
     let tmp = tempfile::tempdir().unwrap();
     let candidate = write_source(tmp.path(), "src/.rs", b"pub fn bad() {}\n");
 
     let result = scan_orphan_references(&[candidate], tmp.path(), || {}, |_| {});
 
-    assert!(result.references.is_empty());
-    assert_eq!(result.errors.len(), 1);
-    assert!(result.errors[0].contains("candidate file stem is absent"));
+    assert!(
+        result.errors.is_empty(),
+        "a dot-prefixed file name is a valid candidate: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        result.references.len(),
+        1,
+        "exactly one candidate should be tracked: {:?}",
+        result
+            .references
+            .iter()
+            .map(|reference| &reference.candidate)
+            .collect::<Vec<_>>()
+    );
 }
