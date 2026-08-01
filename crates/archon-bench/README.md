@@ -18,12 +18,44 @@ Limits live in `threshold.toml` — the single source of truth. Bench
 bodies read that file at runtime and assert against it.
 
 `catalog_representation` uses deterministic 100-, 1,000-, and 10,000-agent
-fixtures and validates deterministic, order-independent entry, name-index,
-tag-index, and capability-index checksums before timing. It compares clone,
-exact lookup, highest-version lookup, and tag/capability `AND` filter-candidate
-construction (including both bucket clones) for equivalent representations; it
-does not measure or claim `ArcSwap` publication, metadata collection, sorting,
-or complete catalog listing.
+fixtures and validates every complete entry digest plus deterministic,
+order-independent name-index, tag-index, and capability-index checksums before
+timing. Entry digests include every `AgentMetadata` field; JSON schemas are
+recursively canonicalized by object key before hashing. It compares exact
+lookup, highest-version lookup, and tag/capability `AND` filter-candidate
+construction (including both bucket clones) for equivalent representations.
+
+### Issue #109 publication evidence
+
+The reproducible decision group is
+`catalog_representation/complete_publication`. Each timed iteration exactly
+models production's publication statement,
+`cached_snapshot.store(Arc::new(staging.clone()))`: it deep-clones the complete
+representation, wraps it in `Arc`, and stores it in an equivalent `ArcSwap`
+target. Fixtures and the initially empty targets are constructed outside the
+timed loop; `black_box` covers the prepared snapshot, store input, and load
+readback. Metadata validation, staging-lock acquisition, and staging/index
+mutation are outside this boundary because they occur before the production
+`publish` statement; neither representation includes them here.
+
+Actual Criterion central estimates from the reproducible run are below.
+`DashMap / standard-map` is the ratio, so a value above `1.0x` means the
+DashMap-backed publication was slower; the final column is the standard-map
+reduction relative to DashMap.
+
+| Entries | DashMap clone + `ArcSwap::store` | Standard-map clone + `ArcSwap::store` | DashMap / standard-map | Standard-map reduction |
+|---:|---:|---:|---:|---:|
+| 100 | 127.28 µs | 75.648 µs | 1.683x | 40.57% |
+| 1,000 | 1.1292 ms | 783.54 µs | 1.441x | 30.61% |
+| 10,000 | 18.777 ms | 15.145 ms | 1.240x | 19.34% |
+
+Acceptance threshold: pursue a representation migration only if this complete
+publication group shows the standard-map representation at least 50% faster
+than DashMap at **every** measured size (equivalently,
+`DashMap / standard-map >= 2.0x` at every size). The observed reductions are
+19.34%–40.57%, so the threshold is not met. Conclusion: **no migration** from
+the production DashMap representation based on this evidence. This replaces
+and does not rely on prior undocumented 0.89%/0.15% claims.
 
 ## Phase-0 stubs
 

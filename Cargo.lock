@@ -298,9 +298,11 @@ dependencies = [
 name = "archon-bench"
 version = "1.4.0"
 dependencies = [
+ "arc-swap",
  "archon-core",
  "archon-pipeline",
  "async-trait",
+ "blake3",
  "chrono",
  "criterion",
  "dashmap 6.1.0",
