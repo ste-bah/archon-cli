@@ -293,48 +293,66 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         .await;
     }
 
-    // 2. Run OCR extraction
-    let request = OcrRequest {
-        file_path: file_path.to_string(),
-        document_id: document_id.to_string(),
-        ocr_run_id: ocr_run_id.clone(),
-        page_range: None,
-        language_hint: None,
-    };
-
+    // 2. Extract text. Spreadsheets render natively (calamine → Markdown
+    // tables, one page per sheet) and then reuse the text pipeline below;
+    // everything else goes through the OCR provider.
     let mut image_ocr_failed = false;
-    let extract_result = match provider.extract(request).await {
-        Ok(result) => result,
-        Err(e) => {
-            // Mark OCR run as Failed
-            let _ = store::update_ocr_run_completion(
-                db,
-                &ocr_run_id,
-                &OcrStatus::Failed,
-                &chrono::Utc::now().to_rfc3339(),
-                0,
-            );
-            // For IMAGES, OCR is best-effort — the CLIP visual embedding is the primary
-            // value (e.g. game frames carry little/no text), so a failed OCR must NOT abort
-            // the document. Proceed with empty text + a single page so the image still gets
-            // embedded and stored. For all other media, propagate the failure.
-            if is_image_media_type(media_type) {
-                image_ocr_failed = true;
-                outcome.warnings.push(format!(
-                    "image OCR failed (continuing to image embedding): {e}"
-                ));
-                crate::ocr::provider::OcrExtractResult {
-                    full_text: String::new(),
-                    page_count: 1,
-                    page_offsets: vec![crate::models::PageOffset {
-                        page: 1,
-                        char_start: 0,
-                        char_end: 0,
-                    }],
-                    processing_duration_ms: 0,
-                }
-            } else {
+    let extract_result = if media_type::is_spreadsheet_media_type(media_type) {
+        match crate::ingest_spreadsheet::extract_spreadsheet(media_type, content_bytes) {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = store::update_ocr_run_completion(
+                    db,
+                    &ocr_run_id,
+                    &OcrStatus::Failed,
+                    &chrono::Utc::now().to_rfc3339(),
+                    0,
+                );
                 return Err(e);
+            }
+        }
+    } else {
+        let request = OcrRequest {
+            file_path: file_path.to_string(),
+            document_id: document_id.to_string(),
+            ocr_run_id: ocr_run_id.clone(),
+            page_range: None,
+            language_hint: None,
+        };
+
+        match provider.extract(request).await {
+            Ok(result) => result,
+            Err(e) => {
+                // Mark OCR run as Failed
+                let _ = store::update_ocr_run_completion(
+                    db,
+                    &ocr_run_id,
+                    &OcrStatus::Failed,
+                    &chrono::Utc::now().to_rfc3339(),
+                    0,
+                );
+                // For IMAGES, OCR is best-effort — the CLIP visual embedding is the primary
+                // value (e.g. game frames carry little/no text), so a failed OCR must NOT abort
+                // the document. Proceed with empty text + a single page so the image still gets
+                // embedded and stored. For all other media, propagate the failure.
+                if is_image_media_type(media_type) {
+                    image_ocr_failed = true;
+                    outcome.warnings.push(format!(
+                        "image OCR failed (continuing to image embedding): {e}"
+                    ));
+                    crate::ocr::provider::OcrExtractResult {
+                        full_text: String::new(),
+                        page_count: 1,
+                        page_offsets: vec![crate::models::PageOffset {
+                            page: 1,
+                            char_start: 0,
+                            char_end: 0,
+                        }],
+                        processing_duration_ms: 0,
+                    }
+                } else {
+                    return Err(e);
+                }
             }
         }
     };
@@ -466,6 +484,9 @@ mod multimodal_tests;
 #[cfg(test)]
 #[path = "ingest_pdf_ingest_tests.rs"]
 mod pdf_ingest_tests;
+#[cfg(test)]
+#[path = "ingest_spreadsheet_tests.rs"]
+mod spreadsheet_tests;
 #[cfg(test)]
 #[path = "ingest_test_support.rs"]
 mod test_support;

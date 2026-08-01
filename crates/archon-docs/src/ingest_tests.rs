@@ -16,6 +16,19 @@ fn test_detect_media_type() {
     assert_eq!(detect_media_type(Path::new("app.toml")), "application/toml");
     assert_eq!(detect_media_type(Path::new("img.png")), "image/png");
     assert_eq!(
+        detect_media_type(Path::new("book.xlsx")),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    assert_eq!(
+        detect_media_type(Path::new("legacy.xls")),
+        "application/vnd.ms-excel"
+    );
+    assert_eq!(detect_media_type(Path::new("rows.csv")), "text/csv");
+    assert_eq!(
+        detect_media_type(Path::new("rows.tsv")),
+        "text/tab-separated-values"
+    );
+    assert_eq!(
         detect_media_type(Path::new("unknown.xyz")),
         "application/octet-stream"
     );
@@ -31,6 +44,12 @@ fn test_is_supported() {
     assert!(is_supported_media_type("application/yaml"));
     assert!(is_supported_media_type("application/toml"));
     assert!(is_supported_media_type("application/pdf"));
+    assert!(is_supported_media_type(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ));
+    assert!(is_supported_media_type("application/vnd.ms-excel"));
+    assert!(is_supported_media_type("text/csv"));
+    assert!(is_supported_media_type("text/tab-separated-values"));
     assert!(!is_supported_media_type("application/octet-stream"));
     assert!(!is_supported_media_type(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

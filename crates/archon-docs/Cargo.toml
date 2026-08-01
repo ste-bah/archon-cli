@@ -21,6 +21,7 @@ chrono.workspace = true
 cozo.workspace = true
 tokio.workspace = true
 walkdir = "2"
+calamine.workspace = true
 lopdf.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 fastembed.workspace = true
@@ -39,3 +40,4 @@ tempfile.workspace = true
 [dev-dependencies]
 serial_test.workspace = true
 wiremock.workspace = true
+zip.workspace = true

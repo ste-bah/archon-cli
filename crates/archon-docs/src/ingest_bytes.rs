@@ -164,6 +164,10 @@ fn media_type_suffix(media_type: &str) -> &'static str {
         "application/yaml" | "application/x-yaml" => ".yaml",
         "application/toml" => ".toml",
         "application/pdf" => ".pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
+        "application/vnd.ms-excel" => ".xls",
+        "text/csv" => ".csv",
+        "text/tab-separated-values" => ".tsv",
         "image/png" => ".png",
         "image/jpeg" => ".jpg",
         "image/tiff" => ".tiff",
@@ -235,6 +239,31 @@ mod tests {
 
         assert_eq!(first.document_id, second.document_id);
         assert!(!second.was_new);
+    }
+
+    #[tokio::test]
+    async fn byte_source_accepts_csv_media() {
+        let db = test_db();
+        let result = ingest_bytes_source_with_policy(
+            &db,
+            "https://example.test/cases.csv",
+            "text/csv",
+            b"scenario,expected\nS-1,match\n",
+            &archon_policy::EffectivePolicy::default(),
+        )
+        .await
+        .unwrap();
+        let doc = store::get_doc_source(&db, &result.document_id)
+            .unwrap()
+            .unwrap();
+        let chunks = store::list_chunks_for_doc(&db, &result.document_id).unwrap();
+
+        assert!(result.was_new);
+        assert_eq!(doc.media_type, "text/csv");
+        assert_eq!(doc.status, DocumentStatus::Ingested);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].content.contains("| scenario | expected |"));
+        assert!(chunks[0].content.contains("| S-1 | match |"));
     }
 
     #[tokio::test]

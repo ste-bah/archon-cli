@@ -5,6 +5,10 @@ pub fn detect_media_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "pdf" => "application/pdf",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls" => "application/vnd.ms-excel",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "tiff" | "tif" => "image/tiff",
@@ -23,6 +27,7 @@ pub fn detect_media_type(path: &Path) -> &'static str {
 /// Determine whether a media type is supported for Phase 1 ingest.
 pub fn is_supported_media_type(media_type: &str) -> bool {
     is_text_pipeline_media_type(media_type)
+        || is_spreadsheet_media_type(media_type)
         || matches!(
             media_type,
             "application/pdf" | "image/png" | "image/jpeg" | "image/tiff"
@@ -55,4 +60,16 @@ pub(crate) fn is_text_pipeline_media_type(media_type: &str) -> bool {
 
 pub(crate) fn is_image_media_type(media_type: &str) -> bool {
     matches!(media_type, "image/png" | "image/jpeg" | "image/tiff")
+}
+
+/// Spreadsheet media types rendered to Markdown tables before entering the
+/// text chunk pipeline (see `ingest_spreadsheet`).
+pub(crate) fn is_spreadsheet_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            | "application/vnd.ms-excel"
+            | "text/csv"
+            | "text/tab-separated-values"
+    )
 }

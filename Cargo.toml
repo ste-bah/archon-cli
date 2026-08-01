@@ -105,6 +105,7 @@ sysinfo = "0.33"
 arc-swap = "1"
 cel-interpreter = { version = "0.10", features = ["json"] }
 walkdir = "2"
+calamine = { version = "0.36", features = ["dates"] }
 moka = { version = "0.12", features = ["sync"] }
 strsim = "0.11"
 globset = "0.4"
@@ -137,6 +138,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.12"
 pretty_assertions = "1.4"
 rstest = "0.22"
+# zip: dev-only — builds minimal .xlsx fixtures for spreadsheet-ingest tests
+# (stored entries only, so no compression features needed).
+zip = { version = "8", default-features = false }
 
 [[bin]]
 name = "archon"

@@ -23,6 +23,7 @@ pub mod ingest_bytes;
 mod ingest_directory;
 mod ingest_multimodal;
 mod ingest_pdf;
+mod ingest_spreadsheet;
 pub mod ingest_text;
 pub mod inspect;
 pub mod marker_source;
