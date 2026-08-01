@@ -267,6 +267,11 @@ mod tests {
     /// R4 branch 3: `cred_path.exists() == false` emits the
     /// byte-exact no-stored-credentials TextDelta. HOME points at a
     /// tempdir WITHOUT `.archon/.credentials.json`.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_no_credentials_emits_no_stored_textdelta() {
         let (mut ctx, mut rx) = make_logout_ctx();
@@ -313,6 +318,11 @@ mod tests {
     /// R4 branch 1: `cred_path.exists() == true` + `remove_file`
     /// succeeds -> emit the byte-exact logged-out TextDelta AND the
     /// file is gone post-execute.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_remove_success_emits_logged_out_textdelta() {
         let (mut ctx, mut rx) = make_logout_ctx();
@@ -369,6 +379,11 @@ mod tests {
     /// a directory rather than a regular file. `std::fs::remove_file`
     /// returns an Err on a directory ("Is a directory" on Linux /
     /// EISDIR).
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_remove_failure_emits_error() {
         let (mut ctx, mut rx) = make_logout_ctx();
@@ -431,6 +446,11 @@ mod tests {
     /// `Dispatcher::dispatch(&mut ctx, "/logout")` routes through the
     /// real alias+primary pipeline. Uses `HOME`-override (no cred
     /// file) to select the no-creds branch deterministically.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_no_creds_emits_textdelta() {
         let (mut ctx, mut rx) = make_logout_ctx();
@@ -471,6 +491,11 @@ mod tests {
     /// `Dispatcher::dispatch(&mut ctx, "/logout")` routes through the
     /// real alias+primary pipeline. Seeded cred file proves the
     /// logged-out branch fires end-to-end AND the file is gone after.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_removes_creds() {
         let (mut ctx, mut rx) = make_logout_ctx();

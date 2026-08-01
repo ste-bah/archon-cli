@@ -359,6 +359,11 @@ mod tests {
     /// tempdir, create `.archon/.credentials.json` there, and assert
     /// the handler emits a single byte-exact TextDelta containing the
     /// `Status: authenticated` block.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_authenticated_branch_emits_textdelta() {
         let (mut ctx, mut rx) = make_login_ctx(Some("anthropic-api-key".to_string()));
@@ -404,6 +409,11 @@ mod tests {
     /// tempdir WITHOUT `.archon/.credentials.json`; assert the handler
     /// emits a single byte-exact TextDelta containing the 4-step
     /// OAuth-instructions block.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_not_authenticated_branch_emits_textdelta() {
         let (mut ctx, mut rx) = make_login_ctx(Some("api-key".to_string()));
@@ -462,6 +472,11 @@ mod tests {
     /// `Dispatcher::dispatch(&mut ctx, "/login")` routes through the
     /// real alias+primary pipeline. Uses `HOME`-override + cred-file
     /// trick to select the authenticated branch deterministically.
+    // `HOME` redirection is Unix-only. On Windows `dirs::home_dir()` resolves
+    // the profile through the shell known-folder API rather than an
+    // environment variable, so the override cannot be made hermetic there and
+    // the test would read (or worse, write) the real user profile.
+    #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_login_with_auth_label_emits_textdelta() {
         let (mut ctx, mut rx) = make_login_ctx(Some("oauth".to_string()));
