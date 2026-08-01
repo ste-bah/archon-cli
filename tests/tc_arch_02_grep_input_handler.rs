@@ -16,8 +16,8 @@ fn arch_lint_passes_on_clean_tree() {
         "TC-ARCH-02: scripts/lint/arch-lint.sh not found at {lint_script:?}"
     );
 
-    let output = Command::new("bash")
-        .arg(&lint_script)
+    let output = Command::new(bash_program())
+        .arg(bash_path(&lint_script))
         .current_dir(repo_root)
         .output()
         .expect("failed to execute arch-lint.sh");
@@ -48,4 +48,52 @@ fn input_handler_markers_exist() {
         main_rs.contains("END INPUT_HANDLER"),
         "TC-ARCH-02: src/main.rs missing END INPUT_HANDLER marker"
     );
+}
+
+/// Locate a bash that actually exists.
+///
+/// Git for Windows ships `bash.exe` but its installer only adds `<git>\cmd` to
+/// PATH -- the directory with `git.exe` and not `bash.exe` -- so a bare
+/// `Command::new("bash")` fails with "program not found" on an otherwise
+/// correctly set up machine.
+fn bash_program() -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        use std::path::PathBuf;
+        // Git's bash FIRST, deliberately. A bare `bash` on Windows usually
+        // resolves to the WSL launcher in System32, which runs inside
+        // the Linux filesystem and cannot see `F:/...` at all -- it reports
+        // "No such file or directory" for a perfectly valid Windows path.
+        if let Ok(output) = Command::new("where").arg("git").output()
+            && let Some(git) = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(PathBuf::from)
+        {
+            let candidate = git
+                .parent()
+                .and_then(|cmd_dir| cmd_dir.parent())
+                .map(|root| root.join("bin").join("bash.exe"));
+            if let Some(path) = candidate
+                && path.is_file()
+            {
+                return path.into_os_string();
+            }
+        }
+        "bash".into()
+    }
+    #[cfg(not(windows))]
+    {
+        "bash".into()
+    }
+}
+
+/// A path bash will accept.
+///
+/// Git's bash consumes backslashes as escapes, so a native Windows path arrives
+/// as `F:archon-localarchon-cli...` and the script is "not found". Forward
+/// slashes survive intact and Windows accepts them too.
+fn bash_path(path: &std::path::Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }
