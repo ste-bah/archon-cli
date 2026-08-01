@@ -13,6 +13,33 @@ What to expect when you launch `archon` for the first time.
 3. If no credentials are found, archon prompts you to run `archon auth login --provider anthropic` or set an API key. Codex-backed sessions use `archon auth login --provider openai-codex` plus `[llm].provider = "openai-codex"`.
 4. The TUI opens with built-in defaults (INTJ personality, `dracula` theme, default permission mode).
 
+## The embedding model downloads on first use
+
+The default embedding provider is `fastembed`, running locally. The first
+operation that needs an embedding downloads the `bge-base-en-v1.5` ONNX model
+(a few hundred MB) from Hugging Face into the platform data directory. It is
+cached, so this happens once per machine.
+
+Download progress is **not** shown, so the first documents ingest, memory write,
+or world-model training run appears to stall for a while with no output. That is
+the model download, not a hang.
+
+This also means the operation needs network access. Failures degrade rather than
+abort — an unavailable provider falls back to hashing text into feature buckets,
+which still works but is a weaker representation. Nothing tells you at the time,
+so an offline first run produces quietly worse results rather than an error.
+
+To avoid the download entirely, pick the dependency-free provider:
+
+```toml
+[learning.world_model.embeddings]
+provider = "deterministic-hash"
+```
+
+That keeps the path free of FastEmbed, OpenAI and any third-party provider, at
+the cost of representation quality. See
+[world-model embeddings](../reference/world-model-embeddings.md).
+
 ## Where data lives
 
 | Path | Purpose |
@@ -89,8 +116,8 @@ A 10-second smoke test:
 # 1. Confirm version
 archon --version
 
-# 2. List registered tools (should be 65)
-archon --list-tools | wc -l
+# 2. Confirm the binary parses and lists its subcommands
+archon --help
 
 # 3. Print mode against a simple file
 echo "fn main() { println!(\"hi\"); }" > /tmp/hi.rs

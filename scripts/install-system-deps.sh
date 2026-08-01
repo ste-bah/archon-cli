@@ -450,7 +450,7 @@ if [ "$DRY_RUN" = false ]; then
     done
     echo
     echo "install-system-deps.sh: done. Next steps:"
-    echo "  1. Install Rust 1.85+ if not already: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    echo "  1. Install rustup if not already (the repo pins its toolchain; rustup fetches it): curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     echo "  2. Build archon-cli: cargo build --release --bin archon"
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
     echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"

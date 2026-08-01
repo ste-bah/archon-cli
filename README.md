@@ -17,7 +17,7 @@ identity-aware Anthropic/Codex provider integration.
 ## Quick start
 
 ```bash
-# Build (Rust 1.85+, edition 2024)
+# Build (rustup installs the pinned toolchain from rust-toolchain.toml)
 git clone https://github.com/ste-bah/archon-cli
 cd archon-cli
 sudo scripts/install-system-deps.sh --check || sudo scripts/install-system-deps.sh
@@ -62,7 +62,7 @@ Full installation guide: [`docs/getting-started/installation.md`](docs/getting-s
 
 | | claude-code (TS/Bun) | archon-cli (Rust) |
 |---|---|---|
-| Runtime | TypeScript / Bun | Rust 1.85+ |
+| Runtime | TypeScript / Bun | Rust (pinned via rust-toolchain.toml) |
 | Memory | markdown files | CozoDB graph + embeddings |
 | Documents | ad hoc file reads | OCR, image ingest, chunks, embeddings, hybrid retrieval, citations |
 | Pipelines | Single-agent loop | 50-agent coding + 46-agent research + 84-specialist game theory |

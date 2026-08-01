@@ -8,7 +8,7 @@ archon-cli is a 26-crate Cargo workspace. There are no precompiled binaries — 
 
 | Requirement | Minimum | Notes |
 |---|---|---|
-| Rust toolchain | 1.85+ | edition 2024 — older toolchains will not compile |
+| Rust toolchain | installed via rustup | `rust-toolchain.toml` pins 1.96.1 and rustup installs it for you |
 | `cargo` | bundled with Rust | comes from rustup |
 | Git | any recent | for `git clone` and branch-aware sessions at runtime |
 | Disk space | ~3 GB free | `target/` build artefacts dominate |
@@ -20,8 +20,17 @@ archon-cli is a 26-crate Cargo workspace. There are no precompiled binaries — 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-rustc --version    # verify: 1.85.0 or newer
 ```
+
+Install rustup rather than a distro Rust package. The repo pins its toolchain in
+`rust-toolchain.toml`, and rustup reads that file and installs the pinned
+version automatically on the first `cargo` command inside the clone — so the
+version you happen to have installed does not matter, and there is nothing to
+check by hand. Budget for that download the first time.
+
+The declared minimum (`rust-version` in the workspace `Cargo.toml`) is **1.88**,
+set by the tree's use of let-chains, which earlier toolchains reject. It only
+applies if you deliberately override the pin; a normal clone builds on 1.96.1.
 
 ## OS-specific build dependencies
 
@@ -93,11 +102,32 @@ winget install Rustlang.Rustup
 winget install Microsoft.VisualStudio.2022.BuildTools
 # Select "Desktop development with C++" during install
 winget install Git.Git
+winget install --id StrawberryPerl.StrawberryPerl -e
 winget install Gyan.FFmpeg
 winget install yt-dlp.yt-dlp
 # Optional Docker sandbox backend:
 winget install Docker.DockerDesktop
 ```
+
+**Perl is required, and it must be Strawberry Perl.** `openssl` is pinned with
+the `vendored` feature, so OpenSSL is compiled from source and its `./Configure`
+script is Perl. Git for Windows ships a cut-down msys Perl that lacks modules
+`Configure` needs, and if that is the only Perl on `PATH` the build fails with:
+
+```
+Can't locate Locale/Maketext/Simple.pm in @INC
+```
+
+Installing OpenSSL for Windows does **not** fix this — `vendored` ignores any
+system OpenSSL and always builds its own. If Strawberry Perl is installed but
+Git's Perl still wins on `PATH`, point the build at it explicitly:
+
+```powershell
+setx PERL "C:\Strawberry\perl\bin\perl.exe"
+```
+
+CI does not hit this because GitHub's Windows runners ship Strawberry Perl
+preinstalled.
 
 Native Windows users who want local `whisper-cpp` ASR should install a
 `whisper-cli` build from the upstream whisper.cpp project and set
@@ -342,11 +372,11 @@ $env:PATH += ";$PWD\target\release"
 
 ```bash
 archon --version
-# Expected: archon 1.3.2 (<short-sha>)
+# Expected: archon 1.4.0 (<short-sha>)
 
 archon --help                   # full subcommand listing
-archon --list-themes            # 23 themes available
-archon --list-output-styles     # 5 output styles available
+archon --list-themes            # 16 MBTI + 6 utility, plus daltonized and auto
+archon --list-output-styles     # built-ins plus any you have installed
 ```
 
 ## Run the test suite (optional)
@@ -367,7 +397,9 @@ cargo nextest run --workspace -j1 -- --test-threads=2
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `error: package 'archon-cli-workspace' specifies edition 2024` | Rust < 1.85 | `rustup update stable` |
+| `error: package 'archon-cli-workspace' specifies edition 2024` | Rust older than the pin, usually a distro Rust rather than rustup | install rustup so `rust-toolchain.toml` is honoured |
+| `error[E0658]: 'let' expressions in this position are unstable` | toolchain below 1.88; the tree uses let-chains | same — let rustup install the pinned toolchain |
+| `Can't locate Locale/Maketext/Simple.pm in @INC` (Windows) | Git's msys Perl is being used to build vendored OpenSSL | install Strawberry Perl, then `setx PERL "C:\Strawberry\perl\bin\perl.exe"` |
 | `failed to resolve openssl` on Linux | missing `libssl-dev` | install OS build deps (above) |
 | WSL2 build hangs then `Killed` / `signal: 9` | OOM during parallel rustc | rebuild with `cargo build --release -j1` |
 | `linker 'cc' not found` | missing C toolchain | install `build-essential` (Linux) or Xcode CLI tools (macOS) |

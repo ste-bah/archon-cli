@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- Rust 1.85+ (edition 2024)
+- rustup (the repo pins its toolchain in `rust-toolchain.toml`; rustup installs it automatically)
 - Either an Anthropic API key, an active Claude.ai subscription, or Codex OAuth with `[llm].provider = "openai-codex"`
 
 If you don't have Rust:
