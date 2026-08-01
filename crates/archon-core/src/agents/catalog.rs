@@ -25,6 +25,11 @@ pub use catalog_types::{
     DiscoverySourceKind, FilterLogic, UnresolvedDependency,
 };
 
+// Immutable production publication and read accessors.
+#[path = "catalog_immutable.rs"]
+mod catalog_immutable;
+pub use catalog_immutable::ImmutableCatalogSnapshot;
+
 // Concurrent state and secondary-index maintenance.
 #[path = "catalog_state.rs"]
 mod catalog_state;

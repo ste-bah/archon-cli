@@ -31,8 +31,8 @@ fn insert_two_versions_same_name() {
 
     assert_eq!(catalog.len(), 2);
 
-    let snap = catalog.snapshot();
-    let versions = snap.name_index.get("foo").unwrap();
+    let snap = catalog.snapshot_immutable();
+    let versions = snap.versions_for("foo").unwrap();
     assert!(versions.contains(&semver::Version::new(1, 0, 0)));
     assert!(versions.contains(&semver::Version::new(2, 0, 0)));
 }
@@ -42,8 +42,8 @@ fn insert_with_tag_populates_tag_index() {
     let catalog = DiscoveryCatalog::new();
     catalog.insert(make_meta("bar", "1.0.0")).unwrap();
 
-    let snap = catalog.snapshot();
-    let tagged = snap.tag_index.get("rust").unwrap();
+    let snap = catalog.snapshot_immutable();
+    let tagged = snap.tagged_keys("rust").unwrap();
     assert!(tagged.contains(&("bar".to_string(), semver::Version::new(1, 0, 0))));
 }
 
@@ -92,13 +92,13 @@ fn snapshot_isolation_from_subsequent_insert() {
     let catalog = DiscoveryCatalog::new();
     catalog.insert(make_meta("before", "1.0.0")).unwrap();
 
-    let snap_before = catalog.snapshot();
-    assert_eq!(snap_before.entries.len(), 1);
+    let snap_before = catalog.snapshot_immutable();
+    assert_eq!(snap_before.len(), 1);
 
     catalog.insert(make_meta("after", "1.0.0")).unwrap();
 
     // Old snapshot still shows 1 entry
-    assert_eq!(snap_before.entries.len(), 1);
+    assert_eq!(snap_before.len(), 1);
     // Current catalog shows 2
     assert_eq!(catalog.len(), 2);
 }

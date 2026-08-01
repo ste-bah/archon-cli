@@ -14,7 +14,7 @@ pub mod transcript;
 pub use catalog::{
     AcceptedInsertCounts, AgentInfoView, AgentKey, BulkInsertRejection, BulkInsertResult,
     CatalogSnapshot, DiscoveryCatalog, DiscoveryError, DiscoverySourceConfig, DiscoverySourceKind,
-    UnresolvedDependency,
+    ImmutableCatalogSnapshot, UnresolvedDependency,
 };
 pub use definition::*;
 pub use metadata::{AgentMetadata, AgentState, DependencyRef, ResourceReq, SourceKind};
