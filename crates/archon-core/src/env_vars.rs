@@ -1,10 +1,15 @@
 //! Centralized environment variable handling for Archon CLI.
 //!
-//! All `ARCHON_*` and `ANTHROPIC_*` environment variables are read once at
-//! startup into an [`ArchonEnvVars`] struct. No scattered `std::env::var()`
-//! calls elsewhere in the codebase.
+//! The `ARCHON_*` and `ANTHROPIC_*` variables that feed session configuration
+//! are read once at startup into an [`ArchonEnvVars`] struct, and follow the
+//! precedence: CLI flags > env vars > config file > hardcoded defaults.
 //!
-//! Precedence: CLI flags > env vars > config file > hardcoded defaults.
+//! Feature-local variables (OCR timeouts, tool binary overrides, offline test
+//! fixtures) are still read at their point of use rather than through this
+//! struct, so they do **not** participate in that precedence chain. Both kinds
+//! must be listed in [`KNOWN_ARCHON_VARS`], which is the allowlist backing
+//! unrecognized-variable warnings — a variable the code honours but omits from
+//! that list produces a spurious warning on every startup.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -57,6 +62,8 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_DOCS_INDEX_MAX_IN_FLIGHT_BATCHES",
     "ARCHON_DOCS_INDEX_WRITER_BATCH_SIZE",
     "ARCHON_DOCS_LEGACY_COZO_VECTOR_WRITE",
+    "ARCHON_DOCS_ADAPTIVE_BATCHING",
+    "ARCHON_DOCS_HYBRID_ALWAYS_SEMANTIC",
     "ARCHON_DOCS_OPENAIKEY",
     "ARCHON_DOC_VECTOR_STORE_DIR",
     "ARCHON_MEMORY_OPENAIKEY",
@@ -69,19 +76,29 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_TOOL_CHILD",
     "ARCHON_VERBOSE",
     // Paths
+    "ARCHON_COMPLETION_DB_PATH",
     "ARCHON_CONFIG_DIR",
     "ARCHON_CONSTELLATION_DB_PATH",
     "ARCHON_DATA_DIR",
     "ARCHON_DOCS_DB_PATH",
+    "ARCHON_EVIDENCE_DB_PATH",
+    "ARCHON_GAMETHEORY_DB_PATH",
     "ARCHON_KB_DB_PATH",
+    "ARCHON_LEARNING_DB_PATH",
     "ARCHON_MEANING_DB_PATH",
     "ARCHON_PROV_DB_PATH",
+    "ARCHON_SESSION_DB_PATH",
+    "ARCHON_VIDEO_DB_PATH",
     // OCR / video helper tuning
     "ARCHON_OCR_ENGINE",
+    "ARCHON_OCR_TIMEOUT_SECS",
+    "ARCHON_PDF_IMAGE_TIMEOUT_SECS",
+    "ARCHON_PDF_RENDER_TIMEOUT_SECS",
     "ARCHON_RAPIDOCR_MIN_SCORE",
     "ARCHON_VIDEO_FRAME_FALLBACK",
     "ARCHON_YTDLP_VIDEO_FORMAT",
     // Tool binary overrides
+    "ARCHON_EVIDENCE_TOOL_BIN",
     "ARCHON_FASTER_WHISPER_BIN",
     "ARCHON_FFMPEG_BIN",
     "ARCHON_FFPROBE_BIN",
@@ -93,6 +110,24 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_VIDEO_OPENCV_PYTHON",
     "ARCHON_WHISPER_BIN",
     "ARCHON_YTDLP_BIN",
+    // TUI
+    "ARCHON_THEME_PREFER",
+    "ARCHON_TRUST_USER_GRAMMARS",
+    "ARCHON_TUI_MOUSE_CAPTURE",
+    // Runtime and agent lifecycle
+    "ARCHON_AUTO_BACKGROUND_TASKS",
+    "ARCHON_FORK_SUBAGENT",
+    "ARCHON_ORCHESTRATED_LIFECYCLE",
+    "ARCHON_PLUGIN_SEED_DIR",
+    "ARCHON_REGISTRY_URL",
+    "ARCHON_REMOTE_URL",
+    "ARCHON_SCRIPT_LIFECYCLE",
+    "ARCHON_SPEC_PATH",
+    "ARCHON_WEB_DEV",
+    // Diagnostic / offline fixtures
+    "ARCHON_STOOQ_CSV_URL",
+    "ARCHON_TRADINGVIEW_OHLCV_FIXTURE",
+    "ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE",
     // Telemetry (recognized but no-op)
     "ARCHON_DISABLE_TELEMETRY",
 ];
