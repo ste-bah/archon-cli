@@ -87,10 +87,14 @@ jobs:
             timeout-override: 45
           - os: windows-latest
             # Windows has no mold, links MSVC, and additionally compiles
-            # vendored OpenSSL from source (see the Perl note below). A local
-            # `cargo check --workspace` on a Windows dev box takes ~8 min cold,
-            # so the full build+nextest run gets a wider budget than the others.
-            timeout-override: 60
+            # vendored OpenSSL from source (see the Perl note below).
+            #
+            # 60 min was not enough: run 30695094906 built the workspace
+            # successfully and was then cancelled mid-nextest at exactly
+            # 60m07s, with macOS finishing the same job in 30m36s. Raised to
+            # 120 so a cold cache can get through the test phase at least once;
+            # tune back down once a warm-cache run shows the real figure.
+            timeout-override: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -167,6 +171,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-${{ matrix.os }}
+          # Without this the cache is only saved on success, so a job that runs
+          # out of wall-clock saves nothing and the next attempt starts cold —
+          # which on Windows is most of the budget gone before a test runs.
+          cache-on-failure: true
 
       - name: Install cargo-nextest
         if: runner.os != 'Windows'
