@@ -41,7 +41,7 @@ fn bench_standard_publication(group: &mut BenchGroup<'_>, size: usize, fixture: 
         BenchmarkId::new("standard_hashmap_clone_plus_arcswap_store", size),
         fixture,
         |bench, fixture| {
-            let target = ArcSwap::from_pointee(StandardMapSnapshot::default());
+            let target = ArcSwap::from_pointee(ImmutableCatalogSnapshot::default());
             bench.iter(|| {
                 let prepared = Arc::new(black_box(fixture.standard.clone()));
                 target.store(black_box(prepared));

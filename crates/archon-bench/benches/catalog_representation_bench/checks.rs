@@ -36,10 +36,11 @@ pub(crate) fn entry_digests_dash(snapshot: &CatalogSnapshot) -> BTreeSet<(String
         .collect()
 }
 
-pub(crate) fn entry_digests_standard(snapshot: &StandardMapSnapshot) -> BTreeSet<(String, String)> {
+pub(crate) fn entry_digests_standard(
+    snapshot: &ImmutableCatalogSnapshot,
+) -> BTreeSet<(String, String)> {
     snapshot
-        .entries
-        .iter()
+        .entries()
         .map(|(key, metadata)| {
             (
                 agent_key_string(key),
@@ -64,17 +65,18 @@ pub(crate) fn snapshot_digest(snapshot: &CatalogSnapshot) -> (usize, usize, usiz
     )
 }
 
-pub(crate) fn standard_digest(snapshot: &StandardMapSnapshot) -> (usize, usize, usize, usize, u64) {
+pub(crate) fn standard_digest(
+    snapshot: &ImmutableCatalogSnapshot,
+) -> (usize, usize, usize, usize, u64) {
     let checksum = snapshot
-        .entries
-        .iter()
+        .entries()
         .map(|(key, metadata)| key_checksum(key).wrapping_add(metadata_checksum(metadata)))
         .fold(0_u64, u64::wrapping_add);
     (
-        snapshot.entries.len(),
-        snapshot.name_index.len(),
-        snapshot.tag_index.len(),
-        snapshot.capability_index.len(),
+        snapshot.len(),
+        snapshot.name_index().count(),
+        snapshot.tag_index().count(),
+        snapshot.capability_index().count(),
         checksum,
     )
 }
@@ -97,10 +99,9 @@ pub(crate) fn name_index_checksum_dash(snapshot: &CatalogSnapshot) -> u64 {
     deterministic_index_checksum(&index)
 }
 
-pub(crate) fn name_index_checksum_standard(snapshot: &StandardMapSnapshot) -> u64 {
+pub(crate) fn name_index_checksum_standard(snapshot: &ImmutableCatalogSnapshot) -> u64 {
     let index = snapshot
-        .name_index
-        .iter()
+        .name_index()
         .map(|(name, versions)| {
             (
                 name.clone(),
@@ -129,11 +130,10 @@ pub(crate) fn membership_index_checksum_dash(
     deterministic_index_checksum(&index)
 }
 
-pub(crate) fn membership_index_checksum_standard(
-    index: &HashMap<String, HashSet<AgentKey>>,
+pub(crate) fn membership_index_checksum_standard<'a>(
+    index: impl Iterator<Item = (&'a String, &'a HashSet<AgentKey>)>,
 ) -> u64 {
     let index = index
-        .iter()
         .map(|(key, members)| (key.clone(), members.iter().map(agent_key_string).collect()))
         .collect();
     deterministic_index_checksum(&index)

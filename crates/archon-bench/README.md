@@ -58,26 +58,27 @@ after that run.
 
 | Group | Entries | DashMap median | Standard-map median | DashMap / standard-map | Standard-map change |
 |---|---:|---:|---:|---:|---:|
-| Complete publication | 100 | 125.138 µs | 76.559 µs | 1.6345x | -38.82% |
-| Complete publication | 1,000 | 1.185825 ms | 783.121 µs | 1.5142x | -33.96% |
-| Complete publication | 10,000 | 18.095649 ms | 13.581230 ms | 1.3324x | -24.95% |
-| Exact get | 100 | 5.436 µs | 5.397 µs | 1.0072x | -0.72% |
-| Exact get | 1,000 | 5.454 µs | 5.381 µs | 1.0135x | -1.33% |
-| Exact get | 10,000 | 5.415 µs | 5.435 µs | 0.9962x | +0.38% |
-| Highest-version resolution | 100 | 5.490 µs | 5.500 µs | 0.9981x | +0.19% |
-| Highest-version resolution | 1,000 | 5.505 µs | 5.478 µs | 1.0049x | -0.49% |
-| Highest-version resolution | 10,000 | 5.491 µs | 5.448 µs | 1.0078x | -0.78% |
-| Tag/capability indexed read | 100 | 19.920 µs | 20.027 µs | 0.9947x | +0.54% |
-| Tag/capability indexed read | 1,000 | 197.765 µs | 196.593 µs | 1.0060x | -0.59% |
-| Tag/capability indexed read | 10,000 | 1.920686 ms | 1.938006 ms | 0.9911x | +0.90% |
+| Complete publication | 100 | 126.340 µs | 75.916 µs | 1.6642x | -39.91% |
+| Complete publication | 1,000 | 1.178800 ms | 784.700 µs | 1.5022x | -33.43% |
+| Complete publication | 10,000 | 16.467000 ms | 11.877000 ms | 1.3865x | -27.87% |
+| Exact get | 100 | 5.489 µs | 5.475 µs | 1.0026x | -0.26% |
+| Exact get | 1,000 | 5.525 µs | 5.529 µs | 0.9993x | +0.07% |
+| Exact get | 10,000 | 5.329 µs | 5.390 µs | 0.9887x | +1.14% |
+| Highest-version resolution | 100 | 5.567 µs | 5.519 µs | 1.0087x | -0.86% |
+| Highest-version resolution | 1,000 | 5.388 µs | 5.444 µs | 0.9897x | +1.04% |
+| Highest-version resolution | 10,000 | 5.507 µs | 5.507 µs | 1.0000x | +0.00% |
+| Tag/capability indexed read | 100 | 20.505 µs | 20.777 µs | 0.9869x | +1.33% |
+| Tag/capability indexed read | 1,000 | 202.250 µs | 198.650 µs | 1.0181x | -1.78% |
+| Tag/capability indexed read | 10,000 | 1.955300 ms | 1.975200 ms | 0.9899x | +1.02% |
 
 Binding acceptance threshold: complete-publication median improvement must be
 at least **15%** at both 1,000 and 10,000 entries, while each
 production-equivalent exact-get, highest-version-resolution, and indexed-read
 median regression must be at most **10%** at both sizes. The publication gains
-are 33.96% and 24.95%; the largest read regression is 0.90%. The binding gate
+are 33.43% and 27.87%; the largest read regression is 1.33%. The binding gate
 therefore **passes**. Compatibility-first V2 production migration is **required**;
-this benchmark correction intentionally leaves production files unchanged.
+production stages and publishes the measured `ImmutableCatalogSnapshot` type, while
+the deprecated legacy snapshot API performs compatibility conversion on demand.
 
 ## Phase-0 stubs
 

@@ -9,7 +9,7 @@ use crate::agents::metadata::AgentMetadata;
 
 /// In-memory catalog with a serialized staging state and published snapshots.
 pub struct DiscoveryCatalog {
-    staging: Mutex<CatalogSnapshot>,
+    staging: Mutex<ImmutableCatalogSnapshot>,
     cached_snapshot: ArcSwap<ImmutableCatalogSnapshot>,
 }
 
@@ -60,7 +60,7 @@ impl DiscoveryCatalog {
     /// Create an empty catalog.
     pub fn new() -> Self {
         Self {
-            staging: Mutex::new(CatalogSnapshot::default()),
+            staging: Mutex::new(ImmutableCatalogSnapshot::default()),
             cached_snapshot: ArcSwap::from_pointee(ImmutableCatalogSnapshot::default()),
         }
     }
@@ -123,12 +123,8 @@ impl DiscoveryCatalog {
         Ok(())
     }
 
-    fn insert_staged(&self, staging: &mut CatalogSnapshot, meta: AgentMetadata) {
-        if let Some(existing) = staging
-            .entries
-            .get(&metadata_key(&meta))
-            .map(|entry| entry.value().clone())
-        {
+    fn insert_staged(&self, staging: &mut ImmutableCatalogSnapshot, meta: AgentMetadata) {
+        if let Some(existing) = staging.get(&metadata_key(&meta)).cloned() {
             if existing.source_path != meta.source_path {
                 warn!(
                     "agent collision: name={} version={} existing={:?} ignored={:?}",
@@ -136,22 +132,18 @@ impl DiscoveryCatalog {
                 );
                 return;
             }
-            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
+            staging.remove_memberships(&metadata_key(&meta), &existing);
         }
-        Self::store_staged(staging, meta);
+        staging.insert(metadata_key(&meta), meta);
     }
 
     /// Inserts bulk metadata while preserving rejected contenders for reporting.
     fn insert_bulk_staged(
         &self,
-        staging: &mut CatalogSnapshot,
+        staging: &mut ImmutableCatalogSnapshot,
         meta: AgentMetadata,
     ) -> Result<(), Box<BulkInsertRejection>> {
-        if let Some(existing) = staging
-            .entries
-            .get(&metadata_key(&meta))
-            .map(|entry| entry.value().clone())
-        {
+        if let Some(existing) = staging.get(&metadata_key(&meta)).cloned() {
             if existing.source_path != meta.source_path {
                 return Err(Box::new(BulkInsertRejection {
                     error: DiscoveryError::DuplicateAgent {
@@ -163,66 +155,14 @@ impl DiscoveryCatalog {
                     metadata: meta,
                 }));
             }
-            Self::remove_memberships(staging, &metadata_key(&meta), &existing);
+            staging.remove_memberships(&metadata_key(&meta), &existing);
         }
-        Self::store_staged(staging, meta);
+        staging.insert(metadata_key(&meta), meta);
         Ok(())
     }
 
-    fn store_staged(staging: &mut CatalogSnapshot, meta: AgentMetadata) {
-        let key = metadata_key(&meta);
-        staging.entries.insert(key.clone(), meta.clone());
-        staging
-            .name_index
-            .entry(meta.name.clone())
-            .or_default()
-            .insert(meta.version.clone());
-        Self::add_memberships(staging, &key, &meta);
-    }
-
-    fn remove_memberships(staging: &mut CatalogSnapshot, key: &AgentKey, meta: &AgentMetadata) {
-        for tag in &meta.tags {
-            Self::remove_membership(&staging.tag_index, tag, key);
-        }
-        for capability in &meta.capabilities {
-            Self::remove_membership(&staging.capability_index, capability, key);
-        }
-    }
-
-    fn remove_membership(
-        index: &dashmap::DashMap<String, std::collections::HashSet<AgentKey>>,
-        membership: &str,
-        key: &AgentKey,
-    ) {
-        if let Some(mut bucket) = index.get_mut(membership) {
-            bucket.remove(key);
-            if bucket.is_empty() {
-                drop(bucket);
-                index.remove(membership);
-            }
-        }
-    }
-
-    fn add_memberships(staging: &mut CatalogSnapshot, key: &AgentKey, meta: &AgentMetadata) {
-        for tag in &meta.tags {
-            staging
-                .tag_index
-                .entry(tag.clone())
-                .or_default()
-                .insert(key.clone());
-        }
-        for capability in &meta.capabilities {
-            staging
-                .capability_index
-                .entry(capability.clone())
-                .or_default()
-                .insert(key.clone());
-        }
-    }
-
-    fn publish(&self, staging: &CatalogSnapshot) {
-        self.cached_snapshot
-            .store(Arc::new(ImmutableCatalogSnapshot::from_legacy(staging)));
+    fn publish(&self, staging: &ImmutableCatalogSnapshot) {
+        self.cached_snapshot.store(Arc::new(staging.clone()));
     }
 
     /// Look up a specific entry from one published snapshot.
@@ -259,5 +199,16 @@ impl DiscoveryCatalog {
 impl Default for DiscoveryCatalog {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod representation_tests {
+    use super::*;
+
+    #[test]
+    fn staging_uses_immutable_snapshot_representation() {
+        let catalog = DiscoveryCatalog::new();
+        let _: &Mutex<ImmutableCatalogSnapshot> = &catalog.staging;
     }
 }
