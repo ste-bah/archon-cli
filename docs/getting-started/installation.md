@@ -36,7 +36,7 @@ applies if you deliberately override the pin; a normal clone builds on 1.96.1.
 
 archon-cli links against OpenSSL via `reqwest` (rustls is also enabled, but build-deps still need pkg-config + libssl headers on Linux for transitive crates).
 
-> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs the required build/doc-ingest/video packages at once: build deps + `pdftotext`/`pdfimages`/`pdftoppm` (poppler) for PDF ingest + `tesseract` for image OCR + `ffmpeg`/`ffprobe` and `yt-dlp` for video ingest. It installs `whisper-cli` where the host package manager provides it, currently Homebrew and Arch-family packages. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Arch/Manjaro, openSUSE/SLE, Alpine, and macOS (Homebrew).
+> **Quick path: one-shot installer.** `scripts/install-system-deps.sh` detects your OS and installs the required build/doc-ingest/video packages at once: build deps + `pdftotext`/`pdfimages`/`pdftoppm` (poppler) for PDF ingest + `tesseract` for image OCR + `ffmpeg`/`ffprobe` and `yt-dlp` for video ingest. It installs `whisper-cli` where the host package manager provides it, currently Homebrew and Arch-family packages. Supports Ubuntu/Debian/WSL2, Fedora/RHEL/Rocky/Alma, Amazon Linux 2023, Arch/Manjaro, openSUSE/SLE, Alpine, and macOS (Homebrew). On Amazon Linux 2023 the deps missing from the core repos (ffmpeg, yt-dlp) are installed from upstream binaries automatically; tesseract is unavailable there — use the RapidOCR fallback below for OCR.
 >
 > ```bash
 > sudo scripts/install-system-deps.sh                  # Linux: required build/PDF/OCR/video deps
@@ -83,6 +83,22 @@ sudo apt install -y build-essential pkg-config libssl-dev git poppler-utils tess
 ```bash
 sudo dnf install -y gcc pkg-config openssl-devel git poppler-utils tesseract ffmpeg-free yt-dlp
 ```
+
+### Amazon Linux 2023
+
+AL2023's core repos don't package tesseract, ffmpeg, yt-dlp, or whisper. The
+installer script handles the fallbacks automatically (static ffmpeg build,
+official yt-dlp binary); manually that is:
+
+```bash
+sudo dnf install -y gcc pkgconf-pkg-config openssl-devel git tar xz poppler-utils
+curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local/bin --wildcards '*/ffmpeg' '*/ffprobe'
+sudo curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod +x /usr/local/bin/yt-dlp
+```
+
+Use `arm64` instead of `amd64` in the ffmpeg URL on Graviton. There is no
+packaged tesseract — for image OCR install the RapidOCR Python fallback shown
+above. Amazon Linux 2 is end-of-life (2026-06-30) and not supported.
 
 ### Arch / Manjaro
 

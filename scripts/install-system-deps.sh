@@ -29,7 +29,15 @@
 #   2   missing dependency (in --check mode)
 #   3   package manager command failed
 #
-# Supports apt, dnf, pacman, zypper, apk, and macOS brew (pre-installed).
+# Supports apt, dnf (Fedora/RHEL family and Amazon Linux 2023+), pacman,
+# zypper, apk, and macOS brew (pre-installed).
+#
+# Amazon Linux 2023 note: tesseract, ffmpeg, yt-dlp, and whisper are not in
+# the AL2023 repos. ffmpeg/ffprobe are installed from the static
+# johnvansickle.com builds and yt-dlp from its official GitHub release
+# binary; tesseract has no packaged fallback (use the RapidOCR Python
+# fallback for OCR instead). Amazon Linux 2 reached end-of-life on
+# 2026-06-30 and is rejected with manual instructions.
 
 set -eu
 
@@ -114,6 +122,12 @@ PKG_DOCKER=""
 PKG_OPENSHELL_PREREQ=""
 PKG_TRADING_TOOLS=""
 CHECK_WHISPER_CLI=false
+# Set for distros whose repos do not package tesseract at all (Amazon Linux
+# 2023). --check and post-install verification then treat tesseract as a
+# warning rather than a failure, pointing at the RapidOCR fallback.
+TESSERACT_UNPACKAGED=false
+# Set for distros needing binary-download fallbacks for ffmpeg/yt-dlp.
+AMZN_BINARY_FALLBACKS=false
 PKG_MGR=""
 PKG_INSTALL_CMD=""
 PKG_UPDATE_CMD=""
@@ -140,6 +154,33 @@ case "$DISTRO_ID" in
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg-free yt-dlp"
         PKG_DOCKER="moby-engine docker-cli"
+        PKG_OPENSHELL_PREREQ="curl"
+        PKG_TRADING_TOOLS="nodejs npm python3"
+        ;;
+    amzn)
+        # Amazon Linux. AL2023+ uses dnf against a deliberately small core
+        # repo: tesseract, ffmpeg, yt-dlp, and whisper are NOT packaged.
+        # ffmpeg + yt-dlp are installed from upstream binaries below
+        # (install_amzn_extras); tesseract has no packaged fallback.
+        # `pkg-config` is provided by `pkgconf-pkg-config` on AL2023.
+        # tar + xz are needed to unpack the static ffmpeg build.
+        if [ "${VERSION_ID:-unknown}" = "2" ]; then
+            echo "install-system-deps.sh: Amazon Linux 2 reached end-of-life on 2026-06-30 and is not supported." >&2
+            echo "  Upgrade to Amazon Linux 2023, or install manually:" >&2
+            echo "    sudo yum install -y gcc pkgconfig openssl-devel git poppler-utils" >&2
+            echo "    tesseract via EPEL; ffmpeg/yt-dlp via static builds (see AL2023 notes in this script)" >&2
+            exit 1
+        fi
+        PKG_MGR="dnf"
+        PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
+        PKG_INSTALL_CMD="dnf install -y"
+        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz"
+        PKG_PDF="poppler-utils"
+        PKG_OCR=""          # not packaged on AL2023 — see TESSERACT_UNPACKAGED
+        PKG_VIDEO=""        # ffmpeg/yt-dlp via install_amzn_extras
+        TESSERACT_UNPACKAGED=true
+        AMZN_BINARY_FALLBACKS=true
+        PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3"
         ;;
@@ -204,7 +245,7 @@ case "$DISTRO_ID" in
         ;;
     *)
         echo "install-system-deps.sh: unsupported OS (uname=$UNAME_S, distro=$DISTRO_ID)" >&2
-        echo "  Supported: ubuntu/debian/wsl2, fedora/rhel/rocky/centos/almalinux, arch/manjaro, opensuse/sles, alpine, macos" >&2
+        echo "  Supported: ubuntu/debian/wsl2, fedora/rhel/rocky/centos/almalinux, amazon-linux-2023, arch/manjaro, opensuse/sles, alpine, macos" >&2
         echo "  Install manually:" >&2
         echo "    Build deps:        gcc/clang, pkg-config, openssl headers, git" >&2
         echo "    PDF utilities:     pdftotext + pdfimages + pdftoppm (poppler-utils)" >&2
@@ -253,7 +294,13 @@ if [ "$CHECK_ONLY" = true ]; then
     #   pdftotext  — text-layer extraction
     #   pdfimages  — embedded image extraction
     #   pdftoppm   — page-render fallback for scanned PDFs
-    for bin in gcc cc pkg-config git pdftotext pdfimages pdftoppm tesseract ffmpeg ffprobe yt-dlp; do
+    CHECK_BINS="gcc cc pkg-config git pdftotext pdfimages pdftoppm ffmpeg ffprobe yt-dlp"
+    if [ "$TESSERACT_UNPACKAGED" = false ]; then
+        CHECK_BINS="$CHECK_BINS tesseract"
+    elif ! command -v tesseract >/dev/null 2>&1; then
+        echo "install-system-deps.sh: note — tesseract is not packaged on $DISTRO_ID; image OCR needs the RapidOCR fallback (python3 -m pip install rapidocr opencv-python) or a source build" >&2
+    fi
+    for bin in $CHECK_BINS; do
         if ! command -v "$bin" >/dev/null 2>&1; then
             MISSING="$MISSING $bin"
         fi
@@ -398,6 +445,71 @@ install_macos_docker() {
     }
 }
 
+install_amzn_extras() {
+    if [ "$AMZN_BINARY_FALLBACKS" != true ]; then
+        return 0
+    fi
+
+    # ffmpeg + ffprobe: static builds from johnvansickle.com (the standard
+    # source for Amazon Linux, linked from ffmpeg.org). Arch-aware.
+    if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+        echo "install-system-deps.sh: ffmpeg/ffprobe already present"
+    else
+        case "$HOST_ARCH" in
+            x86_64)  FFMPEG_ARCH="amd64" ;;
+            aarch64) FFMPEG_ARCH="arm64" ;;
+            *)
+                echo "install-system-deps.sh: no static ffmpeg build for arch $HOST_ARCH — install ffmpeg manually" >&2
+                exit 3
+                ;;
+        esac
+        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz"
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] curl -fsSL $FFMPEG_URL | tar -xJ, then install ffmpeg+ffprobe to /usr/local/bin"
+        else
+            echo "+ installing static ffmpeg from $FFMPEG_URL"
+            FFMPEG_TMP=$(mktemp -d)
+            curl -fsSL "$FFMPEG_URL" -o "$FFMPEG_TMP/ffmpeg.tar.xz" || {
+                echo "install-system-deps.sh: ffmpeg static build download failed" >&2
+                rm -rf "$FFMPEG_TMP"
+                exit 3
+            }
+            tar -xJf "$FFMPEG_TMP/ffmpeg.tar.xz" -C "$FFMPEG_TMP" || {
+                echo "install-system-deps.sh: ffmpeg archive extraction failed" >&2
+                rm -rf "$FFMPEG_TMP"
+                exit 3
+            }
+            FFMPEG_DIR=$(find "$FFMPEG_TMP" -maxdepth 1 -type d -name "ffmpeg-*-static" | head -1)
+            $SUDO install -m 0755 "$FFMPEG_DIR/ffmpeg" "$FFMPEG_DIR/ffprobe" /usr/local/bin/ || {
+                echo "install-system-deps.sh: ffmpeg install to /usr/local/bin failed" >&2
+                rm -rf "$FFMPEG_TMP"
+                exit 3
+            }
+            rm -rf "$FFMPEG_TMP"
+        fi
+    fi
+
+    # yt-dlp: official standalone release binary (self-updatable via -U).
+    if command -v yt-dlp >/dev/null 2>&1; then
+        echo "install-system-deps.sh: yt-dlp already present"
+    else
+        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] curl -fsSL $YTDLP_URL -o /usr/local/bin/yt-dlp && chmod +x"
+        else
+            echo "+ installing yt-dlp from $YTDLP_URL"
+            $SUDO curl -fsSL "$YTDLP_URL" -o /usr/local/bin/yt-dlp || {
+                echo "install-system-deps.sh: yt-dlp download failed" >&2
+                exit 3
+            }
+            $SUDO chmod 0755 /usr/local/bin/yt-dlp
+        fi
+    fi
+
+    echo "install-system-deps.sh: note — tesseract is not packaged on Amazon Linux 2023."
+    echo "  For image OCR use the RapidOCR fallback: python3 -m pip install rapidocr opencv-python"
+}
+
 . "$SCRIPT_DIR/lib/openshell-setup.sh"
 
 if [ -n "$PKG_UPDATE_CMD" ]; then
@@ -418,6 +530,7 @@ if [ -n "$ALL_PKGS" ]; then
 fi
 
 install_macos_docker
+install_amzn_extras
 install_openshell
 setup_openshell_gateway
 
@@ -427,7 +540,10 @@ setup_openshell_gateway
 if [ "$DRY_RUN" = false ]; then
     echo
     echo "install-system-deps.sh: verifying installs..."
-    VERIFY_BINS="pdftotext pdfimages pdftoppm tesseract ffmpeg ffprobe yt-dlp"
+    VERIFY_BINS="pdftotext pdfimages pdftoppm ffmpeg ffprobe yt-dlp"
+    if [ "$TESSERACT_UNPACKAGED" = false ]; then
+        VERIFY_BINS="pdftotext pdfimages pdftoppm tesseract ffmpeg ffprobe yt-dlp"
+    fi
     if [ "$CHECK_WHISPER_CLI" = true ]; then
         VERIFY_BINS="$VERIFY_BINS whisper-cli"
     fi
