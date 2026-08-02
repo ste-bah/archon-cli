@@ -16,9 +16,19 @@ use super::events::{OrchestratorEvent, Subtask};
 use super::{Orchestrator, SubtaskExecutor, topology};
 
 /// Records `(subtask id, context received)` in completion order.
+///
+/// `pub(super)` because the pool-wiring suite beside this one records the same
+/// thing; two identical mocks would be two things to keep in step.
 #[derive(Default)]
-struct RecordingExecutor {
+pub(super) struct RecordingExecutor {
     calls: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl RecordingExecutor {
+    /// The calls recorded so far, in completion order.
+    pub(super) fn recorded(&self) -> Vec<(String, String)> {
+        self.calls.lock().expect("recording mutex").clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -35,7 +45,7 @@ impl SubtaskExecutor for RecordingExecutor {
     }
 }
 
-fn chain(ids: &[(&str, &[&str])]) -> Vec<Subtask> {
+pub(super) fn chain(ids: &[(&str, &[&str])]) -> Vec<Subtask> {
     ids.iter()
         .map(|(id, dependencies)| {
             let mut subtask =

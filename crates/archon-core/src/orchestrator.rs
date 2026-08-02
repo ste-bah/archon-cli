@@ -16,6 +16,11 @@ mod compaction_tests;
 #[cfg(test)]
 mod wave_scheduling_tests;
 
+// Findings O2 and O4 — that every runner actually consults `AgentPool`, and
+// that the pool imposes a lifetime total and not only a concurrency cap.
+#[cfg(test)]
+mod pool_wiring_tests;
+
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 
