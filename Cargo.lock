@@ -1067,6 +1067,7 @@ name = "archon-topology"
 version = "1.4.0"
 dependencies = [
  "archon-workflow",
+ "dashmap 6.1.0",
  "petgraph",
  "serde",
  "serde_json",

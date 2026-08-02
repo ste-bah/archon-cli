@@ -9,6 +9,13 @@
 //!
 //! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
 //!
+//! Milestone 3 adds [`live`]: the per-session executed prefix and the three
+//! guardrail invariants evaluated against it. It is still database-free — the
+//! whole point is that admission runs on the synchronous critical path of every
+//! non-`Safe` tool call, where a Cozo read would take a lock and a Cozo write
+//! would take the process-wide write lock. As with the trace, that is enforced
+//! by this crate being unable to reach a database rather than by a convention.
+//!
 //! Milestone 2 adds the ambient trace ([`trace`]), post-hoc graph
 //! reconstruction ([`reconstruct`]), and the canonical [`task_hash`]. It does
 //! **not** add storage: there is still no `cozo`, no `archon-core`, and no
@@ -38,8 +45,11 @@ pub mod analysis;
 pub mod error;
 mod index;
 pub mod ir;
+#[cfg(feature = "live")]
+pub mod live;
 #[cfg(feature = "workflow")]
 pub mod lower_workflow;
+pub mod permission;
 #[cfg(feature = "trace")]
 pub mod reconstruct;
 pub mod task_hash;
@@ -52,8 +62,13 @@ pub use ir::{
     DataRef, FanoutSpec, GateKind, GraphBudget, GraphOrigin, NodeRole, PermissionClass, TaskGraph,
     TaskNode, WriteTarget,
 };
+#[cfg(feature = "live")]
+pub use live::{
+    Invariant, LiveTopology, LiveTopologyConfig, SpawnIntent, ToolIntent, Verdict, WriteIntent,
+};
 #[cfg(feature = "workflow")]
 pub use lower_workflow::lower_workflow_spec;
+pub use permission::{DECLARED_PERMISSION_LEVELS, is_declared_permission};
 #[cfg(feature = "trace")]
 pub use reconstruct::reconstruct_graph;
 pub use task_hash::{TaskClass, classify_task, task_hash, task_hash_for_class};

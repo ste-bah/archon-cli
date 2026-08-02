@@ -120,44 +120,52 @@ fn parse_foreach_accessor(foreach: &str) -> Option<(&str, &str)> {
     Some((producer, accessor))
 }
 
-/// `WorkflowSpec::permissions` → [`PermissionClass`].
+/// Keys carrying the level inside an object-shaped permissions entry.
 ///
-/// The map is `BTreeMap<String, Value>` with no schema — `deserialize_permissions`
-/// accepts any JSON object verbatim and nothing in the tree reads the result
-/// — so this is a best-effort read of the shapes that are plausibly authored:
-/// a per-stage entry keyed by stage id, or a blanket `default`/`*` entry, whose
-/// value is either the class as a string or an object carrying it under
-/// `class`, `permission`, or `level`.
+/// `level` is canonical — it is the name of the thing being declared. `class`
+/// and `permission` are accepted aliases, retained because they were among the
+/// shapes milestone 1's guesswork already read and specs may exist that use
+/// them.
+const LEVEL_KEYS: [&str; 3] = ["level", "class", "permission"];
+
+/// Keys that declare a level for every stage that has no entry of its own.
+const BLANKET_KEYS: [&str; 2] = ["default", "*"];
+
+/// `WorkflowSpec::permissions` → [`PermissionClass`], per the declared format.
 ///
-/// Anything unrecognised lowers to `Safe`. That is deliberately fail-open:
-/// milestone 1 enforces nothing, and the design requires milestone 3's
-/// enforcement never to fail closed on a bookkeeping gap. An authored graph
-/// that wants an irreversible node marked must say so in a shape this reads.
+/// Milestone 1 read this field with no schema to conform to and guessed. The
+/// format is now defined — see [`crate::permission`] — and grounded in
+/// `archon_tools::tool::PermissionLevel`, the enum admission already keys off.
+/// The map is read as: the stage's own id, then the blanket `default` (alias
+/// `*`); the value is the level as a string, or an object carrying it under
+/// `level` / `class` / `permission`.
+///
+/// Anything unrecognised lowers to `Safe` — including a *present but
+/// unparseable* per-stage entry, which does **not** fall through to `default`.
+/// A stage that says something about itself has spoken, even if unintelligibly,
+/// and inheriting a blanket `dangerous` from a typo would fail closed. Milestone
+/// 3 requires enforcement never to fail closed on a bookkeeping gap. Rejecting
+/// typos belongs in a validator, where failing loudly costs nothing;
+/// [`crate::permission::is_declared_permission`] is there for one.
 fn lower_permission(spec: &WorkflowSpec, stage: &StageSpec) -> PermissionClass {
     spec.permissions
         .get(&stage.id)
-        .or_else(|| spec.permissions.get("default"))
-        .or_else(|| spec.permissions.get("*"))
+        .or_else(|| {
+            BLANKET_KEYS
+                .iter()
+                .find_map(|key| spec.permissions.get(*key))
+        })
         .and_then(permission_from_value)
         .unwrap_or(PermissionClass::Safe)
 }
 
 fn permission_from_value(value: &serde_json::Value) -> Option<PermissionClass> {
     match value {
-        serde_json::Value::String(raw) => permission_from_str(raw),
-        serde_json::Value::Object(fields) => ["class", "permission", "level"]
+        serde_json::Value::String(raw) => PermissionClass::from_declared(raw),
+        serde_json::Value::Object(fields) => LEVEL_KEYS
             .iter()
             .find_map(|key| fields.get(*key))
             .and_then(permission_from_value),
-        _ => None,
-    }
-}
-
-fn permission_from_str(raw: &str) -> Option<PermissionClass> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "safe" => Some(PermissionClass::Safe),
-        "risky" => Some(PermissionClass::Risky),
-        "irreversible" => Some(PermissionClass::Irreversible),
         _ => None,
     }
 }

@@ -70,6 +70,7 @@ use archon_tools::tool::ToolRunAttemptOutcome;
 use archon_topology::ir::TaskGraph;
 use archon_topology::trace::{TopologyPaths, TraceKind, TraceRecord, TraceWriter};
 
+pub(crate) use payload::{subagent_type, written_paths};
 pub(crate) use workflow_tap::project_workflow_run;
 
 /// One turn's ambient trace.

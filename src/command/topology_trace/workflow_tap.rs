@@ -100,6 +100,21 @@ pub(crate) fn project_workflow_run(
 
     for record in &records {
         trace.record(record.clone());
+        // Milestone 3: a `GatePassed` record is the one thing in this replay
+        // that admission needs. It comes from `WorkflowEventKind::ForcedAccepted`,
+        // which is how a human gate is actually cleared today.
+        //
+        // Note what this cannot do. `archon workflow force-accept` runs in a
+        // *separate process* from the run it unblocks, so by the time this
+        // replay sees the event the deciding process is gone. Replaying it here
+        // makes the gate visible to a resumed or attached run in this process
+        // and to the corpus, not to the original one. There is no in-process
+        // producer of "gate passed" anywhere in the tree — which is exactly why
+        // `GateEnforcement::WhereDeclared` is the default rather than the
+        // design's literal reading. See `archon_topology::live::GateEnforcement`.
+        if record.kind == TraceKind::GatePassed && !record.node_id.is_empty() {
+            crate::command::topology_admission::on_gate_passed(run_id, &record.node_id);
+        }
     }
 
     // Declare the reconstruction explicitly rather than letting the fold build

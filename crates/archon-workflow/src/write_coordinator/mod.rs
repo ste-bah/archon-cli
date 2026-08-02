@@ -26,7 +26,10 @@ pub use patch_manifest::{CapturedPatch, ManifestStatus, PatchError, PatchManifes
 pub use worktree_isolation::{
     CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
 };
-pub use write_plan::{NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError};
+pub use write_plan::{
+    NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError, fold_resource_case,
+    keys_conflict, resource_key_for_raw_target,
+};
 
 /// Canonical fan-out item identifier (matches `FanoutItem.id`).
 pub type ItemId = String;

@@ -190,6 +190,9 @@ pub(crate) mod team;
 /// `archon-workflow`, `archon-topology`, and the learning stack at once, and
 /// `archon-pipeline` must not acquire an edge onto `archon-workflow`.
 pub(crate) mod topology_fold;
+/// Milestone 3 topology: guardrail admission. Synchronous, in-memory only —
+/// no database access of any kind, not even a read.
+pub(crate) mod topology_admission;
 /// Milestone 2 topology: the ambient trace recorder. Hot path, file-only,
 /// never touches a database.
 pub(crate) mod topology_trace;
