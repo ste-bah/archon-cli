@@ -162,6 +162,69 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[cfg(windows)]
+async fn windows_raw_child_drains_large_output() {
+    windows_direct_child_drains_large_output(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg(windows)]
+async fn windows_job_object_child_drains_large_output() {
+    windows_direct_child_drains_large_output(true).await;
+}
+
+#[cfg(windows)]
+async fn windows_direct_child_drains_large_output(use_job_object: bool) {
+    use process_wrap::tokio::{ChildWrapper, CommandWrap, JobObject, KillOnDrop};
+    use tokio::io::AsyncReadExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let phase_file = dir.path().join("direct-output.phase");
+    let fixture = write_windows_output_fixture(dir.path(), &phase_file);
+    let mut command = tokio::process::Command::new("powershell");
+    command
+        .args(["-NoProfile", "-File"])
+        .arg(&fixture)
+        .current_dir(dir.path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child: Box<dyn ChildWrapper> = if use_job_object {
+        let mut wrapped = CommandWrap::from(command);
+        wrapped.wrap(KillOnDrop).wrap(JobObject);
+        wrapped.spawn().unwrap()
+    } else {
+        Box::new(command.spawn().unwrap())
+    };
+    let mut stdout = child.stdout().take().unwrap();
+    let mut stderr = child.stderr().take().unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let stdout_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).await.map(|_| bytes.len())
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes).await.map(|_| bytes.len())
+        });
+        let status = child.wait().await.unwrap();
+        (
+            status,
+            stdout_task.await.unwrap(),
+            stderr_task.await.unwrap(),
+        )
+    })
+    .await;
+    let phase = std::fs::read_to_string(&phase_file).unwrap_or_else(|_| "not-started".into());
+    let (status, stdout, stderr) = result.unwrap_or_else(|_| {
+        panic!("direct child timed out: job={use_job_object}, phase={phase:?}")
+    });
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(stdout.unwrap(), 131072);
+    assert_eq!(stderr.unwrap(), 131072);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg(windows)]
 async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     let dir = tempfile::tempdir().unwrap();
     let phase_file = dir.path().join("large-output.phase");
