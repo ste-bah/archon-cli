@@ -160,3 +160,36 @@ fn hooked_records_reach_the_learning_store() {
         episodes.rows[0]
     );
 }
+
+/// The generated-plan derivation and this router must agree on the vocabulary.
+///
+/// `WorkflowScriptPlan::generated` used to hardcode an empty hook list, so every
+/// generated run reached this router with nothing to route and
+/// `empty_hook_list_dispatches_nothing` above was, for that surface, the entire
+/// story. Deriving hooks is worth something only if the names it produces are
+/// names this router recognises, so the two halves are asserted against each
+/// other rather than each against its own idea of the vocabulary.
+#[test]
+fn hooks_derived_for_a_generated_run_are_all_routable_here() {
+    let mut learning = archon_core::config::LearningConfig::default();
+    learning.sona.enabled = true;
+    learning.sona.pipeline_recording = true;
+    learning.reasoning_bank.enabled = true;
+    learning.desc.enabled = true;
+    let derived = crate::command::workflow_live_learning_hooks::derive_learning_hooks(
+        "audit and review the decomposed PRD tasks",
+        None,
+        &learning,
+    );
+    assert!(!derived.is_empty(), "a real run must derive some hook");
+
+    let hooks = derived.iter().map(String::as_str).collect::<Vec<_>>();
+    let plan = plan_dispatch(&[record("a", Verification::Accepted, &hooks)]);
+    assert_eq!(plan.calls.len(), 1, "derived hooks must dispatch");
+    assert_eq!(plan.skipped_unhooked, 0);
+    assert!(
+        plan.unrouted_hooks.is_empty(),
+        "derivation must never emit a hook this router cannot route: {:?}",
+        plan.unrouted_hooks
+    );
+}

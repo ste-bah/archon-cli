@@ -72,6 +72,7 @@ async fn live_planner_uses_bounded_iterative_harness_repair() {
         planner.clone(),
         tui_tx,
         &generated_config,
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("second repaired harness should validate");

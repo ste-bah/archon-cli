@@ -48,6 +48,7 @@ pub(super) async fn plan_live(
     llm: Arc<dyn LlmClient>,
     tui_tx: TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
+    learning: &LearningConfig,
 ) -> Result<WorkflowScriptPlan> {
     let task_universe = extract_task_universe_for_generated_run(task)?;
     if let Some(task_universe) = task_universe {
@@ -69,7 +70,9 @@ pub(super) async fn plan_live(
             &governed_learning_context,
             generated_config,
         )?;
-        match compile_harness_plan(task, Some(task_universe), &harness, generated_config).await {
+        match compile_harness_plan(task, Some(task_universe), &harness, generated_config, learning)
+            .await
+        {
             Ok(mut plan) => {
                 plan.governed_learning_context = governed_learning_context;
                 send_planner_notification(
@@ -110,7 +113,7 @@ pub(super) async fn plan_live(
         ),
     )
     .await?;
-    match llm_plan(task, None, llm, &tui_tx, generated_config).await {
+    match llm_plan(task, None, llm, &tui_tx, generated_config, learning).await {
         Ok(plan) => {
             send_planner_notification(
                 &tui_tx,
@@ -215,6 +218,7 @@ async fn llm_plan(
     llm: Arc<dyn LlmClient>,
     tui_tx: &TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
+    learning: &LearningConfig,
 ) -> std::result::Result<WorkflowScriptPlan, PlannerFailure> {
     let response = workflow_live_retry::send_message_with_transient_retry(
         &llm,
@@ -245,7 +249,16 @@ async fn llm_plan(
     .await
     .map_err(|err| PlannerFailure::new(err.to_string()))?;
     let raw = extract_javascript(&response.content);
-    validate_or_repair_harness(task, task_universe, raw, llm, tui_tx, generated_config).await
+    validate_or_repair_harness(
+        task,
+        task_universe,
+        raw,
+        llm,
+        tui_tx,
+        generated_config,
+        learning,
+    )
+    .await
 }
 
 async fn validate_or_repair_harness(
@@ -255,6 +268,7 @@ async fn validate_or_repair_harness(
     llm: Arc<dyn LlmClient>,
     tui_tx: &TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
+    learning: &LearningConfig,
 ) -> std::result::Result<WorkflowScriptPlan, PlannerFailure> {
     const MAX_REPAIRS: usize = 2;
     let mut harness = raw;
@@ -264,8 +278,14 @@ async fn validate_or_repair_harness(
     // an ordinary `break` value rather than a fall-through the compiler cannot
     // rule out. There is no path off the end of this function.
     loop {
-        let compiled =
-            compile_harness_plan(task, task_universe.clone(), &harness, generated_config).await;
+        let compiled = compile_harness_plan(
+            task,
+            task_universe.clone(),
+            &harness,
+            generated_config,
+            learning,
+        )
+        .await;
         let err = match compiled {
             Ok(plan) => break Ok(plan),
             Err(err) => err,
@@ -336,6 +356,7 @@ async fn compile_harness_plan(
     task_universe: Option<WorkflowV2TaskUniverse>,
     harness_source: &str,
     generated_config: &GeneratedWorkflowConfig,
+    learning: &LearningConfig,
 ) -> archon_workflow::WorkflowResult<WorkflowScriptPlan> {
     let calls = if task_universe.is_some() {
         // Native lifecycle: the plan is declared by the Rust generator and
@@ -352,6 +373,7 @@ async fn compile_harness_plan(
         calls,
         task_universe,
         generated_config.clone(),
+        learning,
     ))
 }
 

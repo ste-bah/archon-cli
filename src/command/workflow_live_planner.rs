@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use archon_core::config::GeneratedWorkflowConfig;
+use archon_core::config::{GeneratedWorkflowConfig, LearningConfig};
 use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
@@ -13,6 +13,8 @@ use archon_workflow::{
     WorkflowConfig, WorkflowGeneratedScaffold, WorkflowLearningEvent, WorkflowSpec, WorkflowStore,
     WorkflowV2HostCall, WorkflowV2HostMethod, workflow_scaffold_hash,
 };
+
+use crate::command::workflow_live_learning_hooks::derive_learning_hooks;
 
 use super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
 use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
@@ -41,8 +43,15 @@ pub(super) struct WorkflowScriptPlan {
     /// It is the routing selector the learning bridge dispatches on, so a
     /// saved workflow that authored hooks must not lose them here — this
     /// field used to be dropped on the floor, which left the only surface
-    /// that can populate it unable to reach its consumer. Empty for
-    /// generated plans: nothing authored a hook, so nothing dispatches.
+    /// that can populate it unable to reach its consumer.
+    ///
+    /// For a *generated* plan it used to be hardcoded empty, which meant no
+    /// generated run ever dispatched learning at all. It is now derived from
+    /// the run's own content by
+    /// [`crate::command::workflow_live_learning_hooks::derive_learning_hooks`],
+    /// at this one construction site so no planner path can forget it. Still
+    /// empty when every candidate subsystem is disabled — and empty still
+    /// dispatches nothing.
     pub(super) learning_hooks: Vec<String>,
 }
 
@@ -53,9 +62,11 @@ impl WorkflowScriptPlan {
         calls: Vec<WorkflowV2HostCall>,
         task_universe: Option<WorkflowV2TaskUniverse>,
         generated_config: GeneratedWorkflowConfig,
+        learning: &LearningConfig,
     ) -> Self {
         let defaults = WorkflowConfig::default();
         let target_repository_root = infer_target_repository_root(task, task_universe.as_ref());
+        let learning_hooks = derive_learning_hooks(task, task_universe.as_ref(), learning);
         Self {
             name: workflow_name_from_task(task),
             task: task.to_string(),
@@ -68,7 +79,7 @@ impl WorkflowScriptPlan {
             script_args: None,
             governed_learning_context: Vec::new(),
             generated_config,
-            learning_hooks: Vec::new(),
+            learning_hooks,
         }
     }
 

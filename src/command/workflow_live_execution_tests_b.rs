@@ -6,12 +6,12 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
     )
     .expect("task 1");
     std::fs::write(
         tasks.join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: ['TASK-TDL-001']\n",
+        standard_task_file("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
     )
     .expect("task 10");
     let task = format!(
@@ -29,6 +29,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
         planner.clone(),
         tui_tx.clone(),
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("seed deterministic generated plan");

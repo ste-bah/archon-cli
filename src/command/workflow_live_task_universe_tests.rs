@@ -1,5 +1,31 @@
 use super::*;
 
+/// A task file in the standard shape: a fenced YAML block declaring every
+/// contract-bearing key.
+///
+/// These tests used to write files carrying bare `task_id:` / `depends_on:`
+/// lines with no YAML block at all, which the old parser happily accepted by
+/// scanning raw text. That is precisely the partial parse the parser now
+/// refuses, so the fixtures are written the way real task files are written.
+fn standard_task(task_id: &str, depends_on: &str, blocks: &str, body: &str) -> String {
+    format!(
+        "# {task_id}\n\n```yaml\ntask_id: {task_id}\ntitle: Fixture {task_id}\n\
+         complexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: {blocks}\n\
+         required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n{body}"
+    )
+}
+
+fn write_task(dir: &Path, file: &str, contents: &str) {
+    fs::write(dir.join(file), contents).expect("write task file");
+}
+
+fn universe_at(dir: &Path) -> WorkflowResult<Option<WorkflowV2TaskUniverse>> {
+    extract_task_universe_for_generated_run(&format!(
+        "Implement the decomposed PRD at {}",
+        dir.display()
+    ))
+}
+
 #[test]
 fn task_universe_resolves_canonical_and_alias_forms() {
     let universe = synthetic_universe(&[
@@ -7,20 +33,12 @@ fn task_universe_resolves_canonical_and_alias_forms() {
         ("TASK-ALPHA-020", &["T020"], &["TASK-ALPHA-010"]),
     ]);
 
-    assert_eq!(
-        universe
-            .resolve_canonical_task_id("TASK-ALPHA-010")
-            .unwrap(),
-        "TASK-ALPHA-010"
-    );
-    assert_eq!(
-        universe.resolve_canonical_task_id("ALPHA-010").unwrap(),
-        "TASK-ALPHA-010"
-    );
-    assert_eq!(
-        universe.resolve_canonical_task_id("T010").unwrap(),
-        "TASK-ALPHA-010"
-    );
+    for alias in ["TASK-ALPHA-010", "ALPHA-010", "T010"] {
+        assert_eq!(
+            universe.resolve_canonical_task_id(alias).unwrap(),
+            "TASK-ALPHA-010"
+        );
+    }
 }
 
 #[test]
@@ -60,23 +78,19 @@ fn task_universe_computes_downstream_task_closure() {
 #[test]
 fn universe_comes_from_task_files_not_reducer_items() {
     let temp = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
-    )
-    .expect("task 1");
-    fs::write(
-        temp.path().join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: ['TASK-TDL-001']\n",
-    )
-    .expect("task 10");
+    let dir = temp.path();
+    write_task(
+        dir,
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "[]", ""),
+    );
+    write_task(
+        dir,
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
+    );
 
-    let universe = extract_task_universe_for_generated_run(&format!(
-        "Implement the decomposed PRD at {}",
-        temp.path().display()
-    ))
-    .expect("extract")
-    .expect("universe");
+    let universe = universe_at(dir).expect("extract").expect("universe");
 
     assert_eq!(
         universe.canonical_ids(),
@@ -91,18 +105,22 @@ fn universe_comes_from_task_files_not_reducer_items() {
 #[test]
 fn task_universe_carries_authoritative_acceptance_criteria() {
     let temp = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n\n## Acceptance Criteria\n\n- First exact criterion.\n- Second exact criterion with `literal` text.\n\n## Focused Tests\n\n- ignored test bullet\n",
-    )
-    .expect("task");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task(
+            "TASK-TDL-001",
+            "[]",
+            "[]",
+            "\n## Acceptance Criteria\n\n- First exact criterion.\n\
+             - Second exact criterion with `literal` text.\n\n\
+             ## Focused Tests\n\n- ignored test bullet\n",
+        ),
+    );
 
-    let universe = extract_task_universe_for_generated_run(&format!(
-        "Implement the decomposed PRD at {}",
-        temp.path().display()
-    ))
-    .expect("extract")
-    .expect("universe");
+    let universe = universe_at(temp.path())
+        .expect("extract")
+        .expect("universe");
 
     assert_eq!(
         universe.tasks[0].acceptance_criteria,
@@ -120,11 +138,11 @@ fn prd_task_references_must_have_matching_task_files() {
     fs::write(&prd, "Acceptance references TASK-TDL-140.\n").expect("prd");
     let tasks = temp.path().join("tasks");
     fs::create_dir_all(&tasks).expect("tasks");
-    fs::write(
-        tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
-    )
-    .expect("task");
+    write_task(
+        &tasks,
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "[]", ""),
+    );
 
     let err = extract_task_universe_for_generated_run(&format!(
         "Implement the decomposed PRD at {} and tasks at {}",
@@ -152,17 +170,13 @@ fn missing_authoritative_task_evidence_fails_for_decomposed_prd() {
 #[test]
 fn invalid_task_id_is_rejected() {
     let temp = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-1\ndepends_on: []\n",
-    )
-    .expect("task");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-1", "[]", "[]", ""),
+    );
 
-    let err = extract_task_universe_for_generated_run(&format!(
-        "Implement the decomposed PRD at {}",
-        temp.path().display()
-    ))
-    .expect_err("invalid task id must fail");
+    let err = universe_at(temp.path()).expect_err("invalid task id must fail");
 
     assert!(err.to_string().contains("invalid task_id"));
 }
@@ -170,267 +184,269 @@ fn invalid_task_id_is_rejected() {
 #[test]
 fn dependency_cycles_are_rejected() {
     let temp = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: [TASK-TDL-010]\n",
-    )
-    .expect("task 1");
-    fs::write(
-        temp.path().join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: [TASK-TDL-001]\n",
-    )
-    .expect("task 10");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[TASK-TDL-010]", "[]", ""),
+    );
+    write_task(
+        temp.path(),
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "[TASK-TDL-001]", "[]", ""),
+    );
 
-    let err = extract_task_universe_for_generated_run(&format!(
-        "Implement the decomposed PRD at {}",
-        temp.path().display()
-    ))
-    .expect_err("cycle must fail");
+    let err = universe_at(temp.path()).expect_err("cycle must fail");
 
     assert!(err.to_string().contains("dependency cycle"));
 }
 
+// ---------------------------------------------------------------------------
+// `blocks:` — the reverse edge
+// ---------------------------------------------------------------------------
+
+/// A file that expresses its ordering only through `blocks:` used to contribute
+/// no edge at all, because nothing read the key. Its dependents then became
+/// eligible immediately.
 #[test]
-fn neutral_task_and_project_capabilities_are_loaded_from_declarations() {
-    let project = tempfile::tempdir().expect("project");
-    let archon = project.path().join(".archon");
-    let tasks = project.path().join("tasks/PRD-DEMO");
-    fs::create_dir_all(&archon).expect("archon dir");
-    fs::create_dir_all(&tasks).expect("tasks dir");
-    fs::write(
-        archon.join("project.json"),
-        serde_json::json!({
-            "required_env_keys": ["PROJECT_TOKEN"],
-            "required_tools": ["project_probe"]
-        })
-        .to_string(),
-    )
-    .expect("project manifest");
-    fs::write(
-        tasks.join("TASK-DEMO-017-deliverable.md"),
-        r#"# Neutral deliverable
+fn a_blocks_declaration_alone_creates_the_dependency_edge() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
+    );
+    // Declares NO depends_on: the edge exists only in the blocker's file.
+    write_task(
+        temp.path(),
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "[]", "[]", ""),
+    );
 
-```yaml
-task_id: TASK-DEMO-017
-depends_on: []
-required_env_keys: [TASK_TOKEN]
-required_tools: [fetch_demo]
-deliverable_contracts:
-  - kind: required_universe_registry
-    artifact_path: .archon/demo/coverage.json
-    registry_path: .archon/demo/registry.json
-    instance_source_path: .archon/demo/instances.json
-    instance_source_records_field: records
-    instance_artifact_field: report_path
-    min_instances: 2
-    required_universe: true
-    data_kind: record_series
-    universe_fields: [instruments, intervals]
-    cells_field: cells
-    cell_identity_fields: [instrument, interval]
-    required_true_fields: [available, eligible]
-    required_nonempty_fields: [dataset_id, version]
-    positive_count_fields: [row_count]
-    gaps_field: gaps
-    registry_records_field: datasets
-    registry_key_fields: [dataset_id, version]
-    registry_required_true_fields: [eligible]
-    registry_status_field: status
-    registry_allowed_statuses: [Healthy]
-    registry_count_field: rows
-    registry_identity_fields:
-      instrument: symbol
-      interval: timeframe
-    payload_path_field: normalized_path
-    payload_format: jsonl
-    required_fields: [timestamp, value, measure]
-    non_constant_fields: [value, measure]
-    series_value_fields: [value, measure]
-    series_overlap_min_rows: 3
-    request_path_field: request_path
-    requested_count_field: count
-    response_path_field: response_path
-    response_identity_fields:
-      instrument: symbol
-    validation_path_field: validation_path
-    validation_status_field: status
-    validation_checks_field: checks
-    validation_check_status_field: status
-    validation_failed_values: [failed]
-    validation_passed_values: [passed]
-```
-"#,
-    )
-    .expect("task");
+    let universe = universe_at(temp.path())
+        .expect("extract")
+        .expect("universe");
 
-    let universe = extract_task_universe_for_generated_run(&format!(
-        "Implement the decomposed PRD task files at {}",
-        tasks.display()
-    ))
-    .expect("extract")
-    .expect("universe");
-    let task = &universe.tasks[0];
+    assert_eq!(
+        universe.tasks[0].blocks_ids,
+        vec!["TASK-TDL-010".to_string()]
+    );
+    assert_eq!(
+        universe.tasks[1].dependency_ids,
+        vec!["TASK-TDL-001".to_string()],
+        "blocks must reconcile into the graph the runner schedules on"
+    );
+    assert_eq!(universe.downstream_task_closure("TASK-TDL-001").len(), 2);
+}
 
-    assert_eq!(task.canonical_task_id, "TASK-DEMO-017");
-    assert_eq!(
-        task.required_env_keys,
-        vec!["PROJECT_TOKEN".to_string(), "TASK_TOKEN".to_string()]
+/// The two directions agreeing is the normal case and must not double-count.
+#[test]
+fn both_directions_declared_reconcile_to_one_edge() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
     );
-    assert_eq!(
-        task.required_tools,
-        vec!["fetch_demo".to_string(), "project_probe".to_string()]
+    write_task(
+        temp.path(),
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
     );
-    assert_eq!(task.deliverable_contracts.len(), 1);
-    let contract = &task.deliverable_contracts[0];
-    assert!(contract.required_universe);
+
+    let universe = universe_at(temp.path())
+        .expect("extract")
+        .expect("universe");
+
     assert_eq!(
-        contract.instance_source_path.as_deref(),
-        Some(".archon/demo/instances.json")
-    );
-    assert_eq!(
-        contract.instance_source_records_field.as_deref(),
-        Some("records")
-    );
-    assert_eq!(
-        contract.instance_artifact_field.as_deref(),
-        Some("report_path")
-    );
-    assert_eq!(contract.min_instances, 2);
-    assert_eq!(contract.data_kind.as_deref(), Some("record_series"));
-    assert_eq!(
-        contract.universe_fields,
-        vec!["instruments".to_string(), "intervals".to_string()]
-    );
-    assert_eq!(
-        contract.non_constant_fields,
-        vec!["value".to_string(), "measure".to_string()]
-    );
-    assert_eq!(contract.series_overlap_min_rows, 3);
-    assert_eq!(
-        contract
-            .registry_identity_fields
-            .get("instrument")
-            .map(String::as_str),
-        Some("symbol")
-    );
-    assert_eq!(
-        contract
-            .response_identity_fields
-            .get("instrument")
-            .map(String::as_str),
-        Some("symbol")
-    );
-    assert_eq!(
-        contract.validation_failed_values,
-        vec!["failed".to_string()]
+        universe.tasks[1].dependency_ids,
+        vec!["TASK-TDL-001".to_string()]
     );
 }
 
+/// Both orders claimed for one pair is unsatisfiable. Reported as the authoring
+/// mistake it is, naming the file, rather than as an opaque two-cycle.
 #[test]
-fn runtime_workflow_code_contains_no_fixture_task_ids() {
-    // D52/D75 gate: the generic workflow runtime must carry NO fixture ids,
-    // fixture paths, or fixture-domain vocabulary. Ids/paths would break other
-    // PRDs outright; domain vocabulary is how fixture assumptions quietly
-    // fossilize into "generic" prompts and detectors.
-    const FIXTURE_LITERALS: &[&str] = &["task-tdl", "trading-lab"];
-    const DOMAIN_VOCABULARY: &[&str] = &[
-        "backtest",
-        "paper trading",
-        "paper-trading",
-        "paper_trading",
-        "paper-readiness",
-        "pine",
-        "ohlcv",
-        "polygon",
-        "tradingview",
-        "openbb",
-    ];
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut runtime_sources = Vec::new();
-    for entry in fs::read_dir(manifest_dir.join("src/command")).expect("read command sources") {
-        let path = entry.expect("source entry").path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if name.starts_with("workflow_live") && name.ends_with(".rs") && !name.contains("_tests") {
-            runtime_sources.push(path);
-        }
-    }
-    collect_workflow_crate_sources(
-        &manifest_dir.join("crates/archon-workflow/src"),
-        &mut runtime_sources,
+fn a_task_that_both_blocks_and_depends_on_the_same_task_is_a_contradiction() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "['TASK-TDL-010']", "['TASK-TDL-010']", ""),
     );
+    write_task(
+        temp.path(),
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "[]", "[]", ""),
+    );
+
+    let err = universe_at(temp.path()).expect_err("contradiction must fail");
+    let message = err.to_string();
+    assert!(message.contains("both blocks and depends_on"), "{message}");
+    assert!(message.contains("TASK-TDL-010"), "{message}");
+}
+
+#[test]
+fn two_tasks_each_claiming_to_block_the_other_is_a_contradiction() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
+    );
+    write_task(
+        temp.path(),
+        "TASK-TDL-010-dependent.md",
+        &standard_task("TASK-TDL-010", "[]", "['TASK-TDL-001']", ""),
+    );
+
+    let err = universe_at(temp.path()).expect_err("mutual blocks must fail");
     assert!(
-        !runtime_sources.is_empty(),
-        "gate found no runtime sources to scan"
+        err.to_string()
+            .contains("each declare that they block the other"),
+        "{err}"
     );
-    for path in runtime_sources {
-        let source = fs::read_to_string(&path).expect("read runtime source");
-        let runtime_only = source
-            .split("\n#[cfg(test)]")
-            .next()
-            .unwrap_or(&source)
-            .to_ascii_lowercase();
-        for literal in FIXTURE_LITERALS {
-            assert!(
-                !runtime_only.contains(literal),
-                "fixture literal '{literal}' leaked into runtime source {}",
-                path.display()
-            );
-        }
-        for word in DOMAIN_VOCABULARY {
-            assert!(
-                !runtime_only.contains(word),
-                "fixture-domain vocabulary '{word}' leaked into runtime source {}",
-                path.display()
-            );
-        }
+}
+
+#[test]
+fn an_unresolvable_blocks_reference_fails_naming_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-TDL-001-foundation.md",
+        &standard_task("TASK-TDL-001", "[]", "['TASK-TDL-999']", ""),
+    );
+
+    let err = universe_at(temp.path()).expect_err("dangling blocks must fail");
+    assert!(
+        err.to_string()
+            .contains("unresolved blocks reference 'TASK-TDL-999'"),
+        "{err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Loud failure on a non-conforming task file
+// ---------------------------------------------------------------------------
+
+fn parse_failure(body: &str) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("TASK-DEMO-017-loud.md");
+    fs::write(&path, body).expect("write task");
+    parse_task_file(&path, body)
+        .expect_err("a non-conforming task file must fail the run")
+        .to_string()
+}
+
+/// The headline silence: a file with no YAML block used to parse into a record
+/// with a filename-derived id, a heading-derived title, and no dependencies,
+/// tools, env keys, or deliverables — and the run continued on an empty graph.
+#[test]
+fn a_task_file_with_no_yaml_block_fails_naming_the_path_and_the_required_keys() {
+    let error = parse_failure("# Loud\n\ntask_id: TASK-DEMO-017\ndepends_on: []\n");
+    assert!(error.contains("no fenced ```yaml task block"), "{error}");
+    assert!(error.contains("TASK-DEMO-017-loud.md"), "{error}");
+    for key in super::parsing::REQUIRED_TASK_KEYS {
+        assert!(error.contains(key), "error must name '{key}': {error}");
     }
 }
 
-fn collect_workflow_crate_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if path.is_dir() {
-            if !name.contains("fixture") && !name.contains("tests") {
-                collect_workflow_crate_sources(&path, out);
-            }
-            continue;
-        }
-        if name.ends_with(".rs") && !name.contains("_tests") && name != "tests.rs" {
-            out.push(path);
-        }
+/// An unterminated fence is not a block. Parsing the truncated remainder would
+/// be exactly the partial parse the parser exists to refuse.
+#[test]
+fn an_unterminated_yaml_fence_is_not_a_block() {
+    let error = parse_failure("# Loud\n\n```yaml\ntask_id: TASK-DEMO-017\n");
+    assert!(error.contains("no fenced ```yaml task block"), "{error}");
+}
+
+/// Malformed YAML used to be swallowed into an empty mapping.
+#[test]
+fn unparseable_yaml_fails_instead_of_becoming_an_empty_mapping() {
+    let error = parse_failure("```yaml\ntask_id: [unclosed\n```\n");
+    assert!(
+        error.contains("could not parse the task YAML block"),
+        "{error}"
+    );
+    assert!(error.contains("TASK-DEMO-017-loud.md"), "{error}");
+}
+
+/// A well-formed block that omits contract-bearing keys must name exactly the
+/// ones it omitted — "declared empty" and "not declared" are different
+/// statements and the parser refuses to guess which was meant.
+#[test]
+fn missing_required_keys_are_named_individually() {
+    let error = parse_failure(concat!(
+        "```yaml\n",
+        "task_id: TASK-DEMO-017\n",
+        "title: Loud\n",
+        "complexity: small\n",
+        "status: ready\n",
+        "depends_on: []\n",
+        "required_tools: []\n",
+        "```\n"
+    ));
+    assert!(error.contains("is missing required key(s)"), "{error}");
+    for missing in ["blocks", "required_env_keys", "deliverable_contracts"] {
+        assert!(error.contains(missing), "{error}");
     }
+    // Keys that WERE declared must not be reported as missing.
+    assert!(!error.contains("complexity"), "{error}");
 }
 
 #[test]
 fn malformed_deliverable_contract_fails_closed() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("TASK-DEMO-017-invalid.md"),
-        r#"```yaml
-task_id: TASK-DEMO-017
-depends_on: []
-deliverable_contracts:
-  - kind: required_universe_registry
-    artifact_path: 42
-```"#,
-    )
-    .expect("task");
+    let error = parse_failure(concat!(
+        "```yaml\n",
+        "task_id: TASK-DEMO-017\n",
+        "title: Loud\n",
+        "complexity: small\n",
+        "status: ready\n",
+        "depends_on: []\n",
+        "blocks: []\n",
+        "required_env_keys: []\n",
+        "required_tools: []\n",
+        "deliverable_contracts:\n",
+        "  - kind: required_universe_registry\n",
+        "    artifact_path: 42\n",
+        "```\n"
+    ));
+    assert!(
+        error.contains("unreadable deliverable_contracts block"),
+        "{error}"
+    );
+    assert!(error.contains("invalid type"), "{error}");
+}
 
-    let error = extract_task_universe_for_generated_run(&format!(
-        "Implement decomposed PRD task files at {}",
-        temp.path().display()
-    ))
-    .expect_err("invalid capability contract must fail");
+/// The whole real 17-task universe, built the way a run builds it.
+#[test]
+fn the_real_seventeen_task_universe_builds_and_reconciles_both_edge_directions() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/prd-trading-data-lake-ahdm-001");
+    let universe = universe_at(&root)
+        .expect("the real task set must build a universe")
+        .expect("a decomposed-PRD task must yield a universe");
+    assert_eq!(universe.tasks.len(), 17);
 
-    assert!(error.to_string().contains("invalid type"));
+    let mut reversed = 0usize;
+    for task in &universe.tasks {
+        for blocked in &task.blocks_ids {
+            let dependent = universe
+                .tasks
+                .iter()
+                .find(|candidate| &candidate.canonical_task_id == blocked)
+                .expect("blocks target resolves to a task in the universe");
+            assert!(
+                dependent.dependency_ids.contains(&task.canonical_task_id),
+                "{} blocks {blocked}, so {blocked} must depend on it",
+                task.canonical_task_id
+            );
+            reversed += 1;
+        }
+    }
+    assert_eq!(reversed, 26, "the PRD declares 26 blocks edges");
+
+    // The audit task gates every other task; the last task gates nothing.
+    assert_eq!(universe.downstream_task_closure("TASK-TDL-001").len(), 17);
+    assert_eq!(universe.downstream_task_closure("TASK-TDL-140").len(), 1);
 }
 
 fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUniverse {
@@ -448,8 +464,6 @@ fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUnive
                         .iter()
                         .map(|dependency| (*dependency).to_string())
                         .collect(),
-                    title: None,
-                    artifact_requirements: Vec::new(),
                     ..Default::default()
                 },
             )

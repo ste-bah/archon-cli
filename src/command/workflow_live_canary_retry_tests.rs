@@ -358,8 +358,14 @@ async fn triage_retry_items_launch_retry_verification() {
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-RETRY-001-proof.md"),
-        format!(
-            "# Retry Proof\n\ntask_id: {TASK_ID}\ndepends_on: []\n\n## Acceptance Criteria\n- Proof artifact exists.\n\n## Artifact Requirements\n- `{ARTIFACT_REL}`\n"
+        super::workflow_live_test_support::standard_task_file(
+            TASK_ID,
+            "[]",
+            "[]",
+            &format!(
+                "\n## Acceptance Criteria\n\n- Proof artifact exists.\n\n\
+                 ## Artifact Requirements\n\n- `{ARTIFACT_REL}`\n"
+            ),
         ),
     )
     .expect("task file");

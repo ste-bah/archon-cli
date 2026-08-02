@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
-use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
+use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig, LearningConfig};
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
@@ -221,6 +221,7 @@ async fn run_live_action(
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
     let policy = live_policy(cwd, config_path.as_deref());
+    let learning = load_learning_config(cwd, config_path.as_deref());
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
@@ -239,8 +240,9 @@ async fn run_live_action(
         let runner = &runner;
         let policy = &policy;
         let generated_config = &generated_config;
+        let learning = &learning;
         async move {
-            let mut plan = plan_live(store, &task, llm, tui_tx, generated_config).await?;
+            let mut plan = plan_live(store, &task, llm, tui_tx, generated_config, learning).await?;
             cap_live_plan_parallelism(&mut plan, runner, policy);
             Ok::<_, anyhow::Error>(plan)
         }
@@ -397,7 +399,12 @@ fn live_policy(cwd: &Path, config_path: Option<&Path>) -> WorkflowPolicy {
     }
 }
 
-fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
+/// The merged config layers, with unreadable or unparseable layers skipped.
+///
+/// Skipping rather than failing throughout: a malformed config layer must not
+/// take a workflow run down, and each reader below falls back to its type's
+/// defaults, which are the conservative choice in every case.
+fn merged_config_layers(cwd: &Path, config_path: Option<&Path>) -> toml::Value {
     use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
     let mut merged = toml::Value::Table(toml::map::Map::new());
     for layer in discover_config_paths(config_path, cwd, None) {
@@ -410,35 +417,45 @@ fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfi
         merged = deep_merge_toml(merged, value);
     }
     merged
-        .get("workflow")
+}
+
+fn config_table(merged: &toml::Value, path: &[&str]) -> toml::Value {
+    let mut cursor = Some(merged);
+    for key in path {
+        cursor = cursor.and_then(|value| value.get(key));
+    }
+    cursor
         .cloned()
         .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
+}
+
+fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
+    config_table(&merged_config_layers(cwd, config_path), &["workflow"])
         .try_into()
         .unwrap_or_else(|_| WorkflowConfig::default())
+}
+
+/// Read the layered `[learning]` table.
+///
+/// Read here rather than threaded from a caller because the planner is the one
+/// place that decides a generated run's `learning_hooks`, and those hooks must
+/// respect the operator's toggles.
+fn load_learning_config(cwd: &Path, config_path: Option<&Path>) -> LearningConfig {
+    config_table(&merged_config_layers(cwd, config_path), &["learning"])
+        .try_into()
+        .unwrap_or_else(|_| LearningConfig::default())
 }
 
 fn load_generated_workflow_config(
     cwd: &Path,
     config_path: Option<&Path>,
 ) -> GeneratedWorkflowConfig {
-    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
-    let mut merged = toml::Value::Table(toml::map::Map::new());
-    for layer in discover_config_paths(config_path, cwd, None) {
-        let Ok(text) = std::fs::read_to_string(&layer.path) else {
-            continue;
-        };
-        let Ok(value) = text.parse::<toml::Value>() else {
-            continue;
-        };
-        merged = deep_merge_toml(merged, value);
-    }
-    merged
-        .get("workflow")
-        .and_then(|workflow| workflow.get("generated"))
-        .cloned()
-        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-        .try_into()
-        .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
+    config_table(
+        &merged_config_layers(cwd, config_path),
+        &["workflow", "generated"],
+    )
+    .try_into()
+    .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
 }
 
 /// Render compact write-coordination status blocks left on disk.

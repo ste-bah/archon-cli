@@ -252,6 +252,7 @@ export default async function workflow(w) {
             Vec::new(),
             None, // no task universe -> provider-authored path
             GeneratedWorkflowConfig::default(),
+            &archon_core::config::LearningConfig::default(),
         );
         // Caller requests v3 (the default); the universe-less plan must still be
         // recorded as NOT script-lifecycle so the guard does not refuse it.

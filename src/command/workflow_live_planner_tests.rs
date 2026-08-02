@@ -35,6 +35,7 @@ fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields
         }],
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
 
     let spec = plan.approval_metadata_spec();
@@ -81,6 +82,7 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
         }],
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
 
     let spec = plan.approval_metadata_spec();
@@ -96,7 +98,7 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
 }
 
 #[test]
-fn a_saved_template_keeps_its_learning_hooks_and_a_generated_plan_has_none() {
+fn a_saved_template_keeps_its_learning_hooks_and_a_generated_plan_derives_them() {
     // `learning_hooks` is the learning bridge's routing selector. A saved
     // workflow that authored hooks used to lose them here, which left the only
     // surface that can populate the field unable to reach its consumer.
@@ -122,13 +124,35 @@ stages:
         vec!["reasoning_bank".to_string(), "sona".to_string()]
     );
 
-    // Nothing authored a hook for a generated plan, so nothing dispatches.
+    // A generated plan authors nothing, so its hooks are DERIVED. This used to
+    // be hardcoded empty, which is why no generated run ever dispatched.
     let generated = WorkflowScriptPlan::generated(
         "Implement a decomposed PRD",
         "export default async function w() {}",
         Vec::new(),
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
-    assert!(generated.approval_metadata_spec().learning_hooks.is_empty());
+    assert_eq!(
+        generated.approval_metadata_spec().learning_hooks,
+        vec!["desc".to_string()],
+        "a generated plan must reach the learning bridge with a routable hook"
+    );
+
+    // With every candidate subsystem turned off the list is empty again, and
+    // an empty list dispatches nothing.
+    let mut all_off = archon_core::config::LearningConfig::default();
+    all_off.sona.pipeline_recording = false;
+    all_off.reasoning_bank.enabled = false;
+    all_off.desc.enabled = false;
+    let silent = WorkflowScriptPlan::generated(
+        "Implement a decomposed PRD",
+        "export default async function w() {}",
+        Vec::new(),
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+        &all_off,
+    );
+    assert!(silent.approval_metadata_spec().learning_hooks.is_empty());
 }

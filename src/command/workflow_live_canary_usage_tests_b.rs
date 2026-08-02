@@ -68,11 +68,16 @@ fn seed_canary_project(root: &std::path::Path) -> (std::path::PathBuf, std::path
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        format!(
-            "# Data Lake Gap Audit\n\ntask_id: TASK-TDL-001\ndepends_on: []\n\n\
-             ## Acceptance Criteria\n\n- Gap audit implemented in the target repository.\n\
-             - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
-             ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+        super::super::workflow_live_test_support::standard_task_file(
+            "TASK-TDL-001",
+            "[]",
+            "[]",
+            &format!(
+                "\n## Acceptance Criteria\n\n\
+                 - Gap audit implemented in the target repository.\n\
+                 - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
+                 ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+            ),
         ),
     )
     .expect("task file");

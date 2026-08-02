@@ -82,6 +82,7 @@ fn create_learning_fixture() -> LearningFixture {
         Vec::new(),
         None,
         GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
     let run = store
         .create_run(plan.approval_metadata_spec())
