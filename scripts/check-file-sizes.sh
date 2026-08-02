@@ -57,6 +57,7 @@ done < <(find . -type f \( \
   \) \
   -not -path '*/target/*' \
   -not -path '*/.cargo/*' \
+  -not -path '*/.claude/worktrees/*' \
   -not -path '*/node_modules/*' \
   -not -path '*/web/dist/*' \
   -not -path '*/tests/fixtures/*' \
