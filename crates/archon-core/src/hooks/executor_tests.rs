@@ -171,7 +171,7 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
         dir.path(),
         "issue92-session",
         "PreToolUse",
-        2,
+        15,
     )
     .await
     .expect("Windows hook fixture should run");

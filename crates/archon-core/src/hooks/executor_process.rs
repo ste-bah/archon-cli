@@ -131,6 +131,8 @@ async fn terminate_process_tree(
     process_group: Option<u32>,
     deadline: &ExecutionDeadline,
 ) {
+    #[cfg(not(unix))]
+    let _ = process_group;
     #[cfg(unix)]
     if let Some(pid) = process_group {
         // SAFETY: the wrapped command is the process-group leader created above.

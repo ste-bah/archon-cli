@@ -332,6 +332,8 @@ pub(super) async fn terminate_child(
     reason: &str,
     deadline: &ExecutionDeadline,
 ) {
+    #[cfg(not(unix))]
+    let _ = process_group;
     #[cfg(unix)]
     if let Some(pid) = process_group {
         // SAFETY: the wrapped command is the process-group leader created above.
