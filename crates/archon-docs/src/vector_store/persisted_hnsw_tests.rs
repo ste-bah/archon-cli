@@ -391,7 +391,11 @@ fn stale_manifest_clears_persisted_snapshot_cache() {
         .unwrap();
 
     assert!(!persisted_hnsw::cache_present());
-    assert_eq!(persisted_hnsw::worker_count(), 0);
+    // Evicting the stale entry drops the request Sender, but the worker only
+    // decrements WORKERS once its recv loop ends and WorkerGuard drops on the
+    // worker's own thread. Reading the count straight after the eviction races
+    // that teardown -- it flaked on a loaded Ubuntu runner at 1 != 0.
+    wait_for_worker_count(0);
 }
 
 #[test]
