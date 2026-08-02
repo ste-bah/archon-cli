@@ -298,3 +298,87 @@ fn schedule_summary_matches_waves() {
     assert!(summary.max_width >= 1);
     assert!(summary.max_width <= caps(4).effective());
 }
+
+fn shared_key(p: &str) -> ResourceKey {
+    ResourceKey::SharedAppend(p.to_string())
+}
+
+/// The case `SharedAppend` was added for. Four concurrent tasks each write a
+/// manifest they own alone and each append an entry to one shared registry.
+/// Declared exclusively, the registry serialises them into four waves; declared
+/// as a coordinated append, they plan as one.
+///
+/// Both halves are asserted, because the serialised half is what the key is
+/// measured against — a test that only showed one wave could not tell the
+/// feature working apart from the conflict check being switched off.
+#[test]
+fn four_registry_appenders_plan_as_one_wave_and_four_exclusive_writers_do_not() {
+    const REGISTRY: &str = ".archon/trading-lab/data/registry.json";
+    let owners = ["item-a", "item-b", "item-c", "item-d"];
+
+    let shared_plans: Vec<WritePlan> = owners
+        .iter()
+        .map(|owner| {
+            plan(
+                owner,
+                &[
+                    file_key(&format!("out/{owner}/manifest.json")),
+                    shared_key(REGISTRY),
+                ],
+                TargetFilesSource::Item,
+            )
+        })
+        .collect();
+    let schedule = build_schedule("impl", &shared_plans, &no_deps(), &caps(4)).expect("schedule");
+    assert_eq!(
+        schedule.waves.len(),
+        1,
+        "four coordinated appenders must plan concurrently: {:?}",
+        schedule.waves
+    );
+    assert_eq!(schedule.waves[0].items.len(), 4);
+
+    let exclusive_plans: Vec<WritePlan> = owners
+        .iter()
+        .map(|owner| {
+            plan(
+                owner,
+                &[
+                    file_key(&format!("out/{owner}/manifest.json")),
+                    file_key(REGISTRY),
+                ],
+                TargetFilesSource::Item,
+            )
+        })
+        .collect();
+    let serial = build_schedule("impl", &exclusive_plans, &no_deps(), &caps(4)).expect("schedule");
+    assert_eq!(
+        serial.waves.len(),
+        4,
+        "declared exclusively, the same four serialise"
+    );
+}
+
+/// One party asserting coordination is not agreement. An item that declares the
+/// registry as an ordinary target still gets it to itself.
+#[test]
+fn one_exclusive_writer_still_serialises_against_the_appenders() {
+    const REGISTRY: &str = ".archon/trading-lab/data/registry.json";
+    let plans = vec![
+        plan(
+            "appender-a",
+            &[shared_key(REGISTRY)],
+            TargetFilesSource::Item,
+        ),
+        plan(
+            "appender-b",
+            &[shared_key(REGISTRY)],
+            TargetFilesSource::Item,
+        ),
+        plan("rewriter", &[file_key(REGISTRY)], TargetFilesSource::Item),
+    ];
+    let schedule = build_schedule("impl", &plans, &no_deps(), &caps(3)).expect("schedule");
+    assert_eq!(schedule.waves.len(), 2, "{:?}", schedule.waves);
+    assert_eq!(schedule.waves[0].items, vec!["appender-a", "appender-b"]);
+    assert_eq!(schedule.waves[1].items, vec!["rewriter"]);
+}

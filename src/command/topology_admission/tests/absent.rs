@@ -66,6 +66,7 @@ fn ending_a_session_drops_its_state() {
             &archon_topology::live::WriteIntent {
                 node_id: "holder".into(),
                 paths: vec!["src/lib.rs".into()],
+                shared_append: Vec::new(),
             },
         );
         assert!(matches!(

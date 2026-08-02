@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use archon_workflow::write_coordinator::write_plan::{ResourceKey, resource_key_for_raw_target};
+use archon_workflow::write_coordinator::write_plan::ResourceKey;
 
 use crate::index::GraphIndex;
 use crate::ir::{GraphBudget, TaskGraph};
@@ -233,9 +233,15 @@ impl SessionState {
         })
     }
 
-    /// Record a claim. Re-claiming the same key by the same node is a no-op.
-    pub(super) fn claim(&mut self, node_id: &str, declared: &str) {
-        let key = resource_key_for_raw_target(declared);
+    /// Record a claim under the key its declarer chose.
+    ///
+    /// The key is built by the caller rather than here, because the same path
+    /// is an exclusive claim or a coordinated-append claim depending on what
+    /// the write intent declared, and that distinction is not recoverable from
+    /// the path string.
+    ///
+    /// Re-claiming the same key by the same node is a no-op.
+    pub(super) fn claim(&mut self, node_id: &str, declared: &str, key: ResourceKey) {
         if self
             .claims
             .iter()

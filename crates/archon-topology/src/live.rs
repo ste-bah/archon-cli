@@ -339,10 +339,7 @@ impl LiveTopology {
                 }
             }
             if !intent.writes.is_empty() {
-                let write = WriteIntent {
-                    node_id: intent.node_id.clone(),
-                    paths: intent.writes.clone(),
-                };
+                let write = WriteIntent::exclusive(intent.node_id.clone(), intent.writes.clone());
                 let verdict = writes::admit_write(state, config, &write);
                 if verdict.is_blocked() {
                     return verdict;

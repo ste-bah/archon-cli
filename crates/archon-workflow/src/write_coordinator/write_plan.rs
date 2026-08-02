@@ -55,12 +55,40 @@ impl NormalizedPath {
 }
 
 /// Conflict-graph resource key. Variant declaration order IS the Ord order:
-/// File < Dir < Glob (asserted by test).
+/// File < Dir < Glob < SharedAppend (asserted by test).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ResourceKey {
     File(String),
     Dir(String),
     Glob(String),
+    /// A single file several items append to **under coordination**.
+    ///
+    /// # This is an assertion, not a mechanism
+    ///
+    /// Declaring `SharedAppend` does not make a write atomic, does not take a
+    /// lock, and does not serialise anything. It is the item author asserting
+    /// that their write to this path is coordinated and atomic — a
+    /// read-modify-write under a lock, an append to an append-only log, a
+    /// write-to-temp-then-rename. The coordinator takes that assertion at face
+    /// value and stops scheduling around the path. If the assertion is false,
+    /// the writes race and the coordinator will not have caught it.
+    ///
+    /// Nothing produces this key by default. Every declaration surface starts
+    /// exclusive ([`ResourceKey::File`]) and has to name a path explicitly to
+    /// move it here, so a path never becomes concurrent by accident — see
+    /// [`super::shared_append`].
+    ///
+    /// Overlap rules, and no others:
+    ///
+    /// - `SharedAppend` vs `SharedAppend` — **not** a conflict. Both parties
+    ///   assert coordinated access.
+    /// - `SharedAppend(p)` vs `File(p)`, or a `Dir`/`Glob` covering `p` —
+    ///   **conflict**. One party wants exclusive access and gets it.
+    /// - Malformed or unresolvable on either side — **conflict**. A shared
+    ///   append names one concrete file; a pattern or an empty string is a claim
+    ///   that cannot be checked, and the safe reading of an unreadable claim on
+    ///   a shared resource is that it covers the resource.
+    SharedAppend(String),
 }
 
 /// Provenance of an item's resolved target files (PRD-012 §8.1).
@@ -300,7 +328,20 @@ pub fn resource_key_for_raw_target(raw: &str) -> ResourceKey {
 
 /// Deterministic overlap table (PRD-012 §10.1).
 pub fn keys_conflict(a: &ResourceKey, b: &ResourceKey) -> bool {
-    use ResourceKey::{Dir, File, Glob};
+    use ResourceKey::{Dir, File, Glob, SharedAppend};
+    // A shared-append claim that does not name one resolvable file cannot be
+    // checked against anything, so it conflicts with everything. Same direction
+    // as `glob_match`'s malformed-pattern arm below, and for the same reason.
+    if let SharedAppend(p) = a
+        && !is_resolvable_shared_append(p)
+    {
+        return true;
+    }
+    if let SharedAppend(p) = b
+        && !is_resolvable_shared_append(p)
+    {
+        return true;
+    }
     match (a, b) {
         (File(x), File(y)) => x == y,
         (File(f), Dir(d)) | (Dir(d), File(f)) => f == d || f.starts_with(&format!("{d}/")),
@@ -310,7 +351,27 @@ pub fn keys_conflict(a: &ResourceKey, b: &ResourceKey) -> bool {
         (Glob(g), File(f)) | (File(f), Glob(g)) => glob_match(g, f),
         (Glob(g), Dir(d)) | (Dir(d), Glob(g)) => glob_match(g, &format!("{d}/*")),
         (Glob(x), Glob(y)) => globs_overlap(x, y),
+        // Both sides assert coordinated access; neither wants exclusivity.
+        (SharedAppend(_), SharedAppend(_)) => false,
+        // One side wants the file to itself, and gets it.
+        (SharedAppend(p), File(f)) | (File(f), SharedAppend(p)) => p == f,
+        (SharedAppend(p), Dir(d)) | (Dir(d), SharedAppend(p)) => {
+            p == d || p.starts_with(&format!("{d}/"))
+        }
+        (SharedAppend(p), Glob(g)) | (Glob(g), SharedAppend(p)) => glob_match(g, p),
     }
+}
+
+/// Whether a shared-append claim names one concrete file this table can check.
+///
+/// A shared append is a claim about *a file* — several writers coordinating on
+/// one path. A pattern names a set whose membership depends on the filesystem,
+/// and "coordinated atomic append to whatever matches" is not a claim anybody
+/// can honour. An empty string names nothing. Both are rejected here and
+/// [`keys_conflict`] turns the rejection into a conflict, which is the fail-safe
+/// direction: an unreadable claim on a shared resource might cover it.
+fn is_resolvable_shared_append(path: &str) -> bool {
+    !path.trim().is_empty() && !path.contains(GLOB_METACHARACTERS)
 }
 
 fn glob_match(pattern: &str, candidate: &str) -> bool {

@@ -15,6 +15,7 @@ fn a_blocked_write_names_the_holder_the_path_and_the_invariant() {
             &archon_topology::live::WriteIntent {
                 node_id: "holder".into(),
                 paths: vec!["src/lib.rs".into()],
+                shared_append: Vec::new(),
             },
         );
 
@@ -46,6 +47,7 @@ fn a_read_is_not_treated_as_a_write() {
             &archon_topology::live::WriteIntent {
                 node_id: "holder".into(),
                 paths: vec!["src/lib.rs".into()],
+                shared_append: Vec::new(),
             },
         );
 
@@ -176,6 +178,7 @@ fn the_outcome_tap_releases_write_claims() {
                 &archon_topology::live::WriteIntent {
                     node_id: "other".into(),
                     paths: vec!["src/lib.rs".into()],
+                    shared_append: Vec::new(),
                 },
             )
             .is_allowed()
