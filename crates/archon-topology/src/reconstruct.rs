@@ -23,7 +23,7 @@
 //! That makes a reconstructed graph adequate for the outcome corpus — span,
 //! fan-out width, retry counts, observed conflicts — and adequate for the
 //! milestone 4 fusion lint only to the extent the taps observed both halves of
-//! a dataflow. It remains inadequate for [`crate::TaskGraph::fake_edges`],
+//! a dataflow. It remains inadequate for [`crate::TaskGraph::classify_edges`],
 //! which reasons about *declared* intent: an edge this module invented from
 //! spawn parentage is not a claim anybody made.
 //!

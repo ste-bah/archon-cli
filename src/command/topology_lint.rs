@@ -14,7 +14,7 @@
 //! - `--tasks <DIR>` — a decomposed-PRD `TASK-*.md` directory. This is the only
 //!   surface in the tree that declares dataflow on both sides (contracted
 //!   artifacts out, named artifacts in), so it is the only one on which
-//!   [`TaskGraph::fake_edges`] can conclude anything.
+//!   [`TaskGraph::classify_edges`] can conclude anything.
 //! - `--spec-file <PATH>` — a `WorkflowSpec`. Carries roles and fan-out, so
 //!   diamond conformance is meaningful; carries no read declarations, so the
 //!   dataflow lints stay silent by the crate's unknown rule.

@@ -1,195 +1,16 @@
-//! The lints against the real seventeen-task PRD, and against the two shapes
-//! `adversarial-review` had before and after it became a per-task stage.
+//! The lints against the two shapes `adversarial-review` had before and after
+//! it became a per-task stage, and against a recorded trace.
 //!
-//! These are the tests that stop the suite being a set of opinions about
-//! synthetic graphs. `tests/fixtures/prd-trading-data-lake-ahdm-001` is a real
-//! decomposed PRD written by a user, checked in verbatim, with real
-//! `depends_on`, real `deliverable_contracts`, and real prose in its
-//! `## Files Expected to Change` sections.
-
-use std::path::PathBuf;
+//! The real seventeen-task PRD corpus has its own file, [`real_corpus`].
 
 use archon_topology::ir::{FanoutSpec, GateKind, NodeRole, TaskGraph, TaskNode, WriteTarget};
 use archon_topology::{DiamondFinding, GraphOrigin};
 
 use super::*;
 
-fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prd-trading-data-lake-ahdm-001")
-}
+mod real_corpus;
 
-fn real_task_graph() -> TaskGraph {
-    task_graph_from_root(&fixture_root()).expect("the seventeen real task files lower")
-}
-
-// --------------------------------------------------------- the real 17 tasks
-
-#[test]
-fn the_seventeen_real_tasks_lower_with_declared_dataflow_on_both_sides() {
-    let graph = real_task_graph();
-    assert_eq!(graph.len(), 17, "the PRD decomposes into 17 tasks");
-
-    // Production is what makes `fake_edges` able to conclude anything about the
-    // upstream end of an edge.
-    let producing = graph
-        .nodes
-        .iter()
-        .filter(|node| node.writes_are_known())
-        .count();
-    assert_eq!(
-        producing, 17,
-        "every task declares files it changes or artifacts it produces"
-    );
-
-    // Consumption is the half the design believed did not exist. It is sparse
-    // in the real corpus — most tasks declare only what they produce — and that
-    // sparseness is the reason the lint stays silent on most edges rather than
-    // reporting them all. If this ever reaches zero the lint has gone silent,
-    // not clean, and the assertion below is what would catch it.
-    let consuming: Vec<&str> = graph
-        .nodes
-        .iter()
-        .filter(|node| node.consumption_is_known())
-        .map(|node| node.id.as_str())
-        .collect();
-    assert!(
-        consuming.len() >= 2,
-        "at least two tasks must name an upstream artifact; found {consuming:?}"
-    );
-}
-
-/// The real finding, pinned. `TASK-TDL-080` (the coverage-matrix command)
-/// declares a dependency on all six ingest tasks, but the only input its
-/// contract declares is `registry.json` — which `TASK-TDL-010` produces, not
-/// any of the six. The ordering it needs is registry-mediated; nothing in the
-/// six tasks' declared outputs is named by TDL-080 at all.
-///
-/// Pinned as an exact set rather than a count so that a change in either
-/// direction — a task file gaining an input declaration, or the lint starting
-/// to over-report — fails here and names what moved.
-#[test]
-fn the_real_graph_reports_exactly_the_coverage_matrix_edges() {
-    let graph = real_task_graph();
-    let mut reported: Vec<String> = graph
-        .fake_edges()
-        .expect("valid graph")
-        .iter()
-        .map(|edge| format!("{} -> {}", edge.dependent, edge.dependency))
-        .collect();
-    reported.sort();
-    assert_eq!(
-        reported,
-        vec![
-            "TASK-TDL-080 -> TASK-TDL-040",
-            "TASK-TDL-080 -> TASK-TDL-041",
-            "TASK-TDL-080 -> TASK-TDL-042",
-            "TASK-TDL-080 -> TASK-TDL-050",
-            "TASK-TDL-080 -> TASK-TDL-060",
-            "TASK-TDL-080 -> TASK-TDL-070",
-        ]
-    );
-}
-
-/// A prior run's findings are appended into the task file between markers, and
-/// they quote reviewer evidence verbatim — including artifact paths the task
-/// never claimed to read. Attributing those to the author invents a
-/// declaration. `TASK-TDL-070` is the case that proved it: an appended finding
-/// quotes an absolute path ending in `registry.json`, which briefly made the
-/// task look like a registry consumer and turned a correctly-silent edge into a
-/// reported one.
-#[test]
-fn appended_prior_run_findings_are_not_read_as_declared_consumption() {
-    let graph = real_task_graph();
-    let node = graph.node("TASK-TDL-070").expect("TDL-070 present");
-    assert!(
-        !node.reads.contains(&WriteTarget::Artifact(
-            ".archon/trading-lab/data/registry.json".to_string()
-        )),
-        "TDL-070 declares no registry input; only its appended findings mention one"
-    );
-}
-
-#[test]
-fn the_registry_dataflow_between_tdl_010_and_tdl_020_is_recovered() {
-    let graph = real_task_graph();
-    let producer = graph.node("TASK-TDL-010").expect("TDL-010 present");
-    assert!(
-        producer.writes.contains(&WriteTarget::Artifact(
-            ".archon/trading-lab/data/registry.json".to_string()
-        )),
-        "TDL-010 is contracted to produce the registry"
-    );
-    let consumer = graph.node("TASK-TDL-020").expect("TDL-020 present");
-    assert!(
-        consumer.reads.contains(&WriteTarget::Artifact(
-            ".archon/trading-lab/data/registry.json".to_string()
-        )),
-        "TDL-020's contract declares the registry as its input"
-    );
-    assert!(
-        consumer.depends_on.contains(&"TASK-TDL-010".to_string()),
-        "and it declares the dependency too"
-    );
-}
-
-/// The edge that carries the recovered dataflow must not be reported. A lint
-/// that flags a real edge is worse than one that flags nothing.
-#[test]
-fn the_real_dataflow_edge_is_not_reported_as_fake() {
-    let graph = real_task_graph();
-    let fake = graph
-        .fake_edges()
-        .expect("the real graph is structurally valid");
-    assert!(
-        !fake
-            .iter()
-            .any(|edge| edge.dependent == "TASK-TDL-020" && edge.dependency == "TASK-TDL-010"),
-        "TDL-020 -> TDL-010 carries declared dataflow and must not be called fake"
-    );
-}
-
-/// Every reported edge must be a real declared edge, and the dependent must
-/// really have declared some consumption. This is the invariant that keeps the
-/// output honest: a finding against a node that declared nothing would be the
-/// unknown-dataflow rule being violated.
-#[test]
-fn every_fake_edge_reported_on_the_real_graph_is_well_founded() {
-    let graph = real_task_graph();
-    for edge in graph.fake_edges().expect("valid graph") {
-        let dependent = graph.node(&edge.dependent).expect("dependent exists");
-        let dependency = graph.node(&edge.dependency).expect("dependency exists");
-        assert!(
-            dependent.depends_on.contains(&edge.dependency),
-            "{} does not actually depend on {}",
-            edge.dependent,
-            edge.dependency
-        );
-        assert!(
-            dependent.consumption_is_known(),
-            "{} declared no consumption; the lint must have stayed silent",
-            edge.dependent
-        );
-        assert!(
-            dependency.writes_are_known(),
-            "{} declared no production; the lint must have stayed silent",
-            edge.dependency
-        );
-    }
-}
-
-#[test]
-fn the_real_graph_renders_a_report_naming_its_nodes() {
-    let text = run_lint(&fixture_root(), &LintSource::Tasks(fixture_root()))
-        .expect("the real task set lints");
-    assert!(text.contains("advisory only"), "the report says it advises");
-    assert!(text.contains("## fake edges"), "all three sections present");
-    assert!(text.contains("## diamond conformance"));
-    assert!(text.contains("## stop-rule fusion"));
-    assert!(
-        text.contains("TASK-TDL-"),
-        "findings name specific tasks:\n{text}"
-    );
-}
+use real_corpus::fixture_root;
 
 // ------------------------------------------- adversarial-review, before/after
 
@@ -430,7 +251,7 @@ fn the_slash_surface_parses_the_same_three_flags_and_refuses_anything_else() {
     let args = vec!["--tasks".to_string(), root.display().to_string()];
     let text = crate::command::workflow::lint_from_slash_args(&root, &args)
         .expect("the slash form reaches the same report");
-    assert!(text.contains("## fake edges"));
+    assert!(text.contains("## dependency edges"));
 
     let unknown = vec!["--everything".to_string(), "x".to_string()];
     let error = crate::command::workflow::lint_from_slash_args(&root, &unknown)

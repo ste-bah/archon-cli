@@ -10,7 +10,7 @@
 //! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
 //!
 //! Milestone 4 adds three advisory lints beside them —
-//! [`TaskGraph::diamond_conformance`], [`TaskGraph::fake_edges`], and
+//! [`TaskGraph::diamond_conformance`], [`TaskGraph::classify_edges`], and
 //! [`TaskGraph::stop_rule_fusion`]. They are analyses, not gates: each returns
 //! findings with a remedy string and none of them can fail a run.
 //!
@@ -62,8 +62,9 @@ pub mod task_hash;
 pub mod trace;
 
 pub use analysis::{
-    CoupledPair, CriticalPath, DiamondFinding, DiamondReport, FakeEdge, FusibleChain, FusionKind,
-    FusionReport, ParallelismProfile, VerifierDiversity, WriteConflict,
+    ClassifiedEdge, CoupledPair, CriticalPath, DiamondFinding, DiamondReport, EdgeSupport,
+    FusibleChain, FusionKind, FusionReport, LikelyCause, ParallelismProfile, VerifierDiversity,
+    WriteConflict,
 };
 pub use error::TopologyError;
 pub use ir::{
