@@ -65,7 +65,7 @@ struct CommandOutput {
 enum RunError {
     Spawn(String),
     Io(String),
-    Timeout,
+    Timeout(&'static str),
 }
 
 impl std::fmt::Display for RunError {
@@ -73,7 +73,7 @@ impl std::fmt::Display for RunError {
         match self {
             Self::Spawn(s) => write!(f, "spawn error: {s}"),
             Self::Io(s) => write!(f, "I/O error: {s}"),
-            Self::Timeout => write!(f, "timed out"),
+            Self::Timeout(phase) => write!(f, "timed out during {phase}"),
         }
     }
 }

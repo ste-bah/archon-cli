@@ -89,7 +89,7 @@ async fn hook_parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
     .await
     .expect("hook invocation exceeded its strict outer deadline");
 
-    assert!(matches!(output, Err(super::RunError::Timeout)));
+    assert!(matches!(output, Err(super::RunError::Timeout(_))));
     assert!(started.elapsed() < std::time::Duration::from_secs(4));
     wait_until_unix_process_is_absent(
         &std::fs::read_to_string(&pid_file).expect("descendant pid file"),

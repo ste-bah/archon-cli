@@ -38,7 +38,7 @@ pub(super) async fn run_command(
         Some(error) => error,
         None => {
             timeout_with_cleanup(&mut child, process_group, &deadline, &stdout, &stderr).await;
-            return Err(RunError::Timeout);
+            return Err(RunError::Timeout("stdin write"));
         }
     };
     let status = match wait_or_terminate(&mut child, &deadline).await {
@@ -124,7 +124,7 @@ async fn wait_or_terminate(
         Some(status) => status.map_err(|error| RunError::Io(error.to_string())),
         None => {
             terminate_process_tree(child, child.id(), deadline).await;
-            Err(RunError::Timeout)
+            Err(RunError::Timeout("process wait"))
         }
     }
 }
@@ -207,7 +207,7 @@ async fn join_pipes(
 ) -> Result<(PipeOutput, PipeOutput), RunError> {
     let Some(pipes) = join_pipe_tasks(deadline, stdout, stderr).await else {
         abort_pipe_tasks(stdout, stderr);
-        return Err(RunError::Timeout);
+        return Err(RunError::Timeout("pipe drain"));
     };
     Ok(pipes)
 }
