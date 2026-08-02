@@ -281,7 +281,6 @@ impl SessionStore {
 
 pub fn default_db_path() -> PathBuf {
     crate::background::archon_data_dir()
-        .join("archon")
         .join("sessions")
         .join("sessions.db")
 }

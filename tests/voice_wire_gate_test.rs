@@ -113,6 +113,10 @@ fn run_and_scrape(voice_enabled: bool) -> String {
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
         .env("ARCHON_LOG_DIR", &log_dir)
+        // XDG_DATA_HOME only redirects `dirs::data_dir()` on Linux -- Windows
+        // reads the shell known-folder API and macOS ~/Library/Application
+        // Support, so without this the child opens the real user database.
+        .env("ARCHON_DATA_DIR", tmp.path().join("data").join("archon"))
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())
