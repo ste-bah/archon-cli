@@ -11,6 +11,8 @@
 | `OPENAI_API_KEY` | OpenAI API key for embeddings, LLM provider, and STT |
 | `GOOGLE_API_KEY` | Google Generative Language API key for Gemini VLM image descriptions |
 | `ARCHON_MEMORY_OPENAIKEY` | Alias for `OPENAI_API_KEY` for memory and docs embeddings |
+| `ARCHON_MEMORY_EMBEDDING_BASE_URL` | OpenAI-compatible `/v1` base URL for memory embeddings; falls back to `OPENAI_BASE_URL`, then `[memory] embedding_base_url` in config |
+| `ARCHON_MEMORY_EMBEDDING_MODEL` | Memory embedding model for OpenAI-compatible providers; falls back to `[memory] embedding_model`, then `text-embedding-3-small` |
 | `ARCHON_DOCS_EMBEDDING_PROVIDER` | Docs semantic indexing provider: `auto`, `local`, `openai`, or `disabled` |
 | `ARCHON_DOCS_OPENAIKEY` | OpenAI-compatible key used only for docs embeddings |
 | `ARCHON_DOCS_EMBEDDING_BASE_URL` | OpenAI-compatible `/v1` base URL for docs embeddings |
