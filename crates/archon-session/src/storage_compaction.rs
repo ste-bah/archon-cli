@@ -247,11 +247,11 @@ impl SessionStore {
         record: &CompactionLedgerRecord,
     ) -> Result<(), SessionError> {
         self.db
-            .run_script(
+            .run_mutable(
                 "?[id, session_id, kind, payload, start_index, end_index, created_at] <- [[$id, $session_id, $kind, $payload, $start_index, $end_index, $created_at]]
                  :put compaction_ledger {id => session_id, kind, payload, start_index, end_index, created_at}",
                 ledger_params(record),
-                ScriptMutability::Mutable,
+                "session store: put compaction ledger record",
             )
             .map_err(db_err)?;
         Ok(())
@@ -287,11 +287,11 @@ impl SessionStore {
         &self,
         record: &CompactionTelemetryRecord,
     ) -> Result<(), SessionError> {
-        self.db.run_script(
+        self.db.run_mutable(
             "?[id, session_id, action, payload, created_at] <- [[$id, $session_id, $action, $payload, $created_at]]
              :put compaction_telemetry {id => session_id, action, payload, created_at}",
             telemetry_params(record),
-            ScriptMutability::Mutable,
+            "session store: put compaction telemetry record",
         ).map_err(db_err)?;
         Ok(())
     }

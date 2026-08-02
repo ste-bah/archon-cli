@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+archon-cozo = { path = "../archon-cozo" }
 archon-meaning = { path = "../archon-meaning" }
 chrono.workspace = true
 cozo.workspace = true

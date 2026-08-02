@@ -34,7 +34,13 @@ pub fn ensure_schema(db: &DbInstance) -> Result<()> {
 }
 
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "constellation schema: create relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

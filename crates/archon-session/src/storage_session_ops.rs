@@ -212,14 +212,14 @@ impl SessionStore {
             DataValue::from(i64::from(metadata.schema_version)),
         );
         self.db
-            .run_script(
+            .run_mutable(
                 "?[id, created_at, last_active, working_directory, git_branch, model, message_count, total_tokens, total_cost, schema_version] <- [[
                     $id, $created_at, $last_active, $working_directory, $git_branch, $model,
                     $message_count, $total_tokens, $total_cost, $schema_version
                 ]]
                 :put sessions {id => created_at, last_active, working_directory, git_branch, model, message_count, total_tokens, total_cost, schema_version}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: put session metadata",
             )
             .map_err(db_err)?;
         Ok(())

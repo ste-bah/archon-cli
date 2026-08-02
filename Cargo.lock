@@ -451,6 +451,7 @@ dependencies = [
 name = "archon-constellation"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "archon-meaning",
  "chrono",
  "cozo-ce",
@@ -623,6 +624,7 @@ name = "archon-knowledge"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "archon-docs",
  "chrono",
  "cozo-ce",
@@ -652,6 +654,7 @@ name = "archon-leann"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "archon-memory",
  "async-trait",
  "chrono",
@@ -769,6 +772,7 @@ dependencies = [
 name = "archon-meaning"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "hex",
@@ -785,6 +789,7 @@ name = "archon-memory"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "dirs",
@@ -914,6 +919,7 @@ dependencies = [
 name = "archon-provenance"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "hex",
@@ -930,6 +936,7 @@ name = "archon-reasoning-quality"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "blake3",
  "chrono",
  "cozo-ce",
@@ -978,6 +985,7 @@ name = "archon-session"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "dirs",

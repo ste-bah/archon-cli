@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use chrono::Utc;
 use cozo::{DataValue, ScriptMutability};
 
+use super::super::helpers::{db_err, run_mutable};
 use super::super::{MemoryGraph, row_values_to_memory};
-use super::db_err;
 use crate::types::{Memory, MemoryError};
 
 impl MemoryGraph {
@@ -30,10 +30,9 @@ impl MemoryGraph {
             ),
             ("now".to_string(), DataValue::from(now.as_str())),
         ]);
-        let result = self
-            .db
-            .run_script(
-                "{
+        let result = run_mutable(
+            &self.db,
+            "{
                     parsed_tags[id, parsed] :=
                         *memories{id, tags: stored_tags}, id = $id,
                         parsed = parse_json(stored_tags);
@@ -70,10 +69,9 @@ impl MemoryGraph {
                         id = $id
                 } as _result
                 %return _result",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: reconcile importance trend tag",
+        )?;
         let row = result
             .rows
             .first()
@@ -132,10 +130,9 @@ impl MemoryGraph {
         params.insert("delta".to_string(), DataValue::from(delta));
         params.insert("now".to_string(), DataValue::from(now.as_str()));
 
-        let result = self
-            .db
-            .run_script(
-                "{
+        let result = run_mutable(
+            &self.db,
+            "{
                     ?[memory_id] := *score_applications{memory_id, provenance_id},
                         memory_id = $id, provenance_id = $provenance_id
                 } as _already_applied
@@ -188,10 +185,9 @@ impl MemoryGraph {
                         id = $id
                 } as _result
                 %return _result",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: apply idempotent importance delta",
+        )?;
 
         let row = result
             .rows

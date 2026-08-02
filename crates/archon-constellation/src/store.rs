@@ -41,12 +41,14 @@ pub fn insert_centroid(db: &DbInstance, centroid: &ConstellationCentroid) -> Res
         DataValue::from(centroid.source_relation.as_str()),
     );
     params.insert("ts".into(), DataValue::from(centroid.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[centroid_id, target, version, vector_json, sample_ids_json, sample_count, source_relation, created_at] <- \
          [[$id, $target, $version, $vector, $sample_ids, $count, $source, $ts]] \
          :put constellation_centroids { centroid_id => target, version, vector_json, sample_ids_json, sample_count, source_relation, created_at }",
         params,
         ScriptMutability::Mutable,
+        "constellation store: insert constellation_centroids row",
     )
     .map_err(|e| ConstellationError::Store(format!("insert centroid failed: {e}")))?;
     Ok(())
@@ -63,11 +65,13 @@ pub fn insert_vector(db: &DbInstance, centroid_id: &str, vector: &[f32]) -> Resu
         "provider".into(),
         DataValue::from(LEXICAL_CENTROID_FEATURE_SPACE),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[centroid_id, embedding, provider] <- [[$id, $embedding, $provider]] \
          :put vec_constellations { centroid_id => embedding, provider }",
         params,
         ScriptMutability::Mutable,
+        "constellation store: insert vec_constellations embedding",
     )
     .map_err(|e| ConstellationError::Store(format!("insert centroid vector failed: {e}")))?;
     Ok(())

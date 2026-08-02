@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+archon-cozo = { path = "../archon-cozo" }
 chrono.workspace = true
 cozo.workspace = true
 hex.workspace = true

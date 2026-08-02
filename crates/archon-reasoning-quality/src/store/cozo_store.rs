@@ -146,11 +146,13 @@ pub fn put_schema_migration(db: &DbInstance, to_version: u32, dry_run: bool) -> 
         "migration_json".to_string(),
         DataValue::from(payload.to_string().as_str()),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[migration_id, migration_json] <- [[$migration_id, $migration_json]]
          :put reasoning_schema_migrations { migration_id => migration_json }",
         params,
         ScriptMutability::Mutable,
+        "reasoning-quality store: record schema migration",
     )
     .map_err(|e| anyhow::anyhow!("reasoning schema migration record failed: {e}"))?;
     Ok(())
@@ -203,12 +205,14 @@ fn put_claim(db: &DbInstance, event: &ReasoningQualityEvent) -> Result<()> {
         "created_at".to_string(),
         DataValue::from(event.created_at.to_rfc3339().as_str()),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[claim_id, session_id, turn_number, subject, entity_key, canonicalizer_version, canonical_text, claim_json, created_at] <- \
          [[$claim_id, $session_id, $turn_number, $subject, $entity_key, $canonicalizer_version, $canonical_text, $claim_json, $created_at]]
          :put reasoning_claims { claim_id => session_id, turn_number, subject, entity_key, canonicalizer_version, canonical_text, claim_json, created_at }",
         params,
         ScriptMutability::Mutable,
+        "reasoning-quality store: upsert reasoning_claims row",
     )
     .map_err(|e| anyhow::anyhow!("reasoning claim upsert failed: {e}"))?;
     Ok(())
@@ -252,12 +256,14 @@ fn put_event(db: &DbInstance, event: &ReasoningQualityEvent) -> Result<()> {
         "created_at".to_string(),
         DataValue::from(event.created_at.to_rfc3339().as_str()),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[event_id, session_id, turn_number, claim_id, event_kind, subject, entity_key, event_json, created_at] <- \
          [[$event_id, $session_id, $turn_number, $claim_id, $event_kind, $subject, $entity_key, $event_json, $created_at]]
          :put reasoning_quality_events { event_id => session_id, turn_number, claim_id, event_kind, subject, entity_key, event_json, created_at }",
         params,
         ScriptMutability::Mutable,
+        "reasoning-quality store: upsert reasoning_quality_events row",
     )
     .map_err(|e| anyhow::anyhow!("reasoning event upsert failed: {e}"))?;
     Ok(())
@@ -278,11 +284,13 @@ fn put_evidence_refs(db: &DbInstance, event: &ReasoningQualityEvent) -> Result<(
             "evidence_json".to_string(),
             DataValue::from(json_string(evidence)?.as_str()),
         );
-        db.run_script(
+        archon_cozo::run_bound_script_guarded(
+            db,
             "?[event_id, evidence_id, evidence_json] <- [[$event_id, $evidence_id, $evidence_json]]
              :put reasoning_evidence_refs { event_id, evidence_id => evidence_json }",
             params,
             ScriptMutability::Mutable,
+            "reasoning-quality store: upsert reasoning_evidence_refs row",
         )
         .map_err(|e| anyhow::anyhow!("reasoning evidence upsert failed: {e}"))?;
     }
@@ -290,7 +298,13 @@ fn put_evidence_refs(db: &DbInstance, event: &ReasoningQualityEvent) -> Result<(
 }
 
 fn run_idempotent(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "reasoning-quality schema: create relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

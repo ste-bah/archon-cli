@@ -76,6 +76,11 @@ struct PendingFile {
 #[derive(Clone)]
 pub struct Indexer {
     db: DbInstance,
+    /// Write-guard config for `db`. Carried explicitly rather than resolved
+    /// from the guard registry: `Indexer` owns its `DbInstance` by value, and
+    /// the registry keys on the pointer identity of the handle that was
+    /// registered, which a move or clone does not preserve.
+    guard: archon_cozo::CozoGuardConfig,
     embedder: Arc<dyn EmbeddingProvider>,
     chunker: Chunker,
     dimension: usize,
@@ -92,15 +97,35 @@ impl Indexer {
         &self.embedder
     }
 
-    /// Create a new indexer.
+    /// Create a new indexer over an unguarded (typically in-memory) instance.
+    ///
+    /// In-memory stores have no cross-process contention, so the default guard
+    /// config is correct. Persistent stores should use [`Indexer::with_guard`]
+    /// with a config built from the database path.
     pub fn new(
         db: DbInstance,
+        config: EmbeddingConfig,
+        grammar_dir: Option<PathBuf>,
+    ) -> Result<Self> {
+        Self::with_guard(
+            db,
+            archon_cozo::CozoGuardConfig::default(),
+            config,
+            grammar_dir,
+        )
+    }
+
+    /// Create a new indexer whose writes are serialised by `guard`.
+    pub fn with_guard(
+        db: DbInstance,
+        guard: archon_cozo::CozoGuardConfig,
         config: EmbeddingConfig,
         grammar_dir: Option<PathBuf>,
     ) -> Result<Self> {
         let embedder = create_embedder(&config)?;
         Ok(Self {
             db,
+            guard,
             embedder,
             chunker: Chunker::new(grammar_dir)?,
             dimension: config.dimension,
@@ -388,7 +413,7 @@ impl Indexer {
     }
 
     fn file_store(&self) -> FileStore<'_> {
-        FileStore::new(&self.db, self.dimension)
+        FileStore::new(&self.db, self.dimension, &self.guard)
     }
 
     #[cfg(test)]

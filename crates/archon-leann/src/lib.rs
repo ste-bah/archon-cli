@@ -34,13 +34,17 @@ impl CodeIndex {
     /// Creates the CozoDB instance and ensures the schema exists.
     pub fn new(db_path: impl Into<PathBuf>, embedding_config: EmbeddingConfig) -> Result<Self> {
         let db_path = db_path.into();
-        let db = cozo::DbInstance::new(
-            "sqlite",
+        // The code index is a persistent SQLite-backed store, so both the open
+        // and every subsequent write are serialised by the `archon-cozo` guard
+        // keyed on this path.
+        let guard = archon_cozo::CozoGuardConfig::for_db_path(&db_path);
+        let db = archon_cozo::open_sqlite_guarded(
             db_path.to_string_lossy().as_ref(),
-            Default::default(),
+            "open leann code index",
+            &guard,
         )
         .map_err(|e| anyhow::anyhow!("failed to open CozoDB at {}: {}", db_path.display(), e))?;
-        let indexer = Indexer::new(db, embedding_config, None)?;
+        let indexer = Indexer::with_guard(db, guard, embedding_config, None)?;
         indexer.ensure_schema()?;
         let search = search::Search::new(indexer.db().clone(), indexer.embedder().clone());
         Ok(CodeIndex {
