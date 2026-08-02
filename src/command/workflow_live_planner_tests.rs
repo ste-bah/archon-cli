@@ -94,3 +94,41 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
     assert_eq!(stage.tool.as_deref(), Some("requireArtifact"));
     assert_eq!(stage.provider_tier, Some(ProviderTier::Local));
 }
+
+#[test]
+fn a_saved_template_keeps_its_learning_hooks_and_a_generated_plan_has_none() {
+    // `learning_hooks` is the learning bridge's routing selector. A saved
+    // workflow that authored hooks used to lose them here, which left the only
+    // surface that can populate the field unable to reach its consumer.
+    let spec = archon_workflow::WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: hooked-template
+task: Template with hooks
+learning_hooks: [sona, reasoning_bank]
+stages:
+  - id: a
+    kind: agent
+    agent: tester
+"#,
+    )
+    .expect("template spec");
+    let plan =
+        WorkflowScriptPlan::from_template(spec, "export default async function w() {}", Vec::new());
+    // The spec deserializer sorts and dedupes hooks, so the authored order is
+    // not preserved — only the set is.
+    assert_eq!(
+        plan.approval_metadata_spec().learning_hooks,
+        vec!["reasoning_bank".to_string(), "sona".to_string()]
+    );
+
+    // Nothing authored a hook for a generated plan, so nothing dispatches.
+    let generated = WorkflowScriptPlan::generated(
+        "Implement a decomposed PRD",
+        "export default async function w() {}",
+        Vec::new(),
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+    );
+    assert!(generated.approval_metadata_spec().learning_hooks.is_empty());
+}

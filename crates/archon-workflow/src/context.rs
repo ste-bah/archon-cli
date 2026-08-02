@@ -5,7 +5,6 @@ use serde_json::{Value, json};
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::fanout::{FanoutItem, extract_items};
 use crate::item_filter;
-use crate::reducers::ReducerInput;
 use crate::run::{ArtifactRef, WorkflowRun};
 use crate::source_context;
 use crate::spec::{StageKind, StageSpec};
@@ -118,26 +117,6 @@ pub fn fanout_items(
     }
     let items = item_filter::apply_stage_filter(stage, extract_items(stage), allow_empty)?;
     validated_fanout_items(stage, items)
-}
-
-pub fn reducer_inputs(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-    stage: &StageSpec,
-) -> WorkflowResult<Vec<ReducerInput>> {
-    stage
-        .depends_on
-        .iter()
-        .map(|dep| {
-            let bodies = dependency_bodies(store, run, dep)?;
-            Ok(ReducerInput {
-                stage_id: dep.clone(),
-                content: bodies.join("\n\n"),
-                accepted: run.accepted_stage(dep),
-                failed: !run.accepted_stage(dep),
-            })
-        })
-        .collect()
 }
 
 pub fn quality_gate_failure(

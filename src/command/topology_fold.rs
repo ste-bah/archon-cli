@@ -26,6 +26,10 @@
 //! - [`labels`] — how IR enums are spelled on the wire.
 //! - [`rows`] — the one batched transaction that writes the three relations.
 //! - [`learning_summary`] — the single shared-store row per graph.
+//! - [`workflow_learning`] — the fold's **second input**: a workflow run's
+//!   learning records, routed by the spec's `learning_hooks` into
+//!   `LearningIntegration`. This is the consumer half of the bridge that
+//!   `archon-workflow` cannot complete on its own (L3).
 //!
 //! # Concurrency contract
 //!
@@ -70,6 +74,9 @@ mod labels;
 mod learning_summary;
 mod rows;
 mod schema;
+mod workflow_learning;
+
+pub(crate) use workflow_learning::bridge_workflow_learning;
 
 use std::path::Path;
 

@@ -3,13 +3,15 @@
 //! Owns the temporary project and its two guarded stores, the sample trace the
 //! suites fold, and the row counters. The suites are split by what they assert:
 //! [`fold_write`] on what one fold puts where, [`idempotence`] on what a repeat
-//! fold must not do, [`metrics`] on the pure derivations, and [`hot_path`] on
-//! the invariant that recording never touches a database.
+//! fold must not do, [`metrics`] on the pure derivations, [`hot_path`] on the
+//! invariant that recording never touches a database, and
+//! [`workflow_learning`] on how `learning_hooks` routes the fold's second input.
 
 mod fold_write;
 mod hot_path;
 mod idempotence;
 mod metrics;
+mod workflow_learning;
 
 use std::path::Path;
 use std::sync::Arc;

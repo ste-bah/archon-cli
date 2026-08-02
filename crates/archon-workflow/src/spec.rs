@@ -33,6 +33,20 @@ pub enum StageKind {
     Implementation,
 }
 
+/// How a `reduce` stage is *described* in a spec.
+///
+/// **Declarative only — nothing dispatches on it.** The deterministic
+/// `ReducerRegistry` that once backed these seven names was deleted (W1): it
+/// had no call site anywhere, its only input producer (`context::reducer_inputs`)
+/// was equally unreachable, and its contract — N text blobs in, one markdown
+/// document out — does not match the live reduce contract, which is a typed
+/// `WorkflowV2Result` envelope carrying routing data the scheduler consumes.
+/// Reduction is performed by an agent (`workflow_agent_select.rs`), except for
+/// `w.finalReport()`, which is deterministic in `WorkflowV2FinalReportBuilder`.
+///
+/// The variants stay because they are part of the `archon.workflow.v1` schema
+/// and specs are authored against them; changing that surface is an explicit
+/// non-goal. They document intent for the reducing agent, and nothing more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReducerKind {

@@ -209,23 +209,34 @@ payloads, credentials, and stale artifact hashes are not carried forward.
 
 ## Learning output
 
-Every run gets a `.archon/workflows/<run-id>/learning/` directory, but today
-it is mostly empty. The only thing currently written there is
-`write-coordination/outcomes.jsonl`, metadata-only rows (file paths, blake3
-hashes, sizes — never patch content) recorded when a coordinated write
+Every run gets a `.archon/workflows/<run-id>/learning/` directory with two
+files in it.
+
+`write-coordination/outcomes.jsonl` holds metadata-only rows (file paths,
+blake3 hashes, sizes — never patch content) recorded when a coordinated write
 completes:
 
 ```bash
 cat .archon/workflows/<run-id>/learning/write-coordination/outcomes.jsonl
 ```
 
-A broader per-stage ledger — `records.jsonl` for every stage outcome,
-`durable-memory.jsonl` for accepted stages with artifacts, and per-adapter
-handoff files for downstream learning consumers — is designed but not wired
-up: the `WorkflowLearningSink` type that would write them exists in the code
-but is never constructed. Don't expect those files to appear. See
-[docs/architecture/dynamic-workflows.md](../architecture/dynamic-workflows.md#learning-records)
-for the current state and the plan to close this gap.
+`records.jsonl` holds one line per stage outcome, written at run completion:
+
+```bash
+cat .archon/workflows/<run-id>/learning/records.jsonl
+```
+
+Each line carries the stage's status, verification, quality score, artifact
+references, retry telemetry, and the spec's `learning_hooks`. That hook list
+is the routing selector: the topology fold reads this file after the run and
+dispatches hooked, completed stages into the learning stack. A spec with no
+`learning_hooks` still writes records — it just dispatches nothing.
+
+There is exactly one record stream. An earlier design also promised
+`durable-memory.jsonl`, `world-traces.jsonl`, `governed-proposals.jsonl` and
+six `adapter-*.jsonl` files; those were never written and no longer exist in
+the design. See
+[docs/architecture/dynamic-workflows.md](../architecture/dynamic-workflows.md#learning-records).
 
 ## Save and reuse a workflow
 

@@ -22,7 +22,6 @@ mod persistence;
 pub mod planner;
 pub mod policy;
 pub mod provider_tiers;
-pub mod reducers;
 mod remediation_items;
 mod request;
 pub mod run;
@@ -62,8 +61,8 @@ pub use generated_workflow::{
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
 };
 pub use learning::{
-    Verification, WorkflowLearningRecord, WorkflowLearningSink, WorkflowRunLearningSummary,
-    learning_records,
+    LEARNING_RECORDS_FILE, Verification, WorkflowLearningRecord, WorkflowLearningSink,
+    WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
@@ -71,7 +70,6 @@ pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{
     ProviderFamily, ProviderTierResolver, ResolvedProviderTier, classify_provider,
 };
-pub use reducers::{ReducerInput, ReducerOutput, ReducerRegistry};
 pub use run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
 pub use runner::{DeterministicStageRunner, StageRunOutput, StageRunRequest, WorkflowStageRunner};
 pub use spec::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec};

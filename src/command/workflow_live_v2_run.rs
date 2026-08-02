@@ -92,18 +92,21 @@ async fn run_v2_workflow_with_origin(
     result
 }
 
-/// Project a finished workflow run into the topology corpus.
+/// Project a finished workflow run into the topology corpus and the learning
+/// stack.
 ///
 /// Graph completion is the trigger the design names, and this is it for
-/// `/workflow`: the run's `events.jsonl` becomes a trace, then a single batched
-/// fold writes `.archon/topology.db` plus one `learning_events` summary row.
+/// `/workflow`: the run's `events.jsonl` becomes a topology trace and a single
+/// batched fold writes `.archon/topology.db` plus one `learning_events`
+/// summary row; then the learning bridge writes the run's record stream and
+/// routes it by the spec's `learning_hooks` into `LearningIntegration`.
 ///
-/// Runs on `spawn_blocking` because both halves are synchronous and the Cozo
+/// Runs on `spawn_blocking` because every part is synchronous and the Cozo
 /// write guard's retry loop sleeps on `thread::sleep` — roughly 19 seconds
 /// worst case, which on a tokio worker is a runtime stall.
 ///
-/// Entirely best-effort: a failure to record the corpus must never change what
-/// the user's run reports.
+/// Entirely best-effort: a failure to record must never change what the user's
+/// run reports.
 async fn fold_run_topology(cwd: &Path, store: &WorkflowStore, run_id: &str, task: &str) {
     let cwd = cwd.to_path_buf();
     let store = store.clone();
@@ -113,7 +116,8 @@ async fn fold_run_topology(cwd: &Path, store: &WorkflowStore, run_id: &str, task
         crate::command::topology_trace::project_workflow_run(&cwd, &store, &run_id);
         crate::command::topology_fold::fold_project_pending_blocking(
             &cwd, &run_id, &task, "default",
-        )
+        );
+        crate::command::topology_fold::bridge_workflow_learning(&cwd, &store, &run_id);
     })
     .await;
 }

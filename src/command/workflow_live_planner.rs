@@ -36,6 +36,14 @@ pub(super) struct WorkflowScriptPlan {
     pub(super) script_args: Option<serde_json::Value>,
     pub(super) governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     pub(super) generated_config: GeneratedWorkflowConfig,
+    /// The spec's `learning_hooks`, carried through to the persisted run.
+    ///
+    /// It is the routing selector the learning bridge dispatches on, so a
+    /// saved workflow that authored hooks must not lose them here — this
+    /// field used to be dropped on the floor, which left the only surface
+    /// that can populate it unable to reach its consumer. Empty for
+    /// generated plans: nothing authored a hook, so nothing dispatches.
+    pub(super) learning_hooks: Vec<String>,
 }
 
 impl WorkflowScriptPlan {
@@ -60,6 +68,7 @@ impl WorkflowScriptPlan {
             script_args: None,
             governed_learning_context: Vec::new(),
             generated_config,
+            learning_hooks: Vec::new(),
         }
     }
 
@@ -80,6 +89,7 @@ impl WorkflowScriptPlan {
             script_args: None,
             governed_learning_context: Vec::new(),
             generated_config: GeneratedWorkflowConfig::default(),
+            learning_hooks: spec.learning_hooks,
         }
     }
 
@@ -97,7 +107,7 @@ impl WorkflowScriptPlan {
                 .map(|call| metadata_stage(&self.task, call))
                 .collect(),
             permissions: Default::default(),
-            learning_hooks: Vec::new(),
+            learning_hooks: self.learning_hooks.clone(),
         }
     }
 
