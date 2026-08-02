@@ -236,7 +236,7 @@ fn windows_output_command(
     use_hook_shell: bool,
 ) -> tokio::process::Command {
     if use_hook_shell {
-        let shell = crate::hooks::shell::resolve_hook_shell();
+        let shell = archon_shell::resolve_shell();
         let mut command = tokio::process::Command::new(&shell.program);
         command
             .arg(shell.command_arg)
