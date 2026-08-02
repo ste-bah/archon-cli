@@ -164,7 +164,8 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
 #[cfg(windows)]
 async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = write_windows_output_fixture(dir.path());
+    let phase_file = dir.path().join("large-output.phase");
+    let fixture = write_windows_output_fixture(dir.path(), &phase_file);
     // Hang guard, not a speed assertion. What this test proves is capture
     // semantics: exit code, the shared 64 KiB bound, and exactly one truncation
     // marker across both pipes. Process-tree cleanup under a *short* timeout has
@@ -174,7 +175,7 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     // lost on a loaded GitHub Windows runner — the failure is startup latency,
     // not a stall: stdin is closed by `write_payload`, and `drain_pipe` keeps
     // reading past budget exhaustion, so the child can never block on a pipe.
-    let output = super::executor_process::run_command(
+    let result = super::executor_process::run_command(
         &windows_file_command(&fixture),
         b"{}",
         dir.path(),
@@ -182,8 +183,11 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
         "PreToolUse",
         60,
     )
-    .await
-    .expect("Windows hook fixture should run");
+    .await;
+    let output = result.unwrap_or_else(|error| {
+        let phase = std::fs::read_to_string(&phase_file).unwrap_or_else(|_| "not-started".into());
+        panic!("Windows hook fixture failed at phase {phase:?}: {error}");
+    });
 
     assert_eq!(output.exit_code, 2);
     assert!(output.stdout.len() + output.stderr.len() <= 64 * 1024);
@@ -298,17 +302,28 @@ Wait-Process -Id $child.Id
 }
 
 #[cfg(windows)]
-fn write_windows_output_fixture(dir: &std::path::Path) -> std::path::PathBuf {
+fn write_windows_output_fixture(
+    dir: &std::path::Path,
+    phase_file: &std::path::Path,
+) -> std::path::PathBuf {
     let fixture = dir.join("large-output.ps1");
+    let phase_file = phase_file.display().to_string().replace('\'', "''");
     std::fs::write(
         &fixture,
-        "\
+        format!(
+            "\
+$phase = '{phase_file}'
+[IO.File]::WriteAllText($phase, 'started')
 $null = [Console]::In.ReadToEnd()
+[IO.File]::WriteAllText($phase, 'stdin-eof')
 $bytes = New-Object byte[] 131072
 [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
+[IO.File]::WriteAllText($phase, 'stdout-written')
 [Console]::OpenStandardError().Write($bytes, 0, $bytes.Length)
+[IO.File]::WriteAllText($phase, 'stderr-written')
 exit 2
-",
+"
+        ),
     )
     .unwrap();
     fixture
