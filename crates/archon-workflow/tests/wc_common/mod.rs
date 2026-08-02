@@ -132,6 +132,11 @@ pub fn init_git_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
     git(&["init", "-q", "-b", "main"], root);
+    // Git for Windows defaults to core.autocrlf=true, so a file committed with
+    // LF is checked back out with CRLF and byte-exact content assertions fail
+    // on that platform only.
+    git(&["config", "core.autocrlf", "false"], root);
+    git(&["config", "core.eol", "lf"], root);
     git(&["config", "user.name", "t"], root);
     git(&["config", "user.email", "t@local"], root);
     std::fs::create_dir_all(root.join("src")).unwrap();

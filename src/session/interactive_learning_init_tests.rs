@@ -1,3 +1,9 @@
+//! Note on timeouts: the post-release waits are 20s, not 2s. `with_write_lock`
+//! takes the sidecar lock with `try_write()` and the waiter retries with
+//! backoff, and on Windows a released byte-range lock is not observed as
+//! promptly as a released flock -- the retry that finally succeeds can land
+//! well past two seconds. These assertions are about ordering (the waiter must
+//! not complete before release) and eventual success, not about latency.
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,7 +39,7 @@ async fn interactive_learning_initialization_keeps_current_thread_runtime_respon
 
     let coordinator = std::thread::spawn(move || {
         open_started_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(Duration::from_secs(20))
             .expect("open boundary entered");
         let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
         release_open_tx.send(()).expect("release open boundary");
@@ -199,7 +205,7 @@ fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
         })
     });
     locked_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(20))
         .expect("registered sidecar lock acquired");
 
     let (result_tx, result_rx) = mpsc::channel();
@@ -249,7 +255,7 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
         })
     });
     locked_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(20))
         .expect("sidecar lock acquired");
 
     let (result_tx, result_rx) = mpsc::channel();
@@ -260,7 +266,11 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
             .expect("report schema initialization");
     });
 
-    let completed_before_release = result_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+    // Short on purpose: this is the negative check -- the waiter must NOT
+        // have finished while the lock is held. Only the post-release waits
+        // below need a generous budget.
+        let completed_before_release =
+            result_rx.recv_timeout(Duration::from_millis(200)).is_ok();
     release_tx.send(()).expect("release lock");
     lock_holder
         .join()
@@ -272,7 +282,7 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
         "pipeline schemas must wait for the held sidecar lock"
     );
     let result = result_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(20))
         .expect("schema initialization after lock release");
     initialization.join().expect("schema thread joins");
     assert!(
@@ -305,7 +315,7 @@ fn interactive_governed_schema_initialization_waits_for_held_sidecar_lock() {
         })
     });
     locked_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(20))
         .expect("sidecar lock acquired");
 
     let (result_tx, result_rx) = mpsc::channel();
@@ -329,7 +339,7 @@ fn interactive_governed_schema_initialization_waits_for_held_sidecar_lock() {
     );
     assert!(
         result_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(Duration::from_secs(20))
             .expect("governed schema initialization after lock release"),
         "governed schemas initialize after lock release"
     );

@@ -31,7 +31,12 @@ pub fn normalize_target_for_repository(
 ) -> Result<String, WorkflowV2WriteSafetyError> {
     let trimmed = target.trim();
     let path = Path::new(trimmed);
-    if !path.is_absolute() {
+    // `has_root()` as well as `is_absolute()`. On Windows `/repo/src/a.rs` is
+    // not absolute -- it carries no drive letter -- but it is rooted, and
+    // treating it as relative here made an absolute in-repo change look like a
+    // path outside declared ownership. Same trap as the write-plan escape
+    // guard; on Unix the two are equivalent.
+    if !path.is_absolute() && !path.has_root() {
         return normalize_target(item_id, trimmed);
     }
     let Some(root) = repository_root
@@ -50,7 +55,7 @@ fn normalize_absolute_target(
     root: &str,
 ) -> Result<String, WorkflowV2WriteSafetyError> {
     let root_path = Path::new(root);
-    if !root_path.is_absolute() {
+    if !root_path.is_absolute() && !root_path.has_root() {
         return Err(unsafe_target(item_id, target));
     }
     let clean_root = clean_absolute_path(item_id, root, root_path)?;

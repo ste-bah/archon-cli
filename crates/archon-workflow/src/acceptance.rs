@@ -147,7 +147,7 @@ pub(crate) fn run_verify_command_capture(
 /// Falls back to bare `sh` so the error message stays the familiar one when no
 /// shell can be found at all.
 #[cfg(windows)]
-fn shell_program() -> std::ffi::OsString {
+pub(crate) fn shell_program() -> std::ffi::OsString {
     use std::path::PathBuf;
 
     if Command::new("sh").arg("-c").arg("exit 0").output().is_ok() {
@@ -176,7 +176,7 @@ fn shell_program() -> std::ffi::OsString {
 }
 
 #[cfg(not(windows))]
-fn shell_program() -> std::ffi::OsString {
+pub(crate) fn shell_program() -> std::ffi::OsString {
     "sh".into()
 }
 
