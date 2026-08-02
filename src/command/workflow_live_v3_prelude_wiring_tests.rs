@@ -209,8 +209,8 @@ mod prelude_wiring_tests {
     #[test]
     fn the_success_break_precedes_the_transport_guards_in_the_real_loop() {
         let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
-        let body = &prelude()[loop_start
-            ..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
+        let body = &prelude()
+            [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
 
         let check_dispatch = body
             .find("label: `review-verify-${slug(taskId)}-${round}`")
@@ -251,8 +251,8 @@ mod prelude_wiring_tests {
     #[test]
     fn the_round_loop_guards_use_the_success_aware_transport_predicate() {
         let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
-        let body = &prelude()[loop_start
-            ..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
+        let body = &prelude()
+            [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
 
         assert!(
             !body.contains("transportFailure(fix)") && !body.contains("transportFailure(check)"),

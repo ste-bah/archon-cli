@@ -34,9 +34,13 @@ pub(super) fn focused_completion_evidence_valid(item: &serde_json::Value) -> boo
         item.get("status").and_then(serde_json::Value::as_str),
         Some("accepted" | "noop")
     );
-    let versioned = item.get("source_fingerprint").and_then(serde_json::Value::as_str)
+    let versioned = item
+        .get("source_fingerprint")
+        .and_then(serde_json::Value::as_str)
         == Some("focused-verification-evidence-v2");
-    let kind = item.get("evidence_kind").and_then(serde_json::Value::as_str)
+    let kind = item
+        .get("evidence_kind")
+        .and_then(serde_json::Value::as_str)
         == Some("focused_verification");
     accepted && versioned && kind && focused_completion_has_refs(item)
 }

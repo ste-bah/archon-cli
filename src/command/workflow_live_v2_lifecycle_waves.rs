@@ -22,16 +22,14 @@ impl LifecycleDriver {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             std::mem::take(&mut state.pending_implementation_items)
         };
-        inventory =
-            workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
-                &contract,
-                &inventory,
-                pending_implementation_items,
-            );
+        inventory = workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
+            &contract,
+            &inventory,
+            pending_implementation_items,
+        );
         let (reconciled_inventory, mut noop_reclassified_ids) =
             workflow_live_v2_lifecycle_noop_routing::reclassify_inventory_contradicted_noops(
-                &contract,
-                &inventory,
+                &contract, &inventory,
             );
         inventory = reconciled_inventory;
         {
@@ -62,7 +60,8 @@ impl LifecycleDriver {
         let mut implementation_wave_index = 1usize;
 
         while !remaining_items.is_empty() && dependency_iteration <= self.max_dependency_waves {
-            let ready_items = support::ready_items_from(&contract, &remaining_items, &completed_ids);
+            let ready_items =
+                support::ready_items_from(&contract, &remaining_items, &completed_ids);
             if ready_items.is_empty() {
                 let repaired = self
                     .repair_dependency_deadlock(
@@ -82,9 +81,7 @@ impl LifecycleDriver {
                     );
                     remaining_items = support::array(inventory.get("items"))
                         .into_iter()
-                        .filter(|item| {
-                            !support::item_is_completed(&contract, item, &completed_ids)
-                        })
+                        .filter(|item| !support::item_is_completed(&contract, item, &completed_ids))
                         .collect();
                     continue;
                 }
@@ -243,9 +240,8 @@ impl LifecycleDriver {
                     .completed_ids
                     .insert(id);
             }
-            remaining_items.retain(|item| {
-                !support::item_is_completed(&contract, item, &completed_ids)
-            });
+            remaining_items
+                .retain(|item| !support::item_is_completed(&contract, item, &completed_ids));
             if !ready_implementation_items.is_empty() {
                 implementation_wave_index += 1;
             }
@@ -312,8 +308,9 @@ impl LifecycleDriver {
                 &graph_issues,
                 &repair,
             );
-            *inventory = contract
-                .normalize_inventory(&support::merge_inventory_repair(&contract, inventory, &repair));
+            *inventory = contract.normalize_inventory(&support::merge_inventory_repair(
+                &contract, inventory, &repair,
+            ));
             *remaining_items = support::array(inventory.get("items"))
                 .into_iter()
                 .filter(|item| !support::item_is_completed(&contract, item, completed_ids))

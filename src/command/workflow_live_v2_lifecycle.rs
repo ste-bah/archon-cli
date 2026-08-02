@@ -54,10 +54,9 @@ impl WorkflowV2ScriptRunner {
             ));
         };
         let target_repository_root = self.runtime.target_repository_root.clone();
-        let project_artifact_root = archon_workflow::project_artifact_context_from_v2_root(
-            self.v2_store.root(),
-        )
-        .project_root;
+        let project_artifact_root =
+            archon_workflow::project_artifact_context_from_v2_root(self.v2_store.root())
+                .project_root;
         let resume_completed_ids = self.resume_completed_ids.clone();
         let generated_config = self.runtime.generated_config.clone();
         let host = Arc::new(WorkflowScriptHost {
@@ -138,7 +137,6 @@ pub(super) struct LifecycleEvidence {
 include!("workflow_live_v2_lifecycle_driver_a.rs");
 include!("workflow_live_v2_lifecycle_driver_b.rs");
 include!("workflow_live_v2_lifecycle_driver_c.rs");
-
 
 pub(super) fn normalize_null_report_collections(value: &mut serde_json::Value) {
     const COLLECTION_FIELDS: &[&str] = &[

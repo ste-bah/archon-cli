@@ -38,7 +38,9 @@ impl LifecycleDriver {
         // Round 1 reuses the per-task findings the dependency waves already
         // produced (`None` = do not re-review), so the diamond costs nothing
         // extra here.
-        let mut review = self.run_review_round(review_iteration, None, evidence).await?;
+        let mut review = self
+            .run_review_round(review_iteration, None, evidence)
+            .await?;
 
         while remediation::review_needs_remediation(&review) && review_iteration <= 6 {
             let raw_inventory = self
@@ -155,12 +157,7 @@ impl LifecycleDriver {
                 return Ok(());
             }
             if !self
-                .run_review_verification_gate(
-                    review_iteration,
-                    &review,
-                    &review_fixes,
-                    evidence,
-                )
+                .run_review_verification_gate(review_iteration, &review, &review_fixes, evidence)
                 .await?
             {
                 return Ok(());
@@ -323,8 +320,7 @@ impl LifecycleDriver {
                 }));
             }
             final_iteration += 1;
-            let reconciliation_id =
-                format!("final-evidence-reconciliation-{final_iteration}");
+            let reconciliation_id = format!("final-evidence-reconciliation-{final_iteration}");
             let next_reconciliation = self
                 .reduce(
                     &reconciliation_id,

@@ -66,7 +66,8 @@ impl LifecycleDriver {
         while !remediation::remediation_inventory_ready(&remediation_inventory)
             && repair_attempt <= self.max_repair_iterations
         {
-            let call_id = format!("remediation-empty-inventory-repair-{wave_index}-{repair_attempt}");
+            let call_id =
+                format!("remediation-empty-inventory-repair-{wave_index}-{repair_attempt}");
             let repair = self
                 .reduce(
                     &call_id,
