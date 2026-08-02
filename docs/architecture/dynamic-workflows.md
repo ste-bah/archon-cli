@@ -183,28 +183,23 @@ Raw tool output and provider-private reasoning fields are not returned.
 
 ## Learning records
 
-Completed and failed workflow runs write inspectable records under:
+Every run gets a `.archon/workflows/<run-id>/learning/` directory — it is one
+of the fixed run subdirectories created up front — but today only one thing
+writes into it: `record_write_coordination_outcome` appends metadata-only
+rows (file paths, blake3 hashes, sizes; never patch content) to
+`write-coordination/outcomes.jsonl` when a coordinated write completes.
 
-```text
-.archon/workflows/<run-id>/learning/
-```
-
-The ledger files are:
-
-- `records.jsonl` — every stage outcome for audit visibility
-- `durable-memory.jsonl` — accepted stages with artifacts only
-- `world-traces.jsonl` — trace references for world-model/JEPA consumers
-- `governed-proposals.jsonl` — proposal records only; no auto-apply
-- `adapter-sona.jsonl`
-- `adapter-rlm.jsonl`
-- `adapter-reflexion.jsonl`
-- `adapter-reasoning-bank.jsonl`
-- `adapter-jepa.jsonl`
-- `adapter-world-model.jsonl`
-- `adapter-records.jsonl` — combined direct handoff records
-
-Failed, forced, skipped, or still-running stages are recorded for audit but are
-not treated as durable memory.
+`WorkflowLearningSink`, the type that would fan a run's stage outcomes out
+into `records.jsonl`, `durable-memory.jsonl`, `world-traces.jsonl`,
+`governed-proposals.jsonl`, and a set of per-adapter files, is defined in
+[`learning.rs`](../../crates/archon-workflow/src/learning.rs) and
+re-exported from the crate root, but nothing constructs or calls it.
+Until that changes, none of those files are written, and a reader should not
+expect to find them. The intended fix collapses that fan-out to a single
+record stream and gives it a real consumer above this crate — the thin
+workflow crate cannot depend on the learning stack, so the handoff itself is
+the right shape and only the consumer is missing. It is planned, not
+scheduled.
 
 ## Current integration status
 
@@ -212,7 +207,9 @@ The implementation provides the provider-neutral crate, spec validation,
 durable store, event sanitization, deterministic shell executor, live TUI
 planner and runner through the active LLM adapter, lifecycle commands, forced
 acceptance audit, template sanitizer, TUI workflow view, web workflow
-SSE/control API, and direct learning adapter records.
+SSE/control API, and metadata-only write-coordination outcome records. The
+broader per-stage learning fan-out described above is not part of what ships
+today.
 
 The static `/archon-code`, `/archon-research`, and `/gametheory` paths remain
 the production subagent-backed pipelines. Dynamic workflows are the new runtime
