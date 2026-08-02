@@ -100,7 +100,8 @@ fn write_fanout_outcome_gap_evidence_uses_schema_kind() {
 
     let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
     let evidence = result.data["outcomes"][0]["evidence"].clone();
-    let parsed: Vec<WorkflowV2Evidence> = serde_json::from_value(evidence).expect("evidence schema");
+    let parsed: Vec<WorkflowV2Evidence> =
+        serde_json::from_value(evidence).expect("evidence schema");
 
     assert!(parsed.iter().any(|item| {
         item.kind == WorkflowV2EvidenceKind::Review && item.summary.contains("missing-evidence")

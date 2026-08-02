@@ -37,10 +37,9 @@ fn coordinator_undeclared_patch_wording_is_branch_scoped_safety_data() {
 
 #[test]
 fn compound_repair_failure_uses_root_rejection_kind() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d26_compound_repair_failure.json"
-    ))
-    .expect("fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/d26_compound_repair_failure.json"))
+            .expect("fixture");
     let error = fixture["error"].as_str().expect("error");
 
     assert_eq!(write_branch_error_kind(error), BranchFailureKind::Contract);
@@ -103,7 +102,9 @@ fn post_parse_worktree_rejection_persists_the_result_body() {
         .expect("rejected output log");
     let log: serde_json::Value = serde_json::from_str(&body).expect("rejected output JSON");
     assert_eq!(log["rejections"][0]["attempt"], "validation");
-    assert!(log["rejections"][0]["raw_body"]
-        .as_str()
-        .is_some_and(|body| body.contains("agent accepted without enough evidence")));
+    assert!(
+        log["rejections"][0]["raw_body"]
+            .as_str()
+            .is_some_and(|body| body.contains("agent accepted without enough evidence"))
+    );
 }

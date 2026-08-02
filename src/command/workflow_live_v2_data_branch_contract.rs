@@ -77,7 +77,9 @@ pub(super) fn is_actual_execution_failure(outcome: &WorkflowV2BranchOutcome) -> 
         || error.contains("rate limit")
 }
 
-pub(super) fn failure_kind_for_outcome(outcome: &WorkflowV2BranchOutcome) -> Option<BranchFailureKind> {
+pub(super) fn failure_kind_for_outcome(
+    outcome: &WorkflowV2BranchOutcome,
+) -> Option<BranchFailureKind> {
     match outcome.status {
         WorkflowV2Status::Failed => {
             let error = outcome

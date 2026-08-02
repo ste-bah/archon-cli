@@ -153,7 +153,10 @@ pub(super) fn pack_result_like_object(
     serde_json::Value::Object(packed)
 }
 
-pub(super) fn compact_known_result_field(key: &str, value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn compact_known_result_field(
+    key: &str,
+    value: &serde_json::Value,
+) -> serde_json::Value {
     match key {
         "summary" => truncate_json_text(value),
         "evidence" => serde_json::Value::Array(

@@ -162,7 +162,10 @@ pub(super) fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> Workfl
     result
 }
 
-pub(super) fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) -> WorkflowV2Result {
+pub(super) fn failed_branch_error_result(
+    outcome: &WorkflowV2BranchOutcome,
+    error: &str,
+) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::Failed,
         summary: format!(
@@ -189,7 +192,9 @@ pub(super) fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, erro
     result
 }
 
-pub(super) fn typed_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
+pub(super) fn typed_results_from_outcomes(
+    outcomes: &[WorkflowV2BranchOutcome],
+) -> Vec<WorkflowV2Result> {
     outcomes
         .iter()
         .filter_map(|outcome| outcome.result.clone())

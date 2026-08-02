@@ -240,7 +240,9 @@ pub(in super::super) fn attach_completion_evidence_for_call(
     outcome.completion_evidence = evidence;
 }
 
-pub(super) fn task_completion_evidence_kind(call_id: &str) -> Option<WorkflowV2TaskCompletionEvidenceKind> {
+pub(super) fn task_completion_evidence_kind(
+    call_id: &str,
+) -> Option<WorkflowV2TaskCompletionEvidenceKind> {
     if call_id.starts_with("noop-proof-verification-")
         || call_id.starts_with("noop-proof-reverification-")
     {
