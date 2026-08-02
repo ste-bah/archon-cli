@@ -65,7 +65,7 @@ pub use resume::WorkflowV2ResumeDecision;
 pub use runtime::{WorkflowV2CallExecution, WorkflowV2RunSummary, WorkflowV2Runtime};
 pub use scheduler::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CancellationToken, WorkflowV2FanoutItem,
-    WorkflowV2FanoutReport, WorkflowV2Scheduler, WorkflowV2SchedulerConfig,
+    WorkflowV2FanoutReport, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, stable_value_hash,
 };
 pub use task_record::{
     WorkflowV2ImplementationStatus, WorkflowV2TaskFileStatus, WorkflowV2TaskRecord,

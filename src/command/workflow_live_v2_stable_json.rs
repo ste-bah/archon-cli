@@ -1,32 +1,78 @@
-use std::collections::BTreeMap;
+//! Content hashing for workflow V2 call inputs and evidence snapshots.
+//!
+//! This used to canonicalize the value first: sort object keys, and sort ARRAY
+//! ELEMENTS recursively at every depth. Both were wrong-to-useless.
+//!
+//! Object-key sorting was redundant. `serde_json`'s `preserve_order` feature is
+//! not enabled in this workspace, so `Map` is a `BTreeMap` and key order is
+//! already deterministic on serialization.
+//!
+//! Array sorting was an outright defect. Array ORDER is semantically meaningful
+//! in exactly the payloads hashed here, so `[a, b]` and `[b, a]` hashing alike
+//! conflated genuinely different inputs and let a reordered run replay the wrong
+//! cached result:
+//!
+//! - Array position IS fan-out branch identity: `fanout_item_id` falls back to
+//!   the item index when an item declares no id/task_id/work_unit_id, and that
+//!   index becomes the branch call id. Permuting `source_data` reassigns every
+//!   branch while a sorting hash stays identical.
+//! - Reducer arguments are a positional tuple consumed positionally in Rust
+//!   (index 1 items, 2 result-with-outcomes, 3 verification records).
+//! - Declared artifact verifiers execute in array order, fail-fast.
+//!
+//! `source_data` is only stripped from the hashed input when a source
+//! fingerprint exists, and fingerprints are minted for a small set of wave ids
+//! only — so every `reduce`, every `finalReport` and the whole v3 path hashed
+//! raw `source_data` under the sorting rule.
+//!
+//! There is now ONE hash for workflow JSON, the crate's `stable_value_hash`.
 
-use sha2::{Digest, Sha256};
-
+/// Hash a workflow JSON payload. Order-preserving; see the module docs.
 pub(super) fn stable_hash(value: &serde_json::Value) -> String {
-    let canonical = canonical_json(value);
-    let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
-    let digest = Sha256::digest(bytes);
-    format!("{digest:x}")
+    archon_workflow::stable_value_hash(value)
 }
 
-fn canonical_json(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(items) => {
-            let mut values = items.iter().map(canonical_json).collect::<Vec<_>>();
-            values.sort_by(|left, right| {
-                serde_json::to_string(left)
-                    .unwrap_or_default()
-                    .cmp(&serde_json::to_string(right).unwrap_or_default())
-            });
-            serde_json::Value::Array(values)
-        }
-        serde_json::Value::Object(object) => {
-            let mut sorted = serde_json::Map::new();
-            for (key, value) in object.iter().collect::<BTreeMap<_, _>>() {
-                sorted.insert(key.clone(), canonical_json(value));
-            }
-            serde_json::Value::Object(sorted)
-        }
-        other => other.clone(),
+#[cfg(test)]
+mod tests {
+    use super::stable_hash;
+
+    #[test]
+    fn permuted_arrays_hash_differently() {
+        // Array position is branch identity, a positional reducer argument, and
+        // verifier execution order. A permutation is a DIFFERENT input.
+        let left = serde_json::json!({ "source_data": [{ "item_id": "a" }, { "item_id": "b" }] });
+        let right = serde_json::json!({ "source_data": [{ "item_id": "b" }, { "item_id": "a" }] });
+        assert_ne!(stable_hash(&left), stable_hash(&right));
+    }
+
+    #[test]
+    fn permuted_nested_arrays_hash_differently() {
+        let left = serde_json::json!({ "outer": [{ "inner": ["a", "b"] }] });
+        let right = serde_json::json!({ "outer": [{ "inner": ["b", "a"] }] });
+        assert_ne!(stable_hash(&left), stable_hash(&right));
+    }
+
+    #[test]
+    fn object_key_order_is_already_canonical() {
+        // `preserve_order` is off, so both literals build the same BTreeMap.
+        let left = serde_json::json!({ "alpha": 1, "beta": 2 });
+        let right = serde_json::json!({ "beta": 2, "alpha": 1 });
+        assert_eq!(stable_hash(&left), stable_hash(&right));
+    }
+
+    #[test]
+    fn identical_values_hash_identically() {
+        let value =
+            serde_json::json!({ "call_id": "implement-task-001", "source_data": [1, 2, 3] });
+        assert_eq!(stable_hash(&value), stable_hash(&value.clone()));
+    }
+
+    #[test]
+    fn matches_the_crate_hash() {
+        let value = serde_json::json!({ "source_data": ["b", "a"] });
+        assert_eq!(
+            stable_hash(&value),
+            archon_workflow::stable_value_hash(&value)
+        );
     }
 }

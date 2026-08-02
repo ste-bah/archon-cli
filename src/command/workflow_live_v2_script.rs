@@ -60,6 +60,22 @@ pub(super) struct WorkflowV2ScriptRunner {
     script_args: Option<serde_json::Value>,
     adopt_accepted_cache: bool,
     resume_completed_ids: std::collections::BTreeSet<String>,
+    /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
+    /// the task universe's dependency edges.
+    ///
+    /// The store's invalidation routines only ever fire from the operator's
+    /// `workflow restart` command; nothing marks a downstream record stale when
+    /// an upstream call re-executes mid-run and produces different output. The
+    /// content-keyed reuse paths do not need that — a changed input changes the
+    /// input hash and they re-execute on their own. The two reuse paths that
+    /// legitimately cannot key on the input hash do, so they consult this set
+    /// instead: reuse is refused for any record covering a task that is
+    /// downstream of work this run has already redone.
+    ///
+    /// Shared by `Arc` across runner clones on purpose: the v3 authoring
+    /// bootstrap and the authored run it hands off to are one logical run, and
+    /// taint must not be laundered by the clone.
+    reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -88,6 +104,7 @@ impl WorkflowV2ScriptRunner {
             script_args,
             adopt_accepted_cache: false,
             resume_completed_ids: Default::default(),
+            reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
         }
     }
 
