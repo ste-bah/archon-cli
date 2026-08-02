@@ -32,9 +32,9 @@ pub(crate) use runtime::{
 };
 pub(super) use status::load_world_model_stats;
 pub(crate) use status::render_world_status;
-pub(crate) use status::{WorldInspectionRow, world_inspection_rows};
 #[cfg(test)]
 pub(super) use status::render_world_status_with_stats;
+pub(crate) use status::{WorldInspectionRow, world_inspection_rows};
 pub(crate) use trainer_runtime::{
     latest_daemon_trainer_event, run_daemon_trainer_tick_controlled_with_activity,
     schedule_dynamic_trainer_tick,

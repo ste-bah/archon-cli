@@ -128,9 +128,7 @@ fn effect_of(verb: &str) -> &'static str {
         }
         "rollback" => "This reverts the active model to a previous promotion.",
         "guard" => "This changes runtime guardrail policy, which gates tool admission.",
-        "train" | "train-jepa" => {
-            "This starts a training run and writes a new candidate model."
-        }
+        "train" | "train-jepa" => "This starts a training run and writes a new candidate model.",
         "trainer-tick" => "This forces a daemon trainer tick outside its schedule.",
         "ingest" => "This writes to the trace corpus the model trains on.",
         "record-outcome" => "This writes an outcome label into the trace corpus.",
