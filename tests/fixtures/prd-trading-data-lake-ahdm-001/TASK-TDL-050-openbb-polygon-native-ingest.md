@@ -16,6 +16,8 @@ required_tools: []
 deliverable_contracts:
   - kind: native_dataset_manifest
     artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json
+  - kind: trading_data_registry_entry
+    artifact_path: .archon/trading-lab/data/registry.json
 ```
 
 ## Purpose

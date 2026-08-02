@@ -16,6 +16,8 @@ required_tools: [tv_health_check, chart_get_state, quote_get]
 deliverable_contracts:
   - kind: provider_snapshot
     artifact_path: .archon/trading-lab/data/snapshots/<provider>/<symbol>.json
+  - kind: trading_data_registry_entry
+    artifact_path: .archon/trading-lab/data/registry.json
 ```
 
 ## Purpose

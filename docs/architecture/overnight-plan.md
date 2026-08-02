@@ -107,6 +107,63 @@ manifest path, all wave 4, all `worktree` write mode); the cycle diagnostic nami
 Whatever the lint agent leaves. Then one full-workspace run — the only one — with the disk
 cleaned first.
 
+### Phase 6 — requirement traceability and satisfaction proof
+
+The PRD half of the original graph-engineering idea, made executable. Motivated by a real failure:
+`TASK-TDL-001`'s prior-run finding F1 — *"Accepted verification treats 170 unique IDs as satisfying
+normative requirement mapping… artifact sample has repeated generic evidence for REQ-DL-001..004."*
+An LLM wrote a gap report claiming 93 requirements were mapped, padded with reused evidence, and a
+reviewer caught it. A graph with anchored edges makes that structurally impossible: an edge either
+names a `file:line` or it does not exist.
+
+**D5 — `implements:` is an explicit task field, not inferred.** Task YAML gains
+`implements: [REQ-DL-020, REQ-DL-021]`. This restores a regression — the older XML task format
+carried `<implements><requirement_ref>` and the YAML format dropped it. Today only 3 of the PRD's
+93 requirement IDs are cited in any task file, so there is no binding from a requirement to the
+verifier meant to prove it. Inference was considered and rejected: F1 is direct evidence that
+inferred mapping gets padded, and an explicit field enables two checks inference cannot — every
+cited ID must exist in the PRD, and every requirement must be claimed by at least one task
+(an unclaimed requirement is a decomposition gap, reported not invented).
+
+**The proof ladder.** Every requirement→code edge carries a level. An unproven edge never counts,
+and never satisfies a promotion gate — the same rule REQ-BT-003 already applies to diagnostic
+overrides.
+
+| Level | Meaning | Mechanism |
+| --- | --- | --- |
+| `Candidate` | code is *about* the requirement | `archon-leann` symbol-level search: `file_path`, `line_start`/`line_end`, `file_hash` |
+| `Exercised` | a named verifier ran and touched the anchor | verifier `commands_run` evidence + `TraceKind::FileRead` from the ambient trace |
+| `Falsifiable` | breaking the anchor breaks the verifier | requirement-scoped mutation, `error`-severity requirements only (PRD §21) |
+
+`Exercised` is the level that kills F1: one command's trace cannot touch four unrelated anchors, so
+generic evidence repeated across `REQ-DL-001..004` cannot promote. `file_hash` makes an anchor
+invalidatable — when the file changes the edge is known-stale rather than silently wrong.
+
+**Wiring, not new subsystems.** Extract the 93 IDs by regex (they are regular and mostly on their
+own bullet line, no LLM needed) into `EntityRecord`s; anchor each via `search_with_filter` scoped by
+the task's declared paths; store as `RelationRecord`s; `scan_claims` already detects contradictions
+between them.
+
+**Two constraints, both real.** `archon-leann`'s `replace_file_with_cancel`/`remove_file` hold the
+Cozo write lock across an entire `multi_transaction` — the longest critical section in the tree — so
+indexing must run out of band, never mid-workflow. And `Search::new` needs an `EmbeddingProvider`, so
+indexing the repository is a genuine one-off cost with ~93 queries per PRD after it.
+
+`FileRead` is file-granular. Line-granular proof needs coverage (`cargo-llvm-cov`); there is already
+a `coverage-analyzer` agent under `.archon/agents/coding-pipeline/`. Treat that as the upgrade path,
+not the first cut.
+
+### Phase 7 — SONA-driven parameter tuning
+
+M5 piece 2, revised: `crates/archon-pipeline/src/learning/sona/` already implements the weight
+learning a corpus query would have approximated — `get_weight(route, pattern_id)`, `provide_feedback`,
+`check_drift`, `save_checkpoint`/`rollback`. Wire it to the four `GeneratedWorkflowConfig`
+parameters, keyed by task class. Recorded on [issue #112](https://github.com/ste-bah/archon-cli/issues/112).
+
+**SONA must not touch Phase 6.** It produces a weight; satisfaction is binary and evidence-anchored.
+Letting the learning subsystem answer the verification question reproduces F1 with better maths
+behind it.
+
 ## Out of scope, recorded
 
 M5 motif selection is [issue #112](https://github.com/ste-bah/archon-cli/issues/112): it needs a

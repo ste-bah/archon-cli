@@ -18,6 +18,8 @@ deliverable_contracts:
     artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json
   - kind: provider_capability_record
     artifact_path: .archon/trading-lab/data/provider-capabilities.json
+  - kind: trading_data_registry_entry
+    artifact_path: .archon/trading-lab/data/registry.json
 ```
 
 ## Purpose
