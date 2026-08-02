@@ -164,6 +164,38 @@ parameters, keyed by task class. Recorded on [issue #112](https://github.com/ste
 Letting the learning subsystem answer the verification question reproduces F1 with better maths
 behind it.
 
+### Phase 8 — motif selection, reframed as structural variation
+
+[Issue #112](https://github.com/ste-bah/archon-cli/issues/112) was filed as deferred on the grounds
+that there is no motif library to select among, and that an alternative topology would have to
+reproduce the 62-entry plan's earned failure handling (`blocked-*` stages, repair loops, noop-proof
+verification, evidence reconciliation, dependency-deadlock detection, final zero-gap audit).
+
+That reasoning holds for *rival plans*. It does not hold for *variations within the proven plan*, and
+three things landed since that make the variation form tractable:
+
+1. **A second shape now exists and is measured.** Moving `adversarial-review` from a terminal
+   `REDUCE` to a per-task `PARALLEL` stage was itself a motif change, and it produced a measurable
+   improvement — attribution became structural, and five findings that had been carried by hand for
+   months replay correctly.
+2. **The lint suite can score a topology.** Diamond conformance, verifier diversity, fake edges and
+   coupled fan-outs are computable on any `TaskGraph`, so a variation can be evaluated before it runs
+   and audited after.
+3. **SONA supplies the selection machinery**, including drift detection and rollback — see Phase 7.
+
+**So the feasible form is structural knobs on one well-tested topology, not a library of rival
+plans.** Every variation inherits the existing failure handling by construction, which was the whole
+objection. Candidate knobs, each already a real decision the plan makes:
+
+- review granularity — per task, per wave, or terminal
+- verifier count and diversity per task
+- repair and investigation iteration budgets (the `GeneratedWorkflowConfig` four)
+- fan-out width against the declared dependency graph
+
+Sequenced after Phase 7, because it needs SONA wired and a corpus with real runs in it. A knob with
+no outcome evidence for a task class holds its current default rather than being explored
+speculatively — the same fail-closed rule the rest of this document applies.
+
 ## Out of scope, recorded
 
 M5 motif selection is [issue #112](https://github.com/ste-bah/archon-cli/issues/112): it needs a
