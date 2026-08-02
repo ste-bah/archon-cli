@@ -214,8 +214,14 @@ fn daemon_heartbeats_while_job_blocks() {
     assert!(updated > started);
 }
 
+/// Wait for the daemon thread to pick up `name`.
+///
+/// The budget is generous on purpose: this is a positive wait that returns as
+/// soon as the job appears, so a large ceiling costs nothing on a fast machine.
+/// At the previous 2s it failed on a loaded Windows runner at 2.19s -- the
+/// daemon had simply not been scheduled yet.
 fn wait_for_job(root: &std::path::Path, name: &str) -> chrono::DateTime<chrono::Utc> {
-    for _ in 0..20 {
+    for _ in 0..300 {
         if let Some(state) = CognitiveDaemon::status(root, 1_000).unwrap().state
             && state.current_job.as_deref() == Some(name)
         {

@@ -309,6 +309,14 @@ fn headless_ping_pong_round_trip() {
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
         .env("ARCHON_LOG_DIR", &log_dir)
+        // XDG_DATA_HOME alone does not redirect the child's memory database:
+        // `dirs::data_dir()` reads it only on Linux, and falls back to the
+        // shell known-folder API on Windows and ~/Library/Application Support
+        // on macOS. Without this the spawned binary opened the runner's real
+        // memory.db, which every other concurrent test is also using, and Cozo
+        // panicked on open with `database is locked` -- so the child exited 1
+        // having written nothing and the test reported a bare stdout EOF.
+        .env("ARCHON_DATA_DIR", tmp.path().join("data").join("archon"))
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())
@@ -369,6 +377,14 @@ fn headless_invalid_json_returns_error() {
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
         .env("ARCHON_LOG_DIR", &log_dir)
+        // XDG_DATA_HOME alone does not redirect the child's memory database:
+        // `dirs::data_dir()` reads it only on Linux, and falls back to the
+        // shell known-folder API on Windows and ~/Library/Application Support
+        // on macOS. Without this the spawned binary opened the runner's real
+        // memory.db, which every other concurrent test is also using, and Cozo
+        // panicked on open with `database is locked` -- so the child exited 1
+        // having written nothing and the test reported a bare stdout EOF.
+        .env("ARCHON_DATA_DIR", tmp.path().join("data").join("archon"))
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())

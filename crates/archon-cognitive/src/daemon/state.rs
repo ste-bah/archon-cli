@@ -116,8 +116,7 @@ impl DaemonPaths {
         let raw = serde_json::to_string_pretty(state)?;
         let mut temp = tempfile::NamedTempFile::new_in(&self.root)?;
         temp.write_all(raw.as_bytes())?;
-        temp.persist(&self.state_path)
-            .map_err(|error| error.error)?;
+        persist_with_retry(temp, &self.state_path)?;
         Ok(())
     }
 
@@ -133,6 +132,41 @@ impl DaemonPaths {
         }
         Ok(())
     }
+}
+
+/// Replace `destination` with `temp`, retrying briefly on a transient denial.
+///
+/// A replace-rename is atomic on Unix whatever else has the destination open.
+/// Windows is not: `MoveFileEx` fails with `Access denied` (5) or
+/// `Sharing violation` (32) for as long as another handle is open on the
+/// target, and `CognitiveDaemon::status` opens exactly that file on every poll.
+/// A single heartbeat write losing that race returned an error the daemon loop
+/// treats as fatal, so a routine concurrent read could stop the heartbeat.
+fn persist_with_retry(
+    temp: tempfile::NamedTempFile,
+    destination: &Path,
+) -> Result<(), CognitiveError> {
+    const ATTEMPTS: usize = 50;
+
+    let mut temp = temp;
+    for attempt in 0..ATTEMPTS {
+        match temp.persist(destination) {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt + 1 < ATTEMPTS && is_transient_replace_error(&error.error) => {
+                temp = error.file;
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(error) => return Err(error.error.into()),
+        }
+    }
+    unreachable!("the final attempt returns rather than looping")
+}
+
+fn is_transient_replace_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ResourceBusy
+    ) || error.raw_os_error().is_some_and(|code| code == 32)
 }
 
 pub fn status_for(paths: &DaemonPaths, stale_ms: u64) -> Result<DaemonStatus, CognitiveError> {
