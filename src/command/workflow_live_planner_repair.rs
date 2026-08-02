@@ -259,53 +259,49 @@ async fn validate_or_repair_harness(
     const MAX_REPAIRS: usize = 2;
     let mut harness = raw;
     let mut attempts = Vec::new();
-    for attempt in 0..=MAX_REPAIRS {
-        match compile_harness_plan(task, task_universe.clone(), &harness, generated_config).await {
-            Ok(plan) => return Ok(plan),
-            Err(err) if attempt < MAX_REPAIRS => {
-                let error = err.to_string();
-                attempts.push(planner_attempt(
-                    "harness",
-                    attempt + 1,
-                    Some(&error),
-                    &harness,
-                ));
-                let repair_number = attempt + 1;
-                send_planner_notification(
-                    tui_tx,
-                    "provider-harness-validation-repair",
-                    TuiEvent::TextDelta(format!(
-                        "Workflow planner: generated harness failed validation ({err}); requesting repaired harness ({repair_number}/{MAX_REPAIRS})...\n"
-                    )),
-                )
-                .await
-                .map_err(|err| {
-                        PlannerFailure::with_attempts(err.to_string(), attempts.clone())
-                    })?;
-                harness = request_repaired_harness(
-                    task,
-                    task_universe.as_ref(),
-                    &harness,
-                    error,
-                    llm.clone(),
-                    tui_tx,
-                )
-                .await
-                .map_err(|err| PlannerFailure::with_attempts(err.to_string(), attempts.clone()))?;
-            }
-            Err(err) => {
-                let error = err.to_string();
-                attempts.push(planner_attempt(
-                    "harness",
-                    attempt + 1,
-                    Some(&error),
-                    &harness,
-                ));
-                return Err(PlannerFailure::with_attempts(error, attempts));
-            }
+    let mut attempt = 0usize;
+    // The loop yields the outcome directly, so exhausting the repair budget is
+    // an ordinary `break` value rather than a fall-through the compiler cannot
+    // rule out. There is no path off the end of this function.
+    loop {
+        let compiled =
+            compile_harness_plan(task, task_universe.clone(), &harness, generated_config).await;
+        let err = match compiled {
+            Ok(plan) => break Ok(plan),
+            Err(err) => err,
+        };
+        let error = err.to_string();
+        attempts.push(planner_attempt(
+            "harness",
+            attempt + 1,
+            Some(&error),
+            &harness,
+        ));
+        if attempt >= MAX_REPAIRS {
+            break Err(PlannerFailure::with_attempts(error, attempts));
         }
+        let repair_number = attempt + 1;
+        send_planner_notification(
+            tui_tx,
+            "provider-harness-validation-repair",
+            TuiEvent::TextDelta(format!(
+                "Workflow planner: generated harness failed validation ({err}); requesting repaired harness ({repair_number}/{MAX_REPAIRS})...\n"
+            )),
+        )
+        .await
+        .map_err(|err| PlannerFailure::with_attempts(err.to_string(), attempts.clone()))?;
+        harness = request_repaired_harness(
+            task,
+            task_universe.as_ref(),
+            &harness,
+            error,
+            llm.clone(),
+            tui_tx,
+        )
+        .await
+        .map_err(|err| PlannerFailure::with_attempts(err.to_string(), attempts.clone()))?;
+        attempt += 1;
     }
-    unreachable!("harness repair loop either returns plan or final error")
 }
 
 fn planner_attempt(
