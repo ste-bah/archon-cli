@@ -347,6 +347,7 @@ dependencies = [
  "archon-sdk",
  "archon-session",
  "archon-tools",
+ "archon-topology",
  "archon-trading",
  "archon-tui",
  "archon-video",
@@ -493,6 +494,7 @@ dependencies = [
  "archon-session",
  "archon-test-support",
  "archon-tools",
+ "archon-topology",
  "async-trait",
  "axum",
  "chrono",
@@ -1047,6 +1049,17 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "which",
+]
+
+[[package]]
+name = "archon-topology"
+version = "1.4.0"
+dependencies = [
+ "archon-workflow",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]

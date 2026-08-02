@@ -177,6 +177,7 @@ archon-observability = { path = "crates/archon-observability" }
 archon-world-model = { path = "crates/archon-world-model" }
 archon-reasoning-quality = { path = "crates/archon-reasoning-quality" }
 archon-workflow = { path = "crates/archon-workflow" }
+archon-topology = { path = "crates/archon-topology" }
 archon-lanham = { path = "crates/archon-lanham" }
 archon-draft = { path = "crates/archon-draft" }
 reqwest.workspace = true
