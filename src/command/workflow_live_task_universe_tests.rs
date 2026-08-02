@@ -453,38 +453,11 @@ fn malformed_deliverable_contract_fails_closed() {
     assert!(error.contains("invalid type"), "{error}");
 }
 
-/// The whole real 17-task universe, built the way a run builds it.
-#[test]
-fn the_real_seventeen_task_universe_builds_and_reconciles_both_edge_directions() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/prd-trading-data-lake-ahdm-001");
-    let universe = universe_at(&root)
-        .expect("the real task set must build a universe")
-        .expect("a decomposed-PRD task must yield a universe");
-    assert_eq!(universe.tasks.len(), 17);
-
-    let mut reversed = 0usize;
-    for task in &universe.tasks {
-        for blocked in &task.blocks_ids {
-            let dependent = universe
-                .tasks
-                .iter()
-                .find(|candidate| &candidate.canonical_task_id == blocked)
-                .expect("blocks target resolves to a task in the universe");
-            assert!(
-                dependent.dependency_ids.contains(&task.canonical_task_id),
-                "{} blocks {blocked}, so {blocked} must depend on it",
-                task.canonical_task_id
-            );
-            reversed += 1;
-        }
-    }
-    assert_eq!(reversed, 26, "the PRD declares 26 blocks edges");
-
-    // The audit task gates every other task; the last task gates nothing.
-    assert_eq!(universe.downstream_task_closure("TASK-TDL-001").len(), 17);
-    assert_eq!(universe.downstream_task_closure("TASK-TDL-140").len(), 1);
-}
+// The whole-fixture universe test that used to live here moved to
+// `workflow_live_v2_prd_pipeline_tests::the_dependency_graph_honours_both_depends_on_and_blocks`,
+// which makes the same 26-edge and downstream-closure assertions plus the
+// wave, plan and per-task-input checks the same fixture supports. Two copies of
+// it also pushed this file past the 500-line ceiling.
 
 fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
