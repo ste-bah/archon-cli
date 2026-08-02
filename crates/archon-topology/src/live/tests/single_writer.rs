@@ -184,8 +184,97 @@ fn invariant_2_declines_to_conclude_when_no_path_is_declared() {
     let unknown = WriteIntent {
         node_id: "b".into(),
         paths: vec![String::new(), "   ".into()],
+        shared_append: Vec::new(),
     };
     assert!(live.on_write_intent(SESSION, &unknown).is_allowed());
+}
+
+// ---------------------------------------------------------- shared appends
+
+fn append(node: &str, path: &str) -> WriteIntent {
+    WriteIntent::exclusive(node, Vec::new()).with_shared_append(vec![path.to_string()])
+}
+
+/// Admission must reach the same three answers the write coordinator plans by,
+/// because it is the same overlap table. Two nodes both asserting a coordinated
+/// append to one path do not race.
+#[test]
+fn invariant_2_admits_two_unrelated_nodes_appending_to_one_declared_path() {
+    let live = tracker(LiveTopologyConfig::default());
+    live.on_node_started(SESSION, "a");
+    live.on_node_started(SESSION, "b");
+    assert!(
+        live.on_write_intent(SESSION, &append("a", ".archon/data/registry.json"))
+            .is_allowed()
+    );
+    assert!(
+        live.on_write_intent(SESSION, &append("b", ".archon/data/registry.json"))
+            .is_allowed()
+    );
+}
+
+/// One side asserting coordination is not agreement, in either order.
+#[test]
+fn invariant_2_blocks_an_exclusive_write_against_a_declared_append() {
+    for (first, second) in [("append", "exclusive"), ("exclusive", "append")] {
+        let live = tracker(LiveTopologyConfig::default());
+        live.on_node_started(SESSION, "a");
+        live.on_node_started(SESSION, "b");
+        let intent = |node: &str, kind: &str| match kind {
+            "append" => append(node, ".archon/data/registry.json"),
+            _ => write(node, ".archon/data/registry.json"),
+        };
+        assert!(
+            live.on_write_intent(SESSION, &intent("a", first))
+                .is_allowed()
+        );
+        let verdict = live.on_write_intent(SESSION, &intent("b", second));
+        assert_eq!(
+            verdict.invariant(),
+            Some(Invariant::SingleWriter),
+            "{first} then {second} must block"
+        );
+        let reason = verdict.reason().expect("blocked carries a reason");
+        assert!(
+            reason.contains("both sides must declare the path as a shared append"),
+            "the reason must name the way out: {reason}"
+        );
+    }
+}
+
+/// The fail-safe. A shared-append claim naming a pattern rather than a file
+/// cannot be checked, so it conflicts — it must not pass by being downgraded.
+#[test]
+fn invariant_2_treats_an_unresolvable_shared_append_as_conflicting() {
+    let live = tracker(LiveTopologyConfig::default());
+    live.on_node_started(SESSION, "a");
+    live.on_node_started(SESSION, "b");
+    assert!(
+        live.on_write_intent(SESSION, &write("a", "src/lib.rs"))
+            .is_allowed()
+    );
+    assert!(
+        live.on_write_intent(SESSION, &append("b", ".archon/data/*.json"))
+            .is_blocked(),
+        "a pattern is not a coordinated claim on a file"
+    );
+}
+
+/// Nothing becomes concurrent by omission: an ordinary write to the same path
+/// still blocks, exactly as before this key existed.
+#[test]
+fn invariant_2_still_blocks_when_neither_side_declares_an_append() {
+    let live = tracker(LiveTopologyConfig::default());
+    live.on_node_started(SESSION, "a");
+    live.on_node_started(SESSION, "b");
+    assert!(
+        live.on_write_intent(SESSION, &write("a", ".archon/data/registry.json"))
+            .is_allowed()
+    );
+    assert!(
+        live.on_write_intent(SESSION, &write("b", ".archon/data/registry.json"))
+            .is_blocked()
+    );
 }
 
 #[test]

@@ -14,14 +14,14 @@
 //! ([`FusionKind::Fuse`]); otherwise they are two stages that could run at once
 //! ([`FusionKind::Parallelise`]).
 //!
-//! # Relation to `fake_edges`
+//! # Relation to `classify_edges`
 //!
-//! [`TaskGraph::fake_edges`](crate::FakeEdge) answers "is this *edge*
-//! justified", over every edge in the graph. This answers "is this *chain*
+//! [`TaskGraph::classify_edges`](crate::ClassifiedEdge) answers "what supports
+//! this *edge*", over every edge in the graph. This answers "is this *chain*
 //! shaped right", and only fires on a degenerate chain — sole predecessor, sole
 //! successor — where the remedy is mechanical. Both can fire on one pair. They
-//! are kept separate because the remedies differ: one deletes an edge, the
-//! other merges or re-levels two stages.
+//! are kept separate because the remedies differ: one questions an edge or the
+//! declaration behind it, the other merges or re-levels two stages.
 //!
 //! # Silence is the default
 //!

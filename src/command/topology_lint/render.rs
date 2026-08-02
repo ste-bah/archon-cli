@@ -6,6 +6,7 @@
 //! analysis crate and this module only arranges them.
 
 use anyhow::Result;
+use archon_topology::EdgeSupport;
 use archon_topology::ir::{TaskGraph, WriteTarget};
 
 /// Render the full report for `graph`.
@@ -24,7 +25,7 @@ pub(super) fn report(graph: &TaskGraph, subject: &str) -> Result<String> {
     ));
 
     out.push_str(&diamond_section(graph)?);
-    out.push_str(&fake_edge_section(graph)?);
+    out.push_str(&edge_support_section(graph)?);
     out.push_str(&fusion_section(graph)?);
     Ok(out)
 }
@@ -55,28 +56,69 @@ fn diamond_section(graph: &TaskGraph) -> Result<String> {
     Ok(out)
 }
 
-fn fake_edge_section(graph: &TaskGraph) -> Result<String> {
-    let edges = graph.fake_edges()?;
-    let mut out = String::from("\n## fake edges\n");
+/// Declared edges, split by what supports them.
+///
+/// Three classes, printed differently on purpose. `Dataflow` edges are silent —
+/// they are the expected case and listing them buries the rest. `OrderingOnly`
+/// edges are listed under an explicit heading that says they are not findings,
+/// because the reader has to be able to tell "the lint looked and concluded
+/// this edge is fine" apart from "the lint did not look". Only `Unsupported`
+/// edges are findings, and each carries the remedy the analysis wrote, which
+/// names both candidate causes rather than assuming the dependent is at fault.
+fn edge_support_section(graph: &TaskGraph) -> Result<String> {
+    let edges = graph.classify_edges()?;
+    let mut out = String::from("\n## dependency edges\n");
     let declared = graph
         .nodes
         .iter()
         .filter(|node| node.consumption_is_known())
         .count();
     if declared == 0 {
-        out.push_str("  no node declares what it consumes, so no edge can be shown unjustified.\n");
+        out.push_str("  no node declares what it consumes, so no edge can be classified.\n");
         return Ok(out);
     }
-    if edges.is_empty() {
-        out.push_str(&format!(
-            "  no findings across {declared} node(s) with declared consumption.\n"
-        ));
+
+    let dataflow = edges
+        .iter()
+        .filter(|edge| edge.support == EdgeSupport::Dataflow)
+        .count();
+    let ordering: Vec<_> = edges
+        .iter()
+        .filter(|edge| edge.support == EdgeSupport::OrderingOnly)
+        .collect();
+    let unsupported: Vec<_> = edges.iter().filter(|edge| edge.is_defect()).collect();
+
+    out.push_str(&format!(
+        "  {} edge(s) classified across {declared} node(s) with declared consumption: \
+         {dataflow} carrying dataflow, {} ordering-only, {} unsupported.\n",
+        edges.len(),
+        ordering.len(),
+        unsupported.len()
+    ));
+
+    if !ordering.is_empty() {
+        out.push_str("  ordering-only (not findings — code must exist before it runs):\n");
+        for edge in ordering {
+            out.push_str(&format!(
+                "    {} -> {}: {}\n        {}\n",
+                edge.dependent,
+                edge.dependency,
+                edge.headline(),
+                edge.remedy()
+            ));
+        }
+    }
+
+    if unsupported.is_empty() {
+        out.push_str("  no unsupported edges.\n");
         return Ok(out);
     }
-    for edge in &edges {
+    for edge in unsupported {
         out.push_str(&format!(
             "  {} -> {}: {}\n",
-            edge.dependent, edge.dependency, "no declared dataflow"
+            edge.dependent,
+            edge.dependency,
+            edge.headline()
         ));
         out.push_str(&format!(
             "      produced: {}\n      consumed: {}\n      {}\n",

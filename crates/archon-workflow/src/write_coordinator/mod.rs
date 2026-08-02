@@ -10,6 +10,7 @@ pub mod conflict_graph;
 pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
+pub mod shared_append;
 pub mod status;
 pub mod worktree_isolation;
 pub mod write_plan;
@@ -23,6 +24,11 @@ pub use coordinator::{
 };
 pub use patch_apply::{ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock};
 pub use patch_manifest::{CapturedPatch, ManifestStatus, PatchError, PatchManifest};
+pub use shared_append::{
+    SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,
+    resource_keys_for_targets_with_shared_append, shared_append_key,
+    shared_append_key_for_raw_target,
+};
 pub use worktree_isolation::{
     CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
 };

@@ -1,15 +1,18 @@
-//! Milestone 4: the three advisory lints.
+//! Milestone 4: stop-rule fusion and diamond conformance.
+//!
+//! The third lint — dependency-edge classification — has its own file,
+//! `edge_support_tests.rs`.
 //!
 //! The property every one of these has to hold is *silence on unknown*. Two of
 //! the three reason from dataflow, and the majority of graphs in this tree
 //! declare none — the `Vec<Subtask>` lowering has nothing to give and a lowered
 //! `WorkflowSpec` declares writes but never reads. A lint that treated "not
 //! declared" as "declared empty" would report every edge of every team graph as
-//! fake, which is the one failure mode that would make the suite worth turning
-//! off.
+//! unsupported, which is the one failure mode that would make the suite worth
+//! turning off.
 
 use archon_topology::ir::{
-    DataRef, FanoutSpec, GateKind, GraphOrigin, NodeRole, TaskGraph, TaskNode, WriteTarget,
+    FanoutSpec, GateKind, GraphOrigin, NodeRole, TaskGraph, TaskNode, WriteTarget,
 };
 use archon_topology::{DiamondFinding, FusionKind};
 
@@ -42,86 +45,6 @@ fn node(
         writes: writes.iter().map(|value| path(value)).collect(),
         ..TaskNode::new(id, role)
     }
-}
-
-// ------------------------------------------------------------- fake edges
-
-#[test]
-fn an_edge_whose_dependent_reads_what_the_dependency_writes_is_real() {
-    let g = graph(vec![
-        node("a", NodeRole::Work, &[], &[], &["out.json"]),
-        node("b", NodeRole::Work, &["a"], &["out.json"], &["final.json"]),
-    ]);
-    assert!(g.fake_edges().expect("valid").is_empty());
-}
-
-#[test]
-fn an_edge_with_no_overlapping_dataflow_is_reported_with_both_sides() {
-    let g = graph(vec![
-        node("a", NodeRole::Work, &[], &[], &["out.json"]),
-        node(
-            "b",
-            NodeRole::Work,
-            &["a"],
-            &["other.json"],
-            &["final.json"],
-        ),
-    ]);
-    let found = g.fake_edges().expect("valid");
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].dependent, "b");
-    assert_eq!(found[0].dependency, "a");
-    assert_eq!(found[0].produced, vec![path("out.json")]);
-    assert_eq!(found[0].consumed, vec![path("other.json")]);
-    assert!(found[0].remedy().contains("depends_on"));
-}
-
-/// The rule the whole suite rests on. `b` declares no consumption at all, so
-/// nothing can be concluded about its edge — not "it is fake", not "it is real".
-#[test]
-fn an_edge_is_never_reported_when_the_dependent_declares_no_consumption() {
-    let g = graph(vec![
-        node("a", NodeRole::Work, &[], &[], &["out.json"]),
-        node("b", NodeRole::Work, &["a"], &[], &[]),
-    ]);
-    assert!(g.fake_edges().expect("valid").is_empty());
-}
-
-#[test]
-fn an_edge_is_never_reported_when_the_dependency_declares_no_production() {
-    let g = graph(vec![
-        node("a", NodeRole::Work, &[], &[], &[]),
-        node("b", NodeRole::Work, &["a"], &["other.json"], &[]),
-    ]);
-    assert!(g.fake_edges().expect("valid").is_empty());
-}
-
-/// `consumes` is producer-keyed rather than resource-keyed, so a fan-out's
-/// `foreach` source justifies its edge on its own without any path overlap.
-#[test]
-fn a_resolved_producer_reference_justifies_an_edge_without_path_overlap() {
-    let g = graph(vec![
-        node("producer", NodeRole::Work, &[], &[], &["items.json"]),
-        TaskNode {
-            depends_on: vec!["producer".to_string()],
-            consumes: vec![DataRef::new("producer", "items")],
-            reads: vec![path("unrelated.json")],
-            ..TaskNode::new("wave", NodeRole::Work)
-        },
-    ]);
-    assert!(g.fake_edges().expect("valid").is_empty());
-}
-
-#[test]
-fn fake_edges_rejects_a_structurally_invalid_graph_rather_than_guessing() {
-    let g = graph(vec![node(
-        "b",
-        NodeRole::Work,
-        &["missing"],
-        &["x"],
-        &["y"],
-    )]);
-    assert!(g.fake_edges().is_err(), "an unknown dependency is an error");
 }
 
 // --------------------------------------------------------- stop-rule fusion
@@ -456,7 +379,7 @@ fn the_lints_return_findings_and_never_a_verdict() {
         node("a", NodeRole::Work, &[], &[], &["out.json"]),
         node("b", NodeRole::Work, &["a"], &["other.json"], &[]),
     ]);
-    let _: Vec<archon_topology::FakeEdge> = g.fake_edges().expect("valid");
+    let _: Vec<archon_topology::ClassifiedEdge> = g.classify_edges().expect("valid");
     let _: archon_topology::DiamondReport = g.diamond_conformance().expect("valid");
     let _: archon_topology::FusionReport = g.stop_rule_fusion().expect("valid");
     // The graph is otherwise usable: a lint finding changes nothing about it.

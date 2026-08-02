@@ -101,13 +101,43 @@ pub struct SpawnIntent {
 }
 
 /// A write about to happen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WriteIntent {
     /// Node performing the write.
     pub node_id: String,
-    /// Raw declared paths or globs. Normalisation and overlap are
-    /// `archon-workflow`'s write coordinator's business, not this crate's.
+    /// Raw declared paths or globs, claimed **exclusively**. Normalisation and
+    /// overlap are `archon-workflow`'s write coordinator's business, not this
+    /// crate's.
     pub paths: Vec<String>,
+    /// Raw declared paths the node appends to **under coordination**, claimed
+    /// as `ResourceKey::SharedAppend`.
+    ///
+    /// Empty by default and never inferred: a path is exclusive unless the
+    /// caller puts it here. Two nodes that both list the same path here do not
+    /// conflict; a node that lists it here against another that lists it in
+    /// [`WriteIntent::paths`] does, because the second wants the file to
+    /// itself. Declaring it asserts the write is atomic; it does not make it
+    /// atomic.
+    pub shared_append: Vec<String>,
+}
+
+impl WriteIntent {
+    /// An exclusive claim on `paths` — the default reading of a write.
+    #[must_use]
+    pub fn exclusive(node_id: impl Into<String>, paths: Vec<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            paths,
+            shared_append: Vec::new(),
+        }
+    }
+
+    /// Add paths this node appends to under coordination.
+    #[must_use]
+    pub fn with_shared_append(mut self, paths: Vec<String>) -> Self {
+        self.shared_append = paths;
+        self
+    }
 }
 
 /// A tool call about to run.

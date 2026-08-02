@@ -42,7 +42,8 @@
 use super::LiveTopologyConfig;
 use super::state::SessionState;
 use super::verdict::{Invariant, Verdict, WriteIntent};
-use archon_workflow::write_coordinator::write_plan::resource_key_for_raw_target;
+use archon_workflow::write_coordinator::shared_append::shared_append_key_for_raw_target;
+use archon_workflow::write_coordinator::write_plan::{ResourceKey, resource_key_for_raw_target};
 
 /// Admit a write, claiming its paths when admitted.
 pub(super) fn admit_write(
@@ -50,37 +51,64 @@ pub(super) fn admit_write(
     config: LiveTopologyConfig,
     intent: &WriteIntent,
 ) -> Verdict {
-    let paths: Vec<&String> = intent
-        .paths
-        .iter()
-        .filter(|path| !path.trim().is_empty())
-        .collect();
-    if paths.is_empty() {
+    let claims = declared_claims(intent);
+    if claims.is_empty() {
         return Verdict::Allowed;
     }
 
     if config.single_writer {
-        for path in &paths {
-            let key = resource_key_for_raw_target(path);
-            if let Some(claim) = state.conflicting_claims(&intent.node_id, &key) {
-                let reason = format!(
-                    "single_writer: '{node}' cannot write '{path}' — node '{holder}' is live and \
-                     already claims '{held}', and no dependency path connects the two, so the \
-                     writes would race. Depend on '{holder}', wait for it to finish, or write a \
-                     different path.",
-                    node = intent.node_id,
-                    holder = claim.node_id,
-                    held = claim.declared,
-                );
-                return Verdict::blocked(Invariant::SingleWriter, reason);
+        for (path, key) in &claims {
+            if let Some(claim) = state.conflicting_claims(&intent.node_id, key) {
+                return Verdict::blocked(Invariant::SingleWriter, reason(intent, path, claim));
             }
         }
     }
 
     // Claim only after every path cleared, so a partially-admitted write leaves
     // no claim behind for the caller to trip over on its next attempt.
-    for path in paths {
-        state.claim(&intent.node_id, path);
+    for (path, key) in claims {
+        state.claim(&intent.node_id, path, key);
     }
     Verdict::Allowed
+}
+
+/// One resource key per declared path, exclusive unless declared shared.
+///
+/// The same three rules the write coordinator plans by, because they are the
+/// same table: `keys_conflict` decides, and this only chooses which key to hand
+/// it. A path in both lists resolves to `SharedAppend` — the shared declaration
+/// is the more specific statement, and resolving it the other way would make the
+/// declaration unusable for any node that also lists its full target set.
+fn declared_claims(intent: &WriteIntent) -> Vec<(&str, ResourceKey)> {
+    let shared: Vec<&str> = intent
+        .shared_append
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !path.trim().is_empty())
+        .collect();
+    let mut claims: Vec<(&str, ResourceKey)> = shared
+        .iter()
+        .map(|path| (*path, shared_append_key_for_raw_target(path)))
+        .collect();
+    for path in &intent.paths {
+        let path = path.as_str();
+        if path.trim().is_empty() || shared.contains(&path) {
+            continue;
+        }
+        claims.push((path, resource_key_for_raw_target(path)));
+    }
+    claims
+}
+
+fn reason(intent: &WriteIntent, path: &str, claim: &super::state::WriteClaim) -> String {
+    format!(
+        "single_writer: '{node}' cannot write '{path}' — node '{holder}' is live and already \
+         claims '{held}', and no dependency path connects the two, so the writes would race. \
+         Depend on '{holder}', wait for it to finish, or write a different path. If both writes \
+         are genuinely coordinated and atomic, both sides must declare the path as a shared \
+         append; one side declaring it is a claim to exclusive access.",
+        node = intent.node_id,
+        holder = claim.node_id,
+        held = claim.declared,
+    )
 }

@@ -31,6 +31,7 @@ fn write(node: &str, path: &str) -> WriteIntent {
     WriteIntent {
         node_id: node.to_string(),
         paths: vec![path.to_string()],
+        shared_append: Vec::new(),
     }
 }
 

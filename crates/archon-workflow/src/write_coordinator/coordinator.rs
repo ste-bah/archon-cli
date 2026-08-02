@@ -12,13 +12,14 @@ pub use super::WriteBoundaryProbe;
 use super::conflict_graph::{WaveCaps, build_schedule};
 use super::patch_apply::{ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock};
 use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest, validate_patch};
+use super::shared_append::{
+    resolve_shared_append_targets, resource_keys_for_targets_with_shared_append,
+};
 use super::worktree_isolation::{
     CanonicalBaseline, ItemWorkspace, WorkspaceStatus, capture_canonical_baseline,
     create_item_workspace,
 };
-use super::write_plan::{
-    NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
-};
+use super::write_plan::{NormalizedPath, TargetFilesSource, WritePlan, normalize_target};
 use super::{
     ItemId, SerialFallbackReason, WaveId, WriteCoordinatorConfig, WriteCoordinatorRuntime,
 };
@@ -192,8 +193,18 @@ fn build_write_plan(
         .map(|t| normalize_target(t, canonical))
         .collect::<Result<_, _>>()
         .map_err(FanoutError::Plan)?;
+    // Empty unless the item's payload names paths under
+    // `shared_append_target_files`, so every target stays exclusive by default
+    // and concurrency is opted into, never inherited.
+    let shared_append: Vec<NormalizedPath> = resolve_shared_append_targets(&pi.item.payload)
+        .map_err(FanoutError::Plan)?
+        .iter()
+        .map(|t| normalize_target(t, canonical))
+        .collect::<Result<_, _>>()
+        .map_err(FanoutError::Plan)?;
     let resource_keys =
-        resource_keys_for_targets(&target_files, canonical, &[]).map_err(FanoutError::Plan)?;
+        resource_keys_for_targets_with_shared_append(&target_files, canonical, &[], &shared_append)
+            .map_err(FanoutError::Plan)?;
     let isolated_root = ctx
         .run_root
         .join("wc")
