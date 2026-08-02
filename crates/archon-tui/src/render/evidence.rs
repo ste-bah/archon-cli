@@ -17,6 +17,7 @@ pub fn draw_evidence_view(frame: &mut Frame, app: &App) {
         EvidenceViewState::Learning(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::Video(screen) => screen.render(frame, area, &app.theme),
         EvidenceViewState::Workflow(screen) => screen.render(frame, area, &app.theme),
+        EvidenceViewState::World(screen) => screen.render(frame, area, &app.theme),
     }
 }
 

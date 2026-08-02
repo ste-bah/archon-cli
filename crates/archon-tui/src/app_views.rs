@@ -23,6 +23,9 @@ impl App {
             ViewId::Workflow => Some(EvidenceViewState::Workflow(
                 crate::screens::workflow::WorkflowScreen::runs(),
             )),
+            ViewId::World => Some(EvidenceViewState::World(
+                crate::screens::world::WorldScreen::model(),
+            )),
             _ => None,
         };
     }
@@ -94,6 +97,18 @@ impl App {
                 screen.set_rows(
                     rows.into_iter()
                         .map(|row| crate::screens::workflow::WorkflowRow {
+                            id: row.id,
+                            label: row.title,
+                            status: row.status,
+                            detail: row.detail,
+                        })
+                        .collect(),
+                );
+            }
+            Some(EvidenceViewState::World(screen)) => {
+                screen.set_rows(
+                    rows.into_iter()
+                        .map(|row| crate::screens::world::WorldRow {
                             id: row.id,
                             label: row.title,
                             status: row.status,

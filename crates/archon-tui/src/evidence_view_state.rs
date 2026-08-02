@@ -8,6 +8,7 @@ pub enum EvidenceViewState {
     Learning(crate::screens::learning::LearningScreen),
     Video(crate::screens::video::VideoScreen),
     Workflow(crate::screens::workflow::WorkflowScreen),
+    World(crate::screens::world::WorldScreen),
 }
 
 impl EvidenceViewState {
@@ -19,6 +20,7 @@ impl EvidenceViewState {
             Self::Learning(_) => ViewId::Learning,
             Self::Video(_) => ViewId::Video,
             Self::Workflow(_) => ViewId::Workflow,
+            Self::World(_) => ViewId::World,
         }
     }
 }

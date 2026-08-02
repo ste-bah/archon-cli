@@ -25,6 +25,7 @@ pub enum ViewId {
     Learning,
     Video,
     Workflow,
+    World,
 }
 
 /// Source-of-truth row payload for Evidence Engine inspection overlays.

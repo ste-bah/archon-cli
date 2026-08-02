@@ -32,6 +32,7 @@ pub(crate) use runtime::{
 };
 pub(super) use status::load_world_model_stats;
 pub(crate) use status::render_world_status;
+pub(crate) use status::{WorldInspectionRow, world_inspection_rows};
 #[cfg(test)]
 pub(super) use status::render_world_status_with_stats;
 pub(crate) use trainer_runtime::{

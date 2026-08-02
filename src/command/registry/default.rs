@@ -135,6 +135,10 @@ pub(crate) fn default_registry() -> Registry {
     );
     b.insert_primary("docs", Arc::new(DocsViewHandler));
     b.insert_primary("cognitive", Arc::new(CognitiveViewHandler));
+    b.insert_primary(
+        "world",
+        Arc::new(crate::command::world_view::WorldViewHandler),
+    );
     b.insert_primary("learning", Arc::new(LearningViewHandler));
     b.insert_primary(
         "kb",

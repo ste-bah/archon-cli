@@ -154,6 +154,118 @@ pub(crate) fn render_world_status_with_stats(
     )
 }
 
+/// One row of the `/world` TUI inspector.
+pub(crate) struct WorldInspectionRow {
+    pub id: &'static str,
+    pub label: String,
+    pub status: String,
+    pub detail: String,
+}
+
+/// Structured counterpart to [`render_world_status`], for the `/world`
+/// inspector. Deliberately surfaces the same facts the shell prints — an
+/// inspector that shows a rosier picture than `archon world status` would be
+/// worse than no inspector.
+pub(crate) fn world_inspection_rows(
+    config: &archon_core::config::ArchonConfig,
+) -> Vec<WorldInspectionRow> {
+    let wm = &config.learning.world_model;
+    let stats = load_world_model_stats().unwrap_or_default();
+    let cold = archon_world_model::trace::evaluate_cold_start(
+        stats,
+        archon_world_model::ColdStartThresholds {
+            min_rows: wm.cold_start.min_rows,
+            min_sessions: wm.cold_start.min_sessions,
+            min_observed_days: wm.cold_start.min_observed_days,
+        },
+    );
+    let active = super::active_model_id().ok().flatten();
+    let candidate_count = super::model_registry()
+        .and_then(|registry| registry.candidate_count())
+        .unwrap_or_default();
+
+    let (cold_status, cold_detail) = match cold {
+        archon_world_model::ColdStartStatus::Ready => {
+            ("ready".to_string(), "thresholds met".to_string())
+        }
+        archon_world_model::ColdStartStatus::ColdStart {
+            rows_needed,
+            sessions_needed,
+            days_needed,
+        } => (
+            "cold-start".to_string(),
+            format!("needs {rows_needed} rows, {sessions_needed} sessions, {days_needed} days"),
+        ),
+    };
+
+    // The advisor is inert with nothing promoted. Report that as a distinct
+    // status rather than letting an empty model id read as unremarkable.
+    let (advisor_status, active_detail) = match active.as_deref() {
+        Some(id) if matches!(cold, archon_world_model::ColdStartStatus::Ready) => {
+            ("ready".to_string(), id.to_string())
+        }
+        Some(id) => ("fail-open".to_string(), format!("{id} (cold-start)")),
+        None => (
+            "inert".to_string(),
+            "nothing promoted — advisor is a no-op".to_string(),
+        ),
+    };
+
+    vec![
+        WorldInspectionRow {
+            id: "advisor",
+            label: "advisor".into(),
+            status: advisor_status,
+            detail: format!("advisory-only; active model: {active_detail}"),
+        },
+        WorldInspectionRow {
+            id: "corpus",
+            label: "corpus".into(),
+            status: cold_status,
+            detail: format!(
+                "{} rows, {} sessions, {} observed days — {cold_detail}",
+                stats.rows, stats.sessions, stats.observed_days
+            ),
+        },
+        WorldInspectionRow {
+            id: "candidates",
+            label: "candidates".into(),
+            status: candidate_count.to_string(),
+            detail: format!("{} JEPA candidate file(s) on disk", jepa_candidate_count()),
+        },
+        WorldInspectionRow {
+            id: "last-eval",
+            label: "last eval".into(),
+            status: if last_eval_summary().trim() == "none" {
+                "never".into()
+            } else {
+                "scored".into()
+            },
+            detail: last_eval_summary(),
+        },
+        WorldInspectionRow {
+            id: "trainer",
+            label: "daemon trainer".into(),
+            status: if wm.auto_trainer.enabled {
+                "enabled".into()
+            } else {
+                "disabled".into()
+            },
+            detail: super::latest_daemon_trainer_event()
+                .map(|event| {
+                    let age = chrono::Utc::now().signed_duration_since(event.created_at);
+                    let staleness = if age.num_days() >= 1 {
+                        format!(" [STALE — {} day(s) ago]", age.num_days())
+                    } else {
+                        String::new()
+                    };
+                    format!("{} — {}{staleness}", event.status, event.summary)
+                })
+                .unwrap_or_else(|| "no daemon trainer tick recorded".into()),
+        },
+    ]
+}
+
 fn jepa_candidate_count() -> usize {
     let Ok(root) = super::world_model_root() else {
         return 0;
