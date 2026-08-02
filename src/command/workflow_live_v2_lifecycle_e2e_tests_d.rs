@@ -388,6 +388,12 @@ fn find_string_key(value: &serde_json::Value, target: &str) -> Option<String> {
 
 fn init_git_repo(repo: &std::path::Path) {
     run_git(repo, &["init"]);
+    // Line endings pinned: Git for Windows defaults to core.autocrlf=true, so a
+    // file committed with LF is checked back out with CRLF, the lifecycle sees
+    // every seeded source as modified, and the run latches into verification
+    // remediation instead of reaching a terminal state.
+    run_git(repo, &["config", "core.autocrlf", "false"]);
+    run_git(repo, &["config", "core.eol", "lf"]);
     run_git(repo, &["config", "user.name", "archon-test"]);
     run_git(
         repo,
