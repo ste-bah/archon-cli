@@ -39,7 +39,10 @@ pub enum EmbeddingProviderKind {
     Auto,
     /// fastembed BGE-base-en-v1.5 quantized (768-dim, CPU-only).
     Local,
-    /// OpenAI text-embedding-3-small (1536-dim, requires API key).
+    /// OpenAI-compatible endpoint (default: OpenAI text-embedding-3-small,
+    /// 1536-dim; requires API key). ARCHON_MEMORY_EMBEDDING_BASE_URL /
+    /// OPENAI_BASE_URL and ARCHON_MEMORY_EMBEDDING_MODEL redirect it to any
+    /// OpenAI-compatible proxy.
     #[serde(rename = "openai")]
     OpenAI,
 }
@@ -90,6 +93,12 @@ fn openai_api_key() -> Option<String> {
 /// - `"auto"`: use OpenAI if an API key is found in the environment, else local.
 /// - `"local"`: always use local fastembed.
 /// - `"openai"`: require an API key or return an error.
+///
+/// The openai provider honours ARCHON_MEMORY_EMBEDDING_BASE_URL (else
+/// OPENAI_BASE_URL) and ARCHON_MEMORY_EMBEDDING_MODEL, so it can target any
+/// OpenAI-compatible endpoint (e.g. a local LiteLLM proxy) instead of
+/// api.openai.com. Switching endpoint/model changes the embedding space —
+/// reindex stored memories afterwards (`archon memory reindex --all`).
 pub fn create_provider(
     config: &EmbeddingConfig,
 ) -> Result<Arc<dyn EmbeddingProvider>, MemoryError> {
