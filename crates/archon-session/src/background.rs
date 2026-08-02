@@ -33,8 +33,7 @@ pub struct BackgroundSessionInfo {
 
 /// Directory for background session files.
 pub fn sessions_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+    archon_data_dir()
         .join("archon")
         .join("sessions")
 }
@@ -193,4 +192,19 @@ pub fn is_session_alive_in_dir(dir: &Path, session_id: &str) -> bool {
     };
     // kill(pid, 0) checks if process exists without sending a signal
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// The archon data directory, honouring `ARCHON_DATA_DIR`.
+///
+/// `dirs::data_dir()` alone reads the shell known-folder API on Windows, so
+/// neither `XDG_DATA_HOME` nor `HOME` redirects it there -- the documented
+/// `ARCHON_DATA_DIR` override was silently ignored by every caller below, and
+/// tests that thought they were pointing at a scratch directory were opening
+/// the real user database instead (SQLite then reported "database is locked"
+/// when two of them ran at once).
+pub fn archon_data_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("ARCHON_DATA_DIR").filter(|value| !value.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    dirs::data_dir().unwrap_or_else(|| PathBuf::from("."))
 }
