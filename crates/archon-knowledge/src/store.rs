@@ -141,7 +141,8 @@ pub fn insert_claim(db: &DbInstance, claim: &ClaimRecord) -> Result<()> {
     params.insert("pol".into(), DataValue::from(claim.polarity.as_str()));
     params.insert("conf".into(), DataValue::from(claim.confidence));
     params.insert("ts".into(), DataValue::from(claim.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[claim_id, chunk_id, document_id, text, normalized_subject, normalized_predicate, polarity, confidence, created_at]
             <- [[$id, $cid, $did, $txt, $subj, $pred, $pol, $conf, $ts]]
@@ -152,6 +153,7 @@ pub fn insert_claim(db: &DbInstance, claim: &ClaimRecord) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_claims row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert claim failed: {e}")))?;
     Ok(())
@@ -169,7 +171,8 @@ pub fn insert_entity(db: &DbInstance, entity: &EntityRecord) -> Result<()> {
     params.insert("mentions".into(), DataValue::from(entity.mentions));
     params.insert("conf".into(), DataValue::from(entity.confidence));
     params.insert("ts".into(), DataValue::from(entity.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[entity_id, name, entity_type, source_chunk_id, mentions, confidence, created_at]
             <- [[$id, $name, $typ, $cid, $mentions, $conf, $ts]]
@@ -179,6 +182,7 @@ pub fn insert_entity(db: &DbInstance, entity: &EntityRecord) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_entities row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert entity failed: {e}")))?;
     Ok(())
@@ -205,7 +209,8 @@ pub fn insert_relation(db: &DbInstance, relation: &RelationRecord) -> Result<()>
     );
     params.insert("conf".into(), DataValue::from(relation.confidence));
     params.insert("ts".into(), DataValue::from(relation.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[relation_id, source_entity_id, target_entity_id, relation_type, source_chunk_id, confidence, created_at]
             <- [[$id, $src, $dst, $typ, $cid, $conf, $ts]]
@@ -216,6 +221,7 @@ pub fn insert_relation(db: &DbInstance, relation: &RelationRecord) -> Result<()>
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_relations row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert relation failed: {e}")))?;
     Ok(())
@@ -228,7 +234,8 @@ pub fn upsert_source_quality(db: &DbInstance, record: &SourceQualityRecord) -> R
     params.insert("obs".into(), DataValue::from(record.observations));
     params.insert("out".into(), DataValue::from(record.last_outcome.as_str()));
     params.insert("ts".into(), DataValue::from(record.updated_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[source_id, score, observations, last_outcome, updated_at]
             <- [[$sid, $score, $obs, $out, $ts]]
@@ -236,6 +243,7 @@ pub fn upsert_source_quality(db: &DbInstance, record: &SourceQualityRecord) -> R
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: upsert kb_source_quality row",
     )
     .map_err(|e| KnowledgeError::Store(format!("upsert source quality failed: {e}")))?;
     Ok(())
@@ -268,7 +276,8 @@ pub fn insert_contradiction(db: &DbInstance, contradiction: &ContradictionRecord
         "ts".into(),
         DataValue::from(contradiction.created_at.as_str()),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[contradiction_id, left_claim_id, right_claim_id, contradiction_type, explanation, confidence, created_at]
             <- [[$id, $left, $right, $typ, $exp, $conf, $ts]]
@@ -279,6 +288,7 @@ pub fn insert_contradiction(db: &DbInstance, contradiction: &ContradictionRecord
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_contradictions row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert contradiction failed: {e}")))?;
     Ok(())

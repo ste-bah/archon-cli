@@ -24,11 +24,20 @@ pub(super) enum ReplaceFileOutcome {
 pub(super) struct FileStore<'a> {
     db: &'a DbInstance,
     dimension: usize,
+    guard: &'a archon_cozo::CozoGuardConfig,
 }
 
 impl<'a> FileStore<'a> {
-    pub(super) fn new(db: &'a DbInstance, dimension: usize) -> Self {
-        Self { db, dimension }
+    pub(super) fn new(
+        db: &'a DbInstance,
+        dimension: usize,
+        guard: &'a archon_cozo::CozoGuardConfig,
+    ) -> Self {
+        Self {
+            db,
+            dimension,
+            guard,
+        }
     }
 
     pub(super) fn ensure_schema(&self) -> Result<()> {
@@ -76,6 +85,12 @@ impl<'a> FileStore<'a> {
         Ok(!result.rows.is_empty())
     }
 
+    /// Replace every chunk of `file_path` in one Cozo multi-transaction.
+    ///
+    /// This is a write path but not a `run_script(.., Mutable)` one, so it is
+    /// wrapped in [`archon_cozo::run_guarded`] as a whole: the transaction is
+    /// atomic, which makes the guard's retry-on-SQLITE_BUSY loop safe to apply
+    /// to the entire body.
     pub(super) fn replace_file_with_cancel<F>(
         &self,
         file_path: &str,
@@ -84,49 +99,64 @@ impl<'a> FileStore<'a> {
         cancelled: F,
     ) -> Result<ReplaceFileOutcome>
     where
-        F: FnOnce() -> bool,
+        F: Fn() -> bool,
     {
-        let transaction = self.db.multi_transaction(true);
-        let result = self.replace_file_in_transaction(&transaction, file_path, file_hash, chunks);
-        match result {
-            Ok(()) if cancelled() => {
-                let _ = transaction.abort();
-                Ok(ReplaceFileOutcome::Cancelled)
-            }
-            Ok(()) => transaction
-                .commit()
-                .map(|()| ReplaceFileOutcome::Committed)
-                .map_err(|error| cozo_error("commit file replacement", error)),
-            Err(error) => {
-                let _ = transaction.abort();
-                Err(error)
-            }
-        }
+        archon_cozo::run_guarded(
+            "leann index: replace indexed file",
+            ScriptMutability::Mutable,
+            self.guard,
+            || {
+                let transaction = self.db.multi_transaction(true);
+                let result =
+                    self.replace_file_in_transaction(&transaction, file_path, file_hash, chunks);
+                match result {
+                    Ok(()) if cancelled() => {
+                        let _ = transaction.abort();
+                        Ok(ReplaceFileOutcome::Cancelled)
+                    }
+                    Ok(()) => transaction
+                        .commit()
+                        .map(|()| ReplaceFileOutcome::Committed)
+                        .map_err(|error| cozo_error("commit file replacement", error)),
+                    Err(error) => {
+                        let _ = transaction.abort();
+                        Err(error)
+                    }
+                }
+            },
+        )
     }
 
     pub(super) fn remove_file(&self, file_path: &str) -> Result<()> {
-        let transaction = self.db.multi_transaction(true);
-        let result = (|| {
-            remove_file_chunks_in_transaction(&transaction, file_path)?;
-            let mut params = BTreeMap::new();
-            params.insert("fp".to_string(), DataValue::from(file_path));
-            transaction
-                .run_script(
-                    "?[file_path] <- [[$fp]] :rm file_states { file_path }",
-                    params,
-                )
-                .map_err(|error| cozo_error("remove file state", error))?;
-            Ok(())
-        })();
-        match result {
-            Ok(()) => transaction
-                .commit()
-                .map_err(|error| cozo_error("commit file removal", error)),
-            Err(error) => {
-                let _ = transaction.abort();
-                Err(error)
-            }
-        }
+        archon_cozo::run_guarded(
+            "leann index: remove indexed file",
+            ScriptMutability::Mutable,
+            self.guard,
+            || {
+                let transaction = self.db.multi_transaction(true);
+                let result = (|| {
+                    remove_file_chunks_in_transaction(&transaction, file_path)?;
+                    let mut params = BTreeMap::new();
+                    params.insert("fp".to_string(), DataValue::from(file_path));
+                    transaction
+                        .run_script(
+                            "?[file_path] <- [[$fp]] :rm file_states { file_path }",
+                            params,
+                        )
+                        .map_err(|error| cozo_error("remove file state", error))?;
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => transaction
+                        .commit()
+                        .map_err(|error| cozo_error("commit file removal", error)),
+                    Err(error) => {
+                        let _ = transaction.abort();
+                        Err(error)
+                    }
+                }
+            },
+        )
     }
 
     #[cfg(test)]
@@ -166,10 +196,14 @@ impl<'a> FileStore<'a> {
     }
 
     fn run_idempotent(&self, script: &str) -> Result<()> {
-        match self
-            .db
-            .run_script(script, Default::default(), ScriptMutability::Mutable)
-        {
+        match archon_cozo::run_script_guarded(
+            self.db,
+            script,
+            Default::default(),
+            ScriptMutability::Mutable,
+            "leann index schema: create relation or index",
+            self.guard,
+        ) {
             Ok(_) => Ok(()),
             Err(error) => {
                 let message = error.to_string();

@@ -281,12 +281,14 @@ fn insert_sample(db: &DbInstance, sample: &MeaningSample) -> Result<()> {
         DataValue::from(sample.metadata_json.to_string().as_str()),
     );
     params.insert("ts".into(), DataValue::from(sample.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[sample_id, workspace_id, artifact_id, label, source_event_id, event_type, text, metadata_json, created_at] <- \
          [[$id, $wid, $aid, $label, $eid, $et, $txt, $meta, $ts]] \
          :put meaning_samples { sample_id => workspace_id, artifact_id, label, source_event_id, event_type, text, metadata_json, created_at }",
         params,
         ScriptMutability::Mutable,
+        "meaning store: insert meaning_samples row",
     )
     .map_err(|e| MeaningError::Store(format!("insert meaning sample failed: {e}")))?;
     Ok(())
@@ -309,12 +311,14 @@ fn insert_pair(db: &DbInstance, pair: &ContrastivePair) -> Result<()> {
         DataValue::from(pair.anchor_artifact_id.as_str()),
     );
     params.insert("ts".into(), DataValue::from(pair.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[pair_id, workspace_id, positive_sample_id, negative_sample_id, anchor_artifact_id, created_at] <- \
          [[$id, $wid, $pos, $neg, $anchor, $ts]] \
          :put meaning_contrastive_pairs { pair_id => workspace_id, positive_sample_id, negative_sample_id, anchor_artifact_id, created_at }",
         params,
         ScriptMutability::Mutable,
+        "meaning store: insert meaning_contrastive_pairs row",
     )
     .map_err(|e| MeaningError::Store(format!("insert meaning pair failed: {e}")))?;
     Ok(())
@@ -338,12 +342,14 @@ fn insert_triplet(db: &DbInstance, triplet: &TripletRecord) -> Result<()> {
         DataValue::from(triplet.negative_sample_id.as_str()),
     );
     params.insert("ts".into(), DataValue::from(triplet.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[triplet_id, workspace_id, anchor_artifact_id, positive_sample_id, negative_sample_id, created_at] <- \
          [[$id, $wid, $anchor, $pos, $neg, $ts]] \
          :put meaning_triplets { triplet_id => workspace_id, anchor_artifact_id, positive_sample_id, negative_sample_id, created_at }",
         params,
         ScriptMutability::Mutable,
+        "meaning store: insert meaning_triplets row",
     )
     .map_err(|e| MeaningError::Store(format!("insert meaning triplet failed: {e}")))?;
     Ok(())
@@ -361,11 +367,13 @@ fn insert_dataset(db: &DbInstance, dataset: &EvalDataset) -> Result<()> {
         DataValue::from(dataset.triplet_count as i64),
     );
     params.insert("ts".into(), DataValue::from(dataset.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         "?[dataset_id, sample_count, triplet_count, created_at] <- [[$id, $samples, $triplets, $ts]] \
          :put meaning_eval_datasets { dataset_id => sample_count, triplet_count, created_at }",
         params,
         ScriptMutability::Mutable,
+        "meaning store: insert meaning_eval_datasets row",
     )
     .map_err(|e| MeaningError::Store(format!("insert eval dataset failed: {e}")))?;
     Ok(())
@@ -409,7 +417,13 @@ pub fn stable_id(prefix: &str, parts: &[&str]) -> String {
 }
 
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "meaning schema: create relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

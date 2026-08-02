@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use chrono::Utc;
-use cozo::{DataValue, ScriptMutability};
+use cozo::DataValue;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use super::helpers::db_err;
+use super::helpers::run_mutable;
 use super::{MemoryGraph, row_to_memory, row_values_to_memory};
 use crate::types::{Memory, MemoryError, MemoryType, StoreMemoryOutcome};
 
@@ -63,9 +63,9 @@ impl MemoryGraph {
         params.insert("access_count".to_string(), DataValue::from(0i64));
         params.insert("last_accessed".to_string(), DataValue::from(""));
 
-        self.db
-            .run_script(
-                "?[id, content, title, memory_type, importance, tags,
+        run_mutable(
+            &self.db,
+            "?[id, content, title, memory_type, importance, tags,
                   source_type, project_path, created_at, updated_at,
                   access_count, last_accessed] <- [[
                     $id, $content, $title, $memory_type, $importance, $tags,
@@ -77,10 +77,9 @@ impl MemoryGraph {
                     source_type, project_path, created_at, updated_at,
                     access_count, last_accessed
                 }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: store new memory",
+        )?;
 
         debug!(id = %id, "stored memory");
         if let Err(error) = self.embed_and_store(&id, content) {
@@ -151,10 +150,9 @@ impl MemoryGraph {
             ("access_count".to_string(), DataValue::from(0i64)),
             ("last_accessed".to_string(), DataValue::from("")),
         ]);
-        let result = self
-            .db
-            .run_script(
-                "{
+        let result = run_mutable(
+            &self.db,
+            "{
                     ?[id, content, title, memory_type, importance, tags, source_type,
                         project_path, created_at, updated_at, access_count, last_accessed, created] :=
                         *memories{id, content, title, memory_type, importance, tags, source_type,
@@ -186,10 +184,9 @@ impl MemoryGraph {
                         created = true
                 } as _created
                 %return _created",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: store memory with explicit id",
+        )?;
         let row = result
             .rows
             .first()
@@ -222,10 +219,9 @@ impl MemoryGraph {
             ("id".to_string(), DataValue::from(id)),
             ("now".to_string(), DataValue::from(now.as_str())),
         ]);
-        let result = self
-            .db
-            .run_script(
-                "{
+        let result = run_mutable(
+            &self.db,
+            "{
                     ?[id, content, title, memory_type, importance, tags, source_type,
                         project_path, created_at, updated_at, access_count, last_accessed] :=
                         *memories{id, content, title, memory_type, importance, tags, source_type,
@@ -244,10 +240,9 @@ impl MemoryGraph {
                             project_path, created_at, updated_at, access_count, last_accessed},
                         id = $id
                 }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: get memory and bump access stats",
+        )?;
 
         let row = result
             .rows
@@ -285,10 +280,9 @@ impl MemoryGraph {
         params.insert("replace_tags".to_string(), DataValue::from(tags.is_some()));
         params.insert("now".to_string(), DataValue::from(now.as_str()));
 
-        let result = self
-            .db
-            .run_script(
-                "{
+        let result = run_mutable(
+            &self.db,
+            "{
                     ?[id] := *memories{id}, id = $id
                 } as _current
                 %if _current
@@ -308,10 +302,9 @@ impl MemoryGraph {
                     }
                 %end
                 %return _current",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: update memory content and tags",
+        )?;
 
         if result.rows.is_empty() {
             return Err(MemoryError::NotFound(id.to_string()));
@@ -342,9 +335,9 @@ impl MemoryGraph {
         let mut params = BTreeMap::new();
         params.insert("id".to_string(), DataValue::from(id));
 
-        self.db
-            .run_script(
-                "{
+        run_mutable(
+            &self.db,
+            "{
                     ?[from_id, to_id, rel_type] :=
                         *relationships{from_id, to_id, rel_type}, from_id = $id
                     ?[from_id, to_id, rel_type] :=
@@ -360,10 +353,9 @@ impl MemoryGraph {
                     ?[id] <- [[$id]]
                     :rm memories {id}
                 }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: delete memory and its edges",
+        )?;
 
         Ok(())
     }

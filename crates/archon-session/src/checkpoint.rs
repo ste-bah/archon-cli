@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
+use cozo::{DataValue, NamedRows, ScriptMutability};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -72,7 +72,7 @@ pub struct SnapshotInfo {
 /// Stores file snapshots so that modified files can be restored to their
 /// original content. Backed by a CozoDB database.
 pub struct CheckpointStore {
-    db: DbInstance,
+    db: archon_cozo::GuardedDbInstance,
     max_snapshots: u32,
 }
 
@@ -91,7 +91,12 @@ impl CheckpointStore {
         }
 
         let path_str = path.to_string_lossy().to_string();
-        let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
+        let db = archon_cozo::open_sqlite_guarded_instance(
+            &path_str,
+            "open checkpoint store",
+            archon_cozo::CozoGuardConfig::for_db_path(path),
+        )
+        .map_err(db_err)?;
 
         #[cfg(unix)]
         secure_file_permissions(path)?;
@@ -101,10 +106,19 @@ impl CheckpointStore {
         Ok(store)
     }
 
-    fn init_schema(&self) -> Result<(), CheckpointError> {
+    fn run_mutable(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        context: &str,
+    ) -> anyhow::Result<NamedRows> {
         self.db
-            .run_script(
-                ":create checkpoints {
+            .run_script_guarded(script, params, ScriptMutability::Mutable, context)
+    }
+
+    fn init_schema(&self) -> Result<(), CheckpointError> {
+        self.run_mutable(
+            ":create checkpoints {
                     session_id: String,
                     file_path: String,
                     turn_number: Int
@@ -114,17 +128,17 @@ impl CheckpointStore {
                     tool_name: String,
                     timestamp: String
                 }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
+            Default::default(),
+            "checkpoint store schema: create checkpoints relation",
+        )
+        .or_else(|e| {
+            let msg = e.to_string();
+            if msg.contains("already exists") || msg.contains("conflicts") {
+                Ok(empty_rows())
+            } else {
+                Err(db_err(e))
+            }
+        })?;
 
         Ok(())
     }
@@ -158,9 +172,8 @@ impl CheckpointStore {
         params.insert("tool_name".to_string(), DataValue::from(tool_name));
         params.insert("timestamp".to_string(), DataValue::from(now.as_str()));
 
-        self.db
-            .run_script(
-                "?[session_id, file_path, turn_number, original_content, file_existed, tool_name, timestamp] <- [[
+        self.run_mutable(
+            "?[session_id, file_path, turn_number, original_content, file_existed, tool_name, timestamp] <- [[
                     $session_id, $file_path, $turn_number,
                     $original_content, $file_existed, $tool_name, $timestamp
                 ]]
@@ -168,10 +181,10 @@ impl CheckpointStore {
                     session_id, file_path, turn_number
                     => original_content, file_existed, tool_name, timestamp
                 }",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "checkpoint store: snapshot file before edit",
+        )
+        .map_err(db_err)?;
 
         // LRU eviction
         self.evict(session_id)?;
@@ -407,14 +420,13 @@ impl CheckpointStore {
                 del_params.insert("file_path".to_string(), row[1].clone());
                 del_params.insert("turn_number".to_string(), row[2].clone());
 
-                self.db
-                    .run_script(
-                        "?[session_id, file_path, turn_number] <- [[$session_id, $file_path, $turn_number]]
+                self.run_mutable(
+                    "?[session_id, file_path, turn_number] <- [[$session_id, $file_path, $turn_number]]
                          :rm checkpoints {session_id, file_path, turn_number}",
-                        del_params,
-                        ScriptMutability::Mutable,
-                    )
-                    .map_err(db_err)?;
+                    del_params,
+                    "checkpoint store: evict oldest snapshot",
+                )
+                .map_err(db_err)?;
             }
         }
 
