@@ -41,6 +41,8 @@ async-trait.workspace = true
 # crosses archon-core boundaries. (dashmap + once_cell were moved to
 # archon-tools in TASK-AGS-104 along with the background_agents module.)
 tokio-util.workspace = true
+process-wrap.workspace = true
+libc = "0.2"
 dashmap.workspace = true
 tokio-stream.workspace = true
 russh.workspace = true

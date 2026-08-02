@@ -20,6 +20,7 @@ pub mod config_tool;
 pub mod docs;
 pub(crate) mod docs_runtime;
 pub mod evidence_cli;
+pub mod execution_deadline;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;

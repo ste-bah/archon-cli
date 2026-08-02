@@ -219,6 +219,30 @@ jobs:
         # which does not apply to the MSVC linker.
         run: cargo build --workspace
 
+      - name: Windows Issue 92 process evidence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: "1"
+          ISSUE92_FORBIDDEN: "must-not-reach-hooks"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            'windows_hook_output_has_a_shared_bound_and_reports_truncation',
+            'windows_hook_uses_isolated_environment_and_explicit_context',
+            'windows_hook_timeout_kills_descendant_process',
+            'windows_hook_process_exists_reports_existing_and_absent_processes',
+            'windows_timeout_kills_background_descendant',
+            'windows_bash_process_exists_reports_existing_and_absent_processes',
+            'windows_and_mixed_separator_test_paths_are_exempt'
+          )
+          foreach ($test in $tests) {
+            $output = & cargo test --workspace $test -- --test-threads=1 2>&1 | Out-String
+            $output | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $test" }
+            if ($output -notmatch 'running 1 test') { throw "Issue #92 test did not run: $test" }
+          }
+
       - name: Run tests (nextest)
         if: runner.os != 'Windows'
         shell: bash
