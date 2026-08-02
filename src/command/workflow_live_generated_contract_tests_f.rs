@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn workflow_live_generated_contract_verified_noop_requires_artifact_metadata() {
     let inventory = normalize_generated_inventory_value(
@@ -82,7 +84,7 @@ fn workflow_live_generated_contract_flags_noncanonical_remediation_fixture() {
 
 #[test]
 fn target_file_issue_rejects_instruction_text() {
-    let issue = super::lifecycle_target_file_issue(
+    let issue = super::super::lifecycle_target_file_issue(
         "Produce or update admissible evidence references for the audit",
         Some("/repo"),
     )
@@ -93,7 +95,7 @@ fn target_file_issue_rejects_instruction_text() {
 #[test]
 fn target_file_issue_accepts_repo_relative_path() {
     assert!(
-        super::lifecycle_target_file_issue("crates/archon-core/src/lib.rs", Some("/repo"))
+        super::super::lifecycle_target_file_issue("crates/archon-core/src/lib.rs", Some("/repo"))
             .is_none()
     );
 }
@@ -258,7 +260,7 @@ fn fabel_triage_retry_items_normalize_idempotently() {
     }
 }
 
-fn assert_fixture_items_are_idempotent(fixture: &str) {
+pub(super) fn assert_fixture_items_are_idempotent(fixture: &str) {
     let value: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/wffed_verification_plan_1.json"))
             .expect("fixture json");
@@ -279,12 +281,12 @@ fn assert_fixture_items_are_idempotent(fixture: &str) {
     }
 }
 
-fn placeholder_task_universe() -> super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
-    super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+pub(super) fn placeholder_task_universe() -> super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+    super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![
-            super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-X-020".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-020.md".to_string(),
@@ -293,7 +295,7 @@ fn placeholder_task_universe() -> super::super::workflow_live_task_universe::Wor
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-X-130".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-130.md".to_string(),

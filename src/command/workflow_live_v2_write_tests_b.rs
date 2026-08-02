@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn worktree_assignment_builds_coordinator_plan_with_isolated_root() {
     let temp = tempfile::tempdir().expect("tempdir");

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn write_fanout_review_branch_stays_needs_review_not_failed() {
     let temp = tempfile::tempdir().expect("tempdir");

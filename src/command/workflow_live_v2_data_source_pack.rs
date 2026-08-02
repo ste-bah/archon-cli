@@ -1,13 +1,15 @@
-const SOURCE_PACK_TEXT_LIMIT: usize = 700;
+use super::*;
 
-pub(super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value {
+pub(super) const SOURCE_PACK_TEXT_LIMIT: usize = 700;
+
+pub(in super::super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value {
     // Packed reduce source is prior agent output, and allowed_mcp_tools scans
     // the whole stage input: a tool declaration surviving the pack would bind
     // MCP tools on the reducer. The unknown-object packer preserves every key,
     // so strip tool declarations here — the fanout branch builder already does
     // the same for write/verify items.
     let mut value = value.clone();
-    super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
+    super::super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
     let value = &value;
     match value {
         serde_json::Value::Array(items) => {
@@ -42,14 +44,14 @@ pub(super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value 
     }
 }
 
-fn pack_outcomes(value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn pack_outcomes(value: &serde_json::Value) -> serde_json::Value {
     let Some(outcomes) = value.as_array() else {
         return serde_json::Value::Array(Vec::new());
     };
     serde_json::Value::Array(outcomes.iter().map(pack_outcome).collect())
 }
 
-fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
     let Some(object) = value.as_object() else {
         return compact_unknown_source_value(value);
     };
@@ -97,7 +99,7 @@ fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(packed)
 }
 
-fn pack_result_like_object(
+pub(super) fn pack_result_like_object(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Value {
     let mut packed = serde_json::Map::new();
@@ -151,7 +153,7 @@ fn pack_result_like_object(
     serde_json::Value::Object(packed)
 }
 
-fn compact_known_result_field(key: &str, value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn compact_known_result_field(key: &str, value: &serde_json::Value) -> serde_json::Value {
     match key {
         "summary" => truncate_json_text(value),
         "evidence" => serde_json::Value::Array(
@@ -230,7 +232,7 @@ fn compact_known_result_field(key: &str, value: &serde_json::Value) -> serde_jso
     }
 }
 
-fn compact_unknown_source_value(value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn compact_unknown_source_value(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::String(_) => truncate_json_text(value),
         serde_json::Value::Array(items) => {
@@ -247,7 +249,7 @@ fn compact_unknown_source_value(value: &serde_json::Value) -> serde_json::Value 
     }
 }
 
-fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool {
+pub(super) fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool {
     matches!(
         key,
         "summary" | "output_summary" | "description" | "content"
@@ -256,14 +258,14 @@ fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool {
         .is_some_and(|text| text.len() > SOURCE_PACK_TEXT_LIMIT)
 }
 
-fn truncate_json_text(value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn truncate_json_text(value: &serde_json::Value) -> serde_json::Value {
     let Some(text) = value.as_str() else {
         return value.clone();
     };
     serde_json::Value::String(truncate_for_result(text, SOURCE_PACK_TEXT_LIMIT))
 }
 
-fn json_array_len(value: &serde_json::Value) -> serde_json::Value {
+pub(super) fn json_array_len(value: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(value.as_array().map(Vec::len).unwrap_or(0))
 }
 

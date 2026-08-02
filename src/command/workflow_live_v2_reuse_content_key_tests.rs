@@ -1,3 +1,5 @@
+use super::*;
+
     // Reuse must be CONTENT-KEYED. These tests cover the two halves of that:
     // the cache key itself must distinguish inputs that differ (including array
     // order), and the reuse paths on a resume must consult it.
@@ -5,13 +7,13 @@
     // Included from `workflow_live_v2_script_tests.rs` — do NOT run rustfmt on
     // this file directly; it is `include!`d, not a `mod`.
 
-    fn reuse_test_store(temp: &tempfile::TempDir) -> (WorkflowStore, archon_workflow::WorkflowRun) {
+    pub(super) fn reuse_test_store(temp: &tempfile::TempDir) -> (WorkflowStore, archon_workflow::WorkflowRun) {
         let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
         let run = workflow_store.create_run(test_spec()).expect("run");
         (workflow_store, run)
     }
 
-    fn reuse_test_runner(
+    pub(super) fn reuse_test_runner(
         workflow_store: &WorkflowStore,
         run: &archon_workflow::WorkflowRun,
         v2_store: &WorkflowV2ResultStore,
@@ -44,7 +46,7 @@
         )
     }
 
-    const REUSE_PROBE_SCRIPT: &str = r#"
+    pub(super) const REUSE_PROBE_SCRIPT: &str = r#"
 async function workflow(w) {
   await w.checkpoint("downstream", { inputs: args.items });
   return "done";
@@ -53,7 +55,7 @@ async function workflow(w) {
 
     /// A `checkpoint` result echoes its input, so the persisted record's data
     /// tells us whether the call ran fresh or replayed a stored result.
-    fn recorded_items(v2_store: &WorkflowV2ResultStore, call_id: &str) -> serde_json::Value {
+    pub(super) fn recorded_items(v2_store: &WorkflowV2ResultStore, call_id: &str) -> serde_json::Value {
         v2_store
             .load_call_record(call_id)
             .expect("call record lookup")
@@ -182,7 +184,7 @@ async function workflow(w) {
 
     /// The hash scheme this workspace shipped before the fix: sha256 over a
     /// canonical form that sorted object keys AND array elements recursively.
-    fn legacy_stable_hash(value: &serde_json::Value) -> String {
+    pub(super) fn legacy_stable_hash(value: &serde_json::Value) -> String {
         use sha2::{Digest, Sha256};
 
         fn canonical(value: &serde_json::Value) -> serde_json::Value {
@@ -299,7 +301,7 @@ async function workflow(w) {
         );
     }
 
-    const TWO_TASK_SCRIPT: &str = r#"
+    pub(super) const TWO_TASK_SCRIPT: &str = r#"
 async function workflow(w) {
   await w.checkpoint("implement-task-tdl-001", { inputs: args.upstream });
   await w.checkpoint("implement-task-tdl-010", { inputs: args.downstream });
@@ -307,7 +309,7 @@ async function workflow(w) {
 }
 "#;
 
-    fn completed_task_record(
+    pub(super) fn completed_task_record(
         run_id: &str,
         call_id: &str,
         task_id: &str,
@@ -343,7 +345,7 @@ async function workflow(w) {
 
     /// Build the two-task universe with an explicit dependency edge from the
     /// downstream task to the upstream one (or without it, for the control).
-    fn two_task_universe(downstream_depends_on_upstream: bool) -> WorkflowV2TaskUniverse {
+    pub(super) fn two_task_universe(downstream_depends_on_upstream: bool) -> WorkflowV2TaskUniverse {
         let mut universe = task_universe();
         if !downstream_depends_on_upstream {
             for task in &mut universe.tasks {
@@ -353,7 +355,7 @@ async function workflow(w) {
         universe
     }
 
-    async fn run_completed_task_resume(
+    pub(super) async fn run_completed_task_resume(
         temp: &tempfile::TempDir,
         downstream_depends_on_upstream: bool,
     ) -> (WorkflowV2ScriptSummary, WorkflowV2ResultStore) {

@@ -1,4 +1,6 @@
-fn invariant_chain_fixture() -> serde_json::Value {
+use super::*;
+
+pub(super) fn invariant_chain_fixture() -> serde_json::Value {
     serde_json::from_str(include_str!(
         "fixtures/wf32_verification_invariant_chain.json"
     ))
@@ -71,7 +73,7 @@ fn d70_artifact_only_work_without_declared_contract_is_repairable() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+        tasks: vec![super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
@@ -105,12 +107,12 @@ fn d70_declared_contract_allows_artifact_only_ownership() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+        tasks: vec![super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
             deliverable_contracts: vec![
-                super::super::workflow_live_task_universe::WorkflowV2DeliverableContract {
+                super::super::super::workflow_live_task_universe::WorkflowV2DeliverableContract {
                     kind: "audit_report".to_string(),
                     artifact_path: ".archon/reports/current.json".to_string(),
                     ..Default::default()

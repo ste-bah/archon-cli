@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn wf66_inherited_undeclared_path_evidence_does_not_block_isolated_worktree() {
     let result = wf66_preflight_result();
@@ -49,7 +51,7 @@ fn idempotent_noop_artifact_claim_runs_declared_verifier() {
     assert!(error.contains("declared artifact verifier failed"));
 }
 
-fn wf66_preflight_result() -> Option<WorkflowV2Result> {
+pub(super) fn wf66_preflight_result() -> Option<WorkflowV2Result> {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf66_remediation_wave_1_3_source_preflight.json"
     ))
@@ -195,7 +197,7 @@ fn owned_oversized_existing_target_does_not_block_source_preflight() {
     .is_none());
 }
 
-fn branches_from_fixture_items(
+pub(super) fn branches_from_fixture_items(
     fixture: &serde_json::Value,
     call: &WorkflowV2HostCall,
 ) -> Vec<WorkflowV2FanoutItem> {
@@ -215,7 +217,7 @@ fn branches_from_fixture_items(
         .collect()
 }
 
-fn branch_for_item(
+pub(super) fn branch_for_item(
     call: &WorkflowV2HostCall,
     item_id: &str,
     target_files: serde_json::Value,

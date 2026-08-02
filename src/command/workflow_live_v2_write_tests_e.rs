@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn verification_blocked_after_patch_is_contract_not_safety() {
     let error =

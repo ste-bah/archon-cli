@@ -1,4 +1,6 @@
-fn canonical_task_ids_from_result(result: &WorkflowV2Result) -> Vec<String> {
+use super::*;
+
+pub(super) fn canonical_task_ids_from_result(result: &WorkflowV2Result) -> Vec<String> {
     let mut ids = canonical_task_ids_from_generated_value(&result.data, None);
     ids.extend(
         string_array(result.data.get("canonical_task_ids"))
@@ -22,7 +24,7 @@ fn canonical_task_ids_from_result(result: &WorkflowV2Result) -> Vec<String> {
     sorted_unique(ids)
 }
 
-fn evidence_summaries_from_result(result: &WorkflowV2Result) -> Vec<String> {
+pub(super) fn evidence_summaries_from_result(result: &WorkflowV2Result) -> Vec<String> {
     let accepted_or_noop = matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -95,7 +97,7 @@ fn evidence_summaries_from_result(result: &WorkflowV2Result) -> Vec<String> {
     sorted_unique(evidence)
 }
 
-fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
     match value {
         Some(serde_json::Value::Array(items)) => items
             .iter()
@@ -114,7 +116,7 @@ fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
     }
 }
 
-fn string_value(value: Option<&serde_json::Value>) -> Option<String> {
+pub(super) fn string_value(value: Option<&serde_json::Value>) -> Option<String> {
     value
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
@@ -122,7 +124,7 @@ fn string_value(value: Option<&serde_json::Value>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn sorted_unique(values: Vec<String>) -> Vec<String> {
+pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
     use std::collections::BTreeSet;
 
     values
@@ -134,7 +136,7 @@ fn sorted_unique(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result {
+pub(super) fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result {
     let mut result = outcome.result.clone().unwrap_or_else(|| WorkflowV2Result {
         status: WorkflowV2Status::Blocked,
         summary: format!(
@@ -160,7 +162,7 @@ fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> WorkflowV2Result 
     result
 }
 
-fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) -> WorkflowV2Result {
+pub(super) fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::Failed,
         summary: format!(
@@ -187,14 +189,14 @@ fn failed_branch_error_result(outcome: &WorkflowV2BranchOutcome, error: &str) ->
     result
 }
 
-fn typed_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
+pub(super) fn typed_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
     outcomes
         .iter()
         .filter_map(|outcome| outcome.result.clone())
         .collect()
 }
 
-fn count_outcomes_with_status(
+pub(super) fn count_outcomes_with_status(
     outcomes: &[WorkflowV2BranchOutcome],
     status: WorkflowV2Status,
 ) -> usize {
@@ -204,7 +206,7 @@ fn count_outcomes_with_status(
         .count()
 }
 
-fn count_outcomes_with_failure_kind(
+pub(super) fn count_outcomes_with_failure_kind(
     outcomes: &[WorkflowV2BranchOutcome],
     kinds: &[BranchFailureKind],
 ) -> usize {
@@ -219,7 +221,7 @@ fn count_outcomes_with_failure_kind(
         .count()
 }
 
-fn truncate_for_result(value: &str, max_chars: usize) -> String {
+pub(super) fn truncate_for_result(value: &str, max_chars: usize) -> String {
     let mut output = String::new();
     for ch in value.chars().take(max_chars) {
         output.push(ch);

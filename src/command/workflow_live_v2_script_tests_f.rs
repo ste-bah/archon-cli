@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn prose_target_files_fail_fast_in_the_script() {
     let temp = tempfile::tempdir().expect("tempdir");

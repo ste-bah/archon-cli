@@ -1,3 +1,5 @@
+use super::*;
+
     #[tokio::test]
     async fn closed_tui_prevents_cached_script_host_call_reuse() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -286,11 +288,11 @@ async function workflow(w) {
     }
 
     #[derive(Default)]
-    struct TransientBlockedScriptLlm {
-        calls: AtomicUsize,
-        started: tokio::sync::Notify,
-        second_started: tokio::sync::Notify,
-        release: tokio::sync::Notify,
+    pub(super) struct TransientBlockedScriptLlm {
+        pub(super) calls: AtomicUsize,
+        pub(super) started: tokio::sync::Notify,
+        pub(super) second_started: tokio::sync::Notify,
+        pub(super) release: tokio::sync::Notify,
     }
 
     #[async_trait::async_trait]
@@ -321,9 +323,9 @@ async function workflow(w) {
     }
 
     #[derive(Default)]
-    struct CompletionBlockedScriptLlm {
-        started: tokio::sync::Notify,
-        release: tokio::sync::Notify,
+    pub(super) struct CompletionBlockedScriptLlm {
+        pub(super) started: tokio::sync::Notify,
+        pub(super) release: tokio::sync::Notify,
     }
 
     #[async_trait::async_trait]
@@ -359,11 +361,11 @@ async function workflow(w) {
     }
 
     #[derive(Default)]
-    struct RepairBlockedScriptLlm {
-        calls: AtomicUsize,
-        first_finished: tokio::sync::Notify,
-        repair_started: tokio::sync::Notify,
-        release_repair: tokio::sync::Notify,
+    pub(super) struct RepairBlockedScriptLlm {
+        pub(super) calls: AtomicUsize,
+        pub(super) first_finished: tokio::sync::Notify,
+        pub(super) repair_started: tokio::sync::Notify,
+        pub(super) release_repair: tokio::sync::Notify,
     }
 
     #[async_trait::async_trait]

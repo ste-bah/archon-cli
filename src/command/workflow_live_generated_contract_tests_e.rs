@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn workflow_live_generated_contract_normalizes_wf139e_verification_plan_fixture() {
     let fixture = include_str!("fixtures/wf139e_verification_plan_items.json");

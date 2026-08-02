@@ -1,3 +1,4 @@
+use super::*;
 
     #[tokio::test]
     async fn awaited_host_call_time_does_not_trip_js_watchdog() {
@@ -103,7 +104,7 @@ async function workflow(w) {
         assert_eq!(summary.status, WorkflowV2Status::Failed);
         assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
         assert_eq!(summary.executed, 1);
-        super::super::workflow_live_v2_state::sync_v2_summary_to_run(
+        super::super::super::workflow_live_v2_state::sync_v2_summary_to_run(
             &workflow_store,
             &run.id,
             &summary.calls,
@@ -119,7 +120,7 @@ async function workflow(w) {
         assert!(events.contains("\"event\":\"terminal_status\""));
     }
 
-    fn test_spec() -> WorkflowSpec {
+    pub(super) fn test_spec() -> WorkflowSpec {
         WorkflowSpec {
             schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
             name: "script-stop-test".to_string(),
@@ -133,19 +134,19 @@ async function workflow(w) {
         }
     }
 
-    fn test_runtime(spec: &WorkflowSpec) -> WorkflowV2ScriptRuntime {
+    pub(super) fn test_runtime(spec: &WorkflowSpec) -> WorkflowV2ScriptRuntime {
         WorkflowV2ScriptRuntime {
             target_repository_root: spec.target_repository_root.clone(),
             generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
         }
     }
 
-    fn task_universe() -> WorkflowV2TaskUniverse {
+    pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
         WorkflowV2TaskUniverse {
             schema_version: "workflow-v2-task-universe-v1".to_string(),
             source_roots: vec!["/tmp/tasks".to_string()],
             tasks: vec![
-                super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                     canonical_task_id: "TASK-TDL-001".to_string(),
                     aliases: vec!["T001".to_string()],
                     source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -154,7 +155,7 @@ async function workflow(w) {
                     artifact_requirements: Vec::new(),
                     ..Default::default()
                 },
-                super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+                super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                     canonical_task_id: "TASK-TDL-010".to_string(),
                     aliases: vec!["T010".to_string()],
                     source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -167,7 +168,7 @@ async function workflow(w) {
         }
     }
 
-    struct PanicLlm;
+    pub(super) struct PanicLlm;
 
     #[async_trait::async_trait]
     impl LlmClient for PanicLlm {
@@ -182,8 +183,8 @@ async function workflow(w) {
         }
     }
 
-    struct AlwaysInvalidLlm {
-        calls: AtomicUsize,
+    pub(super) struct AlwaysInvalidLlm {
+        pub(super) calls: AtomicUsize,
     }
 
     #[async_trait::async_trait]
@@ -206,8 +207,8 @@ async function workflow(w) {
     }
 
 
-    struct SlowAcceptedLlm {
-        delay: Duration,
+    pub(super) struct SlowAcceptedLlm {
+        pub(super) delay: Duration,
     }
 
     #[async_trait::async_trait]
