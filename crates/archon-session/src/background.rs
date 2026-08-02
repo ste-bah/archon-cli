@@ -33,9 +33,7 @@ pub struct BackgroundSessionInfo {
 
 /// Directory for background session files.
 pub fn sessions_dir() -> PathBuf {
-    archon_data_dir()
-        .join("archon")
-        .join("sessions")
+    archon_data_dir().join("archon").join("sessions")
 }
 
 // ---------------------------------------------------------------------------

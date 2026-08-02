@@ -491,18 +491,18 @@ fn known_vars_are_well_formed() {
 #[test]
 fn known_vars_covers_every_category() {
     let expected = [
-        "ANTHROPIC_API_KEY",             // auth
-        "ARCHON_MODEL",                  // model & behaviour
-        "ARCHON_DISABLE_HOOKS",          // feature control
-        "ARCHON_DOC_VECTOR_STORE_DIR",   // memory / embeddings
-        "ARCHON_LOG",                    // debugging
-        "ARCHON_DATA_DIR",               // paths
-        "ARCHON_OCR_ENGINE",             // OCR / video tuning
-        "ARCHON_FFMPEG_BIN",             // tool binary overrides
-        "ARCHON_THEME_PREFER",           // TUI
-        "ARCHON_REMOTE_URL",             // runtime & agent lifecycle
+        "ANTHROPIC_API_KEY",                // auth
+        "ARCHON_MODEL",                     // model & behaviour
+        "ARCHON_DISABLE_HOOKS",             // feature control
+        "ARCHON_DOC_VECTOR_STORE_DIR",      // memory / embeddings
+        "ARCHON_LOG",                       // debugging
+        "ARCHON_DATA_DIR",                  // paths
+        "ARCHON_OCR_ENGINE",                // OCR / video tuning
+        "ARCHON_FFMPEG_BIN",                // tool binary overrides
+        "ARCHON_THEME_PREFER",              // TUI
+        "ARCHON_REMOTE_URL",                // runtime & agent lifecycle
         "ARCHON_TRADINGVIEW_OHLCV_FIXTURE", // diagnostic fixtures
-        "ARCHON_DISABLE_TELEMETRY",      // telemetry
+        "ARCHON_DISABLE_TELEMETRY",         // telemetry
     ];
 
     for var in &expected {

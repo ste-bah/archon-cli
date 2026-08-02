@@ -252,8 +252,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         slash_primary: Some("world"),
         tui_surface: "World-model inspector + CLI mirror",
         status: SurfaceStatus::Done,
-        source_of_truth:
-            "src/command/world_view.rs + src/command/world_model.rs + crates/archon-world-model",
+        source_of_truth: "src/command/world_view.rs + src/command/world_model.rs + crates/archon-world-model",
         notes: "Local world-model status, ingest/backfill, dynamic trainer tick, latent and JEPA candidate train/eval/promote, JEPA eval-run inspection, fail-open prediction, outcome/surprise recording, action scoring, explain, and rollback are mirrored. /world opens a read-only inspector (advisor, corpus/cold-start, candidates, last eval, trainer health); verbs that change promotion state, the trace corpus, or guardrail policy require an explicit --yes from the TUI. The advisor remains advisory-only.",
     },
     CommandSurfaceRow {

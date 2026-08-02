@@ -121,8 +121,14 @@ fn auth_status_redacts_codex_identity_fields() {
         // steer `dirs::home_dir()` on Windows, so without these the spawned
         // binary reads the developer's real credentials and reports their
         // account instead of the fixture's.
-        .env("ARCHON_CREDENTIALS_FILE", home.join(".archon").join(".credentials.json"))
-        .env("ARCHON_CODEX_AUTH_FILE", home.join(".codex").join("auth.json"))
+        .env(
+            "ARCHON_CREDENTIALS_FILE",
+            home.join(".archon").join(".credentials.json"),
+        )
+        .env(
+            "ARCHON_CODEX_AUTH_FILE",
+            home.join(".codex").join("auth.json"),
+        )
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", &config)
         .env("ARCHON_CONFIG_DIR", config.join("archon"))

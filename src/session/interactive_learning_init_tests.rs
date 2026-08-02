@@ -267,10 +267,9 @@ fn interactive_learning_schema_initialization_waits_for_held_sidecar_lock() {
     });
 
     // Short on purpose: this is the negative check -- the waiter must NOT
-        // have finished while the lock is held. Only the post-release waits
-        // below need a generous budget.
-        let completed_before_release =
-            result_rx.recv_timeout(Duration::from_millis(200)).is_ok();
+    // have finished while the lock is held. Only the post-release waits
+    // below need a generous budget.
+    let completed_before_release = result_rx.recv_timeout(Duration::from_millis(200)).is_ok();
     release_tx.send(()).expect("release lock");
     lock_holder
         .join()
