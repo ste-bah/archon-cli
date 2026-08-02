@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::WorkflowResult;
-use crate::spec::{
-    ArtifactPolicy, ProviderTier, ReducerKind, StageKind, StageSpec, WORKFLOW_SCHEMA, WorkflowSpec,
-};
+use crate::spec::{ProviderTier, ReducerKind, StageKind, StageSpec, WORKFLOW_SCHEMA, WorkflowSpec};
 
 pub trait WorkflowPlanner {
     fn plan(&self, task: &str) -> WorkflowResult<WorkflowSpec>;
@@ -17,10 +15,6 @@ pub struct HeuristicWorkflowPlanner;
 
 impl WorkflowPlanner for HeuristicWorkflowPlanner {
     fn plan(&self, task: &str) -> WorkflowResult<WorkflowSpec> {
-        let mut provider_tiers = BTreeMap::new();
-        provider_tiers.insert(ProviderTier::Planner, "auto".to_string());
-        provider_tiers.insert(ProviderTier::Critic, "auto".to_string());
-        provider_tiers.insert(ProviderTier::Reducer, "auto".to_string());
         let spec = WorkflowSpec {
             schema: WORKFLOW_SCHEMA.to_string(),
             name: slug_name(task),
@@ -28,7 +22,6 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
             target_repository_root: None,
             max_parallelism: 8,
             max_agents: 200,
-            provider_tiers,
             stages: vec![
                 items_producer(
                     "discover",
@@ -57,7 +50,6 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     foreach: None,
                     reducer: None,
                     tool: None,
-                    condition: None,
                     depends_on: vec!["synthesize".to_string()],
                     provider_tier: Some(ProviderTier::Critic),
                     retry: Default::default(),
@@ -72,9 +64,7 @@ impl WorkflowPlanner for HeuristicWorkflowPlanner {
                     extra: BTreeMap::new(),
                 },
             ],
-            artifact_policy: ArtifactPolicy::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: vec!["sona".into(), "reasoning_bank".into(), "world_model".into()],
         };
         spec.validate()?;
@@ -91,7 +81,6 @@ fn agent(id: &str, agent: &str, tier: ProviderTier, depends_on: Vec<&str>) -> St
         foreach: None,
         reducer: None,
         tool: None,
-        condition: None,
         depends_on: depends_on.into_iter().map(str::to_string).collect(),
         provider_tier: Some(tier),
         retry: Default::default(),
@@ -144,7 +133,6 @@ fn reduce(id: &str, reducer: ReducerKind, tier: ProviderTier, depends_on: Vec<&s
         foreach: None,
         reducer: Some(reducer),
         tool: None,
-        condition: None,
         depends_on: depends_on.into_iter().map(str::to_string).collect(),
         provider_tier: Some(tier),
         retry: Default::default(),

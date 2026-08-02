@@ -180,7 +180,6 @@ fn validate_saved_harness(source: &str) -> WorkflowResult<()> {
 pub fn sanitize_spec(spec: &WorkflowSpec) -> WorkflowResult<WorkflowSpec> {
     let mut sanitized = spec.clone();
     sanitized.permissions.clear();
-    sanitized.quality_gates.remove("run_id");
     for stage in &mut sanitized.stages {
         stage.model = None;
         stage.provider = None;

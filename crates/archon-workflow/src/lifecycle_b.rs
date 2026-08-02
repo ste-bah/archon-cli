@@ -69,7 +69,7 @@ mod tests {
 
     use super::*;
     use crate::run::{ItemState, StageStatus};
-    use crate::spec::{ArtifactPolicy, StageKind, StageSpec, WorkflowSpec};
+    use crate::spec::{StageKind, StageSpec, WorkflowSpec};
 
     #[test]
     fn resume_reopens_cancelled_work_without_rewinding_accepted_work() {
@@ -129,11 +129,8 @@ mod tests {
             target_repository_root: None,
             max_parallelism: 1,
             max_agents: 1,
-            provider_tiers: BTreeMap::new(),
             stages: vec![test_stage("accepted"), test_stage("cancelled")],
-            artifact_policy: ArtifactPolicy::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: Vec::new(),
         }
     }
@@ -147,7 +144,6 @@ mod tests {
             foreach: None,
             reducer: None,
             tool: None,
-            condition: None,
             depends_on: Vec::new(),
             provider_tier: None,
             retry: Default::default(),

@@ -46,9 +46,13 @@ fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields
         .iter()
         .find(|stage| stage.id == "missing-plan-escalation")
         .expect("metadata stage exists");
+    // `condition` is not a typed StageSpec field: nothing ever evaluated it.
+    // The authored text still round-trips verbatim through the flattened extras.
     assert_eq!(
-        stage.condition.as_deref(),
-        Some("plannedItems.length === 0 && proofReview.status !== \"accepted\"")
+        stage.extra.get("condition"),
+        Some(&json!(
+            "plannedItems.length === 0 && proofReview.status !== \"accepted\""
+        ))
     );
     assert_eq!(stage.input["runtime"], "script_first_v2");
     assert_eq!(stage.extra.get("runtime_loop"), Some(&json!("while")));

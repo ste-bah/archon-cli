@@ -9,6 +9,7 @@ mod agent_output_normalize;
 mod agent_prompt;
 mod agent_repair;
 mod branch_evidence;
+pub mod call_execution;
 pub mod host_api;
 pub mod implementation_inspection;
 pub mod prd_intake;
@@ -20,8 +21,6 @@ pub mod project_artifacts;
 pub mod report;
 pub mod result;
 pub mod result_store;
-pub mod resume;
-pub mod runtime;
 pub mod scheduler;
 pub mod task_record;
 pub mod validation;
@@ -31,6 +30,7 @@ mod write_mode_paths;
 pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
 };
+pub use call_execution::WorkflowV2CallExecution;
 pub use host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,
@@ -61,8 +61,6 @@ pub use result_store::{
     WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2TaskCompletionEvidence,
     WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskInvalidation,
 };
-pub use resume::WorkflowV2ResumeDecision;
-pub use runtime::{WorkflowV2CallExecution, WorkflowV2RunSummary, WorkflowV2Runtime};
 pub use scheduler::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CancellationToken, WorkflowV2FanoutItem,
     WorkflowV2FanoutReport, WorkflowV2Scheduler, WorkflowV2SchedulerConfig,

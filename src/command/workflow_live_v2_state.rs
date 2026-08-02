@@ -348,7 +348,6 @@ mod tests {
             target_repository_root: Some("/repo".to_string()),
             max_parallelism: 8,
             max_agents: 32,
-            provider_tiers: BTreeMap::new(),
             stages: vec![StageSpec {
                 id: stage_id.to_string(),
                 kind: StageKind::Agent,
@@ -357,7 +356,6 @@ mod tests {
                 foreach: None,
                 reducer: None,
                 tool: None,
-                condition: None,
                 depends_on: Vec::new(),
                 provider_tier: None,
                 retry: RetryPolicy::default(),
@@ -371,9 +369,7 @@ mod tests {
                 filter: None,
                 extra,
             }],
-            artifact_policy: Default::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: Vec::new(),
         }
     }

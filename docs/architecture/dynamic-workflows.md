@@ -34,27 +34,27 @@ A workflow plan is YAML with:
 - `schema: archon.workflow.v1`
 - `name` and `task`
 - `max_parallelism` and `max_agents`
-- provider tiers such as `planner`, `critic`, and `reducer`
-- stages of kind `agent`, `fanout`, `reduce`, `condition`, `tool`,
-  `checkpoint`, `quality_gate`, `human_gate`, or `implementation`
-- artifact, permission, quality-gate, and learning-hook metadata
+- stages of kind `agent`, `fanout`, `reduce`, `tool`, `checkpoint`,
+  `quality_gate`, `human_gate`, or `implementation`
+- permission and learning-hook metadata
 
 Provider-specific model IDs are not allowed inside stages. A stage may request
-a capability tier, but the active provider configuration resolves the concrete
-provider/model at runtime.
+a capability tier via `provider_tier`, but the active provider configuration
+(`WorkflowConfig::provider_tiers`) resolves the concrete provider/model at
+runtime.
 
-Generated plans may include a concise per-stage `task` objective. Provider tier
-entries may be either `critic: auto` or neutral map form such as
-`critic: { provider: auto, model: auto }`; generated lists such as
-`provider_tiers: [planner, researcher, critic]` and named list entries such as
-`{ tier: critic, provider: auto, model: auto }` are normalized too. Concrete
-provider/model names remain invalid in generated specs. Live generated specs are
-also normalized before
-validation: `inputs`/`outputs` metadata can infer missing `depends_on` edges,
-top-level `quality_gates` entries can be promoted into executable
-`quality_gate` stages, missing agent names fall back to the stage id, missing
-fan-out `foreach` values run as a single item, and missing reducer kinds default
-to `evidence_weighted_report`.
+Generated plans may include a concise per-stage `task` objective. Live generated
+specs are normalized before validation: `inputs`/`outputs` metadata can infer
+missing `depends_on` edges, missing agent names fall back to the stage id,
+missing fan-out `foreach` values run as a single item, and missing reducer kinds
+default to `evidence_weighted_report`.
+
+A spec-level `provider_tiers`, `artifact_policy`, or `quality_gates` block is
+accepted and ignored for backward compatibility. None of the three was ever
+read; tier resolution has always come from `WorkflowConfig`, and quality gates
+are expressed as `quality_gate` stages. A `condition` stage kind is likewise
+accepted and loaded as `checkpoint`: no condition evaluator was ever wired up,
+so such a stage always proceeded unconditionally.
 
 Write-capable generated plans must use a typed implementation contract. Known
 single-stage edits use `kind: implementation` with `expected_target_files`.
