@@ -6,6 +6,7 @@ mod learning;
 mod providers;
 mod runtime;
 mod sections;
+mod topology;
 mod validation;
 mod world_model;
 
@@ -15,6 +16,7 @@ pub use learning::*;
 pub use providers::*;
 pub use runtime::*;
 pub use sections::*;
+pub use topology::*;
 pub use validation::*;
 pub use world_model::*;
 
@@ -89,6 +91,9 @@ pub struct ArchonConfig {
     /// Workflow runtime configuration.
     #[serde(default)]
     pub workflow: WorkflowRuntimeConfig,
+    /// Milestone 3 topology guardrail admission.
+    #[serde(default)]
+    pub topology: TopologyConfig,
 }
 
 #[cfg(test)]

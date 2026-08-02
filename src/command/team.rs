@@ -43,6 +43,11 @@ pub(crate) async fn handle_team_command(
             let trace_root = std::env::current_dir().unwrap_or_default();
             let trace_graph_id = format!("team-{}", team_cfg.name);
             crate::command::topology_trace::begin(&trace_root, &trace_graph_id, &trace_graph_id);
+            // Milestone 3: track the same id for guardrail admission, so the
+            // team's declared graph, node lifecycle, and write claims are all
+            // keyed together. Enforcement is governed by `[topology]`; with
+            // `admission_enabled = false` this is a no-op.
+            crate::command::topology_admission::install(config, &trace_graph_id);
 
             archon_observability::spawn_named("team-event-printer", async move {
                 while let Some(event) = rx.recv().await {
@@ -77,6 +82,7 @@ pub(crate) async fn handle_team_command(
             // worker is a runtime stall. One writer, batched, one transaction.
             let fold_goal = goal.clone();
             let fold_graph_id = trace_graph_id.clone();
+            let fold_graph_id_for_end = trace_graph_id.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 crate::command::topology_fold::fold_project_pending_blocking(
                     &trace_root,
@@ -87,6 +93,8 @@ pub(crate) async fn handle_team_command(
             })
             .await;
             crate::command::topology_trace::end();
+            // Bounded state, dropped at session end.
+            crate::command::topology_admission::end_session(&fold_graph_id_for_end);
 
             match run {
                 Ok(result) => println!("Result: {result}"),

@@ -35,6 +35,11 @@ impl AmbientTrace {
                     ..graph
                 };
                 self.declare_graph(&graph);
+                // Milestone 3: the same lowering feeds admission, so a team run
+                // is admitted against the shape it declared rather than against
+                // a reconstruction. Keyed by the trace's session id — see the
+                // namespace caveat in `topology_admission`.
+                crate::command::topology_admission::declare_graph(&self.session_id, &graph);
             }
             OrchestratorEvent::AgentSpawned {
                 agent_id,
@@ -51,12 +56,16 @@ impl AmbientTrace {
                     TraceRecord::new(&ts, &self.graph_id, TraceKind::NodeStarted)
                         .with_node(subtask_id),
                 );
+                crate::command::topology_admission::on_node_started(&self.session_id, subtask_id);
             }
             OrchestratorEvent::AgentComplete { subtask_id, .. } => {
                 self.record(
                     TraceRecord::new(&ts, &self.graph_id, TraceKind::NodeFinished)
                         .with_node(subtask_id),
                 );
+                // Releases the node's write claims and its live-agent slot. The
+                // lifetime agent total is not released: that is the point of it.
+                crate::command::topology_admission::on_node_finished(&self.session_id, subtask_id);
             }
             OrchestratorEvent::AgentFailed {
                 subtask_id,
@@ -73,6 +82,17 @@ impl AmbientTrace {
                         .with_node(subtask_id)
                         .with_outcome(false, true),
                 );
+                if *will_retry {
+                    crate::command::topology_admission::on_node_started(
+                        &self.session_id,
+                        subtask_id,
+                    );
+                } else {
+                    crate::command::topology_admission::on_node_finished(
+                        &self.session_id,
+                        subtask_id,
+                    );
+                }
             }
             OrchestratorEvent::TeamComplete { .. } => {
                 self.record(TraceRecord::new(

@@ -254,6 +254,50 @@ pub fn resource_keys_for_targets(
     Ok(keys)
 }
 
+/// Glob metacharacters. A target containing any of these is a pattern, not a
+/// literal path, and must become a [`ResourceKey::Glob`] so the overlap table
+/// matches it rather than comparing it as a string.
+const GLOB_METACHARACTERS: [char; 4] = ['*', '?', '[', '{'];
+
+/// Case-fold a raw path or glob exactly as [`NormalizedPath::key_string`] does.
+///
+/// Exposed so a caller that builds resource keys by another route still folds
+/// case the same way. Two keys that disagree on folding never conflict, and a
+/// missed conflict is the failure direction this whole module is built to
+/// avoid.
+#[must_use]
+pub fn fold_resource_case(raw: &str) -> String {
+    fold_case_for_os(raw, std::env::consts::OS)
+}
+
+/// Build one resource key from a raw declared target, **touching no filesystem**.
+///
+/// [`normalize_target`] is the right entry point for the coordinator: it
+/// validates, rejects traversal, and resolves symlinks against the live
+/// filesystem. Milestone 3's admission callback cannot use it. That callback is
+/// synchronous and runs on the critical path of every non-`Safe` tool call, and
+/// `normalize_target` performs a `canonicalize` plus a `symlink_metadata` per
+/// path component; it also *fails* on paths outside the repository, and a
+/// failure there would have to be resolved as either "allow" (unsafe) or
+/// "block" (a false positive on every out-of-tree write).
+///
+/// So this is the same question asked with less information: separators
+/// unified, case folded, and the literal/pattern distinction preserved so
+/// [`keys_conflict`] — including its "a malformed glob conflicts with
+/// everything" fail-safe — still decides the overlap. No `Dir` key is produced,
+/// because whether a parent directory is created is a filesystem fact this
+/// cannot see; the consequence is that a directory-scope overlap goes
+/// unreported here, which under-reports rather than over-reports.
+#[must_use]
+pub fn resource_key_for_raw_target(raw: &str) -> ResourceKey {
+    let unified = fold_resource_case(&raw.trim().replace('\\', "/"));
+    if unified.contains(GLOB_METACHARACTERS) {
+        ResourceKey::Glob(unified)
+    } else {
+        ResourceKey::File(unified)
+    }
+}
+
 /// Deterministic overlap table (PRD-012 §10.1).
 pub fn keys_conflict(a: &ResourceKey, b: &ResourceKey) -> bool {
     use ResourceKey::{Dir, File, Glob};

@@ -21,7 +21,7 @@ const WRITING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "ApplyPatch", "No
 ///
 /// Only for tools known to write. A `Read` also carries `file_path`, and
 /// recording that as a write would manufacture write conflicts out of nothing.
-pub(super) fn written_paths(tool_name: &str, input: &serde_json::Value) -> Vec<WriteTarget> {
+pub(crate) fn written_paths(tool_name: &str, input: &serde_json::Value) -> Vec<WriteTarget> {
     if !WRITING_TOOLS.contains(&tool_name) {
         return Vec::new();
     }
@@ -50,7 +50,7 @@ fn normalize_write_path(path: &str) -> String {
 }
 
 /// The agent type a subagent-spawning tool call named, if any.
-pub(super) fn subagent_type(input: &serde_json::Value) -> Option<String> {
+pub(crate) fn subagent_type(input: &serde_json::Value) -> Option<String> {
     let fields = input.as_object()?;
     ["subagent_type", "agent_type", "agent", "type"]
         .iter()

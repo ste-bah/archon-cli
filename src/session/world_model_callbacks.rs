@@ -63,13 +63,23 @@ fn install_on(
         },
     ));
 
+    // Milestone 3 guardrail admission. Registering the session here rather than
+    // inside the callback keeps the callback allocation-free and means a
+    // session that never makes a non-`Safe` tool call is still tracked, which
+    // matters for the write claims a spawned agent's writes compare against.
+    crate::command::topology_admission::install(config, session_id);
+
     let admission_config = config.clone();
     target.set_tool_run_callbacks(
+        // Composed admission: topology guardrails first (in-memory, no database
+        // access of any kind), then the world-model guardrail. See
+        // `world_model::admit_tool_run_composed`.
         Arc::new(move |request| {
-            crate::command::world_model::admit_tool_run_attempt(&admission_config, request)
+            crate::command::world_model::admit_tool_run_composed(&admission_config, request)
         }),
-        // Composed tap: the ambient topology trace plus the world-model
-        // guardrail ledger. See `world_model::tool_run_outcome_taps`.
+        // Composed tap: the ambient topology trace, the topology admission
+        // release, and the world-model guardrail ledger. See
+        // `world_model::tool_run_outcome_taps`.
         Arc::new(crate::command::world_model::tool_run_outcome_taps),
     );
 

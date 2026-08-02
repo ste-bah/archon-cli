@@ -11,7 +11,7 @@ description = "Topology IR (TaskGraph) and pure graph analyses shared by workflo
 # archon-core takes the crate with `default-features = false`: archon-core needs
 # only the IR plus the analyses, and it must not acquire a build edge onto the
 # 22k-LOC workflow crate to get them.
-default = ["workflow", "trace"]
+default = ["workflow", "trace", "live"]
 # serde_json rides along because `WorkflowSpec::permissions` is typed
 # `BTreeMap<String, serde_json::Value>`; reading that field is impossible
 # without naming the type. Confined to this feature so the IR-and-analyses
@@ -26,6 +26,23 @@ workflow = ["dep:archon-workflow", "dep:serde_json"]
 # makes "no Cozo on the hot path" a property of the dependency graph rather
 # than a rule someone has to remember.
 trace = ["dep:serde_json"]
+# Milestone 3's guardrail admission: the per-session executed prefix and the
+# three invariants evaluated against it.
+#
+# It depends on `workflow` — not for `WorkflowSpec`, but for
+# `write_coordinator::write_plan`, whose `ResourceKey` overlap table is the
+# single-writer decision procedure this milestone is required to *extend*
+# rather than reimplement (including its deliberate "a malformed glob is
+# conflicting" fail-safe). Duplicating that table here would mean two answers to
+# one question, and the topology crate's exact-string `write_conflicts` already
+# documents itself as the conservative floor that exists only because the
+# milestone 1 dependency budget excluded `globset`. Admission is not bound by
+# that budget: it is the consumer the coordinator was written for.
+#
+# `dashmap` is the only new external crate, and it is already a workspace
+# dependency. Still no cozo, no archon-core, no learning crate — the property
+# that keeps "no database on the hot path" a fact about the build graph.
+live = ["workflow", "dep:dashmap"]
 
 [dependencies]
 # Hard isolation requirement (docs/architecture/topology-engineering.md,
@@ -36,6 +53,7 @@ petgraph.workspace = true
 serde.workspace = true
 archon-workflow = { path = "../archon-workflow", optional = true }
 serde_json = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
