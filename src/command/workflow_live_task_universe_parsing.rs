@@ -60,6 +60,8 @@ pub(super) fn parse_task_file(
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         acceptance_criteria: declared_task_section_items(raw, "acceptance criteria"),
+        // Additive: the per-task adversarial reviewer reads these verbatim.
+        adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),
         artifact_requirements: declared_task_artifact_requirements(raw),
         required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
         required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),

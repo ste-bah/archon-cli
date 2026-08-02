@@ -100,6 +100,14 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     pub(super) title: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) acceptance_criteria: Vec<String>,
+    /// Per-task adversarial checks declared under an `## Adversarial Review
+    /// Notes` heading in the TASK file. Consumed ONLY by the per-task
+    /// `adversarial-review` stage: they are the task author's own falsification
+    /// hypotheses, and they are meaningless to a reviewer holding every task at
+    /// once, which is why they were unreachable while review was a single
+    /// terminal reduce.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) adversarial_review_notes: Vec<String>,
     /// Explicit artifact declarations from the task file (paths relative to
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

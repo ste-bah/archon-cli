@@ -113,6 +113,43 @@ fn task_universe_carries_authoritative_acceptance_criteria() {
     );
 }
 
+/// `## Adversarial Review Notes` is the task author's own list of falsification
+/// hypotheses. It only became reachable when review moved to one reviewer per
+/// task — a reducer holding every task at once has no use for it. The first
+/// file mirrors a real task file (TASK-TDL-001), including the trailing
+/// prior-run-findings block that must not leak into the notes; the second
+/// declares none, and gets none — nothing is invented for a reviewer to chase.
+#[test]
+fn task_universe_carries_declared_adversarial_review_notes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        temp.path().join("TASK-TDL-001-foundation.md"),
+        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n\n## Acceptance Criteria\n\n- A criterion.\n\n## Adversarial Review Notes\n\n- Verify the task does not weaken native-candle enforcement.\n- Verify residual gaps fail closed.\n\n<!-- PRIOR-RUN-FINDINGS:BEGIN -->\n\n### Prior run `wf-ee4a92fc` (2026-07-28)\n\n- a prior finding bullet that is not a review note\n",
+    )
+    .expect("task");
+    fs::write(
+        temp.path().join("TASK-TDL-002-plain.md"),
+        "# Plain\n\ntask_id: TASK-TDL-002\ndepends_on: []\n\n## Acceptance Criteria\n\n- A criterion.\n",
+    )
+    .expect("task");
+
+    let universe = extract_task_universe_for_generated_run(&format!(
+        "Implement the decomposed PRD at {}",
+        temp.path().display()
+    ))
+    .expect("extract")
+    .expect("universe");
+
+    assert_eq!(
+        universe.tasks[0].adversarial_review_notes,
+        vec![
+            "Verify residual gaps fail closed.".to_string(),
+            "Verify the task does not weaken native-candle enforcement.".to_string(),
+        ]
+    );
+    assert!(universe.tasks[1].adversarial_review_notes.is_empty());
+}
+
 #[test]
 fn prd_task_references_must_have_matching_task_files() {
     let temp = tempfile::tempdir().expect("tempdir");

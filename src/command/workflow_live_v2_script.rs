@@ -346,8 +346,12 @@ include!("workflow_live_v2_script_verification.rs");
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
 pub(super) mod workflow_live_v2_deliverable_contract;
+#[path = "workflow_live_v2_lifecycle_adversarial.rs"]
+mod workflow_live_v2_lifecycle_adversarial;
 #[path = "workflow_live_v2_lifecycle_boundary_repair.rs"]
 mod workflow_live_v2_lifecycle_boundary_repair;
+#[path = "workflow_live_v2_lifecycle_cross_cutting.rs"]
+mod workflow_live_v2_lifecycle_cross_cutting;
 #[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
 mod workflow_live_v2_lifecycle_noop_routing;
 #[path = "workflow_live_v2_lifecycle_prompts.rs"]

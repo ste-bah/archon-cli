@@ -300,6 +300,30 @@ function __archonPrimitives(w) {
       return finding;
     });
   };
+  // Carry the MAP findings through structurally instead of asking the reduce to
+  // preserve them, and drop any reduce finding that merely restates one.
+  //
+  // Same argument as stampTaskIds, one level up: "preserve every map finding
+  // verbatim" is a model instruction, and a reduce that forgets it deletes work
+  // rather than erroring. The map findings are already in hand here — the
+  // primitive read them out of the branches itself — so the reduce cannot lose
+  // them, and its own output is narrowed to what it alone can see. Identity
+  // matching reuses findingIdentities, so a restated finding contributes
+  // nothing however it is reworded around the same id/claim/title.
+  const mergeMapAndReduceFindings = (mapFindings, reduceFindings) => {
+    const seen = {};
+    for (const finding of mapFindings) {
+      for (const key of findingIdentities(finding)) seen[key] = true;
+    }
+    const merged = [...mapFindings];
+    for (const finding of (Array.isArray(reduceFindings) ? reduceFindings : [])) {
+      const identities = findingIdentities(finding);
+      if (identities.some((key) => seen[key])) continue;
+      for (const key of identities) seen[key] = true;
+      merged.push(Object.assign({}, finding, { finding_scope: "cross_cutting" }));
+    }
+    return merged;
+  };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
     const itemTaskIds = {};
@@ -326,14 +350,20 @@ function __archonPrimitives(w) {
       task: reduceTask,
       reviewContract: { version: 1, kind, stage: "reduce_final", sourceMapCallIds: [`${label}-map`], preserveMapFindings: true, findingsPath: "data.findings", accountingField: kind, maxInputBytes: 48000 },
     });
-    return reattributeFindings(findingsFrom(reduce), mapFindings);
+    // reattributeFindings still runs over the reduce's own output: a genuinely
+    // cross-cutting finding may name tasks, and re-attaching by identity costs
+    // nothing. The map half no longer depends on it.
+    return mergeMapAndReduceFindings(
+      mapFindings,
+      reattributeFindings(findingsFrom(reduce), mapFindings),
+    );
   };
   const adversarialReview = async (acceptedTaskIds, opts = {}) =>
     reviewMapReduce(
       "adversarial-review",
       "adversarial_findings",
       "You did NOT do this work — be suspicious. Try to FALSIFY this accepted task using only its own claims and the bounded evidence supplied. Return data.findings as compact structured findings (max 25).",
-      "Preserve every map finding verbatim, then add any cross-task contradictions you can see across the map findings. Return data.findings.",
+      "The per-task findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity and contributes nothing. Return data.findings for cross-task concerns ONLY: contradictions between tasks, global invariants, and PRD-level acceptance no single task owns.",
       acceptedTaskIds,
       opts.evidenceFor,
     );
@@ -342,7 +372,7 @@ function __archonPrimitives(w) {
       "coverage-audit",
       "uncovered_requirements",
       "Compare this accepted task against the source requirements it claims to satisfy. Return data.findings for any requirement it appears NOT to cover.",
-      "Preserve every map coverage finding verbatim, deduplicate only by exact finding identity, then add cross-task uncovered-requirement findings. Return data.findings.",
+      "The per-task coverage findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity. Return data.findings for cross-task uncovered requirements ONLY: requirements no individual task claims, and requirements two tasks each assume the other covers.",
       acceptedTaskIds,
       opts.evidenceFor,
     );

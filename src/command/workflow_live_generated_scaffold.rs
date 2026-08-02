@@ -120,12 +120,23 @@ pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
         ("verification-repair-plan", REDUCE, None),
         ("verification-repair-shape-repair", REDUCE, None),
         ("blocked-verification-failed", FINAL_REPORT, None),
+        // The third point of the per-task diamond. PARALLEL, one reviewer per
+        // task, listed here because that is where it runs: after this wave's
+        // verification accepted the task, not after every wave. It was a single
+        // terminal REDUCE over all tasks, which made attribution inferential
+        // (a reducer has no per-item branch to recover a task id from) and made
+        // every finding arrive too late to be cheap.
+        ("adversarial-review", PARALLEL, None),
         ("wave-completion-evidence-repair", REDUCE, None),
         ("blocked-no-completion", FINAL_REPORT, None),
         ("blocked-loop-exhaustion", FINAL_REPORT, None),
         ("artifact-inventory", REDUCE, None),
         ("save-artifact-inventory", SAVE_ARTIFACT, None),
-        ("adversarial-review", REDUCE, None),
+        // The terminal reduce, narrowed: contradictions BETWEEN tasks, global
+        // invariants, PRD-level acceptance. It is handed the task universe and
+        // a digest of the per-task findings — never the run's implementation
+        // or verification evidence — so it cannot re-review per-task work.
+        ("cross-cutting-review", REDUCE, None),
         ("review-remediation-inventory", REDUCE, None),
         ("review-remediation-inventory-repair", REDUCE, None),
         ("blocked-empty-review-remediation", FINAL_REPORT, None),

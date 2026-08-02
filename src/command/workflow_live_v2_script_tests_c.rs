@@ -262,6 +262,65 @@ fn static_scaffold_plan_has_unique_ids_and_write_isolated_fanouts() {
     }
 }
 
+/// The review diamond, as declared in the approval-time plan.
+///
+/// `adversarial-review` was a single terminal REDUCE over every task at once.
+/// It is now PARALLEL — one reviewer per task — and it is positioned inside the
+/// dependency wave, after `verification-wave` and before the wave's completion
+/// accounting, because that is where it runs. The terminal reduce survives as
+/// `cross-cutting-review`, narrowed to concerns no single-task reviewer can see.
+#[test]
+fn static_scaffold_plan_declares_the_per_task_review_diamond() {
+    let plan = super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
+    let index = |id: &str| {
+        plan.iter()
+            .position(|call| call.id == id)
+            .unwrap_or_else(|| panic!("plan must declare {id}"))
+    };
+    let adversarial = &plan[index("adversarial-review")];
+    assert_eq!(
+        adversarial.method,
+        WorkflowV2HostMethod::Parallel,
+        "per-task review is a map, not a reduce: a reduce has no per-item branch to \
+         recover a task id from, which is exactly how attribution was lost"
+    );
+    assert_eq!(adversarial.write_mode, None, "review is read-only");
+    assert_eq!(
+        plan[index("cross-cutting-review")].method,
+        WorkflowV2HostMethod::Reduce
+    );
+    assert!(
+        plan.iter().all(|call| call.id != "adversarial-review-reduce"),
+        "the old terminal adversarial reduce must not survive under any name"
+    );
+    assert!(
+        index("verification-wave") < index("adversarial-review"),
+        "a task is reviewed after its own verification"
+    );
+    assert!(
+        index("adversarial-review") < index("wave-completion-evidence-repair"),
+        "per-task review runs inside the wave, not after every wave"
+    );
+    assert!(
+        index("adversarial-review") < index("cross-cutting-review"),
+        "the cross-task reduce consumes the per-task findings"
+    );
+    // Downstream review stages are untouched and still run after the reduce.
+    for downstream in [
+        "review-remediation-inventory",
+        "review-remediation-wave",
+        "review-verification-plan",
+        "review-verification-wave",
+        "blocked-review-unresolved",
+        "final-acceptance-report",
+    ] {
+        assert!(
+            index("cross-cutting-review") < index(downstream),
+            "{downstream} must still follow the terminal review reduce"
+        );
+    }
+}
+
 #[tokio::test]
 async fn dry_run_rejects_provider_routing_and_duplicate_ids() {
     let duplicate = r#"

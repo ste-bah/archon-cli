@@ -33,25 +33,10 @@ impl LifecycleDriver {
         }));
 
         let mut review_iteration = 1usize;
-        let mut review = self
-            .reduce(
-                &format!("adversarial-review-{review_iteration}"),
-                serde_json::json!([
-                    self.task_universe,
-                    evidence.implementation,
-                    evidence.verification,
-                    evidence.artifact,
-                    self.governed_learning_context
-                ]),
-                "reviewer",
-                prompts::ADVERSARIAL_REVIEW_TASK,
-            )
-            .await?;
-        evidence.review.push(serde_json::json!({
-            "kind": "review",
-            "reviewIteration": review_iteration,
-            "result": review,
-        }));
+        // Round 1 reuses the per-task findings the dependency waves already
+        // produced (`None` = do not re-review), so the diamond costs nothing
+        // extra here.
+        let mut review = self.run_review_round(review_iteration, None, evidence).await?;
 
         while remediation::review_needs_remediation(&review) && review_iteration <= 6 {
             let raw_inventory = self
@@ -179,26 +164,17 @@ impl LifecycleDriver {
                 return Ok(());
             }
             review_iteration += 1;
+            // Re-review ONLY the tasks this round remediated. Carrying the
+            // previous round's per-task findings forward unchanged would make
+            // every round report the same findings until the iteration cap,
+            // regardless of whether the fixes landed; re-running the per-task
+            // reviewer is what makes the loop converge on evidence.
+            let remediated = workflow_live_v2_lifecycle_cross_cutting::remediated_task_ids(
+                &review_remediation_inventory,
+            );
             review = self
-                .reduce(
-                    &format!("adversarial-review-{review_iteration}"),
-                    serde_json::json!([
-                        self.task_universe,
-                        evidence.implementation,
-                        evidence.verification,
-                        evidence.review,
-                        evidence.artifact,
-                        self.governed_learning_context
-                    ]),
-                    "reviewer",
-                    prompts::ADVERSARIAL_RE_REVIEW_TASK,
-                )
+                .run_review_round(review_iteration, Some(&remediated), evidence)
                 .await?;
-            evidence.review.push(serde_json::json!({
-                "kind": "review",
-                "reviewIteration": review_iteration,
-                "result": review,
-            }));
         }
 
         if remediation::review_needs_remediation(&review) {

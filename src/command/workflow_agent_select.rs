@@ -323,6 +323,45 @@ mod tests {
         assert_eq!(select_workflow_agent_key(&req, &agents), "sherlock-holmes");
     }
 
+    /// The per-task `adversarial-review-<task>` stage is a PARALLEL read-only
+    /// stage carrying `tier: critic`, which resolves to `ProviderTier::Critic`.
+    /// It must route to an adversarial reviewer, not to a coder — parallel
+    /// stages default to `ProviderTier::Coder` when no tier is declared, so the
+    /// tier is the whole mechanism.
+    #[test]
+    fn per_task_adversarial_review_selects_an_adversarial_reviewer() {
+        let agents = vec![
+            "general-purpose".into(),
+            "coder".into(),
+            "sherlock-holmes".into(),
+        ];
+        let mut req = request(
+            StageKind::Fanout,
+            ProviderTier::Critic,
+            "You did NOT do this work — be suspicious of it. Run read-only adversarial review of ONE task only.",
+        );
+        req.stage_id = "adversarial-review-TASK-TDL-001".into();
+        assert_eq!(select_workflow_agent_key(&req, &agents), "sherlock-holmes");
+    }
+
+    /// `code-reviewer` ships as a PLUGIN agent (`plugins/feature-dev/agents/`,
+    /// `plugins/pr-review-toolkit/agents/`) and reaches this list through
+    /// `AgentRegistry::load`, which merges plugin agents into the registry.
+    /// With no `sherlock-holmes` installed the plugin reviewer must be the one
+    /// that runs; falling through to `general-purpose` would silently downgrade
+    /// every per-task review to a non-adversarial agent.
+    #[test]
+    fn a_plugin_provided_reviewer_is_reachable_for_per_task_review() {
+        let agents = vec!["general-purpose".into(), "code-reviewer".into()];
+        let mut req = request(
+            StageKind::Fanout,
+            ProviderTier::Critic,
+            "Run read-only adversarial review of ONE task only.",
+        );
+        req.stage_id = "adversarial-review-TASK-TDL-001".into();
+        assert_eq!(select_workflow_agent_key(&req, &agents), "code-reviewer");
+    }
+
     #[test]
     fn explicit_known_agent_wins() {
         let agents = vec!["general-purpose".into(), "code-reviewer".into()];

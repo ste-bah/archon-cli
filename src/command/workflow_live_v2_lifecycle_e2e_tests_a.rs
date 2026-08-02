@@ -270,11 +270,21 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
             )
         } else if call_id.starts_with("adversarial-review-") {
+            // Per-task review branches: read-only, one per accepted task, and
+            // deliberately silent about which task they reviewed — attribution
+            // comes from the branch, not from the reviewer.
             accepted_result(
-                "synthetic adversarial review accepted",
-                serde_json::json!({ "items": [] }),
+                "synthetic per-task adversarial review found nothing to falsify",
+                serde_json::json!({ "findings": [] }),
                 all_task_coverage(),
                 vec![test_command("true", true, "review found no residual gaps")],
+            )
+        } else if call_id.starts_with("cross-cutting-review-") {
+            accepted_result(
+                "synthetic cross-cutting review accepted",
+                serde_json::json!({ "items": [] }),
+                all_task_coverage(),
+                vec![test_command("true", true, "no cross-task contradiction")],
             )
         } else if call_id.starts_with("final-evidence-reconciliation-") {
             accepted_result(

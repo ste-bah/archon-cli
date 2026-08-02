@@ -177,6 +177,23 @@ impl LifecycleDriver {
                 .await?;
             }
 
+            // The third point of the diamond: implementation-wave (FANOUT) ->
+            // verification-wave (PARALLEL) -> adversarial-review (PARALLEL),
+            // one reviewer per task, as soon as that task's own verification
+            // accepted it. Running here rather than after every wave is what
+            // makes a wave-1 defect cheap: it is reported before wave 2 builds
+            // on it. The review is read-only and never gates wave completion —
+            // its findings are carried to the review-remediation loop, which
+            // is where work gets done about them.
+            if !accepted_this_wave.is_empty() {
+                self.run_per_task_adversarial_review(
+                    &format!("wave-{dependency_iteration}"),
+                    &accepted_this_wave,
+                    evidence,
+                )
+                .await?;
+            }
+
             let mut newly_completed: Vec<String> = accepted_this_wave
                 .iter()
                 .filter(|id| !completed_ids.contains(*id))

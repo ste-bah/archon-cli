@@ -1,4 +1,113 @@
 impl LifecycleDriver {
+    /// Per-task adversarial review: ONE read-only critic branch per task, over
+    /// that task's diff, acceptance criteria and declared
+    /// `## Adversarial Review Notes` — and nothing else.
+    ///
+    /// Runs inside the dependency wave, immediately after the task's own
+    /// verification accepted it, so a wave-1 defect is reported in wave 1
+    /// instead of after wave N. Findings are stamped with the reviewing
+    /// branch's task id by `attributed_findings`, so the reviewer is never
+    /// asked to remember which task it is looking at.
+    ///
+    /// Returns the attributed findings and records them on `evidence.review`.
+    /// A stage that returns nothing returns no findings — it never fabricates
+    /// acceptance.
+    pub(super) async fn run_per_task_adversarial_review(
+        &self,
+        round_id: &str,
+        task_ids: &std::collections::BTreeSet<String>,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+        let items = workflow_live_v2_lifecycle_adversarial::per_task_review_items(
+            &self.universe,
+            task_ids,
+            &[&evidence.implementation, &evidence.verification],
+        );
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let result = self
+            .parallel(
+                &format!("adversarial-review-{round_id}"),
+                serde_json::json!(&items),
+                serde_json::json!({
+                    // `critic` is what routes this to an adversarial reviewer:
+                    // it resolves to ProviderTier::Critic, whose candidate list
+                    // is sherlock-holmes -> code-reviewer -> reviewer, drawn
+                    // from the AgentRegistry (plugin agents included).
+                    "tier": "critic",
+                    "maxParallelism": "configured",
+                    "task": prompts::PER_TASK_ADVERSARIAL_REVIEW_TASK,
+                }),
+            )
+            .await?;
+        let findings =
+            workflow_live_v2_lifecycle_adversarial::attributed_findings(&items, &result);
+        evidence.review.push(serde_json::json!({
+            "kind": "adversarial-review-task",
+            "reviewRound": round_id,
+            "reviewedTaskIds": task_ids,
+            "findings": findings,
+            "result": result,
+        }));
+        Ok(findings)
+    }
+
+    /// One review round: the per-task findings, then the NARROWED terminal
+    /// reduce, then a structural merge.
+    ///
+    /// `re_review` is `None` for round 1, which reuses the findings the
+    /// dependency waves already produced, and `Some(ids)` afterwards, which
+    /// re-runs the per-task reviewer over exactly the tasks the previous round
+    /// remediated. The merge — not the reducer — is what preserves per-task
+    /// findings and what derives the status: a cross-cutting reduce returning
+    /// "accepted" over outstanding per-task findings would otherwise short
+    /// `review_needs_remediation` and discard every one of them.
+    pub(super) async fn run_review_round(
+        &self,
+        review_iteration: usize,
+        re_review: Option<&std::collections::BTreeSet<String>>,
+        evidence: &mut LifecycleEvidence,
+    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        let per_task_findings = match re_review {
+            Some(task_ids) => {
+                self.run_per_task_adversarial_review(
+                    &format!("round-{review_iteration}"),
+                    task_ids,
+                    evidence,
+                )
+                .await?
+            }
+            None => workflow_live_v2_lifecycle_adversarial::collected_per_task_findings(
+                &evidence.review,
+            ),
+        };
+        let task = if re_review.is_some() {
+            prompts::CROSS_CUTTING_RE_REVIEW_TASK
+        } else {
+            prompts::CROSS_CUTTING_REVIEW_TASK
+        };
+        let cross = self
+            .reduce(
+                &format!("cross-cutting-review-{review_iteration}"),
+                workflow_live_v2_lifecycle_cross_cutting::cross_cutting_input(
+                    &self.task_universe,
+                    &per_task_findings,
+                ),
+                "reviewer",
+                task,
+            )
+            .await?;
+        let review =
+            workflow_live_v2_lifecycle_cross_cutting::merge_review(&per_task_findings, &cross);
+        evidence.review.push(serde_json::json!({
+            "kind": "review",
+            "reviewIteration": review_iteration,
+            "result": review,
+        }));
+        Ok(review)
+    }
+
     async fn run_noop_proofs(
         &self,
         ready_noop_items: &[serde_json::Value],
