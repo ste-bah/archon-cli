@@ -11,6 +11,7 @@ status: blocked
 depends_on: ['TASK-TDL-040', 'TASK-TDL-041', 'TASK-TDL-042', 'TASK-TDL-050', 'TASK-TDL-060', 'TASK-TDL-070']
 blocks: ['TASK-TDL-090', 'TASK-TDL-100']
 source_sections: ['6', '8.5', '23', '24']
+implements: [REQ-DL-040, REQ-DL-041, REQ-DL-042, REQ-DL-061, REQ-DL-062]
 required_env_keys: [OPENBB_API_URL, POLYGON_API_KEY]
 required_tools: [data_get_ohlcv]
 deliverable_contracts:
@@ -137,6 +138,7 @@ clean bill of health.
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

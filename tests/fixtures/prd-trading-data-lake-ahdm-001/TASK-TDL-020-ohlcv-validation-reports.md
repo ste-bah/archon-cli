@@ -11,6 +11,7 @@ status: blocked
 depends_on: ['TASK-TDL-010']
 blocks: ['TASK-TDL-030', 'TASK-TDL-090']
 source_sections: ['8.2', '8.3', '8.6', '20', '21']
+implements: [REQ-DL-010, REQ-DL-011, REQ-DL-012, REQ-DL-013, REQ-DL-020, REQ-DL-021, REQ-DL-022, REQ-DL-023, REQ-DL-050, REQ-DL-051, REQ-DL-052, REQ-DL-053, REQ-DL-054, REQ-DL-055, REQ-DL-056, REQ-DL-090, REQ-DL-091, REQ-DL-092, REQ-DL-093, REQ-DL-094, REQ-DL-095, REQ-DL-096, REQ-DL-097, REQ-DL-098, REQ-DL-100, REQ-DL-101, REQ-DL-102, REQ-DL-103]
 required_env_keys: []
 required_tools: []
 deliverable_contracts:
@@ -161,6 +162,7 @@ belongs elsewhere — do not attempt the whole pattern from here.
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

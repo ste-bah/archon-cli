@@ -11,6 +11,7 @@ status: blocked
 depends_on: ['TASK-TDL-030']
 blocks: ['TASK-TDL-080']
 source_sections: ['7', '8.4', '25.3']
+implements: [REQ-DL-035]
 required_env_keys: []
 required_tools: []
 deliverable_contracts:
@@ -101,6 +102,7 @@ clean bill of health.
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

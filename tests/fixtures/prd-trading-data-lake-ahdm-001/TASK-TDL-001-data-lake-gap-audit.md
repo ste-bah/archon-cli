@@ -11,6 +11,7 @@ status: ready
 depends_on: []
 blocks: ['TASK-TDL-010']
 source_sections: ['2', '5', '14', '17', '24']
+implements: []
 required_env_keys: []
 required_tools: []
 deliverable_contracts:
@@ -115,6 +116,7 @@ fix what is real, and refute what is wrong with specific evidence rather than ed
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

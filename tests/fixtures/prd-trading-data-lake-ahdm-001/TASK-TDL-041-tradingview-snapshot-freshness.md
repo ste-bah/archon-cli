@@ -11,6 +11,7 @@ status: pending
 depends_on: ['TASK-TDL-040']
 blocks: ['TASK-TDL-080']
 source_sections: ['7', '8.4', '25.1']
+implements: [REQ-DL-032, REQ-DL-033]
 required_env_keys: []
 required_tools: [tv_health_check, chart_get_state, quote_get]
 deliverable_contracts:
@@ -158,6 +159,7 @@ belongs elsewhere — do not attempt the whole pattern from here.
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

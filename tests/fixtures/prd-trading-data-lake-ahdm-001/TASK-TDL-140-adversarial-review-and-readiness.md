@@ -11,6 +11,7 @@ status: blocked
 depends_on: ['TASK-TDL-120', 'TASK-TDL-130']
 blocks: []
 source_sections: ['12', '27', '31', '32']
+implements: [REQ-AHDM-009, REQ-AHDM-010, REQ-AHDM-030, REQ-AHDM-031, REQ-AHDM-032, REQ-AHDM-033]
 required_env_keys: []
 required_tools: [data_get_ohlcv, pine_analyze, pine_check, pine_compile, pine_smart_compile, pine_get_errors, pine_get_console]
 deliverable_contracts:
@@ -132,6 +133,7 @@ fix what is real, and refute what is wrong with specific evidence rather than ed
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

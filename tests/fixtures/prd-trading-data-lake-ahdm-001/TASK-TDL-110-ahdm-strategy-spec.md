@@ -11,6 +11,7 @@ status: blocked
 depends_on: ['TASK-TDL-100']
 blocks: ['TASK-TDL-120', 'TASK-TDL-130']
 source_sections: ['9', '27', '28']
+implements: [REQ-AHDM-001, REQ-AHDM-005, REQ-AHDM-020, REQ-AHDM-021]
 required_env_keys: []
 required_tools: []
 deliverable_contracts:
@@ -161,6 +162,7 @@ belongs elsewhere — do not attempt the whole pattern from here.
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change

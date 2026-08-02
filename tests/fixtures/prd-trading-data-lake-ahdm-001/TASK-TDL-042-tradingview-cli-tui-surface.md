@@ -11,6 +11,7 @@ status: pending
 depends_on: ['TASK-TDL-040']
 blocks: ['TASK-TDL-080']
 source_sections: ['7', '8.4', '25.1']
+implements: [REQ-DL-060, REQ-DL-120, REQ-DL-121, REQ-DL-122, REQ-DL-123, REQ-DL-124]
 required_env_keys: []
 required_tools: []
 deliverable_contracts: []
@@ -98,6 +99,7 @@ fix what is real, and refute what is wrong with specific evidence rather than ed
 
 ## Required Task Checklist
 
+- implements (normative requirement IDs)
 - scope
 - files expected to change
 - files forbidden to change
