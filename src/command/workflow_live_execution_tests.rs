@@ -21,7 +21,7 @@ use super::workflow_live_test_support::{
     FlakyAgentClient, FlakyPlanner, GeneratedV2FanoutRunClient, GeneratedV2RunClient,
     GeneratedV2SlowFanoutRunClient, GeneratedV2WorktreeRunClient, GuttedImplementationPlanner,
     InvalidItemsThenRepairAgentClient, InvalidPlanner, PlannerRepairRetryClient,
-    SavedV2TemplateRunClient, request, runner,
+    SavedV2TemplateRunClient, request, runner, standard_task_file,
 };
 use super::{LiveApprovalMode, plan_live, run_live_action};
 

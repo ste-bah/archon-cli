@@ -427,3 +427,23 @@ pub(crate) fn boundary_runner(
     runner.workspace_boundary_supported = true;
     (runner, tui_rx)
 }
+
+/// A `TASK-*.md` file in the standard decomposed-PRD shape.
+///
+/// These fixtures used to carry bare `task_id:` / `depends_on:` lines with no
+/// YAML block at all, which the old parser accepted by scanning raw text. That
+/// partial parse is now a hard error, so every test fixture is written the way a
+/// real task file is written: a fenced YAML block declaring every
+/// contract-bearing key. `body` is appended verbatim for the markdown sections.
+pub(crate) fn standard_task_file(
+    task_id: &str,
+    depends_on: &str,
+    blocks: &str,
+    body: &str,
+) -> String {
+    format!(
+        "# {task_id}\n\n```yaml\ntask_id: {task_id}\ntitle: Fixture {task_id}\n\
+         complexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: {blocks}\n\
+         required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n{body}"
+    )
+}

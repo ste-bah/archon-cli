@@ -96,8 +96,20 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     pub(super) source_path: String,
     #[serde(default)]
     pub(super) dependency_ids: Vec<String>,
+    /// The task file's declared `blocks:` — the reverse edge of `depends_on`.
+    ///
+    /// Kept verbatim as declared rather than folded away, so the reconciled
+    /// graph can be checked against what each file actually said. `blocks` used
+    /// to be parsed by nothing at all: a task file that expressed its ordering
+    /// only in that direction contributed no edge and its dependents ran early.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) blocks_ids: Vec<String>,
     #[serde(default)]
     pub(super) title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) complexity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) status: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) acceptance_criteria: Vec<String>,
     /// Per-task adversarial checks declared under an `## Adversarial Review
@@ -108,6 +120,10 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     /// terminal reduce.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) adversarial_review_notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) files_expected_to_change: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) files_forbidden_to_change: Vec<String>,
     /// Explicit artifact declarations from the task file (paths relative to
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -319,20 +335,18 @@ pub(super) fn extract_task_universe_for_generated_run(
                 .flatten()
                 .collect(),
         );
-        let mut normalized_dependencies = Vec::new();
-        for dep in &task.dependency_ids {
-            let Some(canonical) = aliases.get(dep).cloned() else {
-                return Err(WorkflowError::SpecInvalid(format!(
-                    "generated decomposed PRD workflow has unresolved dependency reference '{dep}' in {}",
-                    task.source_path
-                )));
-            };
-            normalized_dependencies.push(canonical);
-        }
-        task.dependency_ids = sorted_unique(normalized_dependencies);
+        task.dependency_ids = resolve_task_references(
+            &task.dependency_ids,
+            &aliases,
+            &task.source_path,
+            "dependency",
+        )?;
+        task.blocks_ids =
+            resolve_task_references(&task.blocks_ids, &aliases, &task.source_path, "blocks")?;
         tasks.push(task);
     }
     tasks.sort_by(|left, right| left.canonical_task_id.cmp(&right.canonical_task_id));
+    reconcile_blocks_into_dependencies(&mut tasks)?;
     validate_task_dependency_graph(&tasks)?;
 
     Ok(Some(WorkflowV2TaskUniverse {

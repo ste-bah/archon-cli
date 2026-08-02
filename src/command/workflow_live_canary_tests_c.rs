@@ -58,15 +58,16 @@ async fn canary_wf_afae6bee_regression() {
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        format!(
-            "# Data Lake Gap Audit\n\n\
-             task_id: TASK-TDL-001\n\
-             depends_on: []\n\n\
-             ## Acceptance Criteria\n\n\
-             - Gap audit implemented in the target repository.\n\
-             - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
-             ## Artifact Requirements\n\n\
-             - `{CANARY_ARTIFACT_REL}`\n"
+        super::workflow_live_test_support::standard_task_file(
+            "TASK-TDL-001",
+            "[]",
+            "[]",
+            &format!(
+                "\n## Acceptance Criteria\n\n\
+                 - Gap audit implemented in the target repository.\n\
+                 - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
+                 ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+            ),
         ),
     )
     .expect("task file");

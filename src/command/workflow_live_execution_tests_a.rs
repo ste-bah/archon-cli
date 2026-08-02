@@ -9,6 +9,7 @@ async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
         Arc::new(InvalidPlanner),
         tui_tx,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect_err("invalid live plans must fail instead of using heuristic fallback");
@@ -50,6 +51,7 @@ async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
             run_planner,
             tui_tx,
             &default_generated_workflow_config(),
+            &archon_core::config::LearningConfig::default(),
         )
         .await
     });
@@ -103,6 +105,7 @@ async fn live_planner_retries_transient_stream_server_errors() {
         planner.clone(),
         tui_tx,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("transient planner stream failure should retry and recover");
@@ -120,12 +123,12 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
     )
     .expect("task 1");
     std::fs::write(
         tasks.join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: ['TASK-TDL-001']\n",
+        standard_task_file("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
     )
     .expect("task 10");
     let store = WorkflowStore::new(temp.path().join("workflows"));
@@ -143,6 +146,7 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
         planner.clone(),
         tui_tx,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("decomposed PRD planning should use the deterministic scaffold");
@@ -230,7 +234,7 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "[]", ""),
     )
     .expect("task 1");
     let store = WorkflowStore::new(temp.path().join("workflows"));
@@ -282,6 +286,7 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
         planner,
         tui_tx,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("decomposed PRD planning should use deterministic scaffold");
