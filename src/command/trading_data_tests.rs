@@ -345,11 +345,14 @@ fn tradingview_snapshot_fails_closed_without_provider_state() {
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
     assert_eq!(report["can_fetch"], false);
+    // The reason carries the OS error text verbatim, and the OS wording
+    // differs: Unix says "No such file or directory", Windows says "The system
+    // cannot find the file specified". Assert the fixture path is named and
+    // that it reads as missing, rather than pinning one platform's phrasing.
+    let reason = report["unavailable_reason"].as_str().unwrap();
     assert!(
-        report["unavailable_reason"]
-            .as_str()
-            .unwrap()
-            .contains("No such file")
+        reason.contains("No such file") || reason.contains("cannot find the file"),
+        "reason should say the fixture is missing: {reason}"
     );
     assert!(report["snapshot_path"].is_null());
     assert_eq!(report["required_mcp_tools"][2], "quote_get");
