@@ -386,6 +386,13 @@ pub struct MemoryConfig {
     pub db_path: Option<String>,
     /// Embedding provider: `auto`, `local`, or `openai`.
     pub embedding_provider: archon_memory::embedding::EmbeddingProviderKind,
+    /// API root for the openai embedding provider (e.g. "http://127.0.0.1:1234/v1"
+    /// for a local OpenAI-compatible proxy). None = the real OpenAI API. The
+    /// ARCHON_MEMORY_EMBEDDING_BASE_URL / OPENAI_BASE_URL env vars take precedence.
+    pub embedding_base_url: Option<String>,
+    /// Model for the openai embedding provider. None = text-embedding-3-small.
+    /// The ARCHON_MEMORY_EMBEDDING_MODEL env var takes precedence.
+    pub embedding_model: Option<String>,
     /// Keyword/vector blend factor for hybrid search (0.0 = pure vector, 1.0 = pure keyword).
     pub hybrid_alpha: f32,
     /// Memory garden consolidation settings.
@@ -402,6 +409,8 @@ impl Default for MemoryConfig {
             enabled: true,
             db_path: None,
             embedding_provider: archon_memory::embedding::EmbeddingProviderKind::Auto,
+            embedding_base_url: None,
+            embedding_model: None,
             hybrid_alpha: 0.3,
             garden: archon_memory::garden::GardenConfig::default(),
             auto_capture: AutoCaptureConfig::default(),

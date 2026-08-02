@@ -81,6 +81,8 @@ pub(super) async fn prepare(
         let embed_cfg = archon_memory::embedding::EmbeddingConfig {
             provider: config.memory.embedding_provider,
             hybrid_alpha: config.memory.hybrid_alpha,
+            base_url: config.memory.embedding_base_url.clone(),
+            model: config.memory.embedding_model.clone(),
         };
         match archon_memory::embedding::create_provider(&embed_cfg) {
             Ok(provider) => {

@@ -47,6 +47,7 @@ fn embedding_config_serde_round_trip() {
     let cfg = EmbeddingConfig {
         provider: EmbeddingProviderKind::Local,
         hybrid_alpha: 0.5,
+        ..Default::default()
     };
     let json = serde_json::to_string(&cfg).expect("serialize");
     let parsed: EmbeddingConfig = serde_json::from_str(&json).expect("deserialize");
