@@ -4,6 +4,7 @@
 //! guarantee that a terminal error is not retried at all, and — for the async
 //! path — that a blocking guarded operation leaves the Tokio runtime free to
 //! make progress on other tasks.
+
 use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;

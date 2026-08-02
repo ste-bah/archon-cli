@@ -3,6 +3,7 @@
 //! The path is a pure function of the database path and must stay pure — in
 //! particular it must not create the database's parent directory, because it is
 //! called on databases that do not exist yet.
+
 use super::*;
 
 #[test]

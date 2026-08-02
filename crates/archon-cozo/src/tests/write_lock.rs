@@ -7,6 +7,7 @@
 //!
 //! [`stale_guarded_database_registry_entries_are_pruned`] belongs here because
 //! the registry is what resolves a database to the lock these tests take.
+
 use std::fs::OpenOptions;
 use std::sync::Arc;
 use std::time::Duration;

@@ -3,6 +3,7 @@
 //! Two questions, both answered without running a retry loop: how long a policy
 //! is willing to sleep in total, and whether a given error message is a busy
 //! signal worth retrying or a terminal fault worth surfacing.
+
 use std::time::Duration;
 
 use super::*;
