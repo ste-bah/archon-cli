@@ -203,11 +203,11 @@ fn backoff(attempt: u32) {
     std::thread::sleep(std::time::Duration::from_millis(ms));
 }
 
-fn env_base_url() -> Option<String> {
+pub(crate) fn env_base_url() -> Option<String> {
     env_nonempty("ARCHON_MEMORY_EMBEDDING_BASE_URL").or_else(|| env_nonempty("OPENAI_BASE_URL"))
 }
 
-fn env_model() -> Option<String> {
+pub(crate) fn env_model() -> Option<String> {
     env_nonempty("ARCHON_MEMORY_EMBEDDING_MODEL")
 }
 

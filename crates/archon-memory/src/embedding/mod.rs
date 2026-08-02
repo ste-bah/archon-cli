@@ -65,6 +65,13 @@ pub struct EmbeddingConfig {
     pub provider: EmbeddingProviderKind,
     /// Weight of keyword score in hybrid search (0.0 = pure vector, 1.0 = pure keyword).
     pub hybrid_alpha: f32,
+    /// API root for the openai provider (e.g. "http://127.0.0.1:1234/v1").
+    /// `None` means the real OpenAI API. The ARCHON_MEMORY_EMBEDDING_BASE_URL /
+    /// OPENAI_BASE_URL environment variables take precedence over this value.
+    pub base_url: Option<String>,
+    /// Model name for the openai provider. `None` means text-embedding-3-small.
+    /// The ARCHON_MEMORY_EMBEDDING_MODEL environment variable takes precedence.
+    pub model: Option<String>,
 }
 
 impl Default for EmbeddingConfig {
@@ -72,6 +79,8 @@ impl Default for EmbeddingConfig {
         Self {
             provider: EmbeddingProviderKind::Auto,
             hybrid_alpha: 0.3,
+            base_url: None,
+            model: None,
         }
     }
 }
@@ -94,11 +103,13 @@ fn openai_api_key() -> Option<String> {
 /// - `"local"`: always use local fastembed.
 /// - `"openai"`: require an API key or return an error.
 ///
-/// The openai provider honours ARCHON_MEMORY_EMBEDDING_BASE_URL (else
-/// OPENAI_BASE_URL) and ARCHON_MEMORY_EMBEDDING_MODEL, so it can target any
-/// OpenAI-compatible endpoint (e.g. a local LiteLLM proxy) instead of
-/// api.openai.com. Switching endpoint/model changes the embedding space —
-/// reindex stored memories afterwards (`archon memory reindex --all`).
+/// The openai provider resolves its endpoint and model env-first with a
+/// config fallback: ARCHON_MEMORY_EMBEDDING_BASE_URL (else OPENAI_BASE_URL,
+/// else `config.base_url`) and ARCHON_MEMORY_EMBEDDING_MODEL (else
+/// `config.model`), so it can target any OpenAI-compatible endpoint (e.g. a
+/// local LiteLLM proxy) instead of api.openai.com. Switching endpoint/model
+/// changes the embedding space — reindex stored memories afterwards
+/// (`archon memory reindex --all`).
 pub fn create_provider(
     config: &EmbeddingConfig,
 ) -> Result<Arc<dyn EmbeddingProvider>, MemoryError> {
@@ -111,12 +122,14 @@ pub fn create_provider(
                         .into(),
                 )
             })?;
-            let provider = openai::OpenAIEmbedding::new(&key)?;
+            let (base_url, model) = resolve_openai_options(config);
+            let provider = openai::OpenAIEmbedding::with_options(&key, base_url, model)?;
             Ok(Arc::new(provider))
         }
         EmbeddingProviderKind::Auto => {
             if let Some(key) = openai_api_key() {
-                match openai::OpenAIEmbedding::new(&key) {
+                let (base_url, model) = resolve_openai_options(config);
+                match openai::OpenAIEmbedding::with_options(&key, base_url, model) {
                     Ok(provider) => return Ok(Arc::new(provider)),
                     Err(e) => {
                         tracing::warn!("OpenAI provider init failed, falling back to local: {e}");
@@ -130,5 +143,49 @@ pub fn create_provider(
             let provider = local::LocalEmbedding::new()?;
             Ok(Arc::new(provider))
         }
+    }
+}
+
+/// Endpoint/model for the openai provider: environment wins, config falls back.
+fn resolve_openai_options(config: &EmbeddingConfig) -> (Option<String>, Option<String>) {
+    (
+        openai::env_base_url().or_else(|| config.base_url.clone()),
+        openai::env_model().or_else(|| config.model.clone()),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_base_url_and_model_used_when_env_absent() {
+        // SAFETY: no other test in this binary reads these variables mid-test.
+        unsafe {
+            std::env::remove_var("ARCHON_MEMORY_EMBEDDING_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("ARCHON_MEMORY_EMBEDDING_MODEL");
+        }
+        let config = EmbeddingConfig {
+            base_url: Some("http://127.0.0.1:1234/v1".into()),
+            model: Some("embed-v4".into()),
+            ..Default::default()
+        };
+        let (base_url, model) = resolve_openai_options(&config);
+        assert_eq!(base_url.as_deref(), Some("http://127.0.0.1:1234/v1"));
+        assert_eq!(model.as_deref(), Some("embed-v4"));
+
+        let (no_base, no_model) = resolve_openai_options(&EmbeddingConfig::default());
+        assert_eq!(no_base, None);
+        assert_eq!(no_model, None);
+    }
+
+    #[test]
+    fn config_without_new_keys_still_parses() {
+        let config: EmbeddingConfig =
+            serde_json::from_str(r#"{"provider":"local","hybrid_alpha":0.5}"#).expect("parse");
+        assert_eq!(config.provider, EmbeddingProviderKind::Local);
+        assert_eq!(config.base_url, None);
+        assert_eq!(config.model, None);
     }
 }

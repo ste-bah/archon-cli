@@ -50,6 +50,7 @@ fn factory_creates_local_when_no_api_key() {
     let cfg = EmbeddingConfig {
         provider: EmbeddingProviderKind::Auto,
         hybrid_alpha: 0.3,
+        ..Default::default()
     };
     let provider = create_provider(&cfg).expect("factory should succeed for local");
     // Local provider returns 768 dimensions
@@ -66,6 +67,7 @@ fn factory_rejects_openai_without_key() {
     let cfg = EmbeddingConfig {
         provider: EmbeddingProviderKind::OpenAI,
         hybrid_alpha: 0.3,
+        ..Default::default()
     };
     let result = create_provider(&cfg);
     assert!(result.is_err(), "openai provider without key should fail");
