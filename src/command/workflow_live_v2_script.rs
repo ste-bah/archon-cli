@@ -380,6 +380,14 @@ mod workflow_live_v2_lifecycle_verify_routing;
 mod workflow_live_v2_lifecycle_verify_scope;
 #[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
 mod workflow_live_v2_lifecycle_verify_supersede;
+// Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
+// inside this subsystem because that is the only scope from which the planner,
+// the task universe, the scheduler primitives and the per-task review item
+// builder are all reachable at once — which is exactly the property that made
+// "nobody has run the whole thing end to end" possible.
+#[cfg(test)]
+#[path = "workflow_live_v2_prd_pipeline_tests.rs"]
+mod workflow_live_v2_prd_pipeline_tests;
 
 include!("workflow_live_v2_script_dry_run.rs");
 

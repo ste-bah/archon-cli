@@ -74,7 +74,13 @@ mod labels;
 mod learning_summary;
 mod rows;
 mod schema;
-mod workflow_learning;
+/// Crate-visible so a plan-inspection test can route a hook list through the
+/// real `plan_dispatch` rather than through a mirrored copy of
+/// `INTEGRATION_HOOKS`. Asserting a derived hook against a second hand-kept
+/// list of routable names proves the two lists agree, not that the fold routes
+/// anything — which is the closed loop that let `learning_hooks` be dead for as
+/// long as it was.
+pub(crate) mod workflow_learning;
 
 pub(crate) use workflow_learning::bridge_workflow_learning;
 
