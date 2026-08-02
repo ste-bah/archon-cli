@@ -127,11 +127,8 @@ async function workflow(w) {
             target_repository_root: None,
             max_parallelism: 4,
             max_agents: 16,
-            provider_tiers: BTreeMap::new(),
             stages: Vec::new(),
-            artifact_policy: Default::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: Vec::new(),
         }
     }

@@ -9,11 +9,12 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::run::{ArtifactRef, RunStatus, WorkflowRun};
 use crate::spec::WorkflowSpec;
 
+// `reducers/` was created here and never written to: the deterministic reducer
+// registry it was named for had no call site anywhere and was deleted with W1.
 const RUN_SUBDIRS: &[&str] = &[
     "artifacts",
     "agent-outputs",
     "prompts",
-    "reducers",
     "quality",
     "learning",
 ];

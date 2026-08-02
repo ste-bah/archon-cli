@@ -13,6 +13,9 @@ pub(crate) async fn execute_tool_attempt(
     sandbox_prechecked: bool,
 ) -> ToolResult {
     let permission_level = tool.permission_level(&input);
+    // Admission still runs only for non-`Safe` tools with a callback installed
+    // — that is a policy decision and it has not changed. What changed is that
+    // the *outcome* callback below no longer inherits that filter.
     let admission_enabled =
         permission_level != PermissionLevel::Safe && ctx.tool_run_admission.is_some();
     if admission_enabled && let Some(admission) = &ctx.tool_run_admission {
@@ -25,7 +28,15 @@ pub(crate) async fn execute_tool_attempt(
                 AgentActivityKind::ToolFailed,
                 AgentActivityStatus::Failed,
             );
-            record_outcome(ctx, tool.name(), &input, permission_level, true, true);
+            record_outcome(
+                ctx,
+                tool.name(),
+                &input,
+                permission_level,
+                true,
+                true,
+                admission_enabled,
+            );
             return result;
         }
     }
@@ -40,9 +51,15 @@ pub(crate) async fn execute_tool_attempt(
             AgentActivityKind::ToolFailed,
             AgentActivityStatus::Failed,
         );
-        if admission_enabled {
-            record_outcome(ctx, tool.name(), &input, permission_level, false, true);
-        }
+        record_outcome(
+            ctx,
+            tool.name(),
+            &input,
+            permission_level,
+            false,
+            true,
+            admission_enabled,
+        );
         return ToolResult::error(reason);
     }
 
@@ -56,16 +73,15 @@ pub(crate) async fn execute_tool_attempt(
     let outcome_input = input.clone();
     let result = tool.execute(input, ctx).await;
     emit_tool_result_activity(ctx, tool.name(), &result, started_at.elapsed());
-    if admission_enabled {
-        record_outcome(
-            ctx,
-            tool.name(),
-            &outcome_input,
-            permission_level,
-            false,
-            result.is_error,
-        );
-    }
+    record_outcome(
+        ctx,
+        tool.name(),
+        &outcome_input,
+        permission_level,
+        false,
+        result.is_error,
+        admission_enabled,
+    );
     result
 }
 
@@ -86,6 +102,23 @@ fn admission_request(
     }
 }
 
+/// Report a terminal outcome for a tool attempt.
+///
+/// **Fires for every attempt**, including `Safe` tools and attempts for which no
+/// admission callback is installed. It used to fire only when admission ran,
+/// which made it useless as an ambient signal: `Safe` covers the great majority
+/// of tool calls, so a topology trace built on the old behaviour would have seen
+/// almost nothing.
+///
+/// The cost of widening it is that the one existing consumer — the world-model
+/// guardrail in `src/command/world_model/guard/00_tool_run.rs` — was written
+/// against the narrow contract. It resolves each outcome to a persisted
+/// admission decision and, finding none, warns and writes an
+/// `unavailable` record. Left alone it would have done that for every `Safe`
+/// tool call in the process, both spamming the log and polluting the guardrail
+/// outcome store with rows describing attempts that were never guarded.
+/// `admission_evaluated` carries the distinction the filter used to imply, and
+/// that consumer now returns early on `false`.
 fn record_outcome(
     ctx: &ToolContext,
     tool_name: &str,
@@ -93,6 +126,7 @@ fn record_outcome(
     permission_level: PermissionLevel,
     blocked: bool,
     is_error: bool,
+    admission_evaluated: bool,
 ) {
     let Some(callback) = &ctx.tool_run_outcome else {
         return;
@@ -107,5 +141,6 @@ fn record_outcome(
         permission_level,
         blocked,
         is_error,
+        admission_evaluated,
     });
 }

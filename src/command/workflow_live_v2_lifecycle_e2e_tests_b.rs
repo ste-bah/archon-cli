@@ -32,11 +32,8 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         target_repository_root: Some(repo.display().to_string()),
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
@@ -216,11 +213,8 @@ async fn failed_final_report_emits_host_built_fallback() {
         target_repository_root: None,
         max_parallelism: 1,
         max_agents: 1,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let universe = WorkflowV2TaskUniverse {

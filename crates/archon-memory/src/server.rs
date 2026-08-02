@@ -10,6 +10,11 @@
 //! counters.  All [`MemoryGraph`] methods take `&self`, so no external
 //! write-lock is required — an `Arc<MemoryGraph>` is sufficient for
 //! shared concurrent access across Tokio tasks.
+//!
+//! Dispatch itself is *blocking*: the graph's write path now goes through the
+//! `archon-cozo` guard, whose SQLITE_BUSY retry loop parks the calling thread
+//! with `thread::sleep`. Running that directly on a Tokio worker would stall
+//! the runtime, so every request is handed to `spawn_blocking`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -107,9 +112,18 @@ impl MemoryServer {
                 }
             };
 
-            let resp = match dispatch(&graph, &req.method, &req.params) {
-                Ok(val) => make_response_ok(req.id, val),
-                Err(msg) => make_response_err(req.id, msg),
+            let dispatch_graph = Arc::clone(&graph);
+            let method = req.method.clone();
+            let params = req.params.clone();
+            let dispatched =
+                tokio::task::spawn_blocking(move || dispatch(&dispatch_graph, &method, &params))
+                    .await;
+            let resp = match dispatched {
+                Ok(Ok(val)) => make_response_ok(req.id, val),
+                Ok(Err(msg)) => make_response_err(req.id, msg),
+                Err(join_error) => {
+                    make_response_err(req.id, format!("memory dispatch task failed: {join_error}"))
+                }
             };
 
             writer.write_all(resp.as_bytes()).await?;

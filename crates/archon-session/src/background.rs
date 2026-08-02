@@ -33,7 +33,7 @@ pub struct BackgroundSessionInfo {
 
 /// Directory for background session files.
 pub fn sessions_dir() -> PathBuf {
-    archon_data_dir().join("archon").join("sessions")
+    archon_data_dir().join("sessions")
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ pub fn is_session_alive_in_dir(dir: &Path, session_id: &str) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-/// The archon data directory, honouring `ARCHON_DATA_DIR`.
+/// Archon's own data directory, honouring `ARCHON_DATA_DIR`.
 ///
 /// `dirs::data_dir()` alone reads the shell known-folder API on Windows, so
 /// neither `XDG_DATA_HOME` nor `HOME` redirects it there -- the documented
@@ -200,9 +200,19 @@ pub fn is_session_alive_in_dir(dir: &Path, session_id: &str) -> bool {
 /// tests that thought they were pointing at a scratch directory were opening
 /// the real user database instead (SQLite then reported "database is locked"
 /// when two of them ran at once).
+///
+/// This returns the `archon` directory itself, not its parent, matching
+/// `archon_memory::access::default_memory_data_dir`. The two resolvers read the
+/// same variable, so they have to agree on what it names: while this one
+/// returned the parent and callers appended `archon`, setting the override put
+/// the memory database at `$ARCHON_DATA_DIR` but sessions at
+/// `$ARCHON_DATA_DIR/archon/sessions`. The defaults agreed, so only an explicit
+/// override diverged.
 pub fn archon_data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("ARCHON_DATA_DIR").filter(|value| !value.is_empty()) {
         return PathBuf::from(dir);
     }
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from("."))
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("archon")
 }

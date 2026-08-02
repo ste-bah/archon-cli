@@ -347,6 +347,7 @@ dependencies = [
  "archon-sdk",
  "archon-session",
  "archon-tools",
+ "archon-topology",
  "archon-trading",
  "archon-tui",
  "archon-video",
@@ -450,6 +451,7 @@ dependencies = [
 name = "archon-constellation"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "archon-meaning",
  "chrono",
  "cozo-ce",
@@ -493,6 +495,7 @@ dependencies = [
  "archon-session",
  "archon-test-support",
  "archon-tools",
+ "archon-topology",
  "async-trait",
  "axum",
  "chrono",
@@ -623,6 +626,7 @@ name = "archon-knowledge"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "archon-docs",
  "chrono",
  "cozo-ce",
@@ -652,6 +656,7 @@ name = "archon-leann"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "archon-memory",
  "async-trait",
  "chrono",
@@ -769,6 +774,7 @@ dependencies = [
 name = "archon-meaning"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "hex",
@@ -785,6 +791,7 @@ name = "archon-memory"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "dirs",
@@ -914,6 +921,7 @@ dependencies = [
 name = "archon-provenance"
 version = "1.4.0"
 dependencies = [
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "hex",
@@ -930,6 +938,7 @@ name = "archon-reasoning-quality"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "blake3",
  "chrono",
  "cozo-ce",
@@ -978,6 +987,7 @@ name = "archon-session"
 version = "1.4.0"
 dependencies = [
  "anyhow",
+ "archon-cozo",
  "chrono",
  "cozo-ce",
  "dirs",
@@ -1050,6 +1060,17 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "which",
+]
+
+[[package]]
+name = "archon-topology"
+version = "1.4.0"
+dependencies = [
+ "archon-workflow",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]

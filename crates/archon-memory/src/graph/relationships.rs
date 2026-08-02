@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use chrono::Utc;
-use cozo::{DataValue, ScriptMutability};
+use cozo::DataValue;
 
 use super::MemoryGraph;
-use super::helpers::db_err;
+use super::helpers::run_mutable;
 use crate::types::{MemoryError, RelType};
 
 impl MemoryGraph {
@@ -33,9 +33,9 @@ impl MemoryGraph {
         params.insert("strength".to_string(), DataValue::from(strength));
         params.insert("created_at".to_string(), DataValue::from(now));
 
-        self.db
-            .run_script(
-                "{
+        run_mutable(
+            &self.db,
+            "{
                     ?[from_id, to_id, rel_type] :=
                         *relationships{from_id, to_id, rel_type},
                         from_id = $from_id, to_id = $to_id, rel_type = $rel_type
@@ -49,10 +49,9 @@ impl MemoryGraph {
                         :put relationships {from_id, to_id, rel_type => context, strength, created_at}
                     }
                 %end",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "memory graph: create relationship",
+        )?;
 
         Ok(())
     }

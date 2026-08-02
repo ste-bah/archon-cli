@@ -4,13 +4,17 @@ pub mod jsonl;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use cozo::DbInstance;
+use archon_cozo::{CozoGuardConfig, GuardedDbInstance};
 
 use crate::types::ReasoningQualityEvent;
 
 pub struct ReasoningQualityStore {
     root: PathBuf,
-    db: DbInstance,
+    /// Guarded handle. Registering the instance is what lets the free
+    /// functions in [`cozo_store`] resolve the write-lock config by pointer
+    /// identity, so every `Mutable` script serialises against other writers
+    /// of the same `reasoning-quality.db` file.
+    db: GuardedDbInstance,
 }
 
 impl ReasoningQualityStore {
@@ -18,8 +22,12 @@ impl ReasoningQualityStore {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(&root)?;
         let db_path = root.join("reasoning-quality.db");
-        let db = DbInstance::new("sqlite", db_path.to_string_lossy().as_ref(), "")
-            .map_err(|e| anyhow::anyhow!("reasoning-quality db open failed: {e}"))?;
+        let db = archon_cozo::open_sqlite_guarded_instance(
+            db_path.to_string_lossy().as_ref(),
+            "open reasoning-quality store",
+            CozoGuardConfig::for_db_path(&db_path),
+        )
+        .map_err(|e| anyhow::anyhow!("reasoning-quality db open failed: {e}"))?;
         cozo_store::ensure_schema(&db)?;
         Ok(Self { root, db })
     }

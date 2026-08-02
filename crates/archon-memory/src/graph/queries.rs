@@ -3,7 +3,7 @@ use cozo::ScriptMutability;
 use crate::search;
 use crate::types::{Memory, MemoryError, SearchFilter};
 
-use super::helpers::db_err;
+use super::helpers::{db_err, run_mutable};
 use super::{MemoryGraph, raw_to_memory, read_all_memories};
 
 impl MemoryGraph {
@@ -70,9 +70,9 @@ impl MemoryGraph {
     /// Delete all memories and relationships from the graph.
     pub fn clear_all(&self) -> Result<usize, MemoryError> {
         let count = self.memory_count()?;
-        self.db
-            .run_script(
-                "?[id, content, title, memory_type, importance, tags,
+        run_mutable(
+            &self.db,
+            "?[id, content, title, memory_type, importance, tags,
                   source_type, project_path, created_at, updated_at,
                   access_count, last_accessed] :=
                     *memories{id, content, title, memory_type, importance, tags,
@@ -83,21 +83,19 @@ impl MemoryGraph {
                     source_type, project_path, created_at, updated_at,
                     access_count, last_accessed
                 }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
-        self.db
-            .run_script(
-                "?[from_id, to_id, rel_type, context, strength, created_at] :=
+            Default::default(),
+            "memory graph: clear all memories",
+        )?;
+        run_mutable(
+            &self.db,
+            "?[from_id, to_id, rel_type, context, strength, created_at] :=
                     *relationships{from_id, to_id, rel_type, context, strength, created_at}
                 :rm relationships {
                     from_id, to_id, rel_type => context, strength, created_at
                 }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            Default::default(),
+            "memory graph: clear all relationships",
+        )?;
         Ok(count)
     }
 }

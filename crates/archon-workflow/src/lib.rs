@@ -22,13 +22,13 @@ mod persistence;
 pub mod planner;
 pub mod policy;
 pub mod provider_tiers;
-pub mod reducers;
 mod remediation_items;
 mod request;
 pub mod run;
 pub mod runner;
 mod source_context;
 pub mod spec;
+mod spec_compat;
 mod spec_deser;
 mod spec_inference;
 mod spec_policy;
@@ -61,8 +61,8 @@ pub use generated_workflow::{
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
 };
 pub use learning::{
-    Verification, WorkflowLearningRecord, WorkflowLearningSink, WorkflowRunLearningSummary,
-    learning_records,
+    LEARNING_RECORDS_FILE, Verification, WorkflowLearningRecord, WorkflowLearningSink,
+    WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
@@ -70,12 +70,9 @@ pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{
     ProviderFamily, ProviderTierResolver, ResolvedProviderTier, classify_provider,
 };
-pub use reducers::{ReducerInput, ReducerOutput, ReducerRegistry};
 pub use run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
 pub use runner::{DeterministicStageRunner, StageRunOutput, StageRunRequest, WorkflowStageRunner};
-pub use spec::{
-    ArtifactPolicy, ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec,
-};
+pub use spec::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 pub use store::WorkflowStore;
 pub use template::{
     SavedWorkflowCommand, SavedWorkflowTemplate, TemplateRegistry, WorkflowCommandRegistry,
@@ -93,17 +90,16 @@ pub use v2::{
     WorkflowV2InspectionDecision, WorkflowV2InspectionError, WorkflowV2PrdIntake,
     WorkflowV2PrdIntakeError, WorkflowV2ProjectArtifactContext, WorkflowV2RejectedOutput,
     WorkflowV2ReportPaths, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
-    WorkflowV2ResumeDecision, WorkflowV2RunSummary, WorkflowV2Runtime, WorkflowV2Scheduler,
-    WorkflowV2SchedulerConfig, WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph,
-    WorkflowV2SourceTaskItem, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
-    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
-    WorkflowV2TaskFileStatus, WorkflowV2TaskInvalidation, WorkflowV2TaskRecord,
-    WorkflowV2ValidationError, WorkflowV2ValidationResult, WorkflowV2WorkItem,
-    WorkflowV2WorkItemKind, WorkflowV2WriteAssignment, WorkflowV2WriteConflict,
+    WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2SourceTargetExpansion,
+    WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2Status,
+    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverage,
+    WorkflowV2TaskCoverageStatus, WorkflowV2TaskFileStatus, WorkflowV2TaskInvalidation,
+    WorkflowV2TaskRecord, WorkflowV2ValidationError, WorkflowV2ValidationResult,
+    WorkflowV2WorkItem, WorkflowV2WorkItemKind, WorkflowV2WriteAssignment, WorkflowV2WriteConflict,
     WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner,
     WorkflowV2WriteSafetyError, WorkflowV2WriteWave, has_project_artifact_evidence,
     normalize_project_artifact_files, normalize_target_for_repository,
-    normalize_targets_for_repository, project_artifact_context_from_v2_root,
+    normalize_targets_for_repository, project_artifact_context_from_v2_root, stable_value_hash,
     validate_changed_files, validate_changed_files_for_repository,
 };
 pub use write_coordinator::{

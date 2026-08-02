@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability, Vector};
 
+use crate::graph::helpers::run_mutable;
 use crate::types::MemoryError;
 
 /// Convert a CozoDB error to [`MemoryError`].
@@ -60,15 +61,20 @@ fn create_embedding_relation(db: &DbInstance, dim: usize) -> Result<(), MemoryEr
             provider: String
         }}"
     );
-    db.run_script(&create_rel, Default::default(), ScriptMutability::Mutable)
-        .or_else(|e| {
-            let msg = e.to_string();
-            if msg.contains("already exists") || msg.contains("conflicts") {
-                Ok(empty_rows())
-            } else {
-                Err(db_err(e))
-            }
-        })?;
+    run_mutable(
+        db,
+        &create_rel,
+        Default::default(),
+        "memory vector search: create memory_embeddings relation",
+    )
+    .or_else(|e| {
+        let msg = e.to_string();
+        if msg.contains("already exists") || msg.contains("conflicts") {
+            Ok(empty_rows())
+        } else {
+            Err(e)
+        }
+    })?;
 
     Ok(())
 }
@@ -84,18 +90,23 @@ fn create_embedding_index(db: &DbInstance, dim: usize) -> Result<(), MemoryError
             ef_construction: 200
         }}"
     );
-    db.run_script(&create_idx, Default::default(), ScriptMutability::Mutable)
-        .or_else(|e| {
-            let msg = e.to_string();
-            if msg.contains("already exists")
-                || msg.contains("conflicts")
-                || msg.contains("index with the same name")
-            {
-                Ok(empty_rows())
-            } else {
-                Err(db_err(e))
-            }
-        })?;
+    run_mutable(
+        db,
+        &create_idx,
+        Default::default(),
+        "memory vector search: create memory_embeddings HNSW index",
+    )
+    .or_else(|e| {
+        let msg = e.to_string();
+        if msg.contains("already exists")
+            || msg.contains("conflicts")
+            || msg.contains("index with the same name")
+        {
+            Ok(empty_rows())
+        } else {
+            Err(e)
+        }
+    })?;
 
     Ok(())
 }
@@ -104,15 +115,17 @@ fn rebuild_embedding_schema(db: &DbInstance, dim: usize) -> Result<(), MemoryErr
     // Embeddings are derived data. If the provider dimension changes, drop only
     // the vector relation/index and let `archon memory reindex --all` rebuild
     // from the authoritative `memories` relation.
-    let _ = db.run_script(
+    let _ = run_mutable(
+        db,
         "::index drop memory_embeddings:embedding_idx",
         Default::default(),
-        ScriptMutability::Mutable,
+        "memory vector search: drop stale memory_embeddings index",
     );
-    let _ = db.run_script(
+    let _ = run_mutable(
+        db,
         "{::remove memory_embeddings}",
         Default::default(),
-        ScriptMutability::Mutable,
+        "memory vector search: remove stale memory_embeddings relation",
     );
     create_embedding_relation(db, dim)?;
     create_embedding_index(db, dim)
@@ -160,11 +173,12 @@ pub fn store_embedding(
     params.insert("embedding".to_string(), DataValue::Vec(Vector::F32(arr)));
     params.insert("provider".to_string(), DataValue::from(provider));
 
-    db.run_script(
+    run_mutable(
+        db,
         "?[memory_id, embedding, provider] <- [[$id, $embedding, $provider]]
          :put memory_embeddings { memory_id => embedding, provider }",
         params,
-        ScriptMutability::Mutable,
+        "memory vector search: store memory embedding",
     )
     .map_err(|e| {
         MemoryError::Database(format!(
@@ -195,13 +209,13 @@ pub fn delete_embedding(db: &DbInstance, memory_id: &str) -> Result<(), MemoryEr
         return Ok(());
     }
 
-    db.run_script(
+    run_mutable(
+        db,
         "?[memory_id, embedding, provider] := *memory_embeddings{memory_id, embedding, provider}, memory_id = $id
          :rm memory_embeddings { memory_id => embedding, provider }",
         params,
-        ScriptMutability::Mutable,
-    )
-    .map_err(db_err)?;
+        "memory vector search: delete memory embedding",
+    )?;
 
     Ok(())
 }

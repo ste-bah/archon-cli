@@ -86,10 +86,27 @@ pub(super) fn dynamic_wave_source_metadata(
             invalid_reason: None,
         };
     }
-    let source_fingerprint = Some(source_fingerprint(&graph));
+    // A graph that cannot be serialized cannot be fingerprinted. Reporting no
+    // fingerprint plus a reason routes the call to the source-metadata review
+    // path; substituting a placeholder hash would make unrelated graphs share a
+    // cache key.
+    let source_fingerprint = match source_fingerprint(&graph) {
+        Ok(fingerprint) => fingerprint,
+        Err(error) => {
+            return DynamicWaveSourceMetadata {
+                source_metadata_required: true,
+                source_fingerprint: None,
+                source_task_graph: Some(graph),
+                unresolved_dependencies,
+                invalid_reason: Some(format!(
+                    "source task graph could not be serialized for fingerprinting: {error}"
+                )),
+            };
+        }
+    };
     DynamicWaveSourceMetadata {
         source_metadata_required: true,
-        source_fingerprint,
+        source_fingerprint: Some(source_fingerprint),
         source_task_graph: Some(graph),
         unresolved_dependencies,
         invalid_reason: None,

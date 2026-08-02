@@ -36,12 +36,14 @@ fn run_dir_layout_created_and_listed() {
         "artifacts",
         "agent-outputs",
         "prompts",
-        "reducers",
         "quality",
         "learning",
     ] {
         assert!(dir.join(path).exists(), "missing {path}");
     }
+    // `reducers/` is gone with the registry it was named for: nothing ever
+    // wrote it, so leaving the directory implied a mechanism that did not run.
+    assert!(!dir.join("reducers").exists());
     assert_eq!(store.list_runs().unwrap().len(), 1);
 }
 

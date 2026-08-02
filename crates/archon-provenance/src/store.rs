@@ -71,7 +71,8 @@ pub fn insert_record(db: &DbInstance, record: &ProvenanceRecord) -> Result<()> {
     );
     params.insert("ts".into(), DataValue::from(record.timestamp.as_str()));
     params.insert("chain".into(), DataValue::from(record.chain_hash.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[record_id, artifact_id, artifact_type, operation, input_hashes_json,
           output_hash, parent_record_ids_json, tool_name, agent_name, model,
@@ -85,6 +86,7 @@ pub fn insert_record(db: &DbInstance, record: &ProvenanceRecord) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "provenance store: insert prov_records row",
     )
     .map_err(|e| ProvenanceError::Store(format!("insert provenance record failed: {e}")))?;
     Ok(())
@@ -101,7 +103,8 @@ pub fn insert_edge(db: &DbInstance, edge: &ProvenanceEdge) -> Result<()> {
     params.insert("to".into(), DataValue::from(edge.to_artifact_id.as_str()));
     params.insert("typ".into(), DataValue::from(edge.edge_type.as_str()));
     params.insert("ts".into(), DataValue::from(edge.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at]
             <- [[$eid, $from, $to, $typ, $ts]]
@@ -109,6 +112,7 @@ pub fn insert_edge(db: &DbInstance, edge: &ProvenanceEdge) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "provenance store: insert prov_edges row",
     )
     .map_err(|e| ProvenanceError::Store(format!("insert provenance edge failed: {e}")))?;
     Ok(())
@@ -227,7 +231,13 @@ fn row_to_record(row: &[DataValue]) -> Result<ProvenanceRecord> {
 }
 
 fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "provenance schema: create relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

@@ -4,6 +4,17 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+# Arms `poison_guarded_scripts`, which makes every guarded Cozo operation panic.
+# It exists so a test can assert that a code path performs *no* database access
+# — proving an absence otherwise requires trusting a reading of the code. Off by
+# default and compiled out entirely, so production builds carry neither the
+# check nor the atomic. Enable it from `[dev-dependencies]`: cargo applies dev
+# dependencies only to test builds, so the feature never reaches a release
+# binary.
+test-support = []
+
 [dependencies]
 anyhow.workspace = true
 cozo.workspace = true

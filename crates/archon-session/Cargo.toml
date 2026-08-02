@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+archon-cozo = { path = "../archon-cozo" }
 serde.workspace = true
 serde_json.workspace = true
 cozo.workspace = true

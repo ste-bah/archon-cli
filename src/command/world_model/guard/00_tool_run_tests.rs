@@ -125,6 +125,7 @@ fn blocked_attempt_records_exactly_one_correlated_outcome() {
         permission_level: request.permission_level,
         blocked: true,
         is_error: true,
+        admission_evaluated: true,
     };
 
     record_tool_run_attempt_outcome_at_root(temp.path(), outcome.clone());
@@ -160,6 +161,7 @@ fn decision_load_failure_records_correlated_unavailable_outcome() {
         permission_level: archon_tools::tool::PermissionLevel::Dangerous,
         blocked: false,
         is_error: false,
+        admission_evaluated: true,
     };
     let action_id = tool_run_action_id_parts(
         &attempt.parent_action_id,
@@ -200,6 +202,7 @@ fn missing_decision_records_correlated_unavailable_outcome() {
         permission_level: archon_tools::tool::PermissionLevel::Dangerous,
         blocked: false,
         is_error: false,
+        admission_evaluated: true,
     };
     let action_id = tool_run_action_id_parts(
         &attempt.parent_action_id,

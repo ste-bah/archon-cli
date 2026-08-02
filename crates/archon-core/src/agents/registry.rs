@@ -189,6 +189,17 @@ impl AgentRegistry {
         *self = Self::load(project_dir);
     }
 
+    /// Reload from all sources with an explicit user home directory.
+    ///
+    /// Mirrors [`Self::load_with_user_home`]. Tests must use this rather than
+    /// [`Self::reload`]: `load` resolves the user scope from
+    /// `dirs::home_dir()`, so a test that only controls `project_dir` still
+    /// picks up whatever the developer has in `~/.archon`, and user scope wins
+    /// over project scope.
+    pub fn reload_with_user_home(&mut self, project_dir: &Path, user_home: Option<&Path>) {
+        *self = Self::load_with_user_home(project_dir, user_home);
+    }
+
     /// Errors encountered during the last load/reload.
     pub fn load_errors(&self) -> &[AgentLoadError] {
         &self.load_errors
@@ -251,7 +262,7 @@ mod tests {
     #[test]
     fn load_with_no_agent_dirs_returns_builtins_only() {
         let tmp = TempDir::new().unwrap();
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         // Only 4 built-in agents (general-purpose, explore, plan, fork)
         assert_eq!(registry.len(), 4);
         assert!(registry.resolve("general-purpose").is_some());
@@ -268,7 +279,7 @@ mod tests {
         fs::create_dir_all(&custom_dir).unwrap();
         create_agent(&custom_dir, "my-agent");
 
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         assert_eq!(registry.len(), 5); // 4 built-in + 1 project
         let agent = registry.resolve("my-agent").unwrap();
         assert_eq!(agent.source, AgentSource::Project);
@@ -277,14 +288,14 @@ mod tests {
     #[test]
     fn resolve_nonexistent_returns_none() {
         let tmp = TempDir::new().unwrap();
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         assert!(registry.resolve("nonexistent").is_none());
     }
 
     #[test]
     fn list_sorted_alphabetically() {
         let tmp = TempDir::new().unwrap();
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         let list = registry.list();
         let names: Vec<&str> = list.iter().map(|a| a.agent_type.as_str()).collect();
         let mut sorted = names.clone();
@@ -296,7 +307,7 @@ mod tests {
     fn user_agent_overrides_project_agent() {
         let tmp = TempDir::new().unwrap();
         // Simulate project agent by creating directly in registry
-        let mut registry = AgentRegistry::load(tmp.path());
+        let mut registry = AgentRegistry::load_with_user_home(tmp.path(), None);
 
         // Insert project-level agent
         let project_agent = CustomAgentDefinition {
@@ -328,12 +339,12 @@ mod tests {
         fs::create_dir_all(&custom_dir).unwrap();
         create_agent(&custom_dir, "original");
 
-        let mut registry = AgentRegistry::load(tmp.path());
+        let mut registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         assert_eq!(registry.len(), 5); // 4 built-in + 1
 
         // Add another agent on disk
         create_agent(&custom_dir, "new-agent");
-        registry.reload(tmp.path());
+        registry.reload_with_user_home(tmp.path(), None);
         assert_eq!(registry.len(), 6); // 4 built-in + 2
         assert!(registry.resolve("new-agent").is_some());
     }
@@ -341,7 +352,7 @@ mod tests {
     #[test]
     fn available_agent_names_sorted() {
         let tmp = TempDir::new().unwrap();
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         let names = registry.available_agent_names();
         let mut sorted = names.clone();
         sorted.sort();
@@ -380,7 +391,7 @@ mod tests {
         create_agent(&custom_dir, "real-agent");
         fs::create_dir_all(custom_dir.join("_template")).unwrap();
 
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         assert_eq!(registry.len(), 5); // 4 built-in + 1 (template skipped)
         assert!(registry.resolve("_template").is_none());
     }
@@ -402,7 +413,7 @@ mod tests {
             return;
         }
 
-        let registry = AgentRegistry::load(&project_root);
+        let registry = AgentRegistry::load_with_user_home(&project_root, None);
         // 4 built-in + 9 project agents = at least 13
         assert!(
             registry.len() >= 13,
@@ -423,7 +434,7 @@ mod tests {
         fs::create_dir_all(&custom_dir).unwrap();
         create_agent(&custom_dir, "good-agent");
 
-        let registry = AgentRegistry::load(tmp.path());
+        let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
         assert!(registry.load_errors().is_empty());
     }
 

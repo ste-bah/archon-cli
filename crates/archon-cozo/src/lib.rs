@@ -17,6 +17,18 @@ use locking::{
 };
 use panic_guard::catch_guarded_operation;
 
+/// How long [`with_write_lock_blocking`] waits before declaring the holder stuck.
+///
+/// Sized for the worst realistic queue rather than the common case. Every
+/// guarded mutable Cozo operation in the workspace funnels through this lock,
+/// several of them now holding it across a whole `multi_transaction` rather
+/// than a single `:put`, and the fail-fast path already spends up to 19s of
+/// cumulative backoff before it gives up (`cumulative_backoff_budget`). A
+/// ceiling at or below that would report a timeout while the system is merely
+/// busy. This exists to turn a wedged or leaked lock into a diagnosable error,
+/// not to police contention.
+pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
+
 const DEFAULT_MAX_ATTEMPTS: usize = 20;
 const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
@@ -341,12 +353,62 @@ fn explicit_error_codes(message: &str) -> impl Iterator<Item = u64> + '_ {
     })
 }
 
+/// Make every guarded Cozo operation **on the calling thread** panic until
+/// [`clear_guarded_script_poison`] is called.
+///
+/// For tests that must prove a code path touches no database at all. The
+/// milestone 2 topology trace is the motivating case: it appends to jsonl on
+/// the hot path of every tool call, and "it does not write to Cozo" is a claim
+/// worth testing rather than asserting. A negative like that cannot be
+/// established by inspecting call sites, so the store is armed to fail loudly
+/// instead.
+///
+/// **Thread-local, not process-global.** A global flag would abort every other
+/// test sharing the binary — cargo runs them in parallel and plenty of them use
+/// a guarded store legitimately. Thread-local scoping is also the more precise
+/// statement of the invariant: the claim is that *this code path* performs no
+/// database access, not that the process is quiescent. The corollary is that a
+/// path which does its database work on a spawned thread would evade the check;
+/// no such path exists here, and the structural argument (`archon-topology`
+/// declares no `cozo` dependency) covers that case anyway.
+#[cfg(feature = "test-support")]
+pub fn poison_guarded_scripts() {
+    script_poison::POISONED.with(|poisoned| poisoned.set(true));
+}
+
+/// Disarm [`poison_guarded_scripts`] on the calling thread.
+#[cfg(feature = "test-support")]
+pub fn clear_guarded_script_poison() {
+    script_poison::POISONED.with(|poisoned| poisoned.set(false));
+}
+
+#[cfg(feature = "test-support")]
+mod script_poison {
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static POISONED: Cell<bool> = const { Cell::new(false) };
+    }
+}
+
 fn run_guarded_once<T>(
     context: &str,
     mutability: ScriptMutability,
     config: &CozoGuardConfig,
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
+    // One-shot: the flag is cleared *before* panicking, not after. The process
+    // panic hook (`src/panic_save.rs`) persists session state, which is itself
+    // a guarded operation — leaving the flag armed would re-enter this check
+    // from inside the hook, and a panic during panic handling aborts the
+    // process instead of failing the test. One panic is all a test needs.
+    #[cfg(feature = "test-support")]
+    if script_poison::POISONED.with(|poisoned| poisoned.replace(false)) {
+        panic!(
+            "guarded Cozo operation {context:?} ran on a path asserted to perform no database access"
+        );
+    }
+
     if matches!(mutability, ScriptMutability::Mutable) {
         let key = write_lock_key(config.write_lock_path.as_deref())?;
         if write_lock_is_held(&key) {
@@ -368,12 +430,45 @@ pub fn canonical_resource_path(path: impl AsRef<Path>) -> Result<PathBuf> {
     locking::canonical_resource_path(path)
 }
 
+/// Fail fast if the write lock for `path` is already taken.
+///
+/// The caller is expected to treat the error as retryable and come back with
+/// backoff; `run_guarded_once` does exactly that. Use
+/// [`with_write_lock_blocking`] instead when losing the race is not something
+/// the caller can recover from by retrying a whole operation.
 pub fn with_write_lock<T>(
     path: &Path,
     context: &str,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     locking::with_write_lock(path, context, run)
+}
+
+/// Run `run` under the write lock for `path`, waiting up to
+/// [`DEFAULT_WRITE_LOCK_WAIT`] for a current holder.
+///
+/// Re-entrant: a thread that already holds this lock — including one inside a
+/// guarded mutable operation on the same database — runs `run` inline instead
+/// of deadlocking against its own `LockFileEx` byte-range lock.
+pub fn with_write_lock_blocking<T>(
+    path: &Path,
+    context: &str,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    with_write_lock_blocking_timeout(path, context, DEFAULT_WRITE_LOCK_WAIT, run)
+}
+
+/// [`with_write_lock_blocking`] with an explicit ceiling on the acquire.
+///
+/// `wait` bounds only the acquisition. Once the lock is held, `run` is allowed
+/// to take as long as it needs.
+pub fn with_write_lock_blocking_timeout<T>(
+    path: &Path,
+    context: &str,
+    wait: Duration,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    locking::with_write_lock_blocking(path, context, wait, run)
 }
 
 pub fn in_guarded_operation() -> bool {

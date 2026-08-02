@@ -25,7 +25,12 @@ impl MemoryGraph {
     /// Open (or create) the graph at an explicit path.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MemoryError> {
         let path_str = path.as_ref().to_string_lossy().to_string();
-        let db = DbInstance::new("sqlite", &path_str, "").map_err(db_err)?;
+        let db = archon_cozo::open_sqlite_guarded_instance(
+            &path_str,
+            "open memory graph",
+            archon_cozo::CozoGuardConfig::for_db_path(path.as_ref()),
+        )
+        .map_err(db_err)?;
 
         #[cfg(unix)]
         secure_file_permissions(path.as_ref())?;
@@ -41,7 +46,10 @@ impl MemoryGraph {
 
     /// Create an in-memory graph (useful for tests).
     pub fn in_memory() -> Result<Self, MemoryError> {
-        let db = DbInstance::new("mem", "", "").map_err(db_err)?;
+        let db = archon_cozo::GuardedDbInstance::new(
+            DbInstance::new("mem", "", "").map_err(db_err)?,
+            archon_cozo::CozoGuardConfig::default(),
+        );
         let graph = Self {
             db,
             embedding_provider: RwLock::new(None),

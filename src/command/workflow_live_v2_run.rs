@@ -75,18 +75,51 @@ async fn run_v2_workflow_with_origin(
             return Ok(message);
         }
     };
-    execute_generated_v2_run(
+    let run_id = run.id.clone();
+    let result = execute_generated_v2_run(
         store,
         run,
         plan,
-        task,
+        task.clone(),
         llm,
         tui_tx,
         agent_names,
         workspace_boundary_supported,
         false,
     )
-    .await
+    .await;
+    fold_run_topology(cwd, store, &run_id, &task).await;
+    result
+}
+
+/// Project a finished workflow run into the topology corpus and the learning
+/// stack.
+///
+/// Graph completion is the trigger the design names, and this is it for
+/// `/workflow`: the run's `events.jsonl` becomes a topology trace and a single
+/// batched fold writes `.archon/topology.db` plus one `learning_events`
+/// summary row; then the learning bridge writes the run's record stream and
+/// routes it by the spec's `learning_hooks` into `LearningIntegration`.
+///
+/// Runs on `spawn_blocking` because every part is synchronous and the Cozo
+/// write guard's retry loop sleeps on `thread::sleep` — roughly 19 seconds
+/// worst case, which on a tokio worker is a runtime stall.
+///
+/// Entirely best-effort: a failure to record must never change what the user's
+/// run reports.
+async fn fold_run_topology(cwd: &Path, store: &WorkflowStore, run_id: &str, task: &str) {
+    let cwd = cwd.to_path_buf();
+    let store = store.clone();
+    let run_id = run_id.to_string();
+    let task = task.to_string();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::command::topology_trace::project_workflow_run(&cwd, &store, &run_id);
+        crate::command::topology_fold::fold_project_pending_blocking(
+            &cwd, &run_id, &task, "default",
+        );
+        crate::command::topology_fold::bridge_workflow_learning(&cwd, &store, &run_id);
+    })
+    .await;
 }
 
 pub(super) async fn resume_generated_v2_workflow(
@@ -126,19 +159,21 @@ pub(super) async fn resume_generated_v2_workflow(
         }
     };
     let task = run.spec.task.clone();
-    execute_generated_v2_run(
+    let run_id = run.id.clone();
+    let result = execute_generated_v2_run(
         store,
         run,
         plan,
-        task,
+        task.clone(),
         llm,
         tui_tx,
         agent_names,
         workspace_boundary_supported,
         true,
     )
-    .await
-    .map(Some)
+    .await;
+    fold_run_topology(cwd, store, &run_id, &task).await;
+    result.map(Some)
 }
 
 async fn live_plan_from_generated_bundle(

@@ -19,6 +19,12 @@ archon-leann = { path = "../archon-leann" }
 # + impl all live in one crate — orphan-rule constraint). No cycle:
 # archon-observability has zero archon-* deps.
 archon-observability = { path = "../archon-observability" }
+# Topology IR + graph analyses. `default-features = false` deliberately: the
+# `workflow` feature would drag archon-workflow (22k LOC) into archon-core's
+# build graph, and archon-core needs only the IR and the analyses. The
+# Vec<Subtask> lowering lives here (orchestrator::topology) rather than in
+# archon-topology so the dependency edge points core → topology, never back.
+archon-topology = { path = "../archon-topology", default-features = false }
 
 # Workspace dependencies
 serde.workspace = true

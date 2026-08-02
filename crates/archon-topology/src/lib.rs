@@ -1,0 +1,61 @@
+//! Topology IR and pure graph analyses.
+//!
+//! Archon represents "a graph of work" on three surfaces — `/workflow` specs,
+//! team subtask lists, and ordinary coding turns — and only the first was ever
+//! governed. This crate is the one intermediate representation all three lower
+//! into, so analysis is written once instead of three times.
+//!
+//! # Scope
+//!
+//! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
+//!
+//! Milestone 2 adds the ambient trace ([`trace`]), post-hoc graph
+//! reconstruction ([`reconstruct`]), and the canonical [`task_hash`]. It does
+//! **not** add storage: there is still no `cozo`, no `archon-core`, and no
+//! learning crate here. The trace is jsonl and the fold that reads it into Cozo
+//! lives above this crate in the binary's `src/command/topology_fold.rs`. That
+//! is the whole reason the dependency set is policed — "no database write on a
+//! hot path" is enforced by this crate being unable to reach a database, not by
+//! a convention.
+//!
+//! Admission is milestone 3 and is not here.
+//!
+//! The `Vec<Subtask>` lowering lives in `archon-core`
+//! (`orchestrator::topology`) rather than here, because `Subtask` is
+//! `archon-core`'s type: putting it here would invert the dependency edge.
+//!
+//! # The unknown-dataflow rule
+//!
+//! [`TaskNode::consumes`] being empty means *unknown*, not *nothing*. The
+//! subtask lowering has no dataflow to give and the session lowering will not
+//! either, so empty is the common case, not the exception. Any analysis
+//! reasoning from dataflow must treat empty as "cannot conclude" and stay
+//! silent. The same applies to [`TaskNode::writes`], which is why
+//! [`TaskGraph::write_conflicts`] skips nodes with no declared targets rather
+//! than treating them as conflict-free.
+
+pub mod analysis;
+pub mod error;
+mod index;
+pub mod ir;
+#[cfg(feature = "workflow")]
+pub mod lower_workflow;
+#[cfg(feature = "trace")]
+pub mod reconstruct;
+pub mod task_hash;
+#[cfg(feature = "trace")]
+pub mod trace;
+
+pub use analysis::{CriticalPath, ParallelismProfile, WriteConflict};
+pub use error::TopologyError;
+pub use ir::{
+    DataRef, FanoutSpec, GateKind, GraphBudget, GraphOrigin, NodeRole, PermissionClass, TaskGraph,
+    TaskNode, WriteTarget,
+};
+#[cfg(feature = "workflow")]
+pub use lower_workflow::lower_workflow_spec;
+#[cfg(feature = "trace")]
+pub use reconstruct::reconstruct_graph;
+pub use task_hash::{TaskClass, classify_task, task_hash, task_hash_for_class};
+#[cfg(feature = "trace")]
+pub use trace::{TopologyPaths, TraceKind, TraceReadout, TraceRecord, TraceWriter, read_trace};

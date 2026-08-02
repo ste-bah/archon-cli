@@ -247,11 +247,19 @@ fn test_archon_memory_uses_cozo_dbinstance() {
     let graph_src = include_str!("../../archon-memory/src/graph.rs");
 
     let has_dbinstance = graph_src.contains("cozo::DbInstance") || graph_src.contains("DbInstance");
-    let has_use_cozo = graph_src.contains("use cozo");
+    // Either the raw handle or `archon-cozo`'s guarded wrapper counts. The
+    // wrapper holds an `Arc<cozo::DbInstance>` and `Deref`s to it — it exists
+    // only to serialise writes against the single-writer SQLite backend, so its
+    // presence is evidence the backend is still CozoDB, not evidence against.
+    // This is NOT a relaxation: swapping to a non-Cozo store still fails, since
+    // neither marker would survive it.
+    let has_use_cozo =
+        graph_src.contains("use cozo") || graph_src.contains("archon_cozo::GuardedDbInstance");
     assert!(
         has_dbinstance && has_use_cozo,
-        "REQ-FOR-PRESERVE-D8 (e) violated: archon-memory/graph.rs no longer imports cozo or \
-         uses DbInstance. has_dbinstance={has_dbinstance}, has_use_cozo={has_use_cozo}. The \
-         storage backend must remain CozoDB until an explicit migration task lands."
+        "REQ-FOR-PRESERVE-D8 (e) violated: archon-memory/graph.rs no longer references cozo or \
+         uses DbInstance (raw or guarded). has_dbinstance={has_dbinstance}, \
+         has_use_cozo={has_use_cozo}. The storage backend must remain CozoDB until an explicit \
+         migration task lands."
     );
 }

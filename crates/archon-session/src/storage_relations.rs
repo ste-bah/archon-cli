@@ -10,10 +10,10 @@ impl SessionStore {
         params.insert("session_id".to_string(), DataValue::from(session_id));
         params.insert("name".to_string(), DataValue::from(name));
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, name] <- [[$session_id, $name]] :put session_names {session_id => name}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: set session name",
             )
             .map_err(db_err)?;
         Ok(())
@@ -54,10 +54,10 @@ impl SessionStore {
         params.insert("session_id".to_string(), DataValue::from(session_id));
         params.insert("parent_session_id".to_string(), DataValue::from(parent_id));
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, parent_session_id] <- [[$session_id, $parent_session_id]] :put session_parents {session_id => parent_session_id}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: set parent session",
             )
             .map_err(db_err)?;
         Ok(())
@@ -75,10 +75,10 @@ impl SessionStore {
         params.insert("session_id".to_string(), DataValue::from(session_id));
         params.insert("tag".to_string(), DataValue::from(tag));
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, tag] <- [[$session_id, $tag]] :put session_tags {session_id, tag}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: put session tag",
             )
             .map_err(db_err)?;
         Ok(())
@@ -89,10 +89,10 @@ impl SessionStore {
         params.insert("session_id".to_string(), DataValue::from(session_id));
         params.insert("tag".to_string(), DataValue::from(tag));
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, tag] <- [[$session_id, $tag]] :rm session_tags {session_id, tag}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: delete session tag",
             )
             .map_err(db_err)?;
         Ok(())

@@ -297,14 +297,22 @@ pub(super) fn v3_call_family(call_id: &str) -> Option<V3CallFamily> {
     }
 }
 
+/// Whether a resume may adopt an accepted record from the frontier.
+///
+/// This path is laxer than strict reuse about the dynamic source fingerprint
+/// (the caller waives it for calls that require no source metadata), but it is
+/// NOT laxer about the input: it used to ignore `input_hash` entirely, so a
+/// resume replayed a recorded result for a call whose input had since changed —
+/// there is no invalidation pass that would have caught it, because
+/// `invalidate_*` only ever runs from the operator's `workflow restart`
+/// command. Content keying is the whole safety argument for reuse, so the
+/// frontier path keys on content too.
 pub(super) fn frontier_resume_record_reusable(
     record: &WorkflowV2CallRecord,
+    input_hash: &str,
     scaffold_hash: &str,
 ) -> bool {
-    record.invalidated_by.is_none()
-        && is_reusable_status(record.status)
-        && record.result.validate().is_ok()
-        && record.scaffold_hash.as_deref() == Some(scaffold_hash)
+    record.is_reusable_for(input_hash) && record.scaffold_hash.as_deref() == Some(scaffold_hash)
 }
 
 fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Option<String> {

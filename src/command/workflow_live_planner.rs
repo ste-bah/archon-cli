@@ -36,6 +36,14 @@ pub(super) struct WorkflowScriptPlan {
     pub(super) script_args: Option<serde_json::Value>,
     pub(super) governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     pub(super) generated_config: GeneratedWorkflowConfig,
+    /// The spec's `learning_hooks`, carried through to the persisted run.
+    ///
+    /// It is the routing selector the learning bridge dispatches on, so a
+    /// saved workflow that authored hooks must not lose them here — this
+    /// field used to be dropped on the floor, which left the only surface
+    /// that can populate it unable to reach its consumer. Empty for
+    /// generated plans: nothing authored a hook, so nothing dispatches.
+    pub(super) learning_hooks: Vec<String>,
 }
 
 impl WorkflowScriptPlan {
@@ -60,6 +68,7 @@ impl WorkflowScriptPlan {
             script_args: None,
             governed_learning_context: Vec::new(),
             generated_config,
+            learning_hooks: Vec::new(),
         }
     }
 
@@ -80,6 +89,7 @@ impl WorkflowScriptPlan {
             script_args: None,
             governed_learning_context: Vec::new(),
             generated_config: GeneratedWorkflowConfig::default(),
+            learning_hooks: spec.learning_hooks,
         }
     }
 
@@ -91,16 +101,13 @@ impl WorkflowScriptPlan {
             target_repository_root: self.target_repository_root.clone(),
             max_parallelism: self.max_parallelism,
             max_agents: self.max_agents,
-            provider_tiers: Default::default(),
             stages: self
                 .calls
                 .iter()
                 .map(|call| metadata_stage(&self.task, call))
                 .collect(),
-            artifact_policy: Default::default(),
             permissions: Default::default(),
-            quality_gates: Default::default(),
-            learning_hooks: Vec::new(),
+            learning_hooks: self.learning_hooks.clone(),
         }
     }
 
@@ -192,7 +199,9 @@ pub(super) fn render_live_plan(plan: &WorkflowScriptPlan) -> Result<String> {
 
 fn metadata_stage(task: &str, call: &WorkflowV2HostCall) -> StageSpec {
     let mut extra = call.options.extra.clone();
-    let condition = take_extra_string(&mut extra, "condition");
+    // `condition` is no longer a typed StageSpec field — no evaluator was ever
+    // wired up, so it never branched. Leave whatever the plan authored in
+    // `extra` so the approval metadata still shows it verbatim.
     strip_reserved_stage_extra(&mut extra);
     StageSpec {
         id: call.id.clone(),
@@ -207,7 +216,6 @@ fn metadata_stage(task: &str, call: &WorkflowV2HostCall) -> StageSpec {
         foreach: None,
         reducer: None,
         tool: declared_tool_name(call),
-        condition,
         depends_on: Vec::new(),
         provider_tier: Some(provider_tier_for_call(call.method)),
         retry: RetryPolicy::default(),
@@ -244,16 +252,6 @@ fn declared_tool_name(call: &WorkflowV2HostCall) -> Option<String> {
         .map(str::to_string)
 }
 
-fn take_extra_string(
-    extra: &mut std::collections::BTreeMap<String, serde_json::Value>,
-    key: &str,
-) -> Option<String> {
-    extra.remove(key).map(|value| match value {
-        serde_json::Value::String(text) => text,
-        other => other.to_string(),
-    })
-}
-
 fn strip_reserved_stage_extra(extra: &mut std::collections::BTreeMap<String, serde_json::Value>) {
     for key in [
         "id",
@@ -263,7 +261,6 @@ fn strip_reserved_stage_extra(extra: &mut std::collections::BTreeMap<String, ser
         "foreach",
         "reducer",
         "tool",
-        "condition",
         "depends_on",
         "provider_tier",
         "retry",

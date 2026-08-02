@@ -279,7 +279,7 @@ fn render_harness_from_spec(spec: &WorkflowSpec) -> String {
             StageKind::Implementation => "implementation",
             StageKind::QualityGate => "qualityGate",
             StageKind::HumanGate => "humanGate",
-            StageKind::Checkpoint | StageKind::Condition => "checkpoint",
+            StageKind::Checkpoint => "checkpoint",
         };
         out.push_str(&format!(
             "  await w.{call}({}, {{ tier: {}, task: {}, depends_on: {}, write: {} }});\n",

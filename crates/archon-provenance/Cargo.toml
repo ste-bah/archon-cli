@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+archon-cozo = { path = "../archon-cozo" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

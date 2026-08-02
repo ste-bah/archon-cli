@@ -2,11 +2,21 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Barrier};
+use std::time::Duration;
 
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
 use crate::kb::ingest_storage::{ChunkData, ChunkStorage};
+use crate::kb::ingest_storage_test_hooks::ReservationRendezvous;
 use crate::kb::schema::{ensure_kb_embedding_schema, ensure_kb_schema};
+
+/// How long an ingest thread waits inside its reservation for the other to join.
+///
+/// Long enough that an unserialised peer — milliseconds away — always arrives,
+/// so the defect still reproduces; short enough that the serialised path, where
+/// the peer is parked on the write lock and never arrives, costs one such wait
+/// per run.
+const RESERVATION_RENDEZVOUS_TIMEOUT: Duration = Duration::from_millis(500);
 
 fn content_hash(content: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -155,6 +165,45 @@ fn concurrent_sqlite_storages_dedupe_shared_hash_and_preserve_unique_embeddings(
     );
 }
 
+/// Ingest nested inside a guarded mutable operation on the same database.
+///
+/// The reservation lock is an OS byte-range lock, and on Windows those conflict
+/// between handles inside one process — so an ingest that re-acquires a lock its
+/// own thread already holds through `run_guarded` would block on itself. A
+/// watchdog rather than a plain call: a regression here hangs, and a hung job is
+/// far worse to diagnose in CI than a failed assertion.
+#[test]
+fn ingest_inside_a_guarded_operation_does_not_self_deadlock() {
+    let temp = tempfile::tempdir().expect("temp database directory");
+    let path = temp.path().join("kb.sqlite");
+    let path = path.to_string_lossy().into_owned();
+    initialize_persisted_kb(&path);
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker_path = path.clone();
+    std::thread::spawn(move || {
+        let storage = ChunkStorage::for_db_path(sqlite_db(&worker_path), &worker_path);
+        let config = archon_cozo::CozoGuardConfig::for_db_path(&worker_path);
+        let nested = archon_cozo::run_guarded(
+            "kb ingest inside a guarded operation",
+            ScriptMutability::Mutable,
+            &config,
+            || store_one(&storage, "nested-content"),
+        );
+        let _ = sender.send(nested.map(|result| result.nodes_created));
+    });
+
+    let nodes_created = receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("nested ingest deadlocked on the reservation lock")
+        .expect("nested ingest succeeds");
+
+    assert_eq!(nodes_created, 1);
+    let reopened = sqlite_db(&path);
+    assert_eq!(count_rows(&reopened, "kb_nodes", "node_id"), 1);
+    assert_eq!(content_hash_owners(&reopened).len(), 1);
+}
+
 fn initialize_persisted_kb(path: &str) {
     let setup = sqlite_db(path);
     ensure_kb_schema(&setup).expect("initialize KB schema");
@@ -162,16 +211,33 @@ fn initialize_persisted_kb(path: &str) {
 }
 
 fn concurrent_nodes_created(path: &str) -> (usize, usize) {
-    let first = Arc::new(ChunkStorage::new(sqlite_db(path)));
-    let second = Arc::new(ChunkStorage::new(sqlite_db(path)));
-    let reservation = Arc::new(Barrier::new(2));
-    let _first_pause = first.pause_before_hash_reservation_for_tests(reservation.clone());
-    let _second_pause = second.pause_before_hash_reservation_for_tests(reservation);
+    // Two genuinely independent handles on one file, which is the whole point:
+    // their reservations must serialise on the database's write lock, not on a
+    // shared `Arc<DbInstance>`.
+    let first = Arc::new(ChunkStorage::for_db_path(sqlite_db(path), path));
+    let second = Arc::new(ChunkStorage::for_db_path(sqlite_db(path), path));
+    let reservation = ReservationRendezvous::new(2, RESERVATION_RENDEZVOUS_TIMEOUT);
+    let _first_pause = first.pause_before_hash_reservation_for_tests(Arc::clone(&reservation));
+    let _second_pause = second.pause_before_hash_reservation_for_tests(Arc::clone(&reservation));
     let start = Arc::new(Barrier::new(2));
     let first_task = spawn_store(first, start.clone(), first_chunks(), "first-source");
     let second_task = spawn_store(second, start, second_chunks(), "second-source");
     let first = first_task.join().expect("first storage thread");
     let second = second_task.join().expect("second storage thread");
+    // The node counts below are the symptom; this is the cause. Both threads
+    // must reach the point between their read and their reservation, and they
+    // must never be there together — that overlap is what let two writers each
+    // conclude the shared hash was unclaimed.
+    assert_eq!(
+        reservation.arrivals(),
+        2,
+        "both ingest threads must reach the reservation"
+    );
+    assert_eq!(
+        reservation.peak_in_flight(),
+        1,
+        "content-hash reservations must not overlap across DbInstance handles"
+    );
     (
         first.expect("first store succeeds").nodes_created,
         second.expect("second store succeeds").nodes_created,

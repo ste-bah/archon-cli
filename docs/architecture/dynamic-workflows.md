@@ -34,27 +34,37 @@ A workflow plan is YAML with:
 - `schema: archon.workflow.v1`
 - `name` and `task`
 - `max_parallelism` and `max_agents`
-- provider tiers such as `planner`, `critic`, and `reducer`
-- stages of kind `agent`, `fanout`, `reduce`, `condition`, `tool`,
-  `checkpoint`, `quality_gate`, `human_gate`, or `implementation`
-- artifact, permission, quality-gate, and learning-hook metadata
+- stages of kind `agent`, `fanout`, `reduce`, `tool`, `checkpoint`,
+  `quality_gate`, `human_gate`, or `implementation`
+- permission and learning-hook metadata
 
 Provider-specific model IDs are not allowed inside stages. A stage may request
-a capability tier, but the active provider configuration resolves the concrete
-provider/model at runtime.
+a capability tier via `provider_tier`, but the active provider configuration
+(`WorkflowConfig::provider_tiers`) resolves the concrete provider/model at
+runtime.
 
-Generated plans may include a concise per-stage `task` objective. Provider tier
-entries may be either `critic: auto` or neutral map form such as
-`critic: { provider: auto, model: auto }`; generated lists such as
-`provider_tiers: [planner, researcher, critic]` and named list entries such as
-`{ tier: critic, provider: auto, model: auto }` are normalized too. Concrete
-provider/model names remain invalid in generated specs. Live generated specs are
-also normalized before
-validation: `inputs`/`outputs` metadata can infer missing `depends_on` edges,
-top-level `quality_gates` entries can be promoted into executable
-`quality_gate` stages, missing agent names fall back to the stage id, missing
-fan-out `foreach` values run as a single item, and missing reducer kinds default
-to `evidence_weighted_report`.
+Generated plans may include a concise per-stage `task` objective. Live generated
+specs are normalized before validation: `inputs`/`outputs` metadata can infer
+missing `depends_on` edges, missing agent names fall back to the stage id,
+missing fan-out `foreach` values run as a single item, and missing reducer kinds
+default to `evidence_weighted_report`.
+
+`reducer` is declarative. It records what a `reduce` stage is *for*; nothing
+dispatches on it. Reduction is performed by an agent, except for
+`w.finalReport()`, which is assembled deterministically from typed prior
+host-call results by `WorkflowV2FinalReportBuilder`. A deterministic
+`ReducerRegistry` with seven implementations once sat behind these names with
+no call site anywhere in the tree — not even its input producer was reachable
+— and its contract (N text blobs in, one markdown document out) did not match
+what a live `reduce` call returns, which is a typed result envelope carrying
+routing data the scheduler consumes. It was deleted rather than wired.
+
+A spec-level `provider_tiers`, `artifact_policy`, or `quality_gates` block is
+accepted and ignored for backward compatibility. None of the three was ever
+read; tier resolution has always come from `WorkflowConfig`, and quality gates
+are expressed as `quality_gate` stages. A `condition` stage kind is likewise
+accepted and loaded as `checkpoint`: no condition evaluator was ever wired up,
+so such a stage always proceeded unconditionally.
 
 Write-capable generated plans must use a typed implementation contract. Known
 single-stage edits use `kind: implementation` with `expected_target_files`.
@@ -72,8 +82,9 @@ Each run lives under:
 ```
 
 The run directory contains `manifest.toml`, `spec.yaml`, `state.json`,
-`events.jsonl`, `artifacts/`, `agent-outputs/`, `prompts/`, `reducers/`,
-`quality/`, and `learning/`.
+`events.jsonl`, `artifacts/`, `agent-outputs/`, `prompts/`, `quality/`, and
+`learning/`. (A `reducers/` directory used to be created here and never
+written to; it went with the unreachable reducer registry.)
 
 State writes use temp-file plus rename. Artifacts carry content hashes,
 producer stage, source-input hash, and accepted status so resume/reuse can
@@ -183,28 +194,35 @@ Raw tool output and provider-private reasoning fields are not returned.
 
 ## Learning records
 
-Completed and failed workflow runs write inspectable records under:
+Every run gets a `.archon/workflows/<run-id>/learning/` directory — it is one
+of the fixed run subdirectories created up front — and two things write into
+it.
 
-```text
-.archon/workflows/<run-id>/learning/
-```
+`record_write_coordination_outcome` appends metadata-only rows (file paths,
+blake3 hashes, sizes; never patch content) to
+`write-coordination/outcomes.jsonl` when a coordinated write completes.
 
-The ledger files are:
+`WorkflowLearningSink`
+([`learning.rs`](../../crates/archon-workflow/src/learning.rs)) writes
+**one** stream, `records.jsonl`, at run completion: one line per stage
+outcome, carrying the stage's status, verification, quality score, artifact
+references, retry telemetry, and the spec's `learning_hooks` verbatim. An
+earlier design demultiplexed the same outcomes into ten files
+(`durable-memory.jsonl`, `world-traces.jsonl`, `governed-proposals.jsonl` and
+six `adapter-*.jsonl`); those are gone. Routing is the reader's job, and
+`learning_hooks` is what it routes on.
 
-- `records.jsonl` — every stage outcome for audit visibility
-- `durable-memory.jsonl` — accepted stages with artifacts only
-- `world-traces.jsonl` — trace references for world-model/JEPA consumers
-- `governed-proposals.jsonl` — proposal records only; no auto-apply
-- `adapter-sona.jsonl`
-- `adapter-rlm.jsonl`
-- `adapter-reflexion.jsonl`
-- `adapter-reasoning-bank.jsonl`
-- `adapter-jepa.jsonl`
-- `adapter-world-model.jsonl`
-- `adapter-records.jsonl` — combined direct handoff records
-
-Failed, forced, skipped, or still-running stages are recorded for audit but are
-not treated as durable memory.
+The reader is the topology fold
+([`src/command/topology_fold/workflow_learning.rs`](../../src/command/topology_fold/workflow_learning.rs)).
+`archon-workflow` depends on exactly one Archon crate and cannot reach
+`LearningIntegration` — that thinness is why persistence here is file-based
+in the first place — so the file handoff crosses the boundary and the binary,
+which is the composition root for the learning stack, consumes it. Hooks that
+name a subsystem reachable through `LearningIntegration` (`sona`,
+`reasoning_bank`, `desc`) dispatch a completed stage outcome into it; hooks
+with no write-side entry point (`world_model`, `jepa`, `rlm`, `reflexion`)
+are counted and reported as unrouted rather than silently dropped. **An empty
+`learning_hooks` list dispatches nothing.**
 
 ## Current integration status
 
@@ -212,7 +230,9 @@ The implementation provides the provider-neutral crate, spec validation,
 durable store, event sanitization, deterministic shell executor, live TUI
 planner and runner through the active LLM adapter, lifecycle commands, forced
 acceptance audit, template sanitizer, TUI workflow view, web workflow
-SSE/control API, and direct learning adapter records.
+SSE/control API, metadata-only write-coordination outcome records, and the
+single per-stage learning record stream with its `learning_hooks`-routed
+consumer in the topology fold.
 
 The static `/archon-code`, `/archon-research`, and `/gametheory` paths remain
 the production subagent-backed pipelines. Dynamic workflows are the new runtime
