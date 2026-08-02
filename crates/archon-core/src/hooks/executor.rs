@@ -1,9 +1,9 @@
 use std::cell::Cell;
 use std::path::Path;
-use std::process::Stdio;
 
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+#[path = "executor_process.rs"]
+mod executor_process;
+use executor_process::run_command;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::types::{HookConfig, HookOutcome, HookResult};
@@ -11,6 +11,10 @@ use super::types::{HookConfig, HookOutcome, HookResult};
 #[path = "executor_function.rs"]
 mod executor_function;
 use executor_function::execute_function_hook;
+
+#[cfg(test)]
+#[path = "executor_tests.rs"]
+mod executor_tests;
 
 // ---------------------------------------------------------------------------
 // Agent hook recursion guard (thread-local) and serialization mutex
@@ -61,7 +65,7 @@ struct CommandOutput {
 enum RunError {
     Spawn(String),
     Io(String),
-    Timeout,
+    Timeout(&'static str),
 }
 
 impl std::fmt::Display for RunError {
@@ -69,7 +73,7 @@ impl std::fmt::Display for RunError {
         match self {
             Self::Spawn(s) => write!(f, "spawn error: {s}"),
             Self::Io(s) => write!(f, "I/O error: {s}"),
-            Self::Timeout => write!(f, "timed out"),
+            Self::Timeout(phase) => write!(f, "timed out during {phase}"),
         }
     }
 }
@@ -323,66 +327,6 @@ fn interpret_exit_code(command: &str, output: CommandOutput) -> HookResult {
     }
 
     result
-}
-
-// ---------------------------------------------------------------------------
-// Shell command runner
-// ---------------------------------------------------------------------------
-
-async fn run_command(
-    command: &str,
-    payload_bytes: &[u8],
-    cwd: &Path,
-    session_id: &str,
-    event_name: &str,
-    timeout_secs: u32,
-) -> Result<CommandOutput, RunError> {
-    let shell = super::shell::resolve_hook_shell();
-    let mut child = Command::new(&shell.program)
-        .arg(shell.command_arg)
-        .arg(command)
-        .current_dir(cwd)
-        .env("ARCHON_SESSION_ID", session_id)
-        .env("ARCHON_CWD", cwd.to_string_lossy().as_ref())
-        .env("ARCHON_HOOK_EVENT", event_name)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| RunError::Spawn(format!("{command}: {e}")))?;
-
-    // Write payload to stdin then drop so the child gets EOF. A successful
-    // short-lived hook may close stdin before reading it; defer BrokenPipe
-    // handling until its exit status is known.
-    let write_error = if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(payload_bytes).await.err()
-    } else {
-        None
-    };
-
-    let timeout = std::time::Duration::from_secs(u64::from(timeout_secs));
-
-    match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(output)) => {
-            if let Some(error) = write_error
-                && (error.kind() != std::io::ErrorKind::BrokenPipe || !output.status.success())
-            {
-                return Err(RunError::Io(error.to_string()));
-            }
-
-            let exit_code = output.status.code().unwrap_or(-1);
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Ok(CommandOutput {
-                exit_code,
-                stdout,
-                stderr,
-            })
-        }
-        Ok(Err(e)) => Err(RunError::Io(e.to_string())),
-        Err(_) => Err(RunError::Timeout),
-    }
 }
 
 // ---------------------------------------------------------------------------

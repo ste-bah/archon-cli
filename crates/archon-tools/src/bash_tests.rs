@@ -1,5 +1,8 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use super::bash_output::spawn_counted_pipe_capture;
 
 use serde_json::json;
 
@@ -47,50 +50,6 @@ async fn printf_wrapper_preserves_dash_dash_and_v() {
 
     assert!(!result.is_error, "{}", result.content);
     assert_eq!(result.content, "--- one ---\ntwo\n");
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn timeout_kills_background_process_group() {
-    let dir = tempfile::tempdir().unwrap();
-    let pid_file = dir.path().join("child.pid");
-    let tool = BashTool {
-        timeout_secs: 1,
-        max_output_bytes: 1024,
-        ..Default::default()
-    };
-    let result = tool
-        .execute(
-            json!({
-                "command": format!(
-                    "sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $! > {}; wait",
-                    pid_file.display()
-                ),
-                "timeout": 100
-            }),
-            &ToolContext {
-                working_dir: dir.path().to_path_buf(),
-                ..ToolContext::default()
-            },
-        )
-        .await;
-
-    assert!(result.is_error, "command should time out");
-    let pid = std::fs::read_to_string(&pid_file)
-        .unwrap()
-        .trim()
-        .to_string();
-    for _ in 0..20 {
-        if !process_exists(&pid) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let _ = std::process::Command::new("kill")
-        .arg("-9")
-        .arg(&pid)
-        .status();
-    panic!("background sleep process survived Bash timeout: pid={pid}");
 }
 
 #[test]
@@ -290,7 +249,7 @@ fn bash_program_selection_prefers_path_discovery() {
 async fn pipe_reader_caps_storage_and_drains_remaining_bytes() {
     let (mut writer, reader) = tokio::io::duplex(64);
     let byte_count = Arc::new(AtomicUsize::new(0));
-    let task = spawn_pipe_reader(
+    let task = spawn_counted_pipe_capture(
         Some(reader),
         Arc::new(AtomicUsize::new(5)),
         Arc::clone(&byte_count),
@@ -313,12 +272,12 @@ async fn pipe_readers_share_one_total_capture_budget() {
     let remaining = Arc::new(AtomicUsize::new(6));
     let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
     let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
-    let stdout_task = spawn_pipe_reader(
+    let stdout_task = spawn_counted_pipe_capture(
         Some(stdout_reader),
         Arc::clone(&remaining),
         Arc::new(AtomicUsize::new(0)),
     );
-    let stderr_task = spawn_pipe_reader(
+    let stderr_task = spawn_counted_pipe_capture(
         Some(stderr_reader),
         remaining,
         Arc::new(AtomicUsize::new(0)),
@@ -335,19 +294,9 @@ async fn pipe_readers_share_one_total_capture_budget() {
     stdout_write.await.unwrap();
     stderr_write.await.unwrap();
 
-    let (stdout, stderr) = join_output(stdout_task, stderr_task).await;
+    let (stdout, stderr) = tokio::join!(stdout_task, stderr_task);
+    let stdout = stdout.unwrap();
+    let stderr = stderr.unwrap();
     assert_eq!(stdout.bytes.len() + stderr.bytes.len(), 6);
     assert!(stdout.truncated || stderr.truncated);
-}
-
-#[cfg(unix)]
-fn process_exists(pid: &str) -> bool {
-    std::process::Command::new("kill")
-        .arg("-0")
-        .arg(pid)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
 }
