@@ -59,7 +59,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::Meaning { .. }
         | Commands::Constellation { .. }
         | Commands::Memory { .. }
-        | Commands::Style { .. }) => handle_data_command(command).await,
+        | Commands::Style { .. }) => handle_data_command(command, config).await,
         command @ (Commands::SelfCmd { .. }
         | Commands::Gametheory { .. }
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
@@ -262,7 +262,7 @@ async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf
     }
 }
 
-async fn handle_data_command(command: Commands) -> Result<()> {
+async fn handle_data_command(command: Commands, config: &ArchonConfig) -> Result<()> {
     match command {
         Commands::Kb { action } => crate::command::kb::handle_kb_command(action).await,
         Commands::Docs { action } => crate::command::docs::handle_docs_command(action).await,
@@ -276,7 +276,7 @@ async fn handle_data_command(command: Commands) -> Result<()> {
             crate::command::constellation::handle_constellation_command(action).await
         }
         Commands::Memory { action } => {
-            crate::command::memory_cli::handle_memory_command(action).await
+            crate::command::memory_cli::handle_memory_command(action, config).await
         }
         Commands::Style { action } => crate::command::style::handle_style_command(action).await,
         _ => unreachable!("data command routed to wrong dispatcher"),
