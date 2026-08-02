@@ -1,28 +1,30 @@
-struct PreparedWorktreeBranch {
-    branch: archon_workflow::WorkflowV2FanoutItem,
-    assignment: WorkflowV2WriteAssignment,
-    coordinator_plan: WritePlan,
-    baseline: CanonicalBaseline,
-    workspace: ItemWorkspace,
+use super::*;
+
+pub(super) struct PreparedWorktreeBranch {
+    pub(super) branch: archon_workflow::WorkflowV2FanoutItem,
+    pub(super) assignment: WorkflowV2WriteAssignment,
+    pub(super) coordinator_plan: WritePlan,
+    pub(super) baseline: CanonicalBaseline,
+    pub(super) workspace: ItemWorkspace,
 }
 
-struct CompletedWorktreeBranch {
-    item_id: String,
-    role: String,
-    item_input_hash: Option<String>,
-    result: WorkflowV2Result,
-    manifest: Option<PatchManifest>,
-    pre_hashes: Option<BTreeMap<String, String>>,
-    workspace_root: PathBuf,
+pub(super) struct CompletedWorktreeBranch {
+    pub(super) item_id: String,
+    pub(super) role: String,
+    pub(super) item_input_hash: Option<String>,
+    pub(super) result: WorkflowV2Result,
+    pub(super) manifest: Option<PatchManifest>,
+    pub(super) pre_hashes: Option<BTreeMap<String, String>>,
+    pub(super) workspace_root: PathBuf,
 }
 
-struct WorktreeFanoutSetup {
-    canonical_root: PathBuf,
-    cfg: WriteCoordinatorConfig,
-    run_root: PathBuf,
+pub(super) struct WorktreeFanoutSetup {
+    pub(super) canonical_root: PathBuf,
+    pub(super) cfg: WriteCoordinatorConfig,
+    pub(super) run_root: PathBuf,
 }
 
-async fn run_worktree_v2_write_fanout(
+pub(super) async fn run_worktree_v2_write_fanout(
     task: &str,
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,
@@ -62,7 +64,7 @@ async fn run_worktree_v2_write_fanout(
     ))
 }
 
-fn worktree_fanout_setup(
+pub(super) fn worktree_fanout_setup(
     target_repository_root: Option<&str>,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<WorktreeFanoutSetup> {
@@ -86,7 +88,7 @@ fn worktree_fanout_setup(
     })
 }
 
-fn worktree_manifest_paths(
+pub(super) fn worktree_manifest_paths(
     run_root: &Path,
     call_id: &str,
     manifests: &[PatchManifest],
@@ -101,7 +103,7 @@ fn worktree_manifest_paths(
     )
 }
 
-fn worktree_fanout_result(
+pub(super) fn worktree_fanout_result(
     call: &WorkflowV2HostCall,
     plan: &WorkflowV2WritePlan,
     run_root: &Path,
@@ -126,7 +128,7 @@ fn worktree_fanout_result(
     result
 }
 
-fn attach_worktree_apply_gap(
+pub(super) fn attach_worktree_apply_gap(
     call: &WorkflowV2HostCall,
     result: &mut WorkflowV2Result,
     apply_gap: Option<String>,

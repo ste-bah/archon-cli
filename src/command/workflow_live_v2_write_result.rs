@@ -1,4 +1,6 @@
-fn result_from_write_fanout(
+use super::*;
+
+pub(super) fn result_from_write_fanout(
     call: &WorkflowV2HostCall,
     mut branch_results: Vec<WorkflowV2Result>,
     plan: &WorkflowV2WritePlan,
@@ -126,7 +128,7 @@ fn result_from_write_fanout(
     result
 }
 
-fn sanitized_write_fanout_outcomes(
+pub(super) fn sanitized_write_fanout_outcomes(
     call: &WorkflowV2HostCall,
     branch_results: &[WorkflowV2Result],
 ) -> Vec<serde_json::Value> {
@@ -136,7 +138,7 @@ fn sanitized_write_fanout_outcomes(
         .collect()
 }
 
-fn sanitized_write_fanout_outcome(
+pub(super) fn sanitized_write_fanout_outcome(
     call: &WorkflowV2HostCall,
     result: &WorkflowV2Result,
 ) -> serde_json::Value {
@@ -191,7 +193,7 @@ fn sanitized_write_fanout_outcome(
     })
 }
 
-fn item_id_from_branch_result(result: &WorkflowV2Result) -> Option<String> {
+pub(super) fn item_id_from_branch_result(result: &WorkflowV2Result) -> Option<String> {
     result
         .data
         .get("item_id")
@@ -202,7 +204,7 @@ fn item_id_from_branch_result(result: &WorkflowV2Result) -> Option<String> {
         .map(str::to_string)
 }
 
-fn canonical_task_ids_from_branch_result(result: &WorkflowV2Result) -> Vec<String> {
+pub(super) fn canonical_task_ids_from_branch_result(result: &WorkflowV2Result) -> Vec<String> {
     let mut ids = BTreeSet::new();
     for id in canonical_task_ids_from_generated_value(&result.data, None)
         .into_iter()
@@ -235,7 +237,7 @@ fn canonical_task_ids_from_branch_result(result: &WorkflowV2Result) -> Vec<Strin
     ids.into_iter().collect()
 }
 
-fn concrete_evidence_from_branch_result(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+pub(super) fn concrete_evidence_from_branch_result(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
     let accepted_or_noop = matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -251,7 +253,7 @@ fn concrete_evidence_from_branch_result(result: &WorkflowV2Result) -> Vec<serde_
     evidence
 }
 
-fn branch_evidence_records(
+pub(super) fn branch_evidence_records(
     result: &WorkflowV2Result,
     accepted_or_noop: bool,
 ) -> Vec<serde_json::Value> {
@@ -275,7 +277,7 @@ fn branch_evidence_records(
         .collect()
 }
 
-fn branch_command_records(
+pub(super) fn branch_command_records(
     result: &WorkflowV2Result,
     accepted_or_noop: bool,
 ) -> Vec<serde_json::Value> {
@@ -297,7 +299,7 @@ fn branch_command_records(
         .collect()
 }
 
-fn branch_file_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+pub(super) fn branch_file_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
     result
         .files_changed
         .iter()
@@ -311,7 +313,7 @@ fn branch_file_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn branch_artifact_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+pub(super) fn branch_artifact_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
     result
         .artifacts
         .iter()
@@ -326,7 +328,7 @@ fn branch_artifact_records(result: &WorkflowV2Result) -> Vec<serde_json::Value> 
         .collect()
 }
 
-fn branch_data_evidence_refs(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+pub(super) fn branch_data_evidence_refs(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
     evidence_refs_from_generated_value(&result.data)
         .into_iter()
         .map(|reference| {
@@ -338,7 +340,7 @@ fn branch_data_evidence_refs(result: &WorkflowV2Result) -> Vec<serde_json::Value
         .collect()
 }
 
-fn branch_task_coverage_records(
+pub(super) fn branch_task_coverage_records(
     result: &WorkflowV2Result,
     accepted_or_noop: bool,
 ) -> Vec<serde_json::Value> {
@@ -359,7 +361,7 @@ fn branch_task_coverage_records(
         .collect()
 }
 
-fn task_coverage_counts_as_evidence(
+pub(super) fn task_coverage_counts_as_evidence(
     coverage: &WorkflowV2TaskCoverage,
     accepted_or_noop: bool,
 ) -> bool {
@@ -370,7 +372,7 @@ fn task_coverage_counts_as_evidence(
         )
 }
 
-fn branch_residual_gap_records(
+pub(super) fn branch_residual_gap_records(
     result: &WorkflowV2Result,
     accepted_or_noop: bool,
 ) -> Vec<serde_json::Value> {
@@ -391,7 +393,7 @@ fn branch_residual_gap_records(
         .collect()
 }
 
-fn string_array_from_data(value: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn string_array_from_data(value: Option<&serde_json::Value>) -> Vec<String> {
     match value {
         Some(serde_json::Value::Array(values)) => values
             .iter()
@@ -410,7 +412,7 @@ fn string_array_from_data(value: Option<&serde_json::Value>) -> Vec<String> {
     }
 }
 
-fn add_write_fanout_evidence(
+pub(super) fn add_write_fanout_evidence(
     result: &mut WorkflowV2Result,
     plan: &WorkflowV2WritePlan,
     fallback_reason: Option<String>,
@@ -442,14 +444,14 @@ fn add_write_fanout_evidence(
         ));
 }
 
-fn count_results_with_status(results: &[WorkflowV2Result], status: WorkflowV2Status) -> usize {
+pub(super) fn count_results_with_status(results: &[WorkflowV2Result], status: WorkflowV2Status) -> usize {
     results
         .iter()
         .filter(|result| result.status == status)
         .count()
 }
 
-fn record_write_peak(peak: &AtomicUsize, observed: usize) {
+pub(super) fn record_write_peak(peak: &AtomicUsize, observed: usize) {
     let mut current = peak.load(Ordering::SeqCst);
     while observed > current {
         match peak.compare_exchange(current, observed, Ordering::SeqCst, Ordering::SeqCst) {

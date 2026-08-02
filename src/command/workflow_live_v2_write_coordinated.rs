@@ -1,4 +1,6 @@
-async fn run_coordinated_v2_write_fanout(
+use super::*;
+
+pub(super) async fn run_coordinated_v2_write_fanout(
     task: &str,
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,
@@ -164,7 +166,7 @@ async fn run_coordinated_v2_write_fanout(
     ))
 }
 
-fn branch_input_for_assignment<'a>(
+pub(super) fn branch_input_for_assignment<'a>(
     branches: &'a [archon_workflow::WorkflowV2FanoutItem],
     item_id: &str,
 ) -> Option<&'a serde_json::Value> {

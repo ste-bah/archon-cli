@@ -1,4 +1,6 @@
-fn branch_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
+use super::*;
+
+pub(super) fn branch_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
     outcomes
         .iter()
         .filter_map(|outcome| {
@@ -9,7 +11,7 @@ fn branch_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<Wor
         .collect()
 }
 
-fn tag_branch_result(result: &mut WorkflowV2Result, item_id: &str) {
+pub(super) fn tag_branch_result(result: &mut WorkflowV2Result, item_id: &str) {
     let mut object = match std::mem::take(&mut result.data) {
         serde_json::Value::Object(object) => object,
         serde_json::Value::Null => serde_json::Map::new(),
@@ -29,7 +31,7 @@ fn tag_branch_result(result: &mut WorkflowV2Result, item_id: &str) {
     result.data = serde_json::Value::Object(object);
 }
 
-fn normalize_write_branch_contract_result(result: &mut WorkflowV2Result) {
+pub(super) fn normalize_write_branch_contract_result(result: &mut WorkflowV2Result) {
     if should_skip_write_contract_normalization(result) {
         return;
     }
@@ -52,14 +54,14 @@ fn normalize_write_branch_contract_result(result: &mut WorkflowV2Result) {
     );
 }
 
-fn should_skip_write_contract_normalization(result: &WorkflowV2Result) -> bool {
+pub(super) fn should_skip_write_contract_normalization(result: &WorkflowV2Result) -> bool {
     matches!(
         failure_kind_from_write_result(result),
         Some(BranchFailureKind::Safety | BranchFailureKind::Execution)
     ) || matches!(result.status, WorkflowV2Status::Cancelled)
 }
 
-fn write_branch_contract_errors(
+pub(super) fn write_branch_contract_errors(
     item_id: Option<&str>,
     canonical_task_ids: &[String],
     evidence: &[serde_json::Value],
@@ -77,7 +79,7 @@ fn write_branch_contract_errors(
     contract_errors
 }
 
-fn mark_write_branch_contract_invalid(
+pub(super) fn mark_write_branch_contract_invalid(
     result: &mut WorkflowV2Result,
     item_id: Option<&str>,
     canonical_task_ids: Vec<String>,
@@ -90,14 +92,14 @@ fn mark_write_branch_contract_invalid(
     set_write_branch_contract_data(result, canonical_task_ids, evidence, contract_errors);
 }
 
-fn add_write_branch_contract_review(result: &mut WorkflowV2Result) {
+pub(super) fn add_write_branch_contract_review(result: &mut WorkflowV2Result) {
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Review,
         "implementation branch outcome must include item_id/id, canonical_task_ids, status, and concrete evidence before it can unblock dependent work",
     ));
 }
 
-fn add_write_branch_contract_gap(
+pub(super) fn add_write_branch_contract_gap(
     result: &mut WorkflowV2Result,
     item_id: Option<&str>,
     contract_errors: &[String],
@@ -115,7 +117,7 @@ fn add_write_branch_contract_gap(
     });
 }
 
-fn set_write_branch_contract_data(
+pub(super) fn set_write_branch_contract_data(
     result: &mut WorkflowV2Result,
     canonical_task_ids: Vec<String>,
     evidence: Vec<serde_json::Value>,
@@ -145,7 +147,7 @@ fn set_write_branch_contract_data(
     result.data = serde_json::Value::Object(object);
 }
 
-fn result_data_object(result: &mut WorkflowV2Result) -> serde_json::Map<String, serde_json::Value> {
+pub(super) fn result_data_object(result: &mut WorkflowV2Result) -> serde_json::Map<String, serde_json::Value> {
     match std::mem::take(&mut result.data) {
         serde_json::Value::Object(object) => object,
         serde_json::Value::Null => serde_json::Map::new(),
@@ -157,7 +159,7 @@ fn result_data_object(result: &mut WorkflowV2Result) -> serde_json::Map<String, 
     }
 }
 
-fn save_write_branch_outcome(
+pub(super) fn save_write_branch_outcome(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
     item_id: &str,
@@ -186,7 +188,7 @@ fn save_write_branch_outcome(
     Ok(())
 }
 
-fn write_items_for_branches(
+pub(super) fn write_items_for_branches(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
@@ -209,7 +211,7 @@ fn write_items_for_branches(
 }
 
 #[cfg(test)]
-fn target_files_for_branch(
+pub(super) fn target_files_for_branch(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
     branch: &archon_workflow::WorkflowV2FanoutItem,
@@ -217,7 +219,7 @@ fn target_files_for_branch(
     Ok(expanded_targets_for_branch(target_repository_root, call, branch)?.target_files)
 }
 
-fn expanded_targets_for_branch(
+pub(super) fn expanded_targets_for_branch(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
     branch: &archon_workflow::WorkflowV2FanoutItem,
@@ -253,7 +255,7 @@ fn expanded_targets_for_branch(
     )))
 }
 
-fn target_files_from_branch_item(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
+pub(super) fn target_files_from_branch_item(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
     branch
         .input
         .get("item")
@@ -266,7 +268,7 @@ fn target_files_from_branch_item(branch: &archon_workflow::WorkflowV2FanoutItem)
         .unwrap_or_default()
 }
 
-fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {
+pub(super) fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {
     items
         .iter()
         .filter_map(serde_json::Value::as_str)
@@ -276,20 +278,20 @@ fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-fn branch_has_artifact_requirements(branch: &archon_workflow::WorkflowV2FanoutItem) -> bool {
+pub(super) fn branch_has_artifact_requirements(branch: &archon_workflow::WorkflowV2FanoutItem) -> bool {
     branch
         .input
         .get("item")
         .is_some_and(item_has_artifact_requirements)
 }
 
-fn item_has_artifact_requirements(item: &serde_json::Value) -> bool {
+pub(super) fn item_has_artifact_requirements(item: &serde_json::Value) -> bool {
     ["artifact_requirements", "project_artifact_requirements"]
         .iter()
         .any(|key| item.get(*key).is_some_and(value_has_content))
 }
 
-fn value_has_content(value: &serde_json::Value) -> bool {
+pub(super) fn value_has_content(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::String(value) => !value.trim().is_empty(),
         serde_json::Value::Array(values) => values.iter().any(value_has_content),
@@ -298,7 +300,7 @@ fn value_has_content(value: &serde_json::Value) -> bool {
     }
 }
 
-fn expand_declared_targets(
+pub(super) fn expand_declared_targets(
     item_id: &str,
     targets: &[String],
     target_repository_root: Option<&str>,

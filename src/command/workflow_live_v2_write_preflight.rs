@@ -1,4 +1,6 @@
-fn preflight_write_fanout_source_contract(
+use super::*;
+
+pub(super) fn preflight_write_fanout_source_contract(
     call: &WorkflowV2HostCall,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
     write_items: &[WorkflowV2WriteItem],
@@ -16,7 +18,7 @@ fn preflight_write_fanout_source_contract(
     (!issues.is_empty()).then(|| write_source_preflight_result(call, branches, plan, issues))
 }
 
-fn is_implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn is_implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
     call.method == archon_workflow::WorkflowV2HostMethod::Fanout
         && call
             .options
@@ -25,7 +27,7 @@ fn is_implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
             .is_some_and(|kind| kind.eq_ignore_ascii_case("implementation"))
 }
 
-fn duplicate_broad_ownership_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
+pub(super) fn duplicate_broad_ownership_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
     let mut by_targets: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
     for item in write_items {
         let mut targets = item.owned_targets.clone();
@@ -50,7 +52,7 @@ fn duplicate_broad_ownership_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<
         .collect()
 }
 
-fn shared_hot_target_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
+pub(super) fn shared_hot_target_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
     let mut by_target: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for item in write_items {
         for target in &item.owned_targets {
@@ -68,7 +70,7 @@ fn shared_hot_target_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_js
         .collect()
 }
 
-fn issue(kind: &str, item_ids: Vec<String>, targets: Vec<String>) -> serde_json::Value {
+pub(super) fn issue(kind: &str, item_ids: Vec<String>, targets: Vec<String>) -> serde_json::Value {
     serde_json::json!({
         "kind": kind,
         "severity": "review",
@@ -77,7 +79,7 @@ fn issue(kind: &str, item_ids: Vec<String>, targets: Vec<String>) -> serde_json:
     })
 }
 
-fn write_source_preflight_result(
+pub(super) fn write_source_preflight_result(
     call: &WorkflowV2HostCall,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
     plan: &WorkflowV2WritePlan,
@@ -111,7 +113,7 @@ fn write_source_preflight_result(
     result
 }
 
-fn preflight_branch_result(
+pub(super) fn preflight_branch_result(
     branch: &archon_workflow::WorkflowV2FanoutItem,
     issues: &[serde_json::Value],
 ) -> WorkflowV2Result {
@@ -137,7 +139,7 @@ fn preflight_branch_result(
     result
 }
 
-fn branch_task_ids(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
+pub(super) fn branch_task_ids(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
     branch
         .input
         .get("item")
@@ -145,7 +147,7 @@ fn branch_task_ids(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String
         .unwrap_or_default()
 }
 
-fn issues_for_branch(item_id: &str, issues: &[serde_json::Value]) -> Vec<serde_json::Value> {
+pub(super) fn issues_for_branch(item_id: &str, issues: &[serde_json::Value]) -> Vec<serde_json::Value> {
     issues
         .iter()
         .filter(|issue| issue_mentions_item(issue, item_id))
@@ -153,7 +155,7 @@ fn issues_for_branch(item_id: &str, issues: &[serde_json::Value]) -> Vec<serde_j
         .collect()
 }
 
-fn issue_mentions_item(issue: &serde_json::Value, item_id: &str) -> bool {
+pub(super) fn issue_mentions_item(issue: &serde_json::Value, item_id: &str) -> bool {
     issue
         .get("item_ids")
         .and_then(serde_json::Value::as_array)
