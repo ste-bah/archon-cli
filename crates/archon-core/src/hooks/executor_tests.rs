@@ -160,7 +160,7 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[cfg(windows)]
 async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     let dir = tempfile::tempdir().unwrap();
