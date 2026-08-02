@@ -1,0 +1,35 @@
+[package]
+name = "archon-topology"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Topology IR (TaskGraph) and pure graph analyses shared by workflow, team, and session surfaces"
+
+[features]
+# `workflow` pulls in archon-workflow for the WorkflowSpec lowering. It is on by
+# default so `cargo check -p archon-topology` exercises the lowering, but
+# archon-core takes the crate with `default-features = false`: archon-core needs
+# only the IR plus the analyses, and it must not acquire a build edge onto the
+# 22k-LOC workflow crate to get them.
+default = ["workflow"]
+# serde_json rides along because `WorkflowSpec::permissions` is typed
+# `BTreeMap<String, serde_json::Value>`; reading that field is impossible
+# without naming the type. Confined to this feature so the IR-and-analyses
+# build archon-core takes stays at petgraph + serde.
+workflow = ["dep:archon-workflow", "dep:serde_json"]
+
+[dependencies]
+# Hard isolation requirement (docs/architecture/topology-engineering.md,
+# "Milestone 1"): petgraph + serde + archon-workflow and nothing else. No cozo,
+# no archon-core, no learning crate — milestone 2 puts the store behind a
+# separate module boundary so these analyses stay usable with no database.
+petgraph.workspace = true
+serde.workspace = true
+archon-workflow = { path = "../archon-workflow", optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+# Deliberately-defective spec fixtures must bypass `WorkflowSpec::from_yaml`,
+# which validates. Test-only; not in the production dependency set.
+serde_yaml_ng.workspace = true
