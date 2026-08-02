@@ -22,6 +22,11 @@ tests/fixtures/agents/generated/** linguist-generated=true
 # scripts/lint/ and scripts/ci/ unpinned. Match on basename instead.
 *.sh text eol=lf
 
+# The FileSizeGuard allowlist is matched with `grep -Fxq`, so a CRLF checkout
+# gives every entry a trailing \r, nothing matches, and the guard reports all 62
+# grandfathered files as fresh offenders on Windows while Linux CI passes.
+scripts/check-file-sizes.allowlist text eol=lf
+
 # Golden-file fixtures are compared byte-for-byte, or parsed on literal "\n\n"
 # block boundaries, so their line endings must not vary by platform. Without
 # this they fail on a Windows checkout purely on \r\n while passing on macOS

@@ -158,8 +158,7 @@ impl CommandHandler for CheckpointHandler {
         let arg = joined.trim();
 
         // R4: path reproduced byte-identically from shipped slash.rs:455-458.
-        let ckpt_path = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
+        let ckpt_path = archon_session::background::archon_data_dir()
             .join("archon")
             .join("checkpoints.db");
 
@@ -251,12 +250,14 @@ mod tests {
     struct EnvGuard {
         prev_xdg: Option<std::ffi::OsString>,
         prev_home: Option<std::ffi::OsString>,
+        prev_data: Option<std::ffi::OsString>,
     }
     impl EnvGuard {
         fn set(tmp: &std::path::Path) -> Self {
             let g = Self {
                 prev_xdg: std::env::var_os("XDG_DATA_HOME"),
                 prev_home: std::env::var_os("HOME"),
+                prev_data: std::env::var_os("ARCHON_DATA_DIR"),
             };
             // SAFETY: env mutation is protected by the command-wide
             // `USER_DATA_ENV_LOCK` acquired by every command test that mutates
@@ -264,6 +265,9 @@ mod tests {
             unsafe {
                 std::env::set_var("XDG_DATA_HOME", tmp);
                 std::env::set_var("HOME", tmp);
+                // XDG/HOME do not steer `dirs::data_dir()` on Windows; this is
+                // what actually redirects the store off the real user profile.
+                std::env::set_var("ARCHON_DATA_DIR", tmp);
             }
             g
         }
@@ -275,6 +279,10 @@ mod tests {
                 match self.prev_xdg.take() {
                     Some(v) => std::env::set_var("XDG_DATA_HOME", v),
                     None => std::env::remove_var("XDG_DATA_HOME"),
+                }
+                match self.prev_data.take() {
+                    Some(v) => std::env::set_var("ARCHON_DATA_DIR", v),
+                    None => std::env::remove_var("ARCHON_DATA_DIR"),
                 }
                 match self.prev_home.take() {
                     Some(v) => std::env::set_var("HOME", v),
@@ -397,8 +405,7 @@ mod tests {
 
             // Seed the real store at the same path the handler will open.
             // Mirror the handler's ckpt_path construction.
-            let ckpt_path = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
+            let ckpt_path = archon_session::background::archon_data_dir()
                 .join("archon")
                 .join("checkpoints.db");
             seed_file = tmp.path().join("seed.txt");

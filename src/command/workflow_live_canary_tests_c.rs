@@ -44,6 +44,11 @@ async fn canary_wf_afae6bee_regression() {
     std::fs::create_dir_all(repo.join("src")).expect("repo src");
     std::fs::write(repo.join("src/lib.rs"), "pub fn gap_audit() {}\n").expect("seed source");
     canary_git(&repo, &["init"]);
+    // Line endings pinned: Git for Windows defaults to core.autocrlf=true, so a
+    // file committed with LF is checked back out with CRLF and the workflow
+    // sees every seeded source as modified.
+    canary_git(&repo, &["config", "core.autocrlf", "false"]);
+    canary_git(&repo, &["config", "core.eol", "lf"]);
     canary_git(&repo, &["config", "user.name", "archon-canary"]);
     canary_git(&repo, &["config", "user.email", "canary@example.invalid"]);
     canary_git(&repo, &["add", "."]);

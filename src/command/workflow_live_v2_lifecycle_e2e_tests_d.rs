@@ -172,11 +172,13 @@ fn verification_result(
         .cwd
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("cwd missing"))?;
-    let output = Command::new(crate::command::posix_shell::posix_shell())
-        .arg("-c")
-        .arg(command)
-        .current_dir(cwd)
-        .output()?;
+    // Fed on stdin rather than as `-c <command>`, matching the production
+    // verification branch. A declared deliverable contract expands into the
+    // ~29 KB generated verifier plus its embedded contract JSON, and Windows
+    // caps a command line at 32,767 characters -- CreateProcess truncates past
+    // that without erroring, so the shell receives a half-written script and
+    // exits non-zero on a syntax error that looks like a failed verification.
+    let output = run_shell_script(cwd, command)?;
     if item.get("deliverable_contract").is_some() {
         deliverable_contract_executed.store(true, Ordering::SeqCst);
     }
@@ -235,6 +237,21 @@ fn verification_result(
         }]);
     }
     Ok(result)
+}
+
+fn run_shell_script(cwd: &std::path::Path, script: &str) -> Result<std::process::Output> {
+    use std::io::Write;
+
+    let mut child = Command::new(crate::command::posix_shell::posix_shell())
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(script.as_bytes())?;
+    }
+    Ok(child.wait_with_output()?)
 }
 
 fn accepted_result(
@@ -388,6 +405,12 @@ fn find_string_key(value: &serde_json::Value, target: &str) -> Option<String> {
 
 fn init_git_repo(repo: &std::path::Path) {
     run_git(repo, &["init"]);
+    // Line endings pinned: Git for Windows defaults to core.autocrlf=true, so a
+    // file committed with LF is checked back out with CRLF, the lifecycle sees
+    // every seeded source as modified, and the run latches into verification
+    // remediation instead of reaching a terminal state.
+    run_git(repo, &["config", "core.autocrlf", "false"]);
+    run_git(repo, &["config", "core.eol", "lf"]);
     run_git(repo, &["config", "user.name", "archon-test"]);
     run_git(
         repo,

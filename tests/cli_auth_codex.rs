@@ -52,10 +52,17 @@ fn write_credentials(home: &Path) {
 
 fn command_with_env(bin: &Path, tmp: &Path) -> Command {
     let (home, config, logs) = isolated_env(tmp);
+    let credentials = home.join(".archon").join(".credentials.json");
+    let codex_auth = home.join(".codex").join("auth.json");
     let mut cmd = Command::new(bin);
     cmd.env("HOME", home)
         .env("XDG_CONFIG_HOME", &config)
         .env("ARCHON_CONFIG_DIR", config.join("archon"))
+        // `HOME` alone does not redirect the spawned binary on Windows:
+        // `dirs::home_dir()` reads the shell known-folder API there, not the
+        // environment. Point at the credential file explicitly.
+        .env("ARCHON_CREDENTIALS_FILE", credentials)
+        .env("ARCHON_CODEX_AUTH_FILE", codex_auth)
         .env("ARCHON_LOG_DIR", logs);
     cmd
 }
@@ -110,6 +117,18 @@ fn auth_status_redacts_codex_identity_fields() {
     write_codex_config(&config);
 
     let output = Command::new(bin)
+        // Same explicit redirection as `command_with_env`: `HOME` does not
+        // steer `dirs::home_dir()` on Windows, so without these the spawned
+        // binary reads the developer's real credentials and reports their
+        // account instead of the fixture's.
+        .env(
+            "ARCHON_CREDENTIALS_FILE",
+            home.join(".archon").join(".credentials.json"),
+        )
+        .env(
+            "ARCHON_CODEX_AUTH_FILE",
+            home.join(".codex").join("auth.json"),
+        )
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", &config)
         .env("ARCHON_CONFIG_DIR", config.join("archon"))
@@ -120,7 +139,11 @@ fn auth_status_redacts_codex_identity_fields() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("authenticated as account ***...7890"));
+    assert!(
+        stdout.contains("authenticated as account ***...7890"),
+        "stdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(stdout.contains("Spoof identity:   from config.toml"));
     assert!(stdout.contains("client-id:      app_EMoamEEZ73..."));
     assert!(!stdout.contains("codex-access-token"));

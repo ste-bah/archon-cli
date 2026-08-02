@@ -215,6 +215,13 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
     let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
     let dataset_root = project_root.join(".archon/trading-lab/data/datasets");
     let registry = project_root.join(".archon/trading-lab/data/registry.json");
+    // References are produced by joining the project root to a `/`-separated
+    // relative path, so the separator at the join point is always `/` while the
+    // root keeps whatever form the platform gave it. `Path::join(..).display()`
+    // would use a native separator there and match nothing on Windows.
+    let joined = |relative: &str| format!("{}/{relative}", project_root.display());
+    let dataset_root_ref = joined(".archon/trading-lab/data/datasets");
+    let registry_ref = joined(".archon/trading-lab/data/registry.json");
     let requirements = stage.input["artifact_requirements"]
         .as_array()
         .expect("artifact requirements");
@@ -222,10 +229,10 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
         .as_str()
         .expect("focused verification");
 
-    assert_eq!(requirements[0], dataset_root.display().to_string());
-    assert_eq!(requirements[1], registry.display().to_string());
-    assert!(focused.contains(&dataset_root.display().to_string()));
-    assert!(focused.contains(&registry.display().to_string()));
+    assert_eq!(requirements[0], dataset_root_ref);
+    assert_eq!(requirements[1], registry_ref);
+    assert!(focused.contains(&dataset_root_ref));
+    assert!(focused.contains(&registry_ref));
     assert!(!focused.contains("Inspect .archon/"));
     assert_eq!(
         std::fs::read_dir(dataset_root)

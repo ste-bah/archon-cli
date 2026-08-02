@@ -182,6 +182,7 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
     assert!(
         implementation_cwd
             .to_string_lossy()
+            .replace('\\', "/")
             .contains("worktrees/implementation"),
         "{}",
         implementation_cwd.display()

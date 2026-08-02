@@ -180,6 +180,21 @@ pub fn credentials_path() -> PathBuf {
         }
     }
 
+    // Explicit override, honoured in real binaries as well as tests.
+    //
+    // Everything below resolves from `dirs::home_dir()`, which on Windows comes
+    // from the shell known-folder API rather than an environment variable. A
+    // spawned `archon` therefore ignored `HOME` entirely, so integration tests
+    // could not point it at a scratch profile -- and users had no way to move
+    // the credential file at all. The `#[cfg(test)]` hook above only ever
+    // helped in-process unit tests.
+    if let Some(path) = std::env::var_os("ARCHON_CREDENTIALS_FILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        return path;
+    }
+
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let new_path = home.join(".archon").join(".credentials.json");
     if new_path.exists() {

@@ -35,13 +35,21 @@ pub(super) fn typed_verification_command(root: &str, contract: &Value) -> Option
     )
 }
 
+/// Resolve a contract path against the project root, `/`-separated.
+///
+/// These strings are interpolated into a shell command, so a native Windows
+/// separator arrives at `sh` as an escape and the verifier probes a mangled
+/// path. `is_absolute()` alone also misses `/repo/...` on Windows -- rooted but
+/// driveless -- which would then be joined under the root a second time.
 fn resolve_contract_path(root: &str, value: Option<&Value>) -> String {
     let value = value.and_then(Value::as_str).unwrap_or_default();
     let path = std::path::Path::new(value);
-    if path.is_absolute() {
-        value.to_string()
+    if path.is_absolute() || path.has_root() {
+        value.replace('\\', "/")
     } else {
-        std::path::Path::new(root).join(path).display().to_string()
+        let root = root.trim_end_matches(['/', '\\']).replace('\\', "/");
+        let relative = value.trim_start_matches(['/', '\\']).replace('\\', "/");
+        format!("{root}/{relative}")
     }
 }
 

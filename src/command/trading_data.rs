@@ -203,15 +203,24 @@ fn status(target: Option<&PathBuf>) -> Result<String> {
     let root = project_root(target)?;
     let lake = TradingDataLake::new(&root);
     let registry = lake.status().map_err(data_error)?;
+    // Paths rendered `/`-separated so the reported location matches the
+    // `/`-separated paths recorded inside the registry itself. `Path::display`
+    // emits native separators, which on Windows made the status output
+    // disagree with the very file it was pointing at.
     Ok([
         "Trading Lab data lake".to_string(),
-        format!("  project: {}", root.display()),
-        format!("  registry: {}", lake.registry_path().display()),
+        format!("  project: {}", posix_display(&root)),
+        format!("  registry: {}", posix_display(&lake.registry_path())),
         format!("  schema_version: {}", registry.schema_version),
         format!("  datasets: {}", registry.datasets.len()),
-        format!("  data_root: {}", lake.data_root().display()),
+        format!("  data_root: {}", posix_display(&lake.data_root())),
     ]
     .join("\n"))
+}
+
+/// A path rendered with `/` separators on every platform.
+fn posix_display(path: &std::path::Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }
 
 fn ingest_ohlcv(input: IngestInput<'_>) -> Result<String> {

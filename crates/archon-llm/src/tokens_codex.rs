@@ -55,6 +55,17 @@ fn read_codex_cli_credentials_locked() -> Result<(CodexCredentials, SystemTime),
 }
 
 fn codex_cli_auth_path() -> PathBuf {
+    // Explicit override, for the same reason as `ARCHON_CREDENTIALS_FILE`:
+    // `dirs::home_dir()` reads the shell known-folder API on Windows, not
+    // `HOME`, so a spawned `archon` could not be pointed at a scratch profile.
+    // Worse than a red test -- it meant the auth-status tests read whatever
+    // Codex credentials the developer actually had installed.
+    if let Some(path) = std::env::var_os("ARCHON_CODEX_AUTH_FILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        return path;
+    }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codex")

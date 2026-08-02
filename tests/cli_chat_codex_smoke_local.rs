@@ -77,6 +77,17 @@ async fn chat_codex_no_stream_works_against_wiremock() {
         .env("HOME", &home)
         .env("XDG_CONFIG_HOME", &config)
         .env("ARCHON_CONFIG_DIR", config.join("archon"))
+        // `HOME` alone does not redirect the spawned binary on Windows:
+        // `dirs::home_dir()` reads the shell known-folder API there, not the
+        // environment. Point at the credential file explicitly.
+        .env(
+            "ARCHON_CREDENTIALS_FILE",
+            home.join(".archon").join(".credentials.json"),
+        )
+        .env(
+            "ARCHON_CODEX_AUTH_FILE",
+            home.join(".codex").join("auth.json"),
+        )
         .env("ARCHON_LOG_DIR", &logs)
         .env("ARCHON_CODEX_BASE_URL", server.uri())
         .args([
