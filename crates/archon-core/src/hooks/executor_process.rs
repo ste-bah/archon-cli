@@ -113,7 +113,11 @@ async fn write_payload(
     if let Err(error) = stdin.write_all(payload).await {
         return Some(error);
     }
-    stdin.shutdown().await.err()
+    if let Err(error) = stdin.flush().await {
+        return Some(error);
+    }
+    drop(stdin);
+    None
 }
 
 async fn wait_or_terminate(
