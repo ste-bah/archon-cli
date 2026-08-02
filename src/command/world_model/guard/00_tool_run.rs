@@ -165,6 +165,15 @@ pub(crate) fn record_tool_run_attempt_outcome(attempt: ToolRunAttemptOutcome) {
 }
 
 fn record_tool_run_attempt_outcome_at_root(root: &Path, attempt: ToolRunAttemptOutcome) {
+    // `ToolRunOutcomeCallback` now fires for every tool attempt, not only for
+    // admitted ones — ambient topology tracing needs the unfiltered stream.
+    // This consumer is the admission ledger's other half and only has anything
+    // to say about attempts admission actually looked at. Without this guard it
+    // would warn and write a `guardrail_decision_unavailable:not_found` outcome
+    // for every `Safe` tool call in the process.
+    if !attempt.admission_evaluated {
+        return;
+    }
     let action_id = tool_run_action_id_parts(
         &attempt.parent_action_id,
         &attempt.tool_use_id,

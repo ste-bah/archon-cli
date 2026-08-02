@@ -36,9 +36,18 @@ pub(crate) async fn handle_team_command(
                 name: team.clone(),
                 ..Default::default()
             };
+            // Milestone 2 topology tap. `OrchestratorEvent` has no subscriber
+            // registry — `Orchestrator::run_team` takes one `mpsc::Sender` and
+            // nothing fans it out — so this receiver loop is the seam. Tracing
+            // here costs one file append per event and no database access.
+            let trace_root = std::env::current_dir().unwrap_or_default();
+            let trace_graph_id = format!("team-{}", team_cfg.name);
+            crate::command::topology_trace::begin(&trace_root, &trace_graph_id, &trace_graph_id);
+
             archon_observability::spawn_named("team-event-printer", async move {
                 while let Some(event) = rx.recv().await {
                     use archon_core::orchestrator::events::OrchestratorEvent;
+                    crate::command::topology_trace::on_orchestrator_event(&event);
                     match event {
                         OrchestratorEvent::TaskDecomposed { subtasks } => {
                             println!("  Plan: {} subtasks", subtasks.len());
@@ -60,7 +69,26 @@ pub(crate) async fn handle_team_command(
                     }
                 }
             });
-            match orch.run_team(team_cfg, goal.clone(), executor, tx).await {
+            let run = orch.run_team(team_cfg, goal.clone(), executor, tx).await;
+
+            // Graph completion: fold the ambient trace. `spawn_blocking`
+            // because the fold is synchronous and the Cozo guard's retry loop
+            // sleeps on `thread::sleep` — up to ~19 seconds — which on a tokio
+            // worker is a runtime stall. One writer, batched, one transaction.
+            let fold_goal = goal.clone();
+            let fold_graph_id = trace_graph_id.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::command::topology_fold::fold_project_pending_blocking(
+                    &trace_root,
+                    &fold_graph_id,
+                    &fold_goal,
+                    "default",
+                )
+            })
+            .await;
+            crate::command::topology_trace::end();
+
+            match run {
                 Ok(result) => println!("Result: {result}"),
                 Err(e) => {
                     eprintln!("Team run failed: {e}");
