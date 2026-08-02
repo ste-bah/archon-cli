@@ -237,10 +237,13 @@ jobs:
             @{ Package = 'archon-pipeline'; Name = 'windows_and_mixed_separator_test_paths_are_exempt' }
           )
           foreach ($test in $tests) {
-            $output = & cargo test -p $test.Package $test.Name -- --test-threads=1 2>&1 | Out-String
-            $output | Write-Host
+            Write-Host "START Issue #92 test: $($test.Name)"
+            & cargo test -p $test.Package $test.Name -- --test-threads=1 2>&1 |
+              Tee-Object -Variable output |
+              Write-Host
             if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $($test.Name)" }
-            if ($output -notmatch 'running 1 test') { throw "Issue #92 test did not run: $($test.Name)" }
+            if (($output | Out-String) -notmatch 'running 1 test') { throw "Issue #92 test did not run: $($test.Name)" }
+            Write-Host "END Issue #92 test: $($test.Name)"
           }
 
       - name: Run tests (nextest)

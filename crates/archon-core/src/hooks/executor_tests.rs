@@ -164,8 +164,9 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
 #[cfg(windows)]
 async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = write_windows_output_fixture(dir.path());
-    let output = super::executor_process::run_command(
+    let phase_file = dir.path().join("large-output.phase");
+    let fixture = write_windows_output_fixture(dir.path(), &phase_file);
+    let result = super::executor_process::run_command(
         &windows_file_command(&fixture),
         b"{}",
         dir.path(),
@@ -173,8 +174,11 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
         "PreToolUse",
         15,
     )
-    .await
-    .expect("Windows hook fixture should run");
+    .await;
+    let output = result.unwrap_or_else(|error| {
+        let phase = std::fs::read_to_string(&phase_file).unwrap_or_else(|_| "not-started".into());
+        panic!("Windows hook fixture failed at phase {phase:?}: {error}");
+    });
 
     assert_eq!(output.exit_code, 2);
     assert!(output.stdout.len() + output.stderr.len() <= 64 * 1024);
@@ -282,17 +286,28 @@ Wait-Process -Id $child.Id
 }
 
 #[cfg(windows)]
-fn write_windows_output_fixture(dir: &std::path::Path) -> std::path::PathBuf {
+fn write_windows_output_fixture(
+    dir: &std::path::Path,
+    phase_file: &std::path::Path,
+) -> std::path::PathBuf {
     let fixture = dir.join("large-output.ps1");
+    let phase_file = phase_file.display().to_string().replace('\'', "''");
     std::fs::write(
         &fixture,
-        "\
+        format!(
+            "\
+$phase = '{phase_file}'
+[IO.File]::WriteAllText($phase, 'started')
 $null = [Console]::In.ReadToEnd()
+[IO.File]::WriteAllText($phase, 'stdin-eof')
 $bytes = New-Object byte[] 131072
 [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
+[IO.File]::WriteAllText($phase, 'stdout-written')
 [Console]::OpenStandardError().Write($bytes, 0, $bytes.Length)
+[IO.File]::WriteAllText($phase, 'stderr-written')
 exit 2
-",
+"
+        ),
     )
     .unwrap();
     fixture
