@@ -216,6 +216,11 @@ libc = "0.2"
 crossterm.workspace = true
 
 [dev-dependencies]
+# Arms `archon_cozo::poison_guarded_scripts` for the "no hot-path database
+# access" test. Declared here rather than in `[dependencies]` so the check and
+# its atomic are compiled out of every non-test build: cargo applies dev
+# dependencies only to test targets.
+archon-cozo = { path = "crates/archon-cozo", features = ["test-support"] }
 tempfile.workspace = true
 async-trait.workspace = true
 regex.workspace = true

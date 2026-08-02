@@ -49,7 +49,18 @@ pub(crate) fn configure_tool_run_context(
     context.tool_run_admission = Some(std::sync::Arc::new(move |request| {
         admit_tool_run_attempt(&admission_config, request)
     }));
-    context.tool_run_outcome = Some(std::sync::Arc::new(record_tool_run_attempt_outcome));
+    context.tool_run_outcome = Some(std::sync::Arc::new(tool_run_outcome_taps));
+}
+
+/// Fan the tool-run outcome out to both consumers.
+///
+/// The callback is a single `Arc<dyn Fn>` with no registry behind it, so a
+/// second consumer means composing here. Order matters only in that the
+/// ambient trace must not be starved by a slow guardrail write; both are
+/// best-effort and neither propagates an error.
+pub(crate) fn tool_run_outcome_taps(outcome: archon_tools::tool::ToolRunAttemptOutcome) {
+    crate::command::topology_trace::on_tool_run_outcome(&outcome);
+    record_tool_run_attempt_outcome(outcome);
 }
 
 include!("world_model/root/00_dispatch.rs");

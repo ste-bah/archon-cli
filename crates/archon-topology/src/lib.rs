@@ -8,10 +8,17 @@
 //! # Scope
 //!
 //! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
-//! No storage, no trace, no admission — those are milestones 2 and 3, and the
-//! crate's dependency set is deliberately too small to reach them. There is no
-//! `cozo`, no `archon-core`, and no learning crate here, so the analyses stay
-//! usable in contexts with no database at all.
+//!
+//! Milestone 2 adds the ambient trace ([`trace`]), post-hoc graph
+//! reconstruction ([`reconstruct`]), and the canonical [`task_hash`]. It does
+//! **not** add storage: there is still no `cozo`, no `archon-core`, and no
+//! learning crate here. The trace is jsonl and the fold that reads it into Cozo
+//! lives above this crate in the binary's `src/command/topology_fold.rs`. That
+//! is the whole reason the dependency set is policed — "no database write on a
+//! hot path" is enforced by this crate being unable to reach a database, not by
+//! a convention.
+//!
+//! Admission is milestone 3 and is not here.
 //!
 //! The `Vec<Subtask>` lowering lives in `archon-core`
 //! (`orchestrator::topology`) rather than here, because `Subtask` is
@@ -33,6 +40,11 @@ mod index;
 pub mod ir;
 #[cfg(feature = "workflow")]
 pub mod lower_workflow;
+#[cfg(feature = "trace")]
+pub mod reconstruct;
+pub mod task_hash;
+#[cfg(feature = "trace")]
+pub mod trace;
 
 pub use analysis::{CriticalPath, ParallelismProfile, WriteConflict};
 pub use error::TopologyError;
@@ -42,3 +54,8 @@ pub use ir::{
 };
 #[cfg(feature = "workflow")]
 pub use lower_workflow::lower_workflow_spec;
+#[cfg(feature = "trace")]
+pub use reconstruct::reconstruct_graph;
+pub use task_hash::{TaskClass, classify_task, task_hash, task_hash_for_class};
+#[cfg(feature = "trace")]
+pub use trace::{TopologyPaths, TraceKind, TraceReadout, TraceRecord, TraceWriter, read_trace};

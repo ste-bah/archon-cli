@@ -11,12 +11,21 @@ description = "Topology IR (TaskGraph) and pure graph analyses shared by workflo
 # archon-core takes the crate with `default-features = false`: archon-core needs
 # only the IR plus the analyses, and it must not acquire a build edge onto the
 # 22k-LOC workflow crate to get them.
-default = ["workflow"]
+default = ["workflow", "trace"]
 # serde_json rides along because `WorkflowSpec::permissions` is typed
 # `BTreeMap<String, serde_json::Value>`; reading that field is impossible
 # without naming the type. Confined to this feature so the IR-and-analyses
 # build archon-core takes stays at petgraph + serde.
 workflow = ["dep:archon-workflow", "dep:serde_json"]
+# Milestone 2's ambient trace: jsonl append/read plus post-hoc graph
+# reconstruction. Feature-gated for the same reason `workflow` is — it needs
+# serde_json, and archon-core takes this crate with `default-features = false`
+# to keep its own build graph at petgraph + serde. Note what is *not* here:
+# no cozo, no archon-core, no learning crate. The trace format lives beside the
+# IR, but every database write lives above this crate in `src/command/`, which
+# makes "no Cozo on the hot path" a property of the dependency graph rather
+# than a rule someone has to remember.
+trace = ["dep:serde_json"]
 
 [dependencies]
 # Hard isolation requirement (docs/architecture/topology-engineering.md,

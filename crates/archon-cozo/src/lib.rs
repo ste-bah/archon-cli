@@ -353,12 +353,62 @@ fn explicit_error_codes(message: &str) -> impl Iterator<Item = u64> + '_ {
     })
 }
 
+/// Make every guarded Cozo operation **on the calling thread** panic until
+/// [`clear_guarded_script_poison`] is called.
+///
+/// For tests that must prove a code path touches no database at all. The
+/// milestone 2 topology trace is the motivating case: it appends to jsonl on
+/// the hot path of every tool call, and "it does not write to Cozo" is a claim
+/// worth testing rather than asserting. A negative like that cannot be
+/// established by inspecting call sites, so the store is armed to fail loudly
+/// instead.
+///
+/// **Thread-local, not process-global.** A global flag would abort every other
+/// test sharing the binary — cargo runs them in parallel and plenty of them use
+/// a guarded store legitimately. Thread-local scoping is also the more precise
+/// statement of the invariant: the claim is that *this code path* performs no
+/// database access, not that the process is quiescent. The corollary is that a
+/// path which does its database work on a spawned thread would evade the check;
+/// no such path exists here, and the structural argument (`archon-topology`
+/// declares no `cozo` dependency) covers that case anyway.
+#[cfg(feature = "test-support")]
+pub fn poison_guarded_scripts() {
+    script_poison::POISONED.with(|poisoned| poisoned.set(true));
+}
+
+/// Disarm [`poison_guarded_scripts`] on the calling thread.
+#[cfg(feature = "test-support")]
+pub fn clear_guarded_script_poison() {
+    script_poison::POISONED.with(|poisoned| poisoned.set(false));
+}
+
+#[cfg(feature = "test-support")]
+mod script_poison {
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static POISONED: Cell<bool> = const { Cell::new(false) };
+    }
+}
+
 fn run_guarded_once<T>(
     context: &str,
     mutability: ScriptMutability,
     config: &CozoGuardConfig,
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
+    // One-shot: the flag is cleared *before* panicking, not after. The process
+    // panic hook (`src/panic_save.rs`) persists session state, which is itself
+    // a guarded operation — leaving the flag armed would re-enter this check
+    // from inside the hook, and a panic during panic handling aborts the
+    // process instead of failing the test. One panic is all a test needs.
+    #[cfg(feature = "test-support")]
+    if script_poison::POISONED.with(|poisoned| poisoned.replace(false)) {
+        panic!(
+            "guarded Cozo operation {context:?} ran on a path asserted to perform no database access"
+        );
+    }
+
     if matches!(mutability, ScriptMutability::Mutable) {
         let key = write_lock_key(config.write_lock_path.as_deref())?;
         if write_lock_is_held(&key) {

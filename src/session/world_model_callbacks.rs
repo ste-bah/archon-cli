@@ -68,7 +68,9 @@ fn install_on(
         Arc::new(move |request| {
             crate::command::world_model::admit_tool_run_attempt(&admission_config, request)
         }),
-        Arc::new(crate::command::world_model::record_tool_run_attempt_outcome),
+        // Composed tap: the ambient topology trace plus the world-model
+        // guardrail ledger. See `world_model::tool_run_outcome_taps`.
+        Arc::new(crate::command::world_model::tool_run_outcome_taps),
     );
 
     let finalization_session_id = session_id.to_string();
