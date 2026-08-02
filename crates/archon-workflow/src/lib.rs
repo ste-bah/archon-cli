@@ -71,7 +71,7 @@ pub use provider_tiers::{
     ProviderFamily, ProviderTierResolver, ResolvedProviderTier, classify_provider,
 };
 pub use run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
-pub use runner::{DeterministicStageRunner, StageRunOutput, StageRunRequest, WorkflowStageRunner};
+pub use runner::{StageRunOutput, StageRunRequest, WorkflowStageRunner};
 pub use spec::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 pub use store::WorkflowStore;
 pub use template::{
