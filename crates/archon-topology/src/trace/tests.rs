@@ -1,8 +1,12 @@
 use std::sync::Arc;
 use std::thread;
 
+use super::record::MAX_DETAIL_CHARS;
+use super::writer::encode_record;
 use super::*;
-use crate::ir::{GraphOrigin, NodeRole, TaskNode};
+use crate::ir::{GraphOrigin, NodeRole, TaskGraph, TaskNode, WriteTarget};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 
 fn temp_dir() -> std::path::PathBuf {
     let base = std::env::temp_dir().join(format!(
