@@ -163,31 +163,36 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[cfg(windows)]
 async fn windows_raw_child_drains_large_output() {
-    windows_direct_child_drains_large_output(false).await;
+    windows_direct_child_drains_large_output(false, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[cfg(windows)]
 async fn windows_job_object_child_drains_large_output() {
-    windows_direct_child_drains_large_output(true).await;
+    windows_direct_child_drains_large_output(true, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg(windows)]
+async fn windows_raw_shell_child_drains_large_output() {
+    windows_direct_child_drains_large_output(false, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg(windows)]
+async fn windows_job_object_shell_child_drains_large_output() {
+    windows_direct_child_drains_large_output(true, true).await;
 }
 
 #[cfg(windows)]
-async fn windows_direct_child_drains_large_output(use_job_object: bool) {
+async fn windows_direct_child_drains_large_output(use_job_object: bool, use_hook_shell: bool) {
     use process_wrap::tokio::{ChildWrapper, CommandWrap, JobObject, KillOnDrop};
     use tokio::io::AsyncReadExt;
 
     let dir = tempfile::tempdir().unwrap();
     let phase_file = dir.path().join("direct-output.phase");
     let fixture = write_windows_output_fixture(dir.path(), &phase_file);
-    let mut command = tokio::process::Command::new("powershell");
-    command
-        .args(["-NoProfile", "-File"])
-        .arg(&fixture)
-        .current_dir(dir.path())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+    let mut command = windows_output_command(&fixture, use_hook_shell);
     let mut child: Box<dyn ChildWrapper> = if use_job_object {
         let mut wrapped = CommandWrap::from(command);
         wrapped.wrap(KillOnDrop).wrap(JobObject);
@@ -216,11 +221,45 @@ async fn windows_direct_child_drains_large_output(use_job_object: bool) {
     .await;
     let phase = std::fs::read_to_string(&phase_file).unwrap_or_else(|_| "not-started".into());
     let (status, stdout, stderr) = result.unwrap_or_else(|_| {
-        panic!("direct child timed out: job={use_job_object}, phase={phase:?}")
+        panic!(
+            "direct child timed out: job={use_job_object}, shell={use_hook_shell}, phase={phase:?}"
+        )
     });
     assert_eq!(status.code(), Some(2));
     assert_eq!(stdout.unwrap(), 131072);
     assert_eq!(stderr.unwrap(), 131072);
+}
+
+#[cfg(windows)]
+fn windows_output_command(
+    fixture: &std::path::Path,
+    use_hook_shell: bool,
+) -> tokio::process::Command {
+    if use_hook_shell {
+        let shell = crate::hooks::shell::resolve_hook_shell();
+        let mut command = tokio::process::Command::new(&shell.program);
+        command
+            .arg(shell.command_arg)
+            .arg(windows_file_command(fixture));
+        configure_windows_output_command(&mut command, fixture);
+        return command;
+    }
+    let mut command = tokio::process::Command::new("powershell");
+    command.args(["-NoProfile", "-File"]).arg(fixture);
+    configure_windows_output_command(&mut command, fixture);
+    command
+}
+
+#[cfg(windows)]
+fn configure_windows_output_command(
+    command: &mut tokio::process::Command,
+    fixture: &std::path::Path,
+) {
+    command
+        .current_dir(fixture.parent().unwrap())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
