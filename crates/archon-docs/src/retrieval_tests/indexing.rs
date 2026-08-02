@@ -1,4 +1,5 @@
 use super::*;
+use crate::indexing::IndexProgressPhase;
 use crate::retrieval::{
     RetrievalWeights, SearchMode, index_chunk, index_pending_chunks, reindex_all, search,
 };
@@ -41,6 +42,127 @@ fn search_surfaces_failed_indexing() {
         msg.contains("archon docs model-status"),
         "message was: {msg}"
     );
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn complete_progress_waits_for_serial_snapshot_publication() {
+    assert_complete_follows_snapshot_publication("completion-serial", 4, 1);
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn complete_progress_waits_for_parallel_snapshot_publication() {
+    assert_complete_follows_snapshot_publication("completion-parallel", 4, 2);
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn failed_snapshot_publication_does_not_emit_complete() {
+    assert_failed_snapshot_does_not_emit_complete("completion-failure-serial", 3, 1);
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn parallel_failed_snapshot_publication_does_not_emit_complete() {
+    assert_failed_snapshot_does_not_emit_complete("completion-failure-parallel", 3, 2);
+}
+
+#[test]
+#[serial_test::serial(docs_global_state)]
+fn zero_candidate_completion_reports_coherent_progress() {
+    let db = test_db();
+    setup_with_provider(&db, 4);
+    let mut complete = None;
+
+    crate::indexing::index_chunks_with_progress(&db, &Default::default(), |event| {
+        if event.phase == IndexProgressPhase::Complete {
+            complete = Some(event);
+        }
+    })
+    .unwrap();
+
+    let event = complete.expect("zero-candidate indexing must complete");
+    assert_eq!(event.batch_index, 0);
+    assert_eq!(event.batch_total, 0);
+    assert_eq!(event.batch_size, 0);
+    assert_eq!(event.indexed, 0);
+    assert_eq!(event.failed, 0);
+    assert_eq!(event.skipped, 0);
+}
+
+fn assert_complete_follows_snapshot_publication(
+    backend: &'static str,
+    dimension: usize,
+    workers: usize,
+) {
+    let db = test_db();
+    crate::schema::ensure_doc_schema(&db).unwrap();
+    crate::schema::ensure_vec_schema(&db, dimension, None).unwrap();
+    crate::embed::set_provider(Box::new(CompletionProvider {
+        backend,
+        dimension,
+        workers,
+    }));
+    insert_test_chunk(
+        &db,
+        "completion-chunk",
+        "snapshot publication must finish first",
+    );
+    let options = crate::indexing::IndexOptions {
+        embedding_workers: Some(workers),
+        batch_size: 1,
+        ..Default::default()
+    };
+    let mut completed = false;
+
+    let result = crate::indexing::index_chunks_with_progress(&db, &options, |event| {
+        if event.phase == IndexProgressPhase::Complete {
+            completed = true;
+            let store = crate::vector_store::DocVectorStore::acquire_default().unwrap();
+            assert!(
+                store.latest_hnsw_manifest(backend).unwrap().is_some(),
+                "Complete must follow persisted HNSW publication"
+            );
+        }
+    });
+
+    assert!(result.is_ok());
+    assert!(completed);
+}
+
+fn assert_failed_snapshot_does_not_emit_complete(
+    backend: &'static str,
+    dimension: usize,
+    workers: usize,
+) {
+    let db = test_db();
+    crate::schema::ensure_doc_schema(&db).unwrap();
+    crate::schema::ensure_vec_schema(&db, dimension, None).unwrap();
+    crate::embed::set_provider(Box::new(CompletionProvider {
+        backend,
+        dimension,
+        workers,
+    }));
+    insert_test_chunk(
+        &db,
+        "failed-completion-chunk",
+        "snapshot publication must fail",
+    );
+    let _failure_guard = crate::vector_store::DocVectorStore::fail_next_hnsw_publication();
+    let options = crate::indexing::IndexOptions {
+        embedding_workers: Some(workers),
+        batch_size: 1,
+        ..Default::default()
+    };
+    let mut completed = false;
+
+    let result = crate::indexing::index_chunks_with_progress(&db, &options, |event| {
+        completed |= event.phase == IndexProgressPhase::Complete;
+    });
+
+    assert!(result.is_err());
+    assert!(!completed);
 }
 
 #[test]

@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
 use archon_docs::embed::LocalEmbeddingProvider;
+use cozo::DataValue;
 
 use super::*;
+use crate::kb::query_search::{
+    candidate_limit_for_tests, merge_semantic_rows, text_candidates_for_tests,
+};
 use crate::kb::schema::{ensure_kb_embedding_schema, ensure_kb_schema};
 
 struct FilteredEmbeddingProvider;
@@ -46,7 +50,7 @@ fn semantic_test_db() -> cozo::DbInstance {
 #[test]
 fn semantic_search_applies_type_filter_before_limiting_candidates() {
     let db = semantic_test_db();
-    for index in 0..4 {
+    for index in 0..129 {
         insert_node(
             &db,
             &format!("raw-{index}"),
@@ -63,6 +67,68 @@ fn semantic_search_applies_type_filter_before_limiting_candidates() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].node.node_id, "concept");
+}
+
+#[test]
+fn semantic_search_respects_requested_limit_after_filtered_merge() {
+    let db = semantic_test_db();
+    insert_node(&db, "concept-a", "concept", "concept-match");
+    insert_node(&db, "concept-b", "concept", "concept-match");
+    let engine = QueryEngine::new(db).with_embedder(Arc::new(FilteredEmbeddingProvider));
+
+    let results = engine
+        .search_nodes("vehicle", 1, Some(&[KbNodeType::Concept]))
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].node.node_id, "concept-a");
+}
+
+#[test]
+fn semantic_search_uses_union_of_requested_type_filters() {
+    let db = semantic_test_db();
+    insert_node(&db, "raw", "raw", "raw-match");
+    insert_node(&db, "concept", "concept", "concept-match");
+    insert_node(&db, "answer", "answer", "concept-match");
+    let engine = QueryEngine::new(db).with_embedder(Arc::new(FilteredEmbeddingProvider));
+
+    let results = engine
+        .search_nodes(
+            "vehicle",
+            2,
+            Some(&[KbNodeType::Concept, KbNodeType::Answer]),
+        )
+        .unwrap();
+
+    assert_eq!(result_ids(&results), ["concept", "answer"]);
+}
+#[test]
+fn semantic_filtered_results_are_deterministic_for_equal_distances() {
+    let db = semantic_test_db();
+    insert_node(&db, "concept-z", "concept", "concept-match");
+    insert_node(&db, "concept-a", "concept", "concept-match");
+    let engine = QueryEngine::new(db).with_embedder(Arc::new(FilteredEmbeddingProvider));
+
+    let first = engine
+        .search_nodes("vehicle", 2, Some(&[KbNodeType::Concept]))
+        .unwrap();
+    let second = engine
+        .search_nodes("vehicle", 2, Some(&[KbNodeType::Concept]))
+        .unwrap();
+
+    assert_eq!(result_ids(&first), result_ids(&second));
+}
+
+#[test]
+fn candidate_bound_is_exactly_three_times_limit() {
+    assert_eq!(candidate_limit_for_tests(2).unwrap(), 6);
+    assert_eq!(candidate_limit_for_tests(400).unwrap(), 1_200);
+    assert_eq!(
+        text_candidates_for_tests(&semantic_test_db(), "none", 1)
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -90,6 +156,97 @@ fn semantic_search_penalizes_answer_nodes_after_merging() {
     assert_eq!(results[0].node.node_id, "raw");
     assert_eq!(results[1].node.node_id, "answer");
     assert!((results[1].score - results[0].score * 0.9).abs() < 0.01);
+}
+
+#[test]
+fn text_search_uses_deterministic_node_id_tie_break_before_limiting() {
+    let db = semantic_test_db();
+    insert_node(&db, "a-content", "raw", "match");
+    insert_node_with_title(&db, "z-title", "raw", "match", "other");
+    insert_node_with_title(&db, "b-title", "raw", "match", "other");
+
+    let results = QueryEngine::new(db).search_nodes("match", 1, None).unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].node.node_id, "b-title");
+    assert_eq!(results[0].score, 0.8);
+}
+
+#[test]
+fn semantic_rows_ignore_non_positive_or_non_finite_scores() {
+    let mut candidates = Vec::new();
+    for (id, distance) in [
+        ("nan", f64::NAN),
+        ("infinity", f64::INFINITY),
+        ("negative", -0.1),
+        ("far", 2.1),
+        ("valid", 1.0),
+    ] {
+        merge_semantic_rows(&[semantic_row(id, distance)], None, &mut candidates);
+    }
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].node.node_id, "valid");
+    assert_eq!(candidates[0].score, 0.5);
+}
+
+#[test]
+fn text_search_ranks_title_matches_before_content_matches() {
+    let db = semantic_test_db();
+    insert_node(&db, "content", "raw", "match");
+    insert_node_with_title(&db, "title", "raw", "match", "other");
+
+    let results = QueryEngine::new(db).search_nodes("match", 1, None).unwrap();
+
+    assert_eq!(results[0].node.node_id, "title");
+    assert_eq!(results[0].score, 0.8);
+}
+
+fn result_ids(results: &[ScoredKbNode]) -> Vec<&str> {
+    results
+        .iter()
+        .map(|result| result.node.node_id.as_str())
+        .collect()
+}
+
+fn semantic_row(id: &str, distance: f64) -> Vec<DataValue> {
+    vec![
+        DataValue::from(id),
+        DataValue::from("raw"),
+        DataValue::from("test"),
+        DataValue::from(""),
+        DataValue::from(""),
+        DataValue::from("content"),
+        DataValue::from(""),
+        DataValue::from(0),
+        DataValue::from(1.0),
+        DataValue::from(1.0),
+        DataValue::from(distance),
+    ]
+}
+
+fn insert_node_with_title(
+    db: &cozo::DbInstance,
+    id: &str,
+    node_type: &str,
+    title: &str,
+    content: &str,
+) {
+    let mut params = BTreeMap::new();
+    params.insert("node_id".into(), DataValue::from(id));
+    params.insert("node_type".into(), DataValue::from(node_type));
+    params.insert("node_title".into(), DataValue::from(title));
+    params.insert("content".into(), DataValue::from(content));
+    db.run_script(
+        "?[node_id, node_type, source, domain_tag, title, content, content_hash, \
+         chunk_index, created_at, updated_at] <- [[$node_id, $node_type, 'test', '', \
+         $node_title, $content, '', 0, 1.0, 1.0]] \
+         :put kb_nodes { node_id => node_type, source, domain_tag, title, content, \
+         content_hash, chunk_index, created_at, updated_at }",
+        params,
+        ScriptMutability::Mutable,
+    )
+    .unwrap();
 }
 
 fn insert_node(db: &cozo::DbInstance, id: &str, node_type: &str, content: &str) {

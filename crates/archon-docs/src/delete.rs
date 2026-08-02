@@ -221,7 +221,9 @@ mod tests {
         store::assign_document_to_kb(&db, "trading-elliott-wave", &doc.document_id).unwrap();
         let chunks = store::list_chunks_for_doc(&db, &doc.document_id).unwrap();
         for chunk in &chunks {
-            crate::index_queue::enqueue_pending_chunk(&db, chunk, 0).unwrap();
+            let mut pending = chunk.clone();
+            pending.embedding_status = "pending".into();
+            crate::index_queue::enqueue_pending_chunk(&db, &pending, 0).unwrap();
         }
         assert!(crate::index_queue::stats(&db).unwrap().pending > 0);
 

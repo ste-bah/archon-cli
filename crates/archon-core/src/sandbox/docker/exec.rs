@@ -77,7 +77,10 @@ fn writable_path_mount_args(working_dir: &Path, writable_paths: &[String]) -> Ve
         // for a Linux container, whatever the host.
         let source = format!(
             "{}/{}",
-            working_dir.display().to_string().trim_end_matches(['/', '\\']),
+            working_dir
+                .display()
+                .to_string()
+                .trim_end_matches(['/', '\\']),
             relative
         );
         args.extend([

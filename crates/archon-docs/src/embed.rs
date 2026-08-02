@@ -144,9 +144,38 @@ pub fn try_set_provider(provider: Box<dyn LocalEmbeddingProvider>) -> Result<(),
 /// Remove the global embedding provider (for testing).
 #[cfg(test)]
 pub fn clear_provider() {
-    if let Ok(mut guard) = PROVIDER.write() {
-        *guard = None;
+    let _ = replace_provider_for_test(None);
+}
+
+#[cfg(test)]
+pub(crate) struct ProviderStateGuard {
+    previous: Option<Arc<dyn LocalEmbeddingProvider>>,
+}
+
+#[cfg(test)]
+impl Drop for ProviderStateGuard {
+    fn drop(&mut self) {
+        let _ = replace_provider_for_test(self.previous.take());
     }
+}
+
+#[cfg(test)]
+pub(crate) fn install_provider_for_test(
+    provider: Box<dyn LocalEmbeddingProvider>,
+) -> ProviderStateGuard {
+    ProviderStateGuard {
+        previous: replace_provider_for_test(Some(Arc::from(provider))),
+    }
+}
+
+#[cfg(test)]
+fn replace_provider_for_test(
+    replacement: Option<Arc<dyn LocalEmbeddingProvider>>,
+) -> Option<Arc<dyn LocalEmbeddingProvider>> {
+    PROVIDER
+        .write()
+        .map(|mut guard| std::mem::replace(&mut *guard, replacement))
+        .unwrap_or(None)
 }
 
 static LAST_INIT_ERROR: RwLock<Option<String>> = RwLock::new(None);

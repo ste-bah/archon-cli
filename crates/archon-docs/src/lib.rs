@@ -15,8 +15,11 @@ mod indexing_adaptive;
 mod indexing_cache;
 mod indexing_options;
 mod indexing_parallel;
+mod indexing_parallel_batches;
+mod indexing_parallel_workers;
 mod indexing_progress;
 mod indexing_result;
+mod indexing_serial;
 mod indexing_store;
 pub mod ingest;
 mod ingest_artifacts;
@@ -67,12 +70,29 @@ mod retrieval_query;
 mod retrieval_semantic;
 #[cfg(test)]
 mod retrieval_tests;
+#[cfg(test)]
+mod runtime_evidence_tests;
+#[cfg(test)]
+mod runtime_fts_evidence_tests;
 pub mod vlm;
 
 pub fn acquire_docs_db(
     path: impl AsRef<std::path::Path>,
 ) -> anyhow::Result<std::sync::Arc<cozo::DbInstance>> {
     docs_db_cache::acquire(path.as_ref()).map(|database| database.db_arc())
+}
+
+#[cfg(test)]
+pub(crate) fn open_docs_db_for_test(
+    path: impl AsRef<std::path::Path>,
+) -> anyhow::Result<archon_cozo::GuardedDbInstance> {
+    let path = path.as_ref();
+    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    archon_cozo::open_sqlite_guarded_instance(
+        &path.to_string_lossy(),
+        "open persisted document store test fixture",
+        config,
+    )
 }
 
 pub fn run_cozo_script_guarded(

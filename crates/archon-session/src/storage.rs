@@ -104,6 +104,8 @@ pub struct SessionStore {
     #[cfg(test)]
     fail_next_compaction_close_after_body: std::sync::atomic::AtomicBool,
     #[cfg(test)]
+    fail_next_compaction_close_after_records: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
     delete_before_compaction_close_transaction: std::sync::atomic::AtomicBool,
 }
 
@@ -132,6 +134,8 @@ impl SessionStore {
             fail_next_delete_after_compaction: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             fail_next_compaction_close_after_body: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_next_compaction_close_after_records: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             delete_before_compaction_close_transaction: std::sync::atomic::AtomicBool::new(false),
         };
@@ -222,6 +226,12 @@ impl SessionStore {
     }
 
     #[cfg(test)]
+    pub(crate) fn fail_next_compaction_close_after_records(&self) {
+        self.fail_next_compaction_close_after_records
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
     pub(crate) fn delete_before_next_compaction_close_transaction(&self) {
         self.delete_before_compaction_close_transaction
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -273,6 +283,9 @@ mod storage_session_ops;
 #[cfg(test)]
 #[path = "storage_atomicity_tests.rs"]
 mod storage_atomicity_tests;
+#[cfg(test)]
+#[path = "storage_compaction_close_persistence_tests.rs"]
+mod storage_compaction_close_persistence_tests;
 #[cfg(test)]
 #[path = "storage_compaction_close_tests.rs"]
 mod storage_compaction_close_tests;

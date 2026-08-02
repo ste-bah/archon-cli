@@ -1,17 +1,12 @@
-use std::time::Instant;
-
 use cozo::{DbInstance, ScriptMutability};
 
 use crate::embed::get_provider;
 use crate::errors::DocsError;
-use crate::indexing_adaptive::AdaptiveBatchController;
-use crate::indexing_progress::{BatchProgress, emit_progress};
-use crate::indexing_store::{mark_batch_failed, retry_batch_individually, store_batch};
+pub use crate::indexing_progress::{IndexProgress, IndexProgressPhase};
 use crate::models::ChunkArtifact;
 use crate::store;
 
 pub use crate::indexing_options::IndexOptions;
-pub use crate::indexing_progress::{IndexProgress, IndexProgressPhase};
 pub use crate::indexing_result::IndexResult;
 
 pub fn count_candidates(db: &DbInstance, options: &IndexOptions) -> Result<usize, DocsError> {
@@ -96,10 +91,8 @@ fn index_loaded_chunks_inner(
     db: &DbInstance,
     chunks: Vec<ChunkArtifact>,
     options: &IndexOptions,
-    progress: Option<&mut dyn FnMut(IndexProgress)>,
+    mut progress: Option<&mut dyn FnMut(IndexProgress)>,
 ) -> Result<IndexResult, DocsError> {
-    let mut progress = progress;
-    let started = Instant::now();
     let provider = get_provider().ok_or_else(|| DocsError::ModelNotConfigured {
         message: "no embedding provider configured".into(),
     })?;
@@ -107,195 +100,39 @@ fn index_loaded_chunks_inner(
         .map_err(|e| DocsError::Retrieval {
             message: format!("failed to ensure vec schema: {e}"),
         })?;
-
-    let mut result = IndexResult::default();
-    let provider_name = provider.backend_name();
-    let requested_workers = options.effective_embedding_workers(provider_name);
-    let worker_count = requested_workers
+    let requested = options.effective_embedding_workers(provider.backend_name());
+    let workers = requested
         .min(provider.max_embedding_workers().max(1))
         .max(1);
-    if requested_workers > worker_count {
+    if requested > workers {
         tracing::warn!(
-            requested_workers,
-            worker_count,
-            provider = provider_name,
+            requested_workers = requested,
+            worker_count = workers,
+            provider = provider.backend_name(),
             "embedding worker count capped by provider parallelism"
         );
     }
-    if worker_count > 1 {
-        let result = crate::indexing_parallel::index_loaded_chunks_parallel(
+    if workers > 1 {
+        return crate::indexing_parallel::index_loaded_chunks_parallel(
             db,
             chunks,
             options,
-            worker_count,
+            workers,
             progress,
-        )?;
-        return build_persisted_snapshot(provider.as_ref(), result);
-    }
-
-    let batch_size = options.batch_size.max(1);
-    let writer_batch_size = options.effective_writer_batch_size();
-    let mut controller = AdaptiveBatchController::from_initial(batch_size);
-    let batch_total = chunks.len().div_ceil(batch_size);
-    emit_progress(
-        &mut progress,
-        IndexProgress {
-            phase: IndexProgressPhase::CandidatesLoaded,
-            batch_index: 0,
-            batch_total,
-            batch_size: chunks.len(),
-            batch_position: 0,
-            chunk_id: None,
-            indexed: 0,
-            failed: 0,
-            skipped: 0,
-            elapsed: started.elapsed(),
-        },
-    );
-
-    let mut offset = 0;
-    let mut batch_number = 0;
-    while offset < chunks.len() {
-        let take = controller.next_size().min(chunks.len() - offset);
-        let batch = &chunks[offset..offset + take];
-        let batch_started = Instant::now();
-        batch_number += 1;
-        emit_progress(
-            &mut progress,
-            IndexProgress {
-                phase: IndexProgressPhase::BatchStarted,
-                batch_index: batch_number,
-                batch_total,
-                batch_size: batch.len(),
-                batch_position: 0,
-                chunk_id: None,
-                indexed: result.indexed,
-                failed: result.failed,
-                skipped: result.skipped,
-                elapsed: started.elapsed(),
-            },
+            |result| build_persisted_snapshot(provider.as_ref(), result),
         );
-        let batch = uncached_batch(db, batch, provider.backend_name(), &mut result);
-        if batch.is_empty() {
-            controller.observe_success(batch_started.elapsed(), take);
-            emit_progress(
-                &mut progress,
-                IndexProgress {
-                    phase: IndexProgressPhase::BatchFinished,
-                    batch_index: batch_number,
-                    batch_total,
-                    batch_size: take,
-                    batch_position: 0,
-                    chunk_id: None,
-                    indexed: result.indexed,
-                    failed: result.failed,
-                    skipped: result.skipped,
-                    elapsed: started.elapsed(),
-                },
-            );
-            offset += take;
-            continue;
-        }
-        let texts = batch
-            .iter()
-            .map(|chunk| chunk.content.clone())
-            .collect::<Vec<_>>();
-        match provider.embed_chunks(&texts) {
-            Ok(vectors) if vectors.len() == batch.len() => {
-                store_batch(
-                    db,
-                    &batch,
-                    vectors,
-                    provider.backend_name(),
-                    &mut result,
-                    &mut progress,
-                    writer_batch_size,
-                    BatchProgress {
-                        index: batch_number,
-                        total: batch_total,
-                        started,
-                    },
-                );
-                controller.observe_success(batch_started.elapsed(), batch.len());
-            }
-            Ok(vectors) => {
-                mark_batch_failed(db, &batch, &mut result);
-                controller.observe_failure();
-                tracing::warn!(
-                    expected = batch.len(),
-                    actual = vectors.len(),
-                    "embedding provider returned wrong vector count"
-                );
-            }
-            Err(error) => {
-                tracing::warn!(%error, "embedding batch failed");
-                controller.observe_failure();
-                emit_progress(
-                    &mut progress,
-                    IndexProgress {
-                        phase: IndexProgressPhase::BatchRetrying,
-                        batch_index: batch_number,
-                        batch_total,
-                        batch_size: batch.len(),
-                        batch_position: 0,
-                        chunk_id: None,
-                        indexed: result.indexed,
-                        failed: result.failed,
-                        skipped: result.skipped,
-                        elapsed: started.elapsed(),
-                    },
-                );
-                retry_batch_individually(
-                    db,
-                    &batch,
-                    provider.as_ref(),
-                    &mut result,
-                    &mut progress,
-                    writer_batch_size,
-                    BatchProgress {
-                        index: batch_number,
-                        total: batch_total,
-                        started,
-                    },
-                );
-            }
-        }
-        emit_progress(
-            &mut progress,
-            IndexProgress {
-                phase: IndexProgressPhase::BatchFinished,
-                batch_index: batch_number,
-                batch_total,
-                batch_size: batch.len(),
-                batch_position: 0,
-                chunk_id: None,
-                indexed: result.indexed,
-                failed: result.failed,
-                skipped: result.skipped,
-                elapsed: started.elapsed(),
-            },
-        );
-        offset += take;
     }
-    emit_progress(
+    crate::indexing_serial::index_serially(
+        db,
+        chunks,
+        options,
+        provider.as_ref(),
         &mut progress,
-        IndexProgress {
-            phase: IndexProgressPhase::Complete,
-            batch_index: batch_total,
-            batch_total,
-            batch_size: 0,
-            batch_position: 0,
-            chunk_id: None,
-            indexed: result.indexed,
-            failed: result.failed,
-            skipped: result.skipped,
-            elapsed: started.elapsed(),
-        },
-    );
-    build_persisted_snapshot(provider.as_ref(), result)
+        std::time::Instant::now(),
+    )
 }
 
-fn build_persisted_snapshot(
+pub(crate) fn build_persisted_snapshot(
     provider: &dyn crate::embed::LocalEmbeddingProvider,
     result: IndexResult,
 ) -> Result<IndexResult, DocsError> {
@@ -308,25 +145,6 @@ fn build_persisted_snapshot(
             message: format!("build persisted HNSW snapshot after indexing: {error}"),
         })?;
     Ok(result)
-}
-
-fn uncached_batch(
-    db: &DbInstance,
-    batch: &[ChunkArtifact],
-    provider: &str,
-    result: &mut IndexResult,
-) -> Vec<ChunkArtifact> {
-    match crate::indexing_cache::reuse_cached_embeddings(db, batch, provider) {
-        Ok(reused) => {
-            result.indexed += reused.hits;
-            result.cache_hits += reused.hits;
-            reused.misses
-        }
-        Err(error) => {
-            tracing::warn!(%error, "embedding cache batch lookup failed; embedding normally");
-            batch.to_vec()
-        }
-    }
 }
 
 pub fn index_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<(), DocsError> {

@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::fs::OpenOptions;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,6 +44,117 @@ fn deriving_write_lock_path_does_not_create_database_parent() {
     );
 }
 
+#[test]
+fn default_retry_policy_has_twenty_attempts() {
+    assert_eq!(CozoGuardConfig::default().max_attempts, 20);
+}
+
+#[test]
+fn default_retry_policy_caps_cumulative_sleep_at_nineteen_seconds() {
+    assert_eq!(
+        cumulative_backoff_budget(&CozoGuardConfig::default()),
+        Duration::from_secs(19)
+    );
+}
+
+#[test]
+fn interactive_retry_policy_has_four_and_a_half_second_sleep_budget() {
+    let config = CozoGuardConfig::for_interactive_db_path("/tmp/interactive.db");
+
+    assert_eq!(config.max_attempts, 10);
+    assert_eq!(
+        cumulative_backoff_budget(&config),
+        Duration::from_millis(4_500)
+    );
+}
+
+#[test]
+fn sync_zero_max_attempts_normalizes_to_one_call() {
+    let calls = Cell::new(0);
+    let config = retry_config(0);
+
+    let error = run_guarded(
+        "zero attempts",
+        ScriptMutability::Immutable,
+        &config,
+        || {
+            calls.set(calls.get() + 1);
+            Err::<(), _>(anyhow!("database is locked"))
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("database is locked"));
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn sync_retry_terminates_after_the_configured_number_of_calls() {
+    let calls = Cell::new(0);
+    let config = retry_config(3);
+
+    let error = run_guarded("retry limit", ScriptMutability::Immutable, &config, || {
+        calls.set(calls.get() + 1);
+        Err::<(), _>(anyhow!("database is locked"))
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("database is locked"));
+    assert_eq!(calls.get(), 3);
+}
+
+#[tokio::test]
+async fn async_zero_max_attempts_normalizes_to_one_call() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls_for_run = Arc::clone(&calls);
+    let config = retry_config(0);
+
+    let error = run_guarded_async(
+        "zero attempts",
+        ScriptMutability::Immutable,
+        &config,
+        move || {
+            calls_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<(), _>(anyhow!("database is locked"))
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("database is locked"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn async_retry_terminates_after_the_configured_number_of_calls() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls_for_run = Arc::clone(&calls);
+    let config = retry_config(3);
+
+    let error = run_guarded_async(
+        "retry limit",
+        ScriptMutability::Immutable,
+        &config,
+        move || {
+            calls_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<(), _>(anyhow!("database is locked"))
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("database is locked"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+}
+
+fn retry_config(max_attempts: usize) -> CozoGuardConfig {
+    CozoGuardConfig {
+        max_attempts,
+        initial_backoff: Duration::ZERO,
+        max_backoff: Duration::ZERO,
+        write_lock_path: None,
+    }
+}
 #[test]
 fn retryable_errors_include_sqlite_and_file_lock_variants() {
     assert!(is_retryable_cozo_error("database is locked (code 5)"));

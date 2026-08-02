@@ -298,7 +298,11 @@ fn scanner_reports_dangling_source_symlinks() {
     assert!(
         result.references.is_empty(),
         "refs={:?} errors={:?}",
-        result.references.iter().map(|r| &r.candidate).collect::<Vec<_>>(),
+        result
+            .references
+            .iter()
+            .map(|r| &r.candidate)
+            .collect::<Vec<_>>(),
         result.errors
     );
     assert_eq!(result.errors.len(), 1, "errors={:?}", result.errors);

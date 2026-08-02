@@ -169,5 +169,8 @@ pub(crate) fn clear_for_tests(path: &Path) {
 }
 
 #[cfg(test)]
+#[path = "learning_store_persistence_tests.rs"]
+mod persistence_tests;
+#[cfg(test)]
 #[path = "learning_store_tests.rs"]
 mod tests;

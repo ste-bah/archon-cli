@@ -383,7 +383,7 @@ fn repository_policy_template_parses_all_vlm_provider_fields() {
     assert_eq!(load.policy.docs.vlm.gemini.api_key_env, "GOOGLE_API_KEY");
     assert_eq!(load.policy.docs.vlm.gemini.model, "gemini-3-flash-preview");
     assert_eq!(load.policy.docs.vlm.gemini.rpm_limit, 12);
-    assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-4-6");
+    assert_eq!(load.policy.docs.vlm.anthropic.model, "claude-sonnet-5");
     assert!(
         load.policy
             .docs

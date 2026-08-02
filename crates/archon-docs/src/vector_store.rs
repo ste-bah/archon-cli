@@ -36,9 +36,9 @@ const ID_PREFIX: &str = "id";
 const REVERSE_ID_PREFIX: &str = "rid";
 
 #[cfg(test)]
-fn persisted_hnsw_load_count() -> usize {
-    persisted_hnsw::load_count()
-}
+pub(crate) use test_hooks::{
+    clear_persisted_hnsw_cache, hnsw_state_guard, persisted_hnsw_load_count,
+};
 #[derive(Clone, Debug)]
 pub struct VectorWrite<'a> {
     pub chunk_id: &'a str,
@@ -288,6 +288,11 @@ impl DocVectorStore {
             created_at: chrono::Utc::now().to_rfc3339(),
             provider_generation: Some(provider_generation),
         };
+        #[cfg(test)]
+        anyhow::ensure!(
+            !test_hooks::should_fail_hnsw_publication(),
+            "forced HNSW publication failure"
+        );
         self.write_hnsw_manifest(provider, &manifest)?;
         persisted_hnsw::clear_dir(&hnsw_dir);
         self.remove_superseded_hnsw_dumps(provider, &manifest.dump_basename)?;

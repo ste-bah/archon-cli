@@ -1,15 +1,7 @@
-use std::sync::{Mutex, MutexGuard, OnceLock};
-
 use super::*;
 
-fn persisted_hnsw_test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let lock = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    persisted_hnsw::clear();
-    lock
+fn persisted_hnsw_test_lock() -> test_hooks::HnswStateGuard {
+    hnsw_state_guard()
 }
 
 fn wait_for_worker_count(expected: usize) {

@@ -353,8 +353,7 @@ async fn refresh_with_policy(
                     if !force && !new_creds.is_expired() {
                         Some(Decision::UseExisting(new_creds))
                     } else {
-                        let refreshed =
-                            refresh_token(&new_creds.refresh_token, client).await?;
+                        let refreshed = refresh_token(&new_creds.refresh_token, client).await?;
                         Some(Decision::Persist(refreshed))
                     }
                 } else {

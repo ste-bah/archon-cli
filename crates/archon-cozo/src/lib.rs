@@ -17,7 +17,7 @@ use locking::{
 };
 use panic_guard::catch_guarded_operation;
 
-const DEFAULT_MAX_ATTEMPTS: usize = 90;
+const DEFAULT_MAX_ATTEMPTS: usize = 20;
 const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
@@ -211,7 +211,7 @@ pub fn run_guarded<T>(
     config: &CozoGuardConfig,
     mut run: impl FnMut() -> Result<T>,
 ) -> Result<T> {
-    let attempts = config.max_attempts.max(1);
+    let attempts = normalized_attempts(config);
 
     for attempt in 0..attempts {
         match run_guarded_once(context, mutability, config, &mut run) {
@@ -242,7 +242,7 @@ where
     T: Send + 'static,
     Run: FnMut() -> Result<T> + Send + 'static,
 {
-    let attempts = config.max_attempts.max(1);
+    let attempts = normalized_attempts(config);
     let context = context.to_string();
     let config = config.clone();
     let mut run = run;
@@ -274,6 +274,17 @@ where
     }
 
     unreachable!("a guarded retry loop always returns from an attempt")
+}
+
+fn normalized_attempts(config: &CozoGuardConfig) -> usize {
+    config.max_attempts.max(1)
+}
+
+#[cfg(test)]
+fn cumulative_backoff_budget(config: &CozoGuardConfig) -> Duration {
+    (0..normalized_attempts(config).saturating_sub(1))
+        .map(|attempt| backoff_duration(config, attempt))
+        .sum()
 }
 
 fn retry_backoff(
@@ -375,5 +386,7 @@ fn backoff_duration(config: &CozoGuardConfig, attempt: usize) -> Duration {
     Duration::from_millis(initial.saturating_mul(attempt as u64 + 1).min(max))
 }
 
+#[cfg(test)]
+mod storage_evidence_tests;
 #[cfg(test)]
 mod tests;

@@ -52,6 +52,34 @@ struct ParallelMockProvider {
     dim: usize,
 }
 
+struct CompletionProvider {
+    backend: &'static str,
+    dimension: usize,
+    workers: usize,
+}
+
+impl LocalEmbeddingProvider for CompletionProvider {
+    fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+        Ok(chunks.iter().map(|_| vec![1.0; self.dimension]).collect())
+    }
+
+    fn embed_query(&self, _query: &str) -> Result<Vec<f32>, DocsError> {
+        Ok(vec![1.0; self.dimension])
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn backend_name(&self) -> &'static str {
+        self.backend
+    }
+
+    fn max_embedding_workers(&self) -> usize {
+        self.workers
+    }
+}
+
 impl LocalEmbeddingProvider for ParallelMockProvider {
     fn embed_chunks(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
         Ok(chunks

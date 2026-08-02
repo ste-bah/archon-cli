@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use archon_workflow::v2::project_artifact_contract::artifact_requirement_paths_from_field;
 use serde_json::{Map, Value};

@@ -486,3 +486,6 @@ fn is_cancelled(cancel: &AtomicBool) -> bool {
 #[cfg(test)]
 #[path = "indexer_atomicity_tests.rs"]
 mod indexer_atomicity_tests;
+#[cfg(test)]
+#[path = "indexer_persistence_evidence_tests.rs"]
+mod indexer_persistence_evidence_tests;

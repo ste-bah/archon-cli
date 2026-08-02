@@ -4,10 +4,16 @@ mod answer_storage;
 pub mod compile;
 pub mod ingest;
 mod ingest_storage;
+#[cfg(test)]
+mod ingest_storage_test_hooks;
+#[cfg(test)]
+mod ingest_storage_tests;
 pub mod lint;
 mod provenance_storage;
 pub mod query;
 mod query_search;
+#[cfg(test)]
+mod runtime_evidence_tests;
 pub mod schema;
 
 pub use schema::{KbEdge, KbEdgeType, KbNode, KbNodeType};

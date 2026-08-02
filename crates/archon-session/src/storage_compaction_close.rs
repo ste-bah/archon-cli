@@ -75,14 +75,7 @@ impl SessionStore {
         let transaction = self.db.multi_transaction(true);
         let result = (|| {
             require_session_in_transaction(&transaction, &segment.session_id)?;
-            if let Some(existing) = segment_in_transaction(&transaction, &segment.id)? {
-                let persisted_body = body_in_transaction(&transaction, &segment.id)?;
-                if persisted_body.as_deref() != Some(body) {
-                    return Err(SessionError::DbError(format!(
-                        "compaction segment '{}' already exists with different source body",
-                        segment.id
-                    )));
-                }
+            if let Some(existing) = existing_matching_segment(&transaction, segment, body)? {
                 return Ok(existing);
             }
             transaction
@@ -98,23 +91,15 @@ impl SessionStore {
                     "injected compaction close failure after body".into(),
                 ));
             }
-            for record in ledger {
-                transaction
-                    .run_script(
-                        "?[id, session_id, kind, payload, start_index, end_index, created_at] <- [[$id, $session_id, $kind, $payload, $start_index, $end_index, $created_at]]
-                         :put compaction_ledger {id => session_id, kind, payload, start_index, end_index, created_at}",
-                        ledger_params(record),
-                    )
-                    .map_err(db_err)?;
-            }
-            if let Some(record) = telemetry {
-                transaction
-                    .run_script(
-                        "?[id, session_id, action, payload, created_at] <- [[$id, $session_id, $action, $payload, $created_at]]
-                         :put compaction_telemetry {id => session_id, action, payload, created_at}",
-                        telemetry_params(record),
-                    )
-                    .map_err(db_err)?;
+            put_ledger_and_telemetry(&transaction, ledger, telemetry)?;
+            #[cfg(test)]
+            if self
+                .fail_next_compaction_close_after_records
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(SessionError::DbError(
+                    "injected compaction close failure after records".into(),
+                ));
             }
             Ok(segment.clone())
         })();
@@ -129,6 +114,49 @@ impl SessionStore {
             }
         }
     }
+}
+
+fn existing_matching_segment(
+    transaction: &cozo::MultiTransaction,
+    segment: &CompactionSegment,
+    body: &[String],
+) -> Result<Option<CompactionSegment>, SessionError> {
+    let Some(existing) = segment_in_transaction(transaction, &segment.id)? else {
+        return Ok(None);
+    };
+    if body_in_transaction(transaction, &segment.id)?.as_deref() != Some(body) {
+        return Err(SessionError::DbError(format!(
+            "compaction segment '{}' already exists with different source body",
+            segment.id
+        )));
+    }
+    Ok(Some(existing))
+}
+
+fn put_ledger_and_telemetry(
+    transaction: &cozo::MultiTransaction,
+    ledger: &[CompactionLedgerRecord],
+    telemetry: Option<&CompactionTelemetryRecord>,
+) -> Result<(), SessionError> {
+    for record in ledger {
+        transaction
+            .run_script(
+                "?[id, session_id, kind, payload, start_index, end_index, created_at] <- [[$id, $session_id, $kind, $payload, $start_index, $end_index, $created_at]]
+                 :put compaction_ledger {id => session_id, kind, payload, start_index, end_index, created_at}",
+                ledger_params(record),
+            )
+            .map_err(db_err)?;
+    }
+    if let Some(record) = telemetry {
+        transaction
+            .run_script(
+                "?[id, session_id, action, payload, created_at] <- [[$id, $session_id, $action, $payload, $created_at]]
+                 :put compaction_telemetry {id => session_id, action, payload, created_at}",
+                telemetry_params(record),
+            )
+            .map_err(db_err)?;
+    }
+    Ok(())
 }
 
 fn require_session_in_transaction(
