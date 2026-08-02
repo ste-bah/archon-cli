@@ -209,29 +209,23 @@ payloads, credentials, and stale artifact hashes are not carried forward.
 
 ## Learning output
 
-After a run finishes, inspect:
+Every run gets a `.archon/workflows/<run-id>/learning/` directory, but today
+it is mostly empty. The only thing currently written there is
+`write-coordination/outcomes.jsonl`, metadata-only rows (file paths, blake3
+hashes, sizes — never patch content) recorded when a coordinated write
+completes:
 
 ```bash
-ls .archon/workflows/<run-id>/learning
+cat .archon/workflows/<run-id>/learning/write-coordination/outcomes.jsonl
 ```
 
-`records.jsonl` contains every stage outcome. `durable-memory.jsonl` contains
-only accepted stages with artifacts. This separation is intentional: failed,
-forced, or unverified stages stay auditable without poisoning durable learning.
-
-Direct handoff files are also written for learning consumers:
-
-```text
-adapter-sona.jsonl
-adapter-rlm.jsonl
-adapter-reflexion.jsonl
-adapter-reasoning-bank.jsonl
-adapter-jepa.jsonl
-adapter-world-model.jsonl
-```
-
-These records give each subsystem a direct workflow trace to consume without
-parsing the generic audit ledger.
+A broader per-stage ledger — `records.jsonl` for every stage outcome,
+`durable-memory.jsonl` for accepted stages with artifacts, and per-adapter
+handoff files for downstream learning consumers — is designed but not wired
+up: the `WorkflowLearningSink` type that would write them exists in the code
+but is never constructed. Don't expect those files to appear. See
+[docs/architecture/dynamic-workflows.md](../architecture/dynamic-workflows.md#learning-records)
+for the current state and the plan to close this gap.
 
 ## Save and reuse a workflow
 
