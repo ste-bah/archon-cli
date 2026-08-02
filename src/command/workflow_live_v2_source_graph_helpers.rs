@@ -198,6 +198,13 @@ fn sorted_unique(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn source_fingerprint(graph: &WorkflowV2SourceTaskGraph) -> String {
-    stable_hash(&serde_json::to_value(graph).unwrap_or(serde_json::Value::Null))
+/// Fingerprint the source graph, or report why it could not be fingerprinted.
+///
+/// `graph` is a typed struct, so `to_value` genuinely can fail. Defaulting to
+/// `Value::Null` on failure would make every unserializable graph hash to the
+/// digest of `null` — colliding with each other and with a legitimately empty
+/// graph — and that hash lands in a reuse cache key. The error is returned so
+/// the caller records "no fingerprint" plus a reason instead.
+fn source_fingerprint(graph: &WorkflowV2SourceTaskGraph) -> Result<String, serde_json::Error> {
+    Ok(stable_hash(&serde_json::to_value(graph)?))
 }
