@@ -100,7 +100,7 @@ pub use v2::{
     WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner,
     WorkflowV2WriteSafetyError, WorkflowV2WriteWave, has_project_artifact_evidence,
     normalize_project_artifact_files, normalize_target_for_repository,
-    normalize_targets_for_repository, project_artifact_context_from_v2_root,
+    normalize_targets_for_repository, project_artifact_context_from_v2_root, stable_value_hash,
     validate_changed_files, validate_changed_files_for_repository,
 };
 pub use write_coordinator::{

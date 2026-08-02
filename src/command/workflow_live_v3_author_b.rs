@@ -115,10 +115,10 @@ impl WorkflowV2ScriptRunner {
         governed_learning_context: &serde_json::Value,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
-        // Authoring must never adopt a cached record from a prior session:
-        // frontier reuse ignores the input hash, which would replay a stale
-        // script for BOTH bounded attempts (retry feedback unseen).
-        bootstrap.adopt_accepted_cache = false;
+        // Frontier reuse is content-keyed now, so the authoring call needs no
+        // opt-out of its own: the brief (task paths + per-file fingerprints +
+        // lessons + retry feedback) IS the hashed input, so the retry attempt
+        // carries a different hash from the first and can never replay it.
         let (task_paths, source_roots) = self
             .task_universe
             .as_ref()
