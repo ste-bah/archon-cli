@@ -228,6 +228,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $tests = @(
+            @{ Package = 'archon-core'; Name = 'windows_raw_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_job_object_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_hook_output_has_a_shared_bound_and_reports_truncation' },
             @{ Package = 'archon-core'; Name = 'windows_hook_uses_isolated_environment_and_explicit_context' },
             @{ Package = 'archon-core'; Name = 'windows_hook_timeout_kills_descendant_process' },
