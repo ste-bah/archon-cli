@@ -1,4 +1,4 @@
-const WORKFLOW_DRY_RUN_WATCHDOG: Duration = Duration::from_secs(10);
+pub(super) const WORKFLOW_DRY_RUN_WATCHDOG: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct WorkflowDryRunPlanDetails {
@@ -33,9 +33,9 @@ pub(crate) struct WorkflowReviewReduceEdge {
 }
 
 #[derive(Default)]
-struct WorkflowDryRunRecorder {
-    details: WorkflowDryRunPlanDetails,
-    policy_error: Option<String>,
+pub(super) struct WorkflowDryRunRecorder {
+    pub(super) details: WorkflowDryRunPlanDetails,
+    pub(super) policy_error: Option<String>,
 }
 
 pub(crate) async fn dry_run_workflow_plan(
@@ -77,7 +77,7 @@ pub(crate) async fn dry_run_workflow_plan_full_details(
     .map_err(|err| WorkflowError::SpecInvalid(format!("workflow.js dry-run task failed: {err}")))?
 }
 
-async fn dry_run_on_current_thread(
+pub(super) async fn dry_run_on_current_thread(
     source: String,
 ) -> archon_workflow::WorkflowResult<WorkflowDryRunPlanDetails> {
     let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder::default()));
@@ -148,7 +148,7 @@ async fn dry_run_on_current_thread(
     Ok(recorder.details.clone())
 }
 
-fn record_dry_run_call(
+pub(super) fn record_dry_run_call(
     recorder: &Arc<StdMutex<WorkflowDryRunRecorder>>,
     method: &str,
     payload: &str,
@@ -217,7 +217,7 @@ fn record_dry_run_call(
     Ok(dry_run_stub_result(method))
 }
 
-fn record_review_contract_details(
+pub(super) fn record_review_contract_details(
     details: &mut WorkflowDryRunPlanDetails,
     call: &WorkflowV2HostCall,
     payload: &str,
@@ -292,14 +292,14 @@ fn record_review_contract_details(
     }
 }
 
-fn review_contract_value(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+pub(super) fn review_contract_value(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
     call.options
         .extra
         .get("reviewContract")
         .or_else(|| call.options.extra.get("review_contract"))
 }
 
-fn string_vec_contract(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+pub(super) fn string_vec_contract(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
     keys.iter()
         .find_map(|key| value.get(*key))
         .and_then(serde_json::Value::as_array)
@@ -312,14 +312,14 @@ fn string_vec_contract(value: &serde_json::Value, keys: &[&str]) -> Vec<String> 
         .collect()
 }
 
-fn usize_contract(value: &serde_json::Value, keys: &[&str]) -> Option<usize> {
+pub(super) fn usize_contract(value: &serde_json::Value, keys: &[&str]) -> Option<usize> {
     keys.iter()
         .find_map(|key| value.get(*key))
         .and_then(serde_json::Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
 }
 
-fn task_ids_from_value(item: &serde_json::Value) -> Vec<String> {
+pub(super) fn task_ids_from_value(item: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     for key in [
         "canonical_task_ids",
@@ -353,7 +353,7 @@ fn task_ids_from_value(item: &serde_json::Value) -> Vec<String> {
     out
 }
 
-fn dry_run_call_from_payload(
+pub(super) fn dry_run_call_from_payload(
     method: &str,
     payload: &str,
 ) -> archon_workflow::WorkflowResult<WorkflowV2HostCall> {
@@ -385,7 +385,7 @@ fn dry_run_call_from_payload(
 // Policy: scripts must not steer provider routing. Enforced at the host
 // boundary (dry-run records the violation; the live host parses the same
 // payloads), not by scanning script source text.
-fn reject_agent_routing_overrides(
+pub(super) fn reject_agent_routing_overrides(
     call_id: &str,
     options: &serde_json::Value,
 ) -> archon_workflow::WorkflowResult<()> {
@@ -402,7 +402,7 @@ fn reject_agent_routing_overrides(
     Ok(())
 }
 
-fn record_policy_error(
+pub(super) fn record_policy_error(
     recorder: &Arc<StdMutex<WorkflowDryRunRecorder>>,
     error: &archon_workflow::WorkflowError,
 ) {
@@ -416,7 +416,7 @@ fn record_policy_error(
 // traversal, no absolute paths; globs add nothing but late ownership
 // mismatches) so prose targets fail the pre-flight even when script-side
 // sugar is bypassed via raw w.fanout or a catch block.
-fn reject_malformed_write_targets(
+pub(super) fn reject_malformed_write_targets(
     call_id: &str,
     source: Option<&serde_json::Value>,
 ) -> archon_workflow::WorkflowResult<()> {

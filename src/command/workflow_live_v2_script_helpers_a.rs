@@ -1,13 +1,13 @@
 #[derive(Debug, serde::Deserialize)]
-struct ScriptHostRequest {
-    id: String,
+pub(super) struct ScriptHostRequest {
+    pub(super) id: String,
     #[serde(default)]
-    options: serde_json::Value,
+    pub(super) options: serde_json::Value,
     #[serde(default)]
-    source: Option<serde_json::Value>,
+    pub(super) source: Option<serde_json::Value>,
 }
 
-fn parse_script_options(
+pub(super) fn parse_script_options(
     value: &serde_json::Value,
 ) -> archon_workflow::WorkflowResult<(WorkflowV2HostOptions, Option<WorkflowV2WriteMode>)> {
     let mut options = WorkflowV2HostOptions::default();
@@ -63,14 +63,14 @@ fn parse_script_options(
     }
     Ok((options, write_mode))
 }
-fn string_value(value: &serde_json::Value) -> Option<String> {
+pub(super) fn string_value(value: &serde_json::Value) -> Option<String> {
     value
         .as_str()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
-fn string_array(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn string_array(value: &serde_json::Value) -> Vec<String> {
     value
         .as_array()
         .into_iter()
@@ -81,7 +81,7 @@ fn string_array(value: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
-fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
+pub(super) fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
     let normalized = normalize_workflow_export(harness_source);
     let v3_primitives = V3_PRIMITIVES_JS;
     let args_literal = script_args
@@ -203,7 +203,7 @@ __archonRun()
 "#
     )
 }
-fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResult<String> {
+pub(super) fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResult<String> {
     let mut view = match &result.data {
         serde_json::Value::Object(object) => object.clone(),
         serde_json::Value::Null => serde_json::Map::new(),
@@ -221,7 +221,7 @@ fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResul
     view.insert("result".to_string(), serde_json::to_value(result)?);
     serde_json::to_string(&serde_json::Value::Object(view)).map_err(Into::into)
 }
-fn completion_evidence_from_result(
+pub(super) fn completion_evidence_from_result(
     result: &WorkflowV2Result,
 ) -> Vec<WorkflowV2TaskCompletionEvidence> {
     let mut evidence = Vec::new();
@@ -249,7 +249,7 @@ fn completion_evidence_from_result(
     }
     evidence
 }
-fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecord) -> bool {
+pub(super) fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecord) -> bool {
     !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }
 
@@ -307,7 +307,7 @@ pub(super) fn v3_call_family(call_id: &str) -> Option<V3CallFamily> {
 /// `invalidate_*` only ever runs from the operator's `workflow restart`
 /// command. Content keying is the whole safety argument for reuse, so the
 /// frontier path keys on content too.
-pub(super) fn frontier_resume_record_reusable(
+pub(in super::super) fn frontier_resume_record_reusable(
     record: &WorkflowV2CallRecord,
     input_hash: &str,
     scaffold_hash: &str,
@@ -315,7 +315,7 @@ pub(super) fn frontier_resume_record_reusable(
     record.is_reusable_for(input_hash) && record.scaffold_hash.as_deref() == Some(scaffold_hash)
 }
 
-fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Option<String> {
+pub(super) fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Option<String> {
     if evidence.is_empty() {
         return None;
     }
@@ -324,7 +324,7 @@ fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Opti
         .map(|value| stable_hash(&value))
 }
 
-fn completion_evidence_call_id(call_id: &str) -> bool {
+pub(super) fn completion_evidence_call_id(call_id: &str) -> bool {
     call_id.starts_with("noop-proof-verification-")
         || call_id.starts_with("noop-proof-reverification-")
         || call_id.starts_with("implementation-wave-")
@@ -334,11 +334,11 @@ fn completion_evidence_call_id(call_id: &str) -> bool {
         || call_id.starts_with("review-verification-wave-")
 }
 
-fn is_reusable_status(status: WorkflowV2Status) -> bool {
+pub(super) fn is_reusable_status(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-fn terminal_stop_for_call(call: &WorkflowV2HostCall, status: WorkflowV2Status) -> bool {
+pub(super) fn terminal_stop_for_call(call: &WorkflowV2HostCall, status: WorkflowV2Status) -> bool {
     // Errors are values: task-level failures flow back to the script as
     // structured results for script-owned remediation. Only cancellation and
     // unsatisfied final/human gates unwind the script.
@@ -349,7 +349,7 @@ fn terminal_stop_for_call(call: &WorkflowV2HostCall, status: WorkflowV2Status) -
         ) && !matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-fn merge_v2_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV2Status {
+pub(super) fn merge_v2_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV2Status {
     if status_precedence(right) > status_precedence(left) {
         right
     } else {
@@ -357,7 +357,7 @@ fn merge_v2_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV
     }
 }
 
-fn status_precedence(status: WorkflowV2Status) -> u8 {
+pub(super) fn status_precedence(status: WorkflowV2Status) -> u8 {
     match status {
         WorkflowV2Status::Cancelled => 7,
         WorkflowV2Status::Failed => 6,
@@ -381,7 +381,7 @@ fn status_precedence(status: WorkflowV2Status) -> u8 {
 /// reason. Genuine (non-infrastructure) failures contribute `Failed` unchanged.
 /// General: keys only on the failure text via the shared transport detector, so
 /// it holds for any stage, PRD, tool, or workflow — no special cases.
-fn run_terminal_status_contribution(
+pub(super) fn run_terminal_status_contribution(
     record: &WorkflowV2CallRecord,
     status: WorkflowV2Status,
 ) -> WorkflowV2Status {
@@ -392,7 +392,7 @@ fn run_terminal_status_contribution(
     }
 }
 
-fn next_action_for_terminal_call(call_id: &str, status: WorkflowV2Status) -> String {
+pub(super) fn next_action_for_terminal_call(call_id: &str, status: WorkflowV2Status) -> String {
     match status {
         WorkflowV2Status::NeedsReview | WorkflowV2Status::Blocked => format!(
             "inspect the recorded result, choose a provided review action if present, then restart or resume: /workflow restart-stage <run-id> {call_id}"
@@ -403,19 +403,19 @@ fn next_action_for_terminal_call(call_id: &str, status: WorkflowV2Status) -> Str
     }
 }
 
-fn normalize_result_for_call(
+pub(super) fn normalize_result_for_call(
     execution: &WorkflowV2CallExecution,
     mut result: WorkflowV2Result,
 ) -> WorkflowV2Result {
-    super::super::workflow_live_artifact_refs::retain_filesystem_artifacts(&mut result);
+    super::super::super::workflow_live_artifact_refs::retain_filesystem_artifacts(&mut result);
     downgrade_read_only_accepted_task_coverage(&execution.call, &mut result);
     guard_empty_items_output(execution, &mut result);
     result
 }
 
-fn mark_unresolved_dependency_metadata(
+pub(super) fn mark_unresolved_dependency_metadata(
     execution: &WorkflowV2CallExecution,
-    metadata: &super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
+    metadata: &super::super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
     result: &mut WorkflowV2Result,
 ) {
     if metadata.unresolved_dependencies.is_empty() {

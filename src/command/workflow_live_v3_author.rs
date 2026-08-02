@@ -3,6 +3,8 @@
 // executes through the QuickJS runtime — composition is code, judgment is a
 // script-spawned agent, and every write flows through the same gauntlet.
 
+use super::*;
+
 
 include!("workflow_live_v3_author_a.rs");
 include!("workflow_live_v3_author_b.rs");

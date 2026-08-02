@@ -3,8 +3,10 @@
 // ownership-expansion follow-up (body_a.js implementation block plus the
 // ownership splice), ported faithfully.
 
+use super::*;
+
 impl LifecycleDriver {
-    pub(in super::super) async fn run_implementation_wave(
+    pub(in super::super::super) async fn run_implementation_wave(
         &self,
         ready_implementation_items: &[serde_json::Value],
         wave_index: usize,

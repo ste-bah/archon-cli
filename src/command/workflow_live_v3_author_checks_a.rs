@@ -2,7 +2,7 @@
 /// host and require it to PLAN real work — with every universe task claimed
 /// by EXACTLY ONE write call, mandatory map→reduce reviews present, and no
 /// umbrella id-stuffing. Reports EVERY defect in one aggregated error.
-async fn validate_authored_plan(
+pub(super) async fn validate_authored_plan(
     source: &str,
     expected_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
@@ -87,58 +87,58 @@ async fn validate_authored_plan(
 
 pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
     ["adversarial_findings", "uncovered_requirements"];
-const CRITIC_TIER: &str = "critic";
-const REVIEW_MAP_STAGE: &str = "map";
-const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
-const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
-const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
-const REMEDIATION_CONTRACT_MARKER: &str = "remediationContract";
-const REMEDIATION_STAGE_FIX: &str = "remediate";
-const REMEDIATION_STAGE_VERIFY: &str = "verify";
+pub(super) const CRITIC_TIER: &str = "critic";
+pub(super) const REVIEW_MAP_STAGE: &str = "map";
+pub(super) const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
+pub(super) const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
+pub(super) const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
+pub(super) const REMEDIATION_CONTRACT_MARKER: &str = "remediationContract";
+pub(super) const REMEDIATION_STAGE_FIX: &str = "remediate";
+pub(super) const REMEDIATION_STAGE_VERIFY: &str = "verify";
 /// Hard ceiling on post-review remediation rounds per task. The pass exists to
 /// close findings, not to grind a task until something reports green.
-const REMEDIATION_MAX_ROUNDS: u64 = 3;
-const REVIEW_BOUNDS_HINT: &str = "maxInputBytes";
-const MANDATED_REVIEW_KINDS: [(&str, &str); 2] = [
+pub(super) const REMEDIATION_MAX_ROUNDS: u64 = 3;
+pub(super) const REVIEW_BOUNDS_HINT: &str = "maxInputBytes";
+pub(super) const MANDATED_REVIEW_KINDS: [(&str, &str); 2] = [
     ("adversarial_findings", "adversarial findings review"),
     ("uncovered_requirements", "source-coverage audit"),
 ];
 
-fn review_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+pub(super) fn review_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
     call.options
         .extra
         .get("reviewContract")
         .or_else(|| call.options.extra.get("review_contract"))
 }
 
-fn review_contract_string<'a>(contract: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+pub(super) fn review_contract_string<'a>(contract: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     contract.get(key).and_then(serde_json::Value::as_str)
 }
 
-fn review_contract_kind(call: &WorkflowV2HostCall) -> Option<&str> {
+pub(super) fn review_contract_kind(call: &WorkflowV2HostCall) -> Option<&str> {
     review_contract(call).and_then(|contract| review_contract_string(contract, "kind"))
 }
 
-fn review_contract_stage(call: &WorkflowV2HostCall) -> Option<&str> {
+pub(super) fn review_contract_stage(call: &WorkflowV2HostCall) -> Option<&str> {
     review_contract(call).and_then(|contract| review_contract_string(contract, "stage"))
 }
 
-fn is_review_contract_call(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn is_review_contract_call(call: &WorkflowV2HostCall) -> bool {
     review_contract(call).is_some()
 }
 
-fn remediation_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
+pub(super) fn remediation_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::Value> {
     call.options
         .extra
         .get(REMEDIATION_CONTRACT_MARKER)
         .or_else(|| call.options.extra.get("remediation_contract"))
 }
 
-fn remediation_contract_string<'a>(call: &'a WorkflowV2HostCall, key: &str) -> Option<&'a str> {
+pub(super) fn remediation_contract_string<'a>(call: &'a WorkflowV2HostCall, key: &str) -> Option<&'a str> {
     remediation_contract(call).and_then(|contract| contract.get(key).and_then(|v| v.as_str()))
 }
 
-fn is_review_remediation_call(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn is_review_remediation_call(call: &WorkflowV2HostCall) -> bool {
     remediation_contract(call).is_some()
 }
 
@@ -150,7 +150,7 @@ fn is_review_remediation_call(call: &WorkflowV2HostCall) -> bool {
 /// `validate_review_remediation_calls` checks every claim such a call makes
 /// against the actual plan, so declaring a contract without the real structure
 /// behind it fails louder than omitting one.
-fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
     !is_review_contract_call(call)
         && !is_review_remediation_call(call)
         && matches!(
@@ -162,14 +162,14 @@ fn is_task_work_call(call: &WorkflowV2HostCall) -> bool {
         )
 }
 
-fn is_critic(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn is_critic(call: &WorkflowV2HostCall) -> bool {
     call.options
         .role
         .as_deref()
         .is_some_and(|role| role.eq_ignore_ascii_case(CRITIC_TIER))
 }
 
-fn call_index(planned: &[WorkflowV2HostCall], call_id: &str) -> Option<usize> {
+pub(super) fn call_index(planned: &[WorkflowV2HostCall], call_id: &str) -> Option<usize> {
     planned.iter().position(|call| call.id == call_id)
 }
 
@@ -181,7 +181,7 @@ fn call_index(planned: &[WorkflowV2HostCall], call_id: &str) -> Option<usize> {
 /// write — be followed by a verifier for the same task. An author who forges a
 /// contract to slip work past the reviewers has to build a genuine, bounded,
 /// re-verified remediation loop to do it, which is the thing we wanted anyway.
-fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<String> {
+pub(super) fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<String> {
     let mut defects = Vec::new();
     let reduce_final_indices: std::collections::BTreeMap<&str, usize> = planned
         .iter()
@@ -285,7 +285,7 @@ fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<String> {
 /// read-only critic map reviewers cover every accepted task exactly once,
 /// then bounded critic reducers preserve map findings into the accounting
 /// fields. Reports EVERY defect in one error and names near-misses.
-fn validate_map_reduce_review_calls(
+pub(super) fn validate_map_reduce_review_calls(
     details: &WorkflowDryRunPlanDetails,
     accepted_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {

@@ -1,10 +1,12 @@
+use super::*;
+
 impl LifecycleDriver {
     /// D78: persist a monitor-visible typed record whenever the host rejects
     /// an LLM repair for semantic-preservation violations. Rejections
     /// otherwise live only in in-memory repair-attempt evidence until the
     /// terminal report, leaving external observers unable to distinguish a
     /// rejected repair's raw envelope from adopted state.
-    async fn record_preservation_rejection(
+    pub(super) async fn record_preservation_rejection(
         &self,
         repair_id: &str,
         violations: &[String],
@@ -26,7 +28,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn enforce_outcome_repair_accounting(
+    pub(super) async fn enforce_outcome_repair_accounting(
         &self,
         call_id: &str,
         raw: serde_json::Value,
@@ -115,7 +117,7 @@ impl LifecycleDriver {
         }
     }
 
-    async fn enforce_final_reconciliation_shape(
+    pub(super) async fn enforce_final_reconciliation_shape(
         &self,
         call_id: &str,
         reconciliation: serde_json::Value,

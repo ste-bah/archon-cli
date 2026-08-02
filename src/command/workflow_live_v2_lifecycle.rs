@@ -3,19 +3,21 @@
 // `WorkflowScriptHost::execute` entry point the QuickJS bridge used, so
 // result reuse, source metadata, run control, events, and persistence behave identically.
 
-use super::super::workflow_live_generated_lifecycle_remediation as remediation;
-use super::super::workflow_live_generated_lifecycle_support as support;
-use super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
-use super::super::workflow_live_semantic_preservation as semantic_preservation;
-use self::workflow_live_v2_lifecycle_prompts as prompts;
+use super::*;
 
-const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
+pub(super) use super::super::super::workflow_live_generated_lifecycle_remediation as remediation;
+pub(super) use super::super::super::workflow_live_generated_lifecycle_support as support;
+pub(super) use super::super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
+pub(super) use super::super::super::workflow_live_semantic_preservation as semantic_preservation;
+pub(super) use super::workflow_live_v2_lifecycle_prompts as prompts;
+
+pub(super) const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
 
 impl WorkflowV2ScriptRunner {
     /// Run the decomposed-PRD lifecycle natively. `harness_source` is the
     /// recorded scaffold (hash identity for reuse/metadata); it is NOT
     /// executed.
-    pub(in super::super) async fn run_decomposed_lifecycle(
+    pub(in super::super::super) async fn run_decomposed_lifecycle(
         self,
         harness_source: &str,
         governed_learning_context: serde_json::Value,
@@ -41,7 +43,7 @@ impl WorkflowV2ScriptRunner {
         })?
     }
 
-    async fn run_decomposed_lifecycle_on_current_thread(
+    pub(super) async fn run_decomposed_lifecycle_on_current_thread(
         self,
         harness_source: &str,
         governed_learning_context: serde_json::Value,
@@ -108,29 +110,29 @@ impl WorkflowV2ScriptRunner {
     }
 }
 
-struct LifecycleDriver {
-    host: Arc<WorkflowScriptHost>,
-    universe: WorkflowV2TaskUniverse,
-    task_universe: serde_json::Value,
-    target_repository_root: Option<String>,
-    project_artifact_root: Option<String>,
-    governed_learning_context: serde_json::Value,
-    max_repair_iterations: usize,
-    max_investigation_iterations: usize,
-    max_dependency_waves: usize,
-    runtime_state:
+pub(super) struct LifecycleDriver {
+    pub(super) host: Arc<WorkflowScriptHost>,
+    pub(super) universe: WorkflowV2TaskUniverse,
+    pub(super) task_universe: serde_json::Value,
+    pub(super) target_repository_root: Option<String>,
+    pub(super) project_artifact_root: Option<String>,
+    pub(super) governed_learning_context: serde_json::Value,
+    pub(super) max_repair_iterations: usize,
+    pub(super) max_investigation_iterations: usize,
+    pub(super) max_dependency_waves: usize,
+    pub(super) runtime_state:
         std::sync::Mutex<workflow_live_v2_lifecycle_terminal_gate::TerminalGateState>,
 }
 
 /// Mutable evidence bundles — the JS lifecycle's top-level arrays.
 #[derive(Default)]
-struct LifecycleEvidence {
-    implementation: Vec<serde_json::Value>,
-    verification: Vec<serde_json::Value>,
-    review: Vec<serde_json::Value>,
-    artifact: Vec<serde_json::Value>,
-    repair_attempts: Vec<serde_json::Value>,
-    final_evidence_repair_attempts: Vec<serde_json::Value>,
+pub(super) struct LifecycleEvidence {
+    pub(super) implementation: Vec<serde_json::Value>,
+    pub(super) verification: Vec<serde_json::Value>,
+    pub(super) review: Vec<serde_json::Value>,
+    pub(super) artifact: Vec<serde_json::Value>,
+    pub(super) repair_attempts: Vec<serde_json::Value>,
+    pub(super) final_evidence_repair_attempts: Vec<serde_json::Value>,
 }
 
 include!("workflow_live_v2_lifecycle_driver_a.rs");
@@ -138,7 +140,7 @@ include!("workflow_live_v2_lifecycle_driver_b.rs");
 include!("workflow_live_v2_lifecycle_driver_c.rs");
 
 
-fn normalize_null_report_collections(value: &mut serde_json::Value) {
+pub(super) fn normalize_null_report_collections(value: &mut serde_json::Value) {
     const COLLECTION_FIELDS: &[&str] = &[
         "accepted_tasks",
         "actionable",
@@ -188,10 +190,10 @@ fn normalize_null_report_collections(value: &mut serde_json::Value) {
     }
 }
 
-fn terminal_marker_requires_report_fallback(status: Option<WorkflowV2Status>) -> bool {
+pub(super) fn terminal_marker_requires_report_fallback(status: Option<WorkflowV2Status>) -> bool {
     status == Some(WorkflowV2Status::Failed)
 }
 
-fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {
+pub(super) fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {
     error.to_string().contains(TERMINAL_GATE_REROUTE_MARKER)
 }

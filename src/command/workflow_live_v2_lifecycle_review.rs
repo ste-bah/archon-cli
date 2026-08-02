@@ -1,5 +1,7 @@
+use super::*;
+
 impl LifecycleDriver {
-    pub(in super::super) async fn run_review_and_final_gates(
+    pub(in super::super::super) async fn run_review_and_final_gates(
         &self,
         inventory: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
@@ -220,7 +222,7 @@ impl LifecycleDriver {
             .await
     }
 
-    async fn run_final_gates(
+    pub(super) async fn run_final_gates(
         &self,
         inventory: &serde_json::Value,
         artifact_inventory: &serde_json::Value,

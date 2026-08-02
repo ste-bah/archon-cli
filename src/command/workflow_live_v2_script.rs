@@ -336,13 +336,24 @@ impl Default for WorkflowScriptAccumulator {
     }
 }
 
-include!("workflow_live_v2_script_host.rs");
+#[path = "workflow_live_v2_script_host.rs"]
+mod workflow_live_v2_script_host;
+use workflow_live_v2_script_host::*;
 
-include!("workflow_live_v2_script_helpers.rs");
+#[path = "workflow_live_v2_script_helpers.rs"]
+mod workflow_live_v2_script_helpers;
+use workflow_live_v2_script_helpers::*;
+// Re-exported: `workflow_live_v2` names this through the subsystem, which the
+// splice used to satisfy implicitly.
+pub(super) use workflow_live_v2_script_helpers::frontier_resume_record_reusable;
 
-include!("workflow_live_v3_prelude.rs");
+#[path = "workflow_live_v3_prelude.rs"]
+mod workflow_live_v3_prelude;
+use workflow_live_v3_prelude::*;
 
-include!("workflow_live_v2_script_verification.rs");
+#[path = "workflow_live_v2_script_verification.rs"]
+mod workflow_live_v2_script_verification;
+use workflow_live_v2_script_verification::*;
 
 #[path = "workflow_live_v2_deliverable_contract.rs"]
 pub(super) mod workflow_live_v2_deliverable_contract;
@@ -389,31 +400,61 @@ mod workflow_live_v2_lifecycle_verify_supersede;
 #[path = "workflow_live_v2_prd_pipeline_tests.rs"]
 mod workflow_live_v2_prd_pipeline_tests;
 
-include!("workflow_live_v2_script_dry_run.rs");
+#[path = "workflow_live_v2_script_dry_run.rs"]
+mod workflow_live_v2_script_dry_run;
+use workflow_live_v2_script_dry_run::*;
+// Re-exported: `workflow_live_v2` names this through the subsystem, which the
+// splice used to satisfy implicitly.
+pub(crate) use workflow_live_v2_script_dry_run::dry_run_workflow_plan;
 
-include!("workflow_live_v2_lifecycle.rs");
+#[path = "workflow_live_v2_lifecycle.rs"]
+mod workflow_live_v2_lifecycle;
+use workflow_live_v2_lifecycle::*;
 
-include!("workflow_live_v3_orchestrated.rs");
+#[path = "workflow_live_v3_orchestrated.rs"]
+mod workflow_live_v3_orchestrated;
+#[cfg(test)]
+use workflow_live_v3_orchestrated::*;
 
-include!("workflow_live_v3_author.rs");
+#[path = "workflow_live_v3_author.rs"]
+mod workflow_live_v3_author;
+#[cfg(test)]
+use workflow_live_v3_author::*;
 
-include!("workflow_live_v3_author_checks.rs");
+#[path = "workflow_live_v3_author_checks.rs"]
+mod workflow_live_v3_author_checks;
+use workflow_live_v3_author_checks::*;
 
-include!("workflow_live_v2_lifecycle_waves.rs");
+#[path = "workflow_live_v2_lifecycle_waves.rs"]
+mod workflow_live_v2_lifecycle_waves;
+#[cfg(test)]
+use workflow_live_v2_lifecycle_waves::*;
 
-include!("workflow_live_v2_lifecycle_impl.rs");
+#[path = "workflow_live_v2_lifecycle_impl.rs"]
+mod workflow_live_v2_lifecycle_impl;
 
-include!("workflow_live_v2_lifecycle_boundary_repair_driver.rs");
+#[path = "workflow_live_v2_lifecycle_boundary_repair_driver.rs"]
+mod workflow_live_v2_lifecycle_boundary_repair_driver;
 
-include!("workflow_live_v2_lifecycle_verify.rs");
+#[path = "workflow_live_v2_lifecycle_verify.rs"]
+mod workflow_live_v2_lifecycle_verify;
+#[cfg(test)]
+use workflow_live_v2_lifecycle_verify::*;
 
-include!("workflow_live_v2_lifecycle_verify_triage.rs");
+#[path = "workflow_live_v2_lifecycle_verify_triage.rs"]
+mod workflow_live_v2_lifecycle_verify_triage;
+#[cfg(test)]
+use workflow_live_v2_lifecycle_verify_triage::*;
 
-include!("workflow_live_v2_lifecycle_verify_remediation.rs");
+#[path = "workflow_live_v2_lifecycle_verify_remediation.rs"]
+mod workflow_live_v2_lifecycle_verify_remediation;
+use workflow_live_v2_lifecycle_verify_remediation::*;
 
-include!("workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs");
+#[path = "workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs"]
+mod workflow_live_v2_lifecycle_verify_outcome_repair_driver;
 
-include!("workflow_live_v2_lifecycle_review.rs");
+#[path = "workflow_live_v2_lifecycle_review.rs"]
+mod workflow_live_v2_lifecycle_review;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]

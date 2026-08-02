@@ -1,8 +1,10 @@
 // Verification-failure triage and its single bounded re-triage path.
 
+use super::*;
+
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation(
+    pub(super) async fn run_verification_remediation(
         &self,
         ready_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -93,7 +95,7 @@ impl LifecycleDriver {
         Ok(retried || superseded || remediated)
     }
 
-    async fn verification_failure_triage(
+    pub(super) async fn verification_failure_triage(
         &self,
         triage_id: &str,
         ready_items: &[serde_json::Value],
@@ -134,7 +136,7 @@ impl LifecycleDriver {
     /// for in a canonical route array. Unaccounted outcomes get one bounded
     /// shape-repair re-ask; the repair is adopted only if it accounts for
     /// more of them.
-    async fn enforce_triage_accounting(
+    pub(super) async fn enforce_triage_accounting(
         &self,
         triage_id: &str,
         failed_outcomes: &[serde_json::Value],
@@ -200,7 +202,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn bounded_verification_retriage(
+    pub(super) async fn bounded_verification_retriage(
         &self,
         triage: serde_json::Value,
         triage_id: &str,
@@ -257,7 +259,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_producer_retry(
+    pub(super) async fn run_producer_retry(
         &self,
         producer_output: &serde_json::Value,
         producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
@@ -354,7 +356,7 @@ pub(super) fn triage_failed_outcomes(
     })]
 }
 
-fn record_triage_retry(
+pub(super) fn record_triage_retry(
     evidence: &mut LifecycleEvidence,
     producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
     wave_index: usize,

@@ -1,4 +1,4 @@
-fn downgrade_read_only_accepted_task_coverage(
+pub(super) fn downgrade_read_only_accepted_task_coverage(
     call: &WorkflowV2HostCall,
     result: &mut WorkflowV2Result,
 ) {
@@ -54,7 +54,7 @@ fn downgrade_read_only_accepted_task_coverage(
     });
 }
 
-fn guard_empty_items_output(execution: &WorkflowV2CallExecution, result: &mut WorkflowV2Result) {
+pub(super) fn guard_empty_items_output(execution: &WorkflowV2CallExecution, result: &mut WorkflowV2Result) {
     if !call_declares_items_output(execution) || !items_output_is_empty(result) {
         return;
     }
@@ -87,7 +87,7 @@ fn guard_empty_items_output(execution: &WorkflowV2CallExecution, result: &mut Wo
     });
 }
 
-fn call_declares_items_output(execution: &WorkflowV2CallExecution) -> bool {
+pub(super) fn call_declares_items_output(execution: &WorkflowV2CallExecution) -> bool {
     execution
         .call
         .options
@@ -96,7 +96,7 @@ fn call_declares_items_output(execution: &WorkflowV2CallExecution) -> bool {
         .is_some_and(outputs_value_declares_items)
 }
 
-fn outputs_value_declares_items(value: &serde_json::Value) -> bool {
+pub(super) fn outputs_value_declares_items(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Array(values) => values
             .iter()
@@ -107,7 +107,7 @@ fn outputs_value_declares_items(value: &serde_json::Value) -> bool {
     }
 }
 
-fn items_output_is_empty(result: &WorkflowV2Result) -> bool {
+pub(super) fn items_output_is_empty(result: &WorkflowV2Result) -> bool {
     result
         .data
         .get("items")
@@ -115,7 +115,7 @@ fn items_output_is_empty(result: &WorkflowV2Result) -> bool {
         .is_some_and(Vec::is_empty)
 }
 
-fn sanitize_v2_gap_id(raw: &str) -> String {
+pub(super) fn sanitize_v2_gap_id(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {

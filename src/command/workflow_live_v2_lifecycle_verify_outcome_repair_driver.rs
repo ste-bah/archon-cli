@@ -1,8 +1,10 @@
 // Bounded repair for mechanical failures produced by verification-remediation writes.
 
+use super::*;
+
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation_wave(
+    pub(super) async fn run_verification_remediation_wave(
         &self,
         ready_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -39,7 +41,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn repair_verification_remediation_outcomes(
+    pub(super) async fn repair_verification_remediation_outcomes(
         &self,
         ready_items: &[serde_json::Value],
         initial_inventory: &serde_json::Value,
@@ -97,7 +99,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn verification_remediation_followup_inventory(
+    pub(super) async fn verification_remediation_followup_inventory(
         &self,
         ready_items: &[serde_json::Value],
         source_inventory: &serde_json::Value,
@@ -147,7 +149,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation_followup(
+    pub(super) async fn run_verification_remediation_followup(
         &self,
         inventory: &serde_json::Value,
         wave: serde_json::Value,
@@ -183,7 +185,7 @@ impl LifecycleDriver {
     }
 }
 
-fn verification_remediation_wave_id(
+pub(super) fn verification_remediation_wave_id(
     wave_index: usize,
     remediation_attempt: &usize,
     repair_attempt: Option<usize>,
@@ -193,7 +195,7 @@ fn verification_remediation_wave_id(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_verification_remediation_wave(
+pub(super) fn record_verification_remediation_wave(
     evidence: &mut LifecycleEvidence,
     wave_index: usize,
     dependency_iteration: usize,

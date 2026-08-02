@@ -3,8 +3,10 @@
 // plans — ported faithfully from the spliced verification lifecycle
 // (workflow_live_generated_scaffold_verification.rs::VERIFICATION_LIFECYCLE_JS).
 
+use super::*;
+
 impl LifecycleDriver {
-    pub(in super::super) async fn run_verification_lifecycle(
+    pub(in super::super::super) async fn run_verification_lifecycle(
         &self,
         ready_implementation_items: &[serde_json::Value],
         implementation_candidate_ids_unique: &[String],
@@ -429,7 +431,7 @@ impl LifecycleDriver {
 
 }
 
-fn scope_repair_inventory_to_failed_outcomes(
+pub(super) fn scope_repair_inventory_to_failed_outcomes(
     contract: &LifecycleContract<'_>,
     inventory: &serde_json::Value,
     verification: &serde_json::Value,
@@ -455,17 +457,17 @@ fn scope_repair_inventory_to_failed_outcomes(
     serde_json::Value::Object(object)
 }
 
-fn outcome_ids(outcomes: &[serde_json::Value]) -> std::collections::BTreeSet<String> {
+pub(super) fn outcome_ids(outcomes: &[serde_json::Value]) -> std::collections::BTreeSet<String> {
     outcomes.iter().flat_map(item_match_ids).collect()
 }
 
-fn item_matches_ids(
+pub(super) fn item_matches_ids(
     item: &serde_json::Value,
     ids: &std::collections::BTreeSet<String>,
 ) -> bool {
     item_match_ids(item).into_iter().any(|id| ids.contains(&id))
 }
 
-fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
+pub(super) fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
     workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item)
 }

@@ -3,10 +3,12 @@
 // remediation loops, and the ownership-expansion follow-up (body_a.js lines
 // 222-500 plus the ownership splice), ported faithfully.
 
+use super::*;
+
 include!("workflow_live_v2_lifecycle_wave_phases.rs");
 
 impl LifecycleDriver {
-    pub(in super::super) async fn run_dependency_waves(
+    pub(in super::super::super) async fn run_dependency_waves(
         &self,
         mut inventory: serde_json::Value,
         discovery: &serde_json::Value,
@@ -272,7 +274,7 @@ impl LifecycleDriver {
         Ok(inventory)
     }
 
-    async fn repair_dependency_deadlock(
+    pub(super) async fn repair_dependency_deadlock(
         &self,
         inventory: &mut serde_json::Value,
         remaining_items: &mut Vec<serde_json::Value>,
@@ -324,7 +326,7 @@ impl LifecycleDriver {
         Ok(false)
     }
 
-    async fn repair_wave_completion_evidence(
+    pub(super) async fn repair_wave_completion_evidence(
         &self,
         ready_items: &[serde_json::Value],
         ready_noop_items: &[serde_json::Value],
@@ -376,12 +378,12 @@ impl LifecycleDriver {
     }
 }
 
-fn item_has_write_ownership(item: &serde_json::Value) -> bool {
+pub(super) fn item_has_write_ownership(item: &serde_json::Value) -> bool {
     support::present(item.get("target_files"))
         || support::present(item.get("artifact_requirements"))
 }
 
-fn preserve_host_pinned_implementation(
+pub(super) fn preserve_host_pinned_implementation(
     contract: &LifecycleContract<'_>,
     inventory: &serde_json::Value,
     noop_reclassified_ids: &std::collections::BTreeSet<String>,
@@ -398,7 +400,7 @@ fn preserve_host_pinned_implementation(
     contract.normalize_inventory(&serde_json::Value::Object(object))
 }
 
-fn preserve_host_pinned_items(
+pub(super) fn preserve_host_pinned_items(
     contract: &LifecycleContract<'_>,
     items: Vec<serde_json::Value>,
     noop_reclassified_ids: &std::collections::BTreeSet<String>,
@@ -424,7 +426,7 @@ fn preserve_host_pinned_items(
 
 /// JS `generatedContractInventoryGraphIssues(remainingItems, completedIds)` —
 /// deadlock diagnostics passed to the repair reducer.
-fn deadlock_graph_issues(
+pub(super) fn deadlock_graph_issues(
     contract: &LifecycleContract<'_>,
     remaining_items: &[serde_json::Value],
     completed_ids: &std::collections::BTreeSet<String>,
