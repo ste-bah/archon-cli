@@ -103,12 +103,28 @@ pub struct KnowledgeBase {
 
 impl KnowledgeBase {
     /// Create a new knowledge base, ensuring the schema exists.
+    ///
+    /// For a persisted database prefer [`KnowledgeBase::for_db_path`]: ingest
+    /// can only serialise content-hash reservations against other handles on
+    /// the same file when it knows where that file is.
     pub fn new(db: cozo::DbInstance) -> Result<Self> {
+        Self::open(db, None)
+    }
+
+    /// Knowledge base over a persisted database at a known path.
+    pub fn for_db_path(db: cozo::DbInstance, db_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::open(db, Some(db_path.as_ref()))
+    }
+
+    fn open(db: cozo::DbInstance, db_path: Option<&std::path::Path>) -> Result<Self> {
         if let Some(embedder) = archon_docs::embed::get_provider() {
-            return Self::from_shared_embedder(db, embedder);
+            return Self::from_shared_embedder(db, embedder, db_path);
         }
         schema::ensure_kb_schema(&db)?;
-        let ingester = ingest::Ingester::new(db.clone())?;
+        let ingester = match db_path {
+            Some(db_path) => ingest::Ingester::for_db_path(db.clone(), db_path)?,
+            None => ingest::Ingester::new(db.clone())?,
+        };
         Ok(Self {
             db,
             ingester,
@@ -120,15 +136,32 @@ impl KnowledgeBase {
         db: cozo::DbInstance,
         embedder: Box<dyn LocalEmbeddingProvider>,
     ) -> Result<Self> {
-        Self::from_shared_embedder(db, Arc::from(embedder))
+        Self::from_shared_embedder(db, Arc::from(embedder), None)
+    }
+
+    /// [`KnowledgeBase::with_embedder`] for a persisted database at a known path.
+    pub fn with_embedder_for_db_path(
+        db: cozo::DbInstance,
+        embedder: Box<dyn LocalEmbeddingProvider>,
+        db_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self> {
+        Self::from_shared_embedder(db, Arc::from(embedder), Some(db_path.as_ref()))
     }
 
     fn from_shared_embedder(
         db: cozo::DbInstance,
         embedder: Arc<dyn LocalEmbeddingProvider>,
+        db_path: Option<&std::path::Path>,
     ) -> Result<Self> {
         schema::ensure_kb_schema(&db)?;
-        let ingester = ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?;
+        let ingester = match db_path {
+            Some(db_path) => ingest::Ingester::with_embedder_for_db_path(
+                db.clone(),
+                Arc::clone(&embedder),
+                db_path,
+            )?,
+            None => ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?,
+        };
         Ok(Self {
             db,
             ingester,
