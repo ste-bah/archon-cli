@@ -53,11 +53,26 @@ stages:
     assert_eq!(role("ask"), NodeRole::Gate(GateKind::Human));
     assert_eq!(role("run"), NodeRole::Tool);
     assert_eq!(role("fold"), NodeRole::Reduce);
-    // Finding W6: `StageSpec::condition` has no evaluator, so a Condition
-    // stage is an unconditional pass-through. It must not lower to a Gate —
-    // that would let a stage that gates nothing satisfy the dominator check.
-    assert_eq!(role("maybe"), NodeRole::Plan);
-    assert!(!role("maybe").is_gate());
+    // Finding W6 removed `StageKind::Condition`: the field had no evaluator, so
+    // such a stage never branched. A spec persisted before that removal still
+    // carries `kind: condition`, which now deserializes to `Checkpoint` —
+    // behaviour-preserving for execution, since an unevaluated condition always
+    // proceeded, and matching how `bundle.rs` already grouped the two.
+    //
+    // The consequence lands here: a legacy condition stage is indistinguishable
+    // from a real checkpoint, because the discriminating field is erased at
+    // deserialize, so it lowers to a checkpoint gate. That is over-permissive
+    // for a presence-based dominator check. It is safe only because milestone 3
+    // narrows the relation to gates actually *passed* in the executed prefix,
+    // and nothing in the tree marks a checkpoint passed — `StageKind::Checkpoint`
+    // has no execution semantics at all, it is a reporting label mapped from
+    // `WorkflowV2HostMethod::Checkpoint`. So under milestone 3 this errs toward
+    // reporting an irreversible action as ungated, which is the fail-safe
+    // direction.
+    //
+    // If a checkpoint ever gains a real "passed" signal, this becomes a live
+    // hole and legacy condition stages must be distinguished before then.
+    assert_eq!(role("maybe"), NodeRole::Gate(GateKind::Checkpoint));
 }
 
 #[test]

@@ -68,13 +68,17 @@ fn lower_stage(spec: &WorkflowSpec, stage: &StageSpec) -> TaskNode {
 
 /// Stage kind → node role, per the milestone 1 mapping table.
 ///
-/// `Condition` is the one kind the table does not name. Finding W6 records that
-/// `StageSpec::condition` has no evaluator anywhere in the tree and zero
-/// read-sites, so a `Condition` stage always proceeds — it is an unconditional
-/// pass-through. It therefore lowers to `Plan`, the only role with neither
-/// side-effect nor gating semantics. Lowering it to `Gate` would be actively
-/// unsafe: it would let a stage that gates nothing satisfy
-/// [`TaskGraph::ungated_irreversible`].
+/// `StageKind::Condition` no longer exists: finding W6 established that
+/// `StageSpec::condition` had no evaluator anywhere in the tree, so such a
+/// stage never branched, and the variant was removed along with the field.
+/// Specs persisted before that removal deserialize `condition` to `Checkpoint`,
+/// which is behaviour-preserving for execution — an unevaluated condition
+/// always proceeded — but note the consequence here: those legacy stages lower
+/// to `NodeRole::Gate(Checkpoint)` and are indistinguishable from a real
+/// checkpoint, because the discriminating field is erased at deserialize.
+/// [`TaskGraph::ungated_irreversible`] will therefore count one as gating.
+/// Milestone 3 narrows that relation to gates actually *passed* in the executed
+/// prefix, which neutralises it — a checkpoint never presented is never passed.
 fn lower_role(kind: StageKind) -> NodeRole {
     use crate::ir::GateKind;
     match kind {
@@ -84,7 +88,6 @@ fn lower_role(kind: StageKind) -> NodeRole {
         StageKind::HumanGate => NodeRole::Gate(GateKind::Human),
         StageKind::Checkpoint => NodeRole::Gate(GateKind::Checkpoint),
         StageKind::Tool => NodeRole::Tool,
-        StageKind::Condition => NodeRole::Plan,
     }
 }
 
