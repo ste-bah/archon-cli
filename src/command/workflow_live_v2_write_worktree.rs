@@ -111,13 +111,8 @@ pub(super) fn worktree_fanout_result(
     artifacts: WorktreePlanArtifacts,
 ) -> WorkflowV2Result {
     reused_results.extend(artifacts.results);
-    let mut result = result_from_write_fanout(
-        call,
-        reused_results,
-        plan,
-        artifacts.peak_parallelism,
-        None,
-    );
+    let mut result =
+        result_from_write_fanout(call, reused_results, plan, artifacts.peak_parallelism, None);
     attach_worktree_apply_gap(call, &mut result, artifacts.apply_gap);
     if let Some(object) = result.data.as_object_mut() {
         object.insert(
@@ -142,7 +137,10 @@ pub(super) fn attach_worktree_apply_gap(
         reason.clone(),
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
-        id: format!("worktree_apply_review_{}", sanitize_v2_path_segment(&call.id)),
+        id: format!(
+            "worktree_apply_review_{}",
+            sanitize_v2_path_segment(&call.id)
+        ),
         description: reason,
         severity: Some("review".to_string()),
     });

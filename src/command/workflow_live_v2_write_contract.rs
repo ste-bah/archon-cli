@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn branch_results_from_outcomes(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<WorkflowV2Result> {
+pub(super) fn branch_results_from_outcomes(
+    outcomes: &[WorkflowV2BranchOutcome],
+) -> Vec<WorkflowV2Result> {
     outcomes
         .iter()
         .filter_map(|outcome| {
@@ -147,7 +149,9 @@ pub(super) fn set_write_branch_contract_data(
     result.data = serde_json::Value::Object(object);
 }
 
-pub(super) fn result_data_object(result: &mut WorkflowV2Result) -> serde_json::Map<String, serde_json::Value> {
+pub(super) fn result_data_object(
+    result: &mut WorkflowV2Result,
+) -> serde_json::Map<String, serde_json::Value> {
     match std::mem::take(&mut result.data) {
         serde_json::Value::Object(object) => object,
         serde_json::Value::Null => serde_json::Map::new(),
@@ -255,7 +259,9 @@ pub(super) fn expanded_targets_for_branch(
     )))
 }
 
-pub(super) fn target_files_from_branch_item(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
+pub(super) fn target_files_from_branch_item(
+    branch: &archon_workflow::WorkflowV2FanoutItem,
+) -> Vec<String> {
     branch
         .input
         .get("item")
@@ -278,7 +284,9 @@ pub(super) fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn branch_has_artifact_requirements(branch: &archon_workflow::WorkflowV2FanoutItem) -> bool {
+pub(super) fn branch_has_artifact_requirements(
+    branch: &archon_workflow::WorkflowV2FanoutItem,
+) -> bool {
     branch
         .input
         .get("item")

@@ -109,7 +109,9 @@ pub(super) fn undeclared_write_paths(error: &str) -> Vec<String> {
     paths
 }
 
-pub(super) fn canonical_task_ids_from_write_error_input(input: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn canonical_task_ids_from_write_error_input(
+    input: Option<&serde_json::Value>,
+) -> Vec<String> {
     let Some(input) = input else {
         return Vec::new();
     };
@@ -166,7 +168,9 @@ pub(super) fn write_branch_runtime_timeout_result(
     result
 }
 
-pub(super) fn failure_kind_from_write_result(result: &WorkflowV2Result) -> Option<BranchFailureKind> {
+pub(super) fn failure_kind_from_write_result(
+    result: &WorkflowV2Result,
+) -> Option<BranchFailureKind> {
     result
         .data
         .get("failure_kind")

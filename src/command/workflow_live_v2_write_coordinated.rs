@@ -127,11 +127,8 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                 && let Err(error) =
                     verify_declared_artifacts_for_result(input, &result, Path::new(root))
             {
-                result = write_branch_validation_error_result(
-                    &assignment.item_id,
-                    Some(input),
-                    &error,
-                );
+                result =
+                    write_branch_validation_error_result(&assignment.item_id, Some(input), &error);
             }
             let role = branches
                 .iter()

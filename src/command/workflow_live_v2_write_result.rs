@@ -237,7 +237,9 @@ pub(super) fn canonical_task_ids_from_branch_result(result: &WorkflowV2Result) -
     ids.into_iter().collect()
 }
 
-pub(super) fn concrete_evidence_from_branch_result(result: &WorkflowV2Result) -> Vec<serde_json::Value> {
+pub(super) fn concrete_evidence_from_branch_result(
+    result: &WorkflowV2Result,
+) -> Vec<serde_json::Value> {
     let accepted_or_noop = matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -284,9 +286,7 @@ pub(super) fn branch_command_records(
     result
         .commands_run
         .iter()
-        .filter(|command| {
-            !accepted_or_noop || command.status == WorkflowV2CommandStatus::Succeeded
-        })
+        .filter(|command| !accepted_or_noop || command.status == WorkflowV2CommandStatus::Succeeded)
         .map(|command| {
             serde_json::json!({
                 "kind": "command",
@@ -444,7 +444,10 @@ pub(super) fn add_write_fanout_evidence(
         ));
 }
 
-pub(super) fn count_results_with_status(results: &[WorkflowV2Result], status: WorkflowV2Status) -> usize {
+pub(super) fn count_results_with_status(
+    results: &[WorkflowV2Result],
+    status: WorkflowV2Status,
+) -> usize {
     results
         .iter()
         .filter(|result| result.status == status)

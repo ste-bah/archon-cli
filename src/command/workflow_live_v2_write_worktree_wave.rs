@@ -305,7 +305,9 @@ pub(super) fn apply_worktree_wave(
     worktree_apply_gap(apply_result)
 }
 
-pub(super) fn worktree_apply_gap(result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>) -> Option<String> {
+pub(super) fn worktree_apply_gap(
+    result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>,
+) -> Option<String> {
     match result {
         Ok(record) if !record.items_failed.is_empty() => Some(format!(
             "worktree patch apply left {} item(s) unapplied: {}",
@@ -334,6 +336,11 @@ pub(super) fn cleanup_completed_worktree_wave(
         WorkspaceStatus::Failed
     };
     for completed_branch in completed {
-        let _ = cleanup_workspace(canonical_root, &completed_branch.workspace_root, status, cfg);
+        let _ = cleanup_workspace(
+            canonical_root,
+            &completed_branch.workspace_root,
+            status,
+            cfg,
+        );
     }
 }

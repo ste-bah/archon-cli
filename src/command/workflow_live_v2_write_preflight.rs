@@ -11,7 +11,11 @@ pub(super) fn preflight_write_fanout_source_contract(
         return None;
     }
     let mut issues = Vec::new();
-    if !plan.conflicts.iter().all(|conflict| conflict.isolated_by_worktree) {
+    if !plan
+        .conflicts
+        .iter()
+        .all(|conflict| conflict.isolated_by_worktree)
+    {
         issues.extend(duplicate_broad_ownership_issues(write_items));
         issues.extend(shared_hot_target_issues(write_items));
     }
@@ -27,7 +31,9 @@ pub(super) fn is_implementation_write_fanout(call: &WorkflowV2HostCall) -> bool 
             .is_some_and(|kind| kind.eq_ignore_ascii_case("implementation"))
 }
 
-pub(super) fn duplicate_broad_ownership_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
+pub(super) fn duplicate_broad_ownership_issues(
+    write_items: &[WorkflowV2WriteItem],
+) -> Vec<serde_json::Value> {
     let mut by_targets: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
     for item in write_items {
         let mut targets = item.owned_targets.clone();
@@ -52,7 +58,9 @@ pub(super) fn duplicate_broad_ownership_issues(write_items: &[WorkflowV2WriteIte
         .collect()
 }
 
-pub(super) fn shared_hot_target_issues(write_items: &[WorkflowV2WriteItem]) -> Vec<serde_json::Value> {
+pub(super) fn shared_hot_target_issues(
+    write_items: &[WorkflowV2WriteItem],
+) -> Vec<serde_json::Value> {
     let mut by_target: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for item in write_items {
         for target in &item.owned_targets {
@@ -100,7 +108,10 @@ pub(super) fn write_source_preflight_result(
         "write source preflight blocked branch launch; source ownership/size issues are data for workflow.js repair",
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
-        id: format!("write_source_preflight_{}", sanitize_v2_path_segment(&call.id)),
+        id: format!(
+            "write_source_preflight_{}",
+            sanitize_v2_path_segment(&call.id)
+        ),
         description: result.summary.clone(),
         severity: Some("review".to_string()),
     });
@@ -147,7 +158,10 @@ pub(super) fn branch_task_ids(branch: &archon_workflow::WorkflowV2FanoutItem) ->
         .unwrap_or_default()
 }
 
-pub(super) fn issues_for_branch(item_id: &str, issues: &[serde_json::Value]) -> Vec<serde_json::Value> {
+pub(super) fn issues_for_branch(
+    item_id: &str,
+    issues: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
     issues
         .iter()
         .filter(|issue| issue_mentions_item(issue, item_id))
