@@ -1,6 +1,11 @@
+use super::tool_tap::permission_class;
+use super::workflow_tap::workflow_trace_record;
 use super::*;
 
 use archon_core::orchestrator::events::{Subtask, SubtaskStatus};
+use archon_tools::tool::PermissionLevel;
+use archon_topology::ir::{GraphOrigin, PermissionClass, WriteTarget};
+use archon_topology::reconstruct::ROOT_NODE_ID;
 use archon_topology::trace::read_trace;
 
 fn outcome(tool: &str, input: serde_json::Value) -> ToolRunAttemptOutcome {

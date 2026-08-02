@@ -29,6 +29,7 @@ pub mod run;
 pub mod runner;
 mod source_context;
 pub mod spec;
+mod spec_compat;
 mod spec_deser;
 mod spec_inference;
 mod spec_policy;
