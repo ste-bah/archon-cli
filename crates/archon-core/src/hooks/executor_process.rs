@@ -110,7 +110,10 @@ async fn write_payload(
     payload: &[u8],
 ) -> Option<std::io::Error> {
     let mut stdin = child.stdin().take()?;
-    stdin.write_all(payload).await.err()
+    if let Err(error) = stdin.write_all(payload).await {
+        return Some(error);
+    }
+    stdin.shutdown().await.err()
 }
 
 async fn wait_or_terminate(

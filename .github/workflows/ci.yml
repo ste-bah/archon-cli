@@ -228,19 +228,19 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $tests = @(
-            'windows_hook_output_has_a_shared_bound_and_reports_truncation',
-            'windows_hook_uses_isolated_environment_and_explicit_context',
-            'windows_hook_timeout_kills_descendant_process',
-            'windows_hook_process_exists_reports_existing_and_absent_processes',
-            'windows_timeout_kills_background_descendant',
-            'windows_bash_process_exists_reports_existing_and_absent_processes',
-            'windows_and_mixed_separator_test_paths_are_exempt'
+            @{ Package = 'archon-core'; Name = 'windows_hook_output_has_a_shared_bound_and_reports_truncation' },
+            @{ Package = 'archon-core'; Name = 'windows_hook_uses_isolated_environment_and_explicit_context' },
+            @{ Package = 'archon-core'; Name = 'windows_hook_timeout_kills_descendant_process' },
+            @{ Package = 'archon-core'; Name = 'windows_hook_process_exists_reports_existing_and_absent_processes' },
+            @{ Package = 'archon-tools'; Name = 'windows_timeout_kills_background_descendant' },
+            @{ Package = 'archon-tools'; Name = 'windows_bash_process_exists_reports_existing_and_absent_processes' },
+            @{ Package = 'archon-pipeline'; Name = 'windows_and_mixed_separator_test_paths_are_exempt' }
           )
           foreach ($test in $tests) {
-            $output = & cargo test --workspace $test -- --test-threads=1 2>&1 | Out-String
+            $output = & cargo test -p $test.Package $test.Name -- --test-threads=1 2>&1 | Out-String
             $output | Write-Host
-            if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $test" }
-            if ($output -notmatch 'running 1 test') { throw "Issue #92 test did not run: $test" }
+            if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $($test.Name)" }
+            if ($output -notmatch 'running 1 test') { throw "Issue #92 test did not run: $($test.Name)" }
           }
 
       - name: Run tests (nextest)
