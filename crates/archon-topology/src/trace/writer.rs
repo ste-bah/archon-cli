@@ -58,8 +58,9 @@ impl TraceWriter {
     /// concurrently with no lock and no interleaving.
     ///
     /// Over-long records are truncated to [`MAX_RECORD_BYTES`] by dropping
-    /// `detail` and then `writes`, in that order, rather than being dropped
-    /// outright — the node attribution is the part the fold cannot do without.
+    /// `detail` and then the target lists, in that order, rather than being
+    /// dropped outright — the node attribution is the part the fold cannot do
+    /// without.
     pub fn append(&self, record: &TraceRecord) -> io::Result<()> {
         let line = encode_record(record)?;
         let mut file = OpenOptions::new()
@@ -78,7 +79,13 @@ pub(super) fn encode_record(record: &TraceRecord) -> io::Result<String> {
         match shed {
             0 => {}
             1 => candidate.detail = None,
-            _ => candidate.writes.clear(),
+            // Both target lists go together. Shedding one and keeping the other
+            // would leave a record asserting "this node wrote X and read
+            // nothing", which the dataflow lints would believe.
+            _ => {
+                candidate.writes.clear();
+                candidate.reads.clear();
+            }
         }
         let mut line = serde_json::to_string(&candidate).map_err(io::Error::other)?;
         // `<` rather than `<=`: the newline has yet to be pushed and counts

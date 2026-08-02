@@ -17,18 +17,53 @@ const WRITE_PATH_KEYS: &[&str] = &["file_path", "path", "notebook_path", "target
 /// `Read`'s `file_path` as a write.
 const WRITING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "ApplyPatch", "NotebookEdit"];
 
+/// Tool input keys that name a file the tool reads.
+const READ_PATH_KEYS: &[&str] = &["file_path", "notebook_path"];
+
+/// Tools that read one *named file*.
+///
+/// `Grep` and `Glob` are deliberately absent even though both read. Their
+/// `path` is a search root — a directory, or nothing at all — and the coupling
+/// check compares read targets against write targets by exact string, the same
+/// conservative floor `TaskGraph::write_conflicts` uses. A directory can never
+/// equal a written file path, so recording one would add rows that can never
+/// match: noise with no possible signal. Under-reporting coupling is the safe
+/// direction; a spurious "these two must be sequential" is not.
+///
+/// `Edit` appears in both lists on purpose: an edit reads the file it rewrites,
+/// so it is a genuine reader as well as a writer.
+const READING_TOOLS: &[&str] = &["Read", "NotebookRead", "Edit", "MultiEdit"];
+
 /// Files a tool call wrote, read out of its input.
 ///
 /// Only for tools known to write. A `Read` also carries `file_path`, and
 /// recording that as a write would manufacture write conflicts out of nothing.
 pub(crate) fn written_paths(tool_name: &str, input: &serde_json::Value) -> Vec<WriteTarget> {
-    if !WRITING_TOOLS.contains(&tool_name) {
+    targets_for(tool_name, input, WRITING_TOOLS, WRITE_PATH_KEYS)
+}
+
+/// Files a tool call read, read out of its input.
+///
+/// The mirror of [`written_paths`], and the input to the stop-rule fusion
+/// lint's coupling check: a read is only half of a dataflow, and until this
+/// existed the trace recorded only the other half.
+pub(crate) fn read_paths(tool_name: &str, input: &serde_json::Value) -> Vec<WriteTarget> {
+    targets_for(tool_name, input, READING_TOOLS, READ_PATH_KEYS)
+}
+
+fn targets_for(
+    tool_name: &str,
+    input: &serde_json::Value,
+    tools: &[&str],
+    keys: &[&str],
+) -> Vec<WriteTarget> {
+    if !tools.contains(&tool_name) {
         return Vec::new();
     }
     let Some(fields) = input.as_object() else {
         return Vec::new();
     };
-    let mut targets: Vec<WriteTarget> = WRITE_PATH_KEYS
+    let mut targets: Vec<WriteTarget> = keys
         .iter()
         .filter_map(|key| fields.get(*key))
         .filter_map(serde_json::Value::as_str)

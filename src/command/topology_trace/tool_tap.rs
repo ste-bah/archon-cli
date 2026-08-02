@@ -10,7 +10,7 @@ use archon_topology::ir::PermissionClass;
 use archon_topology::reconstruct::ROOT_NODE_ID;
 use archon_topology::trace::{TraceKind, TraceRecord};
 
-use super::payload::{subagent_type, written_paths};
+use super::payload::{read_paths, subagent_type, written_paths};
 use super::{AmbientTrace, now};
 
 /// Tools whose invocation launches a subagent. Seeing one of these in the tool
@@ -35,8 +35,12 @@ impl AmbientTrace {
             .with_outcome(outcome.blocked, outcome.is_error)
             .with_attempt(outcome.attempt);
         let writes = written_paths(&outcome.tool_name, &outcome.input);
+        let reads = read_paths(&outcome.tool_name, &outcome.input);
         if !writes.is_empty() {
             attempt = attempt.with_writes(writes.clone());
+        }
+        if !reads.is_empty() {
+            attempt = attempt.with_reads(reads.clone());
         }
         self.record(attempt);
 
@@ -61,6 +65,19 @@ impl AmbientTrace {
                 TraceRecord::new(&ts, &self.graph_id, TraceKind::FileWritten)
                     .with_node(node_id)
                     .with_writes(writes)
+                    .with_outcome(outcome.blocked, outcome.is_error),
+            );
+        }
+
+        // Emitted for a blocked or errored attempt too, exactly as the write
+        // side is. An attempted read is evidence of intended dataflow, and the
+        // fusion lint is about intent — a coupling that a permission denial
+        // happened to prevent this time is still a coupling.
+        if !reads.is_empty() {
+            self.record(
+                TraceRecord::new(&ts, &self.graph_id, TraceKind::FileRead)
+                    .with_node(node_id)
+                    .with_reads(reads)
                     .with_outcome(outcome.blocked, outcome.is_error),
             );
         }

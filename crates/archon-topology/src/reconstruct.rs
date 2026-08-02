@@ -16,13 +16,16 @@
 //!   when the real work joined.
 //! - `consumes` is left empty, and per the crate's unknown-dataflow rule that
 //!   means *unknown*. It is not "this node consumed nothing".
-//! - `writes` is whatever the trace observed being written, which is a lower
-//!   bound: a tool that wrote a file without the tap noticing contributes
-//!   nothing.
+//! - `writes` and `reads` are whatever the trace observed, which is a lower
+//!   bound in both directions: a tool that touched a file without the tap
+//!   noticing contributes nothing.
 //!
 //! That makes a reconstructed graph adequate for the outcome corpus — span,
-//! fan-out width, retry counts, observed conflicts — and inadequate for the
-//! milestone 4 dataflow lints, which need declared `consumes`.
+//! fan-out width, retry counts, observed conflicts — and adequate for the
+//! milestone 4 fusion lint only to the extent the taps observed both halves of
+//! a dataflow. It remains inadequate for [`crate::TaskGraph::fake_edges`],
+//! which reasons about *declared* intent: an edge this module invented from
+//! spawn parentage is not a claim anybody made.
 //!
 //! The origin is supplied by the caller rather than fixed to
 //! [`GraphOrigin::Session`]: a workflow run whose `events.jsonl` is projected
@@ -115,6 +118,12 @@ pub fn reconstruct_graph(
             }
         }
 
+        for target in &record.reads {
+            if !draft.reads.contains(target) {
+                draft.reads.push(target.clone());
+            }
+        }
+
         match record.kind {
             TraceKind::AgentSpawned => draft.spawned = true,
             TraceKind::Verification => draft.verified = true,
@@ -147,6 +156,15 @@ pub fn reconstruct_graph(
             writes.dedup();
             writes
         };
+        // Observed reads, which — like `writes` — are a lower bound: a read the
+        // tap never saw contributes nothing. Empty therefore stays *unknown*,
+        // and the fusion lint declines to conclude anything about such a node.
+        node.reads = {
+            let mut reads = draft.reads;
+            reads.sort();
+            reads.dedup();
+            reads
+        };
         node.permission = draft.permission;
         node.agent = draft.agent;
         // `consumes` stays empty: unknown, not nothing. See the module note.
@@ -172,6 +190,7 @@ fn touch(nodes: &mut BTreeMap<String, NodeDraft>, order: &mut Vec<String>, id: &
 struct NodeDraft {
     depends_on: Vec<String>,
     writes: Vec<WriteTarget>,
+    reads: Vec<WriteTarget>,
     permission: PermissionClass,
     agent: Option<String>,
     spawned: bool,

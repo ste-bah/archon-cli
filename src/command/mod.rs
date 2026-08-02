@@ -184,15 +184,19 @@ pub(crate) mod surface_matrix;
 pub(crate) mod summary;
 pub(crate) mod task;
 pub(crate) mod team;
+/// Milestone 3 topology: guardrail admission. Synchronous, in-memory only —
+/// no database access of any kind, not even a read.
+pub(crate) mod topology_admission;
 /// Milestone 2 topology: the batched fold from ambient traces into
 /// `.archon/topology.db` plus one `learning_events` summary row per graph.
 /// Lives here rather than in `archon-pipeline` because the fold needs
 /// `archon-workflow`, `archon-topology`, and the learning stack at once, and
 /// `archon-pipeline` must not acquire an edge onto `archon-workflow`.
 pub(crate) mod topology_fold;
-/// Milestone 3 topology: guardrail admission. Synchronous, in-memory only —
-/// no database access of any kind, not even a read.
-pub(crate) mod topology_admission;
+/// Milestone 4 topology: the advisory lint suite behind `archon workflow lint`.
+/// Read-only and non-blocking by construction — it loads a graph, runs pure
+/// analyses, and prints. It never writes and never fails a run.
+pub(crate) mod topology_lint;
 /// Milestone 2 topology: the ambient trace recorder. Hot path, file-only,
 /// never touches a database.
 pub(crate) mod topology_trace;
