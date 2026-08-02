@@ -92,6 +92,8 @@ hello.txt
 !/docs/release-notes/**
 
 # Local-only artifacts (not for VCS)
+# Must stay below the /docs/architecture/ re-includes above — last match wins.
+/docs/architecture/topology-engineering.md
 FORENSIC-TASK-DECOMPOSITION.yaml
 *:Zone.Identifier
 .archon/leann.db
