@@ -10,16 +10,22 @@
 //! embedding models or recovering from a corrupted prior model.
 
 use anyhow::{Context, Result};
+use archon_core::config::ArchonConfig;
 
 use crate::cli_args::MemoryAction;
 
-pub async fn handle_memory_command(action: MemoryAction) -> Result<()> {
+pub async fn handle_memory_command(action: MemoryAction, config: &ArchonConfig) -> Result<()> {
     match action {
-        MemoryAction::Reindex { all } => handle_reindex(all).await,
+        MemoryAction::Reindex { all } => handle_reindex(all, config).await,
     }
 }
 
-async fn handle_reindex(all: bool) -> Result<()> {
+/// `config` is the fully layered bootstrap config (user → project → local →
+/// settings, plus env overrides) — the same resolution the interactive
+/// session uses. Do not re-load config here with `config::load_config()`:
+/// that reads only the user layer and can resolve a different
+/// `[memory] embedding_provider` than the session in the same workspace.
+async fn handle_reindex(all: bool, config: &ArchonConfig) -> Result<()> {
     if !all {
         eprintln!(
             "archon memory reindex requires --all to confirm. \
@@ -28,10 +34,8 @@ async fn handle_reindex(all: bool) -> Result<()> {
         std::process::exit(1);
     }
 
-    // Resolve config (so we use the configured embedding provider).
-    let config = archon_core::config::load_config().context("failed to load archon config")?;
     let record = crate::command::world_model::record_runtime_advisory(
-        &config,
+        config,
         archon_world_model::integration::WorldAdvisorSurface::MemorySurfacing,
         "memory-cli",
         "memory_reindex",
@@ -59,6 +63,8 @@ async fn handle_reindex(all: bool) -> Result<()> {
     let embed_cfg = archon_memory::embedding::EmbeddingConfig {
         provider: config.memory.embedding_provider,
         hybrid_alpha: config.memory.hybrid_alpha,
+        base_url: config.memory.embedding_base_url.clone(),
+        model: config.memory.embedding_model.clone(),
     };
     let provider = archon_memory::embedding::create_provider(&embed_cfg)
         .context("failed to create embedding provider")?;

@@ -336,8 +336,16 @@ enabled = true
 # Embedding provider: "auto" | "local" | "openai"
 #   auto   — OpenAI if OPENAI_API_KEY or ARCHON_MEMORY_OPENAIKEY set, else local
 #   local  — fastembed BGE-base-en-v1.5 quantized (768-dim, CPU-only, ~100MB download)
-#   openai — text-embedding-3-small (1536-dim, requires API key)
-embedding_provider = "auto"
+#   openai — OpenAI-compatible endpoint (default: text-embedding-3-small, 1536-dim; requires API key)
+embedding_provider = "local"
+
+# For "openai", the endpoint and model are overridable so any OpenAI-compatible
+# server can serve memory embeddings (e.g. a local LiteLLM proxy). Environment
+# variables win over these keys (ARCHON_MEMORY_EMBEDDING_BASE_URL / OPENAI_BASE_URL,
+# ARCHON_MEMORY_EMBEDDING_MODEL). Switching endpoint or model changes the
+# embedding space — run `archon memory reindex --all` afterwards.
+# embedding_base_url = "http://127.0.0.1:1234/v1"
+# embedding_model = "embed-v4"
 
 # Hybrid search blend: 0.0 = pure vector, 1.0 = pure keyword. 0.3 = 70% vec / 30% kw.
 hybrid_alpha = 0.3

@@ -353,6 +353,38 @@ fn load_local_overrides_project() {
     cleanup_temp_dir(&tmp);
 }
 
+/// Regression test for the `archon memory reindex` config bug: the CLI
+/// loaded only the user layer, so a workspace `.archon/config.toml` setting
+/// `[memory] embedding_provider = "openai"` was ignored and reindex ran
+/// under the user-layer provider while the session used the project one.
+/// The CLI now threads the layered bootstrap config; this pins the layering
+/// behaviour it relies on for `[memory]`.
+#[test]
+fn load_project_memory_provider_overrides_user() {
+    let tmp = make_temp_dir("load-memory-provider");
+
+    let user_cfg = tmp.join("config.toml");
+    fs::write(&user_cfg, "[memory]\nembedding_provider = \"local\"\n").unwrap();
+
+    let work = tmp.join("work");
+    let archon_dir = work.join(".archon");
+    fs::create_dir_all(&archon_dir).unwrap();
+    fs::write(
+        archon_dir.join("config.toml"),
+        "[memory]\nembedding_provider = \"openai\"\n",
+    )
+    .unwrap();
+
+    let config =
+        load_layered_config(Some(&user_cfg), &work, None, None).expect("load should succeed");
+    assert_eq!(
+        config.memory.embedding_provider,
+        archon_memory::embedding::EmbeddingProviderKind::OpenAI,
+        "project layer [memory].embedding_provider should override user layer"
+    );
+    cleanup_temp_dir(&tmp);
+}
+
 #[test]
 fn load_project_inherits_user_keys() {
     let tmp = make_temp_dir("load-inherit");

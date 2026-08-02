@@ -544,6 +544,8 @@ enabled = true
 embedding_provider = "auto"
 hybrid_alpha = 0.3
 # db_path = "/custom/path/memory.db"
+# embedding_base_url = "http://127.0.0.1:1234/v1"
+# embedding_model = "text-embedding-qwen3-embedding-0.6b"
 ```
 
 | Field | Default | What / Why |
@@ -551,6 +553,8 @@ hybrid_alpha = 0.3
 | `enabled` | `true` | Master switch for the memory graph. Disable for ephemeral / stateless sessions. |
 | `db_path` | unset | Override CozoDB file path. Default: `~/.local/share/archon/memory.db`. Use to share a memory graph across multiple archon-cli installations or to keep memory on faster storage. |
 | `embedding_provider` | `"auto"` | `"auto"` uses OpenAI if `OPENAI_API_KEY` (or `ARCHON_MEMORY_OPENAIKEY`) is set, else falls back to local fastembed. `"local"` forces local (768-dim BGE-base-en-v1.5, no network). `"openai"` forces OpenAI-compatible embeddings (1536-dim `text-embedding-3-small` by default, requires API key). Docs semantic indexing follows this setting unless `ARCHON_DOCS_EMBEDDING_PROVIDER` overrides it. |
+| `embedding_base_url` | unset | API root for the `openai` provider, e.g. a local OpenAI-compatible proxy (`http://127.0.0.1:1234/v1`). Unset = the real OpenAI API. `ARCHON_MEMORY_EMBEDDING_BASE_URL` (then `OPENAI_BASE_URL`) takes precedence over this value. |
+| `embedding_model` | unset | Model name sent to the `openai` provider. Unset = `text-embedding-3-small`. `ARCHON_MEMORY_EMBEDDING_MODEL` takes precedence. Change it (or the base URL) and semantic search silently degrades until you run `archon memory reindex --all` — old vectors come from the old model. |
 | `hybrid_alpha` | `0.3` | Hybrid search blend: `0.0` = pure vector, `1.0` = pure keyword (BM25). `0.3` = 70% vector / 30% keyword. Lower for semantic precision, higher for exact-term matching. |
 
 ---
