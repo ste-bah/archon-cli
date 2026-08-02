@@ -136,7 +136,6 @@ fn test_spec() -> WorkflowSpec {
         target_repository_root: None,
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: BTreeMap::from([(ProviderTier::Coder, "test".to_string())]),
         stages: vec![
             test_stage(
                 "read-only-review",
@@ -151,9 +150,7 @@ fn test_spec() -> WorkflowSpec {
                 vec!["read-only-review".to_string()],
             ),
         ],
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     }
 }
@@ -172,7 +169,6 @@ fn test_stage(
         foreach: None,
         reducer: None,
         tool: None,
-        condition: None,
         depends_on,
         provider_tier: Some(ProviderTier::Coder),
         retry: RetryPolicy::default(),

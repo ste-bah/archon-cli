@@ -242,11 +242,8 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
             target_repository_root: None,
             max_parallelism: 4,
             max_agents: 16,
-            provider_tiers: Default::default(),
             stages: Vec::new(),
-            artifact_policy: Default::default(),
             permissions: Default::default(),
-            quality_gates: Default::default(),
             learning_hooks: Vec::new(),
         })
         .expect("prior run");

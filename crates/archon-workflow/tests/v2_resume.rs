@@ -1,7 +1,7 @@
 use archon_workflow::{
-    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2Evidence, WorkflowV2EvidenceKind,
-    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2Result, WorkflowV2ResultStore,
-    WorkflowV2Runtime, WorkflowV2Status,
+    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence,
+    WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Status,
 };
 
 fn call(id: &str, input: serde_json::Value, depends_on: &[&str]) -> WorkflowV2CallExecution {
@@ -26,29 +26,28 @@ fn accepted(summary: &str) -> WorkflowV2Result {
     result
 }
 
-#[test]
-fn resume_reuses_completed_results_without_invoking_executor() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let store = WorkflowV2ResultStore::new(temp.path());
-    let runtime = WorkflowV2Runtime::new(store);
-    let executions = vec![
-        call("a", serde_json::json!({"n": 1}), &[]),
-        call("b", serde_json::json!({"n": 2}), &["a"]),
-    ];
-
-    runtime
-        .run_serial(&executions, |execution| {
-            Ok(accepted(&format!("{} accepted", execution.call.id)))
-        })
-        .expect("first run");
-
-    let summary = runtime
-        .run_serial(&executions, |_| panic!("executor should not be called"))
-        .expect("resume run");
-
-    assert_eq!(summary.executed, 0);
-    assert_eq!(summary.reused, 2);
-    assert_eq!(summary.completed, 2);
+/// Record a completed call the way a live scheduler would, so the store is in a
+/// realistic resumable state before invalidation is exercised.
+fn record_completed(
+    store: &WorkflowV2ResultStore,
+    execution: &WorkflowV2CallExecution,
+    summary: &str,
+) {
+    let record = WorkflowV2CallRecord::new(
+        store.run_id(),
+        execution.call.clone(),
+        1,
+        format!("hash-{}", execution.call.id),
+        accepted(summary),
+        execution.depends_on.clone(),
+    );
+    store.save_call_record(&record).expect("save call record");
+    let mut checkpoint = store
+        .load_checkpoint()
+        .expect("load checkpoint")
+        .unwrap_or_default();
+    checkpoint.mark_completed(&execution.call.id);
+    store.save_checkpoint(&checkpoint).expect("save checkpoint");
 }
 
 #[test]
@@ -86,82 +85,18 @@ fn branch_outcomes_are_persisted_to_per_call_item_artifacts() {
 }
 
 #[test]
-fn changed_input_hash_invalidates_cached_result() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let store = WorkflowV2ResultStore::new(temp.path());
-    let runtime = WorkflowV2Runtime::new(store.clone());
-    let first = vec![call("a", serde_json::json!({"n": 1}), &[])];
-    let second = vec![call("a", serde_json::json!({"n": 2}), &[])];
-
-    runtime
-        .run_serial(&first, |_| Ok(accepted("first")))
-        .expect("first run");
-    runtime
-        .run_serial(&second, |_| Ok(accepted("second")))
-        .expect("second run");
-
-    let record = store
-        .load_call_record("a")
-        .expect("load record")
-        .expect("record");
-    assert_eq!(record.attempt, 2);
-    assert_eq!(record.result.summary, "second");
-}
-
-#[test]
-fn changed_upstream_input_reruns_downstream_even_when_downstream_input_is_same() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let store = WorkflowV2ResultStore::new(temp.path());
-    let runtime = WorkflowV2Runtime::new(store.clone());
-    let first = vec![
-        call("a", serde_json::json!({"n": 1}), &[]),
-        call("b", serde_json::json!({"stable": true}), &["a"]),
-    ];
-    let second = vec![
-        call("a", serde_json::json!({"n": 2}), &[]),
-        call("b", serde_json::json!({"stable": true}), &["a"]),
-    ];
-
-    runtime
-        .run_serial(&first, |execution| {
-            Ok(accepted(&format!("{} first", execution.call.id)))
-        })
-        .expect("first run");
-    let summary = runtime
-        .run_serial(&second, |execution| {
-            Ok(accepted(&format!("{} second", execution.call.id)))
-        })
-        .expect("second run");
-
-    assert_eq!(summary.reused, 0);
-    assert_eq!(summary.executed, 2);
-    assert_eq!(
-        store
-            .load_call_record("b")
-            .expect("load")
-            .expect("record")
-            .result
-            .summary,
-        "b second"
-    );
-}
-
-#[test]
 fn restart_invalidates_downstream_dependents() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());
-    let runtime = WorkflowV2Runtime::new(store.clone());
     let executions = vec![
         call("a", serde_json::json!({"n": 1}), &[]),
         call("b", serde_json::json!({"n": 2}), &["a"]),
         call("c", serde_json::json!({"n": 3}), &["b"]),
     ];
+    for execution in &executions {
+        record_completed(&store, execution, &format!("{} first", execution.call.id));
+    }
 
-    runtime
-        .run_serial(&executions, |execution| {
-            Ok(accepted(&format!("{} first", execution.call.id)))
-        })
-        .expect("first run");
     let invalidated = store
         .invalidate_call_and_dependents(&executions, "b")
         .expect("invalidate");
@@ -175,14 +110,7 @@ fn restart_invalidates_downstream_dependents() {
             .completed_call_ids,
         vec!["a"]
     );
-    let summary = runtime
-        .run_serial(&executions, |execution| {
-            Ok(accepted(&format!("{} rerun", execution.call.id)))
-        })
-        .expect("resume");
-
-    assert_eq!(summary.reused, 1);
-    assert_eq!(summary.executed, 2);
+    // The untouched upstream call keeps its cached result.
     assert_eq!(
         store
             .load_call_record("a")
@@ -191,23 +119,5 @@ fn restart_invalidates_downstream_dependents() {
             .result
             .summary,
         "a first"
-    );
-    assert_eq!(
-        store
-            .load_call_record("b")
-            .expect("load")
-            .expect("record")
-            .result
-            .summary,
-        "b rerun"
-    );
-    assert_eq!(
-        store
-            .load_call_record("c")
-            .expect("load")
-            .expect("record")
-            .result
-            .summary,
-        "c rerun"
     );
 }

@@ -1,7 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use archon_workflow::{
-    ArtifactPolicy, ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec,
-};
+use archon_workflow::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, WorkflowSpec};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -69,11 +67,6 @@ fn plan_workflow(input: WorkflowPlanInput<'_>) -> Result<String> {
 }
 
 fn build_spec(input: WorkflowPlanInput<'_>, items: Vec<Value>) -> Result<WorkflowSpec> {
-    let mut tiers = BTreeMap::new();
-    tiers.insert(ProviderTier::Researcher, "auto".to_string());
-    tiers.insert(ProviderTier::Coder, "auto".to_string());
-    tiers.insert(ProviderTier::Critic, "auto".to_string());
-    tiers.insert(ProviderTier::Reducer, "auto".to_string());
     let spec = WorkflowSpec {
         schema: "archon.workflow.v1".into(),
         name: "trading-lab-end-to-end".into(),
@@ -81,7 +74,6 @@ fn build_spec(input: WorkflowPlanInput<'_>, items: Vec<Value>) -> Result<Workflo
         target_repository_root: Some(input.repository.display().to_string()),
         max_parallelism: 4,
         max_agents: 64,
-        provider_tiers: tiers,
         stages: vec![
             stage(
                 "research-strategy-thesis",
@@ -111,9 +103,7 @@ fn build_spec(input: WorkflowPlanInput<'_>, items: Vec<Value>) -> Result<Workflo
             acceptance_report(),
             quality_gate("acceptance-report"),
         ],
-        artifact_policy: ArtifactPolicy::default(),
         permissions: permissions(input.repository),
-        quality_gates: BTreeMap::new(),
         learning_hooks: vec![
             "sona".into(),
             "reasoning_bank".into(),
@@ -141,7 +131,6 @@ fn stage(
         foreach: None,
         reducer: None,
         tool: None,
-        condition: None,
         depends_on: depends_on.into_iter().map(str::to_string).collect(),
         provider_tier: Some(tier),
         retry: RetryPolicy {

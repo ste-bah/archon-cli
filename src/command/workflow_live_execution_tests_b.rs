@@ -207,7 +207,6 @@ export default async function workflow(w) {
         target_repository_root: None,
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: Default::default(),
         stages: vec![archon_workflow::StageSpec {
             id: "inspect".to_string(),
             kind: StageKind::Agent,
@@ -216,7 +215,6 @@ export default async function workflow(w) {
             foreach: None,
             reducer: None,
             tool: None,
-            condition: None,
             depends_on: Vec::new(),
             provider_tier: Some(ProviderTier::Researcher),
             retry: archon_workflow::RetryPolicy::default(),
@@ -234,9 +232,7 @@ export default async function workflow(w) {
             filter: None,
             extra: Default::default(),
         }],
-        artifact_policy: Default::default(),
         permissions: Default::default(),
-        quality_gates: Default::default(),
         learning_hooks: Vec::new(),
     };
     let store = WorkflowStore::project(temp.path());

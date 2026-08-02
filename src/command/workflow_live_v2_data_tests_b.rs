@@ -290,11 +290,8 @@ fn fanout_branch_inherits_target_files_from_inventory_item() {
         target_repository_root: Some("/repo".to_string()),
         max_parallelism: 8,
         max_agents: 32,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let branch_execution = WorkflowV2CallExecution {
@@ -369,11 +366,8 @@ fn fanout_branch_item_targets_override_static_fallback_targets() {
         target_repository_root: Some("/repo".to_string()),
         max_parallelism: 8,
         max_agents: 32,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let branch_execution = WorkflowV2CallExecution {
