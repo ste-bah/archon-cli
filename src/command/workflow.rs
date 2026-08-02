@@ -22,11 +22,22 @@ pub(crate) struct WorkflowHandler;
 
 impl CommandHandler for WorkflowHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> Result<()> {
-        let command = WorkflowCommand::parse(args)?;
         let cwd = ctx
             .working_dir
             .clone()
             .ok_or_else(|| anyhow!("workflow command requires working directory context"))?;
+        // Intercepted ahead of `WorkflowCommand::parse` for the same reason the
+        // CLI path intercepts ahead of `cli_action`: `CommandAction` is
+        // `archon-workflow`'s execution vocabulary and an advisory read-only
+        // analysis does not belong in it. Both surfaces therefore route `lint`
+        // around the crate rather than through it.
+        if args.first().is_some_and(|first| first == "lint") {
+            let output = lint_from_slash_args(&cwd, &args[1..])?;
+            ctx.emit(TuiEvent::TextDelta(output));
+            ctx.emit(TuiEvent::SlashCommandComplete);
+            return Ok(());
+        }
+        let command = WorkflowCommand::parse(args)?;
         if should_spawn_live(&command.action)
             && let Some(llm) = ctx.llm_adapter.clone()
         {
@@ -55,8 +66,44 @@ impl CommandHandler for WorkflowHandler {
     }
 
     fn description(&self) -> &str {
-        "Plan, run, resume, and inspect dynamic workflows"
+        "Plan, run, resume, lint, and inspect dynamic workflows"
     }
+}
+
+/// `/workflow lint --tasks <DIR>` and friends, parsed by hand.
+///
+/// The slash surface hands over raw tokens rather than a clap-parsed struct, so
+/// the three flags are read directly. An unrecognised token is an error naming
+/// the accepted flags: silently ignoring it would produce a report of something
+/// other than what was asked for, which for a lint is worse than no report.
+pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
+    let mut tasks: Option<PathBuf> = None;
+    let mut spec_file: Option<PathBuf> = None;
+    let mut graph: Option<String> = None;
+    let mut index = 0;
+    while index < args.len() {
+        let value = args.get(index + 1).cloned();
+        let missing = |flag: &str| anyhow!("workflow lint {flag} needs a value");
+        match args[index].as_str() {
+            "--tasks" => tasks = Some(PathBuf::from(value.ok_or_else(|| missing("--tasks"))?)),
+            "--spec-file" => {
+                spec_file = Some(PathBuf::from(value.ok_or_else(|| missing("--spec-file"))?));
+            }
+            "--graph" => graph = Some(value.ok_or_else(|| missing("--graph"))?),
+            other => {
+                return Err(anyhow!(
+                    "workflow lint does not accept '{other}'; use --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
+                ));
+            }
+        }
+        index += 2;
+    }
+    let source = crate::command::topology_lint::LintSource::from_flags(
+        tasks.as_deref(),
+        spec_file.as_deref(),
+        graph.as_deref(),
+    )?;
+    crate::command::topology_lint::run_lint(cwd, &source)
 }
 
 pub(crate) async fn handle_workflow_command(
@@ -65,6 +112,29 @@ pub(crate) async fn handle_workflow_command(
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
+    // Intercepted before conversion: `lint` has no `CommandAction` counterpart
+    // and deliberately does not gain one. `CommandAction` is `archon-workflow`'s
+    // *execution* vocabulary — every variant names something that runs, resumes,
+    // or mutates a run — and an advisory read-only analysis is none of those.
+    // Adding a variant would put a milestone 4 concept inside the thin
+    // provider-neutral crate for no gain.
+    if let WorkflowAction::Lint {
+        tasks,
+        spec_file,
+        graph,
+    } = action
+    {
+        let source = crate::command::topology_lint::LintSource::from_flags(
+            tasks.as_deref(),
+            spec_file.as_deref(),
+            graph.as_deref(),
+        )?;
+        println!(
+            "{}",
+            crate::command::topology_lint::run_lint(&cwd, &source)?
+        );
+        return Ok(());
+    }
     let (action, mode) = cli_action(action)?;
     let output = match mode {
         CliExecutionMode::Deterministic => run_action(&cwd, action)?,
@@ -201,6 +271,13 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             name: name.clone(),
         },
         WorkflowAction::List => CommandAction::List,
+        // Handled in `handle_workflow_command` before conversion; see the note
+        // there on why it has no `CommandAction`.
+        WorkflowAction::Lint { .. } => {
+            return Err(anyhow!(
+                "workflow lint is handled before action conversion and must not reach it"
+            ));
+        }
     };
     Ok((converted, CliExecutionMode::Deterministic))
 }

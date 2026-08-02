@@ -9,6 +9,11 @@
 //!
 //! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
 //!
+//! Milestone 4 adds three advisory lints beside them —
+//! [`TaskGraph::diamond_conformance`], [`TaskGraph::fake_edges`], and
+//! [`TaskGraph::stop_rule_fusion`]. They are analyses, not gates: each returns
+//! findings with a remedy string and none of them can fail a run.
+//!
 //! Milestone 3 adds [`live`]: the per-session executed prefix and the three
 //! guardrail invariants evaluated against it. It is still database-free — the
 //! whole point is that admission runs on the synchronous critical path of every
@@ -56,7 +61,10 @@ pub mod task_hash;
 #[cfg(feature = "trace")]
 pub mod trace;
 
-pub use analysis::{CriticalPath, ParallelismProfile, WriteConflict};
+pub use analysis::{
+    CoupledPair, CriticalPath, DiamondFinding, DiamondReport, FakeEdge, FusibleChain, FusionKind,
+    FusionReport, ParallelismProfile, VerifierDiversity, WriteConflict,
+};
 pub use error::TopologyError;
 pub use ir::{
     DataRef, FanoutSpec, GateKind, GraphBudget, GraphOrigin, NodeRole, PermissionClass, TaskGraph,

@@ -162,6 +162,19 @@ pub struct TaskNode {
     /// File globs and artifact keys this node writes. Also unknown when empty.
     #[serde(default)]
     pub writes: Vec<WriteTarget>,
+    /// File globs and artifact keys this node *reads*, in the same target
+    /// vocabulary as [`TaskNode::writes`].
+    ///
+    /// This is the other half of the dataflow contract, and it is what makes
+    /// the milestone 4 lints computable. [`TaskNode::consumes`] can only say
+    /// "node P produced something I use" and therefore cannot be populated by a
+    /// surface that names resources rather than producers; `reads` names the
+    /// resource and lets the analysis resolve the producer itself.
+    ///
+    /// **Empty means *unknown*, not *reads nothing*** — the same rule as
+    /// `consumes` and `writes`. See [`TaskNode::reads_are_known`].
+    #[serde(default)]
+    pub reads: Vec<WriteTarget>,
     #[serde(default)]
     pub permission: PermissionClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,6 +193,7 @@ impl TaskNode {
             depends_on: Vec::new(),
             consumes: Vec::new(),
             writes: Vec::new(),
+            reads: Vec::new(),
             permission: PermissionClass::Safe,
             agent: None,
             fanout: None,
@@ -201,6 +215,23 @@ impl TaskNode {
     #[must_use]
     pub fn writes_are_known(&self) -> bool {
         !self.writes.is_empty()
+    }
+
+    /// False when `reads` is empty, i.e. when read targets are *unknown*.
+    ///
+    /// A node that genuinely reads nothing is indistinguishable from one whose
+    /// reads were never declared or never observed, so the dataflow lints treat
+    /// empty as "cannot conclude" and stay silent.
+    #[must_use]
+    pub fn reads_are_known(&self) -> bool {
+        !self.reads.is_empty()
+    }
+
+    /// True when this node declares *some* consumption — either resolved
+    /// producer references (`consumes`) or named read targets (`reads`).
+    #[must_use]
+    pub fn consumption_is_known(&self) -> bool {
+        self.dataflow_is_known() || self.reads_are_known()
     }
 }
 

@@ -45,6 +45,56 @@ fn spawns_become_nodes_and_parentage_becomes_edges() {
     ));
 }
 
+/// The read side of the same accumulation. Without it a reconstructed graph
+/// carries only half of every dataflow and the fusion lint can never see a
+/// coupling.
+#[test]
+fn files_read_become_reads_without_becoming_writes() {
+    let records = vec![
+        record(TraceKind::FileRead, "a").with_reads(vec![WriteTarget::Path("src/a.rs".into())]),
+        record(TraceKind::FileRead, "a").with_reads(vec![WriteTarget::Path("src/b.rs".into())]),
+        record(TraceKind::FileRead, "a").with_reads(vec![WriteTarget::Path("src/a.rs".into())]),
+    ];
+
+    let graph = reconstruct_graph(
+        "g1",
+        GraphOrigin::Session {
+            session_id: "s1".into(),
+        },
+        &records,
+    );
+
+    let node = graph.node("a").expect("node a");
+    assert_eq!(
+        node.reads,
+        vec![
+            WriteTarget::Path("src/a.rs".into()),
+            WriteTarget::Path("src/b.rs".into()),
+        ],
+        "sorted and deduplicated, like writes"
+    );
+    assert!(node.writes.is_empty(), "a read is not a write");
+    assert!(node.reads_are_known());
+}
+
+/// A record written before `reads` existed decodes with the field absent, which
+/// must read as *unknown* rather than as an assertion that nothing was read.
+#[test]
+fn a_record_without_the_reads_field_leaves_reads_unknown() {
+    let line = r#"{"ts":"2026-08-02T00:00:00Z","graph_id":"g1","node_id":"a","kind":"file_written","writes":[{"kind":"path","value":"src/a.rs"}]}"#;
+    let record: TraceRecord = serde_json::from_str(line).expect("older record still parses");
+    assert!(record.reads.is_empty());
+
+    let graph = reconstruct_graph(
+        "g1",
+        GraphOrigin::Session {
+            session_id: "s1".into(),
+        },
+        &[record],
+    );
+    assert!(!graph.node("a").expect("node a").reads_are_known());
+}
+
 #[test]
 fn files_written_become_writes() {
     let records = vec![

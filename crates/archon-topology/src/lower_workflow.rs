@@ -60,6 +60,14 @@ fn lower_stage(spec: &WorkflowSpec, stage: &StageSpec) -> TaskNode {
             .iter()
             .map(|path| WriteTarget::Path(path.clone()))
             .collect(),
+        // A `WorkflowSpec` stage declares what it expects to *change* and
+        // nothing about what it expects to read, so reads stay empty — which
+        // means unknown, not "reads nothing". The milestone 4 dataflow lints
+        // therefore stay silent on a lowered spec unless the caller enriches
+        // the graph. Extending `expected_target_files` with a read counterpart
+        // would change `archon.workflow.v1`, which is a non-goal of this
+        // design.
+        reads: Vec::new(),
         permission: lower_permission(spec, stage),
         agent: stage.agent.clone(),
         fanout,

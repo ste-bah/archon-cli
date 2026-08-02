@@ -99,7 +99,7 @@ fn a_blocked_subagent_call_records_no_spawn() {
 }
 
 #[test]
-fn a_write_records_its_target_and_a_read_does_not() {
+fn a_write_and_a_read_are_recorded_as_separate_kinds() {
     let temp = tempfile::tempdir().unwrap();
     let trace = trace_in(temp.path());
 
@@ -123,6 +123,67 @@ fn a_write_records_its_target_and_a_read_does_not() {
         written[0].writes,
         vec![WriteTarget::Path("C:/repo/src/a.rs".into())],
         "separators must be normalized so exact-match conflict detection works"
+    );
+
+    let read: Vec<&TraceRecord> = readout
+        .records
+        .iter()
+        .filter(|record| record.kind == TraceKind::FileRead)
+        .collect();
+    assert_eq!(read.len(), 1, "the Read tool reads and does not write");
+    assert_eq!(read[0].reads, vec![WriteTarget::Path("src/b.rs".into())]);
+    assert!(read[0].writes.is_empty(), "a read is not a write");
+}
+
+/// `Grep` and `Glob` read, but their `path` is a search root rather than a
+/// file. The coupling check compares read targets to write targets by exact
+/// string, so a directory can never match — recording one would add rows that
+/// cannot ever produce a finding.
+#[test]
+fn a_search_root_is_not_recorded_as_a_read_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let trace = trace_in(temp.path());
+
+    trace.record_tool_outcome(&outcome(
+        "Grep",
+        serde_json::json!({"pattern": "fn main", "path": "src"}),
+    ));
+
+    let readout = read_trace(&trace.paths().trace_jsonl("g1")).unwrap();
+    assert!(
+        !readout
+            .records
+            .iter()
+            .any(|record| record.kind == TraceKind::FileRead),
+        "a search over a directory names no file"
+    );
+}
+
+/// An `Edit` is both halves of a dataflow: it cannot rewrite a file it did not
+/// first read. Recording only the write would make a genuine coupling — one
+/// branch editing what another branch produced — invisible.
+#[test]
+fn an_edit_records_both_a_read_and_a_write_of_the_same_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let trace = trace_in(temp.path());
+
+    trace.record_tool_outcome(&outcome(
+        "Edit",
+        serde_json::json!({"file_path": "src/a.rs", "old_string": "a", "new_string": "b"}),
+    ));
+
+    let readout = read_trace(&trace.paths().trace_jsonl("g1")).unwrap();
+    let target = WriteTarget::Path("src/a.rs".into());
+    assert!(
+        readout.records.iter().any(
+            |record| record.kind == TraceKind::FileWritten && record.writes == [target.clone()]
+        )
+    );
+    assert!(
+        readout
+            .records
+            .iter()
+            .any(|record| record.kind == TraceKind::FileRead && record.reads == [target.clone()])
     );
 }
 

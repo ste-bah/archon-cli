@@ -462,6 +462,20 @@ pub enum WorkflowAction {
         /// Template name
         name: String,
     },
+    /// Run the advisory topology lints over a task set, spec, or recorded graph
+    ///
+    /// Reports only. No lint here can fail a run or change a file.
+    Lint {
+        /// Directory of decomposed-PRD TASK-*.md files to lint
+        #[arg(long, value_name = "DIR")]
+        tasks: Option<std::path::PathBuf>,
+        /// Workflow spec file to lint
+        #[arg(long = "spec-file", value_name = "PATH")]
+        spec_file: Option<std::path::PathBuf>,
+        /// Recorded graph id under .archon/topology to lint
+        #[arg(long, value_name = "ID")]
+        graph: Option<String>,
+    },
     /// List workflow runs
     List,
 }

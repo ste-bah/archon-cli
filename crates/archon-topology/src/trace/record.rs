@@ -28,6 +28,13 @@ pub enum TraceKind {
     AgentSpawned,
     ToolAttempt,
     FileWritten,
+    /// A node read a named file. The mirror of [`TraceKind::FileWritten`], and
+    /// the record milestone 4's stop-rule fusion lint needs: coupling between
+    /// two concurrent nodes is only visible when both halves of the dataflow
+    /// are recorded. Added after the trace format shipped, which costs nothing
+    /// — the enum is `#[serde(other)]`-tolerant, so an older reader decodes
+    /// these to [`TraceKind::Unknown`] and skips them.
+    FileRead,
     GatePassed,
     Verification,
     Retry,
@@ -66,6 +73,11 @@ pub struct TraceRecord {
     pub error: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub writes: Vec<WriteTarget>,
+    /// Targets the record's node read. Additive, and absent from every record
+    /// written before this field existed — which decodes as "nothing observed",
+    /// i.e. *unknown*, exactly as [`crate::TaskNode::reads`] requires.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<WriteTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +103,7 @@ impl TraceRecord {
             blocked: false,
             error: false,
             writes: Vec::new(),
+            reads: Vec::new(),
             duration_ms: None,
             attempt: None,
             detail: None,
@@ -137,6 +150,12 @@ impl TraceRecord {
     #[must_use]
     pub fn with_writes(mut self, writes: Vec<WriteTarget>) -> Self {
         self.writes = writes;
+        self
+    }
+
+    #[must_use]
+    pub fn with_reads(mut self, reads: Vec<WriteTarget>) -> Self {
+        self.reads = reads;
         self
     }
 
