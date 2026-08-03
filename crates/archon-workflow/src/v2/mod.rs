@@ -11,6 +11,7 @@ mod agent_repair;
 pub mod artifact_refs;
 mod branch_evidence;
 pub mod call_execution;
+pub mod completion_credit;
 pub mod host_api;
 pub mod implementation_inspection;
 pub mod prd_intake;

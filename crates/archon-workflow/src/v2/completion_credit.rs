@@ -2,25 +2,27 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use archon_workflow::{
-    WorkflowError, WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
-    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverageStatus,
+use crate::error::{WorkflowError, WorkflowResult};
+use crate::task_universe::WorkflowV2TaskUniverse;
+use crate::{
+    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2Status, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
+    WorkflowV2TaskCoverageStatus,
 };
 
-use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+#[cfg(test)]
+#[path = "completion_credit_tests.rs"]
+mod tests;
 
 #[derive(Default)]
-pub(super) struct CompletionCredit {
-    pub(super) implementation: BTreeSet<String>,
-    pub(super) verification: BTreeSet<String>,
-    pub(super) noop: BTreeSet<String>,
+pub struct CompletionCredit {
+    pub implementation: BTreeSet<String>,
+    pub verification: BTreeSet<String>,
+    pub noop: BTreeSet<String>,
 }
 
 impl CompletionCredit {
-    pub(super) fn from_store(
-        store: &WorkflowV2ResultStore,
-    ) -> archon_workflow::WorkflowResult<Self> {
+    pub fn from_store(store: &WorkflowV2ResultStore) -> WorkflowResult<Self> {
         let mut credit = Self::default();
         for record in store.load_call_records()? {
             if record.invalidated_by.is_some() {
@@ -35,7 +37,7 @@ impl CompletionCredit {
         Ok(credit)
     }
 
-    pub(super) fn completed_ids(&self) -> BTreeSet<String> {
+    pub fn completed_ids(&self) -> BTreeSet<String> {
         self.noop
             .iter()
             .chain(self.implementation.intersection(&self.verification))
@@ -86,7 +88,7 @@ impl CompletionCredit {
         }
     }
 
-    pub(super) fn record(&mut self, evidence: &WorkflowV2TaskCompletionEvidence) {
+    pub fn record(&mut self, evidence: &WorkflowV2TaskCompletionEvidence) {
         if !matches!(
             evidence.status,
             WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -120,10 +122,10 @@ fn is_v3_implementation_call(call_id: &str) -> bool {
     id.starts_with("implement-task-") || id.starts_with("remediate-task-")
 }
 
-pub(super) fn prepare_resume_credit(
+pub fn prepare_resume_credit(
     store: &WorkflowV2ResultStore,
     universe: &WorkflowV2TaskUniverse,
-) -> archon_workflow::WorkflowResult<BTreeSet<String>> {
+) -> WorkflowResult<BTreeSet<String>> {
     let mut credit = CompletionCredit::from_store(store)?;
     let verified_noops = verified_noop_task_ids(store, universe)?;
     credit
@@ -141,7 +143,7 @@ pub(super) fn prepare_resume_credit(
     Ok(completed)
 }
 
-pub(super) fn noop_acceptance_criteria_satisfied(
+pub fn noop_acceptance_criteria_satisfied(
     task_id: &str,
     result: Option<&WorkflowV2Result>,
     universe: Option<&WorkflowV2TaskUniverse>,
@@ -185,7 +187,7 @@ pub(super) fn noop_acceptance_criteria_satisfied(
 fn verified_noop_task_ids(
     store: &WorkflowV2ResultStore,
     universe: &WorkflowV2TaskUniverse,
-) -> archon_workflow::WorkflowResult<BTreeSet<String>> {
+) -> WorkflowResult<BTreeSet<String>> {
     let mut verified = BTreeSet::new();
     for record in store.load_call_records()? {
         if record.invalidated_by.is_some() {
@@ -274,7 +276,7 @@ fn value_present(value: &serde_json::Value) -> bool {
 fn apply_terminal_report_credit(
     store: &WorkflowV2ResultStore,
     completed: &mut BTreeSet<String>,
-) -> archon_workflow::WorkflowResult<()> {
+) -> WorkflowResult<()> {
     for record in terminal_records(store)? {
         let data = &record.result.data;
         for task_id in task_ids(data, &["accepted_tasks"]) {
@@ -287,9 +289,7 @@ fn apply_terminal_report_credit(
     Ok(())
 }
 
-fn terminal_records(
-    store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<Vec<archon_workflow::WorkflowV2CallRecord>> {
+fn terminal_records(store: &WorkflowV2ResultStore) -> WorkflowResult<Vec<WorkflowV2CallRecord>> {
     let mut records = store
         .load_call_records()?
         .into_iter()
@@ -313,7 +313,7 @@ fn task_ids(data: &serde_json::Value, keys: &[&str]) -> BTreeSet<String> {
         .collect()
 }
 
-fn archive_terminal_results(store: &WorkflowV2ResultStore) -> archon_workflow::WorkflowResult<()> {
+fn archive_terminal_results(store: &WorkflowV2ResultStore) -> WorkflowResult<()> {
     let records = terminal_records(store)?;
     if records.is_empty() {
         return Ok(());

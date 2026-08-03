@@ -9,10 +9,10 @@ use archon_workflow::{
     WorkflowV2ResultStore, WorkflowV2Status,
 };
 
-use super::workflow_live_v2_completion_credit::{
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::completion_credit::{
     CompletionCredit, noop_acceptance_criteria_satisfied,
 };
-use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 #[path = "workflow_live_v2_host_local.rs"]
 mod workflow_live_v2_host_local;
