@@ -20,13 +20,6 @@ pub(super) fn resolve_hook_shell() -> &'static HookShell {
 }
 
 fn select_hook_shell(is_windows: bool, sh: Option<PathBuf>, bash: Option<PathBuf>) -> HookShell {
-    if is_windows {
-        return HookShell {
-            program: PathBuf::from("cmd"),
-            command_arg: "/C",
-        };
-    }
-
     if let Some(program) = sh.or(bash) {
         return HookShell {
             program,
@@ -34,9 +27,16 @@ fn select_hook_shell(is_windows: bool, sh: Option<PathBuf>, bash: Option<PathBuf
         };
     }
 
-    HookShell {
-        program: PathBuf::from("sh"),
-        command_arg: "-c",
+    if is_windows {
+        HookShell {
+            program: PathBuf::from("cmd"),
+            command_arg: "/C",
+        }
+    } else {
+        HookShell {
+            program: PathBuf::from("sh"),
+            command_arg: "-c",
+        }
     }
 }
 
@@ -46,7 +46,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn windows_uses_native_cmd_even_when_posix_shells_are_discovered() {
+    fn windows_prefers_discovered_posix_shell() {
         let shell = select_hook_shell(
             true,
             Some(PathBuf::from(r"C:\Program Files\Git\bin\sh.exe")),
@@ -56,14 +56,14 @@ mod tests {
         assert_eq!(
             shell,
             HookShell {
-                program: PathBuf::from("cmd"),
-                command_arg: "/C",
+                program: PathBuf::from(r"C:\Program Files\Git\bin\sh.exe"),
+                command_arg: "-c",
             }
         );
     }
 
     #[test]
-    fn windows_uses_native_cmd_when_only_bash_is_discovered() {
+    fn windows_uses_bash_when_sh_is_unavailable() {
         let shell = select_hook_shell(
             true,
             None,
@@ -73,8 +73,8 @@ mod tests {
         assert_eq!(
             shell,
             HookShell {
-                program: PathBuf::from("cmd"),
-                command_arg: "/C",
+                program: PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"),
+                command_arg: "-c",
             }
         );
     }

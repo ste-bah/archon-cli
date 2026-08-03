@@ -257,7 +257,6 @@ fn configure_windows_output_command(
 ) {
     command
         .current_dir(fixture.parent().unwrap())
-        .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
