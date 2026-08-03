@@ -1,24 +1,24 @@
 use super::*;
-use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
+use archon_workflow::{WorkflowAgentOutcome, WorkflowV2HostCall, WorkflowV2HostMethod};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[derive(Default)]
 struct RecordingClient {
-    last_request: Mutex<Option<AgentExecutionRequest>>,
-    requests: Mutex<Vec<AgentExecutionRequest>>,
+    last_request: Mutex<Option<WorkflowAgentCall>>,
+    requests: Mutex<Vec<WorkflowAgentCall>>,
 }
 
 #[async_trait::async_trait]
-impl LlmClient for RecordingClient {
+impl WorkflowLlmClient for RecordingClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        Ok(archon_pipeline::runner::LlmResponse {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(WorkflowAgentOutcome {
             content: "fallback".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -28,14 +28,14 @@ impl LlmClient for RecordingClient {
 
     async fn run_agent(
         &self,
-        request: AgentExecutionRequest,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.requests
             .lock()
             .expect("requests lock")
             .push(request.clone());
         *self.last_request.lock().expect("recording lock") = Some(request);
-        Ok(archon_pipeline::runner::LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "recorded".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -416,7 +416,9 @@ async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
         .expect("recording lock")
         .clone()
         .expect("recorded request");
-    assert_eq!(recorded.pipeline_type, PipelineType::Workflow);
+    // The pipeline type is no longer carried on the call: every call reaching
+    // the port is a workflow stage, and the host adapter stamps it. See
+    // `pipeline_workflow_llm::tests::workflow_calls_stay_workflow_pipeline_type`.
     assert_eq!(recorded.timeout_secs, Some(17));
     assert!(
         recorded.disable_auto_background,
@@ -469,9 +471,11 @@ async fn d47_one_run_uses_identical_provider_presence_for_subagents_and_final_ga
     assert_eq!(recorded.len(), 3);
     for request in recorded.iter() {
         let proof = &request
-            .provider_env_resolution
+            .provider_env
             .as_ref()
             .expect("run-scoped provider resolution")
+            .downcast_ref::<archon_tools::provider_env::ProviderEnvResolution>()
+            .expect("host provider environment")
             .proof;
         assert_eq!(proof, &expected_proof);
     }

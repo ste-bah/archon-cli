@@ -171,14 +171,14 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
 pub(super) struct PanicLlm;
 
 #[async_trait::async_trait]
-impl LlmClient for PanicLlm {
+impl WorkflowLlmClient for PanicLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         panic!("local-host workflow script test must not call the LLM")
     }
 }
@@ -188,16 +188,16 @@ pub(super) struct AlwaysInvalidLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for AlwaysInvalidLlm {
+impl WorkflowLlmClient for AlwaysInvalidLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "not workflow v2 result json".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -211,21 +211,21 @@ pub(super) struct SlowAcceptedLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for SlowAcceptedLlm {
+impl WorkflowLlmClient for SlowAcceptedLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         tokio::time::sleep(self.delay).await;
         let mut result = WorkflowV2Result::accepted("slow accepted");
         result.evidence.push(WorkflowV2Evidence::new(
             WorkflowV2EvidenceKind::Inspection,
             "slow host call completed",
         ));
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: serde_json::to_string(&result).expect("result json"),
             tool_uses: Vec::new(),
             tokens_in: 1,

@@ -2,12 +2,12 @@ use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
 use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
-use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowLlmClientFactory,
-    WorkflowLlmClientRequest, WorkflowPolicy, WorkflowRun, WorkflowStageRunner, WorkflowStore,
+    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowLlmClient,
+    WorkflowLlmClientFactory, WorkflowLlmClientRequest, WorkflowPolicy, WorkflowRun,
+    WorkflowStageRunner, WorkflowStore,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -117,7 +117,7 @@ pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
 pub(crate) fn spawn_live_workflow(
     cwd: PathBuf,
     action: CommandAction,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: TuiEventSender,
     config_path: Option<PathBuf>,
 ) {
@@ -169,7 +169,7 @@ pub(crate) async fn run_live_cli_action(
     action: CommandAction,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
-    llm_factory: &dyn WorkflowLlmClientFactory<dyn LlmClient>,
+    llm_factory: &dyn WorkflowLlmClientFactory,
 ) -> Result<String> {
     let llm = llm_factory
         .build_client(WorkflowLlmClientRequest {
@@ -220,7 +220,7 @@ impl LiveApprovalMode {
 async fn run_live_action(
     cwd: &Path,
     action: CommandAction,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: TuiEventSender,
     config_path: Option<PathBuf>,
     generated_config: GeneratedWorkflowConfig,

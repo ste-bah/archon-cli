@@ -14,8 +14,6 @@ use archon_llm::provider::{
 };
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::ContentBlockType;
-use archon_pipeline::runner::{LlmClient, LlmResponse as PipelineLlmResponse};
-use archon_pipeline::subagent_adapter::SubagentPipelineClient;
 use archon_tools::subagent_executor::install_subagent_executor;
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 use archon_workflow::{WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2ResultStore};
@@ -160,21 +158,6 @@ impl Tool for FixtureDocumentTool {
     }
 }
 
-struct NoopFallback;
-
-#[async_trait::async_trait]
-impl LlmClient for NoopFallback {
-    async fn send_message(
-        &self,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: &str,
-    ) -> anyhow::Result<PipelineLlmResponse> {
-        anyhow::bail!("real subagent path must not use fallback")
-    }
-}
-
 #[test]
 fn workflow_v3_document_ingestion_uses_real_subagent_recovery() {
     run_isolated_fixture(TEST_NAME, FixtureScenario::ToolField);
@@ -259,18 +242,16 @@ async fn run_fixture(scenario: FixtureScenario) {
     );
     install_subagent_executor(Arc::new(executor));
 
-    let llm = SubagentPipelineClient::with_provider(
-        Arc::new(NoopFallback),
-        ToolContext {
-            working_dir: temp.path().to_path_buf(),
-            ..Default::default()
-        },
+    let llm = crate::command::pipeline_workflow_llm::subagent_workflow_client_for_test(
         provider.clone(),
+        "v3-compaction",
+        temp.path().to_path_buf(),
+        crate::command::pipeline_workflow_llm::TestClientFallback::Forbidden,
     );
     let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
     tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let client = LiveV2AgentClient::new(
-        Arc::new(llm),
+        llm,
         tui_tx,
         Vec::new(),
         "v3-compaction".into(),

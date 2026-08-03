@@ -117,6 +117,7 @@ pub(crate) mod pipeline_rewind;
 pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
+pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod provider_gate;
 pub(crate) mod workflow_mcp;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
@@ -250,7 +251,6 @@ pub(crate) mod workflow;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_live_learning_hooks;
 pub(crate) mod workflow_live_sona_tuning;
-pub(crate) mod workflow_llm_client_factory;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 

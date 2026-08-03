@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
 use archon_tui::event_channel::bounded_tui_event_channel;
 use archon_workflow::{
     BranchFailureKind, WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter,
     WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandRecord,
     WorkflowV2CommandStatus, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
 };
+use archon_workflow::{WorkflowAgentCall, WorkflowAgentOutcome, WorkflowLlmClient};
 
 use super::*;
 use crate::command::workflow_live::workflow_live_task_universe::{

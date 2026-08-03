@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, PipelineType};
 use archon_tools::provider_env::ProviderEnvResolution;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use archon_workflow::{
-    ProviderTier, StageKind, StageRunRequest, WorkflowV2AgentClient, WorkflowV2AgentError,
-    WorkflowV2AgentRequest, WorkflowV2HostMethod, WorkflowV2WriteMode,
+    ProviderTier, StageKind, StageRunRequest, WorkflowAgentCall, WorkflowLlmClient,
+    WorkflowProviderEnv, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
+    WorkflowV2HostMethod, WorkflowV2WriteMode,
 };
 
 use super::workflow_live_v2_artifact_paths::stamp_project_artifact_paths;
@@ -21,7 +21,7 @@ use super::super::workflow_live_runner_activity::activity_detail;
 
 #[derive(Clone)]
 pub(super) struct LiveV2AgentClient {
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     pub(super) tui_tx: TuiEventSender,
     provider_tier: ProviderTier,
     agent_names: Vec<String>,
@@ -33,7 +33,7 @@ pub(super) struct LiveV2AgentClient {
 
 impl LiveV2AgentClient {
     pub(super) fn new(
-        llm: Arc<dyn LlmClient>,
+        llm: Arc<dyn WorkflowLlmClient>,
         tui_tx: TuiEventSender,
         agent_names: Vec<String>,
         run_id: String,
@@ -197,9 +197,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         .await?;
         let prompt_parts =
             archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
-        let agent_request = AgentExecutionRequest {
+        let agent_request = WorkflowAgentCall {
             session_id: workflow_agent_session_id(&stage_request),
-            pipeline_type: PipelineType::Workflow,
             task: request.task.clone(),
             cwd: request_target_repository_root(&stage_request),
             ordinal: workflow_agent_ordinal(&stage_request),
@@ -221,7 +220,13 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             allowed_tools: allowed_tools(&stage_request),
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
-            provider_env_resolution: self.provider_env_resolution.clone(),
+            // Wrapped, not read: the port carries the host's resolution back to
+            // the host adapter without this layer or `archon-workflow` ever
+            // seeing the credential values inside it.
+            provider_env: self
+                .provider_env_resolution
+                .clone()
+                .map(WorkflowProviderEnv::new),
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,

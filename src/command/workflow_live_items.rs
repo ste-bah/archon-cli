@@ -1,20 +1,22 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
-use archon_workflow::{StageKind, StageRunRequest, WorkflowError};
+use archon_workflow::{
+    StageKind, StageRunRequest, WorkflowAgentCall, WorkflowAgentOutcome, WorkflowError,
+    WorkflowLlmClient,
+};
 use serde_json::{Value, json};
 
 use super::workflow_live_retry;
 use super::workflow_live_runner::workflow_stage_system_context;
 
 pub(super) async fn repair_item_output<Fut>(
-    llm: &Arc<dyn LlmClient>,
+    llm: &Arc<dyn WorkflowLlmClient>,
     request: &StageRunRequest,
-    agent_request: &AgentExecutionRequest,
-    first_response: LlmResponse,
+    agent_request: &WorkflowAgentCall,
+    first_response: WorkflowAgentOutcome,
     on_retry: impl FnMut(usize) -> Fut,
-) -> archon_workflow::WorkflowResult<LlmResponse>
+) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome>
 where
     Fut: std::future::Future<Output = archon_workflow::WorkflowResult<()>>,
 {
@@ -101,9 +103,9 @@ fn has_parseable_items_or_completed_items(body: &str) -> bool {
 
 fn fallback_read_only_discovery_items(
     request: &StageRunRequest,
-    first_response: LlmResponse,
-    mut repaired: LlmResponse,
-) -> Option<LlmResponse> {
+    first_response: WorkflowAgentOutcome,
+    mut repaired: WorkflowAgentOutcome,
+) -> Option<WorkflowAgentOutcome> {
     if request.stage_kind != StageKind::Agent || !request.depends_on.is_empty() {
         return None;
     }

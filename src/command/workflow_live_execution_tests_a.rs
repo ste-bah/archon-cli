@@ -78,7 +78,7 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
     });
 
     super::super::workflow_live_retry::send_message_with_transient_retry(
-        &(planner.clone() as Arc<dyn LlmClient>),
+        &(planner.clone() as Arc<dyn WorkflowLlmClient>),
         Vec::new(),
         Vec::new(),
         Vec::new(),

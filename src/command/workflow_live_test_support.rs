@@ -4,10 +4,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::Result;
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse};
 use archon_tui::event_channel::{TuiEventReceiver, bounded_tui_event_channel_with_capacity};
-use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
+use archon_workflow::{
+    ProviderTier, StageKind, StageRunRequest, WorkflowAgentCall, WorkflowAgentOutcome,
+    WorkflowLlmClient,
+};
 
 use super::workflow_live_runner::PipelineWorkflowRunner;
 
@@ -66,7 +67,7 @@ pub(crate) struct GuttedImplementationPlanner {
 
 pub(crate) struct InvalidItemsThenRepairAgentClient {
     pub(crate) calls: AtomicUsize,
-    pub(crate) requests: Mutex<Vec<AgentExecutionRequest>>,
+    pub(crate) requests: Mutex<Vec<WorkflowAgentCall>>,
 }
 
 pub(crate) struct BlockedInvalidItemsAgentClient {
@@ -80,15 +81,15 @@ pub(crate) struct AlwaysInvalidItemsAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for InvalidPlanner {
+impl WorkflowLlmClient for InvalidPlanner {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
-        Ok(LlmResponse {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(WorkflowAgentOutcome {
             content: r#"
 export default async function workflow(w) {
   await w.agent("bad", { model: "claude-opus-4-8", task: "inspect" });
@@ -103,19 +104,19 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for FlakyPlanner {
+impl WorkflowLlmClient for FlakyPlanner {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
-            anyhow::bail!(self.first_error);
+            return Err(archon_workflow::WorkflowError::port(self.first_error));
         }
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: r#"
 export default async function workflow(w) {
   await w.agent("discover", { role: "researcher", task: "inspect the repository" });
@@ -130,17 +131,17 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for PlannerRepairRetryClient {
+impl WorkflowLlmClient for PlannerRepairRetryClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match call {
-            0 => Ok(LlmResponse {
+            0 => Ok(WorkflowAgentOutcome {
                 content: "export default async function workflow(w) { invalid(); }".to_string(),
                 tool_uses: Vec::new(),
                 tokens_in: 1,
@@ -149,9 +150,11 @@ impl LlmClient for PlannerRepairRetryClient {
             1 => {
                 self.repair_started.notify_one();
                 self.release_repair.notified().await;
-                anyhow::bail!("LLM stream error (server_error): temporary repair failure")
+                Err(archon_workflow::WorkflowError::port(
+                    "LLM stream error (server_error): temporary repair failure",
+                ))
             }
-            _ => Ok(LlmResponse {
+            _ => Ok(WorkflowAgentOutcome {
                 content: r#"export default async function workflow(w) {
   await w.agent("discover", { role: "researcher", task: "inspect" });
 }"#
@@ -165,16 +168,16 @@ impl LlmClient for PlannerRepairRetryClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for GuttedImplementationPlanner {
+impl WorkflowLlmClient for GuttedImplementationPlanner {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: r#"
 export default async function workflow(w) {
   const inventory = await w.agent("inventory", { role: "planner", task: "Return one JSON object with data.items for implementation fanout." });
@@ -193,23 +196,28 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for FlakyAgentClient {
+impl WorkflowLlmClient for FlakyAgentClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
-        anyhow::bail!("test should use run_agent");
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Err(archon_workflow::WorkflowError::port(
+            "test should use run_agent",
+        ))
     }
 
-    async fn run_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(
+        &self,
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
-            anyhow::bail!(self.first_error);
+            return Err(archon_workflow::WorkflowError::port(self.first_error));
         }
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "status: completed".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -219,21 +227,24 @@ impl LlmClient for FlakyAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CompletionBlockedAgentClient {
+impl WorkflowLlmClient for CompletionBlockedAgentClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         unreachable!("test uses run_agent")
     }
 
-    async fn run_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(
+        &self,
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.started.notify_one();
         self.release.notified().await;
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "status: completed".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -243,16 +254,16 @@ impl LlmClient for CompletionBlockedAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for SavedV2TemplateRunClient {
+impl WorkflowLlmClient for SavedV2TemplateRunClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: serde_json::json!({
                 "status": "accepted",
                 "summary": "Saved V2 command inspected concrete repository state.",
@@ -283,16 +294,16 @@ impl LlmClient for SavedV2TemplateRunClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for GeneratedV2WorktreeRunClient {
+impl WorkflowLlmClient for GeneratedV2WorktreeRunClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.planner_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: r#"
 export default async function workflow(w) {
   const inventory = await w.agent("inventory", { role: "planner", task: "Return typed implementation inventory." });
@@ -307,7 +318,10 @@ export default async function workflow(w) {
         })
     }
 
-    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(
+        &self,
+        request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.agent_calls.fetch_add(1, Ordering::SeqCst);
         let content = match call {
             0 => serde_json::json!({
@@ -339,7 +353,8 @@ export default async function workflow(w) {
                 std::fs::write(
                     cwd.join("src/lib.rs"),
                     "pub fn generated_worktree_value() -> usize { 1 }\n",
-                )?;
+                )
+                .map_err(archon_workflow::WorkflowError::port)?;
                 *self.implementation_cwd.lock().expect("cwd lock") = Some(cwd);
                 serde_json::json!({
                     "status": "accepted",
@@ -380,7 +395,7 @@ export default async function workflow(w) {
             }
             _ => unreachable!("unexpected worktree agent call"),
         };
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -411,7 +426,9 @@ pub(crate) fn request(input: serde_json::Value) -> StageRunRequest {
     }
 }
 
-pub(crate) fn runner(llm: Arc<dyn LlmClient>) -> (PipelineWorkflowRunner, TuiEventReceiver) {
+pub(crate) fn runner(
+    llm: Arc<dyn WorkflowLlmClient>,
+) -> (PipelineWorkflowRunner, TuiEventReceiver) {
     let (tui_tx, tui_rx) = bounded_tui_event_channel_with_capacity(16);
     (
         PipelineWorkflowRunner {
@@ -425,7 +442,7 @@ pub(crate) fn runner(llm: Arc<dyn LlmClient>) -> (PipelineWorkflowRunner, TuiEve
 }
 
 pub(crate) fn boundary_runner(
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
 ) -> (PipelineWorkflowRunner, TuiEventReceiver) {
     let (mut runner, tui_rx) = runner(llm);
     runner.workspace_boundary_supported = true;

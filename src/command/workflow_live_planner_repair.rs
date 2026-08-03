@@ -47,7 +47,7 @@ async fn send_planner_notification(
 pub(crate) async fn plan_live(
     store: &WorkflowStore,
     task: &str,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
@@ -223,7 +223,7 @@ fn record_planner_failure(
 async fn llm_plan(
     task: &str,
     task_universe: Option<WorkflowV2TaskUniverse>,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: &TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
@@ -273,7 +273,7 @@ async fn validate_or_repair_harness(
     task: &str,
     task_universe: Option<WorkflowV2TaskUniverse>,
     raw: String,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: &TuiEventSender,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
@@ -390,7 +390,7 @@ async fn request_repaired_harness(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     invalid_harness: &str,
     error: String,
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<dyn WorkflowLlmClient>,
     tui_tx: &TuiEventSender,
 ) -> Result<String> {
     let response = workflow_live_retry::send_message_with_transient_retry(

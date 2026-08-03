@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use archon_pipeline::runner::LlmClient;
+use archon_workflow::WorkflowLlmClient;
 use archon_workflow::{
     CommandAction, GeneratedWorkflowKind, LifecycleAction, LifecycleController, ProviderTier,
     RunStatus, StageKind, StageRunRequest, WorkflowApprovalStore, WorkflowBundle,

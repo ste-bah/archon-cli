@@ -3,16 +3,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use archon_pipeline::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType};
+use archon_workflow::{WorkflowAgentCall, WorkflowAgentOutcome, WorkflowLlmClient};
 use serde_json::Value;
 
 const LIVE_AGENT_TRANSIENT_ATTEMPTS: usize = 3;
 
 pub(crate) async fn run_agent_with_transient_retry<F, Fut>(
-    llm: &Arc<dyn LlmClient>,
-    agent_request: AgentExecutionRequest,
+    llm: &Arc<dyn WorkflowLlmClient>,
+    agent_request: WorkflowAgentCall,
     mut on_retry: F,
-) -> archon_workflow::WorkflowResult<LlmResponse>
+) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome>
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = archon_workflow::WorkflowResult<()>>,
@@ -41,13 +41,13 @@ where
 }
 
 pub(crate) async fn send_message_with_transient_retry<F, Fut>(
-    llm: &Arc<dyn LlmClient>,
+    llm: &Arc<dyn WorkflowLlmClient>,
     messages: Vec<Value>,
     system: Vec<Value>,
     tools: Vec<Value>,
     model: &str,
     mut on_retry: F,
-) -> Result<LlmResponse>
+) -> Result<WorkflowAgentOutcome>
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = Result<()>>,
@@ -67,7 +67,7 @@ where
                     tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
                     continue;
                 }
-                return Err(error);
+                return Err(error.into());
             }
         }
     }
@@ -103,14 +103,14 @@ pub(crate) fn transient_live_agent_error(message: &str) -> bool {
     .any(|needle| text.contains(needle))
 }
 
+/// The pipeline-type guard this used to carry is gone with the concrete
+/// request type: every call routed through here is a workflow stage, so the
+/// check was always true and only the auto-background flag ever decided.
 pub(crate) fn transient_live_agent_error_for_request(
-    request: &AgentExecutionRequest,
+    request: &WorkflowAgentCall,
     message: &str,
 ) -> bool {
-    if request.pipeline_type == PipelineType::Workflow
-        && request.disable_auto_background
-        && foreground_subagent_timeout_or_cancel(message)
-    {
+    if request.disable_auto_background && foreground_subagent_timeout_or_cancel(message) {
         return false;
     }
     transient_live_agent_error(message)
@@ -126,7 +126,7 @@ fn foreground_subagent_timeout_or_cancel(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_pipeline::runner::{AgentInfo, ToolAccessLevel};
+    use archon_workflow::{WorkflowAgentSpec, WorkflowAgentToolAccess};
 
     #[test]
     fn workflow_foreground_subagent_timeout_is_not_transient_retry() {
@@ -152,15 +152,14 @@ mod tests {
         ));
     }
 
-    fn request(disable_auto_background: bool) -> AgentExecutionRequest {
-        AgentExecutionRequest {
+    fn request(disable_auto_background: bool) -> WorkflowAgentCall {
+        WorkflowAgentCall {
             session_id: "run".to_string(),
-            pipeline_type: PipelineType::Workflow,
             task: "branch".to_string(),
             cwd: None,
             ordinal: 1,
             attempt: 1,
-            agent: AgentInfo {
+            agent: WorkflowAgentSpec {
                 key: "coder".to_string(),
                 display_name: "Coder".to_string(),
                 model: "sonnet".to_string(),
@@ -168,7 +167,7 @@ mod tests {
                 critical: true,
                 parallelizable: true,
                 quality_threshold: 0.8,
-                tool_access_level: ToolAccessLevel::Full,
+                tool_access: WorkflowAgentToolAccess::Full,
             },
             messages: Vec::new(),
             system: Vec::new(),
@@ -176,7 +175,7 @@ mod tests {
             allowed_tools: Vec::new(),
             timeout_secs: Some(7200),
             disable_auto_background,
-            provider_env_resolution: None,
+            provider_env: None,
         }
     }
 }

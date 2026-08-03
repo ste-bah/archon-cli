@@ -2,72 +2,12 @@ use super::*;
 
 pub(super) const CANARY_TEST: &str = "command::workflow_live::workflow_live_canary_tests::usage_tests::canary_wf_afae6bee_provider_ledger";
 pub(super) const CANARY_CHILD_ENV: &str = "ARCHON_CANARY_USAGE_CHILD";
-const CANARY_USAGE_SCOPE: &str = "wf-afae6bee-measurement";
-
-#[derive(Clone)]
-pub(super) struct ScopedCanaryClient {
-    inner: Arc<dyn LlmClient>,
-}
-
-impl ScopedCanaryClient {
-    pub(super) fn new(inner: Arc<dyn LlmClient>) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl LlmClient for ScopedCanaryClient {
-    fn provider_id(&self) -> Option<String> {
-        self.inner.provider_id()
-    }
-
-    fn resolve_model_alias(&self, model: &str) -> String {
-        self.inner.resolve_model_alias(model)
-    }
-
-    async fn send_message(
-        &self,
-        messages: Vec<serde_json::Value>,
-        system: Vec<serde_json::Value>,
-        tools: Vec<serde_json::Value>,
-        model: &str,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        let request = archon_pipeline::runner::AgentExecutionRequest {
-            pipeline_type: archon_pipeline::runner::PipelineType::Workflow,
-            session_id: CANARY_USAGE_SCOPE.into(),
-            cwd: None,
-            task: "controlled canary planner call".into(),
-            ordinal: 0,
-            attempt: 1,
-            agent: archon_pipeline::runner::AgentInfo {
-                key: "planner".into(),
-                display_name: "Planner".into(),
-                model: model.into(),
-                phase: 0,
-                critical: true,
-                parallelizable: false,
-                quality_threshold: 0.0,
-                tool_access_level: archon_pipeline::runner::ToolAccessLevel::ReadOnly,
-            },
-            messages,
-            system,
-            tools,
-            allowed_tools: Vec::new(),
-            timeout_secs: None,
-            disable_auto_background: true,
-            provider_env_resolution: None,
-        };
-        self.inner.run_agent(request).await
-    }
-
-    async fn run_agent(
-        &self,
-        mut request: archon_pipeline::runner::AgentExecutionRequest,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        request.session_id = CANARY_USAGE_SCOPE.into();
-        self.inner.run_agent(request).await
-    }
-}
+/// Every provider call this fixture makes is attributed here, so the ledger
+/// assertion counts exactly its own traffic. The client that enforces it lives
+/// with the pipeline adapter it wraps
+/// ([`crate::command::pipeline_workflow_llm::TestClientFallback::ProviderScopedTo`]),
+/// because wrapping an `archon_pipeline` client is host work.
+pub(super) const CANARY_USAGE_SCOPE: &str = "wf-afae6bee-measurement";
 
 pub(super) struct CanaryProvider {
     script: Arc<CanaryAgentClient>,
