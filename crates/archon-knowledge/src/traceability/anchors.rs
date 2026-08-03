@@ -148,6 +148,13 @@ pub enum AnchorGap {
     NoHitInScope { task_id: String },
     /// No task claims this requirement at all.
     Unclaimed,
+    /// No code index was consulted, so no anchor could exist.
+    ///
+    /// Distinct from [`AnchorGap::NoHitInScope`], and the distinction matters:
+    /// "we did not look" and "we looked and found nothing" are different facts,
+    /// and reporting the first as the second would understate the code without
+    /// evidence.
+    IndexNotConsulted,
 }
 
 /// Anchor one requirement inside one task's declared paths.

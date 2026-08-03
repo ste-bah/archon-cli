@@ -47,6 +47,22 @@
 //! Letting a number stand in for a trace would reproduce F1 with better maths
 //! behind it, which is the one failure mode this module exists to prevent.
 //!
+//! # Why `scan_claims` is not wired in
+//!
+//! [`crate::contradiction_scanner::scan_claims`] was the obvious reuse, and it
+//! does not fit. It pairs [`crate::schema::ClaimRecord`]s with equal
+//! `normalized_subject` and `normalized_predicate` and opposite polarity —
+//! a contradiction between two *assertions*. An anchor edge has no polarity: two
+//! anchors for one requirement are corroboration, not disagreement, and there is
+//! no negative form of "this code is about this requirement" for them to
+//! contradict. Forcing requirements through the claim shape would produce
+//! polarity fields that mean nothing and contradictions that are artefacts of
+//! the encoding.
+//!
+//! The contradiction that actually matters here is F1's, and it is a different
+//! shape: one span standing in as evidence for many requirements.
+//! [`report::find_shared_anchors`] computes it directly from the graph.
+//!
 //! # Indexing runs out of band
 //!
 //! Nothing here indexes anything. [`anchors::CodeSearch`] is a read-only port;

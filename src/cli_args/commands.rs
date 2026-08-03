@@ -4,8 +4,8 @@ use super::{
     AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CognitiveAction,
     CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
     MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
-    ProvidersAction, ReasoningAction, RemoteAction, SandboxAction, SelfAction, StyleAction,
-    TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
+    ProvidersAction, ReasoningAction, RemoteAction, RequirementsAction, SandboxAction, SelfAction,
+    StyleAction, TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]
@@ -258,6 +258,11 @@ pub enum Commands {
     Trading {
         #[command(subcommand)]
         action: TradingCliAction,
+    },
+    /// Trace PRD requirements to code with a proof ladder
+    Requirements {
+        #[command(subcommand)]
+        action: RequirementsAction,
     },
     /// Inspect and export provenance traces
     Prov {

@@ -39,6 +39,9 @@ pub struct AnchorVerdict {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequirementRow {
     pub requirement_id: String,
+    /// 1-based line of the requirement's bullet in the PRD. The requirement's
+    /// own citation: a requirement is as citable as the code it points at.
+    pub prd_line: usize,
     pub severity: Severity,
     pub severity_evidence: Option<String>,
     /// Tasks claiming this requirement via `implements:`.
@@ -111,6 +114,9 @@ fn describe_anchor_gap(gap: &AnchorGap) -> String {
         AnchorGap::NoHitInScope { task_id } => {
             format!("the code index returned nothing inside {task_id}'s declared paths")
         }
+        AnchorGap::IndexNotConsulted => "no code index was consulted (--leann-db not given), \
+             so no anchor could exist; this says nothing about whether the code is there"
+            .to_string(),
     }
 }
 

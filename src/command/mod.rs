@@ -149,6 +149,12 @@ pub(crate) mod reasoning_label;
 pub(crate) mod refresh;
 pub(crate) mod remote;
 pub(crate) mod rename;
+/// Phase 6 traceability: `archon requirements trace`. Read-only over a PRD, a
+/// task directory and an already-built code index. It never indexes — that
+/// holds the Cozo write lock across a whole `multi_transaction` — and it never
+/// fails a run, because an unproven requirement is a declared residual gap
+/// (PRD §32), not a failure and not a pass.
+pub(crate) mod requirement_trace;
 pub(crate) mod resume;
 // TASK-HOTFIX-V0.1.7: /run-agent primary command (#248).
 /// `/archon-code` — 50-agent coding pipeline TUI primary.

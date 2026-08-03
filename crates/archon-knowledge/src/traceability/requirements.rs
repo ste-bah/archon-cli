@@ -174,11 +174,17 @@ fn classify(text: &str) -> (Severity, Option<String>) {
 /// other direction. A requirement that cannot be cited has no business being a
 /// node.
 pub fn requirement_entity(requirement: &Requirement, prd_path: &str) -> EntityRecord {
+    requirement_entity_for(&requirement.id, requirement.line, prd_path)
+}
+
+/// The same projection from the parts a report row keeps, so persistence does
+/// not have to reconstruct a [`Requirement`] it no longer holds.
+pub fn requirement_entity_for(id: &str, line: usize, prd_path: &str) -> EntityRecord {
     EntityRecord {
-        entity_id: stable_id("req", &[prd_path, &requirement.id]),
-        name: requirement.id.clone(),
+        entity_id: stable_id("req", &[prd_path, id]),
+        name: id.to_string(),
         entity_type: REQUIREMENT_ENTITY_TYPE.to_string(),
-        source_chunk_id: format!("{prd_path}#L{}", requirement.line),
+        source_chunk_id: format!("{prd_path}#L{line}"),
         mentions: 1,
         // 1.0 because extraction is a regex over a literal grammar, not an
         // estimate. This field means "how sure are we the node exists", and a

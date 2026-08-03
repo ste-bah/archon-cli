@@ -29,6 +29,7 @@ fn row(req: &str, anchors: Vec<AnchorVerdict>) -> RequirementRow {
     let level = strongest_level(&anchors);
     RequirementRow {
         requirement_id: req.into(),
+        prd_line: 1,
         severity: Severity::Unclassified,
         severity_evidence: None,
         claimed_by: vec!["TASK-A".into()],
