@@ -7,14 +7,15 @@
 //!
 //! # This extends the write coordinator; it does not reimplement it
 //!
-//! `archon-workflow`'s `write_coordinator` already answers "do these two write
-//! sets overlap?" properly, with a resource-key overlap table covering
-//! file/dir/glob combinations
-//! (`write_coordinator::write_plan::keys_conflict`). Admission calls that table
-//! rather than carrying a second opinion. `archon-topology`'s own
-//! `TaskGraph::write_conflicts` uses exact-string overlap and says so — that is
-//! the conservative floor available under milestone 1's dependency budget, not
-//! a rival algorithm.
+//! `archon-write-plan` already answers "do these two write sets overlap?"
+//! properly, with a resource-key overlap table covering file/dir/glob
+//! combinations (`archon_write_plan::write_plan::keys_conflict`). It is the same
+//! table the write coordinator plans by; it lives in its own leaf crate
+//! precisely so both callers share it without a dependency edge between them.
+//! Admission calls it rather than carrying a second opinion.
+//! `archon-topology`'s own `TaskGraph::write_conflicts` uses exact-string
+//! overlap and says so — that is the conservative floor available under
+//! milestone 1's dependency budget, not a rival algorithm.
 //!
 //! What admission adds is a hot-path-safe way to *build* a key:
 //! `write_plan::resource_key_for_raw_target`, which does the same folding and
@@ -42,8 +43,8 @@
 use super::LiveTopologyConfig;
 use super::state::SessionState;
 use super::verdict::{Invariant, Verdict, WriteIntent};
-use archon_workflow::write_coordinator::shared_append::shared_append_key_for_raw_target;
-use archon_workflow::write_coordinator::write_plan::{ResourceKey, resource_key_for_raw_target};
+use archon_write_plan::shared_append::shared_append_key_for_raw_target;
+use archon_write_plan::write_plan::{ResourceKey, resource_key_for_raw_target};
 
 /// Admit a write, claiming its paths when admitted.
 pub(super) fn admit_write(

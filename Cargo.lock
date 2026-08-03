@@ -1076,6 +1076,7 @@ name = "archon-topology"
 version = "1.4.0"
 dependencies = [
  "archon-workflow",
+ "archon-write-plan",
  "dashmap 6.1.0",
  "petgraph",
  "serde",
@@ -1203,13 +1204,13 @@ name = "archon-workflow"
 version = "1.4.0"
 dependencies = [
  "archon-llm",
+ "archon-write-plan",
  "async-trait",
  "blake3",
  "chrono",
  "fd-lock",
  "futures-util",
  "glob",
- "globset",
  "hex",
  "libc",
  "regex",
@@ -1251,6 +1252,17 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "archon-write-plan"
+version = "1.4.0"
+dependencies = [
+ "globset",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

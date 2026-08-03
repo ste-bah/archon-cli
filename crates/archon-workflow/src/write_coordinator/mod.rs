@@ -4,19 +4,27 @@
 //! canonical id aliases shared by every coordinator task. Coordinator behavior
 //! (worktree isolation, conflict graph, patch capture/apply) lives in sibling
 //! modules added by later tasks.
+//!
+//! # `write_plan` and `shared_append` are re-exports
+//!
+//! Both modules moved into the `archon-write-plan` leaf crate, because live
+//! admission in `archon-topology` needs the same overlap table and reaching it
+//! through this crate closed a dependency cycle (see that crate's docs). They
+//! are re-exported here under their original paths, so
+//! `write_coordinator::write_plan::…` and `write_coordinator::shared_append::…`
+//! still resolve for every existing caller.
 
 pub mod config;
 pub mod conflict_graph;
 pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
-pub mod shared_append;
 pub mod status;
 pub mod worktree_isolation;
-pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
+pub use archon_write_plan::{ItemId, shared_append, write_plan};
 pub use config::WriteCoordinatorConfig;
 pub use conflict_graph::{Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps};
 pub use coordinator::{
@@ -36,9 +44,6 @@ pub use write_plan::{
     NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError, fold_resource_case,
     keys_conflict, resource_key_for_raw_target,
 };
-
-/// Canonical fan-out item identifier (matches `FanoutItem.id`).
-pub type ItemId = String;
 
 /// Canonical wave index within a coordinated implementation fanout.
 pub type WaveId = u32;

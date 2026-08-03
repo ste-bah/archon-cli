@@ -41,7 +41,7 @@
 
 use std::collections::BTreeSet;
 
-use super::write_plan::{
+use crate::write_plan::{
     NormalizedPath, ResourceKey, WritePlanError, fold_resource_case, resource_keys_for_targets,
 };
 
@@ -92,7 +92,7 @@ pub fn shared_append_key(target: &NormalizedPath) -> ResourceKey {
 /// The shared-append key for a raw declared path, **touching no filesystem**.
 ///
 /// The counterpart of
-/// [`resource_key_for_raw_target`](super::write_plan::resource_key_for_raw_target),
+/// [`resource_key_for_raw_target`](crate::write_plan::resource_key_for_raw_target),
 /// for milestone 3 admission, which is synchronous on the critical path of
 /// every non-`Safe` tool call and cannot canonicalise. Separators unified and
 /// case folded the same way, so a key built here and a key built from a
@@ -100,7 +100,7 @@ pub fn shared_append_key(target: &NormalizedPath) -> ResourceKey {
 ///
 /// A raw target carrying glob metacharacters still becomes a `SharedAppend`
 /// key here rather than being silently downgraded — and
-/// [`keys_conflict`](super::write_plan::keys_conflict) then treats it as
+/// [`keys_conflict`](crate::write_plan::keys_conflict) then treats it as
 /// conflicting with everything, because a pattern is not a coordinated claim on
 /// a file. Downgrading it to `Glob` would be the fail-open reading.
 #[must_use]

@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::ItemId;
+use crate::ItemId;
 
 /// WC-ERR-* taxonomy (PRD-012 §19).
 #[derive(Debug, Error)]
@@ -76,7 +76,7 @@ pub enum ResourceKey {
     /// Nothing produces this key by default. Every declaration surface starts
     /// exclusive ([`ResourceKey::File`]) and has to name a path explicitly to
     /// move it here, so a path never becomes concurrent by accident — see
-    /// [`super::shared_append`].
+    /// [`crate::shared_append`].
     ///
     /// Overlap rules, and no others:
     ///

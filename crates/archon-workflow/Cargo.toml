@@ -6,13 +6,17 @@ publish = false
 
 [dependencies]
 archon-llm = { path = "../archon-llm" }
+# The write coordinator's resource keys and overlap table. Extracted to a leaf
+# crate because `archon-topology`'s live admission has to reach the same table,
+# and reaching it through this crate closed a dependency cycle. Re-exported from
+# `write_coordinator` so every existing call site keeps its path.
+archon-write-plan = { path = "../archon-write-plan" }
 async-trait.workspace = true
 blake3.workspace = true
 chrono.workspace = true
 fd-lock.workspace = true
 futures-util.workspace = true
 glob.workspace = true
-globset.workspace = true
 hex.workspace = true
 libc = "0.2"
 regex.workspace = true
