@@ -22,10 +22,21 @@
 //! trace. Nothing here indexes; see [`leann_source`] for why that is enforced at
 //! the point of construction rather than by convention.
 //!
-//! `--persist` is the only write, and it writes to a knowledge store the caller
-//! names, never to the code index.
+//! `--persist` is the only write in the default configuration, and it writes to
+//! a knowledge store the caller names, never to the code index.
+//!
+//! # The one exception, and why it is a flag
+//!
+//! `--falsify` executes the falsification plans: it mutates an anchored file,
+//! runs the verifier the task declared, and restores. That is the opposite of
+//! read-only, which is why it is off unless a person types it. Without the flag
+//! nothing in [`falsify`] runs and the output — text and JSON alike — is
+//! byte-identical to what it was before the flag existed. The module documents
+//! what it refuses to do (a dirty file, a workspace-wide command) and what
+//! happens on every path out of a mutation.
 
 mod evidence;
+mod falsify;
 mod leann_source;
 mod render;
 mod slash;
@@ -60,6 +71,12 @@ pub(crate) struct TraceOptions {
     pub(crate) leann_db: Option<PathBuf>,
     /// Knowledge store to persist entities and anchors into.
     pub(crate) persist: Option<PathBuf>,
+    /// Execute the falsification plans instead of only printing them.
+    ///
+    /// The one option here that writes to the working tree, and the only reason
+    /// the rest of this struct can still be described as read-only. Off unless
+    /// a person typed `--falsify`; see [`falsify`] for what "off" has to mean.
+    pub(crate) falsify: bool,
     /// Emit the report model as JSON rather than text.
     pub(crate) json: bool,
     /// Hits requested per declared path scope.
@@ -79,6 +96,7 @@ impl TraceOptions {
             evidence: None,
             leann_db: None,
             persist: None,
+            falsify: false,
             json: false,
             limit_per_scope: 3,
             max_scopes: 8,
@@ -102,6 +120,7 @@ pub(crate) fn handle_requirements_command(
         evidence,
         leann_db,
         persist,
+        falsify,
         json,
         limit_per_scope,
         max_scopes,
@@ -113,6 +132,7 @@ pub(crate) fn handle_requirements_command(
         evidence: evidence.clone(),
         leann_db: leann_db.clone(),
         persist: persist.clone(),
+        falsify: *falsify,
         json: *json,
         limit_per_scope: *limit_per_scope,
         max_scopes: *max_scopes,
@@ -123,7 +143,12 @@ pub(crate) fn handle_requirements_command(
 
 /// Build and render the report.
 pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<String> {
-    let report = build_report(cwd, options)?;
+    let mut report = build_report(cwd, options)?;
+    // Before `--persist`, so a store written in the same invocation records the
+    // level the experiment established rather than the one it started from.
+    if options.falsify {
+        falsify::execute_plans(cwd, &mut report);
+    }
     if let Some(store_path) = &options.persist {
         persist(cwd, store_path, &report)?;
     }
@@ -285,6 +310,9 @@ fn build_row(
             proof,
             missing,
             falsification,
+            // Populated only by `--falsify`, and only after the whole report
+            // exists: a plan is decided by running it, not by building a row.
+            falsification_outcome: None,
         });
     }
     row.level = strongest_level(&row.anchors);

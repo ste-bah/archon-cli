@@ -33,8 +33,9 @@
 //!   generic evidence repeated across `REQ-DL-001..004` cannot promote four
 //!   requirements at once.
 //! - `Falsifiable` — breaking the anchored code breaks the verifier. Planned
-//!   here ([`falsification`]), never executed here, and an unexecuted plan
-//!   promotes nothing.
+//!   here ([`falsification`]) and never executed here: the mutation, the
+//!   process and the restore live behind `archon requirements trace --falsify`
+//!   in the command layer. An unexecuted plan still promotes nothing.
 //!
 //! The rule that an unproven edge never satisfies a gate is the same rule
 //! REQ-BT-003 already applies to diagnostic overrides.
@@ -83,7 +84,9 @@ pub mod tasks;
 
 pub use anchors::{Anchor, AnchorFreshness, CodeHit, CodeSearch};
 pub use coverage::{CoverageReport, PhantomCitation};
-pub use falsification::{FalsificationPlan, MutationKind};
+pub use falsification::{
+    FalsificationOutcome, FalsificationPlan, Inconclusive, MutationKind, RefusedToRun,
+};
 pub use ladder::{
     CommandEvidence, ExercisedProof, MissingForPromotion, ProofLevel, ReadEvidence, ReadScope,
 };

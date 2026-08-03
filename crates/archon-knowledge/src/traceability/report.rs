@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use super::anchors::{Anchor, AnchorFreshness, AnchorGap};
 use super::coverage::CoverageReport;
-use super::falsification::{FalsificationPlan, NotPlannable};
+use super::falsification::{FalsificationOutcome, FalsificationPlan, NotPlannable};
 use super::ladder::{ExercisedProof, MissingForPromotion, ProofLevel};
 use super::requirements::Severity;
 
@@ -33,6 +33,16 @@ pub struct AnchorVerdict {
     pub proof: Option<ExercisedProof>,
     pub missing: Option<MissingForPromotion>,
     pub falsification: std::result::Result<FalsificationPlan, NotPlannable>,
+    /// What running the plan established, when it was run at all.
+    ///
+    /// `None` is the default and the overwhelming case: `--falsify` is opt-in,
+    /// and without it nothing here is ever populated. It is skipped on
+    /// serialisation rather than emitted as `null` so that a report produced
+    /// without the flag is byte-identical to one produced before the flag
+    /// existed — an opt-in that changed the read-only output would not be
+    /// opt-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub falsification_outcome: Option<FalsificationOutcome>,
 }
 
 /// One requirement's whole story.
