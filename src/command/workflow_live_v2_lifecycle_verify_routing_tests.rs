@@ -161,7 +161,7 @@ fn terminal_blocker_blocks_only_when_no_actionable_route_remains() {
 
 #[test]
 fn triage_prompt_forbids_first_sight_retryable_terminal_blockers() {
-    let prompt = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+    let prompt = archon_workflow::v2::lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
 
     assert!(prompt.contains("Never emit a terminal_blocker"));
     assert!(prompt.contains("at least two retry generations"));
@@ -296,10 +296,10 @@ fn merged_unretried_failure_does_not_count_as_reproduced() {
 #[test]
 fn verification_prompts_require_d2_failure_fields() {
     let prompts = [
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::REVIEW_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::REVIEW_VERIFICATION_WAVE_TASK,
     ];
     for prompt in prompts {
         assert!(prompt.contains("pass_fail_count"));
@@ -310,7 +310,7 @@ fn verification_prompts_require_d2_failure_fields() {
 
 #[test]
 fn repair_prompt_requires_write_route_for_reproduced_failures() {
-    let prompt = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REPAIR_PLAN_TASK;
+    let prompt = archon_workflow::v2::lifecycle_prompts::VERIFICATION_REPAIR_PLAN_TASK;
 
     assert!(prompt.contains("consistently reproduced"));
     assert!(prompt.contains("route: write_remediation"));
@@ -318,8 +318,7 @@ fn repair_prompt_requires_write_route_for_reproduced_failures() {
 
 #[test]
 fn provider_remediation_requires_host_grounded_redacted_proof() {
-    let prompt =
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK;
+    let prompt = archon_workflow::v2::lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK;
 
     assert!(prompt.contains("host-injected run-scoped provider environment"));
     assert!(prompt.contains("provider_env_proof"));
@@ -329,9 +328,9 @@ fn provider_remediation_requires_host_grounded_redacted_proof() {
 #[test]
 fn d45_keyless_and_or_unavailable_contracts_are_accepted_at_source() {
     let prompts = [
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_PLAN_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_REMEDIATION_WAVE_TASK,
     ];
 
     assert!(
@@ -349,11 +348,11 @@ fn d45_keyless_and_or_unavailable_contracts_are_accepted_at_source() {
 #[test]
 fn d48_d49_verifier_prompts_search_branch_proofs_and_follow_manifest_pointer() {
     let prompts = [
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::FINAL_EVIDENCE_RECONCILIATION_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::FINAL_ZERO_GAP_AUDIT_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_PLAN_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::FINAL_EVIDENCE_RECONCILIATION_TASK,
+        archon_workflow::v2::lifecycle_prompts::FINAL_ZERO_GAP_AUDIT_TASK,
     ];
 
     assert!(

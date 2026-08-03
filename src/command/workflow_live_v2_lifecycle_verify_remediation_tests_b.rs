@@ -122,7 +122,7 @@ fn d32_unprovable_supersede_requires_one_bounded_retriage() {
 
 #[test]
 fn d32_triage_prompt_routes_stale_filters_to_corrected_retries() {
-    let prompt = workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+    let prompt = archon_workflow::v2::lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
 
     assert!(prompt.contains("zero-match"));
     assert!(prompt.contains("repository-search-verified"));

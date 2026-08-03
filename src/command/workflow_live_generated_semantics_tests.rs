@@ -1,7 +1,4 @@
-#[allow(dead_code)]
-#[allow(clippy::duplicate_mod)]
-#[path = "workflow_live_v2_lifecycle_prompts.rs"]
-mod prompts;
+use archon_workflow::v2::lifecycle_prompts as prompts;
 
 #[test]
 fn workflow_live_generated_semantics_verifier_prompts_forbid_vague_artifact_fields() {

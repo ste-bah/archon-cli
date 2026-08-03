@@ -9,7 +9,7 @@ pub(super) use super::super::super::workflow_live_generated_lifecycle_remediatio
 pub(super) use super::super::super::workflow_live_generated_lifecycle_support as support;
 pub(super) use super::super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
 pub(super) use super::super::super::workflow_live_semantic_preservation as semantic_preservation;
-pub(super) use super::workflow_live_v2_lifecycle_prompts as prompts;
+pub(super) use archon_workflow::v2::lifecycle_prompts as prompts;
 
 pub(super) const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
 

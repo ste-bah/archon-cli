@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::{
-    LifecycleDriver, LifecycleEvidence, support, workflow_live_v2_lifecycle_prompts as prompts,
-};
+use archon_workflow::v2::lifecycle_prompts as prompts;
+
+use super::{LifecycleDriver, LifecycleEvidence, support};
 
 const REVIEW_VERIFICATION_EXECUTION_RETRIES: usize = 2;
 

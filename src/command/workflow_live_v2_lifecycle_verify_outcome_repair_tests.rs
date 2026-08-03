@@ -63,7 +63,7 @@ fn d33_followup_replaces_only_the_failed_remediation_outcome() {
 
 #[test]
 fn d33_prompt_requires_split_or_retry_for_mechanical_contract_failure() {
-    let prompt = workflow_live_v2_lifecycle_prompts::REMEDIATION_OUTCOME_REPAIR_TASK;
+    let prompt = archon_workflow::v2::lifecycle_prompts::REMEDIATION_OUTCOME_REPAIR_TASK;
 
     assert!(prompt.contains("size/format/complexity"));
     assert!(prompt.contains("split"));

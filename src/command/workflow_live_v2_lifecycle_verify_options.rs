@@ -256,7 +256,7 @@ fn templated_path_matches(template: &str, cited: &str, root: &str) -> bool {
 }
 
 pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -> Value {
-    let task = super::workflow_live_v2_lifecycle_prompts::ground_host_manifest_schema(task);
+    let task = archon_workflow::v2::lifecycle_prompts::ground_host_manifest_schema(task);
     let mut options = serde_json::json!({ "tier": "coder", "task": task });
     if focused {
         options["itemKind"] = Value::String("focused_verification".to_string());

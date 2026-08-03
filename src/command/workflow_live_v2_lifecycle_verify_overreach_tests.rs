@@ -73,8 +73,8 @@ fn explicit_task_id_artifact_contract_remains_actionable() {
 
 #[test]
 fn d36_prompts_ground_artifact_fields_in_task_contracts() {
-    let plan = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK;
-    let triage = super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+    let plan = archon_workflow::v2::lifecycle_prompts::VERIFICATION_PLAN_TASK;
+    let triage = archon_workflow::v2::lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
 
     assert!(plan.to_ascii_lowercase().contains("task"));
     assert!(plan.contains("Raw external payloads"));
@@ -111,15 +111,14 @@ fn d54_routes_host_manifest_schema_overreach_to_grounded_retry() {
 #[test]
 fn d54_verification_prompts_whitelist_the_host_manifest_schema() {
     let prompts = [
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_PLAN_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::POST_REMEDIATION_VERIFICATION_PLAN_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
-        super::super::workflow_live_v2_lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_PLAN_TASK,
+        archon_workflow::v2::lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::POST_REMEDIATION_VERIFICATION_PLAN_TASK,
+        archon_workflow::v2::lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+        archon_workflow::v2::lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
     ];
     for prompt in prompts {
-        let grounded =
-            super::super::workflow_live_v2_lifecycle_prompts::ground_host_manifest_schema(prompt);
+        let grounded = archon_workflow::v2::lifecycle_prompts::ground_host_manifest_schema(prompt);
         assert!(grounded.contains("archon.workflow.patch_manifest.v1"));
         assert!(grounded.contains("provider_env_proof is run-scoped"));
         assert!(grounded.contains("normalized_path"));

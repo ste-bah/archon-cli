@@ -1,8 +1,8 @@
-use super::workflow_live_v2_lifecycle_prompts as prompts;
 use super::workflow_live_v2_lifecycle_review_verification::{
     review_verification_execution_retry_items, review_verification_has_execution_failure,
     review_verification_options,
 };
+use archon_workflow::v2::lifecycle_prompts as prompts;
 
 #[test]
 fn review_verification_retry_items_keep_execution_failures_only() {
