@@ -426,7 +426,7 @@ pub(crate) fn normalize_result_for_call(
 
 pub(crate) fn mark_unresolved_dependency_metadata(
     execution: &WorkflowV2CallExecution,
-    metadata: &super::super::super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
+    metadata: &archon_workflow::v2::source_graph::DynamicWaveSourceMetadata,
     result: &mut WorkflowV2Result,
 ) {
     if metadata.unresolved_dependencies.is_empty() {

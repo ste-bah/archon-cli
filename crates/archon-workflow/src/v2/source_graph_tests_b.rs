@@ -5,7 +5,7 @@ fn required_tools_come_from_the_task_universe_not_the_agent_item() {
     // The item forges required_tools/mcp_tools, but the authoritative task
     // declares a different set. The graph item must carry ONLY the universe's
     // tools — an agent cannot bind MCP tools by injecting a declaration.
-    use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+    use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
@@ -216,7 +216,7 @@ fn focused_verification_rejects_retry_steps_without_invariants() {
 fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
     let fixture = archon_test_support::fixtures::WFF68_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+    let normalized = crate::generated_contract::normalize_generated_inventory_value(
         &source_data,
         Some(&tdl_task_universe()),
     );
@@ -239,7 +239,7 @@ fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
 fn focused_verification_rejects_direct_retry_items_without_invariants() {
     let fixture = archon_test_support::fixtures::WF1CA_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+    let normalized = crate::generated_contract::normalize_generated_inventory_value(
         &source_data,
         Some(&tdl_task_universe()),
     );
@@ -255,7 +255,7 @@ fn focused_verification_rejects_direct_retry_items_without_invariants() {
 fn focused_verification_accepts_retry_command_fixture() {
     let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+    let normalized = crate::generated_contract::normalize_generated_inventory_value(
         &source_data,
         Some(&tdl_task_universe()),
     );
@@ -278,7 +278,7 @@ fn focused_verification_accepts_retry_command_fixture() {
 fn focused_verification_rejects_nested_retry_without_invariants() {
     let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+    let normalized = crate::generated_contract::normalize_generated_inventory_value(
         &source_data,
         Some(&tdl_task_universe()),
     );
@@ -392,7 +392,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
     for task_id in ["TASK-TDL-090", "TASK-TDL-110", "TASK-TDL-120"] {
         universe
             .tasks
-            .push(archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            .push(crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: task_id.to_string(),
                 aliases: Vec::new(),
                 source_path: format!("/tmp/tasks/{task_id}.md"),
@@ -404,7 +404,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
     }
     universe
         .tasks
-        .push(archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+        .push(crate::task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-TDL-130".to_string(),
             aliases: Vec::new(),
             source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),

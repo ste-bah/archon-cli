@@ -305,11 +305,7 @@ fn source_graph_target_files(
     if source_targets.is_empty() {
         return (source_targets, evidence_targets);
     }
-    match archon_workflow::normalize_targets_for_repository(
-        "source_graph",
-        &source_targets,
-        Some(root),
-    ) {
+    match crate::normalize_targets_for_repository("source_graph", &source_targets, Some(root)) {
         Ok(normalized) => (normalized, evidence_targets),
         Err(_) => (source_targets, evidence_targets),
     }
