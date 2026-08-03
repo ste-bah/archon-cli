@@ -34,10 +34,9 @@ fn target_files_from_fanout_item_are_required_for_write_branches() {
 fn artifact_only_review_remediation_can_launch_without_repo_targets() {
     let temp = tempfile::tempdir().expect("tempdir");
     let repo_root = temp.path().display().to_string();
-    let item: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/review_remediation_artifact_only_item.json"
-    ))
-    .expect("fixture");
+    let item: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::REVIEW_REMEDIATION_ARTIFACT_ONLY_ITEM)
+            .expect("fixture");
     let call = WorkflowV2HostCall {
         id: "review-remediation-wave-1".to_string(),
         method: WorkflowV2HostMethod::Fanout,

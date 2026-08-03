@@ -200,8 +200,8 @@ fn retry_plan_without_write_route_selects_nothing() {
 #[test]
 fn unsatisfiable_predicate_route_reauthors_check_with_gap_identity() {
     let fixtures = [
-        include_str!("fixtures/wfb36_owned_diff_scope_failure.json"),
-        include_str!("fixtures/wfb36_owned_diff_scope_retry_failure.json"),
+        archon_test_support::fixtures::WFB36_OWNED_DIFF_SCOPE_FAILURE,
+        archon_test_support::fixtures::WFB36_OWNED_DIFF_SCOPE_RETRY_FAILURE,
     ];
     for fixture in fixtures {
         let failed: Value = serde_json::from_str(fixture).expect("fixture");
@@ -228,7 +228,7 @@ fn unsatisfiable_predicate_route_reauthors_check_with_gap_identity() {
 }
 
 fn d31_fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/d31_repeated_gap_retry_chain.json"))
+    serde_json::from_str(archon_test_support::fixtures::D31_REPEATED_GAP_RETRY_CHAIN)
         .expect("D31 fixture")
 }
 
@@ -427,10 +427,9 @@ fn d69_unaccounted_failed_outcomes_require_shape_repair() {
 
 #[test]
 fn d71_post_remediation_envelope_supplies_non_vacuous_triage_denominator() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d71_post_remediation_triage_envelope.json"
-    ))
-    .expect("D71 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::D71_POST_REMEDIATION_TRIAGE_ENVELOPE)
+            .expect("D71 fixture");
     let failed = triage_failed_outcomes(&fixture["verification"]);
 
     assert_eq!(failed.len(), 1);

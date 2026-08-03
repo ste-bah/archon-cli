@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn focused_verification_accepts_retry_plan_fixture() {
-    let fixture = include_str!("fixtures/wf0eca_verification_repair_plan_1_1_item.json");
+    let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_1_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
@@ -23,7 +23,7 @@ fn focused_verification_accepts_retry_plan_fixture() {
 
 #[test]
 fn focused_verification_accepts_required_evidence_retry_commands_fixture() {
-    let fixture = include_str!("fixtures/wf0eca_verification_repair_plan_1_2_item.json");
+    let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_2_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
@@ -47,7 +47,7 @@ fn focused_verification_accepts_required_evidence_retry_commands_fixture() {
 
 #[test]
 fn focused_verification_rejects_embedded_retry_items_without_invariants() {
-    let fixture = include_str!("fixtures/wf199_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF199_VERIFICATION_REPAIR_PLAN_1_1;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let source_data = value["data"]["items"].clone();
     let execution = focused_verification_execution(source_data);
@@ -60,7 +60,7 @@ fn focused_verification_rejects_embedded_retry_items_without_invariants() {
 
 #[test]
 fn focused_verification_rejects_direct_retry_without_invariants() {
-    let fixture = include_str!("fixtures/wfc5d4_verification_repair_plan_1_3.json");
+    let fixture = archon_test_support::fixtures::WFC5D4_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
@@ -102,7 +102,7 @@ fn review_remediation_accepts_artifact_only_canonical_task_item() {
 
 #[test]
 fn review_remediation_accepts_split_gaps_for_same_canonical_task() {
-    let fixture = include_str!("fixtures/wf28f_review_remediation_duplicate_task_items.json");
+    let fixture = archon_test_support::fixtures::WF28F_REVIEW_REMEDIATION_DUPLICATE_TASK_ITEMS;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let execution = review_remediation_execution(source_data);
 

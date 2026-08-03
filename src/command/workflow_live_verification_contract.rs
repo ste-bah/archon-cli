@@ -355,9 +355,9 @@ mod tests {
 
     #[test]
     fn workflow_live_generated_contract_wf2d24_data_store_failure_requires_write_remediation() {
-        let outcome: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
-            "fixtures/wf2d24_verification_wave_1_3_data_store_failed.json"
-        ))
+        let outcome: WorkflowV2BranchOutcome = serde_json::from_str(
+            archon_test_support::fixtures::WF2D24_VERIFICATION_WAVE_1_3_DATA_STORE_FAILED,
+        )
         .expect("fixture");
         let result = outcome.result.expect("result");
 
@@ -369,9 +369,9 @@ mod tests {
 
     #[test]
     fn workflow_live_verification_missing_provider_proof_is_contract_failure() {
-        let result: WorkflowV2Result = serde_json::from_str(include_str!(
-            "fixtures/wff9_provider_missing_env_proof_result.json"
-        ))
+        let result: WorkflowV2Result = serde_json::from_str(
+            archon_test_support::fixtures::WFF9_PROVIDER_MISSING_ENV_PROOF_RESULT,
+        )
         .expect("fixture");
 
         assert_eq!(
@@ -382,9 +382,9 @@ mod tests {
 
     #[test]
     fn workflow_live_verification_verifier_shape_failure_is_not_actionable() {
-        let outcome: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
-            "fixtures/wffed_verification_wave_1_1_bad_branch.json"
-        ))
+        let outcome: WorkflowV2BranchOutcome = serde_json::from_str(
+            archon_test_support::fixtures::WFFED_VERIFICATION_WAVE_1_1_BAD_BRANCH,
+        )
         .expect("fixture");
         let result = outcome.result.expect("result");
 
@@ -476,9 +476,9 @@ mod tests {
 
     #[test]
     fn missing_concrete_artifacts_route_to_write_remediation() {
-        let result: WorkflowV2Result = serde_json::from_str(include_str!(
-            "fixtures/wf346_verification_missing_project_artifacts.json"
-        ))
+        let result: WorkflowV2Result = serde_json::from_str(
+            archon_test_support::fixtures::WF346_VERIFICATION_MISSING_PROJECT_ARTIFACTS,
+        )
         .expect("fixture");
 
         assert_eq!(

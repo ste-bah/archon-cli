@@ -229,6 +229,12 @@ crossterm.workspace = true
 # its atomic are compiled out of every non-test build: cargo applies dev
 # dependencies only to test targets.
 archon-cozo = { path = "crates/archon-cozo", features = ["test-support"] }
+# Holds the workflow-live JSON fixture corpus (`archon_test_support::fixtures`).
+# The corpus lives there rather than beside the tests because `include_str!`
+# resolves relative to the source file: a fixture read by a phase-2 cluster that
+# moves into archon-workflow *and* by one that stays here cannot follow either.
+# One home, named by `const`, so a cluster can move without touching fixtures.
+archon-test-support = { path = "crates/archon-test-support" }
 tempfile.workspace = true
 async-trait.workspace = true
 regex.workspace = true

@@ -51,9 +51,9 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
         )
         .expect("record");
 
-    let blocked_source: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf139e_blocked_verification_failed_source_result.json"
-    ))
+    let blocked_source: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF139E_BLOCKED_VERIFICATION_FAILED_SOURCE_RESULT,
+    )
     .expect("fixture json");
     let final_report = WorkflowV2CallExecution {
         input: serde_json::json!({ "source_data": blocked_source }),

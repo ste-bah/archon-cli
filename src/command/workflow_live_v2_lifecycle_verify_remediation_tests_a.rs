@@ -308,10 +308,9 @@ fn failed_final_report_terminal_marker_routes_to_host_fallback() {
 
 #[test]
 fn mixed_triage_preserves_actionable_and_retry_routes() {
-    let triage: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf3b9_verification_failure_triage_5_3.json"
-    ))
-    .expect("D25 fixture");
+    let triage: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WF3B9_VERIFICATION_FAILURE_TRIAGE_5_3)
+            .expect("D25 fixture");
 
     let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
 
@@ -325,10 +324,9 @@ fn mixed_triage_preserves_actionable_and_retry_routes() {
 
 #[test]
 fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d46_orphaned_verification_retry.json"
-    ))
-    .expect("D46 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::D46_ORPHANED_VERIFICATION_RETRY)
+            .expect("D46 fixture");
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
@@ -432,10 +430,9 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
         task_universe: &universe,
         target_repository_root: Some("/repo"),
     };
-    let triage: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wffed_verification_failure_triage_1_2.json"
-    ))
-    .expect("fixture json");
+    let triage: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WFFED_VERIFICATION_FAILURE_TRIAGE_1_2)
+            .expect("fixture json");
 
     let source_outcomes = vec![failed_outcome_with_gap(
         "verification-wave-1-1-VERIFY-TDL-010-003-project-registry-artifact-contract-check-7",

@@ -63,7 +63,7 @@ fn workflow_live_generated_contract_verified_noop_accepts_explicit_empty_artifac
 
 #[test]
 fn workflow_live_generated_contract_flags_noncanonical_remediation_fixture() {
-    let fixture = include_str!("fixtures/wfd009_remediation_inventory_invalid_task.json");
+    let fixture = archon_test_support::fixtures::WFD009_REMEDIATION_INVENTORY_INVALID_TASK;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -186,7 +186,7 @@ fn artifact_requirements_glob_patterns_move_to_expected_evidence() {
 
 #[test]
 fn artifact_requirements_placeholder_fixture_moves_to_expected_evidence() {
-    let fixture = include_str!("fixtures/wffe96_artifact_requirements_discovery_3_items.json");
+    let fixture = archon_test_support::fixtures::WFFE96_ARTIFACT_REQUIREMENTS_DISCOVERY_3_ITEMS;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&placeholder_task_universe()));
 
@@ -250,10 +250,9 @@ fn fabel_shape_repair_items_normalize_idempotently() {
 
 #[test]
 fn fabel_triage_retry_items_normalize_idempotently() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wffed_verification_failure_triage_1_2.json"
-    ))
-    .expect("fixture json");
+    let value: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WFFED_VERIFICATION_FAILURE_TRIAGE_1_2)
+            .expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
     assert_eq!(inventory.items.len(), 3);
     for item in inventory.items {
@@ -271,12 +270,12 @@ fn fabel_triage_retry_items_normalize_idempotently() {
 
 pub(super) fn assert_fixture_items_are_idempotent(fixture: &str) {
     let value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/wffed_verification_plan_1.json"))
+        serde_json::from_str(archon_test_support::fixtures::WFFED_VERIFICATION_PLAN_1)
             .expect("fixture json");
     let value = if fixture.ends_with("shape_repair_1_1_1.json") {
-        serde_json::from_str(include_str!(
-            "fixtures/wffed_verification_repair_shape_repair_1_1_1.json"
-        ))
+        serde_json::from_str(
+            archon_test_support::fixtures::WFFED_VERIFICATION_REPAIR_SHAPE_REPAIR_1_1_1,
+        )
         .expect("shape fixture json")
     } else {
         value

@@ -87,9 +87,9 @@ fn rust_module_child_declared_by_owned_target_is_owned_for_write_branch() {
 
 #[test]
 fn wf98_module_child_ownership_fixture_no_longer_reports_undeclared_path() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf98_implementation_wave_1_module_child_ownership.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF98_IMPLEMENTATION_WAVE_1_MODULE_CHILD_OWNERSHIP,
+    )
     .expect("fixture");
     let repo_root = env!("CARGO_MANIFEST_DIR").to_string();
     let branch_id = fixture["branch_id"].as_str().expect("branch id");
@@ -170,9 +170,9 @@ fn absolute_item_target_outside_repository_is_rejected() {
 
 #[test]
 fn wf98_false_safety_fixture_accepts_declared_absolute_in_repo_change() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf98_implementation_wave_2_false_safety.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF98_IMPLEMENTATION_WAVE_2_FALSE_SAFETY,
+    )
     .expect("fixture");
     let repo_root = fixture["repository_root"]
         .as_str()

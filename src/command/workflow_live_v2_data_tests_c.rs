@@ -2,14 +2,12 @@ use super::*;
 
 #[test]
 fn focused_verification_duplicate_cargo_harness_pass_is_accepted() {
-    let first: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
-        "fixtures/wfcd824_verification_wave_1_3_check_1.json"
-    ))
-    .expect("first fixture");
-    let second: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
-        "fixtures/wfcd824_verification_wave_1_3_check_2.json"
-    ))
-    .expect("second fixture");
+    let first: WorkflowV2BranchOutcome =
+        serde_json::from_str(archon_test_support::fixtures::WFCD824_VERIFICATION_WAVE_1_3_CHECK_1)
+            .expect("first fixture");
+    let second: WorkflowV2BranchOutcome =
+        serde_json::from_str(archon_test_support::fixtures::WFCD824_VERIFICATION_WAVE_1_3_CHECK_2)
+            .expect("second fixture");
 
     let result = result_from_fanout_report(
         &fanout_call("verification-wave-1-3"),
@@ -40,9 +38,9 @@ fn focused_verification_duplicate_cargo_harness_pass_is_accepted() {
 
 #[test]
 fn focused_verification_failed_tests_require_write_remediation() {
-    let failed: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
-        "fixtures/wf2d24_verification_wave_1_3_data_store_failed.json"
-    ))
+    let failed: WorkflowV2BranchOutcome = serde_json::from_str(
+        archon_test_support::fixtures::WF2D24_VERIFICATION_WAVE_1_3_DATA_STORE_FAILED,
+    )
     .expect("fixture");
 
     let result =

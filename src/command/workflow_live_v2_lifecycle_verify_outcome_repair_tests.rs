@@ -1,9 +1,9 @@
 use super::*;
 
 fn fixture() -> serde_json::Value {
-    serde_json::from_str(include_str!(
-        "fixtures/d33_verification_remediation_contract_failure.json"
-    ))
+    serde_json::from_str(
+        archon_test_support::fixtures::D33_VERIFICATION_REMEDIATION_CONTRACT_FAILURE,
+    )
     .expect("D33 fixture")
 }
 
@@ -72,10 +72,9 @@ fn d33_prompt_requires_split_or_retry_for_mechanical_contract_failure() {
 
 #[test]
 fn d36_two_unchanged_noop_rounds_stop_before_the_third_round() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d36_raw_artifact_overreach_noop_loop.json"
-    ))
-    .expect("D36 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::D36_RAW_ARTIFACT_OVERREACH_NOOP_LOOP)
+            .expect("D36 fixture");
     let wave = fixture["remediation_wave"].clone();
     let rounds = fixture["noop_repair_rounds"]
         .as_array()
@@ -107,10 +106,9 @@ fn d36_two_unchanged_noop_rounds_stop_before_the_third_round() {
 
 #[test]
 fn d36_changed_followup_result_resets_noop_disagreement_streak() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d36_raw_artifact_overreach_noop_loop.json"
-    ))
-    .expect("D36 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::D36_RAW_ARTIFACT_OVERREACH_NOOP_LOOP)
+            .expect("D36 fixture");
     let wave = fixture["remediation_wave"].clone();
     let accepted = serde_json::json!({
         "outcomes": [{"item_id": "fixed", "status": "accepted"}]

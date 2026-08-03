@@ -50,9 +50,9 @@ fn idempotent_noop_artifact_claim_runs_declared_verifier() {
 }
 
 pub(super) fn wf66_preflight_result() -> Option<WorkflowV2Result> {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf66_remediation_wave_1_3_source_preflight.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF66_REMEDIATION_WAVE_1_3_SOURCE_PREFLIGHT,
+    )
     .expect("fixture");
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");

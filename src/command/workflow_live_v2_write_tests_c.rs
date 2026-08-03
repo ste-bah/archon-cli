@@ -186,9 +186,9 @@ fn unsafe_write_mode_errors_remain_safety_branch_errors() {
 
 #[test]
 fn empty_patch_without_noop_is_contract_data_not_terminal_failure() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wfc022_empty_patch_no_noop_branch_failure.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WFC022_EMPTY_PATCH_NO_NOOP_BRANCH_FAILURE,
+    )
     .expect("fixture");
     let error = fixture["old_error"].as_str().expect("old error");
 
@@ -208,9 +208,9 @@ fn empty_patch_without_noop_is_contract_data_not_terminal_failure() {
 
 #[test]
 fn wf139_runtime_project_artifact_is_not_repo_source_write() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf139_project_artifact_write_false_safety.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF139_PROJECT_ARTIFACT_WRITE_FALSE_SAFETY,
+    )
     .expect("fixture");
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path().join("runtime-project");
@@ -300,9 +300,9 @@ fn wf139_runtime_project_artifact_is_not_repo_source_write() {
 
 #[test]
 fn missing_runtime_project_artifact_is_needs_review_not_safety() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wfe2c_missing_project_artifact_false_safety.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WFE2C_MISSING_PROJECT_ARTIFACT_FALSE_SAFETY,
+    )
     .expect("fixture");
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path().join("runtime-project");

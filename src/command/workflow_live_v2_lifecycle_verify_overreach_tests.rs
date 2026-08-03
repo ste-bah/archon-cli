@@ -1,10 +1,8 @@
 use super::*;
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!(
-        "fixtures/d36_raw_artifact_overreach_noop_loop.json"
-    ))
-    .expect("D36 fixture")
+    serde_json::from_str(archon_test_support::fixtures::D36_RAW_ARTIFACT_OVERREACH_NOOP_LOOP)
+        .expect("D36 fixture")
 }
 
 #[test]
@@ -88,10 +86,9 @@ fn d36_prompts_ground_artifact_fields_in_task_contracts() {
 
 #[test]
 fn d54_routes_host_manifest_schema_overreach_to_grounded_retry() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "fixtures/wf44_host_manifest_schema_overreach.json"
-    ))
-    .expect("D54 fixture");
+    let fixture: Value =
+        serde_json::from_str(archon_test_support::fixtures::WF44_HOST_MANIFEST_SCHEMA_OVERREACH)
+            .expect("D54 fixture");
 
     let triage = reroute_unplanned_raw_task_identity(
         fixture["triage"].clone(),

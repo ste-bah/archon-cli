@@ -130,7 +130,7 @@ fn workflow_live_generated_contract_ignores_unowned_support_items_for_scheduling
 
 #[test]
 fn workflow_live_generated_contract_wf6cc_repair_fixture_routes_gaps_to_investigation() {
-    let fixture = include_str!("fixtures/wf6cc_dependency_graph_repair_2.json");
+    let fixture = archon_test_support::fixtures::WF6CC_DEPENDENCY_GRAPH_REPAIR_2;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value_with_repo(
         &value,
@@ -233,7 +233,7 @@ fn workflow_live_generated_contract_accepts_repo_owned_targets() {
 
 #[test]
 fn workflow_live_generated_contract_flags_wf6c30_deadlock_inventory_graph() {
-    let fixture = include_str!("fixtures/wf6c30_deadlock_inventory.json");
+    let fixture = archon_test_support::fixtures::WF6C30_DEADLOCK_INVENTORY;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value_with_repo(
         &value,

@@ -48,7 +48,7 @@ fn workflow_live_generated_contract_normalizes_retry_expected_evidence() {
 
 #[test]
 fn workflow_live_generated_contract_normalizes_retry_steps_fixture() {
-    let fixture = include_str!("fixtures/wffe12_verification_repair_plan_1_3_items.json");
+    let fixture = archon_test_support::fixtures::WFFE12_VERIFICATION_REPAIR_PLAN_1_3_ITEMS;
     let values: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
     let normalized = values
         .iter()
@@ -82,7 +82,7 @@ fn workflow_live_generated_contract_normalizes_retry_steps_fixture() {
 
 #[test]
 fn workflow_live_generated_contract_extracts_nested_retry_repair_plan_fixture() {
-    let fixture = include_str!("fixtures/wff68_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WFF68_VERIFICATION_REPAIR_PLAN_1_1;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -107,7 +107,7 @@ fn workflow_live_generated_contract_extracts_nested_retry_repair_plan_fixture() 
 
 #[test]
 fn workflow_live_generated_contract_extracts_direct_retry_items_fixture() {
-    let fixture = include_str!("fixtures/wf1ca_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF1CA_VERIFICATION_REPAIR_PLAN_1_1;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -135,7 +135,7 @@ fn workflow_live_generated_contract_extracts_direct_retry_items_fixture() {
 
 #[test]
 fn workflow_live_generated_contract_normalizes_retry_command_fixture() {
-    let fixture = include_str!("fixtures/wf19f5_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_1;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -170,7 +170,7 @@ fn workflow_live_generated_contract_normalizes_retry_command_fixture() {
 
 #[test]
 fn workflow_live_generated_contract_normalizes_nested_result_retry_fixture() {
-    let fixture = include_str!("fixtures/wf19f5_verification_repair_plan_1_3.json");
+    let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_3;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -308,7 +308,7 @@ fn workflow_live_generated_contract_top_level_items_are_authoritative() {
 
 #[test]
 fn workflow_live_generated_contract_wf90070_fixture_normalizes_without_malformed_inventory() {
-    let fixture = include_str!("fixtures/wf90070_canonical_inventory.json");
+    let fixture = archon_test_support::fixtures::WF90070_CANONICAL_INVENTORY;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&task_universe()));
     assert!(
@@ -337,7 +337,7 @@ fn workflow_live_generated_contract_wf90070_fixture_normalizes_without_malformed
 
 #[test]
 fn workflow_live_generated_contract_normalizes_wf580_review_remediation_fixture() {
-    let fixture = include_str!("fixtures/wf580_review_remediation_inventory_items.json");
+    let fixture = archon_test_support::fixtures::WF580_REVIEW_REMEDIATION_INVENTORY_ITEMS;
     let values: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
     let normalized = values
         .iter()
@@ -379,7 +379,7 @@ fn workflow_live_generated_contract_normalizes_wf580_review_remediation_fixture(
 
 #[test]
 fn workflow_live_generated_contract_normalizes_wf580_review_verification_fixture() {
-    let fixture = include_str!("fixtures/wf580_review_verification_plan_items.json");
+    let fixture = archon_test_support::fixtures::WF580_REVIEW_VERIFICATION_PLAN_ITEMS;
     let values: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
     let normalized = values
         .iter()

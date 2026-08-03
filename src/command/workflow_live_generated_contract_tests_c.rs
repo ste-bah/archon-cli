@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn workflow_live_generated_contract_normalizes_retry_plan_fixture() {
-    let fixture = include_str!("fixtures/wf0eca_verification_repair_plan_1_1_item.json");
+    let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_1_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized = normalize_generated_item_value(&value, Some(&tdl_task_universe())).value;
 
@@ -24,7 +24,7 @@ fn workflow_live_generated_contract_normalizes_retry_plan_fixture() {
 
 #[test]
 fn workflow_live_generated_contract_normalizes_required_evidence_fixture() {
-    let fixture = include_str!("fixtures/wf0eca_verification_repair_plan_1_2_item.json");
+    let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_2_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized = normalize_generated_item_value(&value, Some(&tdl_task_universe())).value;
 
@@ -119,7 +119,7 @@ fn workflow_live_generated_contract_normalizes_code_agnostic_ownership_fields() 
 
 #[test]
 fn workflow_live_generated_contract_embeds_lowercase_task_ids_from_retry_items() {
-    let fixture = include_str!("fixtures/wf199_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF199_VERIFICATION_REPAIR_PLAN_1_1;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 

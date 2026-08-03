@@ -1,10 +1,8 @@
 use super::*;
 
 pub(super) fn invariant_chain_fixture() -> serde_json::Value {
-    serde_json::from_str(include_str!(
-        "fixtures/wf32_verification_invariant_chain.json"
-    ))
-    .expect("D17 fixture")
+    serde_json::from_str(archon_test_support::fixtures::WF32_VERIFICATION_INVARIANT_CHAIN)
+        .expect("D17 fixture")
 }
 
 #[test]
