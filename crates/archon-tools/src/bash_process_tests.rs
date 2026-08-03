@@ -132,11 +132,9 @@ async fn windows_bash_waits_for_descendant_after_parent_exits() {
     .expect("Bash invocation exceeded its strict outer deadline");
 
     assert!(!result.is_error, "{}", result.content);
-    assert_eq!(
-        std::fs::read_to_string(&completion_file).as_deref(),
-        Ok("complete"),
-        "Bash returned before its Windows descendant completed"
-    );
+    let completion = std::fs::read_to_string(&completion_file)
+        .expect("Bash returned before its Windows descendant completed");
+    assert_eq!(completion, "complete");
 }
 
 #[tokio::test]
