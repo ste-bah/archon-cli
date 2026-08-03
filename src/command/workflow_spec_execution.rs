@@ -1,3 +1,5 @@
+use super::*;
+
 pub(crate) fn load_spec_file(cwd: &Path, path: &str) -> Result<WorkflowSpec> {
     let path = resolve_input_path(cwd, path);
     let raw = fs::read_to_string(&path)?;
@@ -22,7 +24,7 @@ pub(crate) fn load_template(cwd: &Path, name: &str) -> Result<LoadedWorkflowTemp
     })
 }
 
-fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {
+pub(super) fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {
     let run = store.load_state(run_id)?;
     let stage_id = first_repairable_stage(&run).ok_or_else(|| {
         anyhow!("workflow {run_id} has no failed or blocked stage to repair; use /workflow status {run_id}")
@@ -37,7 +39,7 @@ fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<String> {
     ))
 }
 
-fn restart_task_workflow(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<String> {
+pub(super) fn restart_task_workflow(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<String> {
     let run = store.load_state(run_id)?;
     if let Some(output) = restart_generated_v2_task_workflow(store, &run, task_id)? {
         return Ok(output);
@@ -73,7 +75,7 @@ fn first_repairable_stage(run: &WorkflowRun) -> Option<String> {
         .map(|stage| stage.id.clone())
 }
 
-fn stage_id_for_task(run: &WorkflowRun, task_id: &str) -> Option<String> {
+pub(super) fn stage_id_for_task(run: &WorkflowRun, task_id: &str) -> Option<String> {
     let aliases = task_aliases(task_id);
     if aliases.is_empty() {
         return None;

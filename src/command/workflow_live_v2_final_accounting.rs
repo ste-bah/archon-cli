@@ -1,4 +1,6 @@
-pub(super) fn reconcile_final_task_statuses(
+use super::*;
+
+pub(crate) fn reconcile_final_task_statuses(
     report: &mut WorkflowV2FinalReport,
     required_task_ids: &[String],
 ) {

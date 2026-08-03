@@ -40,7 +40,7 @@ use super::{
 /// `workstream`, `source_sections` — are deliberately *not* required: their
 /// absence changes nothing a run executes, so demanding them would only reject
 /// otherwise-valid files.
-pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
+pub(crate) const REQUIRED_TASK_KEYS: &[&str] = &[
     "task_id",
     "title",
     "complexity",

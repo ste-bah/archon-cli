@@ -1,4 +1,6 @@
-pub(super) fn execute_local_host_call(
+use super::*;
+
+pub(crate) fn execute_local_host_call(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,

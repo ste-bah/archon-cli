@@ -3,6 +3,8 @@
 // One of three inherent `impl LifecycleDriver` blocks split out of
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
+use super::*;
+
 impl LifecycleDriver {
 
     pub(super) fn discovery_items(&self) -> Vec<serde_json::Value> {
@@ -28,7 +30,7 @@ impl LifecycleDriver {
 
     /// body_a.js inventory repair loop: one pass per attempt over the issue
     /// kinds, each reduce gated by its own iteration cap.
-    pub(super) async fn repair_inventory(
+    pub(crate) async fn repair_inventory(
         &self,
         raw_inventory: serde_json::Value,
         discovery: &serde_json::Value,

@@ -1,4 +1,6 @@
-async fn run_v2_agent_repair_with_rejected_output_log(
+use super::*;
+
+pub(super) async fn run_v2_agent_repair_with_rejected_output_log(
     adapter: &WorkflowV2AgentAdapter,
     client: &LiveV2AgentClient,
     request: &archon_workflow::WorkflowV2AgentRequest,

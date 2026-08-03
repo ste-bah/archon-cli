@@ -1,4 +1,6 @@
-async fn run_read_only_v2_fanout(
+use super::*;
+
+pub(super) async fn run_read_only_v2_fanout(
     task: &str,
     runtime: &WorkflowV2ScriptRuntime,
     execution: WorkflowV2CallExecution,

@@ -3,11 +3,13 @@
 // One of three inherent `impl LifecycleDriver` blocks split out of
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
+use super::*;
+
 impl LifecycleDriver {
     /// Terminal stop. The host raises the terminal marker for every
     /// non-accepted final report, which unwinds the lifecycle exactly as the
     /// JS throw did; an accepted report returns normally.
-    pub(super) async fn final_report(
+    pub(crate) async fn final_report(
         &self,
         id: &str,
         source: Option<serde_json::Value>,

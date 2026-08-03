@@ -1,4 +1,6 @@
-fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
+use super::*;
+
+pub(super) fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
     let concrete_paths = paths
         .iter()
         .map(|path| path.trim())
@@ -13,8 +15,8 @@ fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
         .all(|path| artifact_path_exists(v2_root, path))
 }
 
-pub(super) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
-    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(path) {
+pub(crate) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
+    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(path) {
         return true;
     }
     let path = Path::new(path);
@@ -39,7 +41,7 @@ pub(super) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
             .unwrap_or(false)
 }
 
-fn project_root_for_v2(v2_root: &Path) -> Option<&Path> {
+pub(super) fn project_root_for_v2(v2_root: &Path) -> Option<&Path> {
     let mut current = Some(v2_root);
     while let Some(path) = current {
         if path.file_name().and_then(|name| name.to_str()) == Some(".archon") {
@@ -50,7 +52,7 @@ fn project_root_for_v2(v2_root: &Path) -> Option<&Path> {
     None
 }
 
-fn repository_root_for_v2(v2_root: &Path) -> Option<PathBuf> {
+pub(super) fn repository_root_for_v2(v2_root: &Path) -> Option<PathBuf> {
     let run_root = v2_root.parent()?;
     let state_path = run_root.join("state.json");
     let raw = fs::read_to_string(state_path).ok()?;
@@ -65,11 +67,11 @@ fn repository_root_for_v2(v2_root: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(root))
 }
 
-fn artifact_path_is_placeholder(path: &str) -> bool {
+pub(super) fn artifact_path_is_placeholder(path: &str) -> bool {
     path.contains('<') || path.contains('>') || path.contains('*')
 }
 
-fn report_paths(v2_root: &Path) -> WorkflowV2ReportPaths {
+pub(super) fn report_paths(v2_root: &Path) -> WorkflowV2ReportPaths {
     let run_root = v2_root.parent().unwrap_or(v2_root);
     WorkflowV2ReportPaths {
         harness_path: run_root.join("workflow.js").display().to_string(),
@@ -78,7 +80,7 @@ fn report_paths(v2_root: &Path) -> WorkflowV2ReportPaths {
     }
 }
 
-fn artifact_paths_from_input(input: &serde_json::Value) -> Vec<PathBuf> {
+pub(super) fn artifact_paths_from_input(input: &serde_json::Value) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     collect_artifact_paths(input, &mut paths);
     paths
@@ -115,13 +117,13 @@ fn collect_artifact_paths(value: &serde_json::Value, paths: &mut Vec<PathBuf>) {
     }
 }
 
-fn artifact_path(v2_root: &Path, id: &str) -> PathBuf {
+pub(super) fn artifact_path(v2_root: &Path, id: &str) -> PathBuf {
     v2_root
         .join("artifacts")
         .join(format!("{}.json", sanitize_id(id)))
 }
 
-fn sanitize_id(raw: &str) -> String {
+pub(super) fn sanitize_id(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
@@ -133,7 +135,7 @@ fn sanitize_id(raw: &str) -> String {
         .collect()
 }
 
-fn write_json(path: &Path, value: &impl serde::Serialize) -> archon_workflow::WorkflowResult<()> {
+pub(super) fn write_json(path: &Path, value: &impl serde::Serialize) -> archon_workflow::WorkflowResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| WorkflowError::Io {
             path: parent.to_path_buf(),

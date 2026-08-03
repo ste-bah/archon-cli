@@ -1,6 +1,9 @@
 // WorkflowScriptHost: execution records and checkpoint state.
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
+
+use super::*;
+
 impl WorkflowScriptHost {
     pub(super) fn execution_from_request(
         &self,
@@ -140,7 +143,7 @@ impl WorkflowScriptHost {
         acc.next_action = Some(next_action);
     }
 
-    pub(super) async fn mark_script_failure(
+    pub(crate) async fn mark_script_failure(
         &self,
         error: &str,
         emit_terminal_status: bool,

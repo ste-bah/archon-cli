@@ -1,3 +1,5 @@
+use super::*;
+
 impl WorkflowV2TaskUniverse {
     /// Declared prose across the universe: every task title, then every
     /// acceptance criterion.
@@ -16,7 +18,7 @@ impl WorkflowV2TaskUniverse {
     }
 }
 
-fn canonical_task_id_from_ref(value: &str) -> Option<String> {
+pub(super) fn canonical_task_id_from_ref(value: &str) -> Option<String> {
     let parts = value.split('-').collect::<Vec<_>>();
     if parts.len() != 3 {
         return None;
@@ -37,7 +39,7 @@ fn canonical_task_id_from_ref(value: &str) -> Option<String> {
     Some(format!("{first}-{second}-{third}"))
 }
 
-fn task_id_from_task_path(path: &Path) -> Option<String> {
+pub(super) fn task_id_from_task_path(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
     canonical_task_id_from_stem(stem)
 }
@@ -60,13 +62,13 @@ fn canonical_task_id_from_stem(stem: &str) -> Option<String> {
     Some(format!("{first}-{second}-{third}"))
 }
 
-fn short_task_alias(canonical: &str) -> Option<String> {
+pub(super) fn short_task_alias(canonical: &str) -> Option<String> {
     let digits = canonical.rsplit('-').next()?;
     (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("T{digits}"))
 }
 
-fn sorted_unique(values: Vec<String>) -> Vec<String> {
+pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
     values
         .into_iter()
         .map(|value| value.trim().to_string())
@@ -78,7 +80,7 @@ fn sorted_unique(values: Vec<String>) -> Vec<String> {
 
 /// Resolve a declared list of task references to canonical ids, or fail naming
 /// the file and the unresolved reference.
-fn resolve_task_references(
+pub(super) fn resolve_task_references(
     declared: &[String],
     aliases: &BTreeMap<String, String>,
     source_path: &str,
@@ -110,7 +112,7 @@ fn resolve_task_references(
 /// `B` each claiming to block the other). Folding those would manufacture a
 /// two-cycle and the cycle detector would report it as a graph shape rather than
 /// as the authoring mistake it is, so they are named here with both files.
-fn reconcile_blocks_into_dependencies(
+pub(super) fn reconcile_blocks_into_dependencies(
     tasks: &mut [WorkflowV2TaskUniverseTask],
 ) -> WorkflowResult<()> {
     let mut declared_blocks: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -163,7 +165,7 @@ fn reconcile_blocks_into_dependencies(
     Ok(())
 }
 
-fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
+pub(super) fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     let graph = tasks
         .iter()
         .map(|task| {

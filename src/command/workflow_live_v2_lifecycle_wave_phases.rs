@@ -1,3 +1,5 @@
+use super::*;
+
 impl LifecycleDriver {
     /// Per-task adversarial review: ONE read-only critic branch per task, over
     /// that task's diff, acceptance criteria and declared
@@ -63,7 +65,7 @@ impl LifecycleDriver {
     /// findings and what derives the status: a cross-cutting reduce returning
     /// "accepted" over outstanding per-task findings would otherwise short
     /// `review_needs_remediation` and discard every one of them.
-    pub(super) async fn run_review_round(
+    pub(crate) async fn run_review_round(
         &self,
         review_iteration: usize,
         re_review: Option<&std::collections::BTreeSet<String>>,

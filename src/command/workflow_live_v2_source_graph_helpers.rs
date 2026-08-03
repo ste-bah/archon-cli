@@ -1,4 +1,6 @@
-fn value_present(value: Option<&serde_json::Value>) -> bool {
+use super::*;
+
+pub(super) fn value_present(value: Option<&serde_json::Value>) -> bool {
     match value {
         Some(serde_json::Value::String(value)) => !value.trim().is_empty(),
         Some(serde_json::Value::Array(values)) => !values.is_empty(),
@@ -8,7 +10,7 @@ fn value_present(value: Option<&serde_json::Value>) -> bool {
     }
 }
 
-fn raw_task_refs(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn raw_task_refs(value: &serde_json::Value) -> Vec<String> {
     sorted_unique(non_empty_strings(
         value
             .get("canonical_task_ids")
@@ -19,7 +21,7 @@ fn raw_task_refs(value: &serde_json::Value) -> Vec<String> {
     ))
 }
 
-fn item_id(value: &serde_json::Value) -> Option<String> {
+pub(super) fn item_id(value: &serde_json::Value) -> Option<String> {
     value
         .get("item_id")
         .or_else(|| value.get("id"))
@@ -41,7 +43,7 @@ fn dependency_refs(value: &serde_json::Value) -> Vec<String> {
     ))
 }
 
-fn normalize_dependency_refs(
+pub(super) fn normalize_dependency_refs(
     value: &serde_json::Value,
     universe: &TaskUniverse,
     item_to_tasks: &BTreeMap<String, Vec<String>>,
@@ -62,13 +64,13 @@ fn normalize_dependency_refs(
     normalized.into_iter().collect()
 }
 
-fn short_task_alias(canonical: &str) -> Option<String> {
+pub(super) fn short_task_alias(canonical: &str) -> Option<String> {
     let digits = canonical.rsplit('-').next()?;
     (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("T{digits}"))
 }
 
-fn unresolved_dependencies(graph: &WorkflowV2SourceTaskGraph) -> Vec<String> {
+pub(super) fn unresolved_dependencies(graph: &WorkflowV2SourceTaskGraph) -> Vec<String> {
     graph
         .items
         .iter()
@@ -79,7 +81,7 @@ fn unresolved_dependencies(graph: &WorkflowV2SourceTaskGraph) -> Vec<String> {
         .collect()
 }
 
-fn graph_invalid_reasons(
+pub(super) fn graph_invalid_reasons(
     wave_kind: DynamicSourceKind,
     graph: &WorkflowV2SourceTaskGraph,
 ) -> Vec<String> {
@@ -145,7 +147,7 @@ fn allows_duplicate_task_assignment(wave_kind: DynamicSourceKind) -> bool {
     )
 }
 
-fn non_empty_strings(value: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn non_empty_strings(value: Option<&serde_json::Value>) -> Vec<String> {
     match value {
         Some(serde_json::Value::Array(items)) => items.iter().flat_map(value_to_strings).collect(),
         Some(serde_json::Value::String(value)) => value
@@ -184,11 +186,11 @@ fn value_to_strings(value: &serde_json::Value) -> Vec<String> {
     }
 }
 
-fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
     non_empty_strings(value)
 }
 
-fn sorted_unique(values: Vec<String>) -> Vec<String> {
+pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
     values
         .into_iter()
         .map(|value| value.trim().to_string())
@@ -205,6 +207,6 @@ fn sorted_unique(values: Vec<String>) -> Vec<String> {
 /// digest of `null` — colliding with each other and with a legitimately empty
 /// graph — and that hash lands in a reuse cache key. The error is returned so
 /// the caller records "no fingerprint" plus a reason instead.
-fn source_fingerprint(graph: &WorkflowV2SourceTaskGraph) -> Result<String, serde_json::Error> {
+pub(super) fn source_fingerprint(graph: &WorkflowV2SourceTaskGraph) -> Result<String, serde_json::Error> {
     Ok(stable_hash(&serde_json::to_value(graph)?))
 }

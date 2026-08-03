@@ -134,9 +134,15 @@ pub(super) struct LifecycleEvidence {
     pub(super) final_evidence_repair_attempts: Vec<serde_json::Value>,
 }
 
-include!("workflow_live_v2_lifecycle_driver_a.rs");
-include!("workflow_live_v2_lifecycle_driver_b.rs");
-include!("workflow_live_v2_lifecycle_driver_c.rs");
+#[path = "workflow_live_v2_lifecycle_driver_a.rs"]
+mod workflow_live_v2_lifecycle_driver_a;
+pub(crate) use workflow_live_v2_lifecycle_driver_a::*;
+#[path = "workflow_live_v2_lifecycle_driver_b.rs"]
+mod workflow_live_v2_lifecycle_driver_b;
+pub(crate) use workflow_live_v2_lifecycle_driver_b::*;
+#[path = "workflow_live_v2_lifecycle_driver_c.rs"]
+mod workflow_live_v2_lifecycle_driver_c;
+pub(crate) use workflow_live_v2_lifecycle_driver_c::*;
 
 pub(super) fn normalize_null_report_collections(value: &mut serde_json::Value) {
     const COLLECTION_FIELDS: &[&str] = &[

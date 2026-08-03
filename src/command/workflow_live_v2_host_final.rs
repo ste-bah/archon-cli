@@ -1,4 +1,6 @@
-fn final_report_result(
+use super::*;
+
+pub(super) fn final_report_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -335,7 +337,7 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     if raw.is_empty() {
         return false;
     }
-    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return true;
     }
     let path = Path::new(raw);
@@ -352,7 +354,7 @@ fn merge_sorted_strings(mut existing: Vec<String>, extra: BTreeSet<String>) -> V
     existing
 }
 
-fn final_acceptance_gate_result(
+pub(super) fn final_acceptance_gate_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,

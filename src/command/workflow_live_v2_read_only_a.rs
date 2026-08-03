@@ -6,7 +6,10 @@
 /// declared relative to it); items lacking either a contract or a root are
 /// skipped — nothing is invented. Domain-agnostic: the contract's own content
 /// decides what gets checked.
-fn declared_contracts_by_item(
+
+use super::*;
+
+pub(super) fn declared_contracts_by_item(
     items: &[archon_workflow::WorkflowV2FanoutItem],
 ) -> std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)> {
     let mut contracts = std::collections::BTreeMap::new();
@@ -64,7 +67,7 @@ fn declared_contracts_by_item(
 /// Host-side and universe-sourced on purpose: the authored script cannot omit,
 /// weaken or invent a contract. Generic — the engine matches by task id and
 /// never reads what the contract contains.
-fn stamp_declared_contracts_from_universe(
+pub(super) fn stamp_declared_contracts_from_universe(
     mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
     task_universe: Option<
         &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
@@ -120,7 +123,7 @@ fn stamp_declared_contracts_from_universe(
 /// mirrors what the task file already declares. Read-only refers to REPO
 /// writes — it does not mean a verifier must be blind to the systems the task
 /// is about.
-fn stamp_required_tools_from_universe(
+pub(super) fn stamp_required_tools_from_universe(
     mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
     task_universe: Option<
         &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,

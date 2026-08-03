@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn validate_review_kind_shape(
     details: &WorkflowDryRunPlanDetails,
     accepted_task_ids: &std::collections::BTreeSet<String>,
@@ -183,7 +185,7 @@ pub(super) fn validate_review_kind_shape(
     }
 }
 
-pub(super) fn validate_review_accounting_from_reducers(
+pub(crate) fn validate_review_accounting_from_reducers(
     script_result: Option<&str>,
     details: &WorkflowDryRunPlanDetails,
     store: &WorkflowV2ResultStore,

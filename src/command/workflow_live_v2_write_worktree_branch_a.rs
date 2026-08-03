@@ -1,4 +1,6 @@
-pub(super) async fn run_one_worktree_branch(
+use super::*;
+
+pub(crate) async fn run_one_worktree_branch(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
@@ -338,7 +340,7 @@ pub(super) fn validate_worktree_branch_result(
     Ok(())
 }
 
-pub(super) fn verify_declared_artifacts_for_result(
+pub(crate) fn verify_declared_artifacts_for_result(
     input: &serde_json::Value,
     result: &WorkflowV2Result,
     workspace_root: &Path,
@@ -360,7 +362,7 @@ pub(super) fn result_requires_declared_artifact_verification(result: &WorkflowV2
         == Some(true)
 }
 
-pub(super) fn run_declared_artifact_verifiers(
+pub(crate) fn run_declared_artifact_verifiers(
     input: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<(), String> {
@@ -440,7 +442,7 @@ pub(super) fn capture_worktree_branch_manifest(
     Ok((Some(manifest), Some(captured.pre_hashes)))
 }
 
-pub(super) fn persist_rejected_worktree_result(
+pub(crate) fn persist_rejected_worktree_result(
     store: &WorkflowV2ResultStore,
     branch_id: &str,
     attempt: &str,

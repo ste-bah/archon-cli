@@ -1,4 +1,6 @@
-pub(super) fn canonical_task_ids_from_generated_value(
+use super::*;
+
+pub(crate) fn canonical_task_ids_from_generated_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> Vec<String> {
@@ -14,7 +16,7 @@ pub(super) fn canonical_task_ids_from_generated_value(
     embedded_task_ids_from_generated_value(value, &universe)
 }
 
-pub(super) fn normalize_canonical_ids(
+pub(crate) fn normalize_canonical_ids(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     ids: impl IntoIterator<Item = String>,
 ) -> CanonicalIdNormalization {
@@ -41,7 +43,7 @@ pub(super) fn normalize_canonical_ids(
     }
 }
 
-fn raw_canonical_task_ids_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn raw_canonical_task_ids_from_generated_value(value: &serde_json::Value) -> Vec<String> {
     raw_strings_from_aliases(
         value,
         &[
@@ -85,7 +87,7 @@ pub(super) fn dependency_ids_from_generated_value(
     )
 }
 
-pub(super) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+pub(crate) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
     sorted_unique(
         raw_strings_from_aliases(
             value,
@@ -117,7 +119,7 @@ pub(super) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> V
 
 /// Lifecycle shims: JS `generatedContractTargetFileIssue` and the item-less
 /// fallback of JS `generatedContractInventorySourceItems`.
-pub(super) fn lifecycle_target_file_issue(
+pub(crate) fn lifecycle_target_file_issue(
     target: &str,
     target_repository_root: Option<&str>,
 ) -> Option<&'static str> {
@@ -125,22 +127,8 @@ pub(super) fn lifecycle_target_file_issue(
     target_file_issue(target, &root)
 }
 
-pub(super) fn lifecycle_inventory_source_items(
+pub(crate) fn lifecycle_inventory_source_items(
     value: &serde_json::Value,
 ) -> Vec<serde_json::Value> {
     collect_generated_inventory_items(value)
 }
-
-include!("workflow_live_generated_contract_validation.rs");
-
-include!("workflow_live_generated_contract_helpers.rs");
-
-include!("workflow_live_generated_contract_artifacts.rs");
-
-include!("workflow_live_generated_contract_retry.rs");
-
-include!("workflow_live_generated_contract_invariants.rs");
-
-#[cfg(test)]
-#[path = "workflow_live_generated_contract_tests.rs"]
-mod tests;

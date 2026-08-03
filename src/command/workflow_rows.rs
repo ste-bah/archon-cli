@@ -1,4 +1,6 @@
-fn emit_workflow_rows(
+use super::*;
+
+pub(super) fn emit_workflow_rows(
     cwd: &Path,
     action: &CommandAction,
     ctx: &mut CommandContext,
@@ -69,7 +71,7 @@ fn run_row(run: &archon_workflow::WorkflowRun) -> EvidenceRowPayload {
     }
 }
 
-fn lifecycle(store: &WorkflowStore, run_id: &str, action: LifecycleAction) -> Result<String> {
+pub(super) fn lifecycle(store: &WorkflowStore, run_id: &str, action: LifecycleAction) -> Result<String> {
     let controller = LifecycleController::new(store.clone());
     let v2_restart = generated_v2_restart_target(&action);
     let run = controller.apply(run_id, action)?;

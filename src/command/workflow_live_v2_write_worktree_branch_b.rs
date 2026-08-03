@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn push_patch_manifest_artifact(
     result: &mut WorkflowV2Result,
     run_root: &Path,
@@ -59,7 +61,7 @@ pub(super) fn validate_captured_patch(
     Ok(captured)
 }
 
-pub(super) fn coordinator_plan_for_assignment(
+pub(crate) fn coordinator_plan_for_assignment(
     run_id: &str,
     stage_id: &str,
     assignment: &WorkflowV2WriteAssignment,
@@ -129,7 +131,7 @@ pub(super) fn normalized_assignment_scopes(
         .collect()
 }
 
-pub(super) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
+pub(crate) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
     run_root
         .join("write-coordination")
         .join("stages")

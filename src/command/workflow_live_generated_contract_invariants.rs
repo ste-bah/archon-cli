@@ -1,4 +1,6 @@
-fn normalize_retry_invariant_context(
+use super::*;
+
+pub(super) fn normalize_retry_invariant_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -39,7 +41,7 @@ fn normalize_retry_invariant_context(
     }
 }
 
-fn retry_invariant_missing_fields(value: &serde_json::Value) -> Vec<&'static str> {
+pub(super) fn retry_invariant_missing_fields(value: &serde_json::Value) -> Vec<&'static str> {
     if !generated_retry_verification_item(value) {
         return Vec::new();
     }

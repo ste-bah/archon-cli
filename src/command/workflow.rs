@@ -356,15 +356,25 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
     Ok(text)
 }
 
-include!("workflow_spec_execution.rs");
+#[path = "workflow_spec_execution.rs"]
+mod workflow_spec_execution;
+pub(crate) use workflow_spec_execution::*;
 
-include!("workflow_rows.rs");
+#[path = "workflow_rows.rs"]
+mod workflow_rows;
+pub(super) use workflow_rows::*;
 
-include!("workflow_restart.rs");
+#[path = "workflow_restart.rs"]
+mod workflow_restart;
+pub(super) use workflow_restart::*;
 
-include!("workflow_status_detail.rs");
+#[path = "workflow_status_detail.rs"]
+mod workflow_status_detail;
+pub(super) use workflow_status_detail::*;
 
-include!("workflow_cli_helpers.rs");
+#[path = "workflow_cli_helpers.rs"]
+mod workflow_cli_helpers;
+pub(super) use workflow_cli_helpers::*;
 
 #[cfg(test)]
 #[path = "workflow_tests.rs"]

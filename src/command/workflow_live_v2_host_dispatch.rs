@@ -1,4 +1,6 @@
-async fn execute_v2_live_call(
+use super::*;
+
+pub(super) async fn execute_v2_live_call(
     task: &str,
     runtime: &WorkflowV2ScriptRuntime,
     execution: WorkflowV2CallExecution,
@@ -80,7 +82,7 @@ async fn execute_v2_live_call(
     }
 }
 
-fn execute_declared_local_tool(
+pub(super) fn execute_declared_local_tool(
     execution: WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -151,7 +153,7 @@ fn should_resolve_local_source(execution: &WorkflowV2CallExecution) -> bool {
         .is_some_and(|source| !source.trim_start().starts_with('{'))
 }
 
-async fn run_single_v2_agent_call(
+pub(super) async fn run_single_v2_agent_call(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
@@ -173,7 +175,7 @@ async fn run_single_v2_agent_call(
     .await
 }
 
-async fn run_single_v2_agent_call_in_repository(
+pub(super) async fn run_single_v2_agent_call_in_repository(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
@@ -249,9 +251,8 @@ async fn run_v2_agent_call_with_rejected_output_log(
     }
 }
 
-include!("workflow_live_v2_host_dispatch_repair.rs");
 
-fn save_rejected_write_output(
+pub(crate) fn save_rejected_write_output(
     v2_store: Option<&WorkflowV2ResultStore>,
     request: &archon_workflow::WorkflowV2AgentRequest,
     attempt: &str,
@@ -272,7 +273,7 @@ fn save_rejected_write_output(
     let _ = store.append_rejected_output(&request.call.id, record);
 }
 
-fn save_rejected_write_result(
+pub(crate) fn save_rejected_write_result(
     v2_store: Option<&WorkflowV2ResultStore>,
     request: &archon_workflow::WorkflowV2AgentRequest,
     attempt: &str,
@@ -301,7 +302,7 @@ fn result_has_rejected_write_output(result: &WorkflowV2Result) -> bool {
     })
 }
 
-pub(super) fn provider_tier_for_v2_request(
+pub(crate) fn provider_tier_for_v2_request(
     request: &archon_workflow::WorkflowV2AgentRequest,
 ) -> ProviderTier {
     match request.role.to_ascii_lowercase().as_str() {
@@ -427,7 +428,3 @@ fn sanitize_generated_contract_gap_id(raw: &str) -> String {
     }
     out.trim_matches('_').to_string()
 }
-
-#[cfg(test)]
-#[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
-mod rejected_output_tests;

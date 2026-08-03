@@ -1,4 +1,6 @@
-pub(super) fn collapse_outcome_clones(
+use super::*;
+
+pub(crate) fn collapse_outcome_clones(
     outcomes: &[serde_json::Value],
     limit: usize,
 ) -> (Vec<serde_json::Value>, usize) {
@@ -222,7 +224,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn repair_post_remediation_plan_once(
+    pub(crate) async fn repair_post_remediation_plan_once(
         &self,
         remediation_inventory: &serde_json::Value,
         remediation_wave: &serde_json::Value,
@@ -285,7 +287,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn producer_retry_items(
+pub(crate) fn producer_retry_items(
     contract: &LifecycleContract<'_>,
     producer_output: &serde_json::Value,
     producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
@@ -337,7 +339,7 @@ pub(super) fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) ->
     )
 }
 
-pub(super) fn record_unresolved_verification_remediation(
+pub(crate) fn record_unresolved_verification_remediation(
     remediation_attempt: &usize,
     wave_index: usize,
     evidence: &mut LifecycleEvidence,

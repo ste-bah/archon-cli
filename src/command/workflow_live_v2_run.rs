@@ -1,4 +1,6 @@
-pub(super) async fn run_generated_v2_workflow(
+use super::*;
+
+pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
@@ -26,7 +28,7 @@ pub(super) async fn run_generated_v2_workflow(
     .await
 }
 
-pub(super) async fn run_saved_v2_workflow(
+pub(crate) async fn run_saved_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
@@ -122,7 +124,7 @@ async fn fold_run_topology(cwd: &Path, store: &WorkflowStore, run_id: &str, task
     .await;
 }
 
-pub(super) async fn resume_generated_v2_workflow(
+pub(crate) async fn resume_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     run_id: &str,
@@ -246,7 +248,7 @@ async fn live_plan_from_generated_bundle(
     Ok(Some(script_plan))
 }
 
-fn save_generated_v2_metadata(
+pub(super) fn save_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
     plan: &WorkflowScriptPlan,
@@ -273,7 +275,7 @@ fn save_generated_v2_metadata(
 
 /// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
 /// fallback on continue agree.
-pub(super) fn script_lifecycle_from_env() -> bool {
+pub(crate) fn script_lifecycle_from_env() -> bool {
     // v3 authored-script lifecycle is the DEFAULT. The decomposed (v1) engine is
     // opt-in only via ARCHON_SCRIPT_LIFECYCLE=0/false — otherwise a run silently
     // fell back to decomposed (old monolithic review) whenever the flag wasn't
@@ -283,7 +285,7 @@ pub(super) fn script_lifecycle_from_env() -> bool {
         .unwrap_or(true)
 }
 
-fn load_generated_v2_metadata(
+pub(super) fn load_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
 ) -> archon_workflow::WorkflowResult<Option<GeneratedV2Metadata>> {
@@ -333,7 +335,7 @@ async fn execute_generated_v2_run(
         plan.task_universe
             .as_ref()
             .map(|universe| {
-                super::workflow_live_v2_completion_credit::prepare_resume_credit(
+                super::super::workflow_live_v2_completion_credit::prepare_resume_credit(
                     &v2_store, universe,
                 )
             })

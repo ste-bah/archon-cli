@@ -1,4 +1,6 @@
-fn source_data_contract_issue(
+use super::*;
+
+pub(super) fn source_data_contract_issue(
     values: &[serde_json::Value],
     universe: &TaskUniverse,
     task_universe: &WorkflowV2TaskUniverse,

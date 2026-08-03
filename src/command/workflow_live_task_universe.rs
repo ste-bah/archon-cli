@@ -6,8 +6,16 @@ use archon_topology::ir::{GraphBudget, GraphOrigin, NodeRole, TaskGraph, TaskNod
 use archon_workflow::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 
-include!("workflow_live_task_universe_a.rs");
-include!("workflow_live_task_universe_b.rs");
+#[path = "workflow_live_task_universe_a.rs"]
+mod workflow_live_task_universe_a;
+pub(crate) use workflow_live_task_universe_a::*;
+#[path = "workflow_live_task_universe_b.rs"]
+mod workflow_live_task_universe_b;
+pub(crate) use workflow_live_task_universe_b::*;
+
+#[path = "workflow_live_task_universe_parsing.rs"]
+pub(super) mod parsing;
+use parsing::{merge_project_capabilities, parse_task_file};
 
 /// Lower a directory of decomposed-PRD `TASK-*.md` files into the topology IR
 /// so the milestone 4 lints can run against it.

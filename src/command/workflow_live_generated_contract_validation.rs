@@ -1,4 +1,6 @@
-fn generated_item_issues(
+use super::*;
+
+pub(super) fn generated_item_issues(
     value: &serde_json::Value,
     universe: &ContractTaskUniverse,
     target_repository_root: Option<&str>,
@@ -208,7 +210,7 @@ fn artifact_producing_intent(value: &serde_json::Value) -> bool {
 
 /// task_id -> claiming (item_id, canonical_task_ids) pairs.
 type TaskClaims = BTreeMap<String, Vec<(Option<String>, Vec<String>)>>;
-fn generated_support_item(value: &serde_json::Value) -> bool {
+pub(super) fn generated_support_item(value: &serde_json::Value) -> bool {
     let work_type = first_string(value, &["work_type", "workType", "kind"])
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -218,7 +220,7 @@ fn generated_support_item(value: &serde_json::Value) -> bool {
     raw_strings_from_aliases(value, &["canonical_task_ids"]).is_empty()
 }
 
-fn generated_inventory_graph_issues(
+pub(super) fn generated_inventory_graph_issues(
     items: &[serde_json::Value],
     universe: &ContractTaskUniverse,
 ) -> Vec<GeneratedContractIssue> {
@@ -329,7 +331,7 @@ fn generated_inventory_graph_issues(
     dedupe_issues(issues)
 }
 
-fn generated_focused_verification_item(value: &serde_json::Value) -> bool {
+pub(super) fn generated_focused_verification_item(value: &serde_json::Value) -> bool {
     generated_verification_intent(value)
         && value_present(value.get("focused_verification"))
         && (value.get("expected_evidence").is_some()
@@ -373,7 +375,7 @@ fn target_files_issue(
     None
 }
 
-fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
+pub(super) fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
         return Some("implementation item has an empty target file");
@@ -401,7 +403,7 @@ fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
     None
 }
 
-fn normalized_contract_path(path: &str) -> Option<String> {
+pub(super) fn normalized_contract_path(path: &str) -> Option<String> {
     let raw = path.trim().replace('\\', "/");
     if raw.is_empty() {
         return None;

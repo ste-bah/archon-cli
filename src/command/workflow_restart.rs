@@ -1,10 +1,12 @@
+use super::*;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum GeneratedV2RestartTarget {
+pub(super) enum GeneratedV2RestartTarget {
     Call(String),
     Item { call_id: String, item_id: String },
 }
 
-fn generated_v2_restart_target(action: &LifecycleAction) -> Option<GeneratedV2RestartTarget> {
+pub(super) fn generated_v2_restart_target(action: &LifecycleAction) -> Option<GeneratedV2RestartTarget> {
     match action {
         LifecycleAction::RestartStage(stage_id) => {
             Some(GeneratedV2RestartTarget::Call(stage_id.clone()))
@@ -19,7 +21,7 @@ fn generated_v2_restart_target(action: &LifecycleAction) -> Option<GeneratedV2Re
     }
 }
 
-fn invalidate_generated_v2_call(
+pub(super) fn invalidate_generated_v2_call(
     store: &WorkflowStore,
     run: &WorkflowRun,
     call_id: &str,
@@ -27,7 +29,7 @@ fn invalidate_generated_v2_call(
     invalidate_generated_v2_call_cache(store, run, call_id, true)
 }
 
-fn restart_generated_v2_task_workflow(
+pub(super) fn restart_generated_v2_task_workflow(
     store: &WorkflowStore,
     run: &WorkflowRun,
     task_id: &str,
@@ -230,7 +232,7 @@ fn reset_generated_v2_stage_state(
     Ok(())
 }
 
-fn invalidate_generated_v2_item(
+pub(super) fn invalidate_generated_v2_item(
     store: &WorkflowStore,
     run: &WorkflowRun,
     call_id: &str,

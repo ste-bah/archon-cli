@@ -1,6 +1,8 @@
+use super::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum GeneratedContractIssueKind {
+pub(crate) enum GeneratedContractIssueKind {
     InventoryShapeRepair,
     TaskUniverseReconcile,
     DependencyGraphRepair,
@@ -28,42 +30,42 @@ impl GeneratedContractIssueKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct GeneratedContractIssue {
-    pub(super) kind: GeneratedContractIssueKind,
-    pub(super) field: String,
-    pub(super) message: String,
+pub(crate) struct GeneratedContractIssue {
+    pub(crate) kind: GeneratedContractIssueKind,
+    pub(crate) field: String,
+    pub(crate) message: String,
     pub(super) item_id: Option<String>,
     pub(super) canonical_task_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct NormalizedGeneratedItem {
-    pub(super) value: serde_json::Value,
-    pub(super) issues: Vec<GeneratedContractIssue>,
+pub(crate) struct NormalizedGeneratedItem {
+    pub(crate) value: serde_json::Value,
+    pub(crate) issues: Vec<GeneratedContractIssue>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct NormalizedGeneratedInventory {
-    pub(super) items: Vec<serde_json::Value>,
-    pub(super) issues: Vec<GeneratedContractIssue>,
+pub(crate) struct NormalizedGeneratedInventory {
+    pub(crate) items: Vec<serde_json::Value>,
+    pub(crate) issues: Vec<GeneratedContractIssue>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(super) struct CanonicalIdNormalization {
-    pub(super) canonical_ids: Vec<String>,
-    pub(super) unresolved_ids: Vec<String>,
+pub(crate) struct CanonicalIdNormalization {
+    pub(crate) canonical_ids: Vec<String>,
+    pub(crate) unresolved_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ContractTaskUniverse {
-    canonical: BTreeSet<String>,
+pub(super) struct ContractTaskUniverse {
+    pub(super) canonical: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
     dependencies: BTreeMap<String, Vec<String>>,
     tasks_with_deliverable_contracts: BTreeSet<String>,
 }
 
 impl ContractTaskUniverse {
-    fn from_authoritative(task_universe: Option<&WorkflowV2TaskUniverse>) -> Self {
+    pub(super) fn from_authoritative(task_universe: Option<&WorkflowV2TaskUniverse>) -> Self {
         let mut out = Self::default();
         let Some(task_universe) = task_universe else {
             return out;
@@ -86,7 +88,7 @@ impl ContractTaskUniverse {
         out
     }
 
-    fn has_deliverable_contract(&self, task_ids: &[String]) -> bool {
+    pub(super) fn has_deliverable_contract(&self, task_ids: &[String]) -> bool {
         task_ids
             .iter()
             .any(|id| self.tasks_with_deliverable_contracts.contains(id))
@@ -105,7 +107,7 @@ impl ContractTaskUniverse {
         }
     }
 
-    fn resolve(&self, value: &str) -> Option<String> {
+    pub(super) fn resolve(&self, value: &str) -> Option<String> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             return None;
@@ -132,20 +134,20 @@ impl ContractTaskUniverse {
             .flatten()
     }
 
-    fn dependencies_for(&self, task_id: &str) -> Vec<String> {
+    pub(super) fn dependencies_for(&self, task_id: &str) -> Vec<String> {
         self.dependencies.get(task_id).cloned().unwrap_or_default()
     }
 }
 
 #[cfg(test)]
-pub(super) fn normalize_generated_inventory_value(
+pub(crate) fn normalize_generated_inventory_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> NormalizedGeneratedInventory {
     normalize_generated_inventory_value_with_repo(value, task_universe, None)
 }
 
-pub(super) fn normalize_generated_inventory_value_with_repo(
+pub(crate) fn normalize_generated_inventory_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,
@@ -180,14 +182,14 @@ fn empty_inventory_issue(universe: &ContractTaskUniverse) -> GeneratedContractIs
     }
 }
 
-pub(super) fn normalize_generated_item_value(
+pub(crate) fn normalize_generated_item_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> NormalizedGeneratedItem {
     normalize_generated_item_value_with_repo(value, task_universe, None)
 }
 
-pub(super) fn normalize_generated_item_value_with_repo(
+pub(crate) fn normalize_generated_item_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,

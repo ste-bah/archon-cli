@@ -1,4 +1,6 @@
-fn normalize_retry_context(
+use super::*;
+
+pub(super) fn normalize_retry_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -84,7 +86,7 @@ fn normalize_retry_context(
         }
 }
 
-fn normalize_provider_env_context(
+pub(super) fn normalize_provider_env_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -136,7 +138,7 @@ fn provider_env_requirement_values(value: &serde_json::Value) -> Vec<serde_json:
         .collect()
 }
 
-fn collect_generated_inventory_items(value: &serde_json::Value) -> Vec<serde_json::Value> {
+pub(super) fn collect_generated_inventory_items(value: &serde_json::Value) -> Vec<serde_json::Value> {
     if let Some(items) = top_level_items(value) {
         return items.clone();
     }

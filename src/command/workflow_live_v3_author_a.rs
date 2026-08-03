@@ -1,6 +1,9 @@
 /// Reference handed to the author agent. Generic by construction: it
 /// documents the dialect, never the fixture domain.
-pub(super) const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
+
+use super::*;
+
+pub(crate) const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
 
 Shape — top-level script, exactly like this (no wrapper function):
 

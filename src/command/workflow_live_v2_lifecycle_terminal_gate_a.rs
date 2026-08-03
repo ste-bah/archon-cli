@@ -1,21 +1,23 @@
-const MAX_REROUTES_PER_BLOCKED_ID: usize = 2;
+use super::*;
+
+pub(super) const MAX_REROUTES_PER_BLOCKED_ID: usize = 2;
 
 #[derive(Default)]
-pub(super) struct TerminalGateState {
-    pub(super) reroute_counts: BTreeMap<String, usize>,
-    pub(super) pending_implementation_items: Vec<Value>,
-    pub(super) completed_ids: BTreeSet<String>,
-    pub(super) noop_reclassified_ids: BTreeSet<String>,
-    pub(super) events: Vec<Value>,
+pub(crate) struct TerminalGateState {
+    pub(crate) reroute_counts: BTreeMap<String, usize>,
+    pub(crate) pending_implementation_items: Vec<Value>,
+    pub(crate) completed_ids: BTreeSet<String>,
+    pub(crate) noop_reclassified_ids: BTreeSet<String>,
+    pub(crate) events: Vec<Value>,
 }
 
 #[derive(Debug, PartialEq)]
-pub(super) enum TerminalGateDecision {
+pub(crate) enum TerminalGateDecision {
     Emit,
     Reroute(Value),
 }
 
-pub(super) fn decide(
+pub(crate) fn decide(
     contract: &LifecycleContract<'_>,
     blocked_id: &str,
     inputs: &Value,
@@ -31,7 +33,7 @@ pub(super) fn decide(
     let ready_noops = support::array(inputs.get("readyNoopItems"));
     let failed_noops = support::array(inputs.get("failedNoopProof"));
     if !ready_noops.is_empty() && !failed_noops.is_empty() {
-        let route = super::workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
+        let route = super::super::workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
             contract,
             &ready_noops,
             &BTreeSet::new(),
@@ -39,7 +41,7 @@ pub(super) fn decide(
             &state.completed_ids,
             &mut state.noop_reclassified_ids,
         );
-        if let super::workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
+        if let super::super::workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
             items,
         ) = route
         {
@@ -110,7 +112,7 @@ pub(super) fn decide(
     TerminalGateDecision::Reroute(event)
 }
 
-pub(super) fn apply_pending_implementation_items(
+pub(crate) fn apply_pending_implementation_items(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
     pending: Vec<Value>,

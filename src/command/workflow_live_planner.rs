@@ -177,7 +177,9 @@ fn decomposed_prd_prompt_slots() -> BTreeMap<String, String> {
     ])
 }
 
-include!("workflow_live_planner_repair.rs");
+#[path = "workflow_live_planner_repair.rs"]
+mod workflow_live_planner_repair;
+pub(crate) use workflow_live_planner_repair::*;
 
 pub(super) fn render_live_plan(plan: &WorkflowScriptPlan) -> Result<String> {
     let mut out = String::new();
