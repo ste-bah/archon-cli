@@ -6,13 +6,12 @@ use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowPolicy, WorkflowRun,
-    WorkflowStageRunner, WorkflowStore,
+    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowLlmClientFactory,
+    WorkflowLlmClientRequest, WorkflowPolicy, WorkflowRun, WorkflowStageRunner, WorkflowStore,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::command::pipeline_support::build_subagent_pipeline_adapter;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
@@ -166,10 +165,15 @@ pub(crate) async fn run_live_cli_action(
     action: CommandAction,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
+    llm_factory: &dyn WorkflowLlmClientFactory<dyn LlmClient>,
 ) -> Result<String> {
-    let llm =
-        build_subagent_pipeline_adapter(config, env_vars, "workflow_cli", cwd, "workflow-cli")
-            .await?;
+    let llm = llm_factory
+        .build_client(WorkflowLlmClientRequest {
+            cwd: cwd.to_path_buf(),
+            origin: "workflow_cli".to_string(),
+            session_id: "workflow-cli".to_string(),
+        })
+        .await?;
     let (tui_tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
     let drain = archon_observability::spawn_named("workflow-cli-tui-drain", async move {
         while rx.recv().await.is_some() {}

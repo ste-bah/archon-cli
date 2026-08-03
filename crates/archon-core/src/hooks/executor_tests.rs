@@ -254,7 +254,7 @@ async fn windows_hook_timeout_kills_descendant_process() {
 
 #[cfg(windows)]
 fn windows_environment_command() -> String {
-    if crate::hooks::shell::resolve_hook_shell().command_arg == "-c" {
+    if archon_shell::resolve_shell().command_arg == "-c" {
         return "printf '%s|%s|%s|%s|%s|%s|%s|%s' \"$ARCHON_SESSION_ID\" \"$ARCHON_CWD\" \"$ARCHON_HOOK_EVENT\" \"${ISSUE92_FORBIDDEN:-missing}\" \"$SYSTEMROOT\" \"$COMSPEC\" \"$PATHEXT\" \"$USERPROFILE\"".to_owned();
     }
     "set \"forbidden=missing\" & if defined ISSUE92_FORBIDDEN set \"forbidden=%ISSUE92_FORBIDDEN%\" & call echo %ARCHON_SESSION_ID%^|%ARCHON_CWD%^|%ARCHON_HOOK_EVENT%^|%%forbidden%%^|%SYSTEMROOT%^|%COMSPEC%^|%PATHEXT%^|%USERPROFILE%".to_owned()
@@ -301,7 +301,7 @@ exit 2
 #[cfg(windows)]
 fn windows_file_command(fixture: &std::path::Path) -> String {
     let path = fixture.display().to_string();
-    if crate::hooks::shell::resolve_hook_shell().command_arg == "-c" {
+    if archon_shell::resolve_shell().command_arg == "-c" {
         return format!(
             "powershell -NoProfile -File '{}'",
             path.replace('\'', "'\\''")

@@ -178,7 +178,6 @@ pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.
 pub(crate) mod session;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
-pub(crate) mod posix_shell;
 pub(crate) mod skills;
 pub(crate) mod slash;
 pub(crate) mod status;
@@ -250,6 +249,7 @@ pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_live_learning_hooks;
+pub(crate) mod workflow_llm_client_factory;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 

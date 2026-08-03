@@ -138,7 +138,15 @@ pub(crate) async fn handle_workflow_command(
     let (action, mode) = cli_action(action)?;
     let output = match mode {
         CliExecutionMode::Deterministic => run_action(&cwd, action)?,
-        CliExecutionMode::Live => run_live_cli_action(&cwd, action, config, env_vars).await?,
+        CliExecutionMode::Live => {
+            // The bin crate is where the port gets its concrete implementation:
+            // this is the last layer that can still name `archon-pipeline`.
+            let llm_factory =
+                crate::command::workflow_llm_client_factory::SubagentPipelineClientFactory::new(
+                    config, env_vars,
+                );
+            run_live_cli_action(&cwd, action, config, env_vars, &llm_factory).await?
+        }
     };
     println!("{output}");
     Ok(())

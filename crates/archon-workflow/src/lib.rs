@@ -18,6 +18,7 @@ pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
 pub mod lifecycle;
+pub mod llm_client_port;
 mod persistence;
 pub mod planner;
 pub mod policy;
@@ -65,6 +66,7 @@ pub use learning::{
     WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
+pub use llm_client_port::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
 pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{

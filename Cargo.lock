@@ -346,6 +346,7 @@ dependencies = [
  "archon-reasoning-quality",
  "archon-sdk",
  "archon-session",
+ "archon-shell",
  "archon-tools",
  "archon-topology",
  "archon-trading",
@@ -493,6 +494,7 @@ dependencies = [
  "archon-observability",
  "archon-permissions",
  "archon-session",
+ "archon-shell",
  "archon-test-support",
  "archon-tools",
  "archon-topology",
@@ -998,6 +1000,13 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "archon-shell"
+version = "1.4.0"
+dependencies = [
+ "which",
 ]
 
 [[package]]

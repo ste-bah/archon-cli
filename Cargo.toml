@@ -157,6 +157,9 @@ archon-permissions = { path = "crates/archon-permissions" }
 archon-plugin = { path = "crates/archon-plugin" }
 archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
+# Shell discovery for `/draft` streaming and workflow v2 verification. Leaf
+# crate, shared with archon-core's hook executor so both resolve the same shell.
+archon-shell = { path = "crates/archon-shell" }
 archon-docs = { path = "crates/archon-docs" }
 archon-knowledge = { path = "crates/archon-knowledge" }
 archon-meaning = { path = "crates/archon-meaning" }

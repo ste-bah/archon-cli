@@ -80,7 +80,7 @@ fn spawn_command(
     session_id: &str,
     event_name: &str,
 ) -> Result<Box<dyn ChildWrapper>, RunError> {
-    let shell = crate::hooks::shell::resolve_hook_shell();
+    let shell = archon_shell::resolve_shell();
     let mut command_builder = Command::new(&shell.program);
     command_builder
         .arg(shell.command_arg)
