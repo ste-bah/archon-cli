@@ -4,7 +4,7 @@ pub(super) fn quality_gate_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let source_results = source_results(execution, v2_store)?;
     let failed = source_results
         .iter()
@@ -122,7 +122,7 @@ pub(super) fn human_gate_result(execution: &WorkflowV2CallExecution) -> Workflow
 pub(super) fn source_results(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<Vec<WorkflowV2Result>> {
+) -> crate::WorkflowResult<Vec<WorkflowV2Result>> {
     if let Some(source_data) = execution.input.get("source_data") {
         let mut results = Vec::new();
         collect_source_results(source_data, &mut results)?;
@@ -148,7 +148,7 @@ pub(super) fn source_results(
 fn collect_source_results(
     value: &serde_json::Value,
     results: &mut Vec<WorkflowV2Result>,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     match value {
         serde_json::Value::Array(items) => {
             for item in items {
@@ -177,7 +177,7 @@ fn collect_source_results(
 fn push_source_result(
     value: &serde_json::Value,
     results: &mut Vec<WorkflowV2Result>,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let result: WorkflowV2Result = serde_json::from_value(value.clone())?;
     results.push(result);
     Ok(())
@@ -261,7 +261,7 @@ pub(super) fn completion_ledger_state(
     v2_store: &WorkflowV2ResultStore,
     required_task_ids: BTreeSet<String>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<(BTreeSet<String>, BTreeSet<String>, Vec<String>)> {
+) -> crate::WorkflowResult<(BTreeSet<String>, BTreeSet<String>, Vec<String>)> {
     let (credit, mut artifact_gaps) = validated_completion_credit(v2_store, task_universe)?;
     let completed = credit
         .completed_ids()
@@ -277,10 +277,10 @@ pub(super) fn completion_ledger_state(
     Ok((completed, missing, artifact_gaps))
 }
 
-pub(crate) fn validated_completion_credit(
+pub(super) fn validated_completion_credit(
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<(CompletionCredit, Vec<String>)> {
+) -> crate::WorkflowResult<(CompletionCredit, Vec<String>)> {
     let mut credit = CompletionCredit::default();
     let mut gaps = Vec::new();
     for record in v2_store.load_call_records()? {
@@ -308,7 +308,7 @@ pub(crate) fn validated_completion_credit(
 
 fn collect_valid_credit(
     store: &WorkflowV2ResultStore,
-    evidence: &[archon_workflow::WorkflowV2TaskCompletionEvidence],
+    evidence: &[crate::WorkflowV2TaskCompletionEvidence],
     result: Option<&WorkflowV2Result>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     credit: &mut CompletionCredit,
@@ -317,9 +317,9 @@ fn collect_valid_credit(
     for item in evidence {
         let is_noop_credit = matches!(
             item.evidence_kind,
-            archon_workflow::WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop
+            crate::WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop
         ) || (item.evidence_kind
-            == archon_workflow::WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate
+            == crate::WorkflowV2TaskCompletionEvidenceKind::ImplementationCandidate
             && item.status == WorkflowV2Status::Noop);
         let noop_criteria_valid = !is_noop_credit
             || noop_acceptance_criteria_satisfied(&item.task_id, result, task_universe);
@@ -442,7 +442,7 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
 }
 
 fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
-    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if crate::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return None;
     }
     let path = Path::new(raw);

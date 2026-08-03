@@ -47,7 +47,7 @@ fn quality_gate_returns_review_choices_for_non_accepted_inputs() {
         "review evidence",
     ));
     store
-        .save_call_record(&archon_workflow::WorkflowV2CallRecord::new(
+        .save_call_record(&crate::WorkflowV2CallRecord::new(
             store.run_id(),
             upstream.call,
             1,

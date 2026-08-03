@@ -389,14 +389,14 @@ fn final_report_accepts_repository_relative_focused_verification_artifacts() {
     });
     verification_result
         .artifacts
-        .push(archon_workflow::WorkflowV2Artifact {
+        .push(crate::WorkflowV2Artifact {
             id: "cli-args-tests".to_string(),
             path: "src/cli_args/tests.rs".to_string(),
             description: None,
         });
     verification_result
         .artifacts
-        .push(archon_workflow::WorkflowV2Artifact {
+        .push(crate::WorkflowV2Artifact {
             id: "trading-market-actions".to_string(),
             path: "src/cli_args/trading_market_actions.rs".to_string(),
             description: None,
