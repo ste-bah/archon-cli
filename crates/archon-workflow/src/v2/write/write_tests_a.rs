@@ -6,9 +6,9 @@ pub(super) use crate::{
 
 use super::*;
 
-#[path = "tests_a1.rs"]
+#[path = "write_tests_a1.rs"]
 mod tests_a1;
 use tests_a1::*;
-#[path = "tests_a2.rs"]
+#[path = "write_tests_a2.rs"]
 mod tests_a2;
 use tests_a2::*;

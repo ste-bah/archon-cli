@@ -363,5 +363,9 @@ use worktree::*;
 use worktree_branch::*;
 use worktree_wave::*;
 
+// `write_tests*`, not `tests*`: the runtime-genericity gate identifies test
+// sources by a `_tests` infix and would otherwise scan these as runtime code —
+// they carry fixture-domain vocabulary by design.
 #[cfg(test)]
+#[path = "write_tests.rs"]
 mod tests;

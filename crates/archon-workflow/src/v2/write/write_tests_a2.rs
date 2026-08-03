@@ -91,7 +91,19 @@ fn wf98_module_child_ownership_fixture_no_longer_reports_undeclared_path() {
         archon_test_support::fixtures::WF98_IMPLEMENTATION_WAVE_1_MODULE_CHILD_OWNERSHIP,
     )
     .expect("fixture");
-    let repo_root = env!("CARGO_MANIFEST_DIR").to_string();
+    // This fixture is the one test here that scans the REAL repository rather
+    // than a synthetic tempdir: it reproduces WF98, where a declared module
+    // parent had to carry its `mod io;` child, and it names actual paths
+    // (`crates/archon-trading/src/data_store.rs`). Those are workspace-relative,
+    // so the root is the workspace root — two levels above this crate's
+    // manifest dir — not `CARGO_MANIFEST_DIR`, which pointed at the workspace
+    // root only while this test lived in the binary crate.
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root above crates/archon-workflow")
+        .display()
+        .to_string();
     let branch_id = fixture["branch_id"].as_str().expect("branch id");
     let call = WorkflowV2HostCall {
         id: fixture["call_id"].as_str().expect("call id").to_string(),
