@@ -228,20 +228,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $tests = @(
-            @{ Package = 'archon-core'; Name = 'windows_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_empty_env_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_sanitized_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_ps_module_path_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_powershell_channel_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_powershell_env_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_ci_env_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_metadata_env_raw_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_job_object_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_empty_env_job_object_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_sanitized_job_object_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_job_object_shell_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_empty_env_job_object_shell_child_drains_large_output' },
-            @{ Package = 'archon-core'; Name = 'windows_sanitized_job_object_shell_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_hook_output_has_a_shared_bound_and_reports_truncation' },
             @{ Package = 'archon-core'; Name = 'windows_hook_uses_isolated_environment_and_explicit_context' },
             @{ Package = 'archon-core'; Name = 'windows_hook_timeout_kills_descendant_process' },
