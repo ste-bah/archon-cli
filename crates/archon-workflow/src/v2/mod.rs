@@ -26,6 +26,7 @@ pub mod local_host;
 pub mod manifest_scope;
 pub mod orchestrator_actions;
 pub mod outcome_envelope;
+pub mod plan_metadata;
 pub mod prd_intake;
 mod project_artifact_completion;
 pub mod project_artifact_contract;
