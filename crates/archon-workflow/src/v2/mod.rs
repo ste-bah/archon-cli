@@ -35,6 +35,7 @@ pub mod project_artifact_results;
 pub mod project_artifact_stamping;
 pub mod project_artifacts;
 pub mod report;
+pub mod restart;
 pub mod result;
 pub mod result_store;
 pub mod scheduler;
