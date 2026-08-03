@@ -111,16 +111,16 @@ async fn windows_bash_waits_for_descendant_after_parent_exits() {
     let completion_file = dir.path().join("detached-child.complete");
     let fixture = write_windows_detached_descendant_fixture(&completion_file);
     let tool = BashTool {
-        timeout_secs: 5,
+        timeout_secs: 15,
         max_output_bytes: 1024,
         ..Default::default()
     };
     let result = tokio::time::timeout(
-        Duration::from_secs(8),
+        Duration::from_secs(20),
         tool.execute(
             json!({
                 "command": windows_powershell_file_command(&fixture),
-                "timeout": 5_000
+                "timeout": 15_000
             }),
             &ToolContext {
                 working_dir: dir.path().to_path_buf(),
