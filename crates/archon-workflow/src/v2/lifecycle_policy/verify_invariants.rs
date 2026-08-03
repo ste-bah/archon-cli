@@ -1,8 +1,8 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
 
-pub(super) fn enforce_retry_invariants(inventory: &Value, verification: &Value) -> Value {
+pub fn enforce_retry_invariants(inventory: &Value, verification: &Value) -> Value {
     let failed = support::non_accepted_outcomes(&support::outcomes_of(verification));
     if failed.is_empty() {
         return inventory.clone();
@@ -111,7 +111,7 @@ fn matching_failed_outcome<'a>(item: &Value, failed: &'a [Value]) -> Option<&'a 
     })
 }
 
-pub(super) fn residual_gap_entries(value: &Value) -> Vec<(String, String)> {
+pub(crate) fn residual_gap_entries(value: &Value) -> Vec<(String, String)> {
     residual_gap_roots(value)
         .into_iter()
         .flat_map(|root| support::array(root.get("residual_gaps")))
@@ -132,7 +132,7 @@ fn residual_gap_roots(value: &Value) -> Vec<&Value> {
     roots
 }
 
-pub(super) fn verification_item_ids(value: &Value) -> Vec<String> {
+pub fn verification_item_ids(value: &Value) -> Vec<String> {
     let mut ids = direct_item_ids(value);
     if let Some(data) = value.get("result").and_then(|result| result.get("data")) {
         ids.extend(direct_item_ids(data));

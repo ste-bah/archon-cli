@@ -1,23 +1,23 @@
 use super::*;
 
-pub(super) const MAX_REROUTES_PER_BLOCKED_ID: usize = 2;
+pub(crate) const MAX_REROUTES_PER_BLOCKED_ID: usize = 2;
 
 #[derive(Default)]
-pub(crate) struct TerminalGateState {
-    pub(crate) reroute_counts: BTreeMap<String, usize>,
-    pub(crate) pending_implementation_items: Vec<Value>,
-    pub(crate) completed_ids: BTreeSet<String>,
-    pub(crate) noop_reclassified_ids: BTreeSet<String>,
-    pub(crate) events: Vec<Value>,
+pub struct TerminalGateState {
+    pub reroute_counts: BTreeMap<String, usize>,
+    pub pending_implementation_items: Vec<Value>,
+    pub completed_ids: BTreeSet<String>,
+    pub noop_reclassified_ids: BTreeSet<String>,
+    pub events: Vec<Value>,
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum TerminalGateDecision {
+pub enum TerminalGateDecision {
     Emit,
     Reroute(Value),
 }
 
-pub(crate) fn decide(
+pub fn decide(
     contract: &LifecycleContract<'_>,
     blocked_id: &str,
     inputs: &Value,
@@ -33,7 +33,7 @@ pub(crate) fn decide(
     let ready_noops = support::array(inputs.get("readyNoopItems"));
     let failed_noops = support::array(inputs.get("failedNoopProof"));
     if !ready_noops.is_empty() && !failed_noops.is_empty() {
-        let route = super::super::workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
+        let route = noop_routing::route_refuted_noops(
             contract,
             &ready_noops,
             &BTreeSet::new(),
@@ -41,10 +41,7 @@ pub(crate) fn decide(
             &state.completed_ids,
             &mut state.noop_reclassified_ids,
         );
-        if let super::super::workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
-            items,
-        ) = route
-        {
+        if let noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(items) = route {
             kinds.push("refuted_noop");
             work.extend(items.iter().cloned());
             pending_implementation_items.extend(items);
@@ -112,7 +109,7 @@ pub(crate) fn decide(
     TerminalGateDecision::Reroute(event)
 }
 
-pub(crate) fn apply_pending_implementation_items(
+pub fn apply_pending_implementation_items(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
     pending: Vec<Value>,

@@ -26,15 +26,9 @@ impl LifecycleDriver {
                     .runtime_state
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                workflow_live_v2_lifecycle_terminal_gate::decide(
-                    &self.contract(),
-                    id,
-                    &inputs,
-                    &mut state,
-                )
+                lifecycle_policy::terminal_gate::decide(&self.contract(), id, &inputs, &mut state)
             };
-            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(event) =
-                decision
+            if let lifecycle_policy::terminal_gate::TerminalGateDecision::Reroute(event) = decision
             {
                 let reroute_count = event
                     .get("reroute_count")

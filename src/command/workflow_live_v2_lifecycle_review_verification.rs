@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
+use archon_workflow::v2::lifecycle_policy;
 use archon_workflow::v2::lifecycle_prompts as prompts;
 
 use super::{LifecycleDriver, LifecycleEvidence, support};
@@ -104,7 +105,7 @@ impl LifecycleDriver {
         } else {
             format!("review-verification-wave-{review_iteration}-retry-{retry}")
         };
-        let items = super::workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+        let items = lifecycle_policy::verify_options::prepare_verification_items(
             items.to_vec(),
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
@@ -199,7 +200,7 @@ fn record_review_verification_retry(
 }
 
 pub(super) fn review_verification_options(items: &[Value], task: &str) -> Value {
-    super::workflow_live_v2_lifecycle_verify_options::verification_options(items, task, false)
+    lifecycle_policy::verify_options::verification_options(items, task, false)
 }
 
 pub(super) fn review_verification_has_execution_failure(verification: &Value) -> bool {

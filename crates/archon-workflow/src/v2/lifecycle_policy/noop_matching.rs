@@ -3,9 +3,9 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::{LifecycleContract, support};
+use crate::generated_lifecycle_support::{self as support, LifecycleContract};
 
-pub(super) fn inventory_contradicts_noop(
+pub fn inventory_contradicts_noop(
     contract: &LifecycleContract<'_>,
     item: &Value,
     gaps: &[Value],

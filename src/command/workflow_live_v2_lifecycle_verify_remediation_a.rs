@@ -25,21 +25,21 @@ impl LifecycleDriver {
                 triage,
             )
             .await?;
-        let mut routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(triage);
+        let mut routes = lifecycle_policy::verify_routing::triage_routes(triage);
         if routes.implementation_failures.is_empty() {
             routes.implementation_failures = actionable.to_vec();
         }
-        let route_plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
-        match workflow_live_v2_lifecycle_verify_routing::remediation_inventory_route(
+        let route_plan = lifecycle_policy::verify_routing::triage_route_plan(&routes);
+        match lifecycle_policy::verify_routing::remediation_inventory_route(
             &route_plan,
             remediation::remediation_inventory_ready(&remediation_inventory),
         ) {
-            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::RunWriteRemediation => {}
-            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::RegenerateInventory => {
+            lifecycle_policy::verify_routing::RemediationInventoryRoute::RunWriteRemediation => {}
+            lifecycle_policy::verify_routing::RemediationInventoryRoute::RegenerateInventory => {
                 return Ok(true);
             }
-            workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::NotNeeded
-            | workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::Block => {
+            lifecycle_policy::verify_routing::RemediationInventoryRoute::NotNeeded
+            | lifecycle_policy::verify_routing::RemediationInventoryRoute::Block => {
                 return Ok(false);
             }
         }

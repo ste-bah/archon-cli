@@ -13,7 +13,8 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::super::workflow_live_v2_lifecycle_adversarial as adversarial;
+use archon_workflow::v2::lifecycle_policy::adversarial;
+
 use super::prd_conformance::render_waves;
 use super::{
     all_learning_enabled, fixture_universe, generated_plan, plan_task_text, wave_index_by_task,

@@ -1,8 +1,11 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
+use crate::v2::deliverable_contract;
 
-pub(super) fn prepare_verification_items(
+use super::verify_scope;
+
+pub fn prepare_verification_items(
     mut items: Vec<Value>,
     project_artifact_root: Option<&str>,
     implementation_evidence: &[Value],
@@ -10,8 +13,7 @@ pub(super) fn prepare_verification_items(
 ) -> Vec<Value> {
     add_declared_deliverable_verifications(&mut items, project_artifact_root, task_universe);
     bind_contract_verifiers_to_cited_artifacts(&mut items, project_artifact_root, task_universe);
-    let scopes =
-        super::workflow_live_v2_lifecycle_verify_scope::manifest_scopes(implementation_evidence);
+    let scopes = verify_scope::manifest_scopes(implementation_evidence);
     items
         .into_iter()
         .map(|mut item| {
@@ -21,9 +23,7 @@ pub(super) fn prepare_verification_items(
                     Value::String(root.to_string()),
                 );
             }
-            super::workflow_live_v2_lifecycle_verify_scope::stamp_manifest_scope(
-                &mut item, &scopes,
-            );
+            verify_scope::stamp_manifest_scope(&mut item, &scopes);
             item
         })
         .collect()
@@ -72,8 +72,7 @@ fn add_declared_deliverable_verifications(
             {
                 continue;
             }
-            let command =
-                super::workflow_live_v2_deliverable_contract::verification_command(root, &contract);
+            let command = deliverable_contract::verification_command(root, &contract);
             let mut artifact_requirements = vec![artifact_path.to_string()];
             if let Some(registry_path) = contract.get("registry_path").and_then(Value::as_str) {
                 artifact_requirements.push(registry_path.to_string());
@@ -150,11 +149,7 @@ fn bind_contract_verifiers_to_cited_artifacts(
                 }
                 let mut bound = contract.clone();
                 bound["artifact_path"] = Value::String(path.clone());
-                bound_commands.insert(
-                    super::workflow_live_v2_deliverable_contract::verification_command(
-                        root, &bound,
-                    ),
-                );
+                bound_commands.insert(deliverable_contract::verification_command(root, &bound));
                 if bound_commands.len() >= MAX_BOUND_CONTRACT_VERIFICATIONS {
                     break;
                 }
@@ -255,8 +250,8 @@ fn templated_path_matches(template: &str, cited: &str, root: &str) -> bool {
         })
 }
 
-pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -> Value {
-    let task = archon_workflow::v2::lifecycle_prompts::ground_host_manifest_schema(task);
+pub fn verification_options(items: &[Value], task: &str, focused: bool) -> Value {
+    let task = crate::v2::lifecycle_prompts::ground_host_manifest_schema(task);
     let mut options = serde_json::json!({ "tier": "coder", "task": task });
     if focused {
         options["itemKind"] = Value::String("focused_verification".to_string());
@@ -280,7 +275,7 @@ pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -
 /// failures the earned failure handling exists to resolve. So the two combine
 /// with `min`, never `max` — there is no setting of this knob that can widen a
 /// wave the rest of the system decided must be serial.
-pub(super) fn write_wave_parallelism(items: &[Value], learned_width: Option<usize>) -> Value {
+pub fn write_wave_parallelism(items: &[Value], learned_width: Option<usize>) -> Value {
     let serial_required = items_have_cargo_commands(items);
     match (serial_required, learned_width) {
         (true, _) => serde_json::json!(1),

@@ -28,7 +28,7 @@ fn fabel_supersede_accepts_shape_failure_with_sibling_evidence() {
         }
     });
 
-    let supersede = workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+    let supersede = lifecycle_policy::verify_supersede::try_supersede_verification(
         &contract,
         &verification,
         &triage,
@@ -72,7 +72,7 @@ fn supersede_rejects_sibling_evidence_for_a_different_invariant() {
     });
 
     assert!(
-        workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+        lifecycle_policy::verify_supersede::try_supersede_verification(
             &contract,
             &verification,
             &triage,
@@ -93,15 +93,13 @@ fn d32_unprovable_supersede_requires_one_bounded_retriage() {
         serde_json::from_str(archon_test_support::fixtures::D32_ZERO_MATCH_RETRIAGE)
             .expect("D32 fixture");
 
+    assert!(lifecycle_policy::verify_retriage::needs_bounded_retriage(
+        &contract,
+        &fixture["verification"],
+        &fixture["triage"],
+    ));
     assert!(
-        workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
-            &contract,
-            &fixture["verification"],
-            &fixture["triage"],
-        )
-    );
-    assert!(
-        workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+        lifecycle_policy::verify_supersede::try_supersede_verification(
             &contract,
             &fixture["verification"],
             &fixture["triage"],
@@ -109,7 +107,7 @@ fn d32_unprovable_supersede_requires_one_bounded_retriage() {
         )
         .is_none()
     );
-    let feedback = workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(
+    let feedback = lifecycle_policy::verify_retriage::retriage_feedback(
         &fixture["verification"],
         &fixture["triage"],
     );
@@ -147,20 +145,18 @@ fn d32_corrected_retries_validate_against_every_failed_outcome() {
     let retries = producer_retry_items(
         &contract,
         &triage,
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        lifecycle_policy::verify_routing::RetryProducer::Retriage,
         &[plan_item],
         &failed,
     )
     .expect("all corrected retries should validate");
 
     assert_eq!(retries.len(), 4);
-    assert!(
-        !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
-            &contract,
-            &fixture["verification"],
-            &triage,
-        )
-    );
+    assert!(!lifecycle_policy::verify_retriage::needs_bounded_retriage(
+        &contract,
+        &fixture["verification"],
+        &triage,
+    ));
 }
 
 #[test]
@@ -191,7 +187,7 @@ fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
     let retries = producer_retry_items(
         &contract,
         &fixture["retriage"],
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        lifecycle_policy::verify_routing::RetryProducer::Retriage,
         &plan_items,
         &source_outcomes,
     )
@@ -200,11 +196,11 @@ fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
     assert_eq!(retries.len(), 2);
     assert_ne!(retries[0]["item_id"], retries[1]["item_id"]);
     assert_eq!(
-        workflow_live_v2_lifecycle_verify_routing::retry_consumption_route(
-            workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+        lifecycle_policy::verify_routing::retry_consumption_route(
+            lifecycle_policy::verify_routing::RetryProducer::Retriage,
             &retries,
         ),
-        workflow_live_v2_lifecycle_verify_routing::RetryConsumptionRoute::RunRetries
+        lifecycle_policy::verify_routing::RetryConsumptionRoute::RunRetries
     );
     assert_eq!(
         fixture["terminal_call"], "blocked-verification-failed-2",
@@ -218,7 +214,7 @@ fn retry_inventory_stamps_a_dropped_source_gap() {
         serde_json::from_str(archon_test_support::fixtures::WF32_VERIFICATION_INVARIANT_CHAIN)
             .expect("D17 fixture");
 
-    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+    let inventory = lifecycle_policy::verify_invariants::enforce_retry_invariants(
         &fixture["invalid_retry_plan"],
         &fixture["initial_verification"],
     );
@@ -237,7 +233,7 @@ fn canary_shape_repair_rounds_use_stable_host_gap_identity() {
     )
     .expect("fixture JSON");
     for key in ["round_1_inventory", "round_3_inventory"] {
-        let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+        let checked = lifecycle_policy::verify_invariants::enforce_retry_invariants(
             &fixture[key],
             &fixture["verification"],
         );
@@ -259,7 +255,7 @@ fn retry_inventory_without_matching_failure_is_rejected() {
         archon_test_support::fixtures::WF6DD_VERIFICATION_RETRY_INVARIANT_FAILURE,
     )
     .expect("fixture JSON");
-    let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+    let checked = lifecycle_policy::verify_invariants::enforce_retry_invariants(
         &fixture["unmatched_inventory"],
         &fixture["verification"],
     );
@@ -277,7 +273,7 @@ fn retry_inventory_accepts_the_exact_source_gap_and_predicate() {
         serde_json::from_str(archon_test_support::fixtures::WF32_VERIFICATION_INVARIANT_CHAIN)
             .expect("D17 fixture");
 
-    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+    let inventory = lifecycle_policy::verify_invariants::enforce_retry_invariants(
         &fixture["valid_retry_plan"],
         &fixture["initial_verification"],
     );
@@ -315,10 +311,9 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
         archon_test_support::fixtures::WF485_VERIFICATION_REMEDIATION_SOURCE_ITEM,
     )
     .expect("D22 fixture");
-    let source_items =
-        workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
-            &serde_json::json!({ "items": [item] }),
-        );
+    let source_items = lifecycle_policy::verify_merge::verification_remediation_source_items(
+        &serde_json::json!({ "items": [item] }),
+    );
 
     assert_eq!(
         source_items[0]["verification_requirements"],
@@ -373,7 +368,7 @@ fn d23_retry_merge_preserves_unretried_failures() {
         serde_json::from_str(archon_test_support::fixtures::WF485_VERIFICATION_RETRY_MERGE)
             .expect("D23 fixture");
     let retry_items = support::array(fixture.get("retry_items"));
-    let merged = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
+    let merged = lifecycle_policy::verify_merge::merge_retry_outcomes(
         &fixture["initial"],
         fixture["retry_result"].clone(),
         &retry_items,

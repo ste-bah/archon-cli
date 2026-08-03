@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn verification_scheduled_ids(
+pub(crate) fn verification_scheduled_ids(
     contract: &LifecycleContract<'_>,
     inputs: &Value,
 ) -> BTreeSet<String> {
@@ -20,7 +20,7 @@ pub(super) fn verification_scheduled_ids(
     ids
 }
 
-pub(super) fn item_id(item: &Value) -> Option<String> {
+pub(crate) fn item_id(item: &Value) -> Option<String> {
     item.get("item_id")
         .or_else(|| item.get("id"))
         .and_then(Value::as_str)
@@ -29,7 +29,7 @@ pub(super) fn item_id(item: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(super) fn compact_work_item(item: &Value) -> Value {
+pub(crate) fn compact_work_item(item: &Value) -> Value {
     serde_json::json!({
         "item_id": item.get("item_id").or_else(|| item.get("id")),
         "source_item_id": item.get("source_item_id"),
@@ -43,7 +43,7 @@ pub(super) fn compact_work_item(item: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+    use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
     fn universe() -> WorkflowV2TaskUniverse {
         WorkflowV2TaskUniverse {

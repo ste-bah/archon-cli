@@ -46,4 +46,8 @@ uuid.workspace = true
 # Dev-only deliberately: pulling it in at build time would put wiremock and the
 # mock doubles into this crate's production dependency graph.
 archon-test-support = { path = "../archon-test-support" }
+# The deliverable-contract verifiers are generated shell and the tests execute
+# them, so they need the same POSIX shell the runtime resolves. archon-shell is
+# a deliberate leaf (no archon-* deps), so this cannot close a cycle.
+archon-shell = { path = "../archon-shell" }
 tempfile.workspace = true

@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::{LifecycleContract, support};
+use crate::generated_lifecycle_support::{self as support, LifecycleContract};
 
-pub(in crate::command) fn pin_noop_acceptance_criteria(
+pub fn pin_noop_acceptance_criteria(
     contract: &LifecycleContract<'_>,
     items: &[Value],
 ) -> Vec<Value> {
@@ -41,7 +41,7 @@ pub(in crate::command) fn pin_noop_acceptance_criteria(
         .collect()
 }
 
-pub(in crate::command) fn enforce_noop_acceptance_criteria(
+pub fn enforce_noop_acceptance_criteria(
     contract: &LifecycleContract<'_>,
     source_items: &[Value],
     outcomes: &[Value],

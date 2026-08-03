@@ -116,7 +116,7 @@ async fn accepted_zero_match_verification_is_demoted_and_routed_to_retry() {
         .await
         .expect("zero-test triage repair");
 
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&triage);
     assert_eq!(routes.retry_items.len(), 1);
     assert_eq!(
         routes.retry_items[0]["classification"],

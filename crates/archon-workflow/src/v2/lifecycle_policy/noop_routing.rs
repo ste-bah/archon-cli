@@ -2,23 +2,23 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support::{self as support, LifecycleContract};
+use crate::generated_lifecycle_support::{self as support, LifecycleContract};
 
-#[path = "workflow_live_v2_lifecycle_noop_acceptance.rs"]
+#[path = "noop_acceptance.rs"]
 mod acceptance;
-pub(super) use acceptance::{enforce_noop_acceptance_criteria, pin_noop_acceptance_criteria};
+pub use acceptance::{enforce_noop_acceptance_criteria, pin_noop_acceptance_criteria};
 
-#[path = "workflow_live_v2_lifecycle_noop_matching.rs"]
+#[path = "noop_matching.rs"]
 mod matching;
 use matching::inventory_contradicts_noop;
 
 #[derive(Debug, PartialEq)]
-pub(super) enum NoopProofExhaustionRoute {
+pub enum NoopProofExhaustionRoute {
     ScheduleImplementation(Vec<Value>),
     Block,
 }
 
-pub(super) fn reclassify_inventory_contradicted_noops(
+pub fn reclassify_inventory_contradicted_noops(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
 ) -> (Value, BTreeSet<String>) {
@@ -51,7 +51,7 @@ pub(super) fn reclassify_inventory_contradicted_noops(
     (Value::Object(object), reclassified_ids)
 }
 
-pub(super) fn route_refuted_noops(
+pub fn route_refuted_noops(
     contract: &LifecycleContract<'_>,
     ready_noop_items: &[Value],
     accepted_ids: &BTreeSet<String>,
@@ -382,5 +382,5 @@ fn inventory_values(inventory: &Value, key: &str) -> Vec<Value> {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_noop_routing_tests.rs"]
+#[path = "noop_routing_tests.rs"]
 mod tests;

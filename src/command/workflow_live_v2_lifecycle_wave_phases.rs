@@ -20,7 +20,7 @@ impl LifecycleDriver {
         task_ids: &std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
-        let items = workflow_live_v2_lifecycle_adversarial::per_task_review_items(
+        let items = lifecycle_policy::adversarial::per_task_review_items(
             &self.universe,
             task_ids,
             &[&evidence.implementation, &evidence.verification],
@@ -43,7 +43,7 @@ impl LifecycleDriver {
                 }),
             )
             .await?;
-        let findings = workflow_live_v2_lifecycle_adversarial::attributed_findings(&items, &result);
+        let findings = lifecycle_policy::adversarial::attributed_findings(&items, &result);
         evidence.review.push(serde_json::json!({
             "kind": "adversarial-review-task",
             "reviewRound": round_id,
@@ -79,9 +79,7 @@ impl LifecycleDriver {
                 )
                 .await?
             }
-            None => workflow_live_v2_lifecycle_adversarial::collected_per_task_findings(
-                &evidence.review,
-            ),
+            None => lifecycle_policy::adversarial::collected_per_task_findings(&evidence.review),
         };
         let task = if re_review.is_some() {
             prompts::CROSS_CUTTING_RE_REVIEW_TASK
@@ -91,7 +89,7 @@ impl LifecycleDriver {
         let cross = self
             .reduce(
                 &format!("cross-cutting-review-{review_iteration}"),
-                workflow_live_v2_lifecycle_cross_cutting::cross_cutting_input(
+                lifecycle_policy::cross_cutting::cross_cutting_input(
                     &self.task_universe,
                     &per_task_findings,
                 ),
@@ -99,8 +97,7 @@ impl LifecycleDriver {
                 task,
             )
             .await?;
-        let review =
-            workflow_live_v2_lifecycle_cross_cutting::merge_review(&per_task_findings, &cross);
+        let review = lifecycle_policy::cross_cutting::merge_review(&per_task_findings, &cross);
         evidence.review.push(serde_json::json!({
             "kind": "review",
             "reviewIteration": review_iteration,
@@ -119,11 +116,10 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
         let contract = self.contract();
-        let ready_noop_items =
-            workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
-                &contract,
-                ready_noop_items,
-            );
+        let ready_noop_items = lifecycle_policy::noop_routing::pin_noop_acceptance_criteria(
+            &contract,
+            ready_noop_items,
+        );
         let noop_options = |task: &str| {
             serde_json::json!({
                 "tier": "analysis",
@@ -145,12 +141,11 @@ impl LifecycleDriver {
             "readyNoopItems": ready_noop_items,
             "result": noop_proof,
         }));
-        let noop_outcomes =
-            workflow_live_v2_lifecycle_noop_routing::enforce_noop_acceptance_criteria(
-                &contract,
-                &ready_noop_items,
-                &support::outcomes_of(&noop_proof),
-            );
+        let noop_outcomes = lifecycle_policy::noop_routing::enforce_noop_acceptance_criteria(
+            &contract,
+            &ready_noop_items,
+            &support::outcomes_of(&noop_proof),
+        );
         for id in support::matching_accepted_noop_ids(&contract, &ready_noop_items, &noop_outcomes)
         {
             accepted_this_wave.insert(id);
@@ -181,7 +176,7 @@ impl LifecycleDriver {
                     &serde_json::json!({ "items": retry_items }),
                     &repair,
                 );
-                retry_items = workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
+                retry_items = lifecycle_policy::noop_routing::pin_noop_acceptance_criteria(
                     &contract,
                     &support::array(merged.get("items")),
                 );
@@ -203,7 +198,7 @@ impl LifecycleDriver {
                     "result": reverification,
                 }));
                 let reverification_outcomes =
-                    workflow_live_v2_lifecycle_noop_routing::enforce_noop_acceptance_criteria(
+                    lifecycle_policy::noop_routing::enforce_noop_acceptance_criteria(
                         &contract,
                         &retry_items,
                         &support::outcomes_of(&reverification),
@@ -220,7 +215,7 @@ impl LifecycleDriver {
             }
         }
         if !failed.is_empty() {
-            match workflow_live_v2_lifecycle_noop_routing::route_refuted_noops(
+            match lifecycle_policy::noop_routing::route_refuted_noops(
                 &contract,
                 &ready_noop_items,
                 accepted_this_wave,
@@ -228,7 +223,7 @@ impl LifecycleDriver {
                 completed_ids,
                 noop_reclassified_ids,
             ) {
-                workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
+                lifecycle_policy::noop_routing::NoopProofExhaustionRoute::ScheduleImplementation(
                     items,
                 ) => {
                     evidence.implementation.push(serde_json::json!({
@@ -242,7 +237,7 @@ impl LifecycleDriver {
                     }));
                     return Ok(items);
                 }
-                workflow_live_v2_lifecycle_noop_routing::NoopProofExhaustionRoute::Block => {
+                lifecycle_policy::noop_routing::NoopProofExhaustionRoute::Block => {
                     return self
                         .final_report(
                             &format!("blocked-noop-proof-failed-{dependency_iteration}"),

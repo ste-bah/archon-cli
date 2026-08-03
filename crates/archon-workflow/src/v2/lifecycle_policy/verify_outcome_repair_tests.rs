@@ -1,3 +1,5 @@
+use crate::generated_lifecycle_support as support;
+
 use super::*;
 
 fn fixture() -> serde_json::Value {
@@ -10,9 +12,8 @@ fn fixture() -> serde_json::Value {
 #[test]
 fn d33_size_gate_failure_is_repairable_contract_output() {
     let fixture = fixture();
-    let repairable = workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(
-        &fixture["remediation_wave"],
-    );
+    let repairable =
+        verify_outcome_repair::repairable_contract_outcomes(&fixture["remediation_wave"]);
 
     assert_eq!(repairable.len(), 1);
     assert_eq!(repairable[0]["failure_kind"], "contract");
@@ -34,8 +35,7 @@ fn d33_safety_failure_is_not_mechanically_repaired() {
         }]
     });
 
-    let repairable =
-        workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(&wave);
+    let repairable = verify_outcome_repair::repairable_contract_outcomes(&wave);
 
     assert!(repairable.is_empty());
 }
@@ -44,7 +44,7 @@ fn d33_safety_failure_is_not_mechanically_repaired() {
 fn d33_followup_replaces_only_the_failed_remediation_outcome() {
     let fixture = fixture();
     let followup_items = support::array(fixture["followup_inventory"].get("items"));
-    let merged = workflow_live_v2_lifecycle_verify_outcome_repair::merge_repaired_outcomes(
+    let merged = verify_outcome_repair::merge_repaired_outcomes(
         &fixture["remediation_wave"],
         fixture["followup_wave"].clone(),
         &followup_items,
@@ -63,7 +63,7 @@ fn d33_followup_replaces_only_the_failed_remediation_outcome() {
 
 #[test]
 fn d33_prompt_requires_split_or_retry_for_mechanical_contract_failure() {
-    let prompt = archon_workflow::v2::lifecycle_prompts::REMEDIATION_OUTCOME_REPAIR_TASK;
+    let prompt = crate::v2::lifecycle_prompts::REMEDIATION_OUTCOME_REPAIR_TASK;
 
     assert!(prompt.contains("size/format/complexity"));
     assert!(prompt.contains("split"));
@@ -82,16 +82,11 @@ fn d36_two_unchanged_noop_rounds_stop_before_the_third_round() {
     let mut streak = 0;
 
     for round in &rounds[..2] {
-        streak = workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
-            streak, &wave, &wave, round,
-        );
+        streak = verify_outcome_repair::next_noop_disagreement_streak(streak, &wave, &wave, round);
     }
     assert_eq!(streak, 2);
-    let stopped = workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(&wave);
-    assert!(
-        workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(&stopped)
-            .is_empty()
-    );
+    let stopped = verify_outcome_repair::mark_noop_disagreement(&wave);
+    assert!(verify_outcome_repair::repairable_contract_outcomes(&stopped).is_empty());
     assert!(
         support::outcomes_of(&stopped)
             .iter()
@@ -115,9 +110,7 @@ fn d36_changed_followup_result_resets_noop_disagreement_streak() {
     });
 
     assert_eq!(
-        workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
-            1, &wave, &accepted, &accepted,
-        ),
+        verify_outcome_repair::next_noop_disagreement_streak(1, &wave, &accepted, &accepted,),
         0
     );
 }

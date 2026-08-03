@@ -40,8 +40,7 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let normalize = |value: &serde_json::Value| {
-            let harvested =
-                workflow_live_v2_lifecycle_boundary_repair::harvest_outcome_repair_items(value);
+            let harvested = lifecycle_policy::boundary_repair::harvest_outcome_repair_items(value);
             remediation::filter_remediation_inventory_by_task_ids(
                 &self.contract(),
                 &remediation::normalize_remediation_inventory_for_sources(
@@ -55,13 +54,11 @@ impl LifecycleDriver {
             )
         };
         let inventory = normalize(&raw);
-        let quality = workflow_live_v2_lifecycle_boundary_repair::outcome_repair_quality(
-            &inventory,
-            failed_outcomes,
-        );
+        let quality =
+            lifecycle_policy::boundary_repair::outcome_repair_quality(&inventory, failed_outcomes);
         if remediation::remediation_inventory_ready(&inventory)
             && quality
-                == (workflow_live_v2_lifecycle_boundary_repair::OutcomeRepairQuality {
+                == (lifecycle_policy::boundary_repair::OutcomeRepairQuality {
                     unaccounted: 0,
                     unresolved_issues: 0,
                     empty_inventory: 0,
@@ -87,7 +84,7 @@ impl LifecycleDriver {
             failed_outcomes,
             &repaired_inventory,
         );
-        let repaired_quality = workflow_live_v2_lifecycle_boundary_repair::outcome_repair_quality(
+        let repaired_quality = lifecycle_policy::boundary_repair::outcome_repair_quality(
             &repaired_inventory,
             failed_outcomes,
         );
@@ -123,13 +120,10 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let reconciliation =
-            workflow_live_v2_lifecycle_boundary_repair::harvest_reconciliation_items(
-                &reconciliation,
-            );
-        let quality =
-            workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(&reconciliation);
+            lifecycle_policy::boundary_repair::harvest_reconciliation_items(&reconciliation);
+        let quality = lifecycle_policy::boundary_repair::reconciliation_quality(&reconciliation);
         if quality
-            == (workflow_live_v2_lifecycle_boundary_repair::ReconciliationQuality {
+            == (lifecycle_policy::boundary_repair::ReconciliationQuality {
                 missing_collection: 0,
                 malformed_items: 0,
             })
@@ -146,23 +140,21 @@ impl LifecycleDriver {
                 prompts::FINAL_EVIDENCE_RECONCILIATION_SHAPE_REPAIR_TASK,
             )
             .await?;
-        let repaired =
-            workflow_live_v2_lifecycle_boundary_repair::harvest_reconciliation_items(&repaired);
+        let repaired = lifecycle_policy::boundary_repair::harvest_reconciliation_items(&repaired);
         support::record_repair_attempt(
             &mut evidence.final_evidence_repair_attempts,
             &repair_id,
             "final_evidence_reconciliation_shape_repair",
-            &workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation),
+            &lifecycle_policy::boundary_repair::collection_items(&reconciliation),
             &repaired,
         );
-        let repaired_quality =
-            workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(&repaired);
+        let repaired_quality = lifecycle_policy::boundary_repair::reconciliation_quality(&repaired);
         // D74: reconciliation issues must survive the shape repair with their
         // identity and classification intact — dropping or reclassifying an
         // issue is how a false green would sneak past the final gates.
         let preservation = semantic_preservation::check_items(
-            &workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation),
-            &workflow_live_v2_lifecycle_boundary_repair::collection_items(&repaired),
+            &lifecycle_policy::boundary_repair::collection_items(&reconciliation),
+            &lifecycle_policy::boundary_repair::collection_items(&repaired),
         );
         if !preservation.passed() {
             support::record_repair_attempt(

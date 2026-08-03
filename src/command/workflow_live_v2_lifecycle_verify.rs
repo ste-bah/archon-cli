@@ -86,7 +86,7 @@ impl LifecycleDriver {
                 )
                 .await;
         }
-        let mut plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+        let mut plan_items = lifecycle_policy::verify_options::prepare_verification_items(
             plan_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
@@ -97,7 +97,7 @@ impl LifecycleDriver {
             .parallel(
                 &format!("verification-wave-{wave_index}"),
                 serde_json::json!(&plan_items),
-                workflow_live_v2_lifecycle_verify_options::verification_options(
+                lifecycle_policy::verify_options::verification_options(
                     &plan_items,
                     prompts::VERIFICATION_WAVE_TASK,
                     true,
@@ -162,7 +162,7 @@ impl LifecycleDriver {
             }
 
             let repeated =
-                workflow_live_v2_lifecycle_verify_routing::repeated_gap_write_remediation_outcomes(
+                lifecycle_policy::verify_routing::repeated_gap_write_remediation_outcomes(
                     &evidence.verification,
                     &verification,
                 );
@@ -233,14 +233,14 @@ impl LifecycleDriver {
             );
             let source_outcomes =
                 support::non_accepted_outcomes(&support::outcomes_of(&verification));
-            let routed = workflow_live_v2_lifecycle_verify_routing::write_remediation_outcomes(
+            let routed = lifecycle_policy::verify_routing::write_remediation_outcomes(
                 &repair_plan,
                 &verification,
             );
             let repair_retried = self
                 .run_producer_retry(
                     &repair_plan,
-                    workflow_live_v2_lifecycle_verify_routing::RetryProducer::RepairPlan,
+                    lifecycle_policy::verify_routing::RetryProducer::RepairPlan,
                     &plan_items,
                     &source_outcomes,
                     wave_index,
@@ -274,18 +274,16 @@ impl LifecycleDriver {
                 repair_attempt += 1;
                 continue;
             }
-            let repair_source =
-                workflow_live_v2_lifecycle_verify_routing::predicate_rewrite_inventory(
-                    &repair_plan,
-                    &verification,
-                )
-                .unwrap_or_else(|| repair_plan.clone());
+            let repair_source = lifecycle_policy::verify_routing::predicate_rewrite_inventory(
+                &repair_plan,
+                &verification,
+            )
+            .unwrap_or_else(|| repair_plan.clone());
             let mut repair_inventory = contract.normalize_inventory(&repair_source);
-            repair_inventory =
-                workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
-                    &repair_inventory,
-                    &verification,
-                );
+            repair_inventory = lifecycle_policy::verify_invariants::enforce_retry_invariants(
+                &repair_inventory,
+                &verification,
+            );
             let allowed_task_ids: Vec<String> = support::unique(
                 plan_items
                     .iter()
@@ -325,7 +323,7 @@ impl LifecycleDriver {
                     &shape_repair,
                 );
                 let mut candidate = contract.normalize_inventory(&shape_repair);
-                candidate = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+                candidate = lifecycle_policy::verify_invariants::enforce_retry_invariants(
                     &candidate,
                     &verification,
                 );
@@ -371,7 +369,7 @@ impl LifecycleDriver {
                 break;
             }
             plan_items = support::retry_verification_items(&contract, &repair_inventory);
-            plan_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+            plan_items = lifecycle_policy::verify_options::prepare_verification_items(
                 plan_items,
                 self.project_artifact_root.as_deref(),
                 &evidence.implementation,
@@ -381,7 +379,7 @@ impl LifecycleDriver {
                 .parallel(
                     &format!("verification-wave-{wave_index}-{repair_attempt}"),
                     serde_json::json!(&plan_items),
-                    workflow_live_v2_lifecycle_verify_options::verification_options(
+                    lifecycle_policy::verify_options::verification_options(
                         &plan_items,
                         prompts::RETRY_VERIFICATION_WAVE_TASK,
                         true,
@@ -470,5 +468,5 @@ pub(super) fn item_matches_ids(
 }
 
 pub(super) fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
-    workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item)
+    lifecycle_policy::verify_invariants::verification_item_ids(item)
 }

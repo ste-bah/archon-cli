@@ -118,8 +118,8 @@ fn exhausted_transport_is_an_explicit_infrastructure_blocker() {
         failed["data"]["terminal_blockers"][0]["classification"],
         "transport_infrastructure_exhausted"
     );
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&failed);
-    let plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&failed);
+    let plan = lifecycle_policy::verify_routing::triage_route_plan(&routes);
     assert!(routes.implementation_failures.is_empty());
     assert!(routes.retry_items.is_empty());
     assert_eq!(routes.terminal_blockers.len(), 1);
@@ -312,7 +312,7 @@ fn mixed_triage_preserves_actionable_and_retry_routes() {
         serde_json::from_str(archon_test_support::fixtures::WF3B9_VERIFICATION_FAILURE_TRIAGE_5_3)
             .expect("D25 fixture");
 
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&triage);
 
     assert_eq!(routes.implementation_failures.len(), 1);
     assert_eq!(routes.retry_items.len(), 3);
@@ -349,13 +349,13 @@ fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
     let retries = producer_retry_items(
         &contract,
         &fixture["triage"],
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
+        lifecycle_policy::verify_routing::RetryProducer::Triage,
         &[fixture["plan_item"].clone()],
         &failed,
     )
     .expect("D46 execution retry must remain schedulable");
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&fixture["triage"]);
-    let plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&fixture["triage"]);
+    let plan = lifecycle_policy::verify_routing::triage_route_plan(&routes);
 
     assert_eq!(retries.len(), 1);
     assert_eq!(
@@ -366,8 +366,8 @@ fn d46_execution_retry_is_scheduled_even_when_write_inventory_is_empty() {
     assert!(plan.try_supersede);
     assert!(!plan.run_write_remediation);
     assert_eq!(
-        workflow_live_v2_lifecycle_verify_routing::remediation_inventory_route(&plan, false),
-        workflow_live_v2_lifecycle_verify_routing::RemediationInventoryRoute::NotNeeded
+        lifecycle_policy::verify_routing::remediation_inventory_route(&plan, false),
+        lifecycle_policy::verify_routing::RemediationInventoryRoute::NotNeeded
     );
 }
 
@@ -403,7 +403,7 @@ fn mixed_supersede_marks_only_its_failed_outcome() {
         }]
     }});
 
-    let result = workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+    let result = lifecycle_policy::verify_supersede::try_supersede_verification(
         &contract,
         &verification,
         &triage,
@@ -441,7 +441,7 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
     let retry_items = producer_retry_items(
         &contract,
         &triage,
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
+        lifecycle_policy::verify_routing::RetryProducer::Triage,
         &[plan_item],
         &source_outcomes,
     );

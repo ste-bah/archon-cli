@@ -33,7 +33,7 @@ impl LifecycleDriver {
                 .map(|width| usize::from(width.max(1))),
             max_dependency_waves: canonical.saturating_mul(3).max(1),
             runtime_state: std::sync::Mutex::new(
-                workflow_live_v2_lifecycle_terminal_gate::TerminalGateState {
+                lifecycle_policy::terminal_gate::TerminalGateState {
                     completed_ids: resume_completed_ids.clone(),
                     ..Default::default()
                 },
@@ -145,7 +145,7 @@ impl LifecycleDriver {
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let items = self.with_declared_task_artifacts(items);
         let source_items = support::array(Some(&items));
-        let max_parallelism = workflow_live_v2_lifecycle_verify_options::write_wave_parallelism(
+        let max_parallelism = lifecycle_policy::verify_options::write_wave_parallelism(
             &source_items,
             self.write_wave_width,
         );
@@ -206,7 +206,7 @@ impl LifecycleDriver {
                             let value =
                                 serde_json::to_value(declared).unwrap_or(serde_json::Value::Null);
                             if let Some(command) =
-                                workflow_live_v2_deliverable_contract::typed_verification_command(
+                                archon_workflow::v2::deliverable_contract::typed_verification_command(
                                     root, &value,
                                 )
                                 && !verifier_commands.contains(&command)

@@ -16,7 +16,9 @@
 
 use serde_json::Value;
 
-use super::{support, workflow_live_v2_lifecycle_adversarial as adversarial};
+use crate::generated_lifecycle_support as support;
+
+use super::adversarial;
 
 /// Longest digest line kept per finding. A digest is for spotting
 /// contradictions BETWEEN findings, not for re-adjudicating one.
@@ -24,7 +26,7 @@ const DIGEST_CLAIM_CHARS: usize = 240;
 
 /// Narrow reduce input: task universe + finding digest. Deliberately excludes
 /// implementation/verification/artifact evidence — that is per-task material.
-pub(super) fn cross_cutting_input(task_universe: &Value, per_task_findings: &[Value]) -> Value {
+pub fn cross_cutting_input(task_universe: &Value, per_task_findings: &[Value]) -> Value {
     serde_json::json!({
         "taskUniverse": task_universe,
         "perTaskFindingDigest": finding_digest(per_task_findings),
@@ -70,7 +72,7 @@ fn claim_text(finding: &Value) -> String {
 /// an `accepted` status, so a cross-cutting reduce that returns "accepted"
 /// while per-task reviewers filed findings would have silently discarded every
 /// one of them. Any surviving finding therefore forces `needs_remediation`.
-pub(super) fn merge_review(per_task_findings: &[Value], cross: &Value) -> Value {
+pub fn merge_review(per_task_findings: &[Value], cross: &Value) -> Value {
     let mut identities: Vec<String> = Vec::new();
     for finding in per_task_findings {
         identities.extend(adversarial::finding_identities(finding));
@@ -165,7 +167,7 @@ fn merged_summary(
 /// what was remediated is what makes the review loop converge — stale findings
 /// from a task nobody touched would otherwise re-enter every round until the
 /// iteration cap.
-pub(super) fn remediated_task_ids(inventory: &Value) -> std::collections::BTreeSet<String> {
+pub fn remediated_task_ids(inventory: &Value) -> std::collections::BTreeSet<String> {
     support::array(inventory.get("items"))
         .iter()
         .flat_map(|item| support::strings_of(item.get("canonical_task_ids")))

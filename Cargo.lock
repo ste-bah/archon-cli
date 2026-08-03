@@ -1203,6 +1203,7 @@ name = "archon-workflow"
 version = "1.4.0"
 dependencies = [
  "archon-llm",
+ "archon-shell",
  "archon-test-support",
  "archon-topology",
  "archon-write-plan",

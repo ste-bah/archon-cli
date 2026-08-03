@@ -1,11 +1,8 @@
 use serde_json::{Map, Value};
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
 
-pub(super) fn reroute_unplanned_raw_task_identity(
-    mut triage: Value,
-    plan_items: &[Value],
-) -> Value {
+pub fn reroute_unplanned_raw_task_identity(mut triage: Value, plan_items: &[Value]) -> Value {
     let Some(data) = triage_data_mut(&mut triage) else {
         return triage;
     };
@@ -209,5 +206,5 @@ fn host_manifest_correction_record(failure: &Value) -> Value {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_overreach_tests.rs"]
+#[path = "verify_overreach_tests.rs"]
 mod tests;

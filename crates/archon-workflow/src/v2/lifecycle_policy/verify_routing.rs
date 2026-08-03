@@ -1,16 +1,18 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
+
+use super::verify_invariants;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RetryProducer {
+pub enum RetryProducer {
     Triage,
     Retriage,
     RepairPlan,
 }
 
 impl RetryProducer {
-    pub(super) fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Triage => "triage",
             Self::Retriage => "retriage",
@@ -20,29 +22,29 @@ impl RetryProducer {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum RetryConsumptionRoute {
+pub enum RetryConsumptionRoute {
     NotNeeded,
     RunRetries,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct VerificationTriageRoutes {
-    pub(super) implementation_failures: Vec<Value>,
-    pub(super) retry_items: Vec<Value>,
-    pub(super) superseded_items: Vec<Value>,
-    pub(super) terminal_blockers: Vec<Value>,
+pub struct VerificationTriageRoutes {
+    pub implementation_failures: Vec<Value>,
+    pub retry_items: Vec<Value>,
+    pub superseded_items: Vec<Value>,
+    pub terminal_blockers: Vec<Value>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct VerificationTriageRoutePlan {
-    pub(super) run_retries: bool,
-    pub(super) try_supersede: bool,
-    pub(super) run_write_remediation: bool,
-    pub(super) terminal_blocked: bool,
+pub struct VerificationTriageRoutePlan {
+    pub run_retries: bool,
+    pub try_supersede: bool,
+    pub run_write_remediation: bool,
+    pub terminal_blocked: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum RemediationInventoryRoute {
+pub enum RemediationInventoryRoute {
     NotNeeded,
     RunWriteRemediation,
     RegenerateInventory,
@@ -68,7 +70,7 @@ const ROUTE_CONTAINER_KEYS: [&str; 3] = ["items", "triage", "routes"];
 /// `data.items.implementation_failures`) into the canonical top-level
 /// collections. Consumers only read the canonical collections; without this
 /// a nested-but-valid triage reads as empty routes.
-pub(super) fn harvest_nested_triage_routes(triage: &Value) -> Value {
+pub fn harvest_nested_triage_routes(triage: &Value) -> Value {
     let mut harvested = triage.clone();
     let Some(data) = data_object_mut(&mut harvested) else {
         return harvested;
@@ -109,7 +111,7 @@ pub(super) fn harvest_nested_triage_routes(triage: &Value) -> Value {
 /// Non-accepted verification outcomes that no canonical triage route array
 /// accounts for. A triage leaving failures unaccounted is a shape failure to
 /// repair, never an empty result to consume.
-pub(super) fn unaccounted_failed_outcomes(triage: &Value, failed_outcomes: &[Value]) -> Vec<Value> {
+pub fn unaccounted_failed_outcomes(triage: &Value, failed_outcomes: &[Value]) -> Vec<Value> {
     let routes = triage_routes(triage);
     let mut routed_ids: std::collections::BTreeSet<String> = Default::default();
     for items in [
@@ -119,15 +121,13 @@ pub(super) fn unaccounted_failed_outcomes(triage: &Value, failed_outcomes: &[Val
         &routes.terminal_blockers,
     ] {
         for item in items {
-            routed_ids.extend(
-                super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item),
-            );
+            routed_ids.extend(verify_invariants::verification_item_ids(item));
         }
     }
     failed_outcomes
         .iter()
         .filter(|outcome| {
-            super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(outcome)
+            verify_invariants::verification_item_ids(outcome)
                 .iter()
                 .all(|id| !routed_ids.contains(id))
         })
@@ -152,7 +152,7 @@ fn data_object_mut(triage: &mut Value) -> Option<&mut serde_json::Map<String, Va
     triage.as_object_mut()
 }
 
-pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
+pub fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
     let data = triage_data(triage);
     let mut implementation_failures = support::array(data.get("implementation_failures"));
     implementation_failures.extend(support::array(data.get("implementationFailures")));
@@ -177,7 +177,7 @@ pub(super) fn triage_routes(triage: &Value) -> VerificationTriageRoutes {
     }
 }
 
-pub(super) fn retry_items(producer_output: &Value) -> Vec<Value> {
+pub fn retry_items(producer_output: &Value) -> Vec<Value> {
     let data = triage_data(producer_output);
     let mut retry_items = support::array(data.get("retry_items"));
     retry_items.extend(support::array(data.get("retryItems")));
@@ -185,7 +185,7 @@ pub(super) fn retry_items(producer_output: &Value) -> Vec<Value> {
     retry_items
 }
 
-pub(super) fn retry_consumption_route(
+pub fn retry_consumption_route(
     _producer: RetryProducer,
     retry_items: &[Value],
 ) -> RetryConsumptionRoute {
@@ -196,7 +196,7 @@ pub(super) fn retry_consumption_route(
     }
 }
 
-pub(super) fn triage_route_plan(routes: &VerificationTriageRoutes) -> VerificationTriageRoutePlan {
+pub fn triage_route_plan(routes: &VerificationTriageRoutes) -> VerificationTriageRoutePlan {
     let run_retries = !routes.retry_items.is_empty();
     let try_supersede =
         !routes.superseded_items.is_empty() || routes.retry_items.iter().any(is_sibling_resolved);
@@ -239,7 +239,7 @@ fn terminal_blocker_is_independent(blocker: &Value, retry_items: &[Value]) -> bo
         .any(|item_id| retry_ids.contains(item_id.as_str()))
 }
 
-pub(super) fn remediation_inventory_route(
+pub fn remediation_inventory_route(
     plan: &VerificationTriageRoutePlan,
     inventory_ready: bool,
 ) -> RemediationInventoryRoute {
@@ -256,7 +256,7 @@ pub(super) fn remediation_inventory_route(
     }
 }
 
-pub(super) fn write_remediation_outcomes(repair_plan: &Value, verification: &Value) -> Vec<Value> {
+pub fn write_remediation_outcomes(repair_plan: &Value, verification: &Value) -> Vec<Value> {
     let data = repair_plan
         .get("data")
         .or_else(|| {
@@ -275,7 +275,7 @@ pub(super) fn write_remediation_outcomes(repair_plan: &Value, verification: &Val
         .collect()
 }
 
-pub(super) fn repeated_gap_write_remediation_outcomes(
+pub fn repeated_gap_write_remediation_outcomes(
     verification_history: &[Value],
     verification: &Value,
 ) -> Vec<Value> {
@@ -354,10 +354,7 @@ fn outcome_gap_ids(outcome: &Value) -> std::collections::BTreeSet<String> {
     ids
 }
 
-pub(super) fn predicate_rewrite_inventory(
-    repair_plan: &Value,
-    verification: &Value,
-) -> Option<Value> {
+pub fn predicate_rewrite_inventory(repair_plan: &Value, verification: &Value) -> Option<Value> {
     let data = triage_data(repair_plan);
     if data.get("route").and_then(Value::as_str) != Some("predicate_unsatisfiable_as_written") {
         return None;
@@ -457,5 +454,5 @@ fn dedup_items(items: &mut Vec<Value>) {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_routing_tests.rs"]
+#[path = "verify_routing_tests.rs"]
 mod tests;

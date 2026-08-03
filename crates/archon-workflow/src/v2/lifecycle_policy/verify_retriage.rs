@@ -1,18 +1,17 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
-use archon_workflow::generated_lifecycle_support::LifecycleContract;
+use crate::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support::LifecycleContract;
 
-use super::workflow_live_v2_lifecycle_verify_routing;
-use super::workflow_live_v2_lifecycle_verify_supersede;
+use super::{verify_routing, verify_supersede};
 
-pub(super) fn needs_bounded_retriage(
+pub fn needs_bounded_retriage(
     contract: &LifecycleContract<'_>,
     verification: &Value,
     triage: &Value,
 ) -> bool {
     let data = triage_data(triage);
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(triage);
+    let routes = verify_routing::triage_routes(triage);
     let superseded = support::array(data.get("superseded_items"));
     let terminal = support::array(data.get("terminal_blockers"));
     if !routes.implementation_failures.is_empty()
@@ -22,7 +21,7 @@ pub(super) fn needs_bounded_retriage(
     {
         return false;
     }
-    workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+    verify_supersede::try_supersede_verification(
         contract,
         verification,
         triage,
@@ -31,7 +30,7 @@ pub(super) fn needs_bounded_retriage(
     .is_none()
 }
 
-pub(super) fn retriage_feedback(verification: &Value, triage: &Value) -> Value {
+pub fn retriage_feedback(verification: &Value, triage: &Value) -> Value {
     let failed = support::non_accepted_outcomes(&support::outcomes_of(verification));
     let failed_ids: Vec<String> = failed.iter().filter_map(outcome_id).collect();
     serde_json::json!({

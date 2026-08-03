@@ -1,28 +1,26 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-use super::support;
+use crate::generated_lifecycle_support as support;
 
-pub(super) fn repairable_contract_outcomes(remediation_wave: &Value) -> Vec<Value> {
+use super::verify_merge;
+
+pub fn repairable_contract_outcomes(remediation_wave: &Value) -> Vec<Value> {
     support::non_accepted_outcomes(&support::outcomes_of(remediation_wave))
         .into_iter()
         .filter(is_contract_failure)
         .collect()
 }
 
-pub(super) fn merge_repaired_outcomes(
+pub fn merge_repaired_outcomes(
     remediation_wave: &Value,
     followup_wave: Value,
     followup_items: &[Value],
 ) -> Value {
-    super::workflow_live_v2_lifecycle_verify_merge::merge_repair_outcomes(
-        remediation_wave,
-        followup_wave,
-        followup_items,
-    )
+    verify_merge::merge_repair_outcomes(remediation_wave, followup_wave, followup_items)
 }
 
-pub(super) fn next_noop_disagreement_streak(
+pub fn next_noop_disagreement_streak(
     previous: usize,
     before: &Value,
     after: &Value,
@@ -39,13 +37,13 @@ pub(super) fn next_noop_disagreement_streak(
     }
 }
 
-pub(super) fn mark_noop_disagreement(remediation_wave: &Value) -> Value {
+pub fn mark_noop_disagreement(remediation_wave: &Value) -> Value {
     let signatures = contract_failure_signatures(remediation_wave);
     let outcomes = support::outcomes_of(remediation_wave)
         .into_iter()
         .map(|outcome| mark_if_unchanged(outcome, &signatures))
         .collect();
-    super::workflow_live_v2_lifecycle_verify_merge::replace_all_outcomes(
+    verify_merge::replace_all_outcomes(
         remediation_wave,
         outcomes,
         "verification remediation overreach",

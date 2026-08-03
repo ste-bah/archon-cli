@@ -11,12 +11,13 @@ use std::collections::BTreeSet;
 
 use serde_json::json;
 
-use super::super::WorkflowV2TaskUniverse;
-use super::super::workflow_live_v2_lifecycle_cross_cutting as cross_cutting;
+use crate::task_universe::WorkflowV2TaskUniverse;
+use crate::v2::lifecycle_policy::cross_cutting;
+
 use super::*;
 
-fn task(id: &str, notes: &[&str]) -> archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
-    archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+fn task(id: &str, notes: &[&str]) -> crate::task_universe::WorkflowV2TaskUniverseTask {
+    crate::task_universe::WorkflowV2TaskUniverseTask {
         canonical_task_id: id.to_string(),
         source_path: format!("/prd/TASK-{id}.md"),
         acceptance_criteria: vec![format!("{id} must be provably done")],
@@ -193,16 +194,14 @@ fn an_accepting_cross_cutting_reduce_cannot_bury_outstanding_per_task_findings()
     let merged =
         cross_cutting::merge_review(&per_task, &json!({"status": "accepted", "items": []}));
     assert_eq!(merged["status"], "needs_remediation");
-    assert!(super::super::remediation::review_needs_remediation(&merged));
+    assert!(crate::generated_lifecycle_remediation::review_needs_remediation(&merged));
 }
 
 #[test]
 fn a_clean_run_accepts() {
     let merged = cross_cutting::merge_review(&[], &json!({"status": "accepted", "items": []}));
     assert_eq!(merged["status"], "accepted");
-    assert!(!super::super::remediation::review_needs_remediation(
-        &merged
-    ));
+    assert!(!crate::generated_lifecycle_remediation::review_needs_remediation(&merged));
 }
 
 /// A reduce that never ran returns no items because it produced nothing, not
@@ -215,7 +214,7 @@ fn a_cross_cutting_reduce_that_did_not_accept_cannot_produce_an_accepted_review(
         &json!({"status": "failed", "summary": "agent transport failed", "items": []}),
     );
     assert_eq!(merged["status"], "cross_cutting_review_not_accepted");
-    assert!(!super::super::support::outcome_accepted_or_noop(&merged));
+    assert!(!crate::generated_lifecycle_support::outcome_accepted_or_noop(&merged));
 }
 
 /// The narrow input is the other half of "it must not re-review per-task work":

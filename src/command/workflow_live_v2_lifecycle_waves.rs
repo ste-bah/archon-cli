@@ -4,6 +4,9 @@
 // 222-500 plus the ownership splice), ported faithfully.
 
 use super::*;
+use archon_workflow::v2::lifecycle_policy::inventory_items::{
+    item_has_write_ownership, preserve_host_pinned_implementation, preserve_host_pinned_items,
+};
 
 #[path = "workflow_live_v2_lifecycle_wave_phases.rs"]
 mod workflow_live_v2_lifecycle_wave_phases;
@@ -24,13 +27,13 @@ impl LifecycleDriver {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             std::mem::take(&mut state.pending_implementation_items)
         };
-        inventory = workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
+        inventory = lifecycle_policy::terminal_gate::apply_pending_implementation_items(
             &contract,
             &inventory,
             pending_implementation_items,
         );
         let (reconciled_inventory, mut noop_reclassified_ids) =
-            workflow_live_v2_lifecycle_noop_routing::reclassify_inventory_contradicted_noops(
+            lifecycle_policy::noop_routing::reclassify_inventory_contradicted_noops(
                 &contract, &inventory,
             );
         inventory = reconciled_inventory;
@@ -382,52 +385,6 @@ impl LifecycleDriver {
                 .collect(),
         )
     }
-}
-
-pub(super) fn item_has_write_ownership(item: &serde_json::Value) -> bool {
-    support::present(item.get("target_files"))
-        || support::present(item.get("artifact_requirements"))
-}
-
-pub(super) fn preserve_host_pinned_implementation(
-    contract: &LifecycleContract<'_>,
-    inventory: &serde_json::Value,
-    noop_reclassified_ids: &std::collections::BTreeSet<String>,
-) -> serde_json::Value {
-    let mut object = inventory.as_object().cloned().unwrap_or_default();
-    object.insert(
-        "items".to_string(),
-        serde_json::Value::Array(preserve_host_pinned_items(
-            contract,
-            support::array(inventory.get("items")),
-            noop_reclassified_ids,
-        )),
-    );
-    contract.normalize_inventory(&serde_json::Value::Object(object))
-}
-
-pub(super) fn preserve_host_pinned_items(
-    contract: &LifecycleContract<'_>,
-    items: Vec<serde_json::Value>,
-    noop_reclassified_ids: &std::collections::BTreeSet<String>,
-) -> Vec<serde_json::Value> {
-    items
-        .into_iter()
-        .map(|mut item| {
-            if contract
-                .canonical_ids_for(&item)
-                .iter()
-                .any(|id| noop_reclassified_ids.contains(id))
-                && let Some(object) = item.as_object_mut()
-            {
-                object.insert(
-                    "work_type".to_string(),
-                    serde_json::Value::String("implementation".to_string()),
-                );
-            }
-            item
-        })
-        .collect()
 }
 
 /// JS `generatedContractInventoryGraphIssues(remainingItems, completedIds)` —

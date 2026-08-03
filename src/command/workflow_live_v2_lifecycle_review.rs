@@ -168,9 +168,8 @@ impl LifecycleDriver {
             // every round report the same findings until the iteration cap,
             // regardless of whether the fixes landed; re-running the per-task
             // reviewer is what makes the loop converge on evidence.
-            let remediated = workflow_live_v2_lifecycle_cross_cutting::remediated_task_ids(
-                &review_remediation_inventory,
-            );
+            let remediated =
+                lifecycle_policy::cross_cutting::remediated_task_ids(&review_remediation_inventory);
             review = self
                 .run_review_round(review_iteration, Some(&remediated), evidence)
                 .await?;
@@ -246,12 +245,10 @@ impl LifecycleDriver {
         let mut reconciliation = self
             .enforce_final_reconciliation_shape(&reconciliation_id, reconciliation, evidence)
             .await?;
-        while !workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation)
-            .is_empty()
+        while !lifecycle_policy::boundary_repair::collection_items(&reconciliation).is_empty()
             && final_iteration <= self.max_repair_iterations
         {
-            let items =
-                workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation);
+            let items = lifecycle_policy::boundary_repair::collection_items(&reconciliation);
             let repair_id = format!("completion-claim-repair-{final_iteration}");
             let claim_repair = self
                 .reduce(
@@ -346,8 +343,7 @@ impl LifecycleDriver {
                 )
                 .await?;
         }
-        if !workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation).is_empty()
-        {
+        if !lifecycle_policy::boundary_repair::collection_items(&reconciliation).is_empty() {
             return self
                 .final_report(
                     "blocked-final-evidence-reconciliation",

@@ -356,7 +356,7 @@ async fn triage_shape_repair_cannot_trade_predicate_identity_for_better_accounti
         .await
         .expect("triage repair");
 
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&retained);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&retained);
     assert_eq!(routes.implementation_failures.len(), 1);
     assert!(routes.retry_items.is_empty());
     assert_eq!(

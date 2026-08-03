@@ -124,8 +124,7 @@ pub(super) struct LifecycleDriver {
     /// `archon_core::config::decide_fanout_width` — this value can only ever be
     /// narrower than the cap, and the runtime clamps it again on the way out.
     pub(super) write_wave_width: Option<usize>,
-    pub(super) runtime_state:
-        std::sync::Mutex<workflow_live_v2_lifecycle_terminal_gate::TerminalGateState>,
+    pub(super) runtime_state: std::sync::Mutex<lifecycle_policy::terminal_gate::TerminalGateState>,
 }
 
 /// Mutable evidence bundles — the JS lifecycle's top-level arrays.
