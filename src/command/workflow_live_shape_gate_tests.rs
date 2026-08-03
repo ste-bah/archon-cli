@@ -217,6 +217,71 @@ fn the_gate_does_nothing_at_all_to_an_unmoved_decision() {
     }
 }
 
+// ------------------------------------------- the declared dependency graph
+
+/// The real seventeen-task PRD corpus, the same fixture the lint suite's
+/// `real_corpus` tests use. It is the only surface in the tree that declares
+/// dataflow on both sides, so it is the only one on which `classify_edges` can
+/// conclude anything — which makes it the only honest test of this half of the
+/// gate.
+fn real_tasks_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/prd-trading-data-lake-ahdm-001")
+}
+
+/// A graph with no fake edges admits the proposal, and the widest wave becomes
+/// the ceiling: width above it is unreachable, because the extra branches would
+/// have nothing to run.
+#[test]
+fn a_clean_declared_graph_admits_and_supplies_the_wave_ceiling() {
+    let root = real_tasks_root();
+    assert!(root.is_dir(), "the seventeen-task fixture must exist");
+
+    let mut decision = moved_decision();
+    let proposed = decision.applied;
+    match admit(&mut decision, &decomposed_prd_plan_calls(), Some(&root)) {
+        GateOutcome::Admitted => {}
+        GateOutcome::Refused(reason) => panic!("the real corpus must admit: {reason}"),
+    }
+
+    let graph =
+        crate::command::workflow_live::workflow_live_task_universe::task_graph_from_root(&root)
+            .expect("the fixture lowers");
+    let widest = graph
+        .waves()
+        .expect("valid graph")
+        .iter()
+        .map(Vec::len)
+        .max()
+        .expect("at least one wave");
+    assert_eq!(
+        usize::try_from(decision.applied).expect("small width"),
+        proposed.min(u32::try_from(widest).expect("small wave")) as usize,
+        "the applied width is the proposal capped by the widest declared wave"
+    );
+    assert!(decision.refusal.is_none());
+}
+
+/// A tasks root that is not a task directory yields no graph, and no graph
+/// means no claim either way — the gate must not refuse on the strength of a
+/// file it could not read, or a missing directory would silently pin every run
+/// to the operator's cap for a reason nobody could see.
+#[test]
+fn an_unreadable_tasks_root_neither_refuses_nor_tightens() {
+    let empty = tempfile::tempdir().expect("tempdir");
+    let mut decision = moved_decision();
+    let proposed = decision.applied;
+    match admit(
+        &mut decision,
+        &decomposed_prd_plan_calls(),
+        Some(empty.path()),
+    ) {
+        GateOutcome::Admitted => {}
+        GateOutcome::Refused(reason) => panic!("an unreadable root must not refuse: {reason}"),
+    }
+    assert_eq!(decision.applied, proposed);
+}
+
 // ------------------------------------------------------------- the lowering
 
 /// A plan that is not the decomposed-PRD plan has no review diamond, and the
