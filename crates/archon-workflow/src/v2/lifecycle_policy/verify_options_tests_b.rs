@@ -324,9 +324,7 @@ fn cargo_write_waves_serialize_before_agent_launch() {
 
 /// Build a project whose payload rows are supplied by the caller, so a test can
 /// choose exactly what the "observed" series looks like.
-pub(super) fn series_project(
-    rows: Vec<serde_json::Value>,
-) -> (tempfile::TempDir, serde_json::Value) {
+pub fn series_project(rows: Vec<serde_json::Value>) -> (tempfile::TempDir, serde_json::Value) {
     let project = tempfile::tempdir().expect("project");
     let count = rows.len();
     write_json(
@@ -370,8 +368,8 @@ pub(super) fn series_project(
     (project, record_series_contract())
 }
 
-pub(super) fn verifier_stdout(project: &tempfile::TempDir, contract: &serde_json::Value) -> String {
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+pub fn verifier_stdout(project: &tempfile::TempDir, contract: &serde_json::Value) -> String {
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         contract,
     );

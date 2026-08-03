@@ -234,13 +234,13 @@ impl LifecycleDriver {
                     "instructions": instructions,
                     "artifact_requirements": artifact_paths,
                 });
-                let items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+                let items = lifecycle_policy::verify_options::prepare_verification_items(
                     vec![item],
                     self.project_artifact_root.as_deref(),
                     &[],
                     &self.task_universe,
                 );
-                let options = workflow_live_v2_lifecycle_verify_options::verification_options(
+                let options = lifecycle_policy::verify_options::verification_options(
                     &items,
                     instructions,
                     true,

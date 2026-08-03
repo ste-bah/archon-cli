@@ -1,14 +1,14 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
 
-pub(super) struct ManifestScope {
+pub struct ManifestScope {
     item_id: String,
     task_ids: Vec<String>,
     value: Value,
 }
 
-pub(super) fn manifest_scopes(evidence: &[Value]) -> Vec<ManifestScope> {
+pub fn manifest_scopes(evidence: &[Value]) -> Vec<ManifestScope> {
     let mut scopes = Vec::new();
     for entry in evidence {
         let result = entry.get("result").unwrap_or(entry);
@@ -20,7 +20,7 @@ pub(super) fn manifest_scopes(evidence: &[Value]) -> Vec<ManifestScope> {
     scopes
 }
 
-pub(super) fn stamp_manifest_scope(item: &mut Value, scopes: &[ManifestScope]) {
+pub fn stamp_manifest_scope(item: &mut Value, scopes: &[ManifestScope]) {
     let Some(scope) = matching_scope(item, scopes) else {
         return;
     };

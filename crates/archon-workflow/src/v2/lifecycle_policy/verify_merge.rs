@@ -2,16 +2,16 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
-use super::support;
+use crate::generated_lifecycle_support as support;
 
-pub(super) fn verification_remediation_source_items(inventory: &Value) -> Vec<Value> {
+pub fn verification_remediation_source_items(inventory: &Value) -> Vec<Value> {
     support::array(inventory.get("items"))
         .into_iter()
         .map(stamp_verification_requirements)
         .collect()
 }
 
-pub(super) fn merge_retry_outcomes(
+pub fn merge_retry_outcomes(
     verification: &Value,
     retry_result: Value,
     retry_items: &[Value],
@@ -24,7 +24,7 @@ pub(super) fn merge_retry_outcomes(
     )
 }
 
-pub(super) fn merge_repair_outcomes(
+pub(crate) fn merge_repair_outcomes(
     remediation_wave: &Value,
     followup_wave: Value,
     followup_items: &[Value],
@@ -119,7 +119,7 @@ fn verification_with_outcomes(verification: &Value, outcomes: Vec<Value>, label:
     Value::Object(merged)
 }
 
-pub(super) fn replace_all_outcomes(original: &Value, outcomes: Vec<Value>, label: &str) -> Value {
+pub(crate) fn replace_all_outcomes(original: &Value, outcomes: Vec<Value>, label: &str) -> Value {
     verification_with_outcomes(original, outcomes, label)
 }
 

@@ -1,6 +1,7 @@
 // Verification-failure triage and its single bounded re-triage path.
 
 use super::*;
+use archon_workflow::v2::lifecycle_policy::triage_outcomes::triage_failed_outcomes;
 
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
@@ -38,8 +39,8 @@ impl LifecycleDriver {
                 evidence,
             )
             .await?;
-        let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
-        let route_plan = workflow_live_v2_lifecycle_verify_routing::triage_route_plan(&routes);
+        let routes = lifecycle_policy::verify_routing::triage_routes(&triage);
+        let route_plan = lifecycle_policy::verify_routing::triage_route_plan(&routes);
         let retried = if route_plan.run_retries {
             self.run_producer_retry(
                 &triage,
@@ -60,7 +61,7 @@ impl LifecycleDriver {
             return Ok(false);
         }
         let superseded = if route_plan.try_supersede {
-            workflow_live_v2_lifecycle_verify_supersede::try_supersede_verification(
+            lifecycle_policy::verify_supersede::try_supersede_verification(
                 &self.contract(),
                 verification,
                 &triage,
@@ -118,10 +119,9 @@ impl LifecycleDriver {
                 prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
             )
             .await?;
-        let triage =
-            workflow_live_v2_lifecycle_verify_overreach::reroute_unplanned_raw_task_identity(
-                triage, plan_items,
-            );
+        let triage = lifecycle_policy::verify_overreach::reroute_unplanned_raw_task_identity(
+            triage, plan_items,
+        );
         let triage = self
             .enforce_triage_accounting(triage_id, actionable, triage, evidence)
             .await?;
@@ -147,12 +147,9 @@ impl LifecycleDriver {
         triage: serde_json::Value,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
-        let triage =
-            workflow_live_v2_lifecycle_verify_routing::harvest_nested_triage_routes(&triage);
-        let unaccounted = workflow_live_v2_lifecycle_verify_routing::unaccounted_failed_outcomes(
-            &triage,
-            failed_outcomes,
-        );
+        let triage = lifecycle_policy::verify_routing::harvest_nested_triage_routes(&triage);
+        let unaccounted =
+            lifecycle_policy::verify_routing::unaccounted_failed_outcomes(&triage, failed_outcomes);
         if unaccounted.is_empty() {
             return Ok(triage);
         }
@@ -165,8 +162,7 @@ impl LifecycleDriver {
                 prompts::VERIFICATION_TRIAGE_SHAPE_REPAIR_TASK,
             )
             .await?;
-        let repaired =
-            workflow_live_v2_lifecycle_verify_routing::harvest_nested_triage_routes(&repaired);
+        let repaired = lifecycle_policy::verify_routing::harvest_nested_triage_routes(&repaired);
         support::record_repair_attempt(
             &mut evidence.repair_attempts,
             &repair_id,
@@ -174,11 +170,10 @@ impl LifecycleDriver {
             &unaccounted,
             &repaired,
         );
-        let still_unaccounted =
-            workflow_live_v2_lifecycle_verify_routing::unaccounted_failed_outcomes(
-                &repaired,
-                failed_outcomes,
-            );
+        let still_unaccounted = lifecycle_policy::verify_routing::unaccounted_failed_outcomes(
+            &repaired,
+            failed_outcomes,
+        );
         // D74: a shape repair that accounts for more outcomes is still rejected
         // when it rewrote or dropped the semantic identity of already-routed
         // entries; the original triage stays authoritative.
@@ -219,9 +214,9 @@ impl LifecycleDriver {
     ) -> archon_workflow::WorkflowResult<(
         serde_json::Value,
         String,
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer,
+        lifecycle_policy::verify_routing::RetryProducer,
     )> {
-        if !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
+        if !lifecycle_policy::verify_retriage::needs_bounded_retriage(
             &self.contract(),
             verification,
             &triage,
@@ -229,12 +224,11 @@ impl LifecycleDriver {
             return Ok((
                 triage,
                 triage_id.to_string(),
-                workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage,
+                lifecycle_policy::verify_routing::RetryProducer::Triage,
             ));
         }
         let id = format!("verification-failure-retriage-{wave_index}-{repair_attempt}");
-        let feedback =
-            workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(verification, &triage);
+        let feedback = lifecycle_policy::verify_retriage::retriage_feedback(verification, &triage);
         let retriage = self
             .reduce(
                 &id,
@@ -256,7 +250,7 @@ impl LifecycleDriver {
         Ok((
             retriage,
             id,
-            workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage,
+            lifecycle_policy::verify_routing::RetryProducer::Retriage,
         ))
     }
 
@@ -264,7 +258,7 @@ impl LifecycleDriver {
     pub(super) async fn run_producer_retry(
         &self,
         producer_output: &serde_json::Value,
-        producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
+        producer: lifecycle_policy::verify_routing::RetryProducer,
         plan_items: &[serde_json::Value],
         source_outcomes: &[serde_json::Value],
         wave_index: usize,
@@ -283,7 +277,7 @@ impl LifecycleDriver {
         ) else {
             return Ok(false);
         };
-        let retry_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+        let retry_items = lifecycle_policy::verify_options::prepare_verification_items(
             retry_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
@@ -296,14 +290,14 @@ impl LifecycleDriver {
                     producer.label()
                 ),
                 serde_json::json!(&retry_items),
-                workflow_live_v2_lifecycle_verify_options::verification_options(
+                lifecycle_policy::verify_options::verification_options(
                     &retry_items,
                     prompts::RETRY_VERIFICATION_WAVE_TASK,
                     true,
                 ),
             )
             .await?;
-        *verification = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(
+        *verification = lifecycle_policy::verify_merge::merge_retry_outcomes(
             verification,
             retry_result,
             &retry_items,
@@ -321,44 +315,9 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn triage_failed_outcomes(verification: &serde_json::Value) -> Vec<serde_json::Value> {
-    let has_concrete_outcomes = [
-        verification.pointer("/outcomes"),
-        verification.pointer("/items"),
-        verification.pointer("/data/outcomes"),
-        verification.pointer("/data/items"),
-        verification.pointer("/result/outcomes"),
-        verification.pointer("/result/items"),
-        verification.pointer("/result/data/outcomes"),
-        verification.pointer("/result/data/items"),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|value| value.as_array().is_some_and(|items| !items.is_empty()));
-    let failed = if has_concrete_outcomes {
-        support::non_accepted_outcomes(&support::outcomes_of(verification))
-    } else {
-        Vec::new()
-    };
-    if !failed.is_empty() || support::outcome_accepted_or_noop(verification) {
-        return failed;
-    }
-    vec![serde_json::json!({
-        "item_id": "verification-triage-denominator-wiring-error",
-        "status": "failed",
-        "failure_kind": "triage_denominator_wiring_error",
-        "summary": "non-accepted verification reached triage without any extractable concrete outcomes",
-        "result": {
-            "status": verification.get("status").cloned().unwrap_or(serde_json::Value::Null),
-            "summary": verification.get("summary").cloned().unwrap_or(serde_json::Value::Null),
-            "residual_gaps": verification.get("residual_gaps").cloned().unwrap_or_else(|| serde_json::json!([])),
-        }
-    })]
-}
-
 pub(super) fn record_triage_retry(
     evidence: &mut LifecycleEvidence,
-    producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
+    producer: lifecycle_policy::verify_routing::RetryProducer,
     wave_index: usize,
     dependency_iteration: usize,
     repair_attempt: usize,
@@ -366,13 +325,13 @@ pub(super) fn record_triage_retry(
     verification: &serde_json::Value,
 ) {
     let producer_call_id = match producer {
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Triage => {
+        lifecycle_policy::verify_routing::RetryProducer::Triage => {
             format!("verification-failure-triage-{wave_index}-{repair_attempt}")
         }
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::Retriage => {
+        lifecycle_policy::verify_routing::RetryProducer::Retriage => {
             format!("verification-failure-retriage-{wave_index}-{repair_attempt}")
         }
-        workflow_live_v2_lifecycle_verify_routing::RetryProducer::RepairPlan => {
+        lifecycle_policy::verify_routing::RetryProducer::RepairPlan => {
             format!("verification-repair-plan-{wave_index}-{repair_attempt}")
         }
     };

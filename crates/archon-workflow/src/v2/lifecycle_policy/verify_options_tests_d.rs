@@ -1,7 +1,7 @@
 // Write-wave fan-out width: the one place a Phase 8 structural knob reaches the
 // running lifecycle. Split out of `..._tests_b.rs` to hold the 500-line ceiling.
 
-use super::super::workflow_live_v2_lifecycle_verify_options::write_wave_parallelism;
+use crate::v2::lifecycle_policy::verify_options::write_wave_parallelism;
 
 /// Constraint 3, at the one place a structural knob touches the running
 /// lifecycle: the cargo pin is a floor, not a preference. Concurrent `cargo`

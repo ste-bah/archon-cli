@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
+
+use super::verify_invariants;
 
 const OUTCOME_ITEM_ALIASES: &[&str] = &[
     "items",
@@ -21,29 +23,29 @@ const RECONCILIATION_ITEM_ALIASES: &[&str] = &[
 const RECONCILIATION_CONTAINER_KEYS: &[&str] = &["items", "reconciliation", "evidence", "issues"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct OutcomeRepairQuality {
-    pub(super) unaccounted: usize,
-    pub(super) unresolved_issues: usize,
-    pub(super) empty_inventory: usize,
+pub struct OutcomeRepairQuality {
+    pub unaccounted: usize,
+    pub unresolved_issues: usize,
+    pub empty_inventory: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct ReconciliationQuality {
-    pub(super) missing_collection: usize,
-    pub(super) malformed_items: usize,
+pub struct ReconciliationQuality {
+    pub missing_collection: usize,
+    pub malformed_items: usize,
 }
 
 impl ReconciliationQuality {
-    pub(super) fn defect_count(self) -> usize {
+    pub fn defect_count(self) -> usize {
         self.missing_collection + self.malformed_items
     }
 }
 
-pub(super) fn harvest_outcome_repair_items(value: &Value) -> Value {
+pub fn harvest_outcome_repair_items(value: &Value) -> Value {
     harvest_known_collection(value, "items", OUTCOME_ITEM_ALIASES, OUTCOME_CONTAINER_KEYS)
 }
 
-pub(super) fn harvest_reconciliation_items(value: &Value) -> Value {
+pub fn harvest_reconciliation_items(value: &Value) -> Value {
     harvest_known_collection(
         value,
         "items",
@@ -52,23 +54,23 @@ pub(super) fn harvest_reconciliation_items(value: &Value) -> Value {
     )
 }
 
-pub(super) fn collection_items(value: &Value) -> Vec<Value> {
+pub fn collection_items(value: &Value) -> Vec<Value> {
     support::array(collection_data(value).get("items"))
 }
 
-pub(super) fn outcome_repair_quality(
+pub fn outcome_repair_quality(
     inventory: &Value,
     failed_outcomes: &[Value],
 ) -> OutcomeRepairQuality {
     let items = collection_items(inventory);
     let accounted_ids = items
         .iter()
-        .flat_map(super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids)
+        .flat_map(verify_invariants::verification_item_ids)
         .collect::<std::collections::BTreeSet<_>>();
     let unaccounted = failed_outcomes
         .iter()
         .filter(|outcome| {
-            !super::workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(outcome)
+            !verify_invariants::verification_item_ids(outcome)
                 .iter()
                 .any(|id| accounted_ids.contains(id))
         })
@@ -81,7 +83,7 @@ pub(super) fn outcome_repair_quality(
     }
 }
 
-pub(super) fn reconciliation_quality(value: &Value) -> ReconciliationQuality {
+pub fn reconciliation_quality(value: &Value) -> ReconciliationQuality {
     let data = collection_data(value);
     let Some(items) = data.get("items").and_then(Value::as_array) else {
         return ReconciliationQuality {
@@ -159,5 +161,5 @@ fn dedup_items(items: &mut Vec<Value>) {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_boundary_repair_tests.rs"]
+#[path = "boundary_repair_tests.rs"]
 mod tests;

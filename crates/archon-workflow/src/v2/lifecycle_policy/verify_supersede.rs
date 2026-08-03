@@ -1,16 +1,16 @@
 use serde_json::Value;
 
-use archon_workflow::generated_lifecycle_support as support;
-use archon_workflow::generated_lifecycle_support::LifecycleContract;
+use crate::generated_lifecycle_support as support;
+use crate::generated_lifecycle_support::LifecycleContract;
 
-use super::workflow_live_v2_lifecycle_verify_invariants;
+use super::{verify_invariants, verify_merge};
 
-pub(super) struct VerificationSupersede {
-    pub(super) verification: Value,
-    pub(super) record: Value,
+pub struct VerificationSupersede {
+    pub verification: Value,
+    pub record: Value,
 }
 
-pub(super) fn try_supersede_verification(
+pub fn try_supersede_verification(
     contract: &LifecycleContract<'_>,
     verification: &Value,
     triage: &Value,
@@ -63,7 +63,7 @@ fn supersede_records(
         if !triage_marks_shape_or_resolved(&triage_item) {
             return None;
         }
-        let gaps = workflow_live_v2_lifecycle_verify_invariants::residual_gap_entries(failure);
+        let gaps = verify_invariants::residual_gap_entries(failure);
         if !triage_preserves_invariant(&triage_item, &gaps) {
             return None;
         }
@@ -157,11 +157,8 @@ fn verification_with_supersede(verification: &Value, records: &[Value]) -> Value
             }
         })
         .collect();
-    let merged = super::workflow_live_v2_lifecycle_verify_merge::replace_all_outcomes(
-        verification,
-        outcomes,
-        "verification supersede",
-    );
+    let merged =
+        verify_merge::replace_all_outcomes(verification, outcomes, "verification supersede");
     let mut object = merged.as_object().cloned().unwrap_or_default();
     object.insert(
         "superseded_verification_outcomes".to_string(),
@@ -228,7 +225,7 @@ fn triage_data(triage: &Value) -> Option<&Value> {
 }
 
 fn outcome_match_ids(value: &Value) -> Vec<String> {
-    workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(value)
+    verify_invariants::verification_item_ids(value)
 }
 
 fn outcome_id(value: &Value) -> String {

@@ -1,8 +1,8 @@
 use super::*;
-use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_script::{
+use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+use crate::v2::lifecycle_policy::inventory_items::{
     item_has_write_ownership, preserve_host_pinned_implementation,
 };
-use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
 fn contract() -> (WorkflowV2TaskUniverse, Value) {
     let universe = WorkflowV2TaskUniverse {

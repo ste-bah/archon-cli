@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-pub(crate) fn verification_command(root: &str, contract: &Value) -> String {
+pub fn verification_command(root: &str, contract: &Value) -> String {
     if let Some(reason) = template_binding_failure(contract) {
         return fail_closed_command(&reason);
     }
@@ -24,7 +24,7 @@ pub(crate) fn verification_command(root: &str, contract: &Value) -> String {
     format!("{command}\n{verifier}")
 }
 
-pub(super) fn typed_verification_command(root: &str, contract: &Value) -> Option<String> {
+pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String> {
     if template_binding_failure(contract).is_some() {
         return None;
     }
@@ -203,4 +203,4 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-const VERIFIER: &str = include_str!("workflow_live_v2_deliverable_verifier.sh");
+const VERIFIER: &str = include_str!("deliverable_verifier.sh");

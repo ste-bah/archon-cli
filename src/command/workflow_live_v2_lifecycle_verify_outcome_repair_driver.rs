@@ -13,7 +13,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
-        let items = workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
+        let items = lifecycle_policy::verify_merge::verification_remediation_source_items(
             remediation_inventory,
         );
         let call_id = verification_remediation_wave_id(wave_index, remediation_attempt, None);
@@ -73,9 +73,7 @@ impl LifecycleDriver {
         let mut noop_disagreement_streak = 0usize;
         for repair_attempt in 1..=self.max_repair_iterations {
             let repairable =
-                workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(
-                    &wave,
-                );
+                lifecycle_policy::verify_outcome_repair::repairable_contract_outcomes(&wave);
             if repairable.is_empty() {
                 break;
             }
@@ -108,7 +106,7 @@ impl LifecycleDriver {
                 )
                 .await?;
             noop_disagreement_streak =
-                workflow_live_v2_lifecycle_verify_outcome_repair::next_noop_disagreement_streak(
+                lifecycle_policy::verify_outcome_repair::next_noop_disagreement_streak(
                     noop_disagreement_streak,
                     &before,
                     &next_wave,
@@ -116,8 +114,7 @@ impl LifecycleDriver {
                 );
             wave = next_wave;
             if noop_disagreement_streak >= 2 {
-                wave =
-                    workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(&wave);
+                wave = lifecycle_policy::verify_outcome_repair::mark_noop_disagreement(&wave);
                 break;
             }
             inventory = followup_inventory;
@@ -192,9 +189,8 @@ impl LifecycleDriver {
         repair_attempt: usize,
         evidence: &mut LifecycleEvidence,
     ) -> archon_workflow::WorkflowResult<(serde_json::Value, serde_json::Value)> {
-        let items = workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
-            inventory,
-        );
+        let items =
+            lifecycle_policy::verify_merge::verification_remediation_source_items(inventory);
         let call_id =
             verification_remediation_wave_id(wave_index, remediation_attempt, Some(repair_attempt));
         let followup = self
@@ -213,7 +209,7 @@ impl LifecycleDriver {
             inventory,
             &followup,
         );
-        let merged = workflow_live_v2_lifecycle_verify_outcome_repair::merge_repaired_outcomes(
+        let merged = lifecycle_policy::verify_outcome_repair::merge_repaired_outcomes(
             &wave,
             followup.clone(),
             &items,

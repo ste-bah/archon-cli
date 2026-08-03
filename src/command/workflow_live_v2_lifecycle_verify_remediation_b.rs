@@ -123,7 +123,7 @@ impl LifecycleDriver {
         else {
             return Ok(false);
         };
-        let post_items = workflow_live_v2_lifecycle_verify_options::prepare_verification_items(
+        let post_items = lifecycle_policy::verify_options::prepare_verification_items(
             post_items,
             self.project_artifact_root.as_deref(),
             &evidence.implementation,
@@ -133,7 +133,7 @@ impl LifecycleDriver {
             .parallel(
                 &format!("verification-wave-{wave_index}-post-remediation-{remediation_attempt}"),
                 serde_json::json!(&post_items),
-                workflow_live_v2_lifecycle_verify_options::verification_options(
+                lifecycle_policy::verify_options::verification_options(
                     &post_items,
                     prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
                     true,
@@ -287,18 +287,18 @@ impl LifecycleDriver {
 pub(crate) fn producer_retry_items(
     contract: &LifecycleContract<'_>,
     producer_output: &serde_json::Value,
-    producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
+    producer: lifecycle_policy::verify_routing::RetryProducer,
     plan_items: &[serde_json::Value],
     source_outcomes: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
-    let retry_items = workflow_live_v2_lifecycle_verify_routing::retry_items(producer_output);
-    if workflow_live_v2_lifecycle_verify_routing::retry_consumption_route(producer, &retry_items)
-        == workflow_live_v2_lifecycle_verify_routing::RetryConsumptionRoute::NotNeeded
+    let retry_items = lifecycle_policy::verify_routing::retry_items(producer_output);
+    if lifecycle_policy::verify_routing::retry_consumption_route(producer, &retry_items)
+        == lifecycle_policy::verify_routing::RetryConsumptionRoute::NotNeeded
     {
         return None;
     }
     let inventory = contract.normalize_inventory(&serde_json::json!({ "items": retry_items }));
-    let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+    let inventory = lifecycle_policy::verify_invariants::enforce_retry_invariants(
         &inventory,
         &serde_json::json!({ "outcomes": source_outcomes }),
     );

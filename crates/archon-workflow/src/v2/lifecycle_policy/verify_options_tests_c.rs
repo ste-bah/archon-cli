@@ -33,7 +33,7 @@ fn a_textual_deliverable_is_checked_for_presence_not_parsed_as_json() {
         "artifact_path": ".archon/demo/inventory.md",
         "artifact_format": "text"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -55,7 +55,7 @@ fn a_missing_textual_deliverable_still_fails() {
         "artifact_path": ".archon/demo/absent.md",
         "artifact_format": "text"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -86,7 +86,7 @@ fn an_undeclared_json_extension_is_still_strictly_parsed() {
         "kind": "thing",
         "artifact_path": ".archon/demo/thing.json"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -128,7 +128,7 @@ fn a_parameterized_markdown_instance_is_not_parsed_as_json() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -154,7 +154,7 @@ fn an_unbound_templated_contract_fails_closed_naming_the_token() {
         "kind": "native_dataset_manifest",
         "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -219,7 +219,7 @@ fn a_bound_template_resolves_to_its_instances() {
         "min_instances": 2
     });
     for contract in [source_bound, glob_bound] {
-        let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+        let command = deliverable_contract::verification_command(
             project.path().to_str().expect("project path"),
             &contract,
         );
@@ -256,7 +256,7 @@ fn a_bound_template_below_its_declared_floor_fails() {
         "artifact_path": ".archon/demo/datasets/<dataset-id>/<version>/manifest.json",
         "min_instances": 2
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -285,7 +285,7 @@ fn a_missing_parameterized_instance_still_fails() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );

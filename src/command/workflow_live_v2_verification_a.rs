@@ -230,7 +230,7 @@ pub(crate) async fn enforce_declared_contracts(
         let mut failed = false;
         for contract in declared {
             let command =
-                super::super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
+                archon_workflow::v2::deliverable_contract::verification_command(root, contract);
             match run_contract_verifier(&command).await {
                 ContractVerification::Passed => passed += 1,
                 ContractVerification::Failed(detail) => {

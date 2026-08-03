@@ -38,11 +38,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
-use super::{WorkflowV2TaskUniverse, support};
+use crate::generated_lifecycle_support as support;
+use crate::task_universe::WorkflowV2TaskUniverse;
 
 /// Call-id prefix for the per-task review stage. One `parallel` call per
 /// dependency wave / review round; one BRANCH per task inside it.
-pub(super) const PER_TASK_REVIEW_ITEM_PREFIX: &str = "adversarial-review-";
+pub(crate) const PER_TASK_REVIEW_ITEM_PREFIX: &str = "adversarial-review-";
 
 /// Keys a finding may use to name its own tasks. Read, never required.
 const DECLARED_TASK_ID_KEYS: &[&str] = &["canonical_task_ids", "task_ids", "taskIds", "task_id"];
@@ -56,7 +57,7 @@ const FINDING_COLLECTION_KEYS: &[&str] = &["findings", "review_findings", "items
 /// `item_id` is derived from the canonical task id, so the host-stamped branch
 /// id is a total function of the task under review — that identity is what
 /// makes attribution structural in `attributed_findings`.
-pub(super) fn per_task_review_items(
+pub fn per_task_review_items(
     universe: &WorkflowV2TaskUniverse,
     task_ids: &BTreeSet<String>,
     evidence: &[&[Value]],
@@ -83,7 +84,7 @@ pub(super) fn per_task_review_items(
         .collect()
 }
 
-pub(super) fn review_item_id(canonical_task_id: &str) -> String {
+pub fn review_item_id(canonical_task_id: &str) -> String {
     format!("{PER_TASK_REVIEW_ITEM_PREFIX}{canonical_task_id}")
 }
 
@@ -125,7 +126,7 @@ fn value_names_task(value: &Value, task_id: &str) -> bool {
 /// the outcome count matches the item count, position is used. When neither
 /// holds, the finding is returned UNSTAMPED rather than guessed at, so it
 /// surfaces as unassigned instead of being silently attached to the wrong task.
-pub(super) fn attributed_findings(items: &[Value], envelope: &Value) -> Vec<Value> {
+pub fn attributed_findings(items: &[Value], envelope: &Value) -> Vec<Value> {
     let by_item = task_ids_by_item_id(items);
     let outcomes = support::outcomes_of(envelope);
     let positional = outcomes.len() == items.len();
@@ -230,7 +231,7 @@ fn declared_task_ids(finding: &Value) -> Vec<String> {
 /// Every per-task finding this run has recorded, newest last. Read back out of
 /// `evidence.review` so the terminal reduce round does not have to re-run the
 /// per-task stage to know what the wave-time reviewers already found.
-pub(super) fn collected_per_task_findings(review_evidence: &[Value]) -> Vec<Value> {
+pub fn collected_per_task_findings(review_evidence: &[Value]) -> Vec<Value> {
     review_evidence
         .iter()
         .filter(|entry| {
@@ -241,14 +242,14 @@ pub(super) fn collected_per_task_findings(review_evidence: &[Value]) -> Vec<Valu
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_adversarial_tests.rs"]
+#[path = "adversarial_tests.rs"]
 mod tests;
 
 /// Stable identity of a finding, used to prove the terminal reduce is not
 /// re-emitting per-task work. Mirrors `findingIdentities` in
 /// `workflow_live_v3_primitives.js` so both halves of the system agree on what
 /// "the same finding" means.
-pub(super) fn finding_identities(finding: &Value) -> Vec<String> {
+pub(crate) fn finding_identities(finding: &Value) -> Vec<String> {
     let mut keys = Vec::new();
     for key in [
         "id",

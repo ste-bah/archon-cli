@@ -354,40 +354,14 @@ use workflow_live_v3_prelude::*;
 mod workflow_live_v2_script_verification;
 use workflow_live_v2_script_verification::*;
 
-#[path = "workflow_live_v2_deliverable_contract.rs"]
-pub(super) mod workflow_live_v2_deliverable_contract;
-#[path = "workflow_live_v2_lifecycle_adversarial.rs"]
-mod workflow_live_v2_lifecycle_adversarial;
-#[path = "workflow_live_v2_lifecycle_boundary_repair.rs"]
-mod workflow_live_v2_lifecycle_boundary_repair;
-#[path = "workflow_live_v2_lifecycle_cross_cutting.rs"]
-mod workflow_live_v2_lifecycle_cross_cutting;
-#[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
-mod workflow_live_v2_lifecycle_noop_routing;
+// The lifecycle's value-level policy now lives in archon-workflow. One import
+// here, and the driver parts below reach every module through it.
+use archon_workflow::v2::lifecycle_policy;
+
 #[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
 mod workflow_live_v2_lifecycle_review_remediation;
 #[path = "workflow_live_v2_lifecycle_review_verification.rs"]
 mod workflow_live_v2_lifecycle_review_verification;
-#[path = "workflow_live_v2_lifecycle_terminal_gate.rs"]
-mod workflow_live_v2_lifecycle_terminal_gate;
-#[path = "workflow_live_v2_lifecycle_verify_invariants.rs"]
-mod workflow_live_v2_lifecycle_verify_invariants;
-#[path = "workflow_live_v2_lifecycle_verify_merge.rs"]
-mod workflow_live_v2_lifecycle_verify_merge;
-#[path = "workflow_live_v2_lifecycle_verify_options.rs"]
-mod workflow_live_v2_lifecycle_verify_options;
-#[path = "workflow_live_v2_lifecycle_verify_outcome_repair.rs"]
-mod workflow_live_v2_lifecycle_verify_outcome_repair;
-#[path = "workflow_live_v2_lifecycle_verify_overreach.rs"]
-mod workflow_live_v2_lifecycle_verify_overreach;
-#[path = "workflow_live_v2_lifecycle_verify_retriage.rs"]
-mod workflow_live_v2_lifecycle_verify_retriage;
-#[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
-mod workflow_live_v2_lifecycle_verify_routing;
-#[path = "workflow_live_v2_lifecycle_verify_scope.rs"]
-mod workflow_live_v2_lifecycle_verify_scope;
-#[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
-mod workflow_live_v2_lifecycle_verify_supersede;
 // Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
 // inside this subsystem because that is the only scope from which the planner,
 // the task universe, the scheduler primitives and the per-task review item
@@ -424,8 +398,6 @@ use workflow_live_v3_author_checks::*;
 
 #[path = "workflow_live_v2_lifecycle_waves.rs"]
 mod workflow_live_v2_lifecycle_waves;
-#[cfg(test)]
-use workflow_live_v2_lifecycle_waves::*;
 
 #[path = "workflow_live_v2_lifecycle_impl.rs"]
 mod workflow_live_v2_lifecycle_impl;
@@ -440,8 +412,6 @@ use workflow_live_v2_lifecycle_verify::*;
 
 #[path = "workflow_live_v2_lifecycle_verify_triage.rs"]
 mod workflow_live_v2_lifecycle_verify_triage;
-#[cfg(test)]
-use workflow_live_v2_lifecycle_verify_triage::*;
 
 #[path = "workflow_live_v2_lifecycle_verify_remediation.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation;
@@ -465,12 +435,6 @@ mod workflow_live_v2_lifecycle_review_remediation_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_review_verification_tests.rs"]
 mod workflow_live_v2_lifecycle_review_verification_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_options_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_options_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_outcome_repair_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_outcome_repair_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation_tests;
