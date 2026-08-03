@@ -9,7 +9,7 @@
 
 use super::*;
 
-use super::super::workflow_live_generated_lifecycle_support::outcomes_of;
+use crate::v2::outcome_envelope::outcomes_of;
 
 const DIGEST_TEXT_LIMIT: usize = 400;
 
@@ -149,7 +149,7 @@ fn digest_text(value: Option<&serde_json::Value>) -> serde_json::Value {
 
 #[cfg(test)]
 mod blocker_tests {
-    use archon_workflow::{WorkflowV2CallExecution, WorkflowV2HostCall, WorkflowV2HostMethod};
+    use crate::{WorkflowV2CallExecution, WorkflowV2HostCall, WorkflowV2HostMethod};
 
     fn execution(input: serde_json::Value) -> WorkflowV2CallExecution {
         WorkflowV2CallExecution {

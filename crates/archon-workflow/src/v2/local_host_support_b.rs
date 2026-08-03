@@ -15,8 +15,8 @@ pub(super) fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
         .all(|path| artifact_path_exists(v2_root, path))
 }
 
-pub(crate) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
-    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(path) {
+pub(super) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
+    if crate::v2::artifact_refs::is_nonfilesystem_artifact_ref(path) {
         return true;
     }
     let path = Path::new(path);
@@ -135,10 +135,7 @@ pub(super) fn sanitize_id(raw: &str) -> String {
         .collect()
 }
 
-pub(super) fn write_json(
-    path: &Path,
-    value: &impl serde::Serialize,
-) -> archon_workflow::WorkflowResult<()> {
+pub(super) fn write_json(path: &Path, value: &impl serde::Serialize) -> crate::WorkflowResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| WorkflowError::Io {
             path: parent.to_path_buf(),

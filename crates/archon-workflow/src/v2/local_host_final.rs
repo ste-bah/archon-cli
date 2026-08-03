@@ -4,7 +4,7 @@ pub(super) fn final_report_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let source_results = final_report_source_results(source_results(execution, v2_store)?);
     let required_task_ids = authoritative_task_ids(task_universe)
         .unwrap_or_else(|| required_task_ids_from_results(&source_results));
@@ -113,7 +113,7 @@ fn guard_final_report_against_dynamic_wave_evidence(
     report: &mut WorkflowV2FinalReport,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let records = v2_store.load_call_records()?;
     let mut dynamic_universe = authoritative_task_ids(task_universe)
         .map(|ids| ids.into_iter().collect::<BTreeSet<_>>())
@@ -283,7 +283,7 @@ fn guard_final_report_against_dynamic_wave_evidence(
 
 fn merge_ledger_task_coverage(
     report: &mut WorkflowV2FinalReport,
-    extra: Vec<archon_workflow::WorkflowV2TaskCoverage>,
+    extra: Vec<crate::WorkflowV2TaskCoverage>,
     completed_ids: &BTreeSet<String>,
 ) {
     let mut seen = report
@@ -298,7 +298,7 @@ fn merge_ledger_task_coverage(
     }
 }
 
-fn task_coverage_key(coverage: &archon_workflow::WorkflowV2TaskCoverage) -> String {
+fn task_coverage_key(coverage: &crate::WorkflowV2TaskCoverage) -> String {
     format!(
         "{}::{:?}::{}",
         coverage.task_id, coverage.status, coverage.summary
@@ -307,7 +307,7 @@ fn task_coverage_key(coverage: &archon_workflow::WorkflowV2TaskCoverage) -> Stri
 
 fn merge_ledger_commands(
     report: &mut WorkflowV2FinalReport,
-    extra: Vec<archon_workflow::WorkflowV2CommandRecord>,
+    extra: Vec<crate::WorkflowV2CommandRecord>,
 ) {
     let mut seen = report
         .commands_run
@@ -321,7 +321,7 @@ fn merge_ledger_commands(
     }
 }
 
-fn command_key(command: &archon_workflow::WorkflowV2CommandRecord) -> String {
+fn command_key(command: &crate::WorkflowV2CommandRecord) -> String {
     format!(
         "{:?}::{:?}::{:?}::{}",
         command.kind, command.status, command.exit_code, command.command
@@ -347,7 +347,7 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     if raw.is_empty() {
         return false;
     }
-    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if crate::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return true;
     }
     let path = Path::new(raw);
@@ -370,7 +370,7 @@ pub(super) fn final_acceptance_gate_result(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     failed_inputs: usize,
     checked_inputs: usize,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let Some(required_task_ids) = authoritative_task_ids(task_universe) else {
         let mut result = WorkflowV2Result {
             status: WorkflowV2Status::NeedsReview,

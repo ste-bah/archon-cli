@@ -82,11 +82,6 @@ mod workflow_live_task_status_tests;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
-#[path = "workflow_live_v2_host.rs"]
-mod workflow_live_v2_host;
-#[cfg(test)]
-#[path = "workflow_live_v2_host_tests.rs"]
-mod workflow_live_v2_host_tests;
 // Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
 // driver wiring lands incrementally; the action contract compiles and is
 // tested from day one.

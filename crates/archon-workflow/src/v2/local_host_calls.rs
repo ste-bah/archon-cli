@@ -1,10 +1,14 @@
 use super::*;
 
-pub(crate) fn execute_local_host_call(
+/// Execute a host call that needs no agent, or report that this method does.
+///
+/// `Ok(None)` means "not a local method" — the caller must dispatch it to an
+/// agent. It is never an acceptance.
+pub fn execute_local_host_call(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<Option<WorkflowV2Result>> {
+) -> crate::WorkflowResult<Option<WorkflowV2Result>> {
     let result = match execution.call.method {
         WorkflowV2HostMethod::Checkpoint => checkpoint_result(execution),
         WorkflowV2HostMethod::SaveArtifact => save_artifact_result(execution, v2_store)?,
@@ -37,7 +41,7 @@ fn checkpoint_result(execution: &WorkflowV2CallExecution) -> WorkflowV2Result {
 fn save_artifact_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let artifact_path = artifact_path(v2_store.root(), &execution.call.id);
     let payload = execution
         .input
@@ -67,7 +71,7 @@ fn save_artifact_result(
 fn require_artifact_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     // Declared artifact paths are project-artifact-root relative; resolve them
     // against the project root that owns this run's `.archon` directory, never
     // against the process working directory.

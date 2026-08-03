@@ -100,7 +100,7 @@ fn final_report_is_derived_from_typed_inputs_and_saved() {
         exit_code: Some(0),
         output_summary: "passed".to_string(),
     });
-    result.artifacts.push(archon_workflow::WorkflowV2Artifact {
+    result.artifacts.push(crate::WorkflowV2Artifact {
         id: "coverage-history".to_string(),
         path: ".archon/trading-lab/data/coverage/history/not-written.json".to_string(),
         description: Some("optional display reference".to_string()),
@@ -123,7 +123,7 @@ fn final_report_is_derived_from_typed_inputs_and_saved() {
         )],
     });
     store
-        .save_call_record(&archon_workflow::WorkflowV2CallRecord::new(
+        .save_call_record(&crate::WorkflowV2CallRecord::new(
             store.run_id(),
             upstream.call,
             1,

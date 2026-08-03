@@ -75,31 +75,11 @@ pub(crate) fn matching_accepted_ids(
 }
 
 /// Outcome accessor across the host's known direct and merged envelopes.
-pub(crate) fn outcomes_of(result: &Value) -> Vec<Value> {
-    for envelope in known_result_envelopes(result) {
-        for key in ["outcomes", "items"] {
-            let values = array(envelope.get(key));
-            if !values.is_empty() {
-                return values;
-            }
-        }
-    }
-    vec![result.clone()]
-}
-
-fn known_result_envelopes(result: &Value) -> Vec<&Value> {
-    let mut envelopes = vec![result];
-    if let Some(inner) = result.get("result") {
-        envelopes.push(inner);
-    }
-    let roots = envelopes.clone();
-    for root in roots {
-        if let Some(data) = root.get("data") {
-            envelopes.push(data);
-        }
-    }
-    envelopes
-}
+///
+/// The definition moved to `archon_workflow::v2::outcome_envelope` with the
+/// local host that also reads it. Re-exported under the JS helper's name so the
+/// forty-odd lifecycle call sites keep their `support::outcomes_of` spelling.
+pub(crate) use archon_workflow::v2::outcome_envelope::outcomes_of;
 
 pub(crate) fn work_type_for(item: &Value) -> &str {
     item.get("work_type").and_then(Value::as_str).unwrap_or("")

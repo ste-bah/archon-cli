@@ -37,4 +37,8 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# The workflow-live JSON corpus. Dev-only: the fixtures are `pub const` test
+# data, and pulling them in at build time would put wiremock and the mock
+# doubles into this crate's production graph.
+archon-test-support = { path = "../archon-test-support" }
 tempfile.workspace = true
