@@ -63,4 +63,3 @@ pub trait WorkflowStageRunner: Send + Sync + WriteBoundaryProbe {
         None
     }
 }
-
