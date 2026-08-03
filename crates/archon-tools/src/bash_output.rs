@@ -11,6 +11,7 @@ const PIPE_READ_CHUNK_BYTES: usize = 8 * 1024;
 pub(super) struct CapturedOutput {
     pub(super) bytes: Vec<u8>,
     pub(super) truncated: bool,
+    pub(super) read_error: Option<String>,
 }
 
 pub(super) fn shared_output_budget(max_output_bytes: usize) -> Arc<AtomicUsize> {
@@ -39,37 +40,35 @@ pub(super) fn spawn_counted_pipe_capture<T>(
 where
     T: AsyncRead + Unpin + Send + 'static,
 {
-    tokio::spawn(async move {
-        capture_pipe(pipe, budget, byte_count)
-            .await
-            .unwrap_or_else(|_| CapturedOutput {
-                bytes: Vec::new(),
-                truncated: true,
-            })
-    })
+    tokio::spawn(async move { capture_pipe(pipe, budget, byte_count).await })
 }
 
 async fn capture_pipe<T>(
     pipe: Option<T>,
     budget: Arc<AtomicUsize>,
     byte_count: Arc<AtomicUsize>,
-) -> std::io::Result<CapturedOutput>
+) -> CapturedOutput
 where
     T: AsyncRead + Unpin,
 {
     let mut output = CapturedOutput {
         bytes: Vec::new(),
         truncated: false,
+        read_error: None,
     };
     let Some(mut pipe) = pipe else {
-        return Ok(output);
+        return output;
     };
     let mut chunk = [0_u8; PIPE_READ_CHUNK_BYTES];
     loop {
-        let read = pipe.read(&mut chunk).await?;
-        if read == 0 {
-            return Ok(output);
-        }
+        let read = match pipe.read(&mut chunk).await {
+            Ok(0) => return output,
+            Ok(read) => read,
+            Err(error) => {
+                output.read_error = Some(error.to_string());
+                return output;
+            }
+        };
         byte_count.fetch_add(read, Ordering::Relaxed);
         let retained = reserve_output_bytes(&budget, read);
         output.bytes.extend_from_slice(&chunk[..retained]);

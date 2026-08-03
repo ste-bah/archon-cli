@@ -270,12 +270,16 @@ pub(super) struct BashChildState<'a> {
 }
 
 impl BashChildState<'_> {
-    async fn fail(&mut self, reason: &str, message: String) -> ToolResult {
-        terminate_child(self.child, self.process_group, reason, self.deadline).await;
+    pub(super) async fn fail(&mut self, reason: &str, message: String) -> ToolResult {
+        let cleanup_error = terminate_child(self.child, self.process_group, reason).await;
         abort_pipe_tasks(self.stdout_task, self.stderr_task);
         if reason == "parent cancellation" {
             tracing::info!("bash: command cancelled by parent CancellationToken");
         }
+        let message = match cleanup_error {
+            Some(error) => format!("{message}; process cleanup failed: {error}"),
+            None => message,
+        };
         ToolResult::error(message)
     }
 }
@@ -308,21 +312,38 @@ pub(super) async fn completed_bash_result(
     state: &mut BashChildState<'_>,
     status: std::io::Result<std::process::ExitStatus>,
 ) -> ToolResult {
-    let Some((stdout, stderr)) =
-        join_pipe_tasks(state.deadline, state.stdout_task, state.stderr_task).await
-    else {
+    let (stdout, stderr) =
+        match join_pipe_tasks(state.deadline, state.stdout_task, state.stderr_task).await {
+            Some(pipes) => pipes,
+            None => {
+                return state
+                    .fail(
+                        "pipe drain timeout",
+                        format!("Command timed out after {}ms", prepared.timeout_ms),
+                    )
+                    .await;
+            }
+        };
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            return state
+                .fail(
+                    "process wait failure",
+                    format!("Failed to wait for bash process: {error}"),
+                )
+                .await;
+        }
+    };
+    if let Some(error) = stdout.read_error.as_ref().or(stderr.read_error.as_ref()) {
         return state
             .fail(
-                "pipe drain timeout",
-                format!("Command timed out after {}ms", prepared.timeout_ms),
+                "pipe read failure",
+                format!("Failed to capture bash output: {error}"),
             )
             .await;
-    };
-    let exit_code = status
-        .as_ref()
-        .ok()
-        .and_then(|status| status.code())
-        .unwrap_or(-1);
+    }
+    let exit_code = status.code().unwrap_or(-1);
     bash_result_from_pipes(tool.max_output_bytes, stdout, stderr, exit_code)
 }
 
@@ -330,17 +351,27 @@ pub(super) async fn terminate_child(
     child: &mut Box<dyn ChildWrapper>,
     process_group: Option<u32>,
     reason: &str,
-    deadline: &ExecutionDeadline,
-) {
+) -> Option<String> {
     #[cfg(not(unix))]
     let _ = process_group;
     #[cfg(unix)]
-    if let Some(pid) = process_group {
+    let kill_error = process_group.and_then(|pid| {
         // SAFETY: the wrapped command is the process-group leader created above.
-        unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
-    }
+        let result = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        (result != 0).then(|| std::io::Error::last_os_error().to_string())
+    });
     #[cfg(not(unix))]
-    let _ = child.start_kill();
-    let _ = deadline.wait(child.wait()).await;
-    tracing::info!(reason, "bash: terminated process tree");
+    let kill_error = child.start_kill().err().map(|error| error.to_string());
+    let wait_error = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(_)) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(_) => Some("process reap exceeded 2 second cleanup deadline".to_string()),
+    };
+    let cleanup_error = kill_error.or(wait_error);
+    if let Some(error) = &cleanup_error {
+        tracing::warn!(reason, error, "bash: process-tree cleanup failed");
+    } else {
+        tracing::info!(reason, "bash: terminated process tree");
+    }
+    cleanup_error
 }
