@@ -124,23 +124,12 @@ async fn wait_or_terminate(
     child: &mut Box<dyn ChildWrapper>,
     deadline: &ExecutionDeadline,
 ) -> Result<std::process::ExitStatus, RunError> {
-    match deadline.wait(wait_for_shell(child)).await {
+    match deadline.wait(child.wait()).await {
         Some(status) => status.map_err(|error| RunError::Io(error.to_string())),
         None => {
             terminate_process_tree(child, child.id(), deadline).await;
             Err(RunError::Timeout("process wait"))
         }
-    }
-}
-
-async fn wait_for_shell(
-    child: &mut Box<dyn ChildWrapper>,
-) -> std::io::Result<std::process::ExitStatus> {
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 

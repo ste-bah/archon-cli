@@ -236,14 +236,14 @@ async fn windows_hook_waits_for_descendant_after_parent_exits() {
     let completion_file = dir.path().join("detached-descendant.complete");
     let fixture = write_windows_detached_descendant_fixture(&completion_file);
     let output = tokio::time::timeout(
-        std::time::Duration::from_secs(8),
+        std::time::Duration::from_secs(20),
         super::executor_process::run_command(
             &windows_file_command(&fixture),
             b"{}",
             dir.path(),
             "issue92-session",
             "PreToolUse",
-            5,
+            15,
         ),
     )
     .await

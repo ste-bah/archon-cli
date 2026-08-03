@@ -254,21 +254,10 @@ pub(super) async fn wait_for_bash_outcome(
     tokio::select! {
         biased;
         _ = cancel_token.cancelled() => BashOutcome::Cancelled,
-        result = deadline.wait(wait_for_shell(child)) => match result {
+        result = deadline.wait(child.wait()) => match result {
             Some(status) => BashOutcome::Done(status),
             None => BashOutcome::Timeout,
         }
-    }
-}
-
-async fn wait_for_shell(
-    child: &mut Box<dyn ChildWrapper>,
-) -> std::io::Result<std::process::ExitStatus> {
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
