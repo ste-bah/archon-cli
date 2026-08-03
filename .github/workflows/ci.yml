@@ -231,6 +231,8 @@ jobs:
             @{ Package = 'archon-core'; Name = 'windows_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_empty_env_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_sanitized_raw_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_ps_module_path_raw_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_powershell_channel_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_powershell_env_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_ci_env_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_metadata_env_raw_child_drains_large_output' },

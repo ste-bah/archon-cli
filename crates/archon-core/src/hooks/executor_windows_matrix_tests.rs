@@ -8,6 +8,8 @@ enum ProbeEnvironment {
     Inherited,
     Empty,
     Sanitized,
+    SanitizedPsModulePath,
+    SanitizedPowerShellChannel,
     SanitizedPowerShell,
     SanitizedCi,
     SanitizedWindows,
@@ -26,6 +28,16 @@ async fn windows_empty_env_raw_child_drains_large_output() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn windows_sanitized_raw_child_drains_large_output() {
     run_probe(false, false, ProbeEnvironment::Sanitized).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn windows_ps_module_path_raw_child_drains_large_output() {
+    run_probe(false, false, ProbeEnvironment::SanitizedPsModulePath).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn windows_powershell_channel_raw_child_drains_large_output() {
+    run_probe(false, false, ProbeEnvironment::SanitizedPowerShellChannel).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -151,6 +163,12 @@ fn output_command(
             command.env_clear();
         }
         ProbeEnvironment::Sanitized => apply_sanitized_env(&mut command, &[]),
+        ProbeEnvironment::SanitizedPsModulePath => {
+            apply_sanitized_env(&mut command, &["PSModulePath"])
+        }
+        ProbeEnvironment::SanitizedPowerShellChannel => {
+            apply_sanitized_env(&mut command, &["POWERSHELL_DISTRIBUTION_CHANNEL"])
+        }
         ProbeEnvironment::SanitizedPowerShell => apply_sanitized_env(
             &mut command,
             &["PSModulePath", "POWERSHELL_DISTRIBUTION_CHANNEL"],
