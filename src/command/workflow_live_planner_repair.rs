@@ -70,7 +70,7 @@ pub(crate) async fn plan_live(
             target_repository_root.as_deref(),
             &task_universe,
             &governed_learning_context,
-            generated_config,
+            &scaffold_limits(generated_config),
         )?;
         match compile_harness_plan(
             task,
@@ -369,7 +369,7 @@ async fn compile_harness_plan(
     let calls = if task_universe.is_some() {
         // Native lifecycle: the plan is declared by the Rust generator and
         // the recorded document is a descriptor, not an executable script.
-        super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
+        archon_workflow::v2::decomposed_prd_plan::decomposed_prd_plan_calls()
     } else {
         // QuickJS is the single grammar for LLM-authored scripts: the dry-run
         // compiles the script and records its typed host calls.

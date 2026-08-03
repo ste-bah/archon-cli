@@ -8,7 +8,7 @@ use archon_workflow::{
     WorkflowV2HostMethod, WorkflowV2WriteMode,
 };
 
-use super::workflow_live_v2_artifact_paths::stamp_project_artifact_paths;
+use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths;
 
 use super::super::workflow_live_retry;
 use super::super::workflow_live_runner::{

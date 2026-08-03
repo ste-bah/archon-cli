@@ -18,8 +18,6 @@ mod planner_repair_tests;
 #[cfg(test)]
 #[path = "workflow_live_tests.rs"]
 mod tests;
-#[path = "workflow_agent_select.rs"]
-mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
 #[cfg(test)]
@@ -33,8 +31,6 @@ mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
-#[path = "workflow_live_generated_scaffold.rs"]
-pub(crate) mod workflow_live_generated_scaffold;
 #[cfg(test)]
 #[path = "workflow_live_generated_semantics_tests.rs"]
 mod workflow_live_generated_semantics_tests;
@@ -46,8 +42,6 @@ mod workflow_live_mcp;
 mod workflow_live_planner;
 #[path = "workflow_live_prompt.rs"]
 mod workflow_live_prompt;
-#[path = "workflow_live_repo_root.rs"]
-mod workflow_live_repo_root;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]

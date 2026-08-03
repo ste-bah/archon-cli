@@ -3,7 +3,7 @@ use super::*;
 use archon_core::config::{ShapeInput, ShapeSource, TunableShapeKnob, decide_fanout_width};
 use archon_workflow::WorkflowV2HostOptions;
 
-use crate::command::workflow_live::workflow_live_generated_scaffold::decomposed_prd_plan_calls;
+use archon_workflow::v2::decomposed_prd_plan::decomposed_prd_plan_calls;
 
 fn moved_decision() -> ShapeDecision {
     let input = ShapeInput {

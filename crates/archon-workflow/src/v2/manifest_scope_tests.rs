@@ -1,5 +1,5 @@
-use super::workflow_live_v2_manifest_scope::manifest_scope_verification_result;
-use archon_workflow::WorkflowV2Status;
+use super::manifest_scope_verification_result;
+use crate::v2::WorkflowV2Status;
 
 #[test]
 fn shared_tree_noise_cannot_fail_manifest_grounded_scope() {

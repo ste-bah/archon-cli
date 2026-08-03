@@ -2,6 +2,7 @@
 
 pub mod acceptance;
 pub mod agent_dispatch_port;
+pub mod agent_select;
 pub mod approval;
 pub mod bundle;
 pub mod command;
@@ -30,6 +31,7 @@ pub mod planner;
 pub mod policy;
 pub mod provider_tiers;
 mod remediation_items;
+pub mod repo_root;
 mod request;
 pub mod run;
 pub mod runner;

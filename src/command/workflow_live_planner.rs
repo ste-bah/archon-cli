@@ -14,14 +14,15 @@ use archon_workflow::{
 
 use crate::command::learning_workflow_hooks::derive_learning_hooks;
 
-use super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
 use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
-use super::workflow_live_repo_root::infer_target_repository_root;
 use super::workflow_live_retry;
 use super::workflow_live_runner::tier_model_alias;
+use archon_workflow::repo_root::infer_target_repository_root;
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
 };
+use archon_workflow::v2::decomposed_prd_plan::decomposed_prd_scaffold;
+use archon_workflow::v2::lifecycle_driver::LifecycleLimits;
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkflowScriptPlan {
@@ -193,6 +194,19 @@ fn decomposed_prd_prompt_slots() -> BTreeMap<String, String> {
                 .to_string(),
         ),
     ])
+}
+
+/// Carry the CLI's configured limits across the crate boundary.
+///
+/// `archon-workflow` does not depend on `archon-core`, so the scaffold takes
+/// the driver's own [`LifecycleLimits`] and the conversion happens here — the
+/// same boundary shape `run_decomposed_lifecycle` already uses.
+pub(super) fn scaffold_limits(generated_config: &GeneratedWorkflowConfig) -> LifecycleLimits {
+    LifecycleLimits {
+        max_repair_iterations: generated_config.max_repair_iterations,
+        max_investigation_iterations: generated_config.max_investigation_iterations,
+        implementation_wave_max_parallelism: generated_config.implementation_wave_max_parallelism,
+    }
 }
 
 #[path = "workflow_live_planner_repair.rs"]

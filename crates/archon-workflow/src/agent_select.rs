@@ -1,9 +1,8 @@
-use archon_workflow::{ProviderTier, StageKind, StageRunRequest};
+//! Which authored agent key runs a workflow stage.
 
-pub(super) fn select_workflow_agent_key(
-    request: &StageRunRequest,
-    available_agents: &[String],
-) -> String {
+use crate::{ProviderTier, StageKind, StageRunRequest};
+
+pub fn select_workflow_agent_key(request: &StageRunRequest, available_agents: &[String]) -> String {
     if let Some(agent) = request
         .agent
         .as_deref()

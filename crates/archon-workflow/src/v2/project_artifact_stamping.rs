@@ -1,9 +1,10 @@
 use std::path::{Component, Path};
 
-use archon_workflow::v2::project_artifact_contract::artifact_requirement_paths_from_field;
 use serde_json::{Map, Value};
 
-pub(super) fn stamp_project_artifact_paths(
+use super::project_artifact_contract::artifact_requirement_paths_from_field;
+
+pub fn stamp_project_artifact_paths(
     object: &mut Map<String, Value>,
     project_root: &str,
 ) -> Vec<Value> {
@@ -140,5 +141,5 @@ fn expand_token(token: &str, project_root: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v2_artifact_paths_tests.rs"]
+#[path = "project_artifact_stamping_tests.rs"]
 mod tests;

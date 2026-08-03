@@ -29,8 +29,6 @@ mod live_agent_dispatch;
 mod workflow_live_provider_env;
 #[path = "workflow_live_v2_aggregate.rs"]
 mod workflow_live_v2_aggregate;
-#[path = "workflow_live_v2_artifact_paths.rs"]
-mod workflow_live_v2_artifact_paths;
 #[path = "workflow_live_v2_data.rs"]
 mod workflow_live_v2_data;
 #[cfg(test)]
@@ -39,11 +37,6 @@ mod workflow_live_v2_data_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_frontier_resume_tests.rs"]
 mod workflow_live_v2_frontier_resume_tests;
-#[path = "workflow_live_v2_manifest_scope.rs"]
-mod workflow_live_v2_manifest_scope;
-#[cfg(test)]
-#[path = "workflow_live_v2_manifest_scope_tests.rs"]
-mod workflow_live_v2_manifest_scope_tests;
 #[path = "workflow_live_v2_stable_json.rs"]
 mod workflow_live_v2_stable_json;
 #[path = "workflow_live_v2_verification.rs"]
@@ -156,9 +149,6 @@ mod rejected_output_tests;
 #[path = "workflow_live_v2_read_only.rs"]
 mod workflow_live_v2_read_only;
 use workflow_live_v2_read_only::*;
-#[path = "workflow_live_v2_read_only_a.rs"]
-mod workflow_live_v2_read_only_a;
-pub(super) use workflow_live_v2_read_only_a::*;
 #[path = "workflow_live_v2_read_only_b.rs"]
 mod workflow_live_v2_read_only_b;
 pub(super) use workflow_live_v2_read_only_b::*;

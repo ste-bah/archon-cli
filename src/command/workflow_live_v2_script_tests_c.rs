@@ -249,8 +249,7 @@ async function workflow(w) {
 #[test]
 fn static_scaffold_plan_has_unique_ids_and_write_isolated_fanouts() {
     use std::collections::BTreeSet;
-    let plan =
-        super::super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
+    let plan = archon_workflow::v2::decomposed_prd_plan::decomposed_prd_plan_calls();
     assert!(!plan.is_empty());
     let mut seen = BTreeSet::new();
     for call in &plan {
@@ -275,8 +274,7 @@ fn static_scaffold_plan_has_unique_ids_and_write_isolated_fanouts() {
 /// `cross-cutting-review`, narrowed to concerns no single-task reviewer can see.
 #[test]
 fn static_scaffold_plan_declares_the_per_task_review_diamond() {
-    let plan =
-        super::super::super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls();
+    let plan = archon_workflow::v2::decomposed_prd_plan::decomposed_prd_plan_calls();
     let index = |id: &str| {
         plan.iter()
             .position(|call| call.id == id)

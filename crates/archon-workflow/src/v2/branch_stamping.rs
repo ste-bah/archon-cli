@@ -1,3 +1,9 @@
+//! Host-side stamping of fan-out branches from the authoritative task universe.
+
+use crate::task_universe::WorkflowV2TaskUniverse;
+
+use super::WorkflowV2FanoutItem;
+
 /// Collect `item_id -> (artifact_root, deliverable_contract)` for every fanout
 /// item that declared a contract, so the host can verify the declared deliverable
 /// itself rather than trusting the branch's self-reported verification.
@@ -6,10 +12,8 @@
 /// declared relative to it); items lacking either a contract or a root are
 /// skipped — nothing is invented. Domain-agnostic: the contract's own content
 /// decides what gets checked.
-use super::*;
-
-pub(super) fn declared_contracts_by_item(
-    items: &[archon_workflow::WorkflowV2FanoutItem],
+pub fn declared_contracts_by_item(
+    items: &[WorkflowV2FanoutItem],
 ) -> std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)> {
     let mut contracts = std::collections::BTreeMap::new();
     for item in items {
@@ -66,10 +70,10 @@ pub(super) fn declared_contracts_by_item(
 /// Host-side and universe-sourced on purpose: the authored script cannot omit,
 /// weaken or invent a contract. Generic — the engine matches by task id and
 /// never reads what the contract contains.
-pub(super) fn stamp_declared_contracts_from_universe(
-    mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
-    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
-) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
+pub fn stamp_declared_contracts_from_universe(
+    mut items: Vec<WorkflowV2FanoutItem>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+) -> Vec<WorkflowV2FanoutItem> {
     let Some(universe) = task_universe else {
         return items;
     };
@@ -120,10 +124,10 @@ pub(super) fn stamp_declared_contracts_from_universe(
 /// mirrors what the task file already declares. Read-only refers to REPO
 /// writes — it does not mean a verifier must be blind to the systems the task
 /// is about.
-pub(super) fn stamp_required_tools_from_universe(
-    mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
-    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
-) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
+pub fn stamp_required_tools_from_universe(
+    mut items: Vec<WorkflowV2FanoutItem>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+) -> Vec<WorkflowV2FanoutItem> {
     let Some(universe) = task_universe else {
         return items;
     };
@@ -169,3 +173,7 @@ fn branch_canonical_task_ids(input: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "branch_stamping_tests.rs"]
+mod tests;
