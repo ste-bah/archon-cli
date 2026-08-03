@@ -6,11 +6,11 @@ use archon_workflow::{
 };
 
 use super::workflow_live_v2_stable_json::stable_hash;
-use super::workflow_live_v2_target_expansion::expand_declared_rust_module_targets;
 use archon_workflow::generated_contract::{
     GeneratedContractIssueKind, normalize_generated_item_value,
 };
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::target_expansion::expand_declared_rust_module_targets;
 
 #[path = "workflow_live_v2_source_graph_core.rs"]
 mod workflow_live_v2_source_graph_core;

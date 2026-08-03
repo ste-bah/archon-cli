@@ -1,26 +1,33 @@
+//! Expanding a declared Rust target into the module files it really owns.
+//!
+//! A task that declares `foo.rs` also owns the file-backed modules that file
+//! declares, and the module directory `foo/` those splits land in. Both the
+//! source graph and the write coordinator have to agree on that set, so the
+//! expansion lives beside the write plan it feeds rather than in the binary.
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use archon_workflow::{WorkflowV2WriteSafetyError, normalize_targets_for_repository};
+use crate::v2::{WorkflowV2WriteSafetyError, normalize_targets_for_repository};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ExpandedTargetFiles {
-    pub(super) declared_target_files: Vec<String>,
-    pub(super) target_files: Vec<String>,
-    pub(super) target_dir_scopes: Vec<String>,
-    pub(super) target_file_expansions: Vec<TargetFileExpansion>,
+pub struct ExpandedTargetFiles {
+    pub declared_target_files: Vec<String>,
+    pub target_files: Vec<String>,
+    pub target_dir_scopes: Vec<String>,
+    pub target_file_expansions: Vec<TargetFileExpansion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TargetFileExpansion {
-    pub(super) source: String,
-    pub(super) expanded: Vec<String>,
-    pub(super) dir_scopes: Vec<String>,
-    pub(super) notes: Vec<String>,
+pub struct TargetFileExpansion {
+    pub source: String,
+    pub expanded: Vec<String>,
+    pub dir_scopes: Vec<String>,
+    pub notes: Vec<String>,
 }
 
-pub(super) fn expand_declared_rust_module_targets(
+pub fn expand_declared_rust_module_targets(
     item_id: &str,
     targets: &[String],
     repository_root: Option<&str>,

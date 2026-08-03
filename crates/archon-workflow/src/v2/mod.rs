@@ -27,6 +27,7 @@ pub mod report;
 pub mod result;
 pub mod result_store;
 pub mod scheduler;
+pub mod target_expansion;
 pub mod task_record;
 pub mod validation;
 pub mod write_mode;
