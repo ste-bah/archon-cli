@@ -68,6 +68,24 @@ Every requirement gets a unique identifier following the pattern `[REQ-DOMAIN-##
 - Automated compliance checking
 - Clear communication about specific items
 
+Write the IDs so a machine can find them without help. In the PRD, each
+normative requirement is **one bullet on its own line, prefixed `- `, opening
+with an ID matching `REQ-<AREA>-<NNN>`**, grouped under the numbered section it
+belongs to:
+
+```markdown
+### 8.3 Native Interval Enforcement
+
+- REQ-DL-020: Production datasets must set `native_interval=true`.
+- REQ-DL-021: Any derived/resampled dataset must set `production_eligible=false`.
+```
+
+That regularity is the whole point: the full set of requirement IDs can then be
+extracted with a regex and no LLM, which is what makes "every requirement is
+claimed by some task" a check rather than a hope. IDs buried mid-paragraph, or
+split across wrapped lines, are not extracted and therefore are not checked —
+they pass by being invisible, which is the worst available outcome.
+
 **Step 4: Identify Non-Functional Requirements**
 
 Extract implicit requirements around performance, security, reliability, accessibility, and compliance. These often hide in PRD language like "fast," "secure," or "enterprise-grade."
@@ -148,6 +166,39 @@ project-root/
     └── diagrams/
         └── architecture.mmd       # Mermaid source files
 ```
+
+**Where decomposed-PRD task files live.** The tree above is for hand-authored
+specs, which are found by being referenced. A PRD decomposed for automated
+execution has a second, stricter layout, because its task files are found by
+walking a directory:
+
+```
+PRD-TRADING-DATA-LAKE-AHDM-001.md          # the PRD itself
+PRD-TRADING-DATA-LAKE-AHDM-001/            # sibling directory, same name
+├── TASK-TDL-001-data-lake-gap-audit.md
+├── TASK-TDL-010-registry-schema-v1.md
+├── TASK-TDL-020-ohlcv-validation-reports.md
+└── TASK-TDL-140-adversarial-review-and-readiness.md
+```
+
+The rules are mechanical, and each one fails closed rather than degrading:
+
+- **One task per file.** There is no multi-task file format.
+- **Discovery is a single non-recursive directory read** for names matching
+  `TASK-*.md`. A task file one directory deeper is not found at all — not
+  warned about, not partially loaded, not found. A correctly formatted task in
+  the wrong place contributes nothing to the run. A directory holding no
+  matching file is refused naming the directory.
+- **The filename carries the task id.** It must match
+  `TASK-<DOMAIN>-<NNN>-<slug>.md`; the id is the first three dash-separated
+  parts of the stem — `TASK`, an uppercase-alphanumeric domain, and exactly
+  three digits. `TASK-TDL-010-registry-schema-v1.md` yields `TASK-TDL-010`. A
+  filename no id can be read from is refused naming the file.
+- **The `task_id` inside the file must equal the id from the filename.** A
+  mismatch is refused naming both, rather than one of them silently winning.
+- **The PRD sits beside the directory**, named for the same PRD id. Tasks point
+  back at it with `prd:` and at its sections with `source_sections:`, so the
+  PRD's section numbering is part of the contract, not presentation. See §3.5.
 
 ### 3.2 The Constitution File
 
@@ -241,6 +292,11 @@ src/
 ### 3.3 Functional Specification Template
 
 Each functional spec describes a domain or feature in terms of user outcomes, not implementation details.
+
+This template is XML and stays XML. Functional and technical specs are read by
+humans and by an LLM, both of which tolerate any consistent structure. Task
+files are not: they are deserialized by a parser, and they use the YAML format
+in §3.5. Do not carry the XML shape across into task files.
 
 ```xml
 <functional_spec id="SPEC-AUTH" version="1.0">
@@ -421,6 +477,10 @@ This should answer: What problem does this solve? Who benefits?
 ### 3.4 Technical Specification Template
 
 Technical specs define *how* to implement functional requirements. They're language-specific and architecture-aware.
+
+Like the functional spec, this document is XML by design and is not parsed by
+tooling. The task files derived from it are parsed, and use the YAML format in
+§3.5.
 
 ```xml
 <technical_spec id="TECH-AUTH" version="1.0" implements="SPEC-AUTH">
@@ -637,99 +697,331 @@ Do not await email delivery in registration flow.
 
 Tasks are atomic work units that an AI agent can complete in a single session. They should be small enough to fit in context but complete enough to be independently testable.
 
-```xml
-<task_spec id="TASK-AUTH-001" version="1.0">
+**Task files are machine-consumed; spec documents are not.** This is the one
+place in this guide where the format is not a matter of taste. A functional or
+technical spec is read by a human or an LLM, either of which copes with any
+consistent structure — so those stay XML (§3.3, §3.4). A task file is read by a
+parser. The parser opens the file, takes the **first fenced ` ```yaml ` block**,
+and deserializes it as a mapping. XML tags contain no `key: value` line, so a
+parser handed an XML task spec recovers nothing from it: no `depends_on`, no
+target files, no test commands.
 
-<metadata>
-  <title>Implement User Registration Endpoint</title>
-  <status>ready</status>
-  <implements>
-    <requirement_ref>REQ-AUTH-01</requirement_ref>
-    <requirement_ref>REQ-AUTH-02</requirement_ref>
-  </implements>
-  <depends_on>
-    <task_ref>TASK-DB-001</task_ref> <!-- Database schema setup -->
-  </depends_on>
-  <estimated_complexity>medium</estimated_complexity>
-</metadata>
+Earlier revisions of this guide taught an XML `<task_spec>` here. A task file in
+that shape did not error — it produced a record with a filename-derived id, a
+heading-derived title and an **empty dependency graph**, and the run proceeded
+to execute against that empty graph, in parallel, in whatever order it liked.
+That partial-parse path has been removed. A task file whose YAML block is
+missing, unparseable, not a mapping, or missing a required key is now refused by
+name and the run stops. Tasks authored in the old XML shape are rejected, not
+silently downgraded. Author them in the format below.
 
-<context>
-This task creates the user registration endpoint. The database schema 
-(TASK-DB-001) is already implemented. Email service integration will be 
-handled in TASK-AUTH-003.
-</context>
+A task file is a markdown document with exactly two machine-read parts: one
+fenced YAML block immediately after the H1, and a set of H2 sections whose
+bullet lists are extracted by heading name.
 
-<prerequisites>
-  <check>User table exists in database</check>
-  <check>bcrypt library is installed</check>
-  <check>Validation middleware is configured</check>
-</prerequisites>
+````markdown
+# TASK-<DOMAIN>-<NNN> — <Title>
 
-<scope>
-  <in_scope>
-    - Create RegisterDto with validation decorators
-    - Create AuthService.registerUser method
-    - Create POST /auth/register endpoint
-    - Create unit tests for registration logic
-    - Create integration test for endpoint
-  </in_scope>
-  <out_of_scope>
-    - Email sending (TASK-AUTH-003)
-    - Email verification flow (TASK-AUTH-004)
-    - Rate limiting (TASK-AUTH-008)
-  </out_of_scope>
-</scope>
-
-<pseudo_code>
-<!-- AI must generate pseudo-code for approval before implementation -->
-
-RegisterDto:
-  - email: string, @IsEmail(), @MaxLength(255)
-  - password: string, @MinLength(12), @IsStrongPassword()
-  - name: string, @MinLength(1), @MaxLength(100)
-
-AuthService.registerUser(dto):
-  1. Check if email exists in database
-     - If exists: throw ConflictError
-  2. Hash password using bcrypt with cost 12
-  3. Create user record with email_verified = false
-  4. Return user without password_hash field
-
-AuthController.register(dto):
-  1. Call authService.registerUser(dto)
-  2. Return 201 with user data and success message
-  3. Catch ConflictError -> return 409
-  4. Catch ValidationError -> return 400
-</pseudo_code>
-
-<files_to_create>
-  <file path="src/auth/dto/register.dto.ts">RegisterDto class</file>
-  <file path="src/auth/auth.service.ts">AuthService (or add to existing)</file>
-  <file path="src/auth/auth.controller.ts">AuthController (or add to existing)</file>
-  <file path="src/auth/auth.service.spec.ts">Unit tests</file>
-  <file path="src/auth/auth.controller.spec.ts">Integration tests</file>
-</files_to_create>
-
-<files_to_modify>
-  <file path="src/app.module.ts">Import AuthModule</file>
-</files_to_modify>
-
-<validation_criteria>
-  <criterion>All tests pass</criterion>
-  <criterion>POST /auth/register returns 201 for valid input</criterion>
-  <criterion>POST /auth/register returns 409 for duplicate email</criterion>
-  <criterion>POST /auth/register returns 400 for invalid input</criterion>
-  <criterion>Password is not stored in plain text</criterion>
-  <criterion>Code follows constitution standards</criterion>
-</validation_criteria>
-
-<test_commands>
-  <command>npm run test -- --grep "AuthService"</command>
-  <command>npm run test:e2e -- --grep "register"</command>
-</test_commands>
-
-</task_spec>
+```yaml
+task_id: TASK-<DOMAIN>-<NNN>
+prd: PRD-<NAME>
+domain: <DOMAIN>
+title: <Title>
+workstream: <W# Name>
+complexity: low|medium|high
+status: ready|pending|in_review|blocked|done
+depends_on: []
+blocks: []
+source_sections: []
+implements: []
+required_env_keys: []
+required_tools: []
+shared_append_target_files: []
+deliverable_contracts: []
 ```
+
+## Purpose
+## Scope            (### In / ### Out)
+## Files Expected to Change
+## Files Forbidden to Change
+## Acceptance Criteria
+## Focused Tests
+## Adversarial Review Notes
+## Required Task Checklist
+## Global Constraints
+````
+
+Declare every key, including the ones that are empty. An empty list is a claim —
+"this task depends on nothing", "this task implements no requirement" — and a
+claim can be checked. An absent key is a hole, and nothing can be checked
+against a hole. `task_id`, `title`, `complexity`, `status`, `depends_on`,
+`blocks`, `required_env_keys`, `required_tools` and `deliverable_contracts` are
+refused outright if absent, naming the file and every missing key.
+
+#### `implements` — the requirement IDs this task satisfies
+
+`implements` lists the normative requirement IDs from the PRD that this task is
+answerable for, for example `implements: [REQ-DL-020, REQ-DL-021]`. Declare it
+on every task. A task that implements no requirement — an audit, a review, a
+readiness sweep — declares `implements: []`, and never omits the field. Treat an
+omission as an incomplete task file and fix it rather than inferring an empty
+list from silence: silence and `[]` must not be the same input.
+
+Two checks follow from this field, and neither is possible without it:
+
+1. **Every ID a task cites must exist in the PRD.** A citation of a requirement
+   that was renumbered or deleted is a stale task, and it is caught by
+   intersection, not by reading.
+2. **Every normative requirement in the PRD must be claimed by at least one
+   task.** A requirement no task claims is a decomposition gap. Record it as an
+   explicit residual gap with a fail-closed behavior; do not leave it silent.
+   Unclaimed and unrecorded is the one state that looks like success.
+
+`implements` also binds a requirement to the focused tests meant to prove it,
+which is what allows a requirement to be marked satisfied by executed evidence
+rather than by assertion.
+
+#### `status` — what the scheduler is allowed to do with this task
+
+Five values, each with a defined effect. This is not a label for humans:
+
+| `status` | Effect on scheduling |
+|---|---|
+| `done` | Never scheduled, on a fresh run or a resume, and **satisfies its dependents** — tasks waiting on it become runnable. |
+| `blocked` | Scheduled only once every dependency it declares is complete. |
+| `ready`, `pending` | Ordinary work, runnable when its dependencies allow. |
+| `in_review` | Ordinary work. **Review is not completion** — an `in_review` task is scheduled like any other. |
+
+Two authoring errors are refused rather than guessed at:
+
+- **`status: blocked` with an empty `depends_on`.** Nothing in the task set can
+  ever unblock it, so the task set is refused naming the task and its file.
+  Either the dependency is missing or the status is stale; both are fixable, and
+  neither is fixable by a scheduler picking one.
+- **An unrecognised value.** The task set is refused naming the value, the task
+  and the file. A status that cannot be classified is never read as finished, so
+  a typo like `dnoe` cannot quietly skip work.
+
+#### `depends_on` and `blocks` — one graph, two directions
+
+`depends_on` lists the tasks that must complete before this one. `blocks` lists
+the tasks that must wait for this one. **Both are parsed and both contribute
+edges**: an edge declared from either end is an edge, and the two lists are
+reconciled into a single graph before anything is scheduled. Declare ordering
+from whichever end is clearer at authoring time; you do not need to mirror it in
+the other task.
+
+This is worth saying because it was not always true. `blocks` was parsed by
+nothing at all: a task that expressed its ordering only in that direction
+contributed no edge whatsoever, and its dependents ran early. In one real
+17-task corpus, 26 `blocks` edges were contributing nothing.
+
+Three contradictions are refused by name rather than folded into the graph,
+because folding them would manufacture a cycle and report an authoring mistake
+as a graph shape:
+
+- a task that declares it blocks itself;
+- a task that both `blocks` and `depends_on` the same task;
+- two tasks that each declare they block the other.
+
+The reconciled graph is then checked for cycles, and a cycle is reported as the
+full path through it.
+
+#### Ordering-only dependencies are legitimate
+
+A task may depend on another purely so that code exists before it runs — the
+CLI surface must exist before a command that uses it, even though no artifact
+flows between them. That is a real dependency and it is classified
+automatically: a dependency that produces no artifacts, whose dependent consumes
+only artifacts, is reported as *ordering-only* and never as a defect.
+
+**Do not invent a `deliverable_contracts` entry to silence it.** A fabricated
+contract names an artifact nothing produces, and every gate downstream then
+either fails against a file that will never exist or, worse, passes vacuously.
+A quiet warning bought with a false contract is a worse position than the
+warning.
+
+#### `deliverable_contracts` — what this task must leave on disk
+
+Each entry declares an artifact the task is answerable for:
+
+```yaml
+deliverable_contracts:
+  - kind: trading_data_registry
+    artifact_path: .archon/trading-lab/data/registry.json
+```
+
+`kind` and `artifact_path` are required. `registry_path`,
+`typed_verifier_command` and `min_instances` are optional, and
+`typed_verifier_command` may reference `{artifact_path}` and `{registry_path}`.
+
+**Use a distinct `kind` for creating a file and for appending to it, even when
+the path is identical.** `trading_data_registry` creates the registry;
+`trading_data_registry_entry` appends an entry to it. That distinction is the
+only thing that lets the tooling tell the producer of a file from a contributor
+to it, and producer and contributor need different ordering, different
+verification and different write coordination.
+
+#### Templated artifact paths need an instance binding
+
+A path containing `<...>` placeholders —
+`.archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json` —
+cannot be checked as written. There is no file named `<dataset-id>`. A task
+declaring a templated path MUST also declare where the real values come from:
+
+```yaml
+deliverable_contracts:
+  - kind: dataset_validation_report
+    artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json
+    instance_source_path: .archon/trading-lab/data/registry.json
+    instance_source_records_field: datasets
+    instance_artifact_field: validation_path
+    min_instances: 1
+```
+
+Read that as: the registry is the enumeration; its `datasets` array holds the
+records; each record's `validation_path` names one real instance of the
+templated path; and there must be at least one. Bind the instances to a source
+collection — `instance_artifact_field` together with `instance_source_path` and
+`instance_source_records_field` (`registry_path` and `registry_records_field`
+are the equivalent pair when the enumeration is the registry the contract
+already names) — so that every expanded path is named by a real record, **or**
+declare `min_instances: 1` or more so that the expansion is at least a claim
+that can fail.
+
+`instance_source_path` and `registry_path` must themselves be concrete. A
+template in either is always refused: those paths are opened literally and
+nothing expands them.
+
+What fails, and when:
+
+- **No binding at all.** The gate can neither pass nor fail against the literal
+  path, so it fails closed at plan time: the verification step for that contract
+  becomes a command that prints the unexpanded token and exits non-zero. The
+  task cannot pass.
+- **`min_instances: 0` with a templated path.** Zero matches satisfy the floor,
+  so the gate is vacuous — it reports success having verified nothing. This is
+  not hypothetical: it shipped, and an adversarial reviewer caught it. Never
+  write `min_instances: 0` on a templated path.
+- **`typed_verifier_command` on a templated path.** Refused. A typed verifier is
+  handed exactly one concrete path and cannot expand a template. Use one or the
+  other.
+- **A templated `registry_path` or `instance_source_path`.** Always refused —
+  those paths are opened literally and no binding expands them.
+
+#### `shared_append_target_files` — concurrent writes, declared
+
+List a path here only when this task writes it **concurrently with another
+task**, typically an append to a shared registry or index. Declaring a path
+tells the write coordinator not to serialize this task against the other writers
+of that path.
+
+Be exact about what the declaration means: **it asserts that the write is
+coordinated and atomic; it does not make it so.** The implementing task owns
+that — append under a lock, or write-and-rename — and the PRD must state the
+atomicity requirement separately as a normative requirement. A declaration
+against a naive read-modify-write is a licence to lose data.
+
+The dangerous case is the opposite one. An undeclared shared write is
+unprotected in the only way that matters: nothing can coordinate a write nobody
+declared. If two tasks touch the same file, both declare it.
+
+#### `source_sections` and `prd`
+
+`source_sections: ['8.4', '22', '25.1']` names the PRD sections this task was
+derived from, and `prd:` names the PRD. These are how a reviewer gets from a
+task back to the requirement text without searching. They depend on the PRD
+having stable, numbered sections; see the PRD authoring guide.
+
+#### The markdown sections
+
+Bullet lists under the H2 headings are extracted by heading name, so keep the
+heading text exactly as given.
+
+- **`## Scope`** carries `### In` and `### Out`. "Out" is where you name the task
+  that owns the work instead, so a reviewer can tell deferral from omission.
+- **`## Files Expected to Change` / `## Files Forbidden to Change`.** The
+  forbidden list is the more useful of the two: it is what stops a task fixing
+  its own failing gate by editing the gate.
+- **`## Acceptance Criteria` and `## Focused Tests`** are the executed evidence
+  that `implements` binds requirements to. A criterion no test can produce
+  evidence for is a criterion that will be marked satisfied by assertion.
+- **`## Adversarial Review Notes`** — see below.
+- **`## Required Task Checklist`** restates, inside the task, what the PRD's task
+  acceptance checklist requires of it, so the checklist travels with the file.
+- **`## Global Constraints`** restates the project-wide rules that apply here —
+  file-size limits, no hardcoded secrets, no vague "later"/"TBD"/"best effort"
+  without a residual-gap record and a fail-closed behavior.
+
+#### `## Adversarial Review Notes` is per-task, not project-wide
+
+These notes are read by an adversarial reviewer that sees **only this task** —
+its file, its diff, its evidence. Write falsification hypotheses specific to
+this task: what would make this task's evidence look good while the work is
+wrong. "Verify the migration cannot delete an artifact it failed to copy" is
+usable. "Verify the system is secure" is not, and neither is anything phrased
+for a reviewer holding every task at once — that reviewer is a different one,
+and notes written for it are wasted here.
+
+#### Worked example
+
+````markdown
+# TASK-TDL-010 — Registry Schema v2 + Migration
+
+```yaml
+task_id: TASK-TDL-010
+prd: PRD-TRADING-DATA-LAKE-AHDM-001
+domain: TDL
+title: Registry Schema v2 + Migration
+workstream: W1 Storage + Validation
+complexity: high
+status: blocked
+depends_on: ['TASK-TDL-001']
+blocks: ['TASK-TDL-020']
+source_sections: ['8.1', '17', '18', '19', '26']
+implements: [REQ-DL-001, REQ-DL-002, REQ-DL-003, REQ-DL-004, REQ-DL-005]
+required_env_keys: []
+required_tools: []
+shared_append_target_files: []
+deliverable_contracts:
+  - kind: trading_data_registry
+    artifact_path: .archon/trading-lab/data/registry.json
+  - kind: registry_migration_report
+    artifact_path: .archon/trading-lab/data/registry-migration-report.json
+```
+
+## Purpose
+
+Implement registry v2 and dataset metadata schema while preserving v1
+readability and migration safety.
+
+## Scope
+
+### In
+
+- Registry schema `archon-trading-data-registry-v2`.
+- v1 registry read compatibility.
+- Atomic migration with backup file.
+
+### Out
+
+- Provider fetch adapters (TASK-TDL-030 onward).
+
+## Files Expected to Change
+## Files Forbidden to Change
+## Acceptance Criteria
+## Focused Tests
+## Adversarial Review Notes
+## Required Task Checklist
+## Global Constraints
+````
+
+Read it as a set of claims. It is `blocked` and names the dependency that will
+release it. It declares the reverse edge to `TASK-TDL-020` so that task does not
+have to. It claims five requirement IDs, each of which must exist in the PRD. It
+creates the registry — `kind: trading_data_registry` — where a later task that
+appends to the same file will declare `trading_data_registry_entry` instead. It
+writes no shared file concurrently, and says so.
 
 ---
 
@@ -1090,10 +1382,15 @@ For human reviewers to validate completed work.
 ┌─────────────────────────────────────────────────────────────────┐
 │   PHASE 4: TASK DECOMPOSITION                                   │
 │   - Break into atomic tasks                                      │
-│   - Define dependencies                                          │
-│   - Create task specs with pseudo-code                           │
+│   - Define dependencies (depends_on and/or blocks)               │
+│   - Write task files in the §3.5 YAML + markdown format          │
+│   - Declare implements[] on every task, empty where none         │
+│   - Declare deliverable_contracts; bind templated paths          │
 │   - Establish validation criteria                                │
-│   Output: Task Specs                                             │
+│   Output: Task files, one per file, in PRD-<NAME>/               │
+│   ★ COMPLETENESS GATE: every requirement claimed; no ID          │
+│     cited that the PRD does not define; no templated             │
+│     artifact path without an instance binding                    │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -1124,10 +1421,32 @@ For human reviewers to validate completed work.
 Use this checklist before handing specifications to an AI agent:
 
 **Structure**
-- [ ] XML tags wrap all critical sections
-- [ ] Requirement IDs assigned to all requirements
+- [ ] XML tags wrap all critical sections *of the constitution, functional and
+      technical specs* — the documents no parser reads
+- [ ] Task files use the §3.5 YAML + markdown format, not XML — a task file is
+      deserialized, and an XML task file is rejected
+- [ ] One task per file, named `TASK-<DOMAIN>-<NNN>-<slug>.md`, in a directory
+      named for the PRD and sitting beside it
+- [ ] `task_id` inside each file matches the id in its filename
+- [ ] Requirement IDs assigned to all requirements, one per line, bullet-prefixed
 - [ ] Clear hierarchy: Constitution → Functional → Technical → Tasks
 - [ ] Directory structure documented
+
+**Task files (machine-parsed)**
+- [ ] Every required key declared, empty lists included
+- [ ] `status` is one of `done`/`blocked`/`ready`/`pending`/`in_review`; no
+      `blocked` task has an empty `depends_on`
+- [ ] Ordering declared via `depends_on` and/or `blocks`; no self-block, no
+      mutual block, no pair declared in both directions
+- [ ] `deliverable_contracts` use distinct `kind` values for create vs. append
+      on the same path
+- [ ] Every templated `<...>` artifact path has an instance binding or
+      `min_instances >= 1`; none has `min_instances: 0`
+- [ ] Every file two tasks write concurrently is in
+      `shared_append_target_files` on both, and the atomicity requirement is
+      stated in the PRD
+- [ ] `## Adversarial Review Notes` are falsification hypotheses for *this*
+      task, not project-wide
 
 **Clarity**
 - [ ] No ambiguous language ("fast," "user-friendly," "simple")
@@ -1137,7 +1456,11 @@ Use this checklist before handing specifications to an AI agent:
 
 **Traceability**
 - [ ] Every requirement traces to a user story
-- [ ] Every task traces to requirements
+- [ ] Every task traces to requirements via `implements:`, declared even when
+      empty
+- [ ] Every ID cited by a task exists in the PRD
+- [ ] Every PRD requirement is claimed by at least one task, or is recorded as
+      an explicit residual gap with a fail-closed behavior
 - [ ] Test cases reference requirements they validate
 
 **Constraints**
@@ -1265,4 +1588,23 @@ Review this before finalizing any specification:
 - [ ] "System should be intuitive" → Not testable, rewrite
 - [ ] "Should work correctly" → Define what "correctly" means
 - [ ] Metrics attached to all performance requirements
+
+**Machine-Consumed Task Files**
+- [ ] Task file is YAML + markdown (§3.5), not XML → an XML task file parses to
+      nothing and is rejected
+- [ ] Required key omitted → refused naming the file and the key; declare empty
+      lists rather than dropping keys
+- [ ] `implements` omitted → the requirement-coverage check cannot run; declare
+      `implements: []` on audit and review tasks
+- [ ] Ordering declared only in `blocks` on one side → fine, both directions are
+      parsed and reconciled; declaring the same pair in both directions is not
+- [ ] Templated `<...>` artifact path with no instance binding → the gate fails
+      closed at plan time naming the unexpanded token
+- [ ] `min_instances: 0` on a templated path → the gate passes having verified
+      nothing; use `1` or more, or bind the instances to a source collection
+- [ ] `deliverable_contracts` entry invented to silence an ordering-only
+      dependency warning → names an artifact nothing produces; leave the
+      ordering-only edge alone
+- [ ] Two tasks appending to one file, neither declaring
+      `shared_append_target_files` → nothing coordinates a write nobody declared
 
