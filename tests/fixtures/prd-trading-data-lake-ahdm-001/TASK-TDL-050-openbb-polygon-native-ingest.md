@@ -14,6 +14,7 @@ source_sections: ['7', '8.4', '25.2']
 implements: [REQ-DL-034]
 required_env_keys: [OPENBB_API_URL, POLYGON_API_KEY]
 required_tools: []
+shared_append_target_files: [.archon/trading-lab/data/registry.json]
 deliverable_contracts:
   - kind: native_dataset_manifest
     artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json

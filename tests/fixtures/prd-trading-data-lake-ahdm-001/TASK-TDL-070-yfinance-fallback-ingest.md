@@ -14,6 +14,7 @@ source_sections: ['7', '8.4', '25.4']
 implements: [REQ-DL-036]
 required_env_keys: []
 required_tools: []
+shared_append_target_files: [.archon/trading-lab/data/registry.json]
 deliverable_contracts:
   - kind: diagnostic_dataset_manifest
     artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json

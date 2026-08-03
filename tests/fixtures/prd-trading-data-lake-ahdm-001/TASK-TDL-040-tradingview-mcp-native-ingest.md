@@ -14,6 +14,7 @@ source_sections: ['7', '8.4', '25.1']
 implements: [REQ-DL-033]
 required_env_keys: []
 required_tools: [tv_health_check, chart_get_state, data_get_ohlcv]
+shared_append_target_files: [.archon/trading-lab/data/registry.json]
 deliverable_contracts:
   - kind: native_dataset_manifest
     artifact_path: .archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json
