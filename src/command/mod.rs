@@ -228,6 +228,10 @@ pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod behaviour;
+/// Pins `/workflow-prd-spec`'s `tasks/PRD-<NAME>/` output location against the
+/// workflow engine's directory walk — the two live in different crates.
+#[cfg(test)]
+mod prd_pipeline_layout_tests;
 pub(crate) mod teleport;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

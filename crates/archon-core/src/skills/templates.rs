@@ -14,6 +14,14 @@ use std::path::{Path, PathBuf};
 pub const AI_AGENT_PRD: &str = include_str!("../../../../assets/templates/ai-agent-prd.md");
 pub const PRD_TO_SPEC: &str = include_str!("../../../../assets/templates/prdtospec.md");
 
+/// Workflow-pipeline PRD framework — numbered sections, regex-extractable
+/// requirement IDs, per-requirement severity. Feeds `/workflow-prd`.
+pub const WORKFLOW_PRD: &str = include_str!("../../../../assets/templates/workflow-prd.md");
+/// Workflow-pipeline decomposition framework — the flat `TASK-*.md` directory
+/// the workflow engine walks. Feeds `/workflow-prd-spec`.
+pub const WORKFLOW_PRD_TO_SPEC: &str =
+    include_str!("../../../../assets/templates/workflow-prdtospec.md");
+
 /// Source label so callers/tests can verify which override won.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemplateSource {
@@ -46,6 +54,8 @@ pub fn resolve_template(name: &str, workdir: &Path) -> (String, TemplateSource) 
     let embedded = match name {
         "ai-agent-prd" => AI_AGENT_PRD,
         "prdtospec" => PRD_TO_SPEC,
+        "workflow-prd" => WORKFLOW_PRD,
+        "workflow-prdtospec" => WORKFLOW_PRD_TO_SPEC,
         _ => return (String::new(), TemplateSource::Missing),
     };
     (embedded.to_string(), TemplateSource::Embedded)
