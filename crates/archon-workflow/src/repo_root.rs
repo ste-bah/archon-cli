@@ -158,14 +158,34 @@ mod tests {
     use super::*;
     use crate::task_universe::WorkflowV2TaskUniverseTask;
 
+    /// A fixture root nested deep enough that the search cannot escape it.
+    ///
+    /// [`scan_source_path`] walks `ancestors().take(6)` from the task directory
+    /// and scans each ancestor's direct children. Rooted at `<temp>/project/
+    /// tasks` that reaches three levels above the temp directory — on this
+    /// machine `%TEMP%` itself — and scores whatever repository-shaped
+    /// directory happens to be sitting there. Agent worktrees and build
+    /// scratch space live in exactly that place, so the tests passed or failed
+    /// depending on what else was on disk at the time.
+    ///
+    /// Three intermediate levels put the sixth ancestor at the temp directory
+    /// itself, so every path the search can reach is one this test created.
+    /// If the `take(6)` bound ever grows, this must grow with it.
+    fn sandbox(temp: &tempfile::TempDir) -> PathBuf {
+        let root = temp.path().join("a/b/c");
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
     #[test]
     fn explicit_repository_text_wins_over_inferred_repo() {
         let temp = tempfile::tempdir().unwrap();
-        let explicit = temp.path().join("explicit");
-        let inferred = temp.path().join("inferred");
+        let root = sandbox(&temp);
+        let explicit = root.join("explicit");
+        let inferred = root.join("inferred");
         fs::create_dir_all(explicit.join(".git")).unwrap();
         fs::create_dir_all(inferred.join(".git")).unwrap();
-        let universe = universe_for(temp.path().join("project/tasks"));
+        let universe = universe_for(root.join("project/tasks"));
 
         let task = format!("implement against repository {}", explicit.display());
 
@@ -178,8 +198,9 @@ mod tests {
     #[test]
     fn infers_sibling_repository_from_task_pack_root() {
         let temp = tempfile::tempdir().unwrap();
-        let tasks = temp.path().join("project/tasks");
-        let repo = temp.path().join("source-repo");
+        let root = sandbox(&temp);
+        let tasks = root.join("project/tasks");
+        let repo = root.join("source-repo");
         fs::create_dir_all(&tasks).unwrap();
         fs::create_dir_all(repo.join(".git")).unwrap();
 
@@ -194,8 +215,9 @@ mod tests {
     #[test]
     fn manifest_repository_is_fallback_when_git_is_absent() {
         let temp = tempfile::tempdir().unwrap();
-        let tasks = temp.path().join("project/tasks");
-        let repo = temp.path().join("source-repo");
+        let root = sandbox(&temp);
+        let tasks = root.join("project/tasks");
+        let repo = root.join("source-repo");
         fs::create_dir_all(&tasks).unwrap();
         fs::create_dir_all(&repo).unwrap();
         fs::write(repo.join("pyproject.toml"), "[project]\nname = 'demo'\n").unwrap();
@@ -211,9 +233,10 @@ mod tests {
     #[test]
     fn runtime_project_artifact_root_without_repo_marker_is_not_selected() {
         let temp = tempfile::tempdir().unwrap();
-        let tasks = temp.path().join("project/tasks");
+        let root = sandbox(&temp);
+        let tasks = root.join("project/tasks");
         fs::create_dir_all(&tasks).unwrap();
-        fs::create_dir_all(temp.path().join("project/.archon/workflows")).unwrap();
+        fs::create_dir_all(root.join("project/.archon/workflows")).unwrap();
 
         let universe = universe_for(tasks);
 
@@ -226,10 +249,11 @@ mod tests {
     #[test]
     fn closer_repo_with_workflow_artifacts_wins_over_farther_repo() {
         let temp = tempfile::tempdir().unwrap();
-        let parent = temp.path().join("workspace");
+        let root = sandbox(&temp);
+        let parent = root.join("workspace");
         let tasks = parent.join("project/tasks");
         let repo = parent.join("source-repo");
-        let farther = temp.path().join("aaa-unrelated");
+        let farther = root.join("aaa-unrelated");
         fs::create_dir_all(&tasks).unwrap();
         fs::create_dir_all(repo.join(".git")).unwrap();
         fs::create_dir_all(repo.join(".archon/workflows")).unwrap();
