@@ -50,8 +50,8 @@ pub(super) async fn apply_generated_shape(
     let (Some(class), Some(universe)) = (class, plan.task_universe.as_ref()) else {
         return;
     };
-    let tasks_root = crate::command::workflow_live_shape_tuning::tasks_root_of(universe);
-    let shape = crate::command::workflow_live_shape_tuning::tune_generated_shape(
+    let tasks_root = crate::command::sona_workflow_shape_tuning::tasks_root_of(universe);
+    let shape = crate::command::sona_workflow_shape_tuning::tune_generated_shape(
         cwd,
         class,
         learning,

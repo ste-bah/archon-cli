@@ -149,7 +149,7 @@ impl LiveV2AgentClient {
 /// "narrowing" could be reported against a number the runtime never used. Two
 /// copies of this resolution is how that happens, so there is one.
 fn live_v2_subagent_max_concurrency() -> Option<usize> {
-    crate::command::workflow_live_shape_tuning::resolved_subagent_cap()
+    crate::command::sona_workflow_shape_tuning::resolved_subagent_cap()
 }
 
 fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {

@@ -319,5 +319,5 @@ fn role_for(method: WorkflowV2HostMethod) -> NodeRole {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_shape_gate_tests.rs"]
+#[path = "sona_workflow_shape_gate_tests.rs"]
 mod tests;

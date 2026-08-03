@@ -248,7 +248,7 @@ async fn run_live_action(
     let mut generated_config = generated_config;
     let mut tuning_decisions = Vec::new();
     if let Some(class) = task_class {
-        let tuning = crate::command::workflow_live_sona_tuning::tune_generated_config(
+        let tuning = crate::command::sona_workflow_tuning::tune_generated_config(
             cwd,
             class,
             &learning,
