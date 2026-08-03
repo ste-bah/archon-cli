@@ -182,7 +182,9 @@ pub(super) fn execution(source_data: serde_json::Value) -> WorkflowV2CallExecuti
     }
 }
 
-pub(super) fn review_remediation_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn review_remediation_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "review-remediation-wave-1".to_string(),
@@ -202,7 +204,9 @@ pub(super) fn review_remediation_execution(source_data: serde_json::Value) -> Wo
     }
 }
 
-pub(super) fn review_verification_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn review_verification_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "review-verification-wave-1".to_string(),
@@ -221,7 +225,9 @@ pub(super) fn review_verification_execution(source_data: serde_json::Value) -> W
     }
 }
 
-pub(super) fn focused_verification_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn focused_verification_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "verification-wave-1".to_string(),

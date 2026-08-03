@@ -401,7 +401,11 @@ pub(super) fn implementation_item(
     })
 }
 
-pub(super) fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_json::Value {
+pub(super) fn verification_item(
+    item_id: &str,
+    task_id: &str,
+    target_file: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "item_id": item_id,
         "source_item_id": item_id.replace("verify-", "implementation-"),
@@ -427,4 +431,3 @@ pub(super) fn verification_remediation_item() -> serde_json::Value {
         "artifact_requirements": [],
     })
 }
-

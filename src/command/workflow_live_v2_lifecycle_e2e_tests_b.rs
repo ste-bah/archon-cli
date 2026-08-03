@@ -400,4 +400,3 @@ fn persisted_semantic_rejection_record(root: &std::path::Path, repair_id: &str) 
     }
     walk(root, &format!("{repair_id}-semantic-preservation-rejected"))
 }
-

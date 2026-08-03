@@ -82,7 +82,10 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
 
     let output = run_live_action(
         temp.path(),
-        CommandAction::Run { task, decomposed: false },
+        CommandAction::Run {
+            task,
+            decomposed: false,
+        },
         planner,
         tui_tx,
         None,

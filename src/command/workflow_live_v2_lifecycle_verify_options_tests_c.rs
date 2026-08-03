@@ -1,6 +1,5 @@
 /// Without a declared calendar the check must stay silent -- it is opt-in, and
 /// a 24/7 venue trades every day.
-
 use super::*;
 
 #[test]

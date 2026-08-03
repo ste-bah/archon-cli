@@ -454,4 +454,3 @@ fn fabel_triage_retry_items_keep_only_required_reruns() {
         "legacy triage fixture retains unrelated contract defects"
     );
 }
-

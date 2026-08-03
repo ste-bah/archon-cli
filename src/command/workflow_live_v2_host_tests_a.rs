@@ -235,8 +235,8 @@ fn final_report_counts_project_relative_noop_evidence_and_ignores_placeholders()
     assert!(
         report.data["artifacts"]
             .as_array()
-            .is_some_and(|artifacts| artifacts.iter().all(|artifact| {
-                artifact["id"] != "coverage-history"
-            }))
+            .is_some_and(|artifacts| artifacts
+                .iter()
+                .all(|artifact| { artifact["id"] != "coverage-history" }))
     );
 }

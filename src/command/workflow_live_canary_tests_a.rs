@@ -51,4 +51,3 @@ pub(super) struct CanaryAgentClient {
     pub(super) project_root: PathBuf,
     pub(super) prompts: CanaryMutex<Vec<String>>,
 }
-

@@ -370,4 +370,3 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
         serde_json::json!(["mcp__demo__fetch_cells"])
     );
 }
-

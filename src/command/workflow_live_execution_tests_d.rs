@@ -130,9 +130,10 @@ pub(super) async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
                 } else {
                     None
                 }
-            }) {
-                return run_id;
-            }
+            })
+        {
+            return run_id;
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "generated workflow run directory was not created"

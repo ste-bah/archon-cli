@@ -236,7 +236,11 @@ pub(super) fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std
     install_subagent_executor(Arc::new(executor));
 }
 
-pub(super) fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, request_bytes: &[u64]) {
+pub(super) fn assert_canary_usage(
+    path: &std::path::Path,
+    expected_rows: usize,
+    request_bytes: &[u64],
+) {
     let db = archon_learning::cozo_guard::open_sqlite_guarded(
         path.to_str().expect("UTF-8 learning path"),
         "reopen canary learning db",
@@ -271,4 +275,3 @@ pub(super) fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, 
     );
     print_canary_evidence(&rows, request_bytes);
 }
-

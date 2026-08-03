@@ -1,6 +1,5 @@
 /// The exemption must cost more than it grants: a forged contract naming a
 /// reduce that does not exist buys nothing.
-
 use super::*;
 
 #[test]
@@ -176,7 +175,11 @@ pub(super) fn remediation_call(
     call
 }
 
-pub(super) fn set_remediation_field(call: &mut WorkflowV2HostCall, key: &str, value: serde_json::Value) {
+pub(super) fn set_remediation_field(
+    call: &mut WorkflowV2HostCall,
+    key: &str,
+    value: serde_json::Value,
+) {
     if let Some(contract) = call
         .options
         .extra

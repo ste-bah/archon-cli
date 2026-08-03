@@ -450,4 +450,3 @@ fn map_reduce_review_rejects_write_and_non_critic_reviews() {
     assert!(error.contains("read-only"), "{error}");
     assert!(error.contains("tier 'critic'"), "{error}");
 }
-

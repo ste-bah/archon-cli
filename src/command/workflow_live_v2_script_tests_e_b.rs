@@ -290,7 +290,11 @@ pub(super) fn task_set<const N: usize>(ids: [&str; N]) -> std::collections::BTre
     ids.into_iter().map(str::to_string).collect()
 }
 
-pub(super) fn save_review_record(store: &WorkflowV2ResultStore, call_id: &str, findings: serde_json::Value) {
+pub(super) fn save_review_record(
+    store: &WorkflowV2ResultStore,
+    call_id: &str,
+    findings: serde_json::Value,
+) {
     let mut result = WorkflowV2Result::accepted("review complete");
     result.data = serde_json::json!({ "findings": findings });
     let record = WorkflowV2CallRecord::new(
@@ -334,7 +338,11 @@ pub(super) fn review_details(
     }
 }
 
-pub(super) fn review_map_claim(review_kind: &str, call_id: &str, task_id: &str) -> WorkflowReviewMapClaim {
+pub(super) fn review_map_claim(
+    review_kind: &str,
+    call_id: &str,
+    task_id: &str,
+) -> WorkflowReviewMapClaim {
     WorkflowReviewMapClaim {
         review_kind: review_kind.to_string(),
         call_id: call_id.to_string(),
@@ -394,7 +402,11 @@ pub(super) fn review_map_call(call_id: &str, review_kind: &str) -> WorkflowV2Hos
     }
 }
 
-pub(super) fn review_reduce_call(call_id: &str, review_kind: &str, stage: &str) -> WorkflowV2HostCall {
+pub(super) fn review_reduce_call(
+    call_id: &str,
+    review_kind: &str,
+    stage: &str,
+) -> WorkflowV2HostCall {
     let mut extra = std::collections::BTreeMap::new();
     extra.insert(
         "reviewContract".to_string(),
@@ -446,4 +458,3 @@ fn post_review_remediation_shape_is_accepted_by_the_mandate() {
         result.unwrap_err()
     );
 }
-

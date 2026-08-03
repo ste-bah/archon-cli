@@ -293,10 +293,7 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
     .await
     .expect("decomposed PRD planning should use deterministic scaffold");
 
-    assert!(
-        plan.harness_source
-            .contains("governed_learning_context:")
-    );
+    assert!(plan.harness_source.contains("governed_learning_context:"));
     assert!(plan.harness_source.contains("final_evidence_gap"));
     assert_eq!(plan.governed_learning_context.len(), 1);
     let scaffold = plan

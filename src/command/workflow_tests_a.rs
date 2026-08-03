@@ -355,4 +355,3 @@ fn restart_task_generated_v2_resolves_alias_without_static_stage() {
         StageStatus::Running
     );
 }
-
