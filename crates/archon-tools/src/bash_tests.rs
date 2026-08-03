@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use tokio::io::{AsyncRead, ReadBuf};
+
 use super::bash_output::spawn_counted_pipe_capture;
 
 use serde_json::json;
@@ -265,6 +267,31 @@ async fn pipe_reader_caps_storage_and_drains_remaining_bytes() {
     assert_eq!(captured.bytes, b"abcde");
     assert!(captured.truncated);
     assert_eq!(byte_count.load(Ordering::Relaxed), 10);
+}
+
+#[tokio::test]
+async fn pipe_read_failure_is_preserved() {
+    let captured = spawn_counted_pipe_capture(
+        Some(FailingReader),
+        Arc::new(AtomicUsize::new(5)),
+        Arc::new(AtomicUsize::new(0)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(captured.read_error.as_deref(), Some("fixture read failure"));
+}
+
+struct FailingReader;
+
+impl AsyncRead for FailingReader {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Err(std::io::Error::other("fixture read failure")))
+    }
 }
 
 #[tokio::test]

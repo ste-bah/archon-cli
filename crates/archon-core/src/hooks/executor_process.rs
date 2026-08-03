@@ -37,7 +37,7 @@ pub(super) async fn run_command(
     let write_error = match deadline.wait(write_payload(&mut child, payload)).await {
         Some(error) => error,
         None => {
-            timeout_with_cleanup(&mut child, process_group, &deadline, &stdout, &stderr).await;
+            timeout_with_cleanup(&mut child, process_group, &stdout, &stderr).await;
             return Err(RunError::Timeout("stdin write"));
         }
     };
@@ -51,10 +51,17 @@ pub(super) async fn run_command(
     let (stdout, stderr) = match join_pipes(&deadline, &mut stdout, &mut stderr).await {
         Ok(pipes) => pipes,
         Err(error) => {
-            terminate_process_tree(&mut child, process_group, &deadline).await;
-            return Err(error);
+            let cleanup_error = terminate_process_tree(&mut child, process_group).await;
+            return Err(combine_cleanup_error(error, cleanup_error));
         }
     };
+    if let Some(error) = stdout.read_error.as_ref().or(stderr.read_error.as_ref()) {
+        let cleanup_error = terminate_process_tree(&mut child, process_group).await;
+        return Err(combine_cleanup_error(
+            RunError::Io(format!("pipe read failed: {error}")),
+            cleanup_error,
+        ));
+    }
     check_write_error(write_error, status.success())?;
     Ok(CommandOutput::from_pipes(
         status.code().unwrap_or(-1),
@@ -66,11 +73,13 @@ pub(super) async fn run_command(
 async fn timeout_with_cleanup(
     child: &mut Box<dyn ChildWrapper>,
     process_group: Option<u32>,
-    deadline: &ExecutionDeadline,
     stdout: &JoinHandle<PipeOutput>,
     stderr: &JoinHandle<PipeOutput>,
 ) {
-    terminate_process_tree(child, process_group, deadline).await;
+    let cleanup_error = terminate_process_tree(child, process_group).await;
+    if let Some(error) = cleanup_error {
+        tracing::warn!(error, "hook timeout cleanup failed");
+    }
     abort_pipe_tasks(stdout, stderr);
 }
 
@@ -125,10 +134,22 @@ async fn wait_or_terminate(
     deadline: &ExecutionDeadline,
 ) -> Result<std::process::ExitStatus, RunError> {
     match deadline.wait(child.wait()).await {
-        Some(status) => status.map_err(|error| RunError::Io(error.to_string())),
+        Some(status) => match status {
+            Ok(status) => Ok(status),
+            Err(error) => {
+                let cleanup_error = terminate_process_tree(child, child.id()).await;
+                Err(combine_cleanup_error(
+                    RunError::Io(error.to_string()),
+                    cleanup_error,
+                ))
+            }
+        },
         None => {
-            terminate_process_tree(child, child.id(), deadline).await;
-            Err(RunError::Timeout("process wait"))
+            let cleanup_error = terminate_process_tree(child, child.id()).await;
+            Err(combine_cleanup_error(
+                RunError::Timeout("process wait"),
+                cleanup_error,
+            ))
         }
     }
 }
@@ -136,18 +157,36 @@ async fn wait_or_terminate(
 async fn terminate_process_tree(
     child: &mut Box<dyn ChildWrapper>,
     process_group: Option<u32>,
-    deadline: &ExecutionDeadline,
-) {
+) -> Option<String> {
     #[cfg(not(unix))]
     let _ = process_group;
     #[cfg(unix)]
-    if let Some(pid) = process_group {
+    let kill_error = process_group.and_then(|pid| {
         // SAFETY: the wrapped command is the process-group leader created above.
-        unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
-    }
+        let result = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        (result != 0).then(|| std::io::Error::last_os_error().to_string())
+    });
     #[cfg(not(unix))]
-    let _ = child.start_kill();
-    let _ = deadline.wait(child.wait()).await;
+    let kill_error = child.start_kill().err().map(|error| error.to_string());
+    let wait_error = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(_)) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(_) => Some("process reap exceeded 2 second cleanup deadline".to_string()),
+    };
+    let cleanup_error = kill_error.or(wait_error);
+    if let Some(error) = &cleanup_error {
+        tracing::warn!(error, "hook process-tree cleanup failed");
+    }
+    cleanup_error
+}
+
+fn combine_cleanup_error(error: RunError, cleanup_error: Option<String>) -> RunError {
+    match cleanup_error {
+        Some(cleanup_error) => {
+            RunError::Io(format!("{error}; process cleanup failed: {cleanup_error}"))
+        }
+        None => error,
+    }
 }
 
 fn check_write_error(error: Option<std::io::Error>, success: bool) -> Result<(), RunError> {
@@ -162,6 +201,7 @@ fn check_write_error(error: Option<std::io::Error>, success: bool) -> Result<(),
 struct PipeOutput {
     bytes: Vec<u8>,
     truncated: bool,
+    read_error: Option<String>,
 }
 
 fn drain_pipe<T>(pipe: Option<T>, budget: Arc<AtomicUsize>) -> JoinHandle<PipeOutput>
@@ -172,13 +212,18 @@ where
         let mut output = PipeOutput {
             bytes: Vec::new(),
             truncated: false,
+            read_error: None,
         };
         let Some(mut pipe) = pipe else { return output };
         let mut chunk = [0; READ_CHUNK_BYTES];
         loop {
             let read = match pipe.read(&mut chunk).await {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break,
                 Ok(read) => read,
+                Err(error) => {
+                    output.read_error = Some(error.to_string());
+                    break;
+                }
             };
             let retained = reserve_bytes(&budget, read);
             output.bytes.extend_from_slice(&chunk[..retained]);
@@ -334,6 +379,7 @@ mod tests {
         PipeOutput {
             bytes: Vec::new(),
             truncated: false,
+            read_error: None,
         }
     }
 }

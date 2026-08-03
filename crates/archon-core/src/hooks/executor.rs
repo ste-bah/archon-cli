@@ -413,10 +413,18 @@ fn spawn_background(
 ) {
     tokio::spawn(async move {
         let payload_bytes = match serde_json::to_vec(&input) {
-            Ok(b) => b,
-            Err(_) => return,
+            Ok(bytes) => bytes,
+            Err(error) => {
+                tracing::warn!(
+                    hook = %command,
+                    event = %event_name,
+                    error = %error,
+                    "failed to serialize background hook payload"
+                );
+                return;
+            }
         };
-        let _ = run_command(
+        if let Err(error) = run_command(
             &command,
             &payload_bytes,
             &cwd,
@@ -424,6 +432,14 @@ fn spawn_background(
             &event_name,
             timeout_secs,
         )
-        .await;
+        .await
+        {
+            tracing::warn!(
+                hook = %command,
+                event = %event_name,
+                error = %error,
+                "background hook execution failed"
+            );
+        }
     });
 }

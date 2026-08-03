@@ -62,6 +62,34 @@ fn shell_quote(path: &std::path::Path) -> String {
 
 #[tokio::test]
 #[cfg(unix)]
+async fn timeout_returns_after_descendant_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("cleanup-before-return.pid");
+    let tool = BashTool {
+        timeout_secs: 1,
+        max_output_bytes: 1024,
+        ..Default::default()
+    };
+    let result = tool
+        .execute(
+            json!({"command": descendant_holding_pipes_command(&pid_file), "timeout": 1_000}),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(result.is_error, "{}", result.content);
+    let pid = std::fs::read_to_string(pid_file).unwrap();
+    assert!(
+        !process_exists(pid.trim()),
+        "descendant survived timeout return"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn timeout_kills_background_process_group() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("child.pid");
@@ -392,10 +420,12 @@ async fn execute_with_output_limit(command: &str, max_output_bytes: usize) -> To
     let stdout = CapturedOutput {
         truncated: result.stdout.len() > captured_limit,
         bytes: result.stdout.into_iter().take(captured_limit).collect(),
+        read_error: None,
     };
     let stderr = CapturedOutput {
         truncated: result.stderr.len() > captured_limit,
         bytes: result.stderr.into_iter().take(captured_limit).collect(),
+        read_error: None,
     };
     bash_result_from_pipes(
         max_output_bytes,
