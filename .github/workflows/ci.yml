@@ -242,7 +242,7 @@ jobs:
           )
           foreach ($test in $tests) {
             Write-Host "START Issue #92 test: $($test.Name)"
-            & cargo test -p $test.Package --lib $test.Name -- --test-threads=1 2>&1 |
+            & cargo test -p $test.Package $test.Name -- --test-threads=1 2>&1 |
               Tee-Object -Variable output |
               Write-Host
             if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $($test.Name)" }
