@@ -73,8 +73,8 @@ use workflow_live_v2_state::{
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
+pub(super) use archon_workflow::v2::script::dry_run_workflow_plan;
 use workflow_live_v2_script::WorkflowV2ScriptRunner;
-pub(super) use workflow_live_v2_script::dry_run_workflow_plan;
 
 use super::LiveApprovalMode;
 use super::workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};

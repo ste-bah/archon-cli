@@ -31,6 +31,7 @@ pub mod report;
 pub mod result;
 pub mod result_store;
 pub mod scheduler;
+pub mod script;
 /// Host-side semantic-preservation enforcement for LLM repair adoption. Only
 /// the lifecycle driver consults it.
 pub(crate) mod semantic_preservation;

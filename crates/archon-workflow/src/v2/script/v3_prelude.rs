@@ -3,9 +3,9 @@
 // normalization shared by every dialect. Split from script_helpers to
 // respect the 500-line source ceiling.
 
-pub(super) const V3_PRIMITIVES_JS: &str = include_str!("workflow_live_v3_primitives.js");
+pub(super) const V3_PRIMITIVES_JS: &str = include_str!("v3_primitives.js");
 
-pub(super) fn normalize_workflow_export(source: &str) -> String {
+pub fn normalize_workflow_export(source: &str) -> String {
     let mut normalized = source.trim().to_string();
     // v3 dialect marker: `export const meta` becomes a plain const plus the
     // global flag __archonRun uses to hand the script the primitive API.
@@ -99,7 +99,7 @@ pub(super) fn statement_end_offset(source: &str, start: usize) -> usize {
     source.len()
 }
 
-pub(super) fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
+pub fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
     let marker = "export const meta";
     let mut offset = 0;
     for line in source.split_inclusive('\n') {
@@ -118,13 +118,13 @@ pub(super) fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_v3_prelude_wiring_tests.rs"]
+#[path = "v3_prelude_wiring_tests.rs"]
 mod wiring_tests;
 
 #[cfg(test)]
-#[path = "workflow_live_v3_prelude_remediation_tests.rs"]
+#[path = "v3_prelude_remediation_tests.rs"]
 mod remediation_tests;
 
 #[cfg(test)]
-#[path = "workflow_live_v3_prelude_review_tests.rs"]
+#[path = "v3_prelude_review_tests.rs"]
 mod review_tests;

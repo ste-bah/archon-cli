@@ -120,7 +120,7 @@ pub(super) fn items_output_is_empty(result: &WorkflowV2Result) -> bool {
         .is_some_and(Vec::is_empty)
 }
 
-pub(crate) fn sanitize_v2_gap_id(raw: &str) -> String {
+pub fn sanitize_v2_gap_id(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {

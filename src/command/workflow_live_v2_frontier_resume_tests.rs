@@ -3,7 +3,7 @@ use archon_workflow::{
     WorkflowV2Result, WorkflowV2Status,
 };
 
-use super::workflow_live_v2_script::frontier_resume_record_reusable;
+use archon_workflow::v2::script::frontier_resume_record_reusable;
 
 const RECORDED_INPUT_HASH: &str = "recorded-input-hash";
 
