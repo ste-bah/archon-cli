@@ -26,6 +26,7 @@
 //! Exactly one must be given. Passing none is an error naming all three rather
 //! than a guess at which was meant.
 
+mod coverage;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -84,9 +85,21 @@ impl LintSource {
 }
 
 /// Load the named graph and render its lint report.
+///
+/// The fourth section, requirement coverage, is not a graph analysis: it
+/// compares the task files' `implements:` claims against the requirement IDs of
+/// the PRD they name, so it takes the task directory rather than the lowered
+/// graph, and it only has anything to say for `--tasks`. It is advisory like the
+/// other three — an unclaimed requirement is reported, never raised.
 pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     let graph = load_graph(cwd, source)?;
-    render::report(&graph, &describe(source))
+    let tasks_root = match source {
+        LintSource::Tasks(path) => Some(absolute(cwd, path)),
+        LintSource::Spec(_) | LintSource::Graph(_) => None,
+    };
+    let mut out = render::report(&graph, &describe(source))?;
+    out.push_str(&coverage::section(tasks_root.as_deref()));
+    Ok(out)
 }
 
 fn describe(source: &LintSource) -> String {

@@ -211,6 +211,11 @@ globset.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
 cozo.workspace = true
+# `archon workflow lint` extracts PRD requirement IDs (`REQ-<AREA>-<NNN>` at a
+# bullet's line start) for the requirement-coverage section. Already a
+# dev-dependency and already in the build graph; promoted so the non-test path
+# can use it too.
+regex.workspace = true
 libc = "0.2"
 # TASK #246: panic_save terminal restore (Show + LeaveAlternateScreen + disable_raw_mode)
 crossterm.workspace = true

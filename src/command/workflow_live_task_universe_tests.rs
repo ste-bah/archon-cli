@@ -11,7 +11,8 @@ fn standard_task(task_id: &str, depends_on: &str, blocks: &str, body: &str) -> S
     format!(
         "# {task_id}\n\n```yaml\ntask_id: {task_id}\ntitle: Fixture {task_id}\n\
          complexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: {blocks}\n\
-         required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n{body}"
+         implements: []\nrequired_env_keys: []\nrequired_tools: []\n\
+         deliverable_contracts: []\n```\n{body}"
     )
 }
 
@@ -142,12 +143,12 @@ fn task_universe_carries_declared_adversarial_review_notes() {
     let temp = tempfile::tempdir().expect("tempdir");
     fs::write(
         temp.path().join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\n```yaml\ntask_id: TASK-TDL-001\ntitle: Foundation\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Acceptance Criteria\n\n- A criterion.\n\n## Adversarial Review Notes\n\n- Verify the task does not weaken native-candle enforcement.\n- Verify residual gaps fail closed.\n\n<!-- PRIOR-RUN-FINDINGS:BEGIN -->\n\n### Prior run `wf-ee4a92fc` (2026-07-28)\n\n- a prior finding bullet that is not a review note\n",
+        "# Foundation\n\n```yaml\ntask_id: TASK-TDL-001\ntitle: Foundation\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Acceptance Criteria\n\n- A criterion.\n\n## Adversarial Review Notes\n\n- Verify the task does not weaken native-candle enforcement.\n- Verify residual gaps fail closed.\n\n<!-- PRIOR-RUN-FINDINGS:BEGIN -->\n\n### Prior run `wf-ee4a92fc` (2026-07-28)\n\n- a prior finding bullet that is not a review note\n",
     )
     .expect("task");
     fs::write(
         temp.path().join("TASK-TDL-002-plain.md"),
-        "# Plain\n\n```yaml\ntask_id: TASK-TDL-002\ntitle: Plain\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Acceptance Criteria\n\n- A criterion.\n",
+        "# Plain\n\n```yaml\ntask_id: TASK-TDL-002\ntitle: Plain\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Acceptance Criteria\n\n- A criterion.\n",
     )
     .expect("task");
 
@@ -439,6 +440,7 @@ fn malformed_deliverable_contract_fails_closed() {
         "status: ready\n",
         "depends_on: []\n",
         "blocks: []\n",
+        "implements: []\n",
         "required_env_keys: []\n",
         "required_tools: []\n",
         "deliverable_contracts:\n",

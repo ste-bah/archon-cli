@@ -11,7 +11,8 @@ fn task_file(task_id: &str, status: &str, depends_on: &str) -> String {
     format!(
         "# {task_id}\n\n```yaml\ntask_id: {task_id}\ntitle: Fixture {task_id}\n\
          complexity: medium\nstatus: {status}\ndepends_on: {depends_on}\nblocks: []\n\
-         required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n"
+         implements: []\nrequired_env_keys: []\nrequired_tools: []\n\
+         deliverable_contracts: []\n```\n"
     )
 }
 

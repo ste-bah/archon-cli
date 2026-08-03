@@ -387,6 +387,90 @@ fn required_tools_env_keys_and_deliverable_contracts_reach_the_per_task_inputs()
     assert_eq!(saw_contracts, 17 - ungated.len());
 }
 
+/// A `shared_append_target_files:` declared in a task file must arrive on the
+/// fan-out item payload, because that payload is the only place the write
+/// coordinator looks — `resolve_shared_append_targets` reads the item and never
+/// the task file. Until this was wired the declaration was inert: an author
+/// could name a shared registry in a task, the coordinator would keep
+/// serialising the writers they had said were coordinated, and nothing reported
+/// that the declaration had gone nowhere.
+///
+/// The second half is the more important one. A task that declared nothing must
+/// come back with the key absent, not present-and-empty and not inherited from
+/// the task beside it. A path becoming concurrently written because a key
+/// appeared by default is the failure this whole mechanism exists to prevent.
+#[test]
+fn a_declared_shared_append_path_reaches_the_payload_the_coordinator_reads() {
+    use crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value;
+    use archon_workflow::write_coordinator::{
+        SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,
+    };
+
+    const SHARED: &str = ".archon/trading-lab/data/registry.json";
+    let dir = tempfile::tempdir().expect("tempdir");
+    for entry in std::fs::read_dir(fixture_root()).expect("read fixture") {
+        let path = entry.expect("fixture entry").path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("TASK-") || !name.ends_with(".md") {
+            continue;
+        }
+        let mut raw = std::fs::read_to_string(&path).expect("read fixture task");
+        if name.starts_with("TASK-TDL-010") {
+            let declared = format!("shared_append_target_files: ['{SHARED}']\nrequired_tools: []");
+            assert!(raw.contains("required_tools: []"), "{name} changed shape");
+            raw = raw.replacen("required_tools: []", &declared, 1);
+        }
+        std::fs::write(dir.path().join(name), raw).expect("write task");
+    }
+
+    let universe = extract_task_universe_for_generated_run(&plan_task_text(dir.path()))
+        .expect("the mutated fixture extracts without error")
+        .expect("a decomposed-PRD task description yields a task universe");
+    let declaring = universe
+        .tasks
+        .iter()
+        .find(|task| task.canonical_task_id == "TASK-TDL-010")
+        .expect("the mutated task is in the universe");
+    assert_eq!(
+        declaring.shared_append_target_files,
+        [SHARED],
+        "the parser did not carry the declaration onto the task record"
+    );
+
+    let item = item_for(&universe, "TASK-TDL-010");
+    assert_eq!(strings_at(&item, SHARED_APPEND_TARGETS_KEY), [SHARED]);
+    assert_eq!(
+        resolve_shared_append_targets(&item).expect("the payload is a readable declaration"),
+        [SHARED],
+        "the coordinator's own reader does not see the declared path"
+    );
+
+    let quiet = item_for(&universe, "TASK-TDL-020");
+    assert!(
+        quiet.get(SHARED_APPEND_TARGETS_KEY).is_none(),
+        "a task that declared nothing must not carry the key at all: {quiet}"
+    );
+    assert!(
+        resolve_shared_append_targets(&quiet)
+            .expect("an absent key is not an error")
+            .is_empty(),
+        "an undeclared target must stay exclusive"
+    );
+
+    fn item_for(universe: &WorkflowV2TaskUniverse, task_id: &str) -> Value {
+        normalize_generated_item_value(
+            &serde_json::json!({
+                "item_id": format!("impl-{task_id}"),
+                "canonical_task_ids": [task_id],
+            }),
+            Some(universe),
+        )
+        .value
+    }
+}
+
 fn strings_at(value: &Value, key: &str) -> Vec<String> {
     value
         .get(key)

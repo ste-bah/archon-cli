@@ -430,10 +430,18 @@ fn stamp_declared_capabilities(
     let mut required_env_keys = BTreeSet::new();
     let mut required_tools = BTreeSet::new();
     let mut deliverable_contracts = BTreeSet::new();
+    // A task file's `shared_append_target_files:` reaches the write coordinator
+    // only through this payload key — `resolve_shared_append_targets` reads the
+    // fan-out item, never the task file. Without this stamp the declaration is
+    // inert and the coordinator serialises writers the author said were
+    // coordinated. Union over the item's tasks, and absent when nothing declared
+    // one, so no path becomes concurrently written by a key appearing empty.
+    let mut shared_append_target_files = BTreeSet::new();
     for task in selected {
         required_env_keys.extend(task.required_env_keys.iter().cloned());
         required_tools.extend(task.required_tools.iter().cloned());
         deliverable_contracts.extend(task.deliverable_contracts.iter().cloned());
+        shared_append_target_files.extend(task.shared_append_target_files.iter().cloned());
     }
     if !required_env_keys.is_empty() {
         object.insert(
@@ -451,6 +459,12 @@ fn stamp_declared_capabilities(
         object.insert(
             "deliverable_contracts".to_string(),
             serde_json::json!(deliverable_contracts),
+        );
+    }
+    if !shared_append_target_files.is_empty() {
+        object.insert(
+            archon_workflow::write_coordinator::SHARED_APPEND_TARGETS_KEY.to_string(),
+            serde_json::json!(shared_append_target_files),
         );
     }
 }

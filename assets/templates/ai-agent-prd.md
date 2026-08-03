@@ -376,8 +376,9 @@ against:
 
 The payoff is that the complete set of requirement IDs is extractable with a
 regex and no LLM. That is what turns "every requirement is claimed by some task"
-into a check that runs in milliseconds and fails closed. An ID the regex cannot
-see is an ID no coverage check will ever miss — it passes by being invisible,
+into a check that runs in milliseconds — `archon workflow lint --tasks <DIR>`
+reports it, advisory, alongside the topology lints. An ID the regex cannot see
+is an ID that check can never report as unclaimed: it passes by being invisible,
 which is the worst outcome available.
 
 **Separate Intent from Implementation**
@@ -577,8 +578,10 @@ That one field makes two checks possible that inference cannot supply:
 
 Both checks are pure set operations over the requirement IDs extracted from this
 PRD (§3.3) and the `implements:` lists read from the task files. No LLM is
-involved and no judgement is exercised, which is why they can be run on every
-change rather than at review time.
+involved and no judgement is exercised, which is why
+`archon workflow lint --tasks <DIR>` runs them on every change rather than at
+review time. It reports both directions and blocks nothing — an unclaimed
+requirement is a question for the author, not a verdict on the run.
 
 ### 4.3 Capturing Non-Functional Requirements with Metrics
 
@@ -1880,8 +1883,8 @@ no templated artifact path lacks an instance binding.
 All three clauses are mechanically checkable without an LLM. The first two are
 set operations over the requirement IDs extracted from this PRD's numbered
 sections and the `implements:` lists read from the task directory — run them as
-a decomposition lint over the tasks before the first one is scheduled
-(`archon workflow lint --tasks <DIR>` is where this check belongs). The third
+a decomposition lint over the tasks before the first one is scheduled:
+`archon workflow lint --tasks <DIR>` reports both, advisory. The third
 fails closed at plan time on its own: a templated `<...>` artifact path with no
 instance binding produces a verification step that prints the unexpanded token
 and exits non-zero, so the task cannot pass.

@@ -344,6 +344,7 @@ mod capability_and_genericity_tests {
     status: ready
     depends_on: []
     blocks: []
+    implements: []
     required_env_keys: [TASK_TOKEN]
     required_tools: [fetch_demo]
     deliverable_contracts:
