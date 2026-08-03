@@ -4,17 +4,15 @@ fn universe() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![
-            super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-X-020".to_string(),
-                aliases: Vec::new(),
-                source_path: "tasks/TASK-X-020.md".to_string(),
-                dependency_ids: Vec::new(),
-                title: None,
-                artifact_requirements: Vec::new(),
-                ..Default::default()
-            },
-        ],
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-X-020".to_string(),
+            aliases: Vec::new(),
+            source_path: "tasks/TASK-X-020.md".to_string(),
+            dependency_ids: Vec::new(),
+            title: None,
+            artifact_requirements: Vec::new(),
+            ..Default::default()
+        }],
     }
 }
 
@@ -246,17 +244,15 @@ fn fabel_contract() -> LifecycleContract<'static> {
         task_universe: Box::leak(Box::new(WorkflowV2TaskUniverse {
             schema_version: "workflow-v2-task-universe-v1".to_string(),
             source_roots: Vec::new(),
-            tasks: vec![
-                super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                    canonical_task_id: "TASK-TDL-010".to_string(),
-                    aliases: Vec::new(),
-                    source_path: "tasks/TASK-TDL-010.md".to_string(),
-                    dependency_ids: Vec::new(),
-                    title: None,
-                    artifact_requirements: Vec::new(),
-                    ..Default::default()
-                },
-            ],
+            tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+                canonical_task_id: "TASK-TDL-010".to_string(),
+                aliases: Vec::new(),
+                source_path: "tasks/TASK-TDL-010.md".to_string(),
+                dependency_ids: Vec::new(),
+                title: None,
+                artifact_requirements: Vec::new(),
+                ..Default::default()
+            }],
         })),
         target_repository_root: Some("/repo"),
     }

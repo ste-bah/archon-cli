@@ -36,6 +36,7 @@ mod spec_policy;
 mod spec_work_units;
 pub mod stage;
 pub mod store;
+pub mod task_universe;
 pub mod template;
 pub mod tui_events;
 pub mod ui_sink_port;

@@ -43,9 +43,7 @@ pub(super) fn compact_work_item(item: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::workflow_live::workflow_live_task_universe::{
-        WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
-    };
+    use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
     fn universe() -> WorkflowV2TaskUniverse {
         WorkflowV2TaskUniverse {

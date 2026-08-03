@@ -3,7 +3,7 @@
 //! [`super::LifecycleContract`] is the one place that already holds both the
 //! task universe and the run's completed set, so it is where "is this task
 //! done?" gets answered. The classification itself lives in
-//! [`crate::command::workflow_live::workflow_live_task_universe::task_status`],
+//! [`archon_workflow::task_universe::task_status`],
 //! which carries the full table of what each value causes.
 
 use std::collections::BTreeSet;
@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 use super::LifecycleContract;
-use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverseTask;
+use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 
 impl LifecycleContract<'_> {
     /// Whether the task universe declares this canonical task already finished.

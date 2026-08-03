@@ -31,7 +31,7 @@
 
 /// The scheduling consequence of a task file's declared `status:`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkflowV2DeclaredStatus {
+pub enum WorkflowV2DeclaredStatus {
     /// Ordinary work: scheduled once its dependencies are satisfied.
     Runnable,
     /// Already finished: never scheduled, and satisfies its dependents.
@@ -46,7 +46,7 @@ pub(crate) enum WorkflowV2DeclaredStatus {
 /// `Err` carries the fragment of a message describing what was wrong; callers
 /// prefix it with the task id and its file, because a status value on its own
 /// is not something a reader can go and fix.
-pub(crate) fn declared_status(raw: Option<&str>) -> Result<WorkflowV2DeclaredStatus, String> {
+pub fn declared_status(raw: Option<&str>) -> Result<WorkflowV2DeclaredStatus, String> {
     let normalized = normalized_status(raw);
     if normalized.is_empty() {
         return Ok(WorkflowV2DeclaredStatus::Runnable);
@@ -71,12 +71,12 @@ pub(crate) fn declared_status(raw: Option<&str>) -> Result<WorkflowV2DeclaredSta
 /// An unclassifiable value is *not* complete. It never reaches here in a loaded
 /// task set — [`declared_status`] refuses it while the universe is built — and
 /// treating it as finished would be the one reading that silently drops work.
-pub(crate) fn declared_status_is_complete(raw: Option<&str>) -> bool {
+pub fn declared_status_is_complete(raw: Option<&str>) -> bool {
     matches!(declared_status(raw), Ok(WorkflowV2DeclaredStatus::Complete))
 }
 
 /// True when the declaration says the author considered the task blocked.
-pub(crate) fn declared_status_is_blocked(raw: Option<&str>) -> bool {
+pub fn declared_status_is_blocked(raw: Option<&str>) -> bool {
     matches!(declared_status(raw), Ok(WorkflowV2DeclaredStatus::Blocked))
 }
 

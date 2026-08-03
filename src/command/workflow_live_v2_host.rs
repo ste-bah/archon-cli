@@ -9,8 +9,8 @@ use archon_workflow::{
     WorkflowV2ResultStore, WorkflowV2Status,
 };
 
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
-use super::workflow_live_v2_completion_credit::{
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::completion_credit::{
     CompletionCredit, noop_acceptance_criteria_satisfied,
 };
 

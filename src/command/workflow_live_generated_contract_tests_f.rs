@@ -290,13 +290,13 @@ pub(super) fn assert_fixture_items_are_idempotent(fixture: &str) {
     }
 }
 
-pub(super) fn placeholder_task_universe()
--> super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
-    super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+pub(super) fn placeholder_task_universe() -> archon_workflow::task_universe::WorkflowV2TaskUniverse
+{
+    archon_workflow::task_universe::WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
         tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-X-020".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-020.md".to_string(),
@@ -305,7 +305,7 @@ pub(super) fn placeholder_task_universe()
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-X-130".to_string(),
                 aliases: Vec::new(),
                 source_path: "tasks/TASK-X-130.md".to_string(),

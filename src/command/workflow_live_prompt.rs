@@ -2,7 +2,7 @@ use archon_workflow::StageRunRequest;
 use serde_json::Value;
 
 use super::workflow_live_runner::command_execution_stage;
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 pub(crate) fn workflow_prompt(request: &StageRunRequest) -> String {
     let input =

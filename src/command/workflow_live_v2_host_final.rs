@@ -347,7 +347,7 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     if raw.is_empty() {
         return false;
     }
-    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return true;
     }
     let path = Path::new(raw);

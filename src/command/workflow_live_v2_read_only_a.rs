@@ -68,9 +68,7 @@ pub(super) fn declared_contracts_by_item(
 /// never reads what the contract contains.
 pub(super) fn stamp_declared_contracts_from_universe(
     mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
-    task_universe: Option<
-        &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
-    >,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
     let Some(universe) = task_universe else {
         return items;
@@ -124,9 +122,7 @@ pub(super) fn stamp_declared_contracts_from_universe(
 /// is about.
 pub(super) fn stamp_required_tools_from_universe(
     mut items: Vec<archon_workflow::WorkflowV2FanoutItem>,
-    task_universe: Option<
-        &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
-    >,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
     let Some(universe) = task_universe else {
         return items;

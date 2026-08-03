@@ -442,7 +442,7 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
 }
 
 fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
-    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return None;
     }
     let path = Path::new(raw);

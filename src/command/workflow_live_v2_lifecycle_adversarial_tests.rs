@@ -15,11 +15,8 @@ use super::super::WorkflowV2TaskUniverse;
 use super::super::workflow_live_v2_lifecycle_cross_cutting as cross_cutting;
 use super::*;
 
-fn task(
-    id: &str,
-    notes: &[&str],
-) -> crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-    crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+fn task(id: &str, notes: &[&str]) -> archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+    archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
         canonical_task_id: id.to_string(),
         source_path: format!("/prd/TASK-{id}.md"),
         acceptance_criteria: vec![format!("{id} must be provably done")],

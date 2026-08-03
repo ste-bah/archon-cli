@@ -22,8 +22,6 @@ mod tests;
 mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
-#[path = "workflow_live_artifact_refs.rs"]
-mod workflow_live_artifact_refs;
 #[cfg(test)]
 #[path = "workflow_live_canary_retry_tests.rs"]
 mod workflow_live_canary_retry_tests;
@@ -65,30 +63,33 @@ mod workflow_live_runner_activity;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;
+#[cfg(test)]
+#[path = "workflow_live_runtime_genericity_tests.rs"]
+mod workflow_live_runtime_genericity_tests;
 #[path = "workflow_live_semantic_preservation.rs"]
 mod workflow_live_semantic_preservation;
 #[path = "workflow_live_shape_apply.rs"]
 mod workflow_live_shape_apply;
-// Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
-// driver wiring lands incrementally; the action contract compiles and is
-// tested from day one.
-#[path = "workflow_live_task_universe.rs"]
-pub(crate) mod workflow_live_task_universe;
+// The task universe itself moved to `archon_workflow::task_universe`. What
+// stayed is this half of its tests: they assert against
+// `workflow_live_generated_lifecycle_support`, which is still in this crate,
+// so they cannot live beside the code they cover until it moves too.
+#[cfg(test)]
+#[path = "workflow_live_task_status_tests.rs"]
+mod workflow_live_task_status_tests;
 #[cfg(test)]
 #[path = "workflow_live_test_support.rs"]
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
-#[path = "workflow_live_v2_completion_credit.rs"]
-mod workflow_live_v2_completion_credit;
-#[cfg(test)]
-#[path = "workflow_live_v2_completion_credit_tests.rs"]
-mod workflow_live_v2_completion_credit_tests;
 #[path = "workflow_live_v2_host.rs"]
 mod workflow_live_v2_host;
 #[cfg(test)]
 #[path = "workflow_live_v2_host_tests.rs"]
 mod workflow_live_v2_host_tests;
+// Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
+// driver wiring lands incrementally; the action contract compiles and is
+// tested from day one.
 #[path = "workflow_live_v3_orchestrator_actions.rs"]
 mod workflow_live_v3_orchestrator_actions;
 #[path = "workflow_live_verification_contract.rs"]

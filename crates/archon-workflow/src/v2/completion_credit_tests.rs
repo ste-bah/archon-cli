@@ -1,11 +1,11 @@
-use archon_workflow::{
+use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+use crate::{
     WorkflowV2BranchOutcome, WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod,
     WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
     WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
 };
 
-use super::workflow_live_task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
-use super::workflow_live_v2_completion_credit::{CompletionCredit, prepare_resume_credit};
+use super::{CompletionCredit, prepare_resume_credit};
 
 #[test]
 fn resume_credit_combines_noop_and_verified_implementation_branches() {

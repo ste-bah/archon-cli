@@ -18,7 +18,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use super::{fixture_root, fixture_universe, plan_task_text, wave_index_by_task, wave_layering};
-use crate::command::workflow_live::workflow_live_task_universe::extract_task_universe_for_generated_run;
+use archon_workflow::task_universe::extract_task_universe_for_generated_run;
 
 #[derive(Debug, Deserialize)]
 struct Guidance {

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 #[path = "workflow_live_generated_contract_a.rs"]
 mod workflow_live_generated_contract_a;

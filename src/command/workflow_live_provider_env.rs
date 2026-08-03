@@ -6,7 +6,7 @@ use archon_tools::provider_env::{
 };
 use archon_workflow::{WorkflowV2AgentRequest, WorkflowV2Evidence, WorkflowV2EvidenceKind};
 
-use super::super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 pub(super) const PROVIDER_ENV_CONTRACT_VERSION: &str = "provider-env-proof-v1";
 

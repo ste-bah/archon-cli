@@ -418,9 +418,7 @@ pub(crate) fn normalize_result_for_call(
     execution: &WorkflowV2CallExecution,
     mut result: WorkflowV2Result,
 ) -> WorkflowV2Result {
-    super::super::super::super::workflow_live_artifact_refs::retain_filesystem_artifacts(
-        &mut result,
-    );
+    archon_workflow::v2::artifact_refs::retain_filesystem_artifacts(&mut result);
     downgrade_read_only_accepted_task_coverage(&execution.call, &mut result);
     guard_empty_items_output(execution, &mut result);
     result

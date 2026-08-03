@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 const REPOSITORY_MARKERS: &[(&str, i32)] = &[
     (".git", 120),
@@ -155,8 +155,8 @@ fn is_windows_absolute_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask;
     use super::*;
+    use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 
     #[test]
     fn explicit_repository_text_wins_over_inferred_repo() {

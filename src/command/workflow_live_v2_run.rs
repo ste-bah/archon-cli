@@ -318,9 +318,7 @@ async fn execute_generated_v2_run(
         plan.task_universe
             .as_ref()
             .map(|universe| {
-                super::super::workflow_live_v2_completion_credit::prepare_resume_credit(
-                    &v2_store, universe,
-                )
+                archon_workflow::v2::completion_credit::prepare_resume_credit(&v2_store, universe)
             })
             .transpose()?
             .unwrap_or_default()

@@ -57,7 +57,7 @@ pub(super) fn typed_verification_command(root: &str, contract: &Value) -> Option
 ///
 /// # What counts as bound
 ///
-/// [`super::workflow_live_task_universe::WorkflowV2DeliverableContract`] already
+/// [`archon_workflow::task_universe::WorkflowV2DeliverableContract`] already
 /// carries the one-contract-many-instances fields, so binding is a declaration
 /// the author can already make. A templated `artifact_path` is checkable when
 /// either:
