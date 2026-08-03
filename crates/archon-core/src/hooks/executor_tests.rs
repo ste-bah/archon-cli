@@ -251,11 +251,9 @@ async fn windows_hook_waits_for_descendant_after_parent_exits() {
     .expect("complete Windows job should succeed");
 
     assert_eq!(output.exit_code, 0);
-    assert_eq!(
-        std::fs::read_to_string(&completion_file).as_deref(),
-        Ok("complete"),
-        "hook returned before its Windows descendant completed"
-    );
+    let completion = std::fs::read_to_string(&completion_file)
+        .expect("hook returned before its Windows descendant completed");
+    assert_eq!(completion, "complete");
 }
 
 #[tokio::test]
