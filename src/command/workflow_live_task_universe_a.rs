@@ -110,6 +110,12 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     pub(super) complexity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) status: Option<String>,
+    /// Declared `implements:` and `shared_append_target_files:` — empty only
+    /// because the author declared them so; see `parsing` for why absent differs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) implements: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) shared_append_target_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) acceptance_criteria: Vec<String>,
     /// Per-task adversarial checks declared under an `## Adversarial Review

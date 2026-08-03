@@ -36,10 +36,22 @@ use super::{
 /// `title`, `complexity`, `status`). Declaring one empty is a statement; leaving
 /// it out is not, and this parser refuses to guess which was meant.
 ///
+/// `implements` is here for the same reason and one more. It is the only link
+/// between a task and the PRD requirements it is answerable for, and the
+/// requirement-coverage lint is a pure set difference over it: an absent
+/// `implements` silently shrinks the claimed set, so a requirement nobody
+/// implements and a requirement nobody *declared* would report identically.
+/// `implements: []` is the honest declaration an audit or review task makes, and
+/// it is accepted; omission is not.
+///
 /// Purely informational keys the standard also carries — `prd`, `domain`,
 /// `workstream`, `source_sections` — are deliberately *not* required: their
 /// absence changes nothing a run executes, so demanding them would only reject
-/// otherwise-valid files.
+/// otherwise-valid files. `prd` and `shared_append_target_files` are read when
+/// present (see [`parse_task_file`]) but stay optional for the same reason: the
+/// coverage lint falls back to the directory name when no task names a PRD, and
+/// an absent shared-append list means "nothing is shared", which is the safe
+/// reading rather than a guess.
 pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
     "task_id",
     "title",
@@ -47,6 +59,7 @@ pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
     "status",
     "depends_on",
     "blocks",
+    "implements",
     "required_env_keys",
     "required_tools",
     "deliverable_contracts",
@@ -110,6 +123,16 @@ pub(super) fn parse_task_file(
         title: metadata_string(&metadata, "title"),
         complexity: metadata_string(&metadata, "complexity"),
         status: metadata_string(&metadata, "status"),
+        // Required above, so an empty vector here means the author wrote
+        // `implements: []` — a task answerable for no requirement — and never
+        // that the key was missing.
+        implements: sorted_unique(metadata_strings(&metadata, "implements")),
+        // Optional, and empty by default: a path is exclusive unless a task
+        // names it here, so nothing becomes concurrently written by omission.
+        shared_append_target_files: sorted_unique(metadata_strings(
+            &metadata,
+            "shared_append_target_files",
+        )),
         acceptance_criteria: declared_task_section_items(raw, "acceptance criteria"),
         // Additive: the per-task adversarial reviewer reads these verbatim.
         adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),

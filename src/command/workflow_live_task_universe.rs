@@ -137,6 +137,42 @@ pub(crate) fn task_graph_from_root(root: &Path) -> WorkflowResult<TaskGraph> {
     })
 }
 
+/// What one task file claims about the PRD it came from.
+///
+/// The topology IR carries no requirement claims — it is a dependency and
+/// dataflow graph — so the coverage lint reads them from here rather than
+/// re-deriving a second, drifting notion of "what this task file said".
+pub(crate) struct TaskRequirementClaims {
+    pub(crate) task_id: String,
+    pub(crate) source_path: String,
+    pub(crate) implements: Vec<String>,
+}
+
+/// Every task file's `implements:` claims, parsed by the same parser a run uses.
+///
+/// Rejects exactly what a run rejects: a file with no YAML block, an
+/// unparseable one, or one missing a required key — `implements` among them —
+/// is an error naming the file. The lint that calls this has already loaded the
+/// same directory as a graph, so this cannot be the first thing to fail.
+pub(crate) fn task_requirement_claims_from_root(
+    root: &Path,
+) -> WorkflowResult<Vec<TaskRequirementClaims>> {
+    let mut claims = Vec::new();
+    for path in task_files_under(root)? {
+        let raw = fs::read_to_string(&path).map_err(|source| WorkflowError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let task = parse_task_file(&path, &raw)?;
+        claims.push(TaskRequirementClaims {
+            task_id: task.canonical_task_id,
+            source_path: task.source_path,
+            implements: task.implements,
+        });
+    }
+    Ok(claims)
+}
+
 /// Artifacts the task is contracted to produce, plus the concrete files it
 /// declares it will change.
 fn task_production(task: &WorkflowV2TaskUniverseTask) -> Vec<WriteTarget> {

@@ -444,6 +444,7 @@ pub(crate) fn standard_task_file(
     format!(
         "# {task_id}\n\n```yaml\ntask_id: {task_id}\ntitle: Fixture {task_id}\n\
          complexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: {blocks}\n\
-         required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n{body}"
+         implements: []\nrequired_env_keys: []\nrequired_tools: []\n\
+         deliverable_contracts: []\n```\n{body}"
     )
 }

@@ -755,8 +755,9 @@ Declare every key, including the ones that are empty. An empty list is a claim �
 "this task depends on nothing", "this task implements no requirement" — and a
 claim can be checked. An absent key is a hole, and nothing can be checked
 against a hole. `task_id`, `title`, `complexity`, `status`, `depends_on`,
-`blocks`, `required_env_keys`, `required_tools` and `deliverable_contracts` are
-refused outright if absent, naming the file and every missing key.
+`blocks`, `implements`, `required_env_keys`, `required_tools` and
+`deliverable_contracts` are refused outright if absent, naming the file and
+every missing key.
 
 #### `implements` — the requirement IDs this task satisfies
 
@@ -765,9 +766,13 @@ answerable for, for example `implements: [REQ-DL-020, REQ-DL-021]`. Declare it
 on every task. A task that implements no requirement — an audit, a review, a
 readiness sweep — declares `implements: []`, and never omits the field. Treat an
 omission as an incomplete task file and fix it rather than inferring an empty
-list from silence: silence and `[]` must not be the same input.
+list from silence: silence and `[]` must not be the same input. A task file
+that omits `implements` is refused by name, like any other missing required
+key.
 
-Two checks follow from this field, and neither is possible without it:
+Two checks follow from this field, and neither is possible without it. Both run
+in `archon workflow lint --tasks <DIR>`, which reports and does not block — it
+names the gap, closing it is the author's:
 
 1. **Every ID a task cites must exist in the PRD.** A citation of a requirement
    that was renumbered or deleted is a stale task, and it is caught by
