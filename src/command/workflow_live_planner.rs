@@ -53,6 +53,14 @@ pub(super) struct WorkflowScriptPlan {
     /// empty when every candidate subsystem is disabled — and empty still
     /// dispatches nothing.
     pub(super) learning_hooks: Vec<String>,
+    /// Why this run's generated limits are what they are.
+    ///
+    /// Empty on every path where SONA did not run, which is the common case and
+    /// stays silent. When it is not empty it is persisted with the run metadata
+    /// and rendered into the plan, so "why did this run get 5 repair
+    /// iterations?" is answerable from the run directory months later — the
+    /// learning store holds the evidence, but a run must carry its own reason.
+    pub(super) tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
 }
 
 impl WorkflowScriptPlan {
@@ -80,6 +88,7 @@ impl WorkflowScriptPlan {
             governed_learning_context: Vec::new(),
             generated_config,
             learning_hooks,
+            tuning_decisions: Vec::new(),
         }
     }
 
@@ -101,6 +110,7 @@ impl WorkflowScriptPlan {
             governed_learning_context: Vec::new(),
             generated_config: GeneratedWorkflowConfig::default(),
             learning_hooks: spec.learning_hooks,
+            tuning_decisions: Vec::new(),
         }
     }
 
@@ -193,6 +203,19 @@ pub(super) fn render_live_plan(plan: &WorkflowScriptPlan) -> Result<String> {
             "Generated repair caps: max_repair_iterations={}, max_investigation_iterations={}\n",
             plan.generated_config.max_repair_iterations,
             plan.generated_config.max_investigation_iterations
+        ));
+    }
+    for decision in &plan.tuning_decisions {
+        if !decision.source.moved() {
+            continue;
+        }
+        out.push_str(&format!(
+            "SONA-tuned {}: {} -> {} (weight {:+.4}, {} observation(s))\n",
+            decision.parameter.key(),
+            decision.baseline,
+            decision.applied,
+            decision.weight,
+            decision.observations
         ));
     }
     for call in &plan.calls {

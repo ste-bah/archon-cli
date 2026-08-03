@@ -1788,6 +1788,29 @@ max_investigation_iterations = 3
 |---|---|---|
 | `max_repair_iterations` | `3` | Maximum script-owned semantic repair attempts for malformed or incomplete generated-PRD inventory/evidence before the workflow stops visibly with blocked/needs-review evidence. Valid range: `1..=8`. |
 | `max_investigation_iterations` | `3` | Maximum script-owned investigation attempts for missing target files, verification requirements, artifact requirements, or provider/environment evidence before terminal blocked/needs-review reporting. Valid range: `1..=8`. |
+| `verification_branch_timeout_secs` | `14400` | Wall-clock a read-only verification or review branch may run. Four hours because a verifier that runs out of clock does not fail honestly — it disappears, and its silence has been observed voiding an already-accepted remediation. Valid range: `300..=86400`. |
+| `host_call_timeout_secs` | `7200` | Wall-clock a non-verification host call may run. Valid range: `300..=86400`. |
+
+### SONA-learned values
+
+When `[learning.sona] enabled = true` **and** `pipeline_recording = true`, these
+four values are learned per task class from recorded run outcomes rather than
+read verbatim. With either toggle off — the default, since `pipeline_recording`
+defaults to `false` — the configured value is used exactly as written.
+
+Even with learning on, the configured value is what a run gets until that
+`(task class, parameter)` key has at least five recorded outcomes; there is no
+exploration. A learned value is clamped into a range narrower than the validated
+one (`max_*_iterations` to `2..=6`, `verification_branch_timeout_secs` to
+`7200..=28800`, `host_call_timeout_secs` to `1800..=14400`), and
+`verification_branch_timeout_secs` is then raised if needed so that it is never
+below `host_call_timeout_secs`. The timeout budgets are a ratchet: recorded
+evidence can only lengthen them.
+
+A run that got a learned value says so in its output and records the reason in
+`.archon/workflows/<run-id>/v2/generated-metadata.json` under
+`tuning_decisions`, with the baseline, the applied value, the weight and the
+observation count.
 
 ---
 

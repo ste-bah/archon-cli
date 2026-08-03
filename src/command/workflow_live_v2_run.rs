@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "workflow_live_v2_run_fold.rs"]
+mod workflow_live_v2_run_fold;
+use workflow_live_v2_run_fold::fold_run_topology;
+
 pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
@@ -11,6 +15,7 @@ pub(crate) async fn run_generated_v2_workflow(
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     script_lifecycle: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -24,6 +29,7 @@ pub(crate) async fn run_generated_v2_workflow(
         workspace_boundary_supported,
         WorkflowBundleOrigin::GeneratedHarness,
         script_lifecycle,
+        learning,
     )
     .await
 }
@@ -38,6 +44,7 @@ pub(crate) async fn run_saved_v2_workflow(
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -51,10 +58,12 @@ pub(crate) async fn run_saved_v2_workflow(
         workspace_boundary_supported,
         WorkflowBundleOrigin::SavedCommand,
         script_lifecycle_from_env(),
+        learning,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_v2_workflow_with_origin(
     cwd: &Path,
     store: &WorkflowStore,
@@ -67,6 +76,7 @@ async fn run_v2_workflow_with_origin(
     workspace_boundary_supported: bool,
     origin: WorkflowBundleOrigin,
     script_lifecycle: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
@@ -90,38 +100,8 @@ async fn run_v2_workflow_with_origin(
         false,
     )
     .await;
-    fold_run_topology(cwd, store, &run_id, &task).await;
+    fold_run_topology(cwd, store, &run_id, &task, learning).await;
     result
-}
-
-/// Project a finished workflow run into the topology corpus and the learning
-/// stack.
-///
-/// Graph completion is the trigger the design names, and this is it for
-/// `/workflow`: the run's `events.jsonl` becomes a topology trace and a single
-/// batched fold writes `.archon/topology.db` plus one `learning_events`
-/// summary row; then the learning bridge writes the run's record stream and
-/// routes it by the spec's `learning_hooks` into `LearningIntegration`.
-///
-/// Runs on `spawn_blocking` because every part is synchronous and the Cozo
-/// write guard's retry loop sleeps on `thread::sleep` — roughly 19 seconds
-/// worst case, which on a tokio worker is a runtime stall.
-///
-/// Entirely best-effort: a failure to record must never change what the user's
-/// run reports.
-async fn fold_run_topology(cwd: &Path, store: &WorkflowStore, run_id: &str, task: &str) {
-    let cwd = cwd.to_path_buf();
-    let store = store.clone();
-    let run_id = run_id.to_string();
-    let task = task.to_string();
-    let _ = tokio::task::spawn_blocking(move || {
-        crate::command::topology_trace::project_workflow_run(&cwd, &store, &run_id);
-        crate::command::topology_fold::fold_project_pending_blocking(
-            &cwd, &run_id, &task, "default",
-        );
-        crate::command::topology_fold::bridge_workflow_learning(&cwd, &store, &run_id);
-    })
-    .await;
 }
 
 pub(crate) async fn resume_generated_v2_workflow(
@@ -133,6 +113,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<Option<String>> {
     let run = store.load_state(run_id)?;
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
@@ -174,7 +155,7 @@ pub(crate) async fn resume_generated_v2_workflow(
         true,
     )
     .await;
-    fold_run_topology(cwd, store, &run_id, &task).await;
+    fold_run_topology(cwd, store, &run_id, &task, learning).await;
     result.map(Some)
 }
 
@@ -267,6 +248,7 @@ pub(super) fn save_generated_v2_metadata(
             .task_universe
             .as_ref()
             .map(|_| plan.generated_config.clone()),
+        tuning_decisions: plan.tuning_decisions.clone(),
         // Only task-universe runs can enter the authored-script lifecycle.
         script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
     };

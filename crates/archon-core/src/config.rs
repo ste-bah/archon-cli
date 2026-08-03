@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+mod generated_tuning;
 mod interfaces;
 mod io;
 mod learning;
@@ -10,6 +11,7 @@ mod topology;
 mod validation;
 mod world_model;
 
+pub use generated_tuning::*;
 pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
