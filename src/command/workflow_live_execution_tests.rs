@@ -14,7 +14,6 @@ use archon_workflow::{
 };
 use serde_json::json;
 
-use super::workflow_live_retry::transient_live_agent_error;
 use super::workflow_live_runner::PipelineWorkflowRunner;
 use super::workflow_live_test_support::{
     AlwaysInvalidItemsAgentClient, BlockedInvalidItemsAgentClient, CompletionBlockedAgentClient,
@@ -24,6 +23,7 @@ use super::workflow_live_test_support::{
     SavedV2TemplateRunClient, request, runner, standard_task_file,
 };
 use super::{LiveApprovalMode, plan_live, run_live_action};
+use archon_workflow::llm_retry::transient_live_agent_error;
 
 fn default_generated_workflow_config() -> archon_core::config::GeneratedWorkflowConfig {
     archon_core::config::GeneratedWorkflowConfig::default()

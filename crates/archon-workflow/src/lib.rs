@@ -25,6 +25,7 @@ pub mod learning;
 pub mod lifecycle;
 pub mod lifecycle_host_port;
 pub mod llm_client_port;
+pub mod llm_retry;
 pub mod lower_workflow;
 mod persistence;
 pub mod planner;
