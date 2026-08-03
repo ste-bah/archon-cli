@@ -32,7 +32,7 @@ use archon_pipeline::learning::trajectory_store;
 use archon_workflow::{WorkflowStore, WorkflowV2ResultStore};
 
 use super::{load_shape_observations, sona_tuning_enabled};
-use crate::command::workflow_live_sona_tuning::learning_store_path;
+use crate::command::sona_workflow_tuning::learning_store_path;
 
 /// Neutral pressure: evidence that the fan-out was observed, with no opinion on
 /// its width. `calculate_gradient` subtracts 0.5, so this moves no weight.
@@ -205,5 +205,5 @@ fn is_contention_error(error: Option<&str>) -> bool {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_shape_tuning_outcome_tests.rs"]
+#[path = "sona_workflow_shape_tuning_outcome_tests.rs"]
 mod tests;

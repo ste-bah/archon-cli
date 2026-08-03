@@ -38,6 +38,7 @@ pub mod stage;
 pub mod store;
 pub mod template;
 pub mod tui_events;
+pub mod ui_sink_port;
 pub mod v2;
 pub mod web_api;
 mod work_unit_coverage;
@@ -82,6 +83,10 @@ pub use spec::{ProviderTier, ReducerKind, RetryPolicy, StageKind, StageSpec, Wor
 pub use store::WorkflowStore;
 pub use template::{
     SavedWorkflowCommand, SavedWorkflowTemplate, TemplateRegistry, WorkflowCommandRegistry,
+};
+pub use ui_sink_port::{
+    SharedWorkflowUiSink, WorkflowActivityStatus, WorkflowActivityUpdate, WorkflowUiDeliveryError,
+    WorkflowUiEvent, WorkflowUiResult, WorkflowUiSink,
 };
 pub use v2::{
     BranchFailureKind, PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2AgentAdapter,

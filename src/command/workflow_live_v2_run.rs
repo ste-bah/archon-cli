@@ -10,7 +10,7 @@ pub(crate) async fn run_generated_v2_workflow(
     plan: WorkflowScriptPlan,
     task: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
@@ -23,7 +23,7 @@ pub(crate) async fn run_generated_v2_workflow(
         plan,
         task,
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         approval_mode,
         workspace_boundary_supported,
@@ -40,7 +40,7 @@ pub(crate) async fn run_saved_v2_workflow(
     plan: WorkflowScriptPlan,
     task: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
@@ -52,7 +52,7 @@ pub(crate) async fn run_saved_v2_workflow(
         plan,
         task,
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         approval_mode,
         workspace_boundary_supported,
@@ -70,7 +70,7 @@ async fn run_v2_workflow_with_origin(
     plan: WorkflowScriptPlan,
     task: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
@@ -81,7 +81,7 @@ async fn run_v2_workflow_with_origin(
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => *run,
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
             return Ok(message);
@@ -94,7 +94,7 @@ async fn run_v2_workflow_with_origin(
         plan,
         task.clone(),
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         workspace_boundary_supported,
         false,
@@ -109,7 +109,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     store: &WorkflowStore,
     run_id: &str,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
@@ -129,7 +129,7 @@ pub(crate) async fn resume_generated_v2_workflow(
             run.id
         )));
     }
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => {
             if matches!(run.status, RunStatus::Paused | RunStatus::Cancelled) {
                 LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Resume)?
@@ -149,7 +149,7 @@ pub(crate) async fn resume_generated_v2_workflow(
         plan,
         task.clone(),
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         workspace_boundary_supported,
         true,
@@ -289,7 +289,7 @@ async fn execute_generated_v2_run(
     plan: WorkflowScriptPlan,
     task: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     workspace_boundary_supported: bool,
     adopt_accepted_cache: bool,
@@ -306,7 +306,7 @@ async fn execute_generated_v2_run(
         .await;
     let client = LiveV2AgentClient::new(
         llm,
-        tui_tx.clone(),
+        ui_sink.clone(),
         agent_names,
         run.id.clone(),
         runtime.target_repository_root.clone(),

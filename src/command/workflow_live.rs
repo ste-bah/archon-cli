@@ -2,16 +2,15 @@ use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
 use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
-use archon_tui::app::TuiEvent;
-use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowLlmClient,
+    CommandAction, RunStatus, SharedWorkflowUiSink, StageStatus, WorkflowConfig, WorkflowLlmClient,
     WorkflowLlmClientFactory, WorkflowLlmClientRequest, WorkflowPolicy, WorkflowRun,
-    WorkflowStageRunner, WorkflowStore,
+    WorkflowStageRunner, WorkflowStore, WorkflowUiEvent,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
@@ -121,12 +120,12 @@ pub(crate) fn spawn_live_workflow(
     cwd: PathBuf,
     action: CommandAction,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     config_path: Option<PathBuf>,
 ) {
     archon_observability::spawn_named("dynamic-workflow-run", async move {
-        if let Err(error) = tui_tx
-            .send_async(TuiEvent::TextDelta(live_start_message(&action)))
+        if let Err(error) = ui_sink
+            .emit(WorkflowUiEvent::Text(live_start_message(&action)))
             .await
         {
             tracing::error!(%error, "workflow start notification delivery failed");
@@ -137,7 +136,7 @@ pub(crate) fn spawn_live_workflow(
             &cwd,
             action,
             llm,
-            tui_tx.clone(),
+            ui_sink.clone(),
             config_path,
             generated_config,
             true,
@@ -146,20 +145,20 @@ pub(crate) fn spawn_live_workflow(
         .await;
         match result {
             Ok(text) => {
-                if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(text)).await {
+                if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(text)).await {
                     tracing::error!(%error, "workflow completion notification delivery failed");
                 }
             }
             Err(err) => {
                 let message = format!("Workflow failed: {err}");
-                if let Err(error) = tui_tx
-                    .send_async(TuiEvent::TextDelta(format!("{message}\n")))
+                if let Err(error) = ui_sink
+                    .emit(WorkflowUiEvent::Text(format!("{message}\n")))
                     .await
                 {
                     tracing::error!(%error, "workflow failure text delivery failed");
                     return;
                 }
-                if let Err(error) = tui_tx.send_async(TuiEvent::Error(message)).await {
+                if let Err(error) = ui_sink.emit(WorkflowUiEvent::Error(message)).await {
                     tracing::error!(%error, "workflow failure notification delivery failed");
                 }
             }
@@ -181,7 +180,13 @@ pub(crate) async fn run_live_cli_action(
             session_id: "workflow-cli".to_string(),
         })
         .await?;
+    // The one place in this file that still names the TUI. A CLI run has no
+    // terminal UI attached, but it must still exert the same backpressure and
+    // coalescing a TUI run does, or the two paths would differ in exactly the
+    // conditions that produce bugs. So the CLI builds the real channel and
+    // drains it, and passes the sender through the same port a TUI run uses.
     let (tui_tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
+    let ui_sink = TuiWorkflowUiSink::arc(tui_tx);
     let drain = archon_observability::spawn_named("workflow-cli-tui-drain", async move {
         while rx.recv().await.is_some() {}
     });
@@ -194,7 +199,7 @@ pub(crate) async fn run_live_cli_action(
         cwd,
         action,
         llm,
-        tui_tx,
+        ui_sink,
         Some(config_path),
         config.workflow.generated.clone(),
         true,
@@ -224,7 +229,7 @@ async fn run_live_action(
     cwd: &Path,
     action: CommandAction,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     config_path: Option<PathBuf>,
     generated_config: GeneratedWorkflowConfig,
     workspace_boundary_supported: bool,
@@ -243,7 +248,7 @@ async fn run_live_action(
     let mut generated_config = generated_config;
     let mut tuning_decisions = Vec::new();
     if let Some(class) = task_class {
-        let tuning = crate::command::workflow_live_sona_tuning::tune_generated_config(
+        let tuning = crate::command::sona_workflow_tuning::tune_generated_config(
             cwd,
             class,
             &learning,
@@ -258,7 +263,7 @@ async fn run_live_action(
             // got five repair iterations must be able to read the answer in the
             // run's own output rather than reconstruct it from the learning
             // store by hand.
-            if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(report)).await {
+            if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(report)).await {
                 tracing::debug!(%error, "tuning report delivery failed");
             }
         }
@@ -267,7 +272,7 @@ async fn run_live_action(
     let tuning_decisions = tuning_decisions;
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
-        tui_tx: tui_tx.clone(),
+        ui_sink: ui_sink.clone(),
         agent_names: AgentRegistry::load(cwd)
             .available_agent_names()
             .into_iter()
@@ -277,7 +282,7 @@ async fn run_live_action(
     };
     let capped_live_plan = |task: &str| {
         let llm = llm.clone();
-        let tui_tx = tui_tx.clone();
+        let ui_sink = ui_sink.clone();
         let task = task.to_string();
         let store = &store;
         let runner = &runner;
@@ -290,7 +295,7 @@ async fn run_live_action(
                 store,
                 &task,
                 llm,
-                tui_tx.clone(),
+                ui_sink.clone(),
                 generated_config,
                 learning,
             )
@@ -305,7 +310,7 @@ async fn run_live_action(
             // declared task graph, and neither exists until the planner has
             // run. Budgets have no such dependency, which is why they are
             // resolved earlier and reach the planner itself.
-            apply_generated_shape(cwd, task_class, learning, &mut plan, &tui_tx).await;
+            apply_generated_shape(cwd, task_class, learning, &mut plan, &ui_sink).await;
             Ok::<_, anyhow::Error>(plan)
         }
     };
@@ -323,7 +328,7 @@ async fn run_live_action(
                 plan,
                 task,
                 llm,
-                tui_tx,
+                ui_sink,
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
@@ -360,7 +365,7 @@ async fn run_live_action(
                 plan,
                 task,
                 llm,
-                tui_tx,
+                ui_sink,
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
@@ -374,7 +379,7 @@ async fn run_live_action(
                 &store,
                 &run_id,
                 llm.clone(),
-                tui_tx.clone(),
+                ui_sink.clone(),
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,

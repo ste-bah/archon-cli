@@ -137,7 +137,7 @@ fn assert_canary_output(output: &str, script: &CanaryAgentClient) -> usize {
 }
 
 async fn run_canary() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     let learning_db_path = root.join(".archon").join("learning-state.db");
@@ -163,7 +163,7 @@ async fn run_canary() {
             decomposed: true,
         },
         harness.client,
-        tui_tx,
+        ui_sink,
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         true,

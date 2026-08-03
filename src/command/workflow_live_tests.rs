@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_tui::event_channel::bounded_tui_event_channel_with_capacity;
+use crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink;
 use archon_workflow::{
     CommandAction, RunStatus, StageKind, StageRunRequest, StageStatus, WorkflowRun, WorkflowSpec,
     WriteBoundaryProbe,
@@ -16,65 +16,8 @@ use super::workflow_live_runner::{
 use super::workflow_live_test_support::{InvalidPlanner, boundary_runner, request};
 use super::{spawn_live_workflow, terminal_resume_message};
 
-#[test]
-fn workflow_and_session_paths_do_not_ignore_tui_delivery() {
-    fn collect(path: &std::path::Path, offenders: &mut Vec<std::path::PathBuf>) {
-        if path.is_file() {
-            inspect_source(path, offenders);
-            return;
-        }
-        for entry in std::fs::read_dir(path).expect("read source directory") {
-            let path = entry.expect("read source entry").path();
-            if path.is_dir() {
-                collect(&path, offenders);
-            } else {
-                inspect_source(&path, offenders);
-            }
-        }
-    }
-
-    fn inspect_source(path: &std::path::Path, offenders: &mut Vec<std::path::PathBuf>) {
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            return;
-        };
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") || name.contains("test") {
-            return;
-        }
-        let compact: String = std::fs::read_to_string(path)
-            .expect("read source")
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect();
-        let ignores_tui_delivery = compact.split(';').any(|statement| {
-            statement.contains("let_=")
-                && (statement.contains(".send(TuiEvent")
-                    || statement.contains(".send(archon_tui::app::TuiEvent"))
-        });
-        if ignores_tui_delivery {
-            offenders.push(path.to_path_buf());
-        }
-    }
-
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut offenders = Vec::new();
-    collect(&root.join("session"), &mut offenders);
-    collect(&root.join("session_loop"), &mut offenders);
-    for entry in std::fs::read_dir(root.join("command")).expect("read command directory") {
-        let path = entry.expect("read command entry").path();
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("workflow_live") && !name.contains("test"))
-        {
-            collect(&path, &mut offenders);
-        }
-    }
-
-    assert!(
-        offenders.is_empty(),
-        "production paths ignore bounded TUI delivery: {offenders:?}"
-    );
-}
+#[path = "workflow_live_delivery_lint_tests.rs"]
+mod delivery_lint;
 
 #[tokio::test]
 async fn closed_tui_prevents_workflow_planner_launch() {
@@ -84,7 +27,7 @@ async fn closed_tui_prevents_workflow_planner_launch() {
             calls: std::sync::atomic::AtomicUsize::new(0),
         },
     );
-    let (tui_tx, rx) = bounded_tui_event_channel_with_capacity(1);
+    let (ui_sink, rx) = bounded_workflow_ui_sink(1);
     drop(rx);
 
     spawn_live_workflow(
@@ -93,7 +36,7 @@ async fn closed_tui_prevents_workflow_planner_launch() {
             task: "must not launch".into(),
         },
         planner.clone(),
-        tui_tx,
+        ui_sink,
         None,
     );
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

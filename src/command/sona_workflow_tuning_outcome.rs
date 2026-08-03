@@ -260,5 +260,5 @@ fn is_investigation_call(call_id: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_sona_tuning_outcome_tests.rs"]
+#[path = "sona_workflow_tuning_outcome_tests.rs"]
 mod tests;

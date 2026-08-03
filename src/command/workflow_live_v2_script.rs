@@ -1,13 +1,12 @@
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use archon_tui::app::TuiEvent;
 use archon_workflow::{
-    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowV2AgentAdapter,
-    WorkflowV2ArtifactRequirement, WorkflowV2CallExecution, WorkflowV2CallRecord,
-    WorkflowV2Checkpoint, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
+    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowUiEvent,
+    WorkflowV2AgentAdapter, WorkflowV2ArtifactRequirement, WorkflowV2CallExecution,
+    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2Evidence, WorkflowV2EvidenceKind,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2ResidualGap,
+    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
     WorkflowV2TaskCoverageStatus, WorkflowV2WriteMode, workflow_scaffold_hash,
 };
 use rquickjs::function::{Async, Func};

@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
 use archon_tools::provider_env::ProviderEnvResolution;
-use archon_tui::app::TuiEvent;
-use archon_tui::event_channel::TuiEventSender;
-use archon_tui::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use archon_workflow::{
-    ProviderTier, StageKind, StageRunRequest, WorkflowAgentCall, WorkflowLlmClient,
-    WorkflowProviderEnv, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
+    ProviderTier, SharedWorkflowUiSink, StageKind, StageRunRequest, WorkflowActivityStatus,
+    WorkflowActivityUpdate, WorkflowAgentCall, WorkflowLlmClient, WorkflowProviderEnv,
+    WorkflowUiEvent, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
     WorkflowV2HostMethod, WorkflowV2WriteMode,
 };
 
@@ -22,7 +20,7 @@ use super::super::workflow_live_runner_activity::activity_detail;
 #[derive(Clone)]
 pub(super) struct LiveV2AgentClient {
     llm: Arc<dyn WorkflowLlmClient>,
-    pub(super) tui_tx: TuiEventSender,
+    pub(super) ui_sink: SharedWorkflowUiSink,
     provider_tier: ProviderTier,
     agent_names: Vec<String>,
     run_id: String,
@@ -34,7 +32,7 @@ pub(super) struct LiveV2AgentClient {
 impl LiveV2AgentClient {
     pub(super) fn new(
         llm: Arc<dyn WorkflowLlmClient>,
-        tui_tx: TuiEventSender,
+        ui_sink: SharedWorkflowUiSink,
         agent_names: Vec<String>,
         run_id: String,
         target_repository_root: Option<String>,
@@ -42,7 +40,7 @@ impl LiveV2AgentClient {
     ) -> Self {
         Self {
             llm,
-            tui_tx,
+            ui_sink,
             provider_tier: ProviderTier::Researcher,
             agent_names,
             run_id,
@@ -67,7 +65,7 @@ impl LiveV2AgentClient {
     pub(super) fn with_provider_tier(&self, provider_tier: ProviderTier) -> Self {
         Self {
             llm: self.llm.clone(),
-            tui_tx: self.tui_tx.clone(),
+            ui_sink: self.ui_sink.clone(),
             provider_tier,
             agent_names: self.agent_names.clone(),
             run_id: self.run_id.clone(),
@@ -80,7 +78,7 @@ impl LiveV2AgentClient {
     pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>) -> Self {
         Self {
             llm: self.llm.clone(),
-            tui_tx: self.tui_tx.clone(),
+            ui_sink: self.ui_sink.clone(),
             provider_tier: self.provider_tier,
             agent_names: self.agent_names.clone(),
             run_id: self.run_id.clone(),
@@ -103,22 +101,17 @@ impl LiveV2AgentClient {
         agent_name: &str,
         provider_id: &str,
         model: &str,
-        status: AgentActivityStatus,
+        status: WorkflowActivityStatus,
         detail: &str,
-    ) -> TuiEvent {
-        TuiEvent::AgentActivity(AgentActivityUpdate {
+    ) -> WorkflowUiEvent {
+        WorkflowUiEvent::Activity(WorkflowActivityUpdate {
             id: format!("workflow:{}:{}", request.run_id, request.stage_id),
             name: agent_name.to_string(),
-            role: AgentActivityRole::Subagent,
             status,
-            current_tool: None,
             detail: Some(activity_detail(request, detail)),
             run_id: Some(request.run_id.clone()),
-            parent_id: None,
-            artifact_id: None,
             provider: Some(provider_id.to_string()),
             model: Some(model.to_string()),
-            cost_usd: None,
         })
     }
 
@@ -128,11 +121,11 @@ impl LiveV2AgentClient {
         agent_name: &str,
         provider_id: &str,
         model: &str,
-        status: AgentActivityStatus,
+        status: WorkflowActivityStatus,
         detail: &str,
     ) -> std::result::Result<(), WorkflowV2AgentError> {
-        self.tui_tx
-            .send_async(Self::activity_event(
+        self.ui_sink
+            .emit(Self::activity_event(
                 request,
                 agent_name,
                 provider_id,
@@ -156,7 +149,7 @@ impl LiveV2AgentClient {
 /// "narrowing" could be reported against a number the runtime never used. Two
 /// copies of this resolution is how that happens, so there is one.
 fn live_v2_subagent_max_concurrency() -> Option<usize> {
-    crate::command::workflow_live_shape_tuning::resolved_subagent_cap()
+    crate::command::sona_workflow_shape_tuning::resolved_subagent_cap()
 }
 
 fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {
@@ -192,7 +185,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             &agent_name,
             &provider_id,
             &resolved_model,
-            AgentActivityStatus::Running,
+            WorkflowActivityStatus::Running,
             "v2 call running",
         )
         .await?;
@@ -245,7 +238,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
                             &agent_name,
                             &provider_id,
                             &resolved_model,
-                            AgentActivityStatus::Running,
+                            WorkflowActivityStatus::Running,
                             &format!(
                                 "v2 call retrying after transient provider error ({attempt}/3)"
                             ),
@@ -270,7 +263,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
                     &agent_name,
                     &provider_id,
                     &resolved_model,
-                    AgentActivityStatus::Failed,
+                    WorkflowActivityStatus::Failed,
                     "v2 call failed",
                 )
                 .await?;
@@ -285,7 +278,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             &agent_name,
             &provider_id,
             &resolved_model,
-            AgentActivityStatus::Complete,
+            WorkflowActivityStatus::Complete,
             "v2 call complete",
         )
         .await?;

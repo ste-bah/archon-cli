@@ -7,9 +7,7 @@
 
 use std::path::Path;
 
-use archon_tui::app::TuiEvent;
-use archon_tui::event_channel::TuiEventSender;
-use archon_workflow::CommandAction;
+use archon_workflow::{CommandAction, SharedWorkflowUiSink, WorkflowUiEvent};
 
 use super::workflow_live_planner::WorkflowScriptPlan;
 
@@ -28,7 +26,7 @@ pub(super) fn live_task_class(action: &CommandAction) -> Option<&'static str> {
         CommandAction::Plan { task } | CommandAction::Run { task, .. } => task,
         _ => return None,
     };
-    Some(crate::command::workflow_live_learning_hooks::classify_generated_run(task, None).as_str())
+    Some(crate::command::learning_workflow_hooks::classify_generated_run(task, None).as_str())
 }
 
 /// Resolve this run's learned plan *shape* and attach it to the plan.
@@ -47,13 +45,13 @@ pub(super) async fn apply_generated_shape(
     class: Option<&str>,
     learning: &archon_core::config::LearningConfig,
     plan: &mut WorkflowScriptPlan,
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
 ) {
     let (Some(class), Some(universe)) = (class, plan.task_universe.as_ref()) else {
         return;
     };
-    let tasks_root = crate::command::workflow_live_shape_tuning::tasks_root_of(universe);
-    let shape = crate::command::workflow_live_shape_tuning::tune_generated_shape(
+    let tasks_root = crate::command::sona_workflow_shape_tuning::tasks_root_of(universe);
+    let shape = crate::command::sona_workflow_shape_tuning::tune_generated_shape(
         cwd,
         class,
         learning,
@@ -71,7 +69,7 @@ pub(super) async fn apply_generated_shape(
         return;
     }
     tracing::info!(class, %report, "generated shape tuned by SONA");
-    if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(report)).await {
+    if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(report)).await {
         tracing::debug!(%error, "shape report delivery failed");
     }
 }

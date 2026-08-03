@@ -164,6 +164,6 @@ fn the_shape_tuner_can_only_move_how_work_is_distributed() {
         "the shape knob set changed; every entry must be a distribution knob whose dangerous \
          direction is already closed by a shipped clamp. A knob that could move a stage, \
          remove a reviewer, or decide acceptance does not belong in this set — see \
-         workflow_live_shape_gate for what a structural knob has to prove before it runs"
+         sona_workflow_shape_gate for what a structural knob has to prove before it runs"
     );
 }

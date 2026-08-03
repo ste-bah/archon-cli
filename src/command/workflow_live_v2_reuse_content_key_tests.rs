@@ -22,13 +22,13 @@ pub(super) fn reuse_test_runner(
     script_args: serde_json::Value,
     universe: Option<WorkflowV2TaskUniverse>,
 ) -> WorkflowV2ScriptRunner {
-    let (tui_tx, tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = default_workflow_ui_sink();
     // The TUI receiver must outlive the run: a closed channel aborts every
     // host call before it can reuse or execute.
     std::mem::forget(tui_rx);
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,

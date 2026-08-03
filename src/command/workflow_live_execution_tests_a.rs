@@ -2,14 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let err = plan_live(
         &store,
         "implement the whole PRD",
         Arc::new(InvalidPlanner),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
         &archon_core::config::LearningConfig::default(),
     )
@@ -41,8 +41,7 @@ async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
         repair_started: tokio::sync::Notify::new(),
         release_repair: tokio::sync::Notify::new(),
     });
-    let (tui_tx, mut tui_rx) =
-        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(8);
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(8);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::project(temp.path());
     let run_planner = planner.clone();
@@ -51,7 +50,7 @@ async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
             &store,
             "Inspect the repository",
             run_planner,
-            tui_tx,
+            ui_sink,
             &default_generated_workflow_config(),
             &archon_core::config::LearningConfig::default(),
         )
@@ -93,7 +92,7 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
 
 #[tokio::test]
 async fn live_planner_retries_transient_stream_server_errors() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let planner = Arc::new(FlakyPlanner {
@@ -105,7 +104,7 @@ async fn live_planner_retries_transient_stream_server_errors() {
         &store,
         "inspect the repository",
         planner.clone(),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
         &archon_core::config::LearningConfig::default(),
     )
@@ -119,7 +118,7 @@ async fn live_planner_retries_transient_stream_server_errors() {
 
 #[tokio::test]
 async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
@@ -146,7 +145,7 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
             temp.path().display()
         ),
         planner.clone(),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
         &archon_core::config::LearningConfig::default(),
     )
@@ -230,7 +229,7 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
 
 #[tokio::test]
 async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_runs() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
@@ -286,7 +285,7 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
             temp.path().display()
         ),
         planner,
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
         &archon_core::config::LearningConfig::default(),
     )

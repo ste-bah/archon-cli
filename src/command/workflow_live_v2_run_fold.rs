@@ -50,9 +50,8 @@ pub(super) async fn fold_run_topology(
         // `classify_generated_run` the read side used — a run whose outcome
         // were filed under a different class than the weight it consumed would
         // never converge on anything.
-        let class =
-            crate::command::workflow_live_learning_hooks::classify_generated_run(&task, None);
-        crate::command::workflow_live_sona_tuning::record_generated_tuning_outcome(
+        let class = crate::command::learning_workflow_hooks::classify_generated_run(&task, None);
+        crate::command::sona_workflow_tuning::record_generated_tuning_outcome(
             &cwd,
             &store,
             &run_id,
@@ -66,7 +65,7 @@ pub(super) async fn fold_run_topology(
         // write wave says nothing about width while still saying plenty about
         // timeouts, and merging them would let one supply the other's
         // observation count.
-        crate::command::workflow_live_shape_tuning::record_generated_shape_outcome(
+        crate::command::sona_workflow_shape_tuning::record_generated_shape_outcome(
             &cwd,
             &store,
             &run_id,

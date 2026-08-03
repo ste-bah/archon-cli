@@ -33,11 +33,11 @@ impl PlannerFailure {
 }
 
 async fn send_planner_notification(
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
     phase: &str,
-    event: TuiEvent,
+    event: WorkflowUiEvent,
 ) -> Result<()> {
-    tui_tx.send_async(event).await.map_err(|error| {
+    ui_sink.emit(event).await.map_err(|error| {
         anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(
             format!("workflow planner notification delivery failed: phase={phase}: {error}"),
         ))
@@ -48,7 +48,7 @@ pub(crate) async fn plan_live(
     store: &WorkflowStore,
     task: &str,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: TuiEventSender,
+    ui_sink: SharedWorkflowUiSink,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
 ) -> Result<WorkflowScriptPlan> {
@@ -57,9 +57,9 @@ pub(crate) async fn plan_live(
         let target_repository_root = infer_target_repository_root(task, Some(&task_universe));
         let governed_learning_context = recent_generated_learning_context(store, 8);
         send_planner_notification(
-            &tui_tx,
+            &ui_sink,
             "deterministic-scaffold-start",
-            TuiEvent::TextDelta(
+            WorkflowUiEvent::Text(
                 "Workflow planner: generating deterministic decomposed-PRD workflow.js scaffold; provider output cannot alter orchestration.\n"
                     .into(),
             ),
@@ -84,9 +84,9 @@ pub(crate) async fn plan_live(
             Ok(mut plan) => {
                 plan.governed_learning_context = governed_learning_context;
                 send_planner_notification(
-                    &tui_tx,
+                    &ui_sink,
                     "deterministic-scaffold-validated",
-                    TuiEvent::TextDelta(format!(
+                    WorkflowUiEvent::Text(format!(
                         "Workflow planner: validated deterministic V2 scaffold '{}' with {} host call(s); creating run...\n",
                         plan.name,
                         plan.calls.len()
@@ -100,9 +100,9 @@ pub(crate) async fn plan_live(
                 let attempt = planner_attempt("scaffold", 1, Some(&error), &harness);
                 let message = planner_failure_message(store, task, &error, &[attempt]);
                 send_planner_notification(
-                    &tui_tx,
+                    &ui_sink,
                     "deterministic-scaffold-failed",
-                    TuiEvent::TextDelta(format!(
+                    WorkflowUiEvent::Text(format!(
                         "Workflow planner failed deterministic scaffold validation; live mode will not fall back to provider-authored orchestration: {message}\n"
                     )),
                 )
@@ -113,20 +113,20 @@ pub(crate) async fn plan_live(
     }
 
     send_planner_notification(
-        &tui_tx,
+        &ui_sink,
         "provider-harness-start",
-        TuiEvent::TextDelta(
+        WorkflowUiEvent::Text(
             "Workflow planner: requesting workflow.js harness from active provider; no run directory exists until validation passes.\n"
                 .into(),
         ),
     )
     .await?;
-    match llm_plan(task, None, llm, &tui_tx, generated_config, learning).await {
+    match llm_plan(task, None, llm, &ui_sink, generated_config, learning).await {
         Ok(plan) => {
             send_planner_notification(
-                &tui_tx,
+                &ui_sink,
                 "provider-harness-validated",
-                TuiEvent::TextDelta(format!(
+                WorkflowUiEvent::Text(format!(
                     "Workflow planner: validated V2 harness '{}' with {} host call(s); creating run...\n",
                     plan.name,
                     plan.calls.len()
@@ -138,9 +138,9 @@ pub(crate) async fn plan_live(
         Err(failure) => {
             let message = planner_failure_message(store, task, &failure.error, &failure.attempts);
             send_planner_notification(
-                &tui_tx,
+                &ui_sink,
                 "provider-harness-failed",
-                TuiEvent::TextDelta(format!(
+                WorkflowUiEvent::Text(format!(
                     "Workflow planner failed workflow.js safety validation; live mode will not fall back to a fixed pipeline: {message}\n"
                 )),
             )
@@ -224,7 +224,7 @@ async fn llm_plan(
     task: &str,
     task_universe: Option<WorkflowV2TaskUniverse>,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
 ) -> std::result::Result<WorkflowScriptPlan, PlannerFailure> {
@@ -241,12 +241,12 @@ async fn llm_plan(
         Vec::new(),
         tier_model_alias(ProviderTier::Planner),
         |attempt| {
-            let tui_tx = tui_tx.clone();
+            let ui_sink = ui_sink.clone();
             async move {
                 send_planner_notification(
-                    &tui_tx,
+                    &ui_sink,
                     "provider-harness-retry",
-                    TuiEvent::TextDelta(format!(
+                    WorkflowUiEvent::Text(format!(
                         "Workflow planner: transient provider error; retrying harness request ({attempt}/3)...\n"
                     )),
                 )
@@ -262,7 +262,7 @@ async fn llm_plan(
         task_universe,
         raw,
         llm,
-        tui_tx,
+        ui_sink,
         generated_config,
         learning,
     )
@@ -274,7 +274,7 @@ async fn validate_or_repair_harness(
     task_universe: Option<WorkflowV2TaskUniverse>,
     raw: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
     generated_config: &GeneratedWorkflowConfig,
     learning: &LearningConfig,
 ) -> std::result::Result<WorkflowScriptPlan, PlannerFailure> {
@@ -310,9 +310,9 @@ async fn validate_or_repair_harness(
         }
         let repair_number = attempt + 1;
         send_planner_notification(
-            tui_tx,
+            ui_sink,
             "provider-harness-validation-repair",
-            TuiEvent::TextDelta(format!(
+            WorkflowUiEvent::Text(format!(
                 "Workflow planner: generated harness failed validation ({err}); requesting repaired harness ({repair_number}/{MAX_REPAIRS})...\n"
             )),
         )
@@ -324,7 +324,7 @@ async fn validate_or_repair_harness(
             &harness,
             error,
             llm.clone(),
-            tui_tx,
+            ui_sink,
         )
         .await
         .map_err(|err| PlannerFailure::with_attempts(err.to_string(), attempts.clone()))?;
@@ -391,7 +391,7 @@ async fn request_repaired_harness(
     invalid_harness: &str,
     error: String,
     llm: Arc<dyn WorkflowLlmClient>,
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
 ) -> Result<String> {
     let response = workflow_live_retry::send_message_with_transient_retry(
         &llm,
@@ -406,12 +406,12 @@ async fn request_repaired_harness(
         Vec::new(),
         tier_model_alias(ProviderTier::Planner),
         |attempt| {
-            let tui_tx = tui_tx.clone();
+            let ui_sink = ui_sink.clone();
             async move {
                 send_planner_notification(
-                    &tui_tx,
+                    &ui_sink,
                     "provider-harness-repair-retry",
-                    TuiEvent::TextDelta(format!(
+                    WorkflowUiEvent::Text(format!(
                         "Workflow planner: transient provider error; retrying repaired harness request ({attempt}/3)...\n"
                     )),
                 )

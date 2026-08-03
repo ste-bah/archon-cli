@@ -97,6 +97,13 @@ pub(crate) mod kb_reprocess;
 pub(crate) mod kb_url;
 pub(crate) mod learning;
 pub(crate) mod learning_status;
+/// What a generated workflow run feeds back to the learning stack, derived
+/// from the run's own content by `archon_topology::classify_task`.
+///
+/// Named outside the `workflow*` prefix for the reason
+/// `sona_workflow_tuning` is: `archon-topology` depends on `archon-workflow`,
+/// so nothing destined for that crate may name it back.
+pub(crate) mod learning_workflow_hooks;
 pub(crate) mod login;
 pub(crate) mod logout;
 // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.
@@ -181,6 +188,18 @@ pub(crate) mod session;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
 pub(crate) mod skills;
 pub(crate) mod slash;
+/// The SONA learning loop over a generated workflow run: the budget tuner, the
+/// shape tuner, and the pre-run topology lint that admits a shape proposal.
+///
+/// Named outside the `workflow*` prefix on purpose. These read and write the
+/// Cozo learning store through `archon_pipeline::learning` and
+/// `topology_fold::open_store`, none of which `archon-workflow` may reach; the
+/// prefix is reserved for files destined for that crate, so keeping these out
+/// of it makes the boundary a one-line grep rather than a convention. The same
+/// reason `pipeline_workflow_llm` is not called `workflow_pipeline_llm`.
+pub(crate) mod sona_workflow_shape_gate;
+pub(crate) mod sona_workflow_shape_tuning;
+pub(crate) mod sona_workflow_tuning;
 pub(crate) mod status;
 pub(crate) mod store_paths;
 pub(crate) mod style;
@@ -203,6 +222,11 @@ pub(crate) mod topology_fold;
 /// Read-only and non-blocking by construction — it loads a graph, runs pure
 /// analyses, and prints. It never writes and never fails a run.
 pub(crate) mod topology_lint;
+/// Lowering a decomposed-PRD task directory into the topology IR, for the
+/// lints and the shape gate that score one. Named outside the `workflow*`
+/// prefix because it names `archon_topology`, and `archon-topology` depends on
+/// `archon-workflow`.
+pub(crate) mod topology_task_graph;
 /// Milestone 2 topology: the ambient trace recorder. Hot path, file-only,
 /// never touches a database.
 pub(crate) mod topology_trace;
@@ -238,6 +262,7 @@ pub mod test_support;
 pub(crate) mod theme;
 pub(crate) mod thinking;
 pub(crate) mod tui_helpers;
+pub(crate) mod tui_workflow_ui_sink;
 pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;
@@ -248,11 +273,11 @@ pub(crate) mod voice;
 pub(crate) mod web;
 pub(crate) mod web_chat;
 pub(crate) mod workflow;
+/// What `src/command/workflow*.rs` may name, pinned as a scan rather than a
+/// convention.
+#[cfg(test)]
+pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_live;
-pub(crate) mod workflow_live_learning_hooks;
-pub(crate) mod workflow_live_shape_gate;
-pub(crate) mod workflow_live_shape_tuning;
-pub(crate) mod workflow_live_sona_tuning;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 

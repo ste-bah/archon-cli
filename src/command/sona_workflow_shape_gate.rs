@@ -202,7 +202,7 @@ fn widest_declared_wave(tasks_root: Option<&Path>) -> Option<u32> {
 
 fn declared_graph(tasks_root: Option<&Path>) -> Option<TaskGraph> {
     let root = tasks_root?;
-    crate::command::workflow_live::workflow_live_task_universe::task_graph_from_root(root).ok()
+    crate::command::topology_task_graph::task_graph_from_root(root).ok()
 }
 
 /// Stage families whose loss would mean the run can no longer fail honestly.
@@ -319,5 +319,5 @@ fn role_for(method: WorkflowV2HostMethod) -> NodeRole {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_shape_gate_tests.rs"]
+#[path = "sona_workflow_shape_gate_tests.rs"]
 mod tests;

@@ -2,13 +2,13 @@
 //!
 //! # What this extends, and what it deliberately does not
 //!
-//! Phase 7 (`workflow_live_sona_tuning`) tunes four scalars inside a fixed
+//! Phase 7 (`sona_workflow_tuning`) tunes four scalars inside a fixed
 //! topology. This module is the first knob that changes the topology itself:
 //! how wide the implementation fan-out dispatches. It is a *variation within
 //! the proven plan*, not a rival plan — every setting runs the same 63 stage
 //! families, the same `blocked-*` terminals, the same repair loops, noop-proof
 //! verification, evidence reconciliation, deadlock detection and final zero-gap
-//! audit, because the knob cannot reach any of them. `workflow_live_shape_gate`
+//! audit, because the knob cannot reach any of them. `sona_workflow_shape_gate`
 //! proves that rather than assuming it.
 //!
 //! There is no motif library here and there must not be one. A rival plan would
@@ -26,7 +26,7 @@
 //!
 //! Phase 6, exactly as Phase 7 must not: nothing in `archon-knowledge` or
 //! `requirement_trace*` may read a learned weight, and
-//! `workflow_live_sona_tuning_isolation_tests.rs` fails the build if one starts
+//! `sona_workflow_tuning_isolation_tests.rs` fails the build if one starts
 //! to. This module is additionally fenced in the other direction: it may only
 //! change how work is *distributed*, never how long it may run, never how many
 //! times it may retry, and never whether it is accepted.
@@ -40,15 +40,15 @@ use archon_pipeline::learning::sona::{SonaParameterTuner, TuningObservation};
 use archon_pipeline::learning::trajectory_store;
 use archon_workflow::WorkflowV2HostCall;
 
-use crate::command::workflow_live_shape_gate::{self, GateOutcome};
-use crate::command::workflow_live_sona_tuning::{learning_store_path, sona_tuning_enabled};
+use crate::command::sona_workflow_shape_gate::{self, GateOutcome};
+use crate::command::sona_workflow_tuning::{learning_store_path, sona_tuning_enabled};
 
-#[path = "workflow_live_shape_tuning_outcome.rs"]
-mod workflow_live_shape_tuning_outcome;
-pub(crate) use workflow_live_shape_tuning_outcome::record_generated_shape_outcome;
+#[path = "sona_workflow_shape_tuning_outcome.rs"]
+mod sona_workflow_shape_tuning_outcome;
+pub(crate) use sona_workflow_shape_tuning_outcome::record_generated_shape_outcome;
 
 #[cfg(test)]
-#[path = "workflow_live_shape_tuning_tests.rs"]
+#[path = "sona_workflow_shape_tuning_tests.rs"]
 mod tests;
 
 /// The concurrency ceiling every fan-out in a live V2 run is clamped to.
@@ -194,7 +194,7 @@ pub(crate) fn tune_generated_shape(
     let mut decision = decide_fanout_width(u32::try_from(cap).unwrap_or(u32::MAX), Some(&input));
 
     if let GateOutcome::Refused(reason) =
-        workflow_live_shape_gate::admit(&mut decision, plan_calls, tasks_root)
+        sona_workflow_shape_gate::admit(&mut decision, plan_calls, tasks_root)
     {
         tracing::warn!(
             class,

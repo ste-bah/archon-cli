@@ -74,10 +74,10 @@ fn request(
 #[tokio::test]
 async fn generated_v2_request_keeps_stable_prompt_in_system_context() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -366,11 +366,11 @@ fn read_only_fanout_parallelism_uses_default_subagent_cap_when_executor_missing(
 #[tokio::test]
 async fn closed_tui_prevents_v2_agent_launch() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     drop(tui_rx);
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -391,10 +391,10 @@ async fn closed_tui_prevents_v2_agent_launch() {
 #[tokio::test]
 async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -439,10 +439,10 @@ async fn d47_one_run_uses_identical_provider_presence_for_subagents_and_final_ga
     let resolution = archon_tools::provider_env::resolve_provider_env(&policy).await;
     let expected_proof = resolution.proof.clone();
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-provider-invariant".to_string(),
         Some("/repo".to_string()),

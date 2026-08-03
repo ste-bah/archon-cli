@@ -56,10 +56,10 @@ fn request() -> WorkflowV2AgentRequest {
 #[tokio::test]
 async fn closed_tui_prevents_v2_success_publication() {
     let recorder = Arc::new(CompletionBlockedClient::default());
-    let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),

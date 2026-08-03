@@ -1,6 +1,8 @@
 use super::*;
 use archon_workflow::WorkflowAgentCall;
 
+use crate::command::tui_workflow_ui_sink::{default_workflow_ui_sink_parts, try_fill_one};
+
 #[tokio::test]
 async fn closed_tui_prevents_cached_script_host_call_reuse() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -13,10 +15,10 @@ async function workflow(w) {
   await w.checkpoint("cached-call");
 }
 "#;
-    let (initial_tui_tx, _initial_tui_rx) = bounded_tui_event_channel();
+    let (initial_ui_sink, _initial_tui_rx) = default_workflow_ui_sink();
     let initial_client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        initial_tui_tx,
+        initial_ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -44,11 +46,11 @@ async function workflow(w) {
         .save_checkpoint(&checkpoint)
         .expect("reset checkpoint");
 
-    let (closed_tui_tx, closed_tui_rx) = bounded_tui_event_channel();
+    let (closed_ui_sink, closed_tui_rx) = default_workflow_ui_sink();
     drop(closed_tui_rx);
     let closed_client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        closed_tui_tx,
+        closed_ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -94,10 +96,10 @@ async fn closed_tui_prevents_script_host_provider_result_persistence() {
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let provider = Arc::new(CompletionBlockedScriptLlm::default());
-    let (tui_tx, tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         provider.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -160,10 +162,10 @@ async fn closed_tui_during_provider_repair_prevents_script_host_persistence() {
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let provider = Arc::new(RepairBlockedScriptLlm::default());
-    let (tui_tx, tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         provider.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -224,11 +226,10 @@ async fn full_tui_during_provider_retry_waits_before_retrying() {
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let provider = Arc::new(TransientBlockedScriptLlm::default());
-    let (tui_tx, mut tui_rx) = bounded_tui_event_channel();
-    let fill_tx = tui_tx.clone();
+    let (ui_sink, fill_tx, mut tui_rx) = default_workflow_ui_sink_parts();
     let client = LiveV2AgentClient::new(
         provider.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -260,7 +261,7 @@ async function workflow(w) {
 
     provider.started.notified().await;
     let _running = tui_rx.recv().await.expect("initial running activity");
-    while fill_tx.send(TuiEvent::GenerationStarted).is_ok() {}
+    while try_fill_one(&fill_tx) {}
     provider.release.notify_one();
     tokio::time::sleep(Duration::from_millis(25)).await;
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);

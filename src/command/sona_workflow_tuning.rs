@@ -13,7 +13,7 @@
 //! # Keying
 //!
 //! One weight per `(task class, parameter)`. The class comes from
-//! [`crate::command::workflow_live_learning_hooks::classify_generated_run`],
+//! [`crate::command::learning_workflow_hooks::classify_generated_run`],
 //! the same classification that already decides the run's learning hooks, so a
 //! run is classified once and everything keyed on that classification agrees.
 //! Project identity is *not* part of the key: the store is already per-project
@@ -27,7 +27,7 @@
 //! requirements were mapped — with better arithmetic behind it and therefore
 //! more credibility. Nothing in `archon-knowledge` or `requirement_trace*` may
 //! read a SONA weight, and
-//! `workflow_live_sona_tuning_isolation_tests.rs` fails the build if one
+//! `sona_workflow_tuning_isolation_tests.rs` fails the build if one
 //! starts to. The only thing this module is allowed to change is how long a
 //! branch may run and how many times a loop may retry.
 
@@ -40,16 +40,16 @@ use archon_core::config::{
 use archon_pipeline::learning::sona::{SonaParameterTuner, TuningObservation};
 use archon_pipeline::learning::trajectory_store;
 
-#[path = "workflow_live_sona_tuning_outcome.rs"]
-mod workflow_live_sona_tuning_outcome;
-pub(crate) use workflow_live_sona_tuning_outcome::record_generated_tuning_outcome;
+#[path = "sona_workflow_tuning_outcome.rs"]
+mod sona_workflow_tuning_outcome;
+pub(crate) use sona_workflow_tuning_outcome::record_generated_tuning_outcome;
 
 #[cfg(test)]
-#[path = "workflow_live_sona_tuning_tests.rs"]
+#[path = "sona_workflow_tuning_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "workflow_live_sona_tuning_isolation_tests.rs"]
+#[path = "sona_workflow_tuning_isolation_tests.rs"]
 mod isolation_tests;
 
 /// Path of the per-project learning store, matching the one the learning fold
