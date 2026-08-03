@@ -1,12 +1,12 @@
 // LifecycleDriver: discovery and inventory items.
 //
 // One of three inherent `impl LifecycleDriver` blocks split out of
-// `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
+// `lifecycle_driver.rs` to hold the 500-line ceiling.
 
 use super::*;
 
 impl LifecycleDriver {
-    pub(super) fn discovery_items(&self) -> Vec<serde_json::Value> {
+    pub(crate) fn discovery_items(&self) -> Vec<serde_json::Value> {
         let paths = serde_json::json!(self.universe.source_roots);
         vec![
             serde_json::json!({
@@ -29,12 +29,12 @@ impl LifecycleDriver {
 
     /// body_a.js inventory repair loop: one pass per attempt over the issue
     /// kinds, each reduce gated by its own iteration cap.
-    pub(crate) async fn repair_inventory(
+    pub async fn repair_inventory(
         &self,
         raw_inventory: serde_json::Value,
         discovery: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
         let mut inventory = contract.normalize_inventory(&raw_inventory);
         let mut attempt = 1usize;

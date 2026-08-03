@@ -1,17 +1,20 @@
-// Rust decomposed-PRD lifecycle driver — the faithful port of the generated
-// scaffold JS (body_a/body_b + verification/ownership splices). It drives the same
-// `WorkflowScriptHost::execute` entry point the QuickJS bridge used, so
-// result reuse, source metadata, run control, events, and persistence behave identically.
+// Composition root for the decomposed-PRD lifecycle.
+//
+// The lifecycle itself is `archon_workflow::v2::lifecycle_driver`. What lives
+// here is the only part that touches the concrete host: it builds the
+// `WorkflowScriptHost` around this runner, hands it to the driver through
+// `archon_workflow::LifecycleHost`, and turns the driver's outcome back into a
+// `WorkflowV2ScriptSummary`.
+//
+// It is spelled as an inherent `impl WorkflowV2ScriptRunner`, so coherence
+// pins it to this crate regardless — but it would belong here anyway. The three
+// host calls below (`summary`, `emit_terminal_status`, `mark_script_failure`)
+// are the ones an earlier survey counted as driver reaches; they are not. The
+// driver never makes them.
 
 use super::*;
 
-pub(super) use super::super::super::workflow_live_semantic_preservation as semantic_preservation;
-pub(super) use archon_workflow::generated_lifecycle_remediation as remediation;
-pub(super) use archon_workflow::generated_lifecycle_support as support;
-pub(super) use archon_workflow::generated_lifecycle_support::LifecycleContract;
-pub(super) use archon_workflow::v2::lifecycle_prompts as prompts;
-
-pub(super) const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";
+use archon_workflow::v2::lifecycle_driver::{LifecycleDriver, LifecycleLimits};
 
 impl WorkflowV2ScriptRunner {
     /// Run the decomposed-PRD lifecycle natively. `harness_source` is the
@@ -71,7 +74,12 @@ impl WorkflowV2ScriptRunner {
             project_artifact_root,
             governed_learning_context,
             resume_completed_ids,
-            &generated_config,
+            LifecycleLimits {
+                max_repair_iterations: generated_config.max_repair_iterations,
+                max_investigation_iterations: generated_config.max_investigation_iterations,
+                implementation_wave_max_parallelism: generated_config
+                    .implementation_wave_max_parallelism,
+            },
         );
         // v3: ONE persistent orchestrator conversation instead of the v2
         // reducer relay. Opt-in via env until certified as the default.
@@ -107,101 +115,4 @@ impl WorkflowV2ScriptRunner {
             }
         }
     }
-}
-
-pub(super) struct LifecycleDriver {
-    pub(super) host: Arc<WorkflowScriptHost>,
-    pub(super) universe: WorkflowV2TaskUniverse,
-    pub(super) task_universe: serde_json::Value,
-    pub(super) target_repository_root: Option<String>,
-    pub(super) project_artifact_root: Option<String>,
-    pub(super) governed_learning_context: serde_json::Value,
-    pub(super) max_repair_iterations: usize,
-    pub(super) max_investigation_iterations: usize,
-    pub(super) max_dependency_waves: usize,
-    /// How many ready tasks the write fan-out may dispatch at once, or `None`
-    /// for the configured subagent concurrency. See
-    /// `archon_core::config::decide_fanout_width` — this value can only ever be
-    /// narrower than the cap, and the runtime clamps it again on the way out.
-    pub(super) write_wave_width: Option<usize>,
-    pub(super) runtime_state: std::sync::Mutex<lifecycle_policy::terminal_gate::TerminalGateState>,
-}
-
-/// Mutable evidence bundles — the JS lifecycle's top-level arrays.
-#[derive(Default)]
-pub(super) struct LifecycleEvidence {
-    pub(super) implementation: Vec<serde_json::Value>,
-    pub(super) verification: Vec<serde_json::Value>,
-    pub(super) review: Vec<serde_json::Value>,
-    pub(super) artifact: Vec<serde_json::Value>,
-    pub(super) repair_attempts: Vec<serde_json::Value>,
-    pub(super) final_evidence_repair_attempts: Vec<serde_json::Value>,
-}
-
-#[path = "workflow_live_v2_lifecycle_driver_a.rs"]
-mod workflow_live_v2_lifecycle_driver_a;
-pub(crate) use workflow_live_v2_lifecycle_driver_a::*;
-#[path = "workflow_live_v2_lifecycle_driver_b.rs"]
-mod workflow_live_v2_lifecycle_driver_b;
-pub(crate) use workflow_live_v2_lifecycle_driver_b::*;
-#[path = "workflow_live_v2_lifecycle_driver_c.rs"]
-mod workflow_live_v2_lifecycle_driver_c;
-pub(crate) use workflow_live_v2_lifecycle_driver_c::*;
-
-pub(super) fn normalize_null_report_collections(value: &mut serde_json::Value) {
-    const COLLECTION_FIELDS: &[&str] = &[
-        "accepted_tasks",
-        "actionable",
-        "artifact_requirements",
-        "artifacts",
-        "blocked_tasks",
-        "canonical_task_ids",
-        "commands_run",
-        "completed_ids",
-        "dependency_ids",
-        "evidence",
-        "failed_tasks",
-        "files_changed",
-        "files_read",
-        "focused_verification",
-        "items",
-        "missing_tasks",
-        "noop_tasks",
-        "outcomes",
-        "remediation_actions",
-        "repair_attempts",
-        "residual_gaps",
-        "retry_items",
-        "review_blockers",
-        "review_findings",
-        "target_files",
-        "task_coverage",
-        "tests_run",
-        "unresolved_issues",
-    ];
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, child) in object {
-                if child.is_null() && COLLECTION_FIELDS.contains(&key.as_str()) {
-                    *child = serde_json::Value::Array(Vec::new());
-                } else {
-                    normalize_null_report_collections(child);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for child in values {
-                normalize_null_report_collections(child);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(super) fn terminal_marker_requires_report_fallback(status: Option<WorkflowV2Status>) -> bool {
-    status == Some(WorkflowV2Status::Failed)
-}
-
-pub(super) fn is_terminal_gate_reroute(error: &WorkflowError) -> bool {
-    error.to_string().contains(TERMINAL_GATE_REROUTE_MARKER)
 }

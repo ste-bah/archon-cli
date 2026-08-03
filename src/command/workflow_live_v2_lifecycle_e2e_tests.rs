@@ -14,6 +14,11 @@ use archon_workflow::{
 use archon_workflow::{WorkflowAgentCall, WorkflowAgentOutcome, WorkflowLlmClient};
 
 use super::*;
+// The lifecycle itself now lives in archon-workflow; what stays here is the
+// end-to-end coverage that drives it over the real host stack.
+use archon_workflow::v2::lifecycle_driver::{LifecycleDriver, LifecycleEvidence, LifecycleLimits};
+use archon_workflow::v2::lifecycle_policy;
+
 use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_verification;
 use archon_workflow::task_universe::{
     WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,

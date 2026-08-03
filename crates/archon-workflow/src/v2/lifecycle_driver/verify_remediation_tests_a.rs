@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
+pub(crate) fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
@@ -131,30 +131,33 @@ fn every_lifecycle_reducer_uses_the_common_transport_retry_path() {
     // The driver's method bodies live in the sibling parts since the
     // file-size split; the contract is module-wide, not file-wide.
     let lifecycle = [
-        include_str!("workflow_live_v2_lifecycle.rs"),
-        include_str!("workflow_live_v2_lifecycle_driver_a.rs"),
-        include_str!("workflow_live_v2_lifecycle_driver_b.rs"),
-        include_str!("workflow_live_v2_lifecycle_driver_c.rs"),
+        include_str!("mod.rs"),
+        include_str!("driver_a.rs"),
+        include_str!("driver_b.rs"),
+        include_str!("driver_c.rs"),
     ]
     .concat();
     let reducer_call_sites = [
-        "workflow_live_v2_lifecycle_impl.rs",
-        "workflow_live_v2_lifecycle_review.rs",
-        "workflow_live_v2_lifecycle_review_verification.rs",
-        "workflow_live_v2_lifecycle_verify.rs",
-        "workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs",
-        "workflow_live_v2_lifecycle_verify_remediation.rs",
-        "workflow_live_v2_lifecycle_verify_triage.rs",
-        "workflow_live_v2_lifecycle_waves.rs",
+        "implementation.rs",
+        "review.rs",
+        "review_verification.rs",
+        "verify.rs",
+        "verify_outcome_repair.rs",
+        "verify_remediation.rs",
+        "verify_triage.rs",
+        "waves.rs",
     ];
 
     assert!(lifecycle.contains("for attempt in 1..=max_transport_attempts"));
     assert!(lifecycle.contains("transport_failure_summary(&result)"));
-    assert!(lifecycle.contains("source_pack_value(&source)"));
+    // The transport retry still packs the source; it now asks the host to do
+    // it through the lifecycle host port rather than naming the binary's
+    // `source_pack_value` directly.
+    assert!(lifecycle.contains("pack_reduce_source(&source)"));
     for source in reducer_call_sites {
         let text = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src/command")
+                .join("src/v2/lifecycle_driver")
                 .join(source),
         )
         .expect("read lifecycle reducer source");

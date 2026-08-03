@@ -17,7 +17,7 @@ fn workflow_v3_transcript_tail_is_independently_bounded() {
 
 #[test]
 fn workflow_v3_uses_its_own_ledger_and_not_agent_compaction_segments() {
-    let source = include_str!("workflow_live_v3_orchestrated.rs");
+    let source = include_str!("orchestrated.rs");
 
     assert!(source.contains("OrchestrationLedger"));
     assert!(source.contains("TRANSCRIPT_TAIL"));

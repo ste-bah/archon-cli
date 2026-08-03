@@ -14,12 +14,12 @@ impl LifecycleDriver {
     /// Returns the attributed findings and records them on `evidence.review`.
     /// A stage that returns nothing returns no findings — it never fabricates
     /// acceptance.
-    pub(super) async fn run_per_task_adversarial_review(
+    pub(crate) async fn run_per_task_adversarial_review(
         &self,
         round_id: &str,
         task_ids: &std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+    ) -> crate::WorkflowResult<Vec<serde_json::Value>> {
         let items = lifecycle_policy::adversarial::per_task_review_items(
             &self.universe,
             task_ids,
@@ -69,7 +69,7 @@ impl LifecycleDriver {
         review_iteration: usize,
         re_review: Option<&std::collections::BTreeSet<String>>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let per_task_findings = match re_review {
             Some(task_ids) => {
                 self.run_per_task_adversarial_review(
@@ -106,7 +106,7 @@ impl LifecycleDriver {
         Ok(review)
     }
 
-    pub(super) async fn run_noop_proofs(
+    pub(crate) async fn run_noop_proofs(
         &self,
         ready_noop_items: &[serde_json::Value],
         completed_ids: &std::collections::BTreeSet<String>,
@@ -114,7 +114,7 @@ impl LifecycleDriver {
         accepted_this_wave: &mut std::collections::BTreeSet<String>,
         noop_reclassified_ids: &mut std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+    ) -> crate::WorkflowResult<Vec<serde_json::Value>> {
         let contract = self.contract();
         let ready_noop_items = lifecycle_policy::noop_routing::pin_noop_acceptance_criteria(
             &contract,
@@ -262,14 +262,14 @@ impl LifecycleDriver {
         Ok(Vec::new())
     }
 
-    pub(super) async fn discover_implementation_targets(
+    pub(crate) async fn discover_implementation_targets(
         &self,
         items: Vec<serde_json::Value>,
         discovery: &serde_json::Value,
         dependency_iteration: usize,
         noop_reclassified_ids: &std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+    ) -> crate::WorkflowResult<Vec<serde_json::Value>> {
         let items = support::array(Some(
             &self.with_declared_task_artifacts(serde_json::Value::Array(items)),
         ));

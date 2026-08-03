@@ -1,7 +1,7 @@
 // LifecycleDriver: final report and terminal handling.
 //
 // One of three inherent `impl LifecycleDriver` blocks split out of
-// `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
+// `lifecycle_driver.rs` to hold the 500-line ceiling.
 
 use super::*;
 
@@ -9,14 +9,14 @@ impl LifecycleDriver {
     /// Terminal stop. The host raises the terminal marker for every
     /// non-accepted final report, which unwinds the lifecycle exactly as the
     /// JS throw did; an accepted report returns normally.
-    pub(crate) async fn final_report(
+    pub async fn final_report(
         &self,
         id: &str,
         source: Option<serde_json::Value>,
         status: &str,
         mut inputs: serde_json::Value,
         task: &str,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         if id.starts_with("blocked-") {
             // Claims remain fail-closed. Scheduling remains fail-open because
             // attempted work still faces implementation, verification, triage,
@@ -74,12 +74,7 @@ impl LifecycleDriver {
         let report_error = match result {
             Ok(_) => return Ok(()),
             Err(error) if error.to_string().contains(TERMINAL_HOST_CALL_MARKER) => {
-                let recorded_status = self
-                    .host
-                    .runner
-                    .v2_store
-                    .load_call_record(id)?
-                    .map(|record| record.status);
+                let recorded_status = self.host.load_call_record(id)?.map(|record| record.status);
                 if !terminal_marker_requires_report_fallback(recorded_status) {
                     return Err(error);
                 }
@@ -145,7 +140,7 @@ impl LifecycleDriver {
         .map(|_| ())
     }
 
-    pub(super) async fn run(&self) -> archon_workflow::WorkflowResult<()> {
+    pub async fn run(&self) -> crate::WorkflowResult<()> {
         loop {
             match self.run_once().await {
                 Err(error) if is_terminal_gate_reroute(&error) => continue,
@@ -154,7 +149,7 @@ impl LifecycleDriver {
         }
     }
 
-    pub(super) async fn run_once(&self) -> archon_workflow::WorkflowResult<()> {
+    pub(crate) async fn run_once(&self) -> crate::WorkflowResult<()> {
         let discovery_items = self.discovery_items();
         let discovery = self
             .parallel(

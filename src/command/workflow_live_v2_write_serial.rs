@@ -5,7 +5,7 @@ pub(super) async fn run_serial_v2_write_fanout(
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
+    dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
@@ -41,16 +41,16 @@ pub(super) async fn run_serial_v2_write_fanout(
             input: branch.input,
             depends_on: vec![execution.call.id.clone()],
         };
-        let mut result = match run_single_v2_agent_call(
-            task,
-            target_repository_root.map(str::to_string),
-            &branch_execution,
-            &adapter,
-            client,
-            Some(v2_store),
-            None,
-        )
-        .await
+        let mut result = match dispatch
+            .run_call(
+                task,
+                target_repository_root.map(str::to_string),
+                &branch_execution,
+                &adapter,
+                Some(v2_store),
+                None,
+            )
+            .await
         {
             Ok(result) => result,
             Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {

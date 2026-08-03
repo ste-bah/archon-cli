@@ -277,7 +277,12 @@ async fn failed_final_report_emits_host_built_fallback() {
         Some(temp.path().display().to_string()),
         serde_json::json!([]),
         Default::default(),
-        &generated_config,
+        LifecycleLimits {
+            max_repair_iterations: generated_config.max_repair_iterations,
+            max_investigation_iterations: generated_config.max_investigation_iterations,
+            implementation_wave_max_parallelism: generated_config
+                .implementation_wave_max_parallelism,
+        },
     );
 
     let result = driver

@@ -13,7 +13,7 @@ impl LifecycleDriver {
         verification: &mut serde_json::Value,
         evidence: &mut LifecycleEvidence,
         triage: &serde_json::Value,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let remediation_inventory = self
             .verification_remediation_inventory(
                 ready_implementation_items,
@@ -72,7 +72,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn verification_remediation_inventory(
+    pub(crate) async fn verification_remediation_inventory(
         &self,
         ready_implementation_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -81,7 +81,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
         triage: &serde_json::Value,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let inventory_id =
             format!("verification-remediation-inventory-{wave_index}-{remediation_attempt}");
         let max_transport_attempts = self.max_repair_iterations.clamp(1, 2);
@@ -225,7 +225,7 @@ pub(crate) fn transport_failure_summary(result: &serde_json::Value) -> Option<St
     Some(summary.to_string())
 }
 
-pub(crate) fn is_transport_failure_text(text: &str) -> bool {
+pub fn is_transport_failure_text(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("agent transport failed")
         || text.contains("reducer transport exhausted")
@@ -237,7 +237,7 @@ pub(crate) fn is_transport_failure_text(text: &str) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn verification_remediation_inventory_source(
+pub(crate) fn verification_remediation_inventory_source(
     task_universe: &serde_json::Value,
     ready_implementation_items: &[serde_json::Value],
     plan_items: &[serde_json::Value],
@@ -311,7 +311,7 @@ pub(crate) fn slim_reducer_source(
     ])
 }
 
-pub(super) fn slim_retriage_feedback(
+pub(crate) fn slim_retriage_feedback(
     value: Option<&serde_json::Value>,
     limit: usize,
 ) -> serde_json::Value {
@@ -352,7 +352,7 @@ pub(super) fn slim_retriage_feedback(
     serde_json::Value::Object(out)
 }
 
-pub(super) fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde_json::Value> {
+pub(crate) fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde_json::Value> {
     let mut seen = std::collections::BTreeSet::new();
     items
         .iter()
@@ -388,7 +388,7 @@ pub(crate) fn slim_verification_records(
     slim
 }
 
-pub(super) fn slim_evidence_record(
+pub(crate) fn slim_evidence_record(
     record: &serde_json::Value,
     outcome_limit: usize,
 ) -> serde_json::Value {
@@ -412,7 +412,7 @@ pub(super) fn slim_evidence_record(
     serde_json::Value::Object(out)
 }
 
-pub(super) fn slim_result_with_outcomes(
+pub(crate) fn slim_result_with_outcomes(
     result: &serde_json::Value,
     outcome_limit: usize,
 ) -> serde_json::Value {
@@ -439,7 +439,7 @@ pub(super) fn slim_result_with_outcomes(
     serde_json::Value::Object(out)
 }
 
-pub(super) fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
     let Some(source) = data.as_object() else {
         return serde_json::Value::Null;
     };

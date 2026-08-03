@@ -26,13 +26,11 @@ use archon_workflow::{
 };
 use tokio::sync::Semaphore;
 
+use super::split_reusable_branch_outcomes;
 use super::workflow_live_v2_aggregate::attach_branch_evidence;
 use super::workflow_live_v2_data::{attach_completion_evidence_for_call, fanout_items_for_call};
 use super::workflow_live_v2_state::poll_v2_run_control;
-use super::{
-    LiveV2AgentClient, run_single_v2_agent_call, run_single_v2_agent_call_in_repository,
-    split_reusable_branch_outcomes,
-};
+use archon_workflow::WorkflowAgentDispatch;
 use archon_workflow::generated_contract::{
     canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
 };
@@ -45,7 +43,7 @@ pub(super) async fn run_write_capable_v2_fanout(
     target_repository_root: Option<&str>,
     execution: WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
+    dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
@@ -106,7 +104,7 @@ pub(super) async fn run_write_capable_v2_fanout(
                 target_repository_root,
                 &execution,
                 adapter,
-                client,
+                dispatch,
                 v2_store,
                 store_for_control,
                 run_id,
@@ -122,7 +120,7 @@ pub(super) async fn run_write_capable_v2_fanout(
                 target_repository_root,
                 &execution,
                 adapter,
-                client,
+                dispatch,
                 v2_store,
                 store_for_control,
                 run_id,
@@ -138,7 +136,7 @@ pub(super) async fn run_write_capable_v2_fanout(
                 target_repository_root,
                 &execution,
                 adapter,
-                client,
+                dispatch,
                 v2_store,
                 store_for_control,
                 run_id,

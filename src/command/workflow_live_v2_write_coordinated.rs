@@ -5,7 +5,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
+    dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
@@ -16,7 +16,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
     let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let mut results = Vec::new();
     let mut peak_parallelism = 0usize;
-    let max_parallelism = client.fanout_parallelism(execution.call.options.max_parallelism);
+    let max_parallelism = dispatch.fanout_parallelism(execution.call.options.max_parallelism);
     for wave in &plan.waves {
         let semaphore = Arc::new(Semaphore::new(max_parallelism));
         let active = Arc::new(AtomicUsize::new(0));
@@ -58,16 +58,16 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                     input: branch.input,
                     depends_on: vec![execution.call.id.clone()],
                 };
-                let result = run_single_v2_agent_call(
-                    task,
-                    target_repository_root.map(str::to_string),
-                    &branch_execution,
-                    &adapter,
-                    client,
-                    Some(v2_store),
-                    None,
-                )
-                .await;
+                let result = dispatch
+                    .run_call(
+                        task,
+                        target_repository_root.map(str::to_string),
+                        &branch_execution,
+                        &adapter,
+                        Some(v2_store),
+                        None,
+                    )
+                    .await;
                 active.fetch_sub(1, Ordering::SeqCst);
                 let result = match result {
                     Ok(result) => result,

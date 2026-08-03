@@ -1,6 +1,7 @@
 //! Provider-neutral dynamic workflow runtime for Archon.
 
 pub mod acceptance;
+pub mod agent_dispatch_port;
 pub mod approval;
 pub mod bundle;
 pub mod command;
@@ -21,6 +22,7 @@ pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
 pub mod lifecycle;
+pub mod lifecycle_host_port;
 pub mod llm_client_port;
 pub mod lower_workflow;
 mod persistence;
@@ -51,6 +53,7 @@ mod work_unit_gate;
 pub mod write_coordinator;
 
 pub use acceptance::{AcceptanceOutcome, TargetFingerprints};
+pub use agent_dispatch_port::WorkflowAgentDispatch;
 pub use approval::{
     WorkflowApprovalDecision, WorkflowApprovalInspection, WorkflowApprovalRecord,
     WorkflowApprovalStore,
@@ -72,6 +75,7 @@ pub use learning::{
     WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
+pub use lifecycle_host_port::{LifecycleHost, TERMINAL_HOST_CALL_MARKER};
 pub use llm_client_port::{
     WorkflowAgentCall, WorkflowAgentOutcome, WorkflowAgentSpec, WorkflowAgentToolAccess,
     WorkflowAgentToolUse, WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest,

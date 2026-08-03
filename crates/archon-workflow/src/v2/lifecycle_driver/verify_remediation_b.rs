@@ -35,7 +35,7 @@ pub(crate) fn collapse_outcome_clones(
     (collapsed, total.saturating_sub(limit))
 }
 
-pub(super) fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) -> String {
+pub(crate) fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) -> String {
     let result = outcome.get("result").unwrap_or(outcome);
     let mut gap_ids = support::array(result.get("residual_gaps"))
         .into_iter()
@@ -54,7 +54,7 @@ pub(super) fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) ->
     }
 }
 
-pub(super) fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for key in ["item_id", "id", "status", "failure_kind"] {
         if let Some(value) = outcome.get(key) {
@@ -66,7 +66,7 @@ pub(super) fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(out)
 }
 
-pub(super) fn item_identity(value: &serde_json::Value) -> &str {
+pub(crate) fn item_identity(value: &serde_json::Value) -> &str {
     value
         .get("item_id")
         .or_else(|| value.get("id"))
@@ -74,7 +74,7 @@ pub(super) fn item_identity(value: &serde_json::Value) -> &str {
         .unwrap_or_default()
 }
 
-pub(super) fn strip_check_suffixes(mut value: &str) -> &str {
+pub(crate) fn strip_check_suffixes(mut value: &str) -> &str {
     while let Some((stem, suffix)) = value.rsplit_once("-check-") {
         if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
             value = stem;
@@ -87,7 +87,7 @@ pub(super) fn strip_check_suffixes(mut value: &str) -> &str {
 
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_post_remediation_verification(
+    pub(crate) async fn run_post_remediation_verification(
         &self,
         ready_implementation_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -98,7 +98,7 @@ impl LifecycleDriver {
         verification: &mut serde_json::Value,
         evidence: &mut LifecycleEvidence,
         contract: &LifecycleContract<'_>,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let raw_plan = self
             .post_remediation_plan(
                 ready_implementation_items,
@@ -152,7 +152,7 @@ impl LifecycleDriver {
         Ok(true)
     }
 
-    pub(super) async fn post_remediation_plan(
+    pub(crate) async fn post_remediation_plan(
         &self,
         ready_implementation_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -160,7 +160,7 @@ impl LifecycleDriver {
         wave_index: usize,
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let plan_id =
             format!("post-remediation-verification-plan-{wave_index}-{remediation_attempt}");
         let raw_plan = self
@@ -188,7 +188,7 @@ impl LifecycleDriver {
         Ok(raw_plan)
     }
 
-    pub(super) async fn repair_post_remediation_plan(
+    pub(crate) async fn repair_post_remediation_plan(
         &self,
         contract: &LifecycleContract<'_>,
         remediation_inventory: &serde_json::Value,
@@ -197,7 +197,7 @@ impl LifecycleDriver {
         wave_index: usize,
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Option<Vec<serde_json::Value>>> {
+    ) -> crate::WorkflowResult<Option<Vec<serde_json::Value>>> {
         let mut post_plan = contract.normalize_inventory(&raw_plan);
         let mut shape_attempt = 1usize;
         while !support::verification_inventory_ready(&post_plan)
@@ -224,7 +224,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn repair_post_remediation_plan_once(
+    pub async fn repair_post_remediation_plan_once(
         &self,
         remediation_inventory: &serde_json::Value,
         remediation_wave: &serde_json::Value,
@@ -233,7 +233,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         shape_attempt: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let repair_id = format!(
             "post-remediation-verification-plan-repair-{wave_index}-{remediation_attempt}-{shape_attempt}"
         );
@@ -314,7 +314,7 @@ pub(crate) fn producer_retry_items(
     (!items.is_empty()).then_some(items)
 }
 
-pub(super) fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
+pub(crate) fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
     let class = item
         .get("classification")
         .or_else(|| item.get("verification_failure_class"))
@@ -324,7 +324,7 @@ pub(super) fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
     !class.contains("sibling") && !class.contains("supersed")
 }
 
-pub(super) fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String> {
+pub(crate) fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String> {
     support::unique(
         plan_items
             .iter()

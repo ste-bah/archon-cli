@@ -1,19 +1,19 @@
 // LifecycleDriver: construction and stage dispatch.
 //
-// One of three inherent `impl LifecycleDriver` blocks split out of
-// `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
+// One of three inherent `impl LifecycleDriver` blocks split out of `mod.rs` to
+// hold the 500-line ceiling.
 
 use super::*;
 
 impl LifecycleDriver {
-    pub(crate) fn new(
-        host: Arc<WorkflowScriptHost>,
+    pub fn new(
+        host: Arc<dyn LifecycleHost>,
         universe: WorkflowV2TaskUniverse,
         target_repository_root: Option<String>,
         project_artifact_root: Option<String>,
         governed_learning_context: serde_json::Value,
         resume_completed_ids: std::collections::BTreeSet<String>,
-        generated_config: &archon_core::config::GeneratedWorkflowConfig,
+        limits: LifecycleLimits,
     ) -> Self {
         let task_universe = serde_json::to_value(&universe).unwrap_or(serde_json::Value::Null);
         let canonical = universe.tasks.len();
@@ -24,11 +24,11 @@ impl LifecycleDriver {
             target_repository_root,
             project_artifact_root,
             governed_learning_context,
-            max_repair_iterations: usize::from(generated_config.max_repair_iterations.clamp(1, 8)),
+            max_repair_iterations: usize::from(limits.max_repair_iterations.clamp(1, 8)),
             max_investigation_iterations: usize::from(
-                generated_config.max_investigation_iterations.clamp(1, 8),
+                limits.max_investigation_iterations.clamp(1, 8),
             ),
-            write_wave_width: generated_config
+            write_wave_width: limits
                 .implementation_wave_max_parallelism
                 .map(|width| usize::from(width.max(1))),
             max_dependency_waves: canonical.saturating_mul(3).max(1),
@@ -55,7 +55,7 @@ impl LifecycleDriver {
         id: &str,
         source: Option<serde_json::Value>,
         options: serde_json::Value,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let mut payload = serde_json::json!({ "id": id, "options": options });
         if let Some(source) = source {
             payload["source"] = source;
@@ -74,7 +74,7 @@ impl LifecycleDriver {
         source: serde_json::Value,
         tier: &str,
         task: &str,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let grounded_task = if id.contains("verification") {
             prompts::ground_host_manifest_schema(task)
         } else {
@@ -94,7 +94,7 @@ impl LifecycleDriver {
             } else if uses_verification_slimming(id) {
                 slim_reducer_source(id, &source, true)
             } else {
-                super::super::super::workflow_live_v2_data::source_pack_value(&source)
+                self.host.pack_reduce_source(&source)
             };
             match self
                 .call(
@@ -133,7 +133,7 @@ impl LifecycleDriver {
         id: &str,
         items: serde_json::Value,
         options: serde_json::Value,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         self.call("parallel", id, Some(items), options).await
     }
 
@@ -142,7 +142,7 @@ impl LifecycleDriver {
         id: &str,
         items: serde_json::Value,
         task: &str,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let items = self.with_declared_task_artifacts(items);
         let source_items = support::array(Some(&items));
         let max_parallelism = lifecycle_policy::verify_options::write_wave_parallelism(
@@ -206,7 +206,7 @@ impl LifecycleDriver {
                             let value =
                                 serde_json::to_value(declared).unwrap_or(serde_json::Value::Null);
                             if let Some(command) =
-                                archon_workflow::v2::deliverable_contract::typed_verification_command(
+                                crate::v2::deliverable_contract::typed_verification_command(
                                     root, &value,
                                 )
                                 && !verifier_commands.contains(&command)

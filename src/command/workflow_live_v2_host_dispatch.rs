@@ -57,7 +57,7 @@ pub(super) async fn execute_v2_live_call(
                 runtime.target_repository_root.as_deref(),
                 execution,
                 adapter,
-                client,
+                &super::live_agent_dispatch::LiveAgentDispatch::new(client.clone()),
                 v2_store,
                 store_for_control,
                 run_id,

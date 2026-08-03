@@ -2,21 +2,21 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use archon_workflow::v2::lifecycle_policy;
-use archon_workflow::v2::lifecycle_prompts as prompts;
+use crate::v2::lifecycle_policy;
+use crate::v2::lifecycle_prompts as prompts;
 
 use super::{LifecycleDriver, LifecycleEvidence, support};
 
 const REVIEW_VERIFICATION_EXECUTION_RETRIES: usize = 2;
 
 impl LifecycleDriver {
-    pub(super) async fn run_review_verification_gate(
+    pub(crate) async fn run_review_verification_gate(
         &self,
         review_iteration: usize,
         review: &Value,
         review_fixes: &Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let plan = self
             .review_verification_plan(review_iteration, review_fixes, evidence)
             .await?;
@@ -54,7 +54,7 @@ impl LifecycleDriver {
         review_iteration: usize,
         mut items: Vec<Value>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Value> {
+    ) -> crate::WorkflowResult<Value> {
         let mut verification = self
             .run_review_verification_wave(review_iteration, 0, &items, evidence)
             .await?;
@@ -83,7 +83,7 @@ impl LifecycleDriver {
         review_iteration: usize,
         review_fixes: &Value,
         evidence: &LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Value> {
+    ) -> crate::WorkflowResult<Value> {
         self.reduce(
             &format!("review-verification-plan-{review_iteration}"),
             serde_json::json!([self.task_universe, review_fixes, evidence.implementation]),
@@ -99,7 +99,7 @@ impl LifecycleDriver {
         retry: usize,
         items: &[Value],
         evidence: &LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Value> {
+    ) -> crate::WorkflowResult<Value> {
         let id = if retry == 0 {
             format!("review-verification-wave-{review_iteration}")
         } else {
@@ -126,7 +126,7 @@ impl LifecycleDriver {
         review_fixes: &Value,
         plan: &Value,
         evidence: &LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         self.final_report(
             &format!("blocked-empty-review-verification-{review_iteration}"),
             None,
@@ -149,7 +149,7 @@ impl LifecycleDriver {
         review_fixes: &Value,
         verification: &Value,
         evidence: &LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         self.final_report(
             &format!("blocked-review-verification-failed-{review_iteration}"),
             None,
@@ -199,17 +199,17 @@ fn record_review_verification_retry(
     );
 }
 
-pub(super) fn review_verification_options(items: &[Value], task: &str) -> Value {
+pub(crate) fn review_verification_options(items: &[Value], task: &str) -> Value {
     lifecycle_policy::verify_options::verification_options(items, task, false)
 }
 
-pub(super) fn review_verification_has_execution_failure(verification: &Value) -> bool {
+pub(crate) fn review_verification_has_execution_failure(verification: &Value) -> bool {
     support::outcomes_of(verification)
         .iter()
         .any(outcome_is_execution_failure)
 }
 
-pub(super) fn review_verification_execution_retry_items(
+pub(crate) fn review_verification_execution_retry_items(
     items: &[Value],
     verification: &Value,
 ) -> Vec<Value> {

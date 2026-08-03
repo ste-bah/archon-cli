@@ -1,11 +1,11 @@
 use super::*;
 
 impl LifecycleDriver {
-    pub(in super::super::super) async fn run_review_and_final_gates(
+    pub(crate) async fn run_review_and_final_gates(
         &self,
         inventory: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         let contract = self.contract();
         let artifact_inventory = self
             .reduce(
@@ -218,12 +218,12 @@ impl LifecycleDriver {
             .await
     }
 
-    pub(super) async fn run_final_gates(
+    pub(crate) async fn run_final_gates(
         &self,
         inventory: &serde_json::Value,
         artifact_inventory: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         let mut final_iteration = 1usize;
         let reconciliation_id = format!("final-evidence-reconciliation-{final_iteration}");
         let reconciliation = self

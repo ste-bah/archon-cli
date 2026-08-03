@@ -1,23 +1,23 @@
 use serde_json::Value;
 
-use archon_workflow::v2::lifecycle_prompts as prompts;
+use crate::v2::lifecycle_prompts as prompts;
 
 use super::{LifecycleDriver, LifecycleEvidence, support};
 
-pub(super) struct ReviewRemediationBlock {
+pub(crate) struct ReviewRemediationBlock {
     pub id: String,
     pub inputs: Value,
 }
 
 impl LifecycleDriver {
-    pub(super) async fn block_failed_review_remediation(
+    pub(crate) async fn block_failed_review_remediation(
         &self,
         evidence: &mut LifecycleEvidence,
         review_iteration: usize,
         review: &Value,
         inventory: &Value,
         review_fixes: &Value,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let Some(blocked) = review_remediation_block(
             evidence,
             review_iteration,
@@ -40,7 +40,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn review_remediation_block(
+pub(crate) fn review_remediation_block(
     evidence: &mut LifecycleEvidence,
     review_iteration: usize,
     task_universe: &Value,
@@ -65,11 +65,11 @@ pub(super) fn review_remediation_block(
     })
 }
 
-pub(super) fn review_remediation_failures(review_fixes: &Value) -> Vec<Value> {
+pub(crate) fn review_remediation_failures(review_fixes: &Value) -> Vec<Value> {
     support::non_accepted_outcomes(&support::outcomes_of(review_fixes))
 }
 
-pub(super) fn record_review_remediation_failure(
+pub(crate) fn record_review_remediation_failure(
     evidence: &mut LifecycleEvidence,
     review_iteration: usize,
     review_fixes: &Value,
@@ -88,7 +88,7 @@ pub(super) fn record_review_remediation_failure(
     unresolved
 }
 
-pub(super) fn blocked_review_remediation_inputs(
+pub(crate) fn blocked_review_remediation_inputs(
     task_universe: &Value,
     review: &Value,
     review_remediation_inventory: &Value,
