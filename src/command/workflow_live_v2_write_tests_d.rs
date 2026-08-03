@@ -2,10 +2,9 @@ use super::*;
 
 #[test]
 fn unresolved_branch_reports_generic_ownership_expansion_need() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wfab880_ownership_expansion_needed.json"
-    ))
-    .expect("fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WFAB880_OWNERSHIP_EXPANSION_NEEDED)
+            .expect("fixture");
     let temp = tempfile::tempdir().expect("tempdir");
     let call = WorkflowV2HostCall {
         id: fixture["call_id"].as_str().expect("call id").to_string(),

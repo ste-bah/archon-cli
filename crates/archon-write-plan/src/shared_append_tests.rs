@@ -5,7 +5,7 @@
 //! and a claim that cannot be resolved conflicts rather than passing.
 
 use super::*;
-use crate::write_coordinator::write_plan::{keys_conflict, normalize_target};
+use crate::write_plan::{keys_conflict, normalize_target};
 use serde_json::json;
 
 fn root() -> tempfile::TempDir {
@@ -207,12 +207,9 @@ fn declaring_nothing_shared_reproduces_the_exclusive_key_set() {
         &[],
     )
     .expect("keys");
-    let plain = crate::write_coordinator::write_plan::resource_keys_for_targets(
-        std::slice::from_ref(&target),
-        r.path(),
-        &[],
-    )
-    .expect("keys");
+    let plain =
+        crate::write_plan::resource_keys_for_targets(std::slice::from_ref(&target), r.path(), &[])
+            .expect("keys");
     assert_eq!(with_none, plain);
 }
 

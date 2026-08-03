@@ -7,7 +7,7 @@
 //!
 //! # Scope
 //!
-//! Milestone 1: the IR, the `WorkflowSpec` lowering, and five pure analyses.
+//! Milestone 1: the IR and five pure analyses.
 //!
 //! Milestone 4 adds three advisory lints beside them —
 //! [`TaskGraph::diamond_conformance`], [`TaskGraph::classify_edges`], and
@@ -32,9 +32,16 @@
 //!
 //! Admission is milestone 3 and is not here.
 //!
-//! The `Vec<Subtask>` lowering lives in `archon-core`
-//! (`orchestrator::topology`) rather than here, because `Subtask` is
-//! `archon-core`'s type: putting it here would invert the dependency edge.
+//! # Neither lowering lives here
+//!
+//! A lowering reads a type this crate does not own, so siting it here would
+//! invert the dependency edge. `Vec<Subtask>` lowers in `archon-core`
+//! (`orchestrator::topology`) because `Subtask` is `archon-core`'s type;
+//! `WorkflowSpec` lowers in `archon-workflow` (`lower_workflow`) because
+//! `WorkflowSpec` is `archon-workflow`'s type. Both crates depend on this one,
+//! and this one depends on neither — which is what keeps
+//! `archon-core -> archon-workflow -> archon-topology -> archon-core` from
+//! closing.
 //!
 //! # The unknown-dataflow rule
 //!
@@ -52,8 +59,6 @@ mod index;
 pub mod ir;
 #[cfg(feature = "live")]
 pub mod live;
-#[cfg(feature = "workflow")]
-pub mod lower_workflow;
 pub mod permission;
 #[cfg(feature = "trace")]
 pub mod reconstruct;
@@ -75,8 +80,6 @@ pub use ir::{
 pub use live::{
     Invariant, LiveTopology, LiveTopologyConfig, SpawnIntent, ToolIntent, Verdict, WriteIntent,
 };
-#[cfg(feature = "workflow")]
-pub use lower_workflow::lower_workflow_spec;
 pub use permission::{DECLARED_PERMISSION_LEVELS, is_declared_permission};
 #[cfg(feature = "trace")]
 pub use reconstruct::reconstruct_graph;

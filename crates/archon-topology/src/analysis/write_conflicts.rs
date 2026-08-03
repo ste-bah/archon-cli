@@ -30,12 +30,11 @@ impl TaskGraph {
     ///
     /// Overlap is exact-match on the target string. Glob-versus-glob
     /// intersection is deliberately not attempted here: doing it properly
-    /// requires the fail-safe matcher in
-    /// `archon_workflow::write_coordinator::write_plan`, which treats a
-    /// malformed glob as *conflicting*, and this crate's dependency budget does
-    /// not admit `globset`. Milestone 3's single-writer invariant extends that
-    /// coordinator rather than reimplementing it, so exact match is the right
-    /// conservative floor here: it under-reports, never over-reports.
+    /// requires the fail-safe matcher in `archon_write_plan::write_plan`, which
+    /// treats a malformed glob as *conflicting*, and this crate's dependency
+    /// budget does not admit `globset`. Milestone 3's single-writer invariant
+    /// calls that matcher rather than reimplementing it, so exact match is the
+    /// right conservative floor here: it under-reports, never over-reports.
     pub fn write_conflicts(&self) -> Result<Vec<WriteConflict>, TopologyError> {
         let index = GraphIndex::build(self)?;
         let reachable = index.descendants(self);

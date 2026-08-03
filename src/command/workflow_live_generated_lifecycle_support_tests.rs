@@ -134,7 +134,7 @@ fn host_result_normalization_stamps_bare_ids_and_surfaces_unknown_ids() {
 fn fabel_verification_plan_schedules_one_branch_per_item() {
     let contract = fabel_contract();
     let value: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/wffed_verification_plan_1.json"))
+        serde_json::from_str(archon_test_support::fixtures::WFFED_VERIFICATION_PLAN_1)
             .expect("fixture json");
     let inventory = contract.normalize_inventory(&value);
     let items = verification_items(&contract, &inventory);
@@ -148,9 +148,9 @@ fn fabel_verification_plan_schedules_one_branch_per_item() {
 #[test]
 fn fabel_shape_repair_schedules_one_branch_per_item() {
     let contract = fabel_contract();
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wffed_verification_repair_shape_repair_1_1_1.json"
-    ))
+    let value: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WFFED_VERIFICATION_REPAIR_SHAPE_REPAIR_1_1_1,
+    )
     .expect("fixture json");
     let inventory = contract.normalize_inventory(&value);
     let items = verification_items(&contract, &inventory);

@@ -240,7 +240,7 @@ fn remediation_source_metadata_treats_task_source_root_paths_as_evidence() {
 
 #[test]
 fn review_remediation_source_metadata_accepts_wf580_fixture_shape() {
-    let fixture = include_str!("fixtures/wf580_review_remediation_inventory_items.json");
+    let fixture = archon_test_support::fixtures::WF580_REVIEW_REMEDIATION_INVENTORY_ITEMS;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized_items = source_data
         .as_array()
@@ -277,7 +277,7 @@ fn review_remediation_source_metadata_accepts_wf580_fixture_shape() {
 
 #[test]
 fn review_verification_source_metadata_accepts_wf580_fixture_shape() {
-    let fixture = include_str!("fixtures/wf580_review_verification_plan_items.json");
+    let fixture = archon_test_support::fixtures::WF580_REVIEW_VERIFICATION_PLAN_ITEMS;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let execution = review_verification_execution(source_data);
 
@@ -301,7 +301,7 @@ fn review_verification_source_metadata_accepts_wf580_fixture_shape() {
 
 #[test]
 fn focused_verification_allows_multiple_checks_for_one_canonical_task() {
-    let fixture = include_str!("fixtures/wf139e_verification_plan_items.json");
+    let fixture = archon_test_support::fixtures::WF139E_VERIFICATION_PLAN_ITEMS;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let execution = focused_verification_execution(source_data);
 
@@ -333,9 +333,9 @@ fn focused_verification_allows_multiple_checks_for_one_canonical_task() {
 #[test]
 fn focused_verification_repair_fixtures_produce_reusable_source_metadata() {
     for fixture in [
-        include_str!("fixtures/wf139e_verification_repair_plan_1_1_items.json"),
-        include_str!("fixtures/wf139e_verification_repair_plan_1_2_items.json"),
-        include_str!("fixtures/wf139e_verification_repair_plan_1_3_items.json"),
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_1_ITEMS,
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_2_ITEMS,
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_3_ITEMS,
     ] {
         let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
         let execution = focused_verification_execution(source_data);

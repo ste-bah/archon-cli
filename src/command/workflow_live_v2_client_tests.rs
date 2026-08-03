@@ -206,7 +206,7 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
             .expect("dataset directory");
         std::fs::write(validation, "{}\n").expect("validation artifact");
     }
-    let fixture = include_str!("fixtures/wf346_verification_project_relative_item.json");
+    let fixture = archon_test_support::fixtures::WF346_VERIFICATION_PROJECT_RELATIVE_ITEM;
     let mut req = request(WorkflowV2HostMethod::Parallel, None);
     req.call.id = "verification-wave-2".to_string();
     req.project_artifacts = archon_workflow::project_artifact_context_from_v2_root(&v2_root);

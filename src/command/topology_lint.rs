@@ -123,7 +123,7 @@ fn load_graph(cwd: &Path, source: &LintSource) -> Result<TaskGraph> {
                 .and_then(|stem| stem.to_str())
                 .unwrap_or("spec")
                 .to_string();
-            Ok(archon_topology::lower_workflow_spec(&spec, run_id))
+            Ok(archon_workflow::lower_workflow_spec(&spec, run_id))
         }
         LintSource::Graph(id) => load_recorded_graph(cwd, id),
     }

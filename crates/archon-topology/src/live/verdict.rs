@@ -3,8 +3,8 @@
 //! The intent types are crate-local rather than `archon-tools`' request type.
 //! The design sketch wrote `on_tool(&self, req: &ToolRunAdmissionRequest)`,
 //! which would pull tokio and the whole tool registry into a crate whose
-//! dependency budget is petgraph + serde + archon-workflow. The binary owns the
-//! translation, and it is a dozen lines.
+//! dependency budget is petgraph + serde plus the leaf `archon-write-plan`. The
+//! binary owns the translation, and it is a dozen lines.
 
 use crate::ir::PermissionClass;
 
@@ -106,8 +106,7 @@ pub struct WriteIntent {
     /// Node performing the write.
     pub node_id: String,
     /// Raw declared paths or globs, claimed **exclusively**. Normalisation and
-    /// overlap are `archon-workflow`'s write coordinator's business, not this
-    /// crate's.
+    /// overlap are `archon-write-plan`'s business, not this crate's.
     pub paths: Vec<String>,
     /// Raw declared paths the node appends to **under coordination**, claimed
     /// as `ResourceKey::SharedAppend`.

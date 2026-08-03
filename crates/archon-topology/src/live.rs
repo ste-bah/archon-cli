@@ -359,7 +359,8 @@ impl LiveTopology {
     /// **`StageKind::Checkpoint` has no execution semantics anywhere in the
     /// tree — nothing marks a checkpoint passed — so under this narrowing a
     /// checkpoint never gates.** That is intended and it is the fail-safe
-    /// direction. See the tripwire in `lower_workflow.rs`: specs persisted
+    /// direction. See the tripwire in `archon-workflow`'s `lower_workflow.rs`:
+    /// specs persisted
     /// before the W6 deletion deserialize a legacy `condition` stage to
     /// `Checkpoint`, and a condition stage never had an evaluator, so treating
     /// its mere presence as gating would let an unevaluated condition authorise

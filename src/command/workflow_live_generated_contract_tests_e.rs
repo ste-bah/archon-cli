@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn workflow_live_generated_contract_normalizes_wf139e_verification_plan_fixture() {
-    let fixture = include_str!("fixtures/wf139e_verification_plan_items.json");
+    let fixture = archon_test_support::fixtures::WF139E_VERIFICATION_PLAN_ITEMS;
     let values: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
     let normalized = values
         .iter()
@@ -41,9 +41,9 @@ fn workflow_live_generated_contract_normalizes_wf139e_verification_plan_fixture(
 #[test]
 fn workflow_live_generated_contract_normalizes_wf139e_repair_plan_aliases() {
     for fixture in [
-        include_str!("fixtures/wf139e_verification_repair_plan_1_1_items.json"),
-        include_str!("fixtures/wf139e_verification_repair_plan_1_2_items.json"),
-        include_str!("fixtures/wf139e_verification_repair_plan_1_3_items.json"),
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_1_ITEMS,
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_2_ITEMS,
+        archon_test_support::fixtures::WF139E_VERIFICATION_REPAIR_PLAN_1_3_ITEMS,
     ] {
         let values: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
         let normalized = values

@@ -22,7 +22,7 @@ fn contract() -> (WorkflowV2TaskUniverse, Value) {
             ..Default::default()
         }],
     };
-    let fixture = serde_json::from_str(include_str!("fixtures/d60_refuted_noop_routing.json"))
+    let fixture = serde_json::from_str(archon_test_support::fixtures::D60_REFUTED_NOOP_ROUTING)
         .expect("D60 fixture");
     (universe, fixture)
 }
@@ -34,10 +34,9 @@ fn d61_host_pins_criteria_and_refutes_both_inconsistent_canary_shapes() {
         task_universe: &universe,
         target_repository_root: Some("/repo"),
     };
-    let canary: Value = serde_json::from_str(include_str!(
-        "fixtures/d61_noop_acceptance_consistency.json"
-    ))
-    .expect("D61 fixture");
+    let canary: Value =
+        serde_json::from_str(archon_test_support::fixtures::D61_NOOP_ACCEPTANCE_CONSISTENCY)
+            .expect("D61 fixture");
     let ready = pin_noop_acceptance_criteria(
         &contract,
         &support::array(fixture["inventory"].get("items")),

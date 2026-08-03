@@ -90,7 +90,7 @@ fn d32_unprovable_supersede_requires_one_bounded_retriage() {
         target_repository_root: Some("/repo"),
     };
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/d32_zero_match_retriage.json"))
+        serde_json::from_str(archon_test_support::fixtures::D32_ZERO_MATCH_RETRIAGE)
             .expect("D32 fixture");
 
     assert!(
@@ -138,7 +138,7 @@ fn d32_corrected_retries_validate_against_every_failed_outcome() {
         target_repository_root: Some("/repo"),
     };
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/d32_zero_match_retriage.json"))
+        serde_json::from_str(archon_test_support::fixtures::D32_ZERO_MATCH_RETRIAGE)
             .expect("D32 fixture");
     let failed = support::non_accepted_outcomes(&support::outcomes_of(&fixture["verification"]));
     let retry_items: Vec<serde_json::Value> = failed.iter().map(corrected_retry_item).collect();
@@ -166,7 +166,7 @@ fn d32_corrected_retries_validate_against_every_failed_outcome() {
 #[test]
 fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/d63_retriage_retry_consumer.json"))
+        serde_json::from_str(archon_test_support::fixtures::D63_RETRIAGE_RETRY_CONSUMER)
             .expect("D63 fixture");
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
@@ -214,10 +214,9 @@ fn d63_retriage_retries_survive_generated_outcome_ids_and_remain_distinct() {
 
 #[test]
 fn retry_inventory_stamps_a_dropped_source_gap() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf32_verification_invariant_chain.json"
-    ))
-    .expect("D17 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WF32_VERIFICATION_INVARIANT_CHAIN)
+            .expect("D17 fixture");
 
     let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
         &fixture["invalid_retry_plan"],
@@ -233,9 +232,9 @@ fn retry_inventory_stamps_a_dropped_source_gap() {
 
 #[test]
 fn canary_shape_repair_rounds_use_stable_host_gap_identity() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf6dd_verification_retry_invariant_failure.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF6DD_VERIFICATION_RETRY_INVARIANT_FAILURE,
+    )
     .expect("fixture JSON");
     for key in ["round_1_inventory", "round_3_inventory"] {
         let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
@@ -256,9 +255,9 @@ fn canary_shape_repair_rounds_use_stable_host_gap_identity() {
 
 #[test]
 fn retry_inventory_without_matching_failure_is_rejected() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf6dd_verification_retry_invariant_failure.json"
-    ))
+    let fixture: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF6DD_VERIFICATION_RETRY_INVARIANT_FAILURE,
+    )
     .expect("fixture JSON");
     let checked = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
         &fixture["unmatched_inventory"],
@@ -274,10 +273,9 @@ fn retry_inventory_without_matching_failure_is_rejected() {
 
 #[test]
 fn retry_inventory_accepts_the_exact_source_gap_and_predicate() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf32_verification_invariant_chain.json"
-    ))
-    .expect("D17 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WF32_VERIFICATION_INVARIANT_CHAIN)
+            .expect("D17 fixture");
 
     let inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
         &fixture["valid_retry_plan"],
@@ -313,9 +311,9 @@ fn fabel_shape_repair_drops_already_accepted_source_outcomes() {
 
 #[test]
 fn d22_verification_remediation_source_items_satisfy_graph_contract() {
-    let item: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wf485_verification_remediation_source_item.json"
-    ))
+    let item: serde_json::Value = serde_json::from_str(
+        archon_test_support::fixtures::WF485_VERIFICATION_REMEDIATION_SOURCE_ITEM,
+    )
     .expect("D22 fixture");
     let source_items =
         workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
@@ -372,7 +370,7 @@ fn d22_verification_remediation_source_items_satisfy_graph_contract() {
 #[test]
 fn d23_retry_merge_preserves_unretried_failures() {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/wf485_verification_retry_merge.json"))
+        serde_json::from_str(archon_test_support::fixtures::WF485_VERIFICATION_RETRY_MERGE)
             .expect("D23 fixture");
     let retry_items = support::array(fixture.get("retry_items"));
     let merged = workflow_live_v2_lifecycle_verify_merge::merge_retry_outcomes(

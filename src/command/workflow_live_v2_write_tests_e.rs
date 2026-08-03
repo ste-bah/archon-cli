@@ -38,7 +38,7 @@ fn coordinator_undeclared_patch_wording_is_branch_scoped_safety_data() {
 #[test]
 fn compound_repair_failure_uses_root_rejection_kind() {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/d26_compound_repair_failure.json"))
+        serde_json::from_str(archon_test_support::fixtures::D26_COMPOUND_REPAIR_FAILURE)
             .expect("fixture");
     let error = fixture["error"].as_str().expect("error");
 
@@ -47,10 +47,9 @@ fn compound_repair_failure_uses_root_rejection_kind() {
 
 #[test]
 fn oversized_candidate_file_is_review_data_not_terminal_stage_failure() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/wfdc_size_policy_branch_failure.json"
-    ))
-    .expect("fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WFDC_SIZE_POLICY_BRANCH_FAILURE)
+            .expect("fixture");
     let error = fixture["old_error"].as_str().expect("old error");
 
     assert!(is_write_branch_validation_error(error));
@@ -66,10 +65,9 @@ fn oversized_candidate_file_is_review_data_not_terminal_stage_failure() {
 
 #[test]
 fn validation_error_preserves_source_task_identity() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/write_validation_error_source_identity.json"
-    ))
-    .expect("fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::WRITE_VALIDATION_ERROR_SOURCE_IDENTITY)
+            .expect("fixture");
     let result = write_branch_validation_error_result(
         fixture["branch_id"].as_str().expect("branch id"),
         Some(&fixture["input"]),

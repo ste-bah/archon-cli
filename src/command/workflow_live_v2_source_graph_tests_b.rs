@@ -202,7 +202,7 @@ fn focused_verification_expected_evidence_changes_source_fingerprint() {
 
 #[test]
 fn focused_verification_rejects_retry_steps_without_invariants() {
-    let fixture = include_str!("fixtures/wffe12_verification_repair_plan_1_3_items.json");
+    let fixture = archon_test_support::fixtures::WFFE12_VERIFICATION_REPAIR_PLAN_1_3_ITEMS;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let execution = focused_verification_execution(source_data);
 
@@ -214,7 +214,7 @@ fn focused_verification_rejects_retry_steps_without_invariants() {
 
 #[test]
 fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
-    let fixture = include_str!("fixtures/wff68_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WFF68_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
@@ -238,7 +238,7 @@ fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
 
 #[test]
 fn focused_verification_rejects_direct_retry_items_without_invariants() {
-    let fixture = include_str!("fixtures/wf1ca_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF1CA_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
@@ -255,7 +255,7 @@ fn focused_verification_rejects_direct_retry_items_without_invariants() {
 
 #[test]
 fn focused_verification_accepts_retry_command_fixture() {
-    let fixture = include_str!("fixtures/wf19f5_verification_repair_plan_1_1.json");
+    let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
@@ -279,7 +279,7 @@ fn focused_verification_accepts_retry_command_fixture() {
 
 #[test]
 fn focused_verification_rejects_nested_retry_without_invariants() {
-    let fixture = include_str!("fixtures/wf19f5_verification_repair_plan_1_3.json");
+    let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let normalized =
         crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
@@ -375,10 +375,9 @@ fn dynamic_wave_source_rejects_duplicate_task_assignment_without_fingerprint() {
 
 #[test]
 fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/d43_same_task_verification_remediation.json"
-    ))
-    .expect("D43 fixture");
+    let fixture: serde_json::Value =
+        serde_json::from_str(archon_test_support::fixtures::D43_SAME_TASK_VERIFICATION_REMEDIATION)
+            .expect("D43 fixture");
     let execution = WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "remediation-wave-10-verification-1".to_string(),

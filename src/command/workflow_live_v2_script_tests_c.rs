@@ -60,10 +60,9 @@ fn read_only_calls_cannot_accept_task_coverage_without_implementation_evidence()
 
 #[test]
 fn artifact_only_focused_verification_can_accept_verification_coverage() {
-    let result: WorkflowV2Result = serde_json::from_str(include_str!(
-        "fixtures/wf32_artifact_verification_aggregate.json"
-    ))
-    .expect("D16 fixture");
+    let result: WorkflowV2Result =
+        serde_json::from_str(archon_test_support::fixtures::WF32_ARTIFACT_VERIFICATION_AGGREGATE)
+            .expect("D16 fixture");
     let options = WorkflowV2HostOptions {
         item_kind: Some("focused_verification".to_string()),
         ..WorkflowV2HostOptions::default()

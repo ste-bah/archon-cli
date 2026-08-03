@@ -7,13 +7,28 @@
 //! Read-only. Lowering never mutates or re-validates the spec — cycles and
 //! fan-out contracts stay `WorkflowSpec::validate`'s business, and the same
 //! defects surface again from [`TaskGraph::waves`].
+//!
+//! # Why the lowering lives here and not in `archon-topology`
+//!
+//! It reads `WorkflowSpec`, which is this crate's type, so siting it beside the
+//! IR meant `archon-topology -> archon-workflow`. That edge closed a cycle —
+//! `archon-core -> archon-workflow -> archon-topology -> archon-core` — the
+//! moment anything in `archon-workflow` needed `archon-core`, and Cargo rejects
+//! a cyclic package graph outright (`cargo metadata` exits 101). Features do not
+//! break it: Cargo features are additive, so a feature-gated edge is still an
+//! edge in the package graph.
+//!
+//! Lowering *into* the IR needs only the IR, and the IR is the smaller and more
+//! stable half. So the edge now runs `archon-workflow -> archon-topology`, in
+//! the direction type ownership already pointed — the same reason the
+//! `Vec<Subtask>` lowering lives in `archon-core`.
 
-use archon_workflow::spec::{StageKind, StageSpec, WorkflowSpec};
-
-use crate::ir::{
+use archon_topology::ir::{
     DataRef, FanoutSpec, GraphBudget, GraphOrigin, NodeRole, PermissionClass, TaskGraph, TaskNode,
     WriteTarget,
 };
+
+use crate::spec::{StageKind, StageSpec, WorkflowSpec, parse_foreach_accessor};
 
 /// Lower a validated (or unvalidated) spec into the IR.
 ///
@@ -88,7 +103,7 @@ fn lower_stage(spec: &WorkflowSpec, stage: &StageSpec) -> TaskNode {
 /// Milestone 3 narrows that relation to gates actually *passed* in the executed
 /// prefix, which neutralises it — a checkpoint never presented is never passed.
 fn lower_role(kind: StageKind) -> NodeRole {
-    use crate::ir::GateKind;
+    use archon_topology::ir::GateKind;
     match kind {
         StageKind::Agent | StageKind::Implementation | StageKind::Fanout => NodeRole::Work,
         StageKind::Reduce => NodeRole::Reduce,
@@ -113,21 +128,6 @@ fn lower_fanout(stage: &StageSpec) -> Option<FanoutSpec> {
     })
 }
 
-/// Parse `${producer.accessor}`.
-///
-/// Reimplemented rather than imported: `archon_workflow::spec`'s copy is
-/// `pub(crate)`. Kept byte-compatible with it, including the trimming.
-fn parse_foreach_accessor(foreach: &str) -> Option<(&str, &str)> {
-    let inner = foreach.trim().strip_prefix("${")?.strip_suffix('}')?;
-    let (producer, accessor) = inner.split_once('.')?;
-    let producer = producer.trim();
-    let accessor = accessor.trim();
-    if producer.is_empty() || accessor.is_empty() {
-        return None;
-    }
-    Some((producer, accessor))
-}
-
 /// Keys carrying the level inside an object-shaped permissions entry.
 ///
 /// `level` is canonical — it is the name of the thing being declared. `class`
@@ -142,7 +142,7 @@ const BLANKET_KEYS: [&str; 2] = ["default", "*"];
 /// `WorkflowSpec::permissions` → [`PermissionClass`], per the declared format.
 ///
 /// Milestone 1 read this field with no schema to conform to and guessed. The
-/// format is now defined — see [`crate::permission`] — and grounded in
+/// format is now defined — see [`archon_topology::permission`] — and grounded in
 /// `archon_tools::tool::PermissionLevel`, the enum admission already keys off.
 /// The map is read as: the stage's own id, then the blanket `default` (alias
 /// `*`); the value is the level as a string, or an object carrying it under
@@ -154,7 +154,7 @@ const BLANKET_KEYS: [&str; 2] = ["default", "*"];
 /// and inheriting a blanket `dangerous` from a typo would fail closed. Milestone
 /// 3 requires enforcement never to fail closed on a bookkeeping gap. Rejecting
 /// typos belongs in a validator, where failing loudly costs nothing;
-/// [`crate::permission::is_declared_permission`] is there for one.
+/// [`archon_topology::permission::is_declared_permission`] is there for one.
 fn lower_permission(spec: &WorkflowSpec, stage: &StageSpec) -> PermissionClass {
     spec.permissions
         .get(&stage.id)

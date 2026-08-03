@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn workflow_live_generated_contract_normalizes_direct_command_retry_fixture() {
-    let fixture = include_str!("fixtures/wfc5d4_verification_repair_plan_1_3.json");
+    let fixture = archon_test_support::fixtures::WFC5D4_VERIFICATION_REPAIR_PLAN_1_3;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 
@@ -36,7 +36,7 @@ fn workflow_live_generated_contract_normalizes_direct_command_retry_fixture() {
 
 #[test]
 fn workflow_live_generated_contract_requires_invariants_for_consolidated_retry_item() {
-    let fixture = include_str!("fixtures/wfcac_verification_repair_consolidated_retry_item.json");
+    let fixture = archon_test_support::fixtures::WFCAC_VERIFICATION_REPAIR_CONSOLIDATED_RETRY_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&tdl_task_universe()));
 

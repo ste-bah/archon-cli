@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use archon_workflow::write_coordinator::write_plan::ResourceKey;
+use archon_write_plan::write_plan::ResourceKey;
 
 use crate::index::GraphIndex;
 use crate::ir::{GraphBudget, TaskGraph};
@@ -229,7 +229,7 @@ impl SessionState {
             claim.node_id != node_id
                 && self.is_live(&claim.node_id)
                 && !self.are_related(node_id, &claim.node_id)
-                && archon_workflow::write_coordinator::write_plan::keys_conflict(&claim.key, key)
+                && archon_write_plan::write_plan::keys_conflict(&claim.key, key)
         })
     }
 

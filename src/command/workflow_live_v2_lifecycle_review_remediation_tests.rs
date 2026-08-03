@@ -1,10 +1,8 @@
 use super::*;
 
 fn failed_review_wave_fixture() -> serde_json::Value {
-    serde_json::from_str(include_str!(
-        "fixtures/wf66_review_remediation_wave_failed_minimal.json"
-    ))
-    .expect("fixture")
+    serde_json::from_str(archon_test_support::fixtures::WF66_REVIEW_REMEDIATION_WAVE_FAILED_MINIMAL)
+        .expect("fixture")
 }
 
 #[test]
