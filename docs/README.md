@@ -137,6 +137,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.5.0](release-notes/v1.5.0.md) — Topology layer (`TaskGraph` IR, ambient trace, guardrail admission), `archon requirements trace` with a four-level proof ladder and `--falsify`, advisory `archon workflow lint`, `/workflow-prd` and `/workflow-prd-spec` skills, SONA tuning of the generated-workflow limits plus a learned fan-out width, and two behaviour changes: hooks resolve a POSIX shell on Windows, and `ARCHON_DATA_DIR` means one directory
 - [v1.4.0](release-notes/v1.4.0.md) — Self-learning JEPA world model (trainable encoders, dense embedding input, live advisory loop, automatic candidate lifecycle), `archon draft` FCDP pipeline with provenance import, agent catalog snapshot fixes, and a repository-wide 500-line file ceiling
 - [v1.3.11](release-notes/v1.3.11.md) — Governed Trading Lab substrate with strategy specs, Pine prototypes, persistent OHLCV data, fill/candle/custom-rule backtests, paper/live gates, TradingView replay-paper evidence, workflow specs, risk/audit controls, learning hooks, and user/cookbook documentation
 - [v1.3.10](release-notes/v1.3.10.md) — Provider-neutral dynamic workflows, durable workflow bundles, live TUI Agent Activity, web Workflows page, learning ledgers, and `/workflow` CLI/TUI control
