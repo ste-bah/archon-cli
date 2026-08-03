@@ -179,4 +179,3 @@ fn a_partial_trailing_workflow_line_is_ignored() {
 
     assert_eq!(project_workflow_run(temp.path(), &store, "wf-1"), 1);
 }
-

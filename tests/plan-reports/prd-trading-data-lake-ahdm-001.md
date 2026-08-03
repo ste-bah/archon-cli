@@ -142,11 +142,11 @@ Stamped onto every implementation item by the host from the task universe. An ag
 | 1 | `TASK-TDL-010` | - | - | trading_data_registry → `.archon/trading-lab/data/registry.json`<br>registry_migration_report → `.archon/trading-lab/data/registry-migration-report.json` |
 | 2 | `TASK-TDL-020` | - | - | dataset_validation_report → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json` |
 | 3 | `TASK-TDL-030` | - | - | provider_capability_registry → `.archon/trading-lab/data/provider-capabilities.json` |
-| 4 | `TASK-TDL-040` | chart_get_state<br>data_get_ohlcv<br>tv_health_check | - | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json` |
-| 4 | `TASK-TDL-050` | - | OPENBB_API_URL<br>POLYGON_API_KEY | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json` |
-| 4 | `TASK-TDL-060` | - | - | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json`<br>provider_capability_record → `.archon/trading-lab/data/provider-capabilities.json` |
-| 4 | `TASK-TDL-070` | - | - | diagnostic_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json` |
-| 5 | `TASK-TDL-041` | chart_get_state<br>quote_get<br>tv_health_check | - | provider_snapshot → `.archon/trading-lab/data/snapshots/<provider>/<symbol>.json` |
+| 4 | `TASK-TDL-040` | chart_get_state<br>data_get_ohlcv<br>tv_health_check | - | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json`<br>trading_data_registry_entry → `.archon/trading-lab/data/registry.json` |
+| 4 | `TASK-TDL-050` | - | OPENBB_API_URL<br>POLYGON_API_KEY | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json`<br>trading_data_registry_entry → `.archon/trading-lab/data/registry.json` |
+| 4 | `TASK-TDL-060` | - | - | native_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json`<br>provider_capability_record → `.archon/trading-lab/data/provider-capabilities.json`<br>trading_data_registry_entry → `.archon/trading-lab/data/registry.json` |
+| 4 | `TASK-TDL-070` | - | - | diagnostic_dataset_manifest → `.archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json`<br>trading_data_registry_entry → `.archon/trading-lab/data/registry.json` |
+| 5 | `TASK-TDL-041` | chart_get_state<br>quote_get<br>tv_health_check | - | provider_snapshot → `.archon/trading-lab/data/snapshots/<provider>/<symbol>.json`<br>trading_data_registry_entry → `.archon/trading-lab/data/registry.json` |
 | 5 | `TASK-TDL-042` | - | - | - |
 | 6 | `TASK-TDL-080` | data_get_ohlcv | OPENBB_API_URL<br>POLYGON_API_KEY | required_universe_registry → `.archon/trading-lab/data/coverage/latest.json` |
 | 7 | `TASK-TDL-090` | - | - | - |

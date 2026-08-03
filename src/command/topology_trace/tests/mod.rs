@@ -27,7 +27,6 @@ fn trace_in(dir: &std::path::Path) -> AmbientTrace {
     AmbientTrace::open(dir, "g1", "s1").unwrap()
 }
 
-
 mod orchestrator_tap;
 mod tool_tap;
 mod workflow_tap;

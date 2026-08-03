@@ -176,4 +176,3 @@ fn permission_levels_map_onto_the_ir_classes() {
         "under-classifying irreversibility is the failure that matters"
     );
 }
-
