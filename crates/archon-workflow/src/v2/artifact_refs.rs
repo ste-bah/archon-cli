@@ -1,11 +1,23 @@
-use archon_workflow::WorkflowV2Result;
+//! Which artifact refs name something the filesystem can be asked about.
+//!
+//! Existence validation is one leg of completion credit, so "does this
+//! artifact exist" must have an answer for every ref a run can produce. Refs
+//! naming something off the filesystem — an inline payload, an HTTP response,
+//! an MCP resource — have no path to stat, and treating them as missing would
+//! deny credit for work that was actually delivered.
+//!
+//! This sits beside the V2 result types rather than in the host because the
+//! rule is a property of `WorkflowV2Result`'s artifact vocabulary, not of any
+//! particular host's filesystem.
+
+use super::result::WorkflowV2Result;
 
 /// Schemes whose artifacts genuinely live outside the filesystem. An
 /// allowlist, not a shape check: existence validation is one leg of
 /// completion credit, so an arbitrary `whatever:` prefix must not bypass it.
 const NONFILESYSTEM_SCHEMES: &[&str] = &["inline", "data", "http", "https", "mcp"];
 
-pub(super) fn is_nonfilesystem_artifact_ref(raw: &str) -> bool {
+pub fn is_nonfilesystem_artifact_ref(raw: &str) -> bool {
     let Some((scheme, _)) = raw.trim().split_once(':') else {
         return false;
     };
@@ -14,7 +26,7 @@ pub(super) fn is_nonfilesystem_artifact_ref(raw: &str) -> bool {
         .any(|known| scheme.eq_ignore_ascii_case(known))
 }
 
-pub(super) fn retain_filesystem_artifacts(result: &mut WorkflowV2Result) {
+pub fn retain_filesystem_artifacts(result: &mut WorkflowV2Result) {
     result
         .artifacts
         .retain(|artifact| !is_nonfilesystem_artifact_ref(&artifact.path));

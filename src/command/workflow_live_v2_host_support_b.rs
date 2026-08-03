@@ -16,7 +16,7 @@ pub(super) fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
 }
 
 pub(crate) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
-    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(path) {
+    if archon_workflow::v2::artifact_refs::is_nonfilesystem_artifact_ref(path) {
         return true;
     }
     let path = Path::new(path);

@@ -8,6 +8,7 @@ pub mod agent_adapter;
 mod agent_output_normalize;
 mod agent_prompt;
 mod agent_repair;
+pub mod artifact_refs;
 mod branch_evidence;
 pub mod call_execution;
 pub mod host_api;
