@@ -1,4 +1,4 @@
-use super::*;
+use crate::v2::{WorkflowV2CommandStatus, WorkflowV2Result};
 
 pub(super) fn is_duplicate_harness_gap(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
@@ -99,7 +99,13 @@ fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
 
 #[cfg(test)]
 mod declared_contract_enforcement_tests {
-    use super::*;
+    use super::super::normalize::{
+        ContractVerification, demote_failed_contract, enforce_declared_contracts,
+        run_contract_verifier, stamp_passed_contracts, verdict_failure, verifier_verdicts,
+    };
+    use crate::v2::{
+        BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Result, WorkflowV2Status,
+    };
 
     fn accepted_outcome(item_id: &str) -> WorkflowV2BranchOutcome {
         WorkflowV2BranchOutcome {
@@ -284,8 +290,11 @@ mod declared_contract_enforcement_tests {
 
 #[cfg(test)]
 mod commandless_demotion_tests {
-    use super::*;
-    use archon_workflow::{WorkflowV2CommandKind, WorkflowV2CommandRecord};
+    use super::super::normalize::normalize_focused_verification_outcome;
+    use crate::v2::{
+        BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandRecord,
+        WorkflowV2CommandStatus, WorkflowV2Result, WorkflowV2Status,
+    };
 
     fn accepted_outcome(commands: Vec<WorkflowV2CommandRecord>) -> WorkflowV2BranchOutcome {
         let mut result = WorkflowV2Result::accepted("verifier claims acceptance");

@@ -61,8 +61,6 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
-#[path = "workflow_live_verification_contract.rs"]
-mod workflow_live_verification_contract;
 #[cfg(test)]
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;

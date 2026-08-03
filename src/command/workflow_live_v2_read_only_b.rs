@@ -165,8 +165,11 @@ pub(super) async fn run_read_only_v2_fanout(
     // Host-executed contract enforcement runs BEFORE aggregation so a demoted
     // branch also lowers the call's aggregate status; demoting afterwards would
     // leave an already-computed "accepted" result standing.
-    workflow_live_v2_verification::enforce_declared_contracts(&mut outcomes, &declared_contracts)
-        .await;
+    archon_workflow::v2::verification::enforce_declared_contracts(
+        &mut outcomes,
+        &declared_contracts,
+    )
+    .await;
     let report = WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: run_report.max_parallelism,

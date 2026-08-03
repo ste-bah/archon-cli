@@ -1,15 +1,22 @@
-use super::*;
+//! Bounded projection of a stored host-call result into a reduce call's
+//! `source_data`.
+//!
+//! A reducer's input is a prior call's whole recorded output, which is
+//! unbounded. Packing keeps the fields routing and triage depend on (identity,
+//! status, classification, evidence, coverage, gaps) at full fidelity and
+//! truncates the free text around them, so a reduce prompt stays within budget
+//! without losing the fields downstream stages read by name.
 
-pub(super) const SOURCE_PACK_TEXT_LIMIT: usize = 700;
+const SOURCE_PACK_TEXT_LIMIT: usize = 700;
 
-pub(in super::super) fn source_pack_value(value: &serde_json::Value) -> serde_json::Value {
+pub fn source_pack_value(value: &serde_json::Value) -> serde_json::Value {
     // Packed reduce source is prior agent output, and allowed_mcp_tools scans
     // the whole stage input: a tool declaration surviving the pack would bind
     // MCP tools on the reducer. The unknown-object packer preserves every key,
     // so strip tool declarations here — the fanout branch builder already does
     // the same for write/verify items.
     let mut value = value.clone();
-    archon_workflow::tool_declarations::strip_tool_declarations(&mut value);
+    crate::tool_declarations::strip_tool_declarations(&mut value);
     let value = &value;
     match value {
         serde_json::Value::Array(items) => {
@@ -44,14 +51,14 @@ pub(in super::super) fn source_pack_value(value: &serde_json::Value) -> serde_js
     }
 }
 
-pub(super) fn pack_outcomes(value: &serde_json::Value) -> serde_json::Value {
+fn pack_outcomes(value: &serde_json::Value) -> serde_json::Value {
     let Some(outcomes) = value.as_array() else {
         return serde_json::Value::Array(Vec::new());
     };
     serde_json::Value::Array(outcomes.iter().map(pack_outcome).collect())
 }
 
-pub(super) fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
+fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
     let Some(object) = value.as_object() else {
         return compact_unknown_source_value(value);
     };
@@ -99,7 +106,7 @@ pub(super) fn pack_outcome(value: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(packed)
 }
 
-pub(super) fn pack_result_like_object(
+fn pack_result_like_object(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Value {
     let mut packed = serde_json::Map::new();
@@ -153,10 +160,7 @@ pub(super) fn pack_result_like_object(
     serde_json::Value::Object(packed)
 }
 
-pub(super) fn compact_known_result_field(
-    key: &str,
-    value: &serde_json::Value,
-) -> serde_json::Value {
+fn compact_known_result_field(key: &str, value: &serde_json::Value) -> serde_json::Value {
     match key {
         "summary" => truncate_json_text(value),
         "evidence" => serde_json::Value::Array(
@@ -235,7 +239,7 @@ pub(super) fn compact_known_result_field(
     }
 }
 
-pub(super) fn compact_unknown_source_value(value: &serde_json::Value) -> serde_json::Value {
+fn compact_unknown_source_value(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::String(_) => truncate_json_text(value),
         serde_json::Value::Array(items) => {
@@ -252,7 +256,7 @@ pub(super) fn compact_unknown_source_value(value: &serde_json::Value) -> serde_j
     }
 }
 
-pub(super) fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool {
+fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool {
     matches!(
         key,
         "summary" | "output_summary" | "description" | "content"
@@ -261,14 +265,28 @@ pub(super) fn is_large_text_field(key: &str, value: &serde_json::Value) -> bool 
         .is_some_and(|text| text.len() > SOURCE_PACK_TEXT_LIMIT)
 }
 
-pub(super) fn truncate_json_text(value: &serde_json::Value) -> serde_json::Value {
+fn truncate_json_text(value: &serde_json::Value) -> serde_json::Value {
     let Some(text) = value.as_str() else {
         return value.clone();
     };
     serde_json::Value::String(truncate_for_result(text, SOURCE_PACK_TEXT_LIMIT))
 }
 
-pub(super) fn json_array_len(value: &serde_json::Value) -> serde_json::Value {
+/// Local copy of the write layer's identical helper: `v2::write::errors` is a
+/// deliberately private module, and a generic character-bounded truncation is
+/// not worth widening it (or minting a crate-wide text module) to share.
+fn truncate_for_result(value: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for ch in value.chars().take(max_chars) {
+        output.push(ch);
+    }
+    if value.chars().count() > max_chars {
+        output.push_str("...");
+    }
+    output
+}
+
+fn json_array_len(value: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(value.as_array().map(Vec::len).unwrap_or(0))
 }
 

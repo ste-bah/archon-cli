@@ -104,7 +104,7 @@ async function workflow(w) {
     assert_eq!(summary.status, WorkflowV2Status::Failed);
     assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
     assert_eq!(summary.executed, 1);
-    super::super::super::workflow_live_v2_state::sync_v2_summary_to_run(
+    archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
         &workflow_store,
         &run.id,
         &summary.calls,

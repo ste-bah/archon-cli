@@ -1,4 +1,4 @@
-use archon_workflow::{
+use crate::v2::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CommandStatus, WorkflowV2Result,
     WorkflowV2Status,
 };
@@ -399,8 +399,8 @@ mod tests {
         let result = WorkflowV2Result {
             status: WorkflowV2Status::NeedsReview,
             summary: "provider returned missing credentials for API key".to_string(),
-            commands_run: vec![archon_workflow::WorkflowV2CommandRecord {
-                kind: archon_workflow::WorkflowV2CommandKind::Other,
+            commands_run: vec![crate::WorkflowV2CommandRecord {
+                kind: crate::WorkflowV2CommandKind::Other,
                 command: "provider check".to_string(),
                 status: WorkflowV2CommandStatus::Failed,
                 exit_code: Some(1),
@@ -429,7 +429,7 @@ mod tests {
             summary:
                 "artifact reports API key missing while redacted environment proof reports present"
                     .to_string(),
-            residual_gaps: vec![archon_workflow::WorkflowV2ResidualGap {
+            residual_gaps: vec![crate::WorkflowV2ResidualGap {
                 id: "provider-env-status-mismatch".to_string(),
                 description:
                     "provider_environment conflicts with current redacted provider_env_proof"
@@ -454,8 +454,8 @@ mod tests {
         let result = WorkflowV2Result {
             status: WorkflowV2Status::Failed,
             summary: "focused test failed: 0 passed, 1 failed".to_string(),
-            commands_run: vec![archon_workflow::WorkflowV2CommandRecord {
-                kind: archon_workflow::WorkflowV2CommandKind::Test,
+            commands_run: vec![crate::WorkflowV2CommandRecord {
+                kind: crate::WorkflowV2CommandKind::Test,
                 command: "cargo test focused_check".to_string(),
                 status: WorkflowV2CommandStatus::Failed,
                 exit_code: Some(101),

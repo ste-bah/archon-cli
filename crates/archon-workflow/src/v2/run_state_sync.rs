@@ -1,15 +1,18 @@
-use anyhow::Result;
-use archon_workflow::run::StageState;
-use archon_workflow::{
+//! Reconcile a generated (V2) run's typed call records back onto the legacy
+//! `state.json` the rest of the runtime reads for run/stage status.
+
+use crate::error::WorkflowResult;
+use crate::run::StageState;
+use crate::{
     RunStatus, StageStatus, WorkflowStore, WorkflowV2HostCall, WorkflowV2ResultStore,
     WorkflowV2Status,
 };
 
-pub(super) fn mark_v2_call_running(
+pub fn mark_v2_call_running(
     store: &WorkflowStore,
     run_id: &str,
     call_id: &str,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let mut run = store.load_state(run_id)?;
     if matches!(run.status, RunStatus::Paused | RunStatus::Cancelled) {
         return Ok(());
@@ -38,11 +41,11 @@ pub(super) fn mark_v2_call_running(
 /// status is then wrong: resume logic, status queries, the resumable guard, and
 /// any monitoring. Stages are left untouched (there is no summary on these
 /// paths); only the run-level status is reconciled.
-pub(super) fn persist_terminal_run_status(
+pub fn persist_terminal_run_status(
     store: &WorkflowStore,
     run_id: &str,
     status: RunStatus,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let mut run = store.load_state(run_id)?;
     if run.status == status {
         return Ok(());
@@ -52,13 +55,13 @@ pub(super) fn persist_terminal_run_status(
     store.save_state_preserving_control(&run)
 }
 
-pub(super) fn sync_v2_summary_to_run(
+pub fn sync_v2_summary_to_run(
     store: &WorkflowStore,
     run_id: &str,
     calls: &[WorkflowV2HostCall],
     v2_store: &WorkflowV2ResultStore,
     status: WorkflowV2Status,
-) -> Result<()> {
+) -> WorkflowResult<()> {
     let mut run = store.load_state(run_id)?;
     for call in calls {
         let call_status = v2_store
@@ -117,7 +120,7 @@ pub(super) fn sync_v2_summary_to_run(
     Ok(())
 }
 
-fn is_dynamic_template_stage(stage: &archon_workflow::StageSpec) -> bool {
+fn is_dynamic_template_stage(stage: &crate::StageSpec) -> bool {
     stage
         .extra
         .get("dynamic_template")
@@ -125,7 +128,7 @@ fn is_dynamic_template_stage(stage: &archon_workflow::StageSpec) -> bool {
         .unwrap_or(false)
 }
 
-fn dynamic_stage_prefix(stage: &archon_workflow::StageSpec) -> Option<String> {
+fn dynamic_stage_prefix(stage: &crate::StageSpec) -> Option<String> {
     stage
         .extra
         .get("dynamic_id_prefix")
@@ -160,7 +163,7 @@ fn run_status_from_v2(status: WorkflowV2Status) -> RunStatus {
 mod tests {
     use std::collections::BTreeMap;
 
-    use archon_workflow::{
+    use crate::{
         RetryPolicy, StageKind, StageSpec, WorkflowSpec, WorkflowV2CallRecord, WorkflowV2HostCall,
         WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
     };
@@ -317,7 +320,7 @@ mod tests {
         extra: BTreeMap<String, serde_json::Value>,
     ) -> WorkflowSpec {
         WorkflowSpec {
-            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            schema: crate::spec::WORKFLOW_SCHEMA.to_string(),
             name: "test".to_string(),
             task: "test".to_string(),
             target_repository_root: Some("/repo".to_string()),
