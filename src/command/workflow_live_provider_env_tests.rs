@@ -98,13 +98,13 @@ async fn d47_generated_provider_workflow_resolves_one_shared_key_set() {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["tasks".to_string()],
         tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-ALPHA-011".to_string(),
                 source_path: "tasks/TASK-ALPHA-011.md".to_string(),
                 required_env_keys: vec!["POLYGON_API_KEY".to_string()],
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-ALPHA-019".to_string(),
                 source_path: "tasks/TASK-ALPHA-019.md".to_string(),
                 required_env_keys: vec!["OPENBB_API_URL".to_string()],

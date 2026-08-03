@@ -67,14 +67,12 @@ fn d70_artifact_only_work_without_declared_contract_is_repairable() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-EX-001".to_string(),
-                source_path: "tasks/TASK-EX-001.md".to_string(),
-                acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
-                ..Default::default()
-            },
-        ],
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-EX-001".to_string(),
+            source_path: "tasks/TASK-EX-001.md".to_string(),
+            acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
+            ..Default::default()
+        }],
     };
     let inventory = normalize_generated_inventory_value_with_repo(
         &serde_json::json!({"items": [{
@@ -103,21 +101,19 @@ fn d70_declared_contract_allows_artifact_only_ownership() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-EX-001".to_string(),
-                source_path: "tasks/TASK-EX-001.md".to_string(),
-                acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
-                deliverable_contracts: vec![
-                super::super::super::workflow_live_task_universe::WorkflowV2DeliverableContract {
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-EX-001".to_string(),
+            source_path: "tasks/TASK-EX-001.md".to_string(),
+            acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
+            deliverable_contracts: vec![
+                archon_workflow::task_universe::WorkflowV2DeliverableContract {
                     kind: "audit_report".to_string(),
                     artifact_path: ".archon/reports/current.json".to_string(),
                     ..Default::default()
                 },
             ],
-                ..Default::default()
-            },
-        ],
+            ..Default::default()
+        }],
     };
     let inventory = normalize_generated_inventory_value_with_repo(
         &serde_json::json!({"items": [{

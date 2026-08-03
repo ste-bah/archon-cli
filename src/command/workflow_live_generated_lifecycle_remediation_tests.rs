@@ -1,20 +1,18 @@
 use super::*;
 
-fn test_universe() -> super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
-    super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+fn test_universe() -> archon_workflow::task_universe::WorkflowV2TaskUniverse {
+    archon_workflow::task_universe::WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
-        tasks: vec![
-            super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-X-001".to_string(),
-                aliases: Vec::new(),
-                source_path: "/tmp/TASK-X-001.md".to_string(),
-                dependency_ids: Vec::new(),
-                title: None,
-                artifact_requirements: Vec::new(),
-                ..Default::default()
-            },
-        ],
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-X-001".to_string(),
+            aliases: Vec::new(),
+            source_path: "/tmp/TASK-X-001.md".to_string(),
+            dependency_ids: Vec::new(),
+            title: None,
+            artifact_requirements: Vec::new(),
+            ..Default::default()
+        }],
     }
 }
 

@@ -31,7 +31,7 @@ use crate::command::workflow_live::workflow_live_generated_scaffold::{
     decomposed_prd_plan_calls, decomposed_prd_scaffold,
 };
 use crate::command::workflow_live::workflow_live_planner::WorkflowScriptPlan;
-use crate::command::workflow_live::workflow_live_task_universe::{
+use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
 };
 

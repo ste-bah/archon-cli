@@ -9,9 +9,7 @@ pub(super) async fn run_read_only_v2_fanout(
     v2_store: &WorkflowV2ResultStore,
     store_for_control: &WorkflowStore,
     run_id: &str,
-    task_universe: Option<
-        &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
-    >,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let items = fanout_items_for_call(&execution, v2_store)?;
     // Read-only branches (verification waves) need the project artifact root
@@ -233,7 +231,7 @@ fn emit_v2_branch_event(
 
 #[cfg(test)]
 mod declared_contract_stamping_tests {
-    use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse;
+    use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
     fn universe() -> WorkflowV2TaskUniverse {
         serde_json::from_value(serde_json::json!({

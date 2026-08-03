@@ -256,7 +256,7 @@ pub(crate) fn load_shape_observations(
 /// the project root: a run whose tasks came from somewhere else must lint the
 /// graph it is actually running, or the gate is scoring a different PRD.
 pub(crate) fn tasks_root_of(
-    universe: &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
+    universe: &archon_workflow::task_universe::WorkflowV2TaskUniverse,
 ) -> Option<PathBuf> {
     universe
         .tasks

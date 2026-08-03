@@ -20,7 +20,7 @@ use super::{
     wave_layering,
 };
 use crate::command::learning_workflow_hooks::derive_learning_hooks;
-use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 /// Review branches for every task, which is what the plan produces once every
 /// task has been accepted by its own verification.

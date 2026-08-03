@@ -6,7 +6,7 @@ use archon_workflow::{
     WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 /// The recorded plan document for a decomposed-PRD run.
 ///

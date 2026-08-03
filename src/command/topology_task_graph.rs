@@ -1,6 +1,6 @@
 //! Lowering a decomposed-PRD task directory into the topology IR.
 //!
-//! Split out of `workflow_live_task_universe` and named outside the `workflow*`
+//! Split out of `archon_workflow::task_universe` and named outside the `workflow*`
 //! prefix, because it is the one part of that module that names
 //! `archon_topology` — and `archon-topology` depends on `archon-workflow`, so
 //! nothing destined for that crate may name it back. Cargo rejects the cycle at
@@ -20,10 +20,8 @@ use std::path::Path;
 use archon_topology::ir::{GraphBudget, GraphOrigin, NodeRole, TaskGraph, TaskNode, WriteTarget};
 use archon_workflow::{WorkflowError, WorkflowResult};
 
-use crate::command::workflow_live::workflow_live_task_universe::parsing::{
-    merge_project_capabilities, parse_task_file,
-};
-use crate::command::workflow_live::workflow_live_task_universe::{
+use archon_workflow::task_universe::parsing::{merge_project_capabilities, parse_task_file};
+use archon_workflow::task_universe::{
     WorkflowV2TaskUniverseTask, reconcile_blocks_into_dependencies, resolve_task_references,
     short_task_alias, task_files_under, validate_declared_statuses, validate_task_dependency_graph,
 };

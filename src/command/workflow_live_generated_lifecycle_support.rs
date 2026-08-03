@@ -14,7 +14,7 @@ use super::workflow_live_generated_contract::{
     GeneratedContractIssue, normalize_canonical_ids, normalize_generated_inventory_value_with_repo,
     normalize_generated_item_value_with_repo,
 };
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 pub(super) fn array(value: Option<&Value>) -> Vec<Value> {
     match value {

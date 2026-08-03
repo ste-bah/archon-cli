@@ -35,7 +35,7 @@
 use archon_core::config::LearningConfig;
 use archon_topology::{TaskClass, classify_task};
 
-use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 /// Cap on how much task-universe prose feeds the classifier.
 ///

@@ -79,8 +79,8 @@ pub(super) use workflow_live_v2_script::dry_run_workflow_plan;
 use super::LiveApprovalMode;
 use super::workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};
 use super::workflow_live_planner::WorkflowScriptPlan;
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 use super::workflow_live_v2_host::execute_local_host_call;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
 

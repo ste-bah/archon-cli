@@ -1,8 +1,8 @@
-use super::super::workflow_live_task_universe::{
-    WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
-};
 use super::workflow_live_v2_data::{
     fanout_items_for_call, result_from_fanout_report, source_pack_value, v2_agent_request,
+};
+use archon_workflow::task_universe::{
+    WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
 };
 use archon_workflow::{
     WorkflowSpec, WorkflowV2AgentAdapter, WorkflowV2BranchOutcome, WorkflowV2CallExecution,

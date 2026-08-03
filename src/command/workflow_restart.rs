@@ -71,9 +71,7 @@ pub(super) fn restart_generated_v2_task_workflow(
 fn generated_v2_task_universe(
     store: &WorkflowStore,
     run: &WorkflowRun,
-) -> Result<
-    Option<crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse>,
-> {
+) -> Result<Option<archon_workflow::task_universe::WorkflowV2TaskUniverse>> {
     let metadata_path = store.run_dir(&run.id).join("v2/generated-metadata.json");
     if !metadata_path.exists() {
         return Ok(None);

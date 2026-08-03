@@ -20,7 +20,7 @@
 use std::fs;
 use std::path::Path;
 
-use archon_workflow::{WorkflowError, WorkflowResult};
+use crate::error::{WorkflowError, WorkflowResult};
 
 use super::{
     WorkflowV2TaskUniverseTask, canonical_task_id_from_ref, sorted_unique, task_id_from_task_path,
@@ -65,10 +65,7 @@ pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
     "deliverable_contracts",
 ];
 
-pub(crate) fn parse_task_file(
-    path: &Path,
-    raw: &str,
-) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
+pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
     let path_task_id = task_id_from_task_path(path).ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
             "generated decomposed PRD workflow could not parse canonical task_id from {}",
@@ -233,7 +230,7 @@ fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
     }
 }
 
-pub(crate) fn merge_project_capabilities(
+pub fn merge_project_capabilities(
     task: &mut WorkflowV2TaskUniverseTask,
     task_path: &Path,
 ) -> WorkflowResult<()> {
@@ -339,9 +336,14 @@ mod tests {
     /// parser was previously only ever exercised against task files this
     /// repository wrote itself — a closed loop in which a field the parser
     /// ignored was also a field no test file declared.
+    /// The real decomposed-PRD corpus, which lives once at the workspace root
+    /// because several crates' tests parse the same seventeen task files. This
+    /// crate sits two levels below it, hence the `../..`: copying the corpus in
+    /// would let the two copies drift and the round-trip assertion would then
+    /// be checking this crate against itself.
     fn fixture_root() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/prd-trading-data-lake-ahdm-001")
+            .join("../../tests/fixtures/prd-trading-data-lake-ahdm-001")
     }
 
     #[derive(serde::Deserialize)]

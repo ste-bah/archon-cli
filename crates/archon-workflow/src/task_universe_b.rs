@@ -8,7 +8,7 @@ impl WorkflowV2TaskUniverse {
     /// derivation lives outside this module and needs the *content* of the
     /// universe to classify the run, not its structure. Titles come first so a
     /// caller that truncates keeps the strongest signal.
-    pub(crate) fn declared_prose(&self) -> Vec<&str> {
+    pub fn declared_prose(&self) -> Vec<&str> {
         let titles = self.tasks.iter().filter_map(|task| task.title.as_deref());
         let criteria = self
             .tasks
@@ -62,7 +62,7 @@ fn canonical_task_id_from_stem(stem: &str) -> Option<String> {
     Some(format!("{first}-{second}-{third}"))
 }
 
-pub(crate) fn short_task_alias(canonical: &str) -> Option<String> {
+pub fn short_task_alias(canonical: &str) -> Option<String> {
     let digits = canonical.rsplit('-').next()?;
     (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("T{digits}"))
@@ -80,7 +80,7 @@ pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
 
 /// Resolve a declared list of task references to canonical ids, or fail naming
 /// the file and the unresolved reference.
-pub(crate) fn resolve_task_references(
+pub fn resolve_task_references(
     declared: &[String],
     aliases: &BTreeMap<String, String>,
     source_path: &str,
@@ -112,7 +112,7 @@ pub(crate) fn resolve_task_references(
 /// `B` each claiming to block the other). Folding those would manufacture a
 /// two-cycle and the cycle detector would report it as a graph shape rather than
 /// as the authoring mistake it is, so they are named here with both files.
-pub(crate) fn reconcile_blocks_into_dependencies(
+pub fn reconcile_blocks_into_dependencies(
     tasks: &mut [WorkflowV2TaskUniverseTask],
 ) -> WorkflowResult<()> {
     let mut declared_blocks: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -180,9 +180,7 @@ pub(crate) fn reconcile_blocks_into_dependencies(
 ///   nothing is making a claim the task set cannot discharge: no other task
 ///   completing will ever unblock it, so either the dependency is missing or
 ///   the status is stale, and both are edits to the file named here.
-pub(crate) fn validate_declared_statuses(
-    tasks: &[WorkflowV2TaskUniverseTask],
-) -> WorkflowResult<()> {
+pub fn validate_declared_statuses(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     for task in tasks {
         let status = task_status::declared_status(task.status.as_deref()).map_err(|detail| {
             WorkflowError::SpecInvalid(format!(
@@ -206,19 +204,17 @@ pub(crate) fn validate_declared_statuses(
 
 impl WorkflowV2TaskUniverseTask {
     /// Whether the task file declares the work already finished.
-    pub(crate) fn declared_status_is_complete(&self) -> bool {
+    pub fn declared_status_is_complete(&self) -> bool {
         task_status::declared_status_is_complete(self.status.as_deref())
     }
 
     /// Whether the task file declares the task blocked by its author.
-    pub(crate) fn declared_status_is_blocked(&self) -> bool {
+    pub fn declared_status_is_blocked(&self) -> bool {
         task_status::declared_status_is_blocked(self.status.as_deref())
     }
 }
 
-pub(crate) fn validate_task_dependency_graph(
-    tasks: &[WorkflowV2TaskUniverseTask],
-) -> WorkflowResult<()> {
+pub fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     let graph = tasks
         .iter()
         .map(|task| {
@@ -303,21 +299,18 @@ fn visit_dependency_node(
 }
 
 #[cfg(test)]
-#[path = "workflow_live_task_universe_tests.rs"]
+#[path = "task_universe_tests.rs"]
 mod tests;
 
-/// The cycle diagnostic's file paths, and everything `status:` now causes.
-///
-/// A separate file from `tests` only because each source file in this tree is
-/// held under a 500-line ceiling.
-#[cfg(test)]
-#[path = "workflow_live_task_status_tests.rs"]
-mod status_tests;
+// The `status:` scheduling half of these tests stayed in the bin crate as
+// `workflow_live_task_status_tests.rs`: it asserts against
+// `workflow_live_generated_lifecycle_support`, which has not moved yet, and a
+// test here cannot reach back across the crate boundary to it.
 
 /// Declaration-driven capability merging, and the runtime-genericity gate.
 ///
 /// A separate file from `tests` only because each source file in this tree is
 /// held under a 500-line ceiling.
 #[cfg(test)]
-#[path = "workflow_live_task_universe_capability_tests.rs"]
+#[path = "task_universe_capability_tests.rs"]
 mod capability_and_genericity_tests;

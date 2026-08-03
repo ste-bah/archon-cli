@@ -1,5 +1,5 @@
-use super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask;
 use super::*;
+use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 
 #[path = "workflow_live_v2_lifecycle_verify_remediation_tests_a.rs"]
 mod workflow_live_v2_lifecycle_verify_remediation_tests_a;

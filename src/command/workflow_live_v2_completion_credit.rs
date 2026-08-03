@@ -8,7 +8,7 @@ use archon_workflow::{
     WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverageStatus,
 };
 
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 
 #[derive(Default)]
 pub(super) struct CompletionCredit {

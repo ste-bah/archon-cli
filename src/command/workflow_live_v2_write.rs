@@ -50,7 +50,7 @@ pub(super) async fn run_write_capable_v2_fanout(
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
     workspace_boundary_supported: bool,
-    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let branches = fanout_items_for_call(&execution, v2_store)?;
@@ -223,7 +223,7 @@ pub(super) fn stamp_project_artifact_policy(
 /// the only writer of the field.
 fn stamp_required_tools_from_universe(
     branches: &mut [archon_workflow::WorkflowV2FanoutItem],
-    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) {
     let Some(universe) = task_universe else {
         return;
