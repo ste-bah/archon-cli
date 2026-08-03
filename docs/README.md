@@ -20,6 +20,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Local world model](architecture/world-model.md) — trace corpus, fail-open advisor, dynamic training, retention, backends
 - [Pipelines](architecture/pipelines.md) — `/archon-code` (50 agents), `/archon-research` (47 agents / 8 phases), audited bundles, resume verification, agent loop, subagent spawning
 - [Dynamic workflows](architecture/dynamic-workflows.md) — provider-neutral generated workflow specs, durable runs, live TUI execution, web workflow view, learning ledgers, resume/restart, and template saving
+- [Topology](architecture/topology.md) — the `TaskGraph` IR both workflow specs and subtask batches lower into, the ambient jsonl trace and its batched fold into `.archon/topology.db`, and synchronous guardrail admission (agent cap, single-writer, ungated-irreversible)
 - [Evidence Engine](evidence-engine.md) — documents, knowledge, provenance, game theory, completion integrity, governed learning, meaning, constellations
 
 ## Evidence Engine
@@ -43,6 +44,8 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [Cognitive configuration](reference/cognitive-config.md) — `[learning.cognitive]` and `[policy.cognitive]`
 - [CLI flags](reference/cli-flags.md) — every command-line argument
+- [`archon requirements trace`](reference/requirements-trace.md) — requirement-to-code traceability, the four-level proof ladder, `--leann-db`, and `--falsify`
+- [`archon workflow lint`](reference/workflow-lint.md) — the four advisory topology analyses: diamond conformance, edge classification, stop-rule fusion, requirement coverage
 - [Environment variables](reference/env-vars.md) — `ARCHON_*` overrides
 - [World-model backends](reference/world-model-backends.md) — CPU, CUDA, and MLX Metal support matrix
 - [CUDA world-model validation](development/world-model-cuda-validation.md) — local CUDA JEPA validation evidence
@@ -117,6 +120,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Remote control](operations/remote-control.md) — WebSocket server, SSH, headless mode, and web launch
 - [Troubleshooting](operations/troubleshooting.md) — known issues, recovery procedures
 - [Data locations](operations/data-locations.md) — where logs, configs, memory, snapshots live
+- [SONA workflow tuning](operations/sona-workflow-tuning.md) — which `[workflow.generated]` limits are learned, the five-observation gate, the upward-only timeout ratchet, and how to find out why a run got a given value
 - [Setup wizard](operations/setup-wizard.md) — `/setup-archon-skills` interactive configuration walkthrough
 - [TUI drain-stall warning](operations/tui-drain-stall.md) — what the render-loop stall warning means
 
