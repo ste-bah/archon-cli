@@ -302,14 +302,14 @@ impl CanaryAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CanaryAgentClient {
+impl WorkflowLlmClient for CanaryAgentClient {
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
         system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> CanaryResult<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let mut prompt = String::new();
         for value in system.iter().chain(messages.iter()) {
             collect_text(value, &mut prompt);
@@ -319,7 +319,7 @@ impl LlmClient for CanaryAgentClient {
             .lock()
             .expect("prompt log lock")
             .push(prompt.chars().take(2000).collect());
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,

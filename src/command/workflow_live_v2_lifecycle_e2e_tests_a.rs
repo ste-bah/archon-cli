@@ -20,18 +20,23 @@ pub(super) enum CannedLifecycleScenario {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CannedLifecycleLlm {
+impl WorkflowLlmClient for CannedLifecycleLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
-        anyhow::bail!("D64 lifecycle harness must use the agent execution seam")
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Err(archon_workflow::WorkflowError::port(
+            "D64 lifecycle harness must use the agent execution seam",
+        ))
     }
 
-    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(
+        &self,
+        request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let prompt = request
             .messages
             .iter()
@@ -316,7 +321,8 @@ impl LlmClient for CannedLifecycleLlm {
                 .task
                 .contains("Fix only the assigned focused-verification failure")
         {
-            implementation_result(&request, &input, &call_id)?
+            implementation_result(&request, &input, &call_id)
+                .map_err(archon_workflow::WorkflowError::port)?
         } else if request.task.contains("Run focused verification only")
             || request
                 .task
@@ -329,7 +335,8 @@ impl LlmClient for CannedLifecycleLlm {
                 &self.deliverable_contract_executed,
                 &self.parameterized_contract_executed,
                 &self.verification_failure_emitted,
-            )?
+            )
+            .map_err(archon_workflow::WorkflowError::port)?
         } else if matches!(
             call_id.as_str(),
             "prd-task-review" | "repository-implementation-audit" | "acceptance-evidence-audit"
@@ -341,10 +348,12 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
             )
         } else {
-            anyhow::bail!("unexpected D64 lifecycle harness call: {call_id}");
+            return Err(archon_workflow::WorkflowError::port(format!(
+                "unexpected D64 lifecycle harness call: {call_id}"
+            )));
         };
 
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: content.to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,

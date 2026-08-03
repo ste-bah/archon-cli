@@ -8,18 +8,17 @@ use std::{
 
 use anyhow::Result;
 use archon_core::config::GeneratedWorkflowConfig;
-use archon_pipeline::runner::LlmClient;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
     GeneratedWorkflowKind, GeneratedWorkflowLearningContext, LifecycleAction, LifecycleController,
     ProviderTier, RunStatus, WorkflowBundle, WorkflowBundleOrigin, WorkflowError,
     WorkflowEventKind, WorkflowEventLog, WorkflowGeneratedScaffold, WorkflowLearningEvent,
-    WorkflowLearningEvidenceRef, WorkflowRun, WorkflowStore, WorkflowV2AgentAdapter,
-    WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
-    WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem,
-    WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2RejectedOutput,
-    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Scheduler,
-    WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
+    WorkflowLearningEvidenceRef, WorkflowLlmClient, WorkflowRun, WorkflowStore,
+    WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2BranchOutcome,
+    WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind,
+    WorkflowV2FanoutItem, WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
 };
 
 #[path = "workflow_live_provider_env.rs"]
@@ -162,20 +161,20 @@ pub(super) use workflow_live_v2_branch_cache::*;
 #[cfg(test)]
 mod generated_resume_tests {
     use super::*;
-    use archon_pipeline::runner::LlmResponse;
     use archon_tui::event_channel::bounded_tui_event_channel;
+    use archon_workflow::WorkflowAgentOutcome;
 
     struct PanicLlm;
 
     #[async_trait::async_trait]
-    impl LlmClient for PanicLlm {
+    impl WorkflowLlmClient for PanicLlm {
         async fn send_message(
             &self,
             _messages: Vec<serde_json::Value>,
             _system: Vec<serde_json::Value>,
             _tools: Vec<serde_json::Value>,
             _model: &str,
-        ) -> Result<LlmResponse> {
+        ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
             panic!("resume guard must fail before scaffold execution")
         }
     }

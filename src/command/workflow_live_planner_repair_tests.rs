@@ -1,9 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::Result;
-use archon_pipeline::runner::{LlmClient, LlmResponse};
-use archon_workflow::WorkflowStore;
+use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient, WorkflowStore};
 
 use super::plan_live;
 
@@ -12,16 +10,16 @@ struct TwoStepRepairPlanner {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for TwoStepRepairPlanner {
+impl WorkflowLlmClient for TwoStepRepairPlanner {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: response_for_call(call).to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,

@@ -66,7 +66,11 @@ pub use learning::{
     WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
-pub use llm_client_port::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
+pub use llm_client_port::{
+    WorkflowAgentCall, WorkflowAgentOutcome, WorkflowAgentSpec, WorkflowAgentToolAccess,
+    WorkflowAgentToolUse, WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest,
+    WorkflowProviderEnv,
+};
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
 pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{

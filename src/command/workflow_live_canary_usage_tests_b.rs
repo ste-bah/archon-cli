@@ -89,7 +89,7 @@ fn seed_canary_project(root: &std::path::Path) -> (std::path::PathBuf, std::path
 struct CanaryRunHarness {
     script: Arc<CanaryAgentClient>,
     request_bytes: Arc<Mutex<Vec<u64>>>,
-    client: Arc<dyn LlmClient>,
+    client: Arc<dyn archon_workflow::WorkflowLlmClient>,
 }
 
 async fn build_canary_harness(root: &std::path::Path) -> CanaryRunHarness {
@@ -106,17 +106,12 @@ async fn build_canary_harness(root: &std::path::Path) -> CanaryRunHarness {
     )
     .await;
     install_canary_executor(Arc::clone(&provider), root);
-    let raw: Arc<dyn LlmClient> =
-        Arc::new(ProviderLlmAdapter::new(Arc::clone(&provider)).with_origin("workflow-canary"));
-    let fallback: Arc<dyn LlmClient> = Arc::new(ScopedCanaryClient::new(raw));
-    let client = Arc::new(SubagentPipelineClient::with_provider(
-        fallback,
-        ToolContext {
-            working_dir: root.to_path_buf(),
-            ..ToolContext::default()
-        },
+    let client = subagent_workflow_client_for_test(
         provider,
-    ));
+        "workflow-canary",
+        root.to_path_buf(),
+        TestClientFallback::ProviderScopedTo(CANARY_USAGE_SCOPE),
+    );
     CanaryRunHarness {
         script,
         request_bytes,

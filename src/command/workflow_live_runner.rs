@@ -1,14 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_pipeline::runner::{
-    AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel,
-};
 use archon_tui::event_channel::TuiEventSender;
 use archon_tui::events::AgentActivityStatus;
 use archon_workflow::{
-    ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowStageRunner,
-    WriteBoundaryProbe,
+    ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowAgentCall, WorkflowAgentSpec,
+    WorkflowAgentToolAccess, WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
 };
 
 use super::workflow_agent_select::select_workflow_agent_key;
@@ -18,7 +15,7 @@ use super::workflow_live_retry;
 use super::workflow_live_runner_activity::required_activity;
 
 pub(crate) struct PipelineWorkflowRunner {
-    pub(crate) llm: Arc<dyn LlmClient>,
+    pub(crate) llm: Arc<dyn WorkflowLlmClient>,
     pub(crate) tui_tx: TuiEventSender,
     pub(crate) agent_names: Vec<String>,
     pub(crate) workspace_boundary_supported: bool,
@@ -62,9 +59,8 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             "stage running",
         )
         .await?;
-        let agent_request = AgentExecutionRequest {
+        let agent_request = WorkflowAgentCall {
             session_id: workflow_agent_session_id(&request),
-            pipeline_type: PipelineType::Workflow,
             task: request.task.clone(),
             cwd: request_target_repository_root(&request),
             ordinal: workflow_agent_ordinal(&request),
@@ -82,7 +78,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             allowed_tools: allowed_tools(&request),
             timeout_secs: None,
             disable_auto_background: false,
-            provider_env_resolution: None,
+            provider_env: None,
         };
         let response = match workflow_live_retry::run_agent_with_transient_retry(
             &self.llm,
@@ -273,9 +269,9 @@ pub(crate) fn workflow_agent(
     request: &StageRunRequest,
     model: &str,
     agent_names: &[String],
-) -> AgentInfo {
+) -> WorkflowAgentSpec {
     let key = select_workflow_agent_key(request, agent_names);
-    AgentInfo {
+    WorkflowAgentSpec {
         display_name: key.replace('-', " "),
         key,
         model: model.to_string(),
@@ -283,12 +279,12 @@ pub(crate) fn workflow_agent(
         critical: matches!(request.stage_kind, StageKind::QualityGate),
         parallelizable: matches!(request.stage_kind, StageKind::Fanout),
         quality_threshold: 0.5,
-        tool_access_level: if matches!(request.stage_kind, StageKind::Implementation)
+        tool_access: if matches!(request.stage_kind, StageKind::Implementation)
             || command_execution_stage(request)
         {
-            ToolAccessLevel::Full
+            WorkflowAgentToolAccess::Full
         } else {
-            ToolAccessLevel::ReadOnly
+            WorkflowAgentToolAccess::ReadOnly
         },
     }
 }

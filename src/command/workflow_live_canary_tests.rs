@@ -26,9 +26,7 @@ use std::sync::Arc;
 use std::sync::Mutex as CanaryMutex;
 use std::sync::OnceLock;
 
-use anyhow::Result as CanaryResult;
-use archon_pipeline::runner::{LlmClient, LlmResponse};
-use archon_workflow::CommandAction;
+use archon_workflow::{CommandAction, WorkflowAgentOutcome, WorkflowLlmClient};
 
 use super::{LiveApprovalMode, run_live_action};
 

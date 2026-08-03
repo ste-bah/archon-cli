@@ -2,10 +2,9 @@ pub(super) use std::collections::BTreeMap;
 pub(super) use std::sync::Arc;
 pub(super) use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(super) use anyhow::Result;
-pub(super) use archon_pipeline::runner::{LlmClient, LlmResponse};
 pub(super) use archon_tui::event_channel::bounded_tui_event_channel;
 pub(super) use archon_workflow::{RunStatus, StageStatus, WorkflowSpec, WorkflowV2TaskCoverage};
+pub(super) use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient};
 
 use super::*;
 

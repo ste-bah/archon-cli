@@ -1,4 +1,5 @@
 use super::*;
+use archon_workflow::WorkflowAgentCall;
 
 #[tokio::test]
 async fn closed_tui_prevents_cached_script_host_call_reuse() {
@@ -296,21 +297,21 @@ pub(super) struct TransientBlockedScriptLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for TransientBlockedScriptLlm {
+impl WorkflowLlmClient for TransientBlockedScriptLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         unreachable!("test uses run_agent")
     }
 
     async fn run_agent(
         &self,
-        _request: archon_pipeline::runner::AgentExecutionRequest,
-    ) -> Result<LlmResponse> {
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
             self.started.notify_one();
@@ -318,7 +319,7 @@ impl LlmClient for TransientBlockedScriptLlm {
         } else {
             self.second_started.notify_one();
         }
-        anyhow::bail!("429 rate limit")
+        Err(archon_workflow::WorkflowError::port("429 rate limit"))
     }
 }
 
@@ -329,21 +330,21 @@ pub(super) struct CompletionBlockedScriptLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CompletionBlockedScriptLlm {
+impl WorkflowLlmClient for CompletionBlockedScriptLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         unreachable!("test uses run_agent")
     }
 
     async fn run_agent(
         &self,
-        _request: archon_pipeline::runner::AgentExecutionRequest,
-    ) -> Result<LlmResponse> {
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.started.notify_one();
         self.release.notified().await;
         let mut result = WorkflowV2Result::accepted("accepted");
@@ -351,7 +352,7 @@ impl LlmClient for CompletionBlockedScriptLlm {
             WorkflowV2EvidenceKind::Inspection,
             "provider completed",
         ));
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: serde_json::to_string(&result).expect("result json"),
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -369,25 +370,25 @@ pub(super) struct RepairBlockedScriptLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for RepairBlockedScriptLlm {
+impl WorkflowLlmClient for RepairBlockedScriptLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         unreachable!("test uses run_agent")
     }
 
     async fn run_agent(
         &self,
-        _request: archon_pipeline::runner::AgentExecutionRequest,
-    ) -> Result<LlmResponse> {
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
             self.first_finished.notify_one();
-            return Ok(LlmResponse {
+            return Ok(WorkflowAgentOutcome {
                 content: "malformed result".to_string(),
                 tool_uses: Vec::new(),
                 tokens_in: 1,
@@ -396,7 +397,7 @@ impl LlmClient for RepairBlockedScriptLlm {
         }
         self.repair_started.notify_one();
         self.release_repair.notified().await;
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "unused repair result".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,

@@ -2,9 +2,7 @@ use std::path::PathBuf;
 use std::process::Command as GitCommand;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::Result;
-use archon_pipeline::runner::{LlmClient, LlmResponse};
-use archon_workflow::CommandAction;
+use archon_workflow::{CommandAction, WorkflowAgentOutcome, WorkflowLlmClient};
 
 use super::{LiveApprovalMode, run_live_action};
 
@@ -275,21 +273,21 @@ impl RetryAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for RetryAgentClient {
+impl WorkflowLlmClient for RetryAgentClient {
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
         system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let mut prompt = String::new();
         for value in system.iter().chain(messages.iter()) {
             collect_text(value, &mut prompt);
         }
         let content = self.respond(&prompt);
         self.prompts.lock().expect("prompt log").push(prompt);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,

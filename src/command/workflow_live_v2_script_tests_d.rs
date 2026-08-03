@@ -125,21 +125,21 @@ pub(super) struct CannedAuthorLlm {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CannedAuthorLlm {
+impl WorkflowLlmClient for CannedAuthorLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let envelope = serde_json::json!({
             "status": "accepted",
             "summary": "authored the workflow script",
             "evidence": [{ "kind": "implementation", "summary": "script authored from the task universe" }],
             "data": { "workflow_js": self.script },
         });
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: envelope.to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,

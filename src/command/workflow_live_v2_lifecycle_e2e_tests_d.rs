@@ -84,7 +84,7 @@ pub(super) fn noop_proof_result(call_id: &str) -> serde_json::Value {
 }
 
 pub(super) fn implementation_result(
-    request: &AgentExecutionRequest,
+    request: &WorkflowAgentCall,
     input: &serde_json::Value,
     call_id: &str,
 ) -> Result<serde_json::Value> {
@@ -156,7 +156,7 @@ pub(super) fn implementation_result(
 }
 
 pub(super) fn verification_result(
-    request: &AgentExecutionRequest,
+    request: &WorkflowAgentCall,
     input: &serde_json::Value,
     call_id: &str,
     deliverable_contract_executed: &AtomicBool,

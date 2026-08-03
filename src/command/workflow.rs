@@ -44,7 +44,9 @@ impl CommandHandler for WorkflowHandler {
             spawn_live_workflow(
                 cwd,
                 command.action,
-                llm,
+                // The interactive surface hands out the session's pipeline
+                // client; the live workflow only ever sees it through the port.
+                crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::arc(llm),
                 ctx.tui_tx.clone(),
                 ctx.config_path.clone(),
             );
@@ -142,7 +144,7 @@ pub(crate) async fn handle_workflow_command(
             // The bin crate is where the port gets its concrete implementation:
             // this is the last layer that can still name `archon-pipeline`.
             let llm_factory =
-                crate::command::workflow_llm_client_factory::SubagentPipelineClientFactory::new(
+                crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(
                     config, env_vars,
                 );
             run_live_cli_action(&cwd, action, config, env_vars, &llm_factory).await?
