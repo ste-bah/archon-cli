@@ -292,7 +292,7 @@ pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification
     //
     // stdin has no such limit, and for a generated script the semantics are
     // the same -- nothing here depends on `$0` or positional arguments.
-    let mut child = match tokio::process::Command::new(crate::command::posix_shell::posix_shell())
+    let mut child = match tokio::process::Command::new(archon_shell::resolve_posix_shell())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

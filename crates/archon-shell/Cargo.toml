@@ -1,0 +1,13 @@
+[package]
+name = "archon-shell"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Shell discovery for archon-cli: resolves the program and command flag used to run a generated shell command. Deliberately a leaf — no archon-* dependencies — so both the CLI surface and archon-workflow can depend on it without creating a cycle through archon-core."
+
+# Dependency discipline: every dep MUST come from [workspace.dependencies].
+[dependencies]
+# PATH lookup without spawning a process. Replaces the previous `where git`
+# subprocess in src/command/posix_shell.rs, which cost a process launch per
+# resolution for information `which` reads straight off PATH.
+which.workspace = true

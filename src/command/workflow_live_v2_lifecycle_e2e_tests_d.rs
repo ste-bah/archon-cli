@@ -244,7 +244,7 @@ pub(super) fn verification_result(
 fn run_shell_script(cwd: &std::path::Path, script: &str) -> Result<std::process::Output> {
     use std::io::Write;
 
-    let mut child = Command::new(crate::command::posix_shell::posix_shell())
+    let mut child = Command::new(archon_shell::resolve_posix_shell())
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

@@ -451,7 +451,7 @@ fn records_dated_to_a_closed_session_are_rejected() {
 /// the heredoc mid-statement. stdin has no such limit.
 fn run_verifier_script(command: &str) -> std::process::Output {
     use std::io::Write as _;
-    let mut child = std::process::Command::new(crate::command::posix_shell::posix_shell())
+    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

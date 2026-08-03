@@ -60,6 +60,12 @@ pub enum WorkflowError {
         #[source]
         source: std::io::Error,
     },
+    /// A host-injected port (see [`crate::llm_client_port`]) failed. Carried
+    /// transparently: the host's error already says what went wrong, and this
+    /// crate knows nothing about the host's machinery that it could usefully
+    /// add in front of it.
+    #[error(transparent)]
+    Port(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
@@ -71,6 +77,13 @@ pub enum WorkflowError {
 }
 
 impl WorkflowError {
+    /// Wraps a host port failure. Takes the boxed error rather than a concrete
+    /// type so hosts using `anyhow` (which converts into this box) do not have
+    /// to flatten their context chain to cross the boundary.
+    pub fn port(source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
+        Self::Port(source.into())
+    }
+
     pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
             path: path.into(),

@@ -95,7 +95,7 @@ fn parameterized_verifier(project: &std::path::Path) -> String {
 
 pub(super) fn run_verifier(command: &str) -> std::process::Output {
     // `sh`, not `/bin/zsh`: production runs focused verifiers through
-    // `Command::new(crate::command::posix_shell::posix_shell())` (workflow_live_v2_verification.rs:287), as does every
+    // `Command::new(archon_shell::resolve_posix_shell())` (workflow_live_v2_verification.rs:287), as does every
     // other verifier path in the workspace. Executing them under a different
     // shell here meant the tests were not exercising what ships, and an
     // absolute /bin/zsh made them fail outright on any host without zsh —
@@ -105,7 +105,7 @@ pub(super) fn run_verifier(command: &str) -> std::process::Output {
     // embeds a ~29 KB Python program and Windows truncates any command line
     // past 32,767 characters, which severed the heredoc mid-script.
     use std::io::Write as _;
-    let mut child = std::process::Command::new(crate::command::posix_shell::posix_shell())
+    let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

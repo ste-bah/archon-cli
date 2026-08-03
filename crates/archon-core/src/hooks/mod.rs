@@ -13,7 +13,6 @@ pub mod function;
 pub mod http;
 pub mod permissions;
 mod registry;
-mod shell;
 pub mod toml_loader;
 mod types;
 pub mod watch;
