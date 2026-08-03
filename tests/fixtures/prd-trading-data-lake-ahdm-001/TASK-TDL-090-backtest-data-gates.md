@@ -54,10 +54,13 @@ Wire production backtest refusal gates for invalid, degraded, non-native, or inc
 
 ## Focused Tests
 
-- Backtest refusal of invalid datasets.
-- Diagnostic override report marking test.
-- Checksum mismatch refusal test.
-- Loose path refusal test.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading backtest_invalid_dataset_refusal` — backtest refuses invalid datasets.
+- `cargo test -p archon-trading backtest_diagnostic_override_marking` — diagnostic override report marking.
+- `cargo test -p archon-trading backtest_checksum_mismatch_refusal` — checksum mismatch refusal.
+- `cargo test -p archon-trading backtest_loose_path_refusal` — loose path refusal.
 
 ## Adversarial Review Notes
 

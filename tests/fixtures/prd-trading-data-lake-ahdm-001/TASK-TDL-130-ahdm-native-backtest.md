@@ -70,11 +70,14 @@ Implement Archon-native AHDM-v1 backtest using registered validated OHLCV datase
 
 ## Focused Tests
 
-- Native backtest happy-path fixture.
-- Refusal tests inherited from TASK-TDL-090.
-- Report replayability test.
-- Shared rule manifest parity test against Pine-owned manifest.
-- Costs/slippage accounting test.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading native_backtest_happy_path` — native backtest happy-path fixture.
+- `cargo test -p archon-trading backtest_invalid_dataset_refusal` — the refusal tests inherited from TASK-TDL-090.
+- `cargo test -p archon-trading native_backtest_replayability` — report replayability.
+- `cargo test -p archon-trading shared_rule_manifest_parity` — shared rule manifest parity against the Pine-owned manifest.
+- `cargo test -p archon-trading native_backtest_costs_slippage` — costs and slippage accounting.
 
 ## Adversarial Review Notes
 

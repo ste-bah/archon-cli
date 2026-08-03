@@ -65,10 +65,15 @@ Produce adversarial review and paper-trading readiness report with explicit pass
 
 ## Focused Tests
 
-- Readiness report structure check.
-- Exact readiness and adversarial-review artifact path checks.
-- Residual gap schema validation where applicable.
-- Final focused tests from all implementation tasks.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading readiness_report_structure` — readiness report structure.
+- `cargo test -p archon-trading readiness_artifact_paths` — exact readiness and adversarial-review artifact paths.
+- `cargo test -p archon-trading residual_gap_schema` — residual gap schema validation.
+- `archon workflow lint --tasks tasks/PRD-TRADING-DATA-LAKE-AHDM-001` — the graph lints clean: diamond conformance, edge classification, stop-rule fusion and requirement coverage.
+- `archon requirements trace --prd prds/PRD-TRADING-DATA-LAKE-AHDM-001/PRD-TRADING-DATA-LAKE-AHDM-001.md --tasks tasks/PRD-TRADING-DATA-LAKE-AHDM-001` — every `error`-severity requirement reaches at least `Exercised`. This is the gate the whole PRD is answerable to, so it is the last focused test.
+- `cargo test -p archon-trading data_store` — the focused tests of every implementation task, re-run together.
 
 ## Adversarial Review Notes
 

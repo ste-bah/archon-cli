@@ -108,12 +108,14 @@ Generate JSON and readable coverage matrix for the required trading-core-v1 univ
 
 ## Focused Tests
 
-- Coverage matrix generation test.
-- Provider selection order test.
-- Freshness classification test.
-- JSON/text output tests.
-- TUI `/trading data coverage` alias routing test.
-- CLI parse and TUI slash-alias routing tests for every owned command.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading coverage_matrix_generation` — coverage matrix generation.
+- `cargo test -p archon-trading coverage_provider_selection_order` — provider selection order.
+- `cargo test -p archon-trading coverage_freshness_classification` — freshness classification.
+- `cargo test --bin archon trading_data_coverage_output` — JSON and text output.
+- `cargo test --bin archon trading_slash_alias_routing` — TUI `/trading data coverage` alias routing, and every other owned alias.
 
 ## Adversarial Review Notes
 

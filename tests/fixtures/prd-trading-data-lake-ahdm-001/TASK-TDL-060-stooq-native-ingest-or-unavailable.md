@@ -72,10 +72,13 @@ Implement Stooq exact-native ingest where directly available, otherwise honest u
 
 ## Focused Tests
 
-- Stooq CSV parse fixture test.
-- Non-data HTML/block fixture test.
-- Native interval refusal test.
-- CLI parse and TUI slash-alias routing tests for every owned command.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test --bin archon stooq_csv_parse_fixture` — Stooq CSV parse fixture.
+- `cargo test --bin archon stooq_non_data_response` — non-data HTML/block fixture.
+- `cargo test --bin archon stooq_native_interval_refusal` — native interval refusal.
+- `cargo test --bin archon fetch_native_stooq_parse` — CLI parse and TUI slash-alias routing for every owned command.
 
 ## Adversarial Review Notes
 

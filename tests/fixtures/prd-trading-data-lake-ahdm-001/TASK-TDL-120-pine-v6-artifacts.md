@@ -73,9 +73,12 @@ The `required_tools` — `pine_analyze`, `pine_check`, `pine_compile`, `pine_sma
 
 ## Focused Tests
 
-- Pine artifact generation test.
-- Structural checks for required plots/outputs.
-- Real MCP invocation of `pine_analyze`/`pine_check`/`pine_compile`/`pine_smart_compile` with captured results. A `PATH`/`which` availability check is not acceptable evidence of use or of unavailability.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading pine_artifact_generation` — Pine artifact generation.
+- `cargo test -p archon-trading pine_required_plots_structure` — structural checks for required plots and outputs.
+- `cargo test --bin archon pine_mcp_invocation_evidence` — real MCP invocation of `pine_analyze`, `pine_check`, `pine_compile` and `pine_smart_compile` with captured results. A `PATH`/`which` availability check is not acceptable evidence of use or of unavailability.
 
 ## Adversarial Review Notes
 

@@ -71,9 +71,12 @@ Implement TradingView MCP native OHLCV historical ingest where MCP exposes actio
 
 ## Focused Tests
 
-- TradingView capability mapping test with mocked MCP response.
-- Native ingest normalization test.
-- Paging test: a requested span above the per-call cap returns the full span across multiple calls.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test --bin archon tradingview_capability_mapping` — TradingView capability mapping against a mocked MCP response.
+- `cargo test --bin archon tradingview_native_normalization` — native ingest normalization.
+- `cargo test --bin archon tradingview_span_paging` — a requested span above the per-call cap returns the full span across multiple calls. This is the test that fails against the fixed `TRADINGVIEW_REQUESTED_BARS` defect.
 
 ## Adversarial Review Notes
 

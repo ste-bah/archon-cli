@@ -79,12 +79,16 @@ Implement registry v2 and dataset metadata schema while preserving v1 readabilit
 
 ## Focused Tests
 
-- Registry schema migration test.
-- Atomic write/interrupted-write behavior test.
-- Dataset id/version validation test.
-- Dataset artifact contract validation test.
-- CLI parse tests for `data list --json`, `data export --dataset-id <ID> --version <VERSION> --out <PATH>`, and any backwards-compatible `export-ohlcv` alias.
-- TUI slash-alias routing tests for owned commands.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading registry_schema_migration` — registry schema migration.
+- `cargo test -p archon-trading registry_atomic_write` — atomic write, including the interrupted-write case.
+- `cargo test -p archon-trading dataset_id_version_validation` — dataset id/version validation.
+- `cargo test -p archon-trading dataset_artifact_contract` — dataset artifact contract validation.
+- `cargo test --bin archon trading_data_list_json_parse` — CLI parse for `data list --json`.
+- `cargo test --bin archon trading_data_export_parse` — CLI parse for `data export --dataset-id <ID> --version <VERSION> --out <PATH>` and the backwards-compatible `export-ohlcv` alias.
+- `cargo test --bin archon trading_slash_alias_routing` — TUI slash-alias routing for owned commands.
 
 ## Adversarial Review Notes
 

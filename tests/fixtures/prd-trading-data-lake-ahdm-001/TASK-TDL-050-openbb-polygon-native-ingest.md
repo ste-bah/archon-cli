@@ -75,10 +75,14 @@ Implement OpenBB/Polygon native OHLCV ingestion where credentials and exact inte
 
 ## Focused Tests
 
-- Missing credential capability test.
-- Redaction test.
-- Native interval response normalization test with fixture.
-- CLI parse and TUI slash-alias routing tests for every owned command.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test --bin archon openbb_missing_credential_capability` — missing credential capability.
+- `cargo test --bin archon openbb_secret_redaction` — redaction.
+- `cargo test --bin archon openbb_interval_normalization` — native interval response normalization against a fixture.
+- `cargo test --bin archon openbb_expected_bars_from_span` — expected bars derived from the requested span and timeframe, not from the observed count. This is the test that fails against the circular-`expected_bars` defect.
+- `cargo test --bin archon fetch_native_polygon_parse` — the missing polygon/openbb `fetch-native` parse contract tests.
 
 ## Adversarial Review Notes
 

@@ -57,8 +57,11 @@ Inspect the existing Trading Lab store, registry, commands, providers, docs, and
 
 ## Focused Tests
 
-- Existing focused data-store tests, if present.
-- `cargo check --workspace --tests -j1` when code is touched; otherwise no compile required.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading data_store` — existing focused data-store tests.
+- `cargo check -p archon-trading --tests` — compile check scoped to the crate under audit. Not `--workspace`: NFR-004 forbids whole-workspace runs, and the audit touches one crate.
 
 ## Adversarial Review Notes
 

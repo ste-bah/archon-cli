@@ -56,8 +56,12 @@ Own the command surface for the TradingView provider: clap argument definitions,
 
 ## Focused Tests
 
-- CLI parse tests for every owned command, including missing-mandatory-flag rejection.
-- TUI `/trading data ...` alias routing test for every owned alias.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test --bin archon trading_market_actions_parse` — CLI parse for every owned command.
+- `cargo test --bin archon trading_missing_mandatory_flag` — missing-mandatory-flag rejection.
+- `cargo test --bin archon trading_slash_alias_routing` — TUI `/trading data ...` alias routing for every owned alias.
 
 ## Adversarial Review Notes
 

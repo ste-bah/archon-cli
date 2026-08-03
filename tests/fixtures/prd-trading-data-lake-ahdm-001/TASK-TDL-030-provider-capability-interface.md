@@ -68,13 +68,16 @@ Define provider-neutral capability and native fetch contracts with exact unavail
 
 ## Focused Tests
 
-- Capability result parsing test.
-- Unavailable reason mapping test.
-- No-expensive-download unit test/mocking where applicable.
-- Provider capabilities persistence and redaction test.
-- CLI parse and TUI slash-alias routing tests for every owned command.
-- Generic snapshot command parse/dispatch test.
-- Snapshot stale-after-5-min classification test.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading provider_capability_parse` — capability result parsing.
+- `cargo test -p archon-trading provider_unavailable_reason` — unavailable reason mapping.
+- `cargo test -p archon-trading provider_no_expensive_download` — no expensive download on the capability path, against a mock.
+- `cargo test -p archon-trading provider_capabilities_redaction` — provider capabilities persistence and secret redaction.
+- `cargo test -p archon-trading snapshot_stale_after_five_minutes` — snapshot stale-after-5-min classification.
+- `cargo test --bin archon trading_data_capabilities_parse` — CLI parse for every owned command.
+- `cargo test --bin archon trading_data_snapshot_parse` — generic snapshot command parse/dispatch.
 
 ## Adversarial Review Notes
 

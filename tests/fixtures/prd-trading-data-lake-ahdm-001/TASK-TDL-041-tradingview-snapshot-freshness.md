@@ -61,9 +61,12 @@ Persist current TradingView snapshots with provider timestamp metadata and the P
 
 ## Focused Tests
 
-- Snapshot artifact persistence test.
-- Snapshot stale-after-5-min test.
-- Snapshot capture failure returns actionable unavailable evidence.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading snapshot_artifact_persistence` — snapshot artifact persistence.
+- `cargo test -p archon-trading snapshot_stale_after_five_minutes` — snapshot stale-after-5-min.
+- `cargo test --bin archon tradingview_snapshot_capture_failure` — capture failure returns actionable unavailable evidence.
 
 ## Adversarial Review Notes
 

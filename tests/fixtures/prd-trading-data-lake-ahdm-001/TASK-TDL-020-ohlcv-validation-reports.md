@@ -69,12 +69,16 @@ Add normalized OHLCV validation reports and native interval production gates.
 
 ## Focused Tests
 
-- Invalid timestamp fixture fails.
-- Duplicate timestamp fixture fails.
-- Bad OHLC fixture fails.
-- Missing metadata fixture fails.
-- Missing/negative volume fixture fails where expected.
-- CLI parse and TUI slash-alias routing tests for every owned command.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading ohlcv_invalid_timestamp` — invalid timestamp fixture fails.
+- `cargo test -p archon-trading ohlcv_duplicate_timestamp` — duplicate timestamp fixture fails.
+- `cargo test -p archon-trading ohlcv_bad_ohlc_relation` — bad OHLC relation fixture fails.
+- `cargo test -p archon-trading ohlcv_missing_metadata` — missing metadata fixture fails.
+- `cargo test -p archon-trading ohlcv_volume_bounds` — missing/negative volume fails where expected.
+- `cargo test --bin archon trading_data_validate_parse` — CLI parse for every owned command.
+- `cargo test --bin archon trading_slash_alias_routing` — TUI slash-alias routing for every owned command.
 
 ## Adversarial Review Notes
 

@@ -273,30 +273,47 @@ fn one_generic_span_answering_for_four_requirements_is_reported_not_accepted() {
     assert!(text.contains("0/4 requirements satisfied"), "{text}");
 }
 
+/// Every task in the corpus declares at least one runnable verifier command.
+///
+/// # What this replaced, and why the numbers moved
+///
+/// This assertion used to pin the opposite: `with_commands * 2 < 17` and more
+/// than thirty prose entries. That was the corpus finding — `## Focused Tests`
+/// bullets were test *descriptions* ("Registry schema migration test."), not
+/// invocations, so no task could reach `Exercised` and the report read
+/// 0 of 93 satisfied. The old test said in as many words that a decomposition
+/// declaring real commands would move these numbers and that this is where it
+/// would be noticed. The decomposition was rewritten; this is that notice.
+///
+/// # What it does not claim
+///
+/// A declared command is not a passing one. Reaching `Exercised` still needs a
+/// recorded run whose trace touched the anchor, and most of these tests do not
+/// exist yet — they are the verifiers the tasks are contracted to produce. What
+/// changed is that the ceiling is no longer structural: a prose bullet could
+/// never promote no matter what ran.
 #[test]
-fn the_real_corpus_declares_almost_no_runnable_verifier_commands() {
+fn every_task_in_the_real_corpus_declares_a_runnable_verifier_command() {
     let bindings = load_bindings(&fixture_tasks()).expect("bindings");
     assert_eq!(bindings.len(), 17);
 
-    let with_commands = bindings
+    let without: Vec<&str> = bindings
         .iter()
-        .filter(|b| !b.verifier_commands.is_empty())
-        .count();
-    let prose_entries: usize = bindings.iter().map(|b| b.prose_focused_tests().len()).sum();
-
-    // The corpus finding, pinned: `## Focused Tests` bullets are test
-    // *descriptions*, not invocations, so most tasks cannot reach `Exercised`
-    // at all. The report names that as the gap rather than pretending
-    // otherwise — and it is a real defect in the decomposition, not in this
-    // code. A future decomposition that declares real commands moves these
-    // numbers, and this assertion is where that is noticed.
+        .filter(|b| b.verifier_commands.is_empty())
+        .map(|b| b.task_id.as_str())
+        .collect();
     assert!(
-        with_commands * 2 < bindings.len(),
-        "expected most tasks to declare no runnable command; {with_commands}/17 did"
+        without.is_empty(),
+        "these tasks declare no runnable command: {without:?}"
     );
+
+    let prose: Vec<&str> = bindings
+        .iter()
+        .flat_map(|b| b.prose_focused_tests())
+        .collect();
     assert!(
-        prose_entries > 30,
-        "prose focused-test entries: {prose_entries}"
+        prose.is_empty(),
+        "these focused-test bullets are still descriptions, not commands: {prose:?}"
     );
 }
 

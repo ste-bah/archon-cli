@@ -69,10 +69,13 @@ Implement yfinance fallback ingestion with degraded metadata and promotion restr
 
 ## Focused Tests
 
-- Fallback metadata test.
-- Promotion refusal test for degraded fallback dataset.
-- Interval limitation mapping test.
-- CLI parse and TUI slash-alias routing tests for every owned command.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading fallback_metadata` — fallback metadata.
+- `cargo test -p archon-trading fallback_promotion_refusal` — promotion refusal for a degraded fallback dataset.
+- `cargo test -p archon-trading fallback_interval_limitation` — interval limitation mapping.
+- `cargo test --bin archon fetch_native_yfinance_parse` — CLI parse and TUI slash-alias routing for every owned command.
 
 ## Adversarial Review Notes
 

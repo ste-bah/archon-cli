@@ -65,12 +65,15 @@ Create deterministic AHDM-v1 StrategySpec referencing registered dataset ids/ver
 
 ## Focused Tests
 
-- StrategySpec schema/field completeness test.
-- Bias component weight sum and required evidence test.
-- Entry model completeness test.
-- Dataset reference validation test.
-- Confidence/no-trade threshold test.
-- Position sizing/risk calculation tests.
+Each bullet is a command a run can execute and a trace can match. A bullet
+that only describes a test cannot promote a requirement past `Unproven`.
+
+- `cargo test -p archon-trading strategy_spec_schema_completeness` — StrategySpec schema and field completeness.
+- `cargo test -p archon-trading strategy_spec_bias_weight_sum` — bias component weight sum and required evidence.
+- `cargo test -p archon-trading strategy_spec_entry_model` — entry model completeness.
+- `cargo test -p archon-trading strategy_spec_dataset_reference` — dataset reference validation.
+- `cargo test -p archon-trading strategy_spec_confidence_threshold` — confidence and no-trade thresholds.
+- `cargo test -p archon-trading strategy_spec_position_sizing` — position sizing and risk calculation.
 
 ## Adversarial Review Notes
 
