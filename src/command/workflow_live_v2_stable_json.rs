@@ -26,9 +26,17 @@
 //! raw `source_data` under the sorting rule.
 //!
 //! There is now ONE hash for workflow JSON, the crate's `stable_value_hash`.
+//!
+//! Nothing here is production code any more. The alias existed for the script
+//! host's `evidence_snapshot_hash`, which followed the script bridge into
+//! `archon_workflow::v2::script` and calls `stable_value_hash` directly; what
+//! is left is the rationale above and the tests that pin it. Those tests want
+//! to sit beside `stable_value_hash` itself, which is a different cluster's
+//! move.
 
 /// Hash a workflow JSON payload. Order-preserving; see the module docs.
-pub(super) fn stable_hash(value: &serde_json::Value) -> String {
+#[cfg(test)]
+fn stable_hash(value: &serde_json::Value) -> String {
     archon_workflow::stable_value_hash(value)
 }
 

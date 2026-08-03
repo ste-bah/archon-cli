@@ -1,8 +1,8 @@
-/// Reference handed to the author agent. Generic by construction: it
-/// documents the dialect, never the fixture domain.
-use super::*;
+// Reference handed to the author agent. Generic by construction: it documents
+// the dialect, never the fixture domain. Prompt copy is byte-identical to what
+// the binary shipped: agents parse structured output against these strings.
 
-pub(crate) const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
+pub const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
 
 Shape — top-level script, exactly like this (no wrapper function):
 
@@ -184,7 +184,7 @@ DIALECT REFERENCE:
 /// Single-pass placeholder substitution: each `{name}` is looked up once —
 /// substituted content is never re-scanned, so run-derived text (learning
 /// context, retry errors) cannot inject other placeholders.
-pub(super) fn compose_author_brief(values: &[(&str, &str)]) -> String {
+pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(V3_AUTHOR_TASK_TEMPLATE.len());
     let mut rest = V3_AUTHOR_TASK_TEMPLATE;
     while let Some(start) = rest.find('{') {

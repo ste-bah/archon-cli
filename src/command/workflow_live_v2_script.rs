@@ -3,11 +3,17 @@ use std::time::{Duration, Instant};
 
 use archon_workflow::{
     WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowUiEvent,
-    WorkflowV2AgentAdapter, WorkflowV2ArtifactRequirement, WorkflowV2CallExecution,
-    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2Evidence, WorkflowV2EvidenceKind,
-    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2ResidualGap,
-    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
-    WorkflowV2TaskCoverageStatus, WorkflowV2WriteMode, workflow_scaffold_hash,
+    WorkflowV2AgentAdapter, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Checkpoint,
+    WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
+    workflow_scaffold_hash,
+};
+// Only this subsystem's tests build the call/coverage shapes by hand; the host
+// itself now receives them already parsed from `archon_workflow::v2::script`.
+#[cfg(test)]
+use archon_workflow::{
+    WorkflowV2HostOptions, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCoverageStatus,
+    WorkflowV2WriteMode,
 };
 use rquickjs::function::{Async, Func};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
@@ -17,7 +23,6 @@ use super::WorkflowV2ScriptRuntime;
 use super::execute_v2_live_call;
 use super::workflow_live_v2_client::LiveV2AgentClient;
 use super::workflow_live_v2_contracts::failed_v2_result;
-use super::workflow_live_v2_stable_json::stable_hash;
 use super::workflow_live_v2_state::{mark_v2_call_running, poll_v2_run_control};
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::source_graph::{
@@ -342,24 +347,24 @@ impl Default for WorkflowScriptAccumulator {
 mod workflow_live_v2_script_host;
 use workflow_live_v2_script_host::*;
 
-#[path = "workflow_live_v2_script_helpers.rs"]
-mod workflow_live_v2_script_helpers;
-use workflow_live_v2_script_helpers::*;
-// Re-exported: `workflow_live_v2` names this through the subsystem, which the
-// splice used to satisfy implicitly.
-pub(super) use workflow_live_v2_script_helpers::frontier_resume_record_reusable;
-
-#[path = "workflow_live_v3_prelude.rs"]
-mod workflow_live_v3_prelude;
-use workflow_live_v3_prelude::*;
-
-#[path = "workflow_live_v2_script_verification.rs"]
-mod workflow_live_v2_script_verification;
-use workflow_live_v2_script_verification::*;
-
-// Terminal-status accounting keys on the same transport detector the driver's
-// reducer retry path does; one definition, in the crate that owns the driver.
-use archon_workflow::v2::lifecycle_driver::is_transport_failure_text;
+// The workflow.js script bridge — payload parsing, source composition, the
+// result/reuse reduction, the dry-run recorder and the v3 dialect — is
+// `archon_workflow::v2::script`. What is left here is the composition root that
+// executes against it. Named once, explicitly: this module used to glob six
+// siblings into one namespace every child inherited through `use super::*`.
+#[cfg(test)]
+use archon_workflow::v2::script::normalize_workflow_export;
+use archon_workflow::v2::script::{
+    ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, V3_PRIMITIVE_REFERENCE,
+    completion_evidence_from_result, compose_author_brief, evidence_snapshot_hash,
+    frontier_resume_record_reusable, is_reusable_status, mark_unresolved_dependency_metadata,
+    merge_v2_status, next_action_for_terminal_call, normalize_result_for_call,
+    parse_script_options, record_tasks_all_completed, result_view_json,
+    reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
+    sanitize_v2_gap_id, script_source, terminal_stop_for_call, v3_call_family,
+    validate_authored_plan, validate_authored_task_accounting, validate_authored_workflow_source,
+    validate_map_reduce_review_calls, validate_review_accounting_from_reducers,
+};
 
 // Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
 // inside this subsystem because that is the only scope from which the planner,
@@ -370,12 +375,9 @@ use archon_workflow::v2::lifecycle_driver::is_transport_failure_text;
 #[path = "workflow_live_v2_prd_pipeline_tests.rs"]
 mod workflow_live_v2_prd_pipeline_tests;
 
-#[path = "workflow_live_v2_script_dry_run.rs"]
-mod workflow_live_v2_script_dry_run;
-use workflow_live_v2_script_dry_run::*;
-// Re-exported: `workflow_live_v2` names this through the subsystem, which the
-// splice used to satisfy implicitly.
-pub(crate) use workflow_live_v2_script_dry_run::dry_run_workflow_plan;
+use archon_workflow::v2::script::dry_run_workflow_plan_full_details;
+#[cfg(test)]
+use archon_workflow::v2::script::{dry_run_workflow_plan, dry_run_workflow_plan_details};
 
 // Composition root for `archon_workflow::v2::lifecycle_driver`: the only code
 // left here that touches the concrete script host.
@@ -387,14 +389,10 @@ mod workflow_live_v2_lifecycle;
 #[path = "lifecycle_script_host.rs"]
 mod lifecycle_script_host;
 
+// Composition root for the v3 authored-script lifecycle: the only code left
+// here that runs the concrete script host over the authoring bootstrap.
 #[path = "workflow_live_v3_author.rs"]
 mod workflow_live_v3_author;
-#[cfg(test)]
-use workflow_live_v3_author::*;
-
-#[path = "workflow_live_v3_author_checks.rs"]
-mod workflow_live_v3_author_checks;
-use workflow_live_v3_author_checks::*;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]

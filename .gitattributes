@@ -53,10 +53,14 @@ web/src/api/generated/** text eol=lf
 # Scripts embedded via include_str!. Unlike a string literal in a .rs file,
 # include_str! does not normalise CRLF, so a Windows checkout would hand the
 # prelude \r\n and break the "\n  };\n" section slicing in
-# workflow_live_v3_prelude_review_tests.rs. The deliverable verifier is a
-# python heredoc, where CRLF breaks the heredoc terminator and indentation.
+# v3_prelude_review_tests.rs. The deliverable verifier is a python heredoc,
+# where CRLF breaks the heredoc terminator and indentation. These patterns
+# contain a slash, so they are anchored and `*` does not cross `/` — a moved
+# script needs its new directory listed, which is why the v3 prelude appears
+# twice-over here after it followed the script bridge into archon-workflow.
 src/command/*.js text eol=lf
 src/command/*.sh text eol=lf
+crates/archon-workflow/src/v2/script/*.js text eol=lf
 
 # Generated docs are asserted equal to the generator's output, which emits \n.
 # Without this a Windows checkout fails generated_provider_capabilities_doc_

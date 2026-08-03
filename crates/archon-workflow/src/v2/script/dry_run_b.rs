@@ -17,7 +17,7 @@ pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
     .to_string()
 }
 
-pub(crate) fn artifact_requirements(
+pub(super) fn artifact_requirements(
     value: &serde_json::Value,
 ) -> Vec<WorkflowV2ArtifactRequirement> {
     value

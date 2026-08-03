@@ -3,35 +3,35 @@ use super::*;
 pub(super) const WORKFLOW_DRY_RUN_WATCHDOG: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WorkflowDryRunPlanDetails {
-    pub(crate) calls: Vec<WorkflowV2HostCall>,
+pub struct WorkflowDryRunPlanDetails {
+    pub calls: Vec<WorkflowV2HostCall>,
     /// (task id, write call id) pairs — coverage AND duplicate detection.
-    pub(crate) write_task_claims: Vec<(String, String)>,
+    pub write_task_claims: Vec<(String, String)>,
     /// Review map item claims captured from source items.
-    pub(crate) review_map_claims: Vec<WorkflowReviewMapClaim>,
+    pub review_map_claims: Vec<WorkflowReviewMapClaim>,
     /// Review reduce linkage and bounds captured from reviewContract metadata.
-    pub(crate) review_reduce_edges: Vec<WorkflowReviewReduceEdge>,
+    pub review_reduce_edges: Vec<WorkflowReviewReduceEdge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkflowReviewMapClaim {
-    pub(crate) review_kind: String,
-    pub(crate) call_id: String,
-    pub(crate) item_id: Option<String>,
-    pub(crate) task_ids: Vec<String>,
+pub struct WorkflowReviewMapClaim {
+    pub review_kind: String,
+    pub call_id: String,
+    pub item_id: Option<String>,
+    pub task_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkflowReviewReduceEdge {
-    pub(crate) review_kind: String,
-    pub(crate) call_id: String,
-    pub(crate) stage: String,
-    pub(crate) accounting_field: Option<String>,
-    pub(crate) source_map_call_ids: Vec<String>,
-    pub(crate) source_reduce_call_ids: Vec<String>,
-    pub(crate) preserve_map_findings: bool,
-    pub(crate) max_input_bytes: Option<usize>,
-    pub(crate) max_findings_per_reduce: Option<usize>,
+pub struct WorkflowReviewReduceEdge {
+    pub review_kind: String,
+    pub call_id: String,
+    pub stage: String,
+    pub accounting_field: Option<String>,
+    pub source_map_call_ids: Vec<String>,
+    pub source_reduce_call_ids: Vec<String>,
+    pub preserve_map_findings: bool,
+    pub max_input_bytes: Option<usize>,
+    pub max_findings_per_reduce: Option<usize>,
 }
 
 #[derive(Default)]
@@ -40,10 +40,10 @@ pub(super) struct WorkflowDryRunRecorder {
     pub(super) policy_error: Option<String>,
 }
 
-pub(crate) async fn dry_run_workflow_plan(
+pub async fn dry_run_workflow_plan(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
-) -> archon_workflow::WorkflowResult<Vec<WorkflowV2HostCall>> {
+) -> WorkflowResult<Vec<WorkflowV2HostCall>> {
     dry_run_workflow_plan_details(harness_source, script_args)
         .await
         .map(|(calls, _)| calls)
@@ -51,18 +51,18 @@ pub(crate) async fn dry_run_workflow_plan(
 
 /// Plan plus (task id, write call id) claims — the authoring pre-flight
 /// requires every universe task claimed by exactly one write call.
-pub(crate) async fn dry_run_workflow_plan_details(
+pub async fn dry_run_workflow_plan_details(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
-) -> archon_workflow::WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
+) -> WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
     let details = dry_run_workflow_plan_full_details(harness_source, script_args).await?;
     Ok((details.calls, details.write_task_claims))
 }
 
-pub(crate) async fn dry_run_workflow_plan_full_details(
+pub async fn dry_run_workflow_plan_full_details(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
-) -> archon_workflow::WorkflowResult<WorkflowDryRunPlanDetails> {
+) -> WorkflowResult<WorkflowDryRunPlanDetails> {
     let source = script_source(harness_source, script_args);
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -81,7 +81,7 @@ pub(crate) async fn dry_run_workflow_plan_full_details(
 
 pub(super) async fn dry_run_on_current_thread(
     source: String,
-) -> archon_workflow::WorkflowResult<WorkflowDryRunPlanDetails> {
+) -> WorkflowResult<WorkflowDryRunPlanDetails> {
     let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder::default()));
     let runtime = AsyncRuntime::new()
         .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
@@ -154,7 +154,7 @@ pub(super) fn record_dry_run_call(
     recorder: &Arc<StdMutex<WorkflowDryRunRecorder>>,
     method: &str,
     payload: &str,
-) -> archon_workflow::WorkflowResult<String> {
+) -> WorkflowResult<String> {
     let call = match dry_run_call_from_payload(method, payload) {
         Ok(call) => call,
         Err(err) => {
@@ -358,7 +358,7 @@ pub(super) fn task_ids_from_value(item: &serde_json::Value) -> Vec<String> {
 pub(super) fn dry_run_call_from_payload(
     method: &str,
     payload: &str,
-) -> archon_workflow::WorkflowResult<WorkflowV2HostCall> {
+) -> WorkflowResult<WorkflowV2HostCall> {
     let request: ScriptHostRequest = serde_json::from_str(payload)?;
     let method = WorkflowV2HostMethod::parse(method).ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
@@ -390,7 +390,7 @@ pub(super) fn dry_run_call_from_payload(
 pub(super) fn reject_agent_routing_overrides(
     call_id: &str,
     options: &serde_json::Value,
-) -> archon_workflow::WorkflowResult<()> {
+) -> WorkflowResult<()> {
     let Some(object) = options.as_object() else {
         return Ok(());
     };
@@ -406,7 +406,7 @@ pub(super) fn reject_agent_routing_overrides(
 
 pub(super) fn record_policy_error(
     recorder: &Arc<StdMutex<WorkflowDryRunRecorder>>,
-    error: &archon_workflow::WorkflowError,
+    error: &WorkflowError,
 ) {
     if let Ok(mut recorder) = recorder.lock() {
         recorder.policy_error.get_or_insert(error.to_string());
@@ -421,7 +421,7 @@ pub(super) fn record_policy_error(
 pub(super) fn reject_malformed_write_targets(
     call_id: &str,
     source: Option<&serde_json::Value>,
-) -> archon_workflow::WorkflowResult<()> {
+) -> WorkflowResult<()> {
     let items = source.and_then(serde_json::Value::as_array);
     for item in items.into_iter().flatten() {
         let targets = item

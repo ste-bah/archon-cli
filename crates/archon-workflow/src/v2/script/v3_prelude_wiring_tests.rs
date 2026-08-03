@@ -30,12 +30,7 @@ mod primitive_binding_tests {
             .collect();
 
         // The globals block moved into a sibling part in the file-size split.
-        let helpers = [
-            include_str!("workflow_live_v2_script_helpers.rs"),
-            include_str!("workflow_live_v2_script_helpers_a.rs"),
-            include_str!("workflow_live_v2_script_helpers_b.rs"),
-        ]
-        .concat();
+        let helpers = [include_str!("helpers_a.rs"), include_str!("helpers_b.rs")].concat();
         let bound: std::collections::BTreeSet<&str> = helpers
             .lines()
             .filter_map(|line| line.trim().strip_prefix("globalThis."))
@@ -57,7 +52,7 @@ mod primitive_binding_tests {
         let missing: Vec<&str> = exported.difference(&bound).copied().collect();
         assert!(
             missing.is_empty(),
-            "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in workflow_live_v2_script_helpers.rs"
+            "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in helpers_a.rs"
         );
     }
 }
