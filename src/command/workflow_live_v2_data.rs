@@ -5,13 +5,13 @@ use archon_workflow::{
     WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2WriteMode,
 };
 
-use super::workflow_live_v2_verification::{
-    normalize_focused_verification_outcome, stamp_focused_verification_input,
-};
 use archon_workflow::v2::branch_evidence::attach_branch_evidence;
 use archon_workflow::v2::completion_evidence::{
     attach_completion_evidence_for_call, canonical_task_ids_from_result,
     evidence_summaries_from_result,
+};
+use archon_workflow::v2::verification::{
+    normalize_focused_verification_outcome, stamp_focused_verification_input,
 };
 
 pub(super) fn execution_with_resolved_source(
@@ -52,9 +52,7 @@ pub(super) fn execution_with_resolved_source(
     Ok(enriched)
 }
 
-#[path = "workflow_live_v2_data_source_pack.rs"]
-mod workflow_live_v2_data_source_pack;
-pub(super) use workflow_live_v2_data_source_pack::source_pack_value;
+pub(super) use archon_workflow::v2::source_pack::source_pack_value;
 
 #[path = "workflow_live_v2_data_source.rs"]
 mod workflow_live_v2_data_source;

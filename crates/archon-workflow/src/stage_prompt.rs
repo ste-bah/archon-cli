@@ -1,10 +1,32 @@
-use archon_workflow::StageRunRequest;
+//! Prompts for the legacy YAML stage executor and the harness planner.
+//!
+//! These are the message bodies the binary hands an agent for a
+//! [`StageRunRequest`]; every input they read is a type this crate owns. The
+//! command-execution guidance is gated by the same predicate that decides the
+//! stage's tool access, so a stage cannot be told to run commands it has no
+//! shell for.
+
 use serde_json::Value;
 
-use super::workflow_live_runner::command_execution_stage;
-use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use crate::StageRunRequest;
+use crate::stage_command_policy::command_execution_stage;
+use crate::task_universe::WorkflowV2TaskUniverse;
 
-pub(crate) fn workflow_prompt(request: &StageRunRequest) -> String {
+/// The system context every stage invocation carries.
+///
+/// A workflow stage is a fresh invocation: restored conversational context,
+/// prior subagent memory, or an earlier session summary must never override
+/// the stage's own contract.
+pub fn workflow_stage_system_context(request: &StageRunRequest) -> String {
+    format!(
+        "You are an Archon dynamic workflow stage agent. This is a fresh workflow stage invocation for run '{}', stage '{}', attempt {}. Ignore any restored conversational context, prior subagent memory, or earlier session summary that conflicts with this invocation. Follow only the current Workflow Task, Evidence Contract, Stage Input, and output schema. Do not ask what to do next, do not stop at a confirmation question, and do not return restored-context summaries. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
+        request.run_id,
+        request.stage_id,
+        request.attempt.max(1)
+    )
+}
+
+pub fn workflow_prompt(request: &StageRunRequest) -> String {
     let input =
         serde_json::to_string_pretty(&request.input).unwrap_or_else(|_| request.input.to_string());
     let command_guidance = if command_execution_stage(request) {
@@ -167,7 +189,7 @@ fn linux_is_wsl2() -> bool {
     false
 }
 
-pub(super) fn harness_planner_prompt(
+pub fn harness_planner_prompt(
     task: &str,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> String {
@@ -222,7 +244,7 @@ const HARNESS_PLANNER_RULES: &str = concat!(
     "- Do not hardcode maxParallelism or total-agent defaults; Archon clamps generated workflow agents to the configured subagent concurrency and workflow policy caps. Only set maxParallelism when intentionally lowering concurrency below that cap.\n",
 );
 
-pub(super) fn harness_repair_prompt(
+pub fn harness_repair_prompt(
     task: &str,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     invalid_harness: &str,

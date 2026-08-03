@@ -10,7 +10,8 @@ use archon_workflow::{
 
 use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths;
 
-use super::super::workflow_live_retry;
+use archon_workflow::stage_retry::run_agent_with_transient_retry;
+
 use super::super::workflow_live_runner::{
     allowed_tools, request_target_repository_root, tier_model_alias, workflow_agent,
     workflow_agent_ordinal, workflow_agent_session_id,
@@ -222,34 +223,28 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
-        let response = match workflow_live_retry::run_agent_with_transient_retry(
-            &self.llm,
-            agent_request,
-            |attempt| {
-                let client = self.clone();
-                let stage_request = stage_request.clone();
-                let agent_name = agent_name.clone();
-                let provider_id = provider_id.clone();
-                let resolved_model = resolved_model.clone();
-                async move {
-                    client
-                        .emit_required_activity(
-                            &stage_request,
-                            &agent_name,
-                            &provider_id,
-                            &resolved_model,
-                            WorkflowActivityStatus::Running,
-                            &format!(
-                                "v2 call retrying after transient provider error ({attempt}/3)"
-                            ),
-                        )
-                        .await
-                        .map_err(|error| {
-                            archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
-                        })
-                }
-            },
-        )
+        let response = match run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
+            let client = self.clone();
+            let stage_request = stage_request.clone();
+            let agent_name = agent_name.clone();
+            let provider_id = provider_id.clone();
+            let resolved_model = resolved_model.clone();
+            async move {
+                client
+                    .emit_required_activity(
+                        &stage_request,
+                        &agent_name,
+                        &provider_id,
+                        &resolved_model,
+                        WorkflowActivityStatus::Running,
+                        &format!("v2 call retrying after transient provider error ({attempt}/3)"),
+                    )
+                    .await
+                    .map_err(|error| {
+                        archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
+                    })
+            }
+        })
         .await
         {
             Ok(response) => response,

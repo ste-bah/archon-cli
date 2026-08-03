@@ -1,17 +1,22 @@
-use super::*;
-
-use super::super::super::workflow_live_verification_contract::annotate_verification_failure_outcome;
+use super::failure_class::annotate_verification_failure_outcome;
+use super::signals::{
+    focused_verification_command_passed, is_duplicate_harness_gap, verification_text,
+};
+use crate::v2::{
+    BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Evidence, WorkflowV2EvidenceKind,
+    WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverageStatus,
+};
 
 // Defined beside the evidence it versions, in archon-workflow, so the stamp
 // written into a call's input and the fingerprint read back off its minted
 // completion evidence cannot drift apart.
-pub(crate) use archon_workflow::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION;
+use crate::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION;
 
-pub(super) fn is_focused_verification_call(call_id: &str) -> bool {
+fn is_focused_verification_call(call_id: &str) -> bool {
     call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
 }
 
-pub(crate) fn stamp_focused_verification_input(call_id: &str, input: &mut serde_json::Value) {
+pub fn stamp_focused_verification_input(call_id: &str, input: &mut serde_json::Value) {
     if !is_focused_verification_call(call_id) {
         return;
     }
@@ -24,7 +29,7 @@ pub(crate) fn stamp_focused_verification_input(call_id: &str, input: &mut serde_
     );
 }
 
-pub(crate) fn normalize_focused_verification_outcome(
+pub fn normalize_focused_verification_outcome(
     call_id: &str,
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
@@ -113,12 +118,12 @@ fn demote_commandless_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let ran_any_successful_command = result
         .commands_run
         .iter()
-        .any(|command| command.status == archon_workflow::WorkflowV2CommandStatus::Succeeded);
+        .any(|command| command.status == crate::WorkflowV2CommandStatus::Succeeded);
     if ran_any_successful_command {
         return;
     }
     result.status = WorkflowV2Status::NeedsReview;
-    result.residual_gaps.push(archon_workflow::WorkflowV2ResidualGap {
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
         id: "zero_command_verification".to_string(),
         description:
             "this focused verification recorded no successful command execution; a run that executed nothing is not verification evidence"
@@ -153,7 +158,7 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let test_commands: Vec<_> = result
         .commands_run
         .iter()
-        .filter(|command| command.kind == archon_workflow::WorkflowV2CommandKind::Test)
+        .filter(|command| command.kind == crate::WorkflowV2CommandKind::Test)
         .collect();
     if test_commands.is_empty() {
         return;
@@ -162,15 +167,15 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     // command carrying several filters can report overall success while named
     // filters inside it matched nothing — that command proves nothing about
     // those filters, and treating the batch as passing credits untested work.
-    let any_zero_matched = test_commands.iter().any(|command| {
-        archon_workflow::context::output_reports_zero_matched_tests(&command.output_summary)
-    });
+    let any_zero_matched = test_commands
+        .iter()
+        .any(|command| crate::context::output_reports_zero_matched_tests(&command.output_summary));
     if !any_zero_matched {
         return;
     }
     result.status = WorkflowV2Status::NeedsReview;
     result.residual_gaps.push(
-        archon_workflow::WorkflowV2ResidualGap {
+        crate::WorkflowV2ResidualGap {
             id: "zero_test_match_verification".to_string(),
             description:
                 "every test command in this focused verification matched zero tests; a run that executed nothing is not verification evidence"
@@ -208,7 +213,7 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 ///
 /// Domain-agnostic: the contract declares its own artifact paths and predicates;
 /// this only runs the command and reads the JSON verdicts from its stdout.
-pub(crate) async fn enforce_declared_contracts(
+pub async fn enforce_declared_contracts(
     outcomes: &mut [WorkflowV2BranchOutcome],
     contracts: &std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)>,
 ) {
@@ -231,8 +236,7 @@ pub(crate) async fn enforce_declared_contracts(
         let mut passed = 0usize;
         let mut failed = false;
         for contract in declared {
-            let command =
-                archon_workflow::v2::deliverable_contract::verification_command(root, contract);
+            let command = crate::v2::deliverable_contract::verification_command(root, contract);
             match run_contract_verifier(&command).await {
                 ContractVerification::Passed => passed += 1,
                 ContractVerification::Failed(detail) => {
@@ -429,15 +433,13 @@ pub(super) fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, deta
     let truncated: String = detail.chars().take(500).collect();
     if let Some(result) = outcome.result.as_mut() {
         result.status = WorkflowV2Status::NeedsReview;
-        result
-            .residual_gaps
-            .push(archon_workflow::WorkflowV2ResidualGap {
-                id: "declared_contract_verification_failed".to_string(),
-                description: format!(
-                    "host-executed declared deliverable contract verification failed: {truncated}"
-                ),
-                severity: Some("review".to_string()),
-            });
+        result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+            id: "declared_contract_verification_failed".to_string(),
+            description: format!(
+                "host-executed declared deliverable contract verification failed: {truncated}"
+            ),
+            severity: Some("review".to_string()),
+        });
         result.evidence.push(WorkflowV2Evidence::new(
             WorkflowV2EvidenceKind::Blocker,
             "accepted branch demoted: the host ran the declared deliverable contract verifier and it failed",

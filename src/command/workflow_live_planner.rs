@@ -14,10 +14,10 @@ use archon_workflow::{
 
 use crate::command::learning_workflow_hooks::derive_learning_hooks;
 
-use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
 use super::workflow_live_retry;
 use super::workflow_live_runner::tier_model_alias;
 use archon_workflow::repo_root::infer_target_repository_root;
+use archon_workflow::stage_prompt::{harness_planner_prompt, harness_repair_prompt};
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
 };

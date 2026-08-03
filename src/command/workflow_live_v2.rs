@@ -36,8 +36,6 @@ mod workflow_live_v2_data_tests;
 mod workflow_live_v2_frontier_resume_tests;
 #[path = "workflow_live_v2_stable_json.rs"]
 mod workflow_live_v2_stable_json;
-#[path = "workflow_live_v2_verification.rs"]
-mod workflow_live_v2_verification;
 
 use workflow_live_v2_data::{
     execution_with_resolved_source, fanout_items_for_call, result_from_fanout_report,
@@ -51,11 +49,9 @@ use workflow_live_v2_client::LiveV2AgentClient;
 mod workflow_live_v2_contracts;
 
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
-#[path = "workflow_live_v2_state.rs"]
-mod workflow_live_v2_state;
 
 use archon_workflow::poll_v2_run_control;
-use workflow_live_v2_state::{persist_terminal_run_status, sync_v2_summary_to_run};
+use archon_workflow::v2::run_state_sync::{persist_terminal_run_status, sync_v2_summary_to_run};
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
