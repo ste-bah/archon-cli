@@ -21,6 +21,7 @@ pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
 pub mod lifecycle;
+pub mod lifecycle_host_port;
 pub mod llm_client_port;
 pub mod lower_workflow;
 mod persistence;
@@ -72,6 +73,7 @@ pub use learning::{
     WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
+pub use lifecycle_host_port::{LifecycleHost, TERMINAL_HOST_CALL_MARKER};
 pub use llm_client_port::{
     WorkflowAgentCall, WorkflowAgentOutcome, WorkflowAgentSpec, WorkflowAgentToolAccess,
     WorkflowAgentToolUse, WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest,

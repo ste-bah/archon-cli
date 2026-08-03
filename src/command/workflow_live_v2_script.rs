@@ -24,7 +24,10 @@ use archon_workflow::v2::source_graph::{
     complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
 };
 
-const TERMINAL_HOST_CALL_MARKER: &str = "workflow terminal host call:";
+// The terminal-call marker is part of the lifecycle host port's contract: the
+// host writes it, the driver routes on it. One definition, in the crate that
+// owns the port.
+use archon_workflow::TERMINAL_HOST_CALL_MARKER;
 #[cfg(not(test))]
 const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_secs(60);
 #[cfg(test)]
@@ -381,6 +384,11 @@ pub(crate) use workflow_live_v2_script_dry_run::dry_run_workflow_plan;
 #[path = "workflow_live_v2_lifecycle.rs"]
 mod workflow_live_v2_lifecycle;
 use workflow_live_v2_lifecycle::*;
+
+// Host side of `archon_workflow::lifecycle_host_port`. Outside the `workflow_*`
+// prefix on purpose — see the file's module doc.
+#[path = "lifecycle_script_host.rs"]
+mod lifecycle_script_host;
 
 #[path = "workflow_live_v3_orchestrated.rs"]
 mod workflow_live_v3_orchestrated;

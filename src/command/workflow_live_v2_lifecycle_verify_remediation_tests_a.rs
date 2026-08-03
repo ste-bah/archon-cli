@@ -150,7 +150,10 @@ fn every_lifecycle_reducer_uses_the_common_transport_retry_path() {
 
     assert!(lifecycle.contains("for attempt in 1..=max_transport_attempts"));
     assert!(lifecycle.contains("transport_failure_summary(&result)"));
-    assert!(lifecycle.contains("source_pack_value(&source)"));
+    // The transport retry still packs the source; it now asks the host to do
+    // it through the lifecycle host port rather than naming the binary's
+    // `source_pack_value` directly.
+    assert!(lifecycle.contains("pack_reduce_source(&source)"));
     for source in reducer_call_sites {
         let text = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

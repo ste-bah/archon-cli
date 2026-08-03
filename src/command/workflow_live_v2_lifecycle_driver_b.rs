@@ -74,12 +74,7 @@ impl LifecycleDriver {
         let report_error = match result {
             Ok(_) => return Ok(()),
             Err(error) if error.to_string().contains(TERMINAL_HOST_CALL_MARKER) => {
-                let recorded_status = self
-                    .host
-                    .runner
-                    .v2_store
-                    .load_call_record(id)?
-                    .map(|record| record.status);
+                let recorded_status = self.host.load_call_record(id)?.map(|record| record.status);
                 if !terminal_marker_requires_report_fallback(recorded_status) {
                     return Err(error);
                 }

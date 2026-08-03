@@ -110,7 +110,7 @@ impl WorkflowV2ScriptRunner {
 }
 
 pub(super) struct LifecycleDriver {
-    pub(super) host: Arc<WorkflowScriptHost>,
+    pub(super) host: Arc<dyn archon_workflow::LifecycleHost>,
     pub(super) universe: WorkflowV2TaskUniverse,
     pub(super) task_universe: serde_json::Value,
     pub(super) target_repository_root: Option<String>,

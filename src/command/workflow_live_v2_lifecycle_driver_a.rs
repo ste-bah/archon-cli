@@ -7,7 +7,7 @@ use super::*;
 
 impl LifecycleDriver {
     pub(crate) fn new(
-        host: Arc<WorkflowScriptHost>,
+        host: Arc<dyn archon_workflow::LifecycleHost>,
         universe: WorkflowV2TaskUniverse,
         target_repository_root: Option<String>,
         project_artifact_root: Option<String>,
@@ -94,7 +94,7 @@ impl LifecycleDriver {
             } else if uses_verification_slimming(id) {
                 slim_reducer_source(id, &source, true)
             } else {
-                super::super::super::workflow_live_v2_data::source_pack_value(&source)
+                self.host.pack_reduce_source(&source)
             };
             match self
                 .call(
