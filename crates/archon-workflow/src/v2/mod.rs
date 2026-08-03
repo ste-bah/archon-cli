@@ -14,6 +14,7 @@ pub mod call_execution;
 pub mod completion_credit;
 pub mod host_api;
 pub mod implementation_inspection;
+pub mod lifecycle_prompts;
 pub mod prd_intake;
 mod project_artifact_completion;
 pub mod project_artifact_contract;

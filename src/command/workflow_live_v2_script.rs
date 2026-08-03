@@ -364,8 +364,6 @@ mod workflow_live_v2_lifecycle_boundary_repair;
 mod workflow_live_v2_lifecycle_cross_cutting;
 #[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
 mod workflow_live_v2_lifecycle_noop_routing;
-#[path = "workflow_live_v2_lifecycle_prompts.rs"]
-mod workflow_live_v2_lifecycle_prompts;
 #[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
 mod workflow_live_v2_lifecycle_review_remediation;
 #[path = "workflow_live_v2_lifecycle_review_verification.rs"]
