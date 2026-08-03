@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use archon_workflow::StageRunRequest;
+// The key vocabulary and its scrub live in archon-workflow so the collector
+// here and the write layer's strip cannot drift apart.
+use archon_workflow::tool_declarations::is_tool_field;
 
 pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
     let project_root = project_root(request);
@@ -34,44 +37,6 @@ fn collect_declared_tools(value: &serde_json::Value, tools: &mut BTreeSet<String
         serde_json::Value::Array(values) => {
             for child in values {
                 collect_declared_tools(child, tools);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Every key `allowed_mcp_tools` treats as a tool declaration. The write path
-/// strips exactly these from the agent-authored branch item before stamping
-/// the authoritative set, so the two lists must never drift.
-pub(crate) const TOOL_DECLARATION_FIELDS: &[&str] = &[
-    "required_tools",
-    "requiredTools",
-    "tool_requirements",
-    "toolRequirements",
-    "mcp_tools",
-    "mcpTools",
-];
-
-fn is_tool_field(key: &str) -> bool {
-    TOOL_DECLARATION_FIELDS.contains(&key)
-}
-
-/// Remove every tool-declaration key at EVERY level of a value. `allowed_mcp_tools`
-/// (and the write no-op guard) scan the whole input recursively, so a shallow
-/// strip leaves a nested `{...: {mcp_tools: [...]}}` forgery reachable. Applied
-/// to agent-authored branch items so only host-stamped, task-universe-derived
-/// tools can ever bind.
-pub(crate) fn strip_tool_declarations(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(object) => {
-            object.retain(|key, _| !is_tool_field(key));
-            for child in object.values_mut() {
-                strip_tool_declarations(child);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for child in values.iter_mut() {
-                strip_tool_declarations(child);
             }
         }
         _ => {}
@@ -112,6 +77,7 @@ fn raw_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_workflow::tool_declarations::strip_tool_declarations;
     use std::collections::BTreeSet;
 
     #[test]

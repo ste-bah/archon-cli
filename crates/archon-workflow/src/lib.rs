@@ -44,6 +44,7 @@ pub mod stage;
 pub mod store;
 pub mod task_universe;
 pub mod template;
+pub mod tool_declarations;
 pub mod tui_events;
 pub mod ui_sink_port;
 pub mod v2;
@@ -61,7 +62,7 @@ pub use approval::{
 pub use bundle::{WorkflowBundle, WorkflowBundleManifest, WorkflowBundleOrigin, WorkflowHarness};
 pub use command::{CommandAction, WorkflowCommand};
 pub use config::WorkflowConfig;
-pub use control::{RunControl, RunControlDecision};
+pub use control::{RunControl, RunControlDecision, poll_v2_run_control};
 pub use error::{WorkflowError, WorkflowResult};
 pub use events::{
     CompactProgress, WorkflowEvent, WorkflowEventKind, WorkflowEventLog, contains_forbidden_field,

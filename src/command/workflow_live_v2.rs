@@ -15,7 +15,7 @@ use archon_workflow::{
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, WorkflowLlmClient, WorkflowRun,
     WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError,
     WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence,
-    WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2FanoutReport, WorkflowV2HostCall,
+    WorkflowV2EvidenceKind, WorkflowV2FanoutReport, WorkflowV2HostCall,
     WorkflowV2HostMethod, WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result,
     WorkflowV2ResultStore, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status,
     workflow_scaffold_hash,
@@ -27,8 +27,6 @@ use archon_workflow::{
 mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
 mod workflow_live_provider_env;
-#[path = "workflow_live_v2_aggregate.rs"]
-mod workflow_live_v2_aggregate;
 #[path = "workflow_live_v2_artifact_paths.rs"]
 mod workflow_live_v2_artifact_paths;
 #[path = "workflow_live_v2_data.rs"]
@@ -67,9 +65,8 @@ use workflow_live_v2_write::run_write_capable_v2_fanout;
 #[path = "workflow_live_v2_state.rs"]
 mod workflow_live_v2_state;
 
-use workflow_live_v2_state::{
-    persist_terminal_run_status, poll_v2_run_control, sync_v2_summary_to_run,
-};
+use archon_workflow::poll_v2_run_control;
+use workflow_live_v2_state::{persist_terminal_run_status, sync_v2_summary_to_run};
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
@@ -163,9 +160,7 @@ pub(super) use workflow_live_v2_read_only_a::*;
 mod workflow_live_v2_read_only_b;
 pub(super) use workflow_live_v2_read_only_b::*;
 
-#[path = "workflow_live_v2_branch_cache.rs"]
-mod workflow_live_v2_branch_cache;
-pub(super) use workflow_live_v2_branch_cache::*;
+pub(super) use archon_workflow::v2::branch_cache::*;
 
 #[cfg(test)]
 mod generated_resume_tests {

@@ -1,34 +1,9 @@
 use anyhow::Result;
 use archon_workflow::run::StageState;
 use archon_workflow::{
-    RunControl, RunControlDecision, RunStatus, StageStatus, WorkflowError, WorkflowStore,
-    WorkflowV2HostCall, WorkflowV2ResultStore, WorkflowV2Status,
+    RunStatus, StageStatus, WorkflowStore, WorkflowV2HostCall, WorkflowV2ResultStore,
+    WorkflowV2Status,
 };
-
-pub(super) fn poll_v2_run_control(
-    store: &WorkflowStore,
-    run_id: &str,
-    call_id: &str,
-) -> archon_workflow::WorkflowResult<()> {
-    let mut local = store.load_state(run_id)?;
-    match RunControl::new(store.clone(), run_id).checkpoint(&mut local)? {
-        RunControlDecision::Continue => Ok(()),
-        RunControlDecision::Paused { generation } => {
-            store.save_state_preserving_control(&local)?;
-            Err(WorkflowError::ControlPaused(format!(
-                "generation {generation} observed before/after V2 call '{}'",
-                call_id
-            )))
-        }
-        RunControlDecision::Cancelled { generation } => {
-            store.save_state_preserving_control(&local)?;
-            Err(WorkflowError::ControlCancelled(format!(
-                "generation {generation} observed before/after V2 call '{}'",
-                call_id
-            )))
-        }
-    }
-}
 
 pub(super) fn mark_v2_call_running(
     store: &WorkflowStore,

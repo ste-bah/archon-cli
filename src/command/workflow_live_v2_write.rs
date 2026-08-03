@@ -26,11 +26,13 @@ use archon_workflow::{
 };
 use tokio::sync::Semaphore;
 
-use super::split_reusable_branch_outcomes;
-use super::workflow_live_v2_aggregate::attach_branch_evidence;
-use super::workflow_live_v2_data::{attach_completion_evidence_for_call, fanout_items_for_call};
-use super::workflow_live_v2_state::poll_v2_run_control;
+use archon_workflow::v2::branch_cache::split_reusable_branch_outcomes;
+
+use super::workflow_live_v2_data::fanout_items_for_call;
 use archon_workflow::WorkflowAgentDispatch;
+use archon_workflow::poll_v2_run_control;
+use archon_workflow::v2::branch_evidence::attach_branch_evidence;
+use archon_workflow::v2::completion_evidence::attach_completion_evidence_for_call;
 use archon_workflow::generated_contract::{
     canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
 };
@@ -270,7 +272,7 @@ fn apply_source_graph_targets_to_branches(
     // stamp below is the only tool source, regardless of caller.
     for branch in branches.iter_mut() {
         if let Some(item_value) = branch.input.get_mut("item") {
-            super::super::workflow_live_mcp::strip_tool_declarations(item_value);
+            archon_workflow::tool_declarations::strip_tool_declarations(item_value);
         }
     }
     let Some(graph) = source_task_graph else {

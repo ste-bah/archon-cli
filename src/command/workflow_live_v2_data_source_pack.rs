@@ -9,7 +9,7 @@ pub(in super::super) fn source_pack_value(value: &serde_json::Value) -> serde_js
     // so strip tool declarations here — the fanout branch builder already does
     // the same for write/verify items.
     let mut value = value.clone();
-    super::super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
+    archon_workflow::tool_declarations::strip_tool_declarations(&mut value);
     let value = &value;
     match value {
         serde_json::Value::Array(items) => {
