@@ -31,6 +31,7 @@ const PASSTHROUGH_VARS: &[&str] = &[
     "WINDIR",
     "COMSPEC",
     "PATHEXT",
+    "PSMODULEPATH",
     "CARGO_HOME",
     "RUSTUP_HOME",
 ];
@@ -78,6 +79,25 @@ mod tests {
         ]);
 
         assert_eq!(env, vec![("PATH".to_string(), "/usr/bin".to_string())]);
+    }
+
+    #[test]
+    fn strict_allowlist_preserves_windows_powershell_module_path() {
+        let env = sanitize_env([
+            (
+                "PSModulePath",
+                r"C:\\Program Files\\WindowsPowerShell\\Modules",
+            ),
+            ("UNRECOGNIZED_CREDENTIAL", "secret"),
+        ]);
+
+        assert_eq!(
+            env,
+            vec![(
+                "PSModulePath".to_string(),
+                r"C:\\Program Files\\WindowsPowerShell\\Modules".to_string(),
+            )]
+        );
     }
 
     #[test]
