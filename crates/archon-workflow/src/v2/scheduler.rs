@@ -469,3 +469,7 @@ pub fn stable_value_hash(value: &serde_json::Value) -> String {
     let bytes = serde_json::to_vec(value).unwrap_or_default();
     blake3::hash(&bytes).to_hex().to_string()
 }
+
+#[cfg(test)]
+#[path = "scheduler_stable_value_hash_tests.rs"]
+mod stable_value_hash_tests;
