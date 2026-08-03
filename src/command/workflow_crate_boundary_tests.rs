@@ -62,7 +62,7 @@ const EXEMPT: &[(&str, &str)] = &[
         "tests of the slash surface, which emits TuiEvents directly",
     ),
     (
-        "workflow_live_tests.rs",
+        "workflow_live_delivery_lint_tests.rs",
         "the delivery lint matches on the literal crate path it forbids",
     ),
     (
