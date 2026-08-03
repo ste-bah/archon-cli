@@ -108,7 +108,7 @@ impl LifecycleDriver {
         Ok(review)
     }
 
-    async fn run_noop_proofs(
+    pub(super) async fn run_noop_proofs(
         &self,
         ready_noop_items: &[serde_json::Value],
         completed_ids: &std::collections::BTreeSet<String>,
@@ -275,7 +275,7 @@ impl LifecycleDriver {
         Ok(Vec::new())
     }
 
-    async fn discover_implementation_targets(
+    pub(super) async fn discover_implementation_targets(
         &self,
         items: Vec<serde_json::Value>,
         discovery: &serde_json::Value,

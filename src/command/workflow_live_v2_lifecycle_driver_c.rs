@@ -5,7 +5,7 @@
 
 impl LifecycleDriver {
 
-    fn discovery_items(&self) -> Vec<serde_json::Value> {
+    pub(super) fn discovery_items(&self) -> Vec<serde_json::Value> {
         let paths = serde_json::json!(self.universe.source_roots);
         vec![
             serde_json::json!({
@@ -28,7 +28,7 @@ impl LifecycleDriver {
 
     /// body_a.js inventory repair loop: one pass per attempt over the issue
     /// kinds, each reduce gated by its own iteration cap.
-    async fn repair_inventory(
+    pub(super) async fn repair_inventory(
         &self,
         raw_inventory: serde_json::Value,
         discovery: &serde_json::Value,

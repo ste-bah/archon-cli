@@ -1,4 +1,6 @@
-async fn run_serial_v2_write_fanout(
+use super::*;
+
+pub(super) async fn run_serial_v2_write_fanout(
     task: &str,
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,

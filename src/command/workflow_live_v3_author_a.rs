@@ -1,6 +1,6 @@
 /// Reference handed to the author agent. Generic by construction: it
 /// documents the dialect, never the fixture domain.
-const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
+pub(super) const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
 
 Shape — top-level script, exactly like this (no wrapper function):
 
@@ -148,7 +148,7 @@ Rules the script must follow:
     notes: '<short honest summary>'
   } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from their final reducers, never invented or omitted."#;
 
-const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete workflow.js orchestration script for this decomposed task set. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
+pub(super) const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete workflow.js orchestration script for this decomposed task set. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
 
 Required investigation (do it; cite the files you actually read in evidence):
 1. READ the source requirements document(s) under the source roots below, and EVERY task file listed.
@@ -182,7 +182,7 @@ DIALECT REFERENCE:
 /// Single-pass placeholder substitution: each `{name}` is looked up once —
 /// substituted content is never re-scanned, so run-derived text (learning
 /// context, retry errors) cannot inject other placeholders.
-fn compose_author_brief(values: &[(&str, &str)]) -> String {
+pub(super) fn compose_author_brief(values: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(V3_AUTHOR_TASK_TEMPLATE.len());
     let mut rest = V3_AUTHOR_TASK_TEMPLATE;
     while let Some(start) = rest.find('{') {

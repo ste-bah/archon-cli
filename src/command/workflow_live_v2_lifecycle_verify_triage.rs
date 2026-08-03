@@ -1,8 +1,10 @@
 // Verification-failure triage and its single bounded re-triage path.
 
+use super::*;
+
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation(
+    pub(super) async fn run_verification_remediation(
         &self,
         ready_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -79,21 +81,21 @@ impl LifecycleDriver {
         }
         let remediated = self
             .run_write_verification_remediation(
-            ready_items,
-            plan_items,
-            &routes.implementation_failures,
-            wave_index,
-            dependency_iteration,
-            remediation_attempt,
-            verification,
-            evidence,
-            &triage,
-        )
-        .await?;
+                ready_items,
+                plan_items,
+                &routes.implementation_failures,
+                wave_index,
+                dependency_iteration,
+                remediation_attempt,
+                verification,
+                evidence,
+                &triage,
+            )
+            .await?;
         Ok(retried || superseded || remediated)
     }
 
-    async fn verification_failure_triage(
+    pub(super) async fn verification_failure_triage(
         &self,
         triage_id: &str,
         ready_items: &[serde_json::Value],
@@ -105,17 +107,21 @@ impl LifecycleDriver {
             .reduce(
                 triage_id,
                 serde_json::json!([
-                    self.task_universe, ready_items, plan_items, actionable,
-                    evidence.implementation, evidence.verification
+                    self.task_universe,
+                    ready_items,
+                    plan_items,
+                    actionable,
+                    evidence.implementation,
+                    evidence.verification
                 ]),
                 "reducer",
                 prompts::VERIFICATION_FAILURE_TRIAGE_TASK,
             )
             .await?;
-        let triage = workflow_live_v2_lifecycle_verify_overreach::reroute_unplanned_raw_task_identity(
-            triage,
-            plan_items,
-        );
+        let triage =
+            workflow_live_v2_lifecycle_verify_overreach::reroute_unplanned_raw_task_identity(
+                triage, plan_items,
+            );
         let triage = self
             .enforce_triage_accounting(triage_id, actionable, triage, evidence)
             .await?;
@@ -134,7 +140,7 @@ impl LifecycleDriver {
     /// for in a canonical route array. Unaccounted outcomes get one bounded
     /// shape-repair re-ask; the repair is adopted only if it accounts for
     /// more of them.
-    async fn enforce_triage_accounting(
+    pub(super) async fn enforce_triage_accounting(
         &self,
         triage_id: &str,
         failed_outcomes: &[serde_json::Value],
@@ -200,7 +206,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn bounded_verification_retriage(
+    pub(super) async fn bounded_verification_retriage(
         &self,
         triage: serde_json::Value,
         triage_id: &str,
@@ -216,7 +222,9 @@ impl LifecycleDriver {
         workflow_live_v2_lifecycle_verify_routing::RetryProducer,
     )> {
         if !workflow_live_v2_lifecycle_verify_retriage::needs_bounded_retriage(
-            &self.contract(), verification, &triage,
+            &self.contract(),
+            verification,
+            &triage,
         ) {
             return Ok((
                 triage,
@@ -225,16 +233,12 @@ impl LifecycleDriver {
             ));
         }
         let id = format!("verification-failure-retriage-{wave_index}-{repair_attempt}");
-        let feedback = workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(
-            verification,
-            &triage,
-        );
+        let feedback =
+            workflow_live_v2_lifecycle_verify_retriage::retriage_feedback(verification, &triage);
         let retriage = self
             .reduce(
                 &id,
-                serde_json::json!([
-                    self.task_universe, plan_items, actionable, feedback
-                ]),
+                serde_json::json!([self.task_universe, plan_items, actionable, feedback]),
                 "reducer",
                 prompts::VERIFICATION_FAILURE_RETRIAGE_TASK,
             )
@@ -257,7 +261,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_producer_retry(
+    pub(super) async fn run_producer_retry(
         &self,
         producer_output: &serde_json::Value,
         producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
@@ -317,9 +321,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn triage_failed_outcomes(
-    verification: &serde_json::Value,
-) -> Vec<serde_json::Value> {
+pub(super) fn triage_failed_outcomes(verification: &serde_json::Value) -> Vec<serde_json::Value> {
     let has_concrete_outcomes = [
         verification.pointer("/outcomes"),
         verification.pointer("/items"),
@@ -354,7 +356,7 @@ pub(super) fn triage_failed_outcomes(
     })]
 }
 
-fn record_triage_retry(
+pub(super) fn record_triage_retry(
     evidence: &mut LifecycleEvidence,
     producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
     wave_index: usize,

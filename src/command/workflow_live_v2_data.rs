@@ -53,14 +53,30 @@ pub(super) fn execution_with_resolved_source(
     Ok(enriched)
 }
 
-include!("workflow_live_v2_data_source_pack.rs");
+#[path = "workflow_live_v2_data_source_pack.rs"]
+mod workflow_live_v2_data_source_pack;
+pub(super) use workflow_live_v2_data_source_pack::source_pack_value;
 
-include!("workflow_live_v2_data_source.rs");
+#[path = "workflow_live_v2_data_source.rs"]
+mod workflow_live_v2_data_source;
+pub(super) use workflow_live_v2_data_source::fanout_items_for_call;
+use workflow_live_v2_data_source::*;
 
-include!("workflow_live_v2_data_fanout_result.rs");
+#[path = "workflow_live_v2_data_fanout_result.rs"]
+mod workflow_live_v2_data_fanout_result;
+pub(super) use workflow_live_v2_data_fanout_result::{
+    attach_completion_evidence_for_call, result_from_fanout_report,
+};
 
-include!("workflow_live_v2_data_branch_contract.rs");
+#[path = "workflow_live_v2_data_branch_contract.rs"]
+mod workflow_live_v2_data_branch_contract;
+use workflow_live_v2_data_branch_contract::*;
 
-include!("workflow_live_v2_data_evidence.rs");
+#[path = "workflow_live_v2_data_evidence.rs"]
+mod workflow_live_v2_data_evidence;
+use workflow_live_v2_data_evidence::*;
 
-include!("workflow_live_v2_data_agent_request.rs");
+#[path = "workflow_live_v2_data_agent_request.rs"]
+mod workflow_live_v2_data_agent_request;
+pub(super) use workflow_live_v2_data_agent_request::v2_agent_request;
+use workflow_live_v2_data_agent_request::*;

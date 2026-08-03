@@ -1,4 +1,4 @@
-fn collapse_outcome_clones(
+pub(super) fn collapse_outcome_clones(
     outcomes: &[serde_json::Value],
     limit: usize,
 ) -> (Vec<serde_json::Value>, usize) {
@@ -33,7 +33,7 @@ fn collapse_outcome_clones(
     (collapsed, total.saturating_sub(limit))
 }
 
-fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) -> String {
+pub(super) fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) -> String {
     let result = outcome.get("result").unwrap_or(outcome);
     let mut gap_ids = support::array(result.get("residual_gaps"))
         .into_iter()
@@ -52,7 +52,7 @@ fn outcome_group_identity(stem: &str, outcome: &serde_json::Value) -> String {
     }
 }
 
-fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
+pub(super) fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for key in ["item_id", "id", "status", "failure_kind"] {
         if let Some(value) = outcome.get(key) {
@@ -64,7 +64,7 @@ fn slim_outcome(outcome: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(out)
 }
 
-fn item_identity(value: &serde_json::Value) -> &str {
+pub(super) fn item_identity(value: &serde_json::Value) -> &str {
     value
         .get("item_id")
         .or_else(|| value.get("id"))
@@ -72,7 +72,7 @@ fn item_identity(value: &serde_json::Value) -> &str {
         .unwrap_or_default()
 }
 
-fn strip_check_suffixes(mut value: &str) -> &str {
+pub(super) fn strip_check_suffixes(mut value: &str) -> &str {
     while let Some((stem, suffix)) = value.rsplit_once("-check-") {
         if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
             value = stem;
@@ -85,7 +85,7 @@ fn strip_check_suffixes(mut value: &str) -> &str {
 
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_post_remediation_verification(
+    pub(super) async fn run_post_remediation_verification(
         &self,
         ready_implementation_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -150,7 +150,7 @@ impl LifecycleDriver {
         Ok(true)
     }
 
-    async fn post_remediation_plan(
+    pub(super) async fn post_remediation_plan(
         &self,
         ready_implementation_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -186,7 +186,7 @@ impl LifecycleDriver {
         Ok(raw_plan)
     }
 
-    async fn repair_post_remediation_plan(
+    pub(super) async fn repair_post_remediation_plan(
         &self,
         contract: &LifecycleContract<'_>,
         remediation_inventory: &serde_json::Value,
@@ -222,7 +222,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn repair_post_remediation_plan_once(
+    pub(super) async fn repair_post_remediation_plan_once(
         &self,
         remediation_inventory: &serde_json::Value,
         remediation_wave: &serde_json::Value,
@@ -285,7 +285,7 @@ impl LifecycleDriver {
     }
 }
 
-fn producer_retry_items(
+pub(super) fn producer_retry_items(
     contract: &LifecycleContract<'_>,
     producer_output: &serde_json::Value,
     producer: workflow_live_v2_lifecycle_verify_routing::RetryProducer,
@@ -318,7 +318,7 @@ fn producer_retry_items(
     (!items.is_empty()).then_some(items)
 }
 
-fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
+pub(super) fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
     let class = item
         .get("classification")
         .or_else(|| item.get("verification_failure_class"))
@@ -328,7 +328,7 @@ fn retry_item_requires_rerun(item: &serde_json::Value) -> bool {
     !class.contains("sibling") && !class.contains("supersed")
 }
 
-fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String> {
+pub(super) fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String> {
     support::unique(
         plan_items
             .iter()
@@ -337,7 +337,7 @@ fn allowed_verification_task_ids(plan_items: &[serde_json::Value]) -> Vec<String
     )
 }
 
-fn record_unresolved_verification_remediation(
+pub(super) fn record_unresolved_verification_remediation(
     remediation_attempt: &usize,
     wave_index: usize,
     evidence: &mut LifecycleEvidence,

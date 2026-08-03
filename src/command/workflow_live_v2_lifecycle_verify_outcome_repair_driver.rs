@@ -1,8 +1,10 @@
 // Bounded repair for mechanical failures produced by verification-remediation writes.
 
+use super::*;
+
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation_wave(
+    pub(super) async fn run_verification_remediation_wave(
         &self,
         ready_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -23,23 +25,36 @@ impl LifecycleDriver {
             )
             .await?;
         record_verification_remediation_wave(
-            evidence, wave_index, dependency_iteration, remediation_attempt,
-            "verification-remediation", remediation_inventory, &wave,
+            evidence,
+            wave_index,
+            dependency_iteration,
+            remediation_attempt,
+            "verification-remediation",
+            remediation_inventory,
+            &wave,
         );
         let wave = self
             .repair_verification_remediation_outcomes(
-                ready_items, remediation_inventory, wave, wave_index,
-                dependency_iteration, remediation_attempt, evidence,
+                ready_items,
+                remediation_inventory,
+                wave,
+                wave_index,
+                dependency_iteration,
+                remediation_attempt,
+                evidence,
             )
             .await?;
         record_unresolved_verification_remediation(
-            remediation_attempt, wave_index, evidence, &wave,
+            remediation_attempt,
+            wave_index,
+            evidence,
+            &wave,
         );
         Ok(wave)
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn repair_verification_remediation_outcomes(
+    pub(super) async fn repair_verification_remediation_outcomes(
         &self,
         ready_items: &[serde_json::Value],
         initial_inventory: &serde_json::Value,
@@ -57,14 +72,24 @@ impl LifecycleDriver {
         let mut inventory = initial_inventory.clone();
         let mut noop_disagreement_streak = 0usize;
         for repair_attempt in 1..=self.max_repair_iterations {
-            let repairable = workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(&wave);
+            let repairable =
+                workflow_live_v2_lifecycle_verify_outcome_repair::repairable_contract_outcomes(
+                    &wave,
+                );
             if repairable.is_empty() {
                 break;
             }
             let followup_inventory = self
                 .verification_remediation_followup_inventory(
-                    ready_items, &inventory, &wave, &repairable, &allowed,
-                    wave_index, remediation_attempt, repair_attempt, evidence,
+                    ready_items,
+                    &inventory,
+                    &wave,
+                    &repairable,
+                    &allowed,
+                    wave_index,
+                    remediation_attempt,
+                    repair_attempt,
+                    evidence,
                 )
                 .await?;
             if !remediation::remediation_inventory_ready(&followup_inventory) {
@@ -73,8 +98,13 @@ impl LifecycleDriver {
             let before = wave.clone();
             let (next_wave, followup_wave) = self
                 .run_verification_remediation_followup(
-                    &followup_inventory, wave, wave_index, dependency_iteration,
-                    remediation_attempt, repair_attempt, evidence,
+                    &followup_inventory,
+                    wave,
+                    wave_index,
+                    dependency_iteration,
+                    remediation_attempt,
+                    repair_attempt,
+                    evidence,
                 )
                 .await?;
             noop_disagreement_streak =
@@ -86,9 +116,8 @@ impl LifecycleDriver {
                 );
             wave = next_wave;
             if noop_disagreement_streak >= 2 {
-                wave = workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(
-                    &wave,
-                );
+                wave =
+                    workflow_live_v2_lifecycle_verify_outcome_repair::mark_noop_disagreement(&wave);
                 break;
             }
             inventory = followup_inventory;
@@ -97,7 +126,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn verification_remediation_followup_inventory(
+    pub(super) async fn verification_remediation_followup_inventory(
         &self,
         ready_items: &[serde_json::Value],
         source_inventory: &serde_json::Value,
@@ -116,7 +145,13 @@ impl LifecycleDriver {
         let raw = self
             .reduce(
                 &call_id,
-                serde_json::json!([self.task_universe, ready_items, source_items, wave, repairable]),
+                serde_json::json!([
+                    self.task_universe,
+                    ready_items,
+                    source_items,
+                    wave,
+                    repairable
+                ]),
                 "reducer",
                 prompts::REMEDIATION_OUTCOME_REPAIR_TASK,
             )
@@ -147,7 +182,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_verification_remediation_followup(
+    pub(super) async fn run_verification_remediation_followup(
         &self,
         inventory: &serde_json::Value,
         wave: serde_json::Value,
@@ -160,9 +195,8 @@ impl LifecycleDriver {
         let items = workflow_live_v2_lifecycle_verify_merge::verification_remediation_source_items(
             inventory,
         );
-        let call_id = verification_remediation_wave_id(
-            wave_index, remediation_attempt, Some(repair_attempt),
-        );
+        let call_id =
+            verification_remediation_wave_id(wave_index, remediation_attempt, Some(repair_attempt));
         let followup = self
             .write_fanout(
                 &call_id,
@@ -171,8 +205,13 @@ impl LifecycleDriver {
             )
             .await?;
         record_verification_remediation_wave(
-            evidence, wave_index, dependency_iteration, remediation_attempt,
-            "verification-remediation-retry", inventory, &followup,
+            evidence,
+            wave_index,
+            dependency_iteration,
+            remediation_attempt,
+            "verification-remediation-retry",
+            inventory,
+            &followup,
         );
         let merged = workflow_live_v2_lifecycle_verify_outcome_repair::merge_repaired_outcomes(
             &wave,
@@ -183,7 +222,7 @@ impl LifecycleDriver {
     }
 }
 
-fn verification_remediation_wave_id(
+pub(super) fn verification_remediation_wave_id(
     wave_index: usize,
     remediation_attempt: &usize,
     repair_attempt: Option<usize>,
@@ -193,7 +232,7 @@ fn verification_remediation_wave_id(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_verification_remediation_wave(
+pub(super) fn record_verification_remediation_wave(
     evidence: &mut LifecycleEvidence,
     wave_index: usize,
     dependency_iteration: usize,

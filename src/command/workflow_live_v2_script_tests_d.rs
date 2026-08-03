@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn v3_dialect_scripts_receive_claude_code_primitives() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -118,8 +120,8 @@ async function workflow(w) {
     assert_eq!(summary.executed, 1);
 }
 
-struct CannedAuthorLlm {
-    script: String,
+pub(super) struct CannedAuthorLlm {
+    pub(super) script: String,
 }
 
 #[async_trait::async_trait]

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn wf66_inherited_undeclared_path_evidence_does_not_block_isolated_worktree() {
     let result = wf66_preflight_result();
@@ -18,10 +20,8 @@ fn declared_artifact_verifier_rejects_unsigned_branch_output() {
         .expect_err("missing signed artifact must fail");
     assert!(rejected.contains("declared artifact verifier failed"));
 
-    std::fs::write(workspace.path().join("signed-artifact"), "signed\n")
-        .expect("signed fixture");
-    run_declared_artifact_verifiers(&accepted, workspace.path())
-        .expect("verified branch output");
+    std::fs::write(workspace.path().join("signed-artifact"), "signed\n").expect("signed fixture");
+    run_declared_artifact_verifiers(&accepted, workspace.path()).expect("verified branch output");
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn idempotent_noop_artifact_claim_runs_declared_verifier() {
     assert!(error.contains("declared artifact verifier failed"));
 }
 
-fn wf66_preflight_result() -> Option<WorkflowV2Result> {
+pub(super) fn wf66_preflight_result() -> Option<WorkflowV2Result> {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/wf66_remediation_wave_1_3_source_preflight.json"
     ))
@@ -77,13 +77,7 @@ fn wf66_preflight_result() -> Option<WorkflowV2Result> {
         .plan(&write_items)
         .expect("plan");
 
-    preflight_write_fanout_source_contract(
-        &call,
-        &branches,
-        &write_items,
-        &plan,
-        Some(&repo_root),
-    )
+    preflight_write_fanout_source_contract(&call, &branches, &write_items, &plan, Some(&repo_root))
 }
 
 #[test]
@@ -111,14 +105,25 @@ fn non_isolated_broad_duplicate_ownership_remains_preflight_data() {
         branch_for_item(&call, "item-b", targets),
     ];
     let write_items = write_items_for_branches(Some(&repo_root), &call, &branches).unwrap();
-    let plan = WorkflowV2WritePlanner::new(temp.path()).plan(&write_items).unwrap();
+    let plan = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&write_items)
+        .unwrap();
 
-    let result =
-        preflight_write_fanout_source_contract(&call, &branches, &write_items, &plan, Some(&repo_root))
-            .expect("preflight result");
+    let result = preflight_write_fanout_source_contract(
+        &call,
+        &branches,
+        &write_items,
+        &plan,
+        Some(&repo_root),
+    )
+    .expect("preflight result");
 
     let issues = result.data["source_preflight_issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["kind"] == "duplicate_broad_ownership"));
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue["kind"] == "duplicate_broad_ownership")
+    );
 }
 
 #[test]
@@ -148,14 +153,16 @@ fn distinct_small_write_items_pass_source_preflight() {
         .plan(&write_items)
         .expect("plan");
 
-    assert!(preflight_write_fanout_source_contract(
-        &call,
-        &branches,
-        &write_items,
-        &plan,
-        Some(&repo_root),
-    )
-    .is_none());
+    assert!(
+        preflight_write_fanout_source_contract(
+            &call,
+            &branches,
+            &write_items,
+            &plan,
+            Some(&repo_root),
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -185,17 +192,19 @@ fn owned_oversized_existing_target_does_not_block_source_preflight() {
         .plan(&write_items)
         .expect("plan");
 
-    assert!(preflight_write_fanout_source_contract(
-        &call,
-        &branches,
-        &write_items,
-        &plan,
-        Some(&repo_root),
-    )
-    .is_none());
+    assert!(
+        preflight_write_fanout_source_contract(
+            &call,
+            &branches,
+            &write_items,
+            &plan,
+            Some(&repo_root),
+        )
+        .is_none()
+    );
 }
 
-fn branches_from_fixture_items(
+pub(super) fn branches_from_fixture_items(
     fixture: &serde_json::Value,
     call: &WorkflowV2HostCall,
 ) -> Vec<WorkflowV2FanoutItem> {
@@ -215,7 +224,7 @@ fn branches_from_fixture_items(
         .collect()
 }
 
-fn branch_for_item(
+pub(super) fn branch_for_item(
     call: &WorkflowV2HostCall,
     item_id: &str,
     target_files: serde_json::Value,

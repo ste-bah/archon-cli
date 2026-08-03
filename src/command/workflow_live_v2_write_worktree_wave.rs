@@ -1,36 +1,38 @@
-#[derive(Default)]
-struct WorktreeWaveArtifacts {
-    results: Vec<WorkflowV2Result>,
-    manifests: Vec<PatchManifest>,
-    pre_hashes: BTreeMap<String, BTreeMap<String, String>>,
-    completed: Vec<CompletedWorktreeBranch>,
-    apply_gap: Option<String>,
-}
+use super::*;
 
 #[derive(Default)]
-struct WorktreePlanArtifacts {
-    results: Vec<WorkflowV2Result>,
-    manifests: Vec<PatchManifest>,
-    apply_gap: Option<String>,
-    peak_parallelism: usize,
+pub(super) struct WorktreeWaveArtifacts {
+    pub(super) results: Vec<WorkflowV2Result>,
+    pub(super) manifests: Vec<PatchManifest>,
+    pub(super) pre_hashes: BTreeMap<String, BTreeMap<String, String>>,
+    pub(super) completed: Vec<CompletedWorktreeBranch>,
+    pub(super) apply_gap: Option<String>,
 }
 
-struct WorktreePlanRunContext<'a> {
-    task: &'a str,
-    target_repository_root: Option<&'a str>,
-    execution: &'a WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    client: &'a LiveV2AgentClient,
-    v2_store: &'a WorkflowV2ResultStore,
-    store_for_control: &'a archon_workflow::WorkflowStore,
-    run_id: &'a str,
-    setup: &'a WorktreeFanoutSetup,
-    semaphore: Arc<Semaphore>,
-    active: Arc<AtomicUsize>,
-    peak: Arc<AtomicUsize>,
+#[derive(Default)]
+pub(super) struct WorktreePlanArtifacts {
+    pub(super) results: Vec<WorkflowV2Result>,
+    pub(super) manifests: Vec<PatchManifest>,
+    pub(super) apply_gap: Option<String>,
+    pub(super) peak_parallelism: usize,
 }
 
-fn worktree_plan_context<'a>(
+pub(super) struct WorktreePlanRunContext<'a> {
+    pub(super) task: &'a str,
+    pub(super) target_repository_root: Option<&'a str>,
+    pub(super) execution: &'a WorkflowV2CallExecution,
+    pub(super) adapter: WorkflowV2AgentAdapter,
+    pub(super) client: &'a LiveV2AgentClient,
+    pub(super) v2_store: &'a WorkflowV2ResultStore,
+    pub(super) store_for_control: &'a archon_workflow::WorkflowStore,
+    pub(super) run_id: &'a str,
+    pub(super) setup: &'a WorktreeFanoutSetup,
+    pub(super) semaphore: Arc<Semaphore>,
+    pub(super) active: Arc<AtomicUsize>,
+    pub(super) peak: Arc<AtomicUsize>,
+}
+
+pub(super) fn worktree_plan_context<'a>(
     task: &'a str,
     target_repository_root: Option<&'a str>,
     execution: &'a WorkflowV2CallExecution,
@@ -58,7 +60,7 @@ fn worktree_plan_context<'a>(
     }
 }
 
-async fn run_worktree_plan_waves(
+pub(super) async fn run_worktree_plan_waves(
     ctx: WorktreePlanRunContext<'_>,
     plan: &WorkflowV2WritePlan,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
@@ -78,7 +80,7 @@ async fn run_worktree_plan_waves(
     Ok(output)
 }
 
-async fn run_one_worktree_wave(
+pub(super) async fn run_one_worktree_wave(
     ctx: &WorktreePlanRunContext<'_>,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
     wave_index: usize,
@@ -106,7 +108,7 @@ async fn run_one_worktree_wave(
     Ok(artifacts)
 }
 
-fn prepare_worktree_wave(
+pub(super) fn prepare_worktree_wave(
     wave: &WorkflowV2WriteWave,
     branches: &[archon_workflow::WorkflowV2FanoutItem],
     run_id: &str,
@@ -141,7 +143,7 @@ fn prepare_worktree_wave(
     Ok(prepared)
 }
 
-fn branch_for_assignment(
+pub(super) fn branch_for_assignment(
     branches: &[archon_workflow::WorkflowV2FanoutItem],
     assignment: &WorkflowV2WriteAssignment,
 ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowV2FanoutItem> {
@@ -157,7 +159,7 @@ fn branch_for_assignment(
         })
 }
 
-async fn run_prepared_worktree_wave(
+pub(super) async fn run_prepared_worktree_wave(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: Vec<PreparedWorktreeBranch>,
 ) -> archon_workflow::WorkflowResult<Vec<CompletedWorktreeBranch>> {
@@ -172,25 +174,25 @@ async fn run_prepared_worktree_wave(
 }
 
 #[derive(Clone)]
-struct WorktreeWaveRunContext<'a> {
-    task: &'a str,
-    target_repository_root: Option<&'a str>,
-    execution: &'a WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    client: &'a LiveV2AgentClient,
-    v2_store: &'a WorkflowV2ResultStore,
-    store_for_control: &'a archon_workflow::WorkflowStore,
-    run_id: &'a str,
-    run_root: &'a Path,
-    canonical_root: &'a Path,
-    cfg: &'a WriteCoordinatorConfig,
-    semaphore: Arc<Semaphore>,
-    active: Arc<AtomicUsize>,
-    peak: Arc<AtomicUsize>,
+pub(super) struct WorktreeWaveRunContext<'a> {
+    pub(super) task: &'a str,
+    pub(super) target_repository_root: Option<&'a str>,
+    pub(super) execution: &'a WorkflowV2CallExecution,
+    pub(super) adapter: WorkflowV2AgentAdapter,
+    pub(super) client: &'a LiveV2AgentClient,
+    pub(super) v2_store: &'a WorkflowV2ResultStore,
+    pub(super) store_for_control: &'a archon_workflow::WorkflowStore,
+    pub(super) run_id: &'a str,
+    pub(super) run_root: &'a Path,
+    pub(super) canonical_root: &'a Path,
+    pub(super) cfg: &'a WriteCoordinatorConfig,
+    pub(super) semaphore: Arc<Semaphore>,
+    pub(super) active: Arc<AtomicUsize>,
+    pub(super) peak: Arc<AtomicUsize>,
 }
 
 impl WorktreePlanRunContext<'_> {
-    fn wave_context(&self) -> WorktreeWaveRunContext<'_> {
+    pub(super) fn wave_context(&self) -> WorktreeWaveRunContext<'_> {
         WorktreeWaveRunContext {
             task: self.task,
             target_repository_root: self.target_repository_root,
@@ -210,7 +212,7 @@ impl WorktreePlanRunContext<'_> {
     }
 }
 
-async fn worktree_branch_job(
+pub(super) async fn worktree_branch_job(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
 ) -> archon_workflow::WorkflowResult<CompletedWorktreeBranch> {
@@ -242,7 +244,7 @@ async fn worktree_branch_job(
     result
 }
 
-fn collect_worktree_wave_artifacts(
+pub(super) fn collect_worktree_wave_artifacts(
     completed: Vec<CompletedWorktreeBranch>,
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
@@ -267,7 +269,7 @@ fn collect_worktree_wave_artifacts(
     Ok(artifacts)
 }
 
-fn push_worktree_manifest_artifacts(
+pub(super) fn push_worktree_manifest_artifacts(
     artifacts: &mut WorktreeWaveArtifacts,
     completed_branch: &CompletedWorktreeBranch,
 ) {
@@ -281,7 +283,7 @@ fn push_worktree_manifest_artifacts(
     }
 }
 
-fn apply_worktree_wave(
+pub(super) fn apply_worktree_wave(
     ctx: &WorktreePlanRunContext<'_>,
     wave_index: usize,
     artifacts: &WorktreeWaveArtifacts,
@@ -303,7 +305,9 @@ fn apply_worktree_wave(
     worktree_apply_gap(apply_result)
 }
 
-fn worktree_apply_gap(result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>) -> Option<String> {
+pub(super) fn worktree_apply_gap(
+    result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>,
+) -> Option<String> {
     match result {
         Ok(record) if !record.items_failed.is_empty() => Some(format!(
             "worktree patch apply left {} item(s) unapplied: {}",
@@ -320,7 +324,7 @@ fn worktree_apply_gap(result: Result<archon_workflow::write_coordinator::ApplyRe
     }
 }
 
-fn cleanup_completed_worktree_wave(
+pub(super) fn cleanup_completed_worktree_wave(
     canonical_root: &Path,
     cfg: &WriteCoordinatorConfig,
     completed: &[CompletedWorktreeBranch],
@@ -332,6 +336,11 @@ fn cleanup_completed_worktree_wave(
         WorkspaceStatus::Failed
     };
     for completed_branch in completed {
-        let _ = cleanup_workspace(canonical_root, &completed_branch.workspace_root, status, cfg);
+        let _ = cleanup_workspace(
+            canonical_root,
+            &completed_branch.workspace_root,
+            status,
+            cfg,
+        );
     }
 }

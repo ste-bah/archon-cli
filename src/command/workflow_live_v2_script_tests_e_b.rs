@@ -263,7 +263,7 @@ fn reference_and_validator_share_the_mandate_contract() {
     );
 }
 
-fn agent_call(id: &str, role: Option<&str>) -> WorkflowV2HostCall {
+pub(super) fn agent_call(id: &str, role: Option<&str>) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),
         method: WorkflowV2HostMethod::Agent,
@@ -275,7 +275,7 @@ fn agent_call(id: &str, role: Option<&str>) -> WorkflowV2HostCall {
     }
 }
 
-fn work_call(id: &str) -> WorkflowV2HostCall {
+pub(super) fn work_call(id: &str) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),
         method: WorkflowV2HostMethod::Fanout,
@@ -284,11 +284,11 @@ fn work_call(id: &str) -> WorkflowV2HostCall {
     }
 }
 
-fn task_set<const N: usize>(ids: [&str; N]) -> std::collections::BTreeSet<String> {
+pub(super) fn task_set<const N: usize>(ids: [&str; N]) -> std::collections::BTreeSet<String> {
     ids.into_iter().map(str::to_string).collect()
 }
 
-fn save_review_record(store: &WorkflowV2ResultStore, call_id: &str, findings: serde_json::Value) {
+pub(super) fn save_review_record(store: &WorkflowV2ResultStore, call_id: &str, findings: serde_json::Value) {
     let mut result = WorkflowV2Result::accepted("review complete");
     result.data = serde_json::json!({ "findings": findings });
     let record = WorkflowV2CallRecord::new(
@@ -307,7 +307,7 @@ fn save_review_record(store: &WorkflowV2ResultStore, call_id: &str, findings: se
     store.save_call_record(&record).expect("save review record");
 }
 
-fn review_details(
+pub(super) fn review_details(
     mut calls: Vec<WorkflowV2HostCall>,
     review_map_claims: Vec<WorkflowReviewMapClaim>,
     review_reduce_edges: Vec<WorkflowReviewReduceEdge>,
@@ -332,7 +332,7 @@ fn review_details(
     }
 }
 
-fn review_map_claim(review_kind: &str, call_id: &str, task_id: &str) -> WorkflowReviewMapClaim {
+pub(super) fn review_map_claim(review_kind: &str, call_id: &str, task_id: &str) -> WorkflowReviewMapClaim {
     WorkflowReviewMapClaim {
         review_kind: review_kind.to_string(),
         call_id: call_id.to_string(),
@@ -341,7 +341,7 @@ fn review_map_claim(review_kind: &str, call_id: &str, task_id: &str) -> Workflow
     }
 }
 
-fn review_reduce<const M: usize, const R: usize>(
+pub(super) fn review_reduce<const M: usize, const R: usize>(
     review_kind: &str,
     call_id: &str,
     accounting_field: &str,
@@ -367,7 +367,7 @@ fn review_reduce<const M: usize, const R: usize>(
     }
 }
 
-fn review_map_call(call_id: &str, review_kind: &str) -> WorkflowV2HostCall {
+pub(super) fn review_map_call(call_id: &str, review_kind: &str) -> WorkflowV2HostCall {
     let mut extra = std::collections::BTreeMap::new();
     extra.insert(
         "reviewContract".to_string(),
@@ -392,7 +392,7 @@ fn review_map_call(call_id: &str, review_kind: &str) -> WorkflowV2HostCall {
     }
 }
 
-fn review_reduce_call(call_id: &str, review_kind: &str, stage: &str) -> WorkflowV2HostCall {
+pub(super) fn review_reduce_call(call_id: &str, review_kind: &str, stage: &str) -> WorkflowV2HostCall {
     let mut extra = std::collections::BTreeMap::new();
     extra.insert(
         "reviewContract".to_string(),

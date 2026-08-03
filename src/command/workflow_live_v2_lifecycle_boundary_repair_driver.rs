@@ -1,10 +1,12 @@
+use super::*;
+
 impl LifecycleDriver {
     /// D78: persist a monitor-visible typed record whenever the host rejects
     /// an LLM repair for semantic-preservation violations. Rejections
     /// otherwise live only in in-memory repair-attempt evidence until the
     /// terminal report, leaving external observers unable to distinguish a
     /// rejected repair's raw envelope from adopted state.
-    async fn record_preservation_rejection(
+    pub(super) async fn record_preservation_rejection(
         &self,
         repair_id: &str,
         violations: &[String],
@@ -26,7 +28,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn enforce_outcome_repair_accounting(
+    pub(super) async fn enforce_outcome_repair_accounting(
         &self,
         call_id: &str,
         raw: serde_json::Value,
@@ -85,11 +87,10 @@ impl LifecycleDriver {
             failed_outcomes,
             &repaired_inventory,
         );
-        let repaired_quality =
-            workflow_live_v2_lifecycle_boundary_repair::outcome_repair_quality(
-                &repaired_inventory,
-                failed_outcomes,
-            );
+        let repaired_quality = workflow_live_v2_lifecycle_boundary_repair::outcome_repair_quality(
+            &repaired_inventory,
+            failed_outcomes,
+        );
         // D74: structural improvement alone is not adoption — the repair must
         // also preserve the semantic identity of the items it reshaped.
         let preservation = semantic_preservation::check_items(
@@ -115,7 +116,7 @@ impl LifecycleDriver {
         }
     }
 
-    async fn enforce_final_reconciliation_shape(
+    pub(super) async fn enforce_final_reconciliation_shape(
         &self,
         call_id: &str,
         reconciliation: serde_json::Value,
@@ -125,9 +126,8 @@ impl LifecycleDriver {
             workflow_live_v2_lifecycle_boundary_repair::harvest_reconciliation_items(
                 &reconciliation,
             );
-        let quality = workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(
-            &reconciliation,
-        );
+        let quality =
+            workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(&reconciliation);
         if quality
             == (workflow_live_v2_lifecycle_boundary_repair::ReconciliationQuality {
                 missing_collection: 0,
@@ -155,9 +155,8 @@ impl LifecycleDriver {
             &workflow_live_v2_lifecycle_boundary_repair::collection_items(&reconciliation),
             &repaired,
         );
-        let repaired_quality = workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(
-            &repaired,
-        );
+        let repaired_quality =
+            workflow_live_v2_lifecycle_boundary_repair::reconciliation_quality(&repaired);
         // D74: reconciliation issues must survive the shape repair with their
         // identity and classification intact — dropping or reclassifying an
         // issue is how a false green would sneak past the final gates.

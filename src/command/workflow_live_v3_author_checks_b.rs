@@ -1,4 +1,4 @@
-fn validate_review_kind_shape(
+pub(super) fn validate_review_kind_shape(
     details: &WorkflowDryRunPlanDetails,
     accepted_task_ids: &std::collections::BTreeSet<String>,
     review_kind: &str,
@@ -183,7 +183,7 @@ fn validate_review_kind_shape(
     }
 }
 
-fn validate_review_accounting_from_reducers(
+pub(super) fn validate_review_accounting_from_reducers(
     script_result: Option<&str>,
     details: &WorkflowDryRunPlanDetails,
     store: &WorkflowV2ResultStore,
@@ -251,7 +251,7 @@ fn validate_review_accounting_from_reducers(
     Ok(())
 }
 
-fn collect_map_findings(
+pub(super) fn collect_map_findings(
     details: &WorkflowDryRunPlanDetails,
     store: &WorkflowV2ResultStore,
     review_kind: &str,
@@ -279,7 +279,7 @@ fn collect_map_findings(
     Ok(findings)
 }
 
-fn extract_review_findings_from_record(
+pub(super) fn extract_review_findings_from_record(
     record: &WorkflowV2CallRecord,
 ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
     let mut findings = Vec::new();
@@ -290,7 +290,7 @@ fn extract_review_findings_from_record(
     Ok(findings)
 }
 
-fn collect_findings_arrays(value: &serde_json::Value, findings: &mut Vec<serde_json::Value>) {
+pub(super) fn collect_findings_arrays(value: &serde_json::Value, findings: &mut Vec<serde_json::Value>) {
     match value {
         serde_json::Value::Array(items) => {
             for item in items {
@@ -313,7 +313,7 @@ fn collect_findings_arrays(value: &serde_json::Value, findings: &mut Vec<serde_j
     }
 }
 
-fn assert_multiset_contains(
+pub(super) fn assert_multiset_contains(
     haystack: &[serde_json::Value],
     needles: &[serde_json::Value],
     context: &str,
@@ -331,7 +331,7 @@ fn assert_multiset_contains(
     Ok(())
 }
 
-fn assert_multiset_equal(
+pub(super) fn assert_multiset_equal(
     left: &[serde_json::Value],
     right: &[serde_json::Value],
     context: &str,
@@ -346,7 +346,7 @@ fn assert_multiset_equal(
     Ok(())
 }
 
-fn finding_multiset(
+pub(super) fn finding_multiset(
     values: &[serde_json::Value],
 ) -> archon_workflow::WorkflowResult<std::collections::BTreeMap<String, usize>> {
     let mut out = std::collections::BTreeMap::new();

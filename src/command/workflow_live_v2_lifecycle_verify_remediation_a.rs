@@ -1,6 +1,6 @@
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    async fn run_write_verification_remediation(
+    pub(super) async fn run_write_verification_remediation(
         &self,
         ready_implementation_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -70,7 +70,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn verification_remediation_inventory(
+    pub(super) async fn verification_remediation_inventory(
         &self,
         ready_implementation_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -146,7 +146,7 @@ impl LifecycleDriver {
     }
 }
 
-fn transport_failure_result(
+pub(super) fn transport_failure_result(
     call_id: &str,
     attempts: usize,
     max_attempts: usize,
@@ -179,13 +179,13 @@ fn transport_failure_result(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum InventoryTransportRoute {
+pub(super) enum InventoryTransportRoute {
     UseResult,
     Retry,
     Exhausted(String),
 }
 
-fn inventory_transport_route(
+pub(super) fn inventory_transport_route(
     result: &serde_json::Value,
     attempt: usize,
     max_attempts: usize,
@@ -200,7 +200,7 @@ fn inventory_transport_route(
     }
 }
 
-fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
+pub(super) fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
     let status = result
         .get("status")
         .or_else(|| result.pointer("/result/status"))
@@ -223,7 +223,7 @@ fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
     Some(summary.to_string())
 }
 
-fn is_transport_failure_text(text: &str) -> bool {
+pub(super) fn is_transport_failure_text(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("agent transport failed")
         || text.contains("reducer transport exhausted")
@@ -235,7 +235,7 @@ fn is_transport_failure_text(text: &str) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn verification_remediation_inventory_source(
+pub(super) fn verification_remediation_inventory_source(
     task_universe: &serde_json::Value,
     ready_implementation_items: &[serde_json::Value],
     plan_items: &[serde_json::Value],
@@ -301,7 +301,7 @@ pub(super) fn slim_reducer_source(
     ])
 }
 
-fn slim_retriage_feedback(value: Option<&serde_json::Value>, limit: usize) -> serde_json::Value {
+pub(super) fn slim_retriage_feedback(value: Option<&serde_json::Value>, limit: usize) -> serde_json::Value {
     let Some(value) = value.and_then(serde_json::Value::as_object) else {
         return serde_json::Value::Null;
     };
@@ -375,7 +375,7 @@ pub(super) fn slim_verification_records(
     slim
 }
 
-fn slim_evidence_record(record: &serde_json::Value, outcome_limit: usize) -> serde_json::Value {
+pub(super) fn slim_evidence_record(record: &serde_json::Value, outcome_limit: usize) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for key in [
         "kind",
@@ -396,7 +396,7 @@ fn slim_evidence_record(record: &serde_json::Value, outcome_limit: usize) -> ser
     serde_json::Value::Object(out)
 }
 
-fn slim_result_with_outcomes(
+pub(super) fn slim_result_with_outcomes(
     result: &serde_json::Value,
     outcome_limit: usize,
 ) -> serde_json::Value {
@@ -423,7 +423,7 @@ fn slim_result_with_outcomes(
     serde_json::Value::Object(out)
 }
 
-fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
+pub(super) fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
     let Some(source) = data.as_object() else {
         return serde_json::Value::Null;
     };

@@ -1,4 +1,4 @@
-fn push_patch_manifest_artifact(
+pub(super) fn push_patch_manifest_artifact(
     result: &mut WorkflowV2Result,
     run_root: &Path,
     call_id: &str,
@@ -11,7 +11,7 @@ fn push_patch_manifest_artifact(
     });
 }
 
-fn persist_worktree_manifest(
+pub(super) fn persist_worktree_manifest(
     run_root: &Path,
     run_id: &str,
     execution: &WorkflowV2CallExecution,
@@ -30,7 +30,7 @@ fn persist_worktree_manifest(
     Ok(serde_json::from_str(&body)?)
 }
 
-fn capture_and_validate_worktree_patch(
+pub(super) fn capture_and_validate_worktree_patch(
     workspace: &ItemWorkspace,
     coordinator_plan: &WritePlan,
     baseline: &CanonicalBaseline,
@@ -43,7 +43,7 @@ fn capture_and_validate_worktree_patch(
     validate_captured_patch(coordinator_plan, cfg, &agent_body, captured)
 }
 
-fn validate_captured_patch(
+pub(super) fn validate_captured_patch(
     coordinator_plan: &WritePlan,
     cfg: &WriteCoordinatorConfig,
     agent_body: &str,
@@ -59,7 +59,7 @@ fn validate_captured_patch(
     Ok(captured)
 }
 
-fn coordinator_plan_for_assignment(
+pub(super) fn coordinator_plan_for_assignment(
     run_id: &str,
     stage_id: &str,
     assignment: &WorkflowV2WriteAssignment,
@@ -86,7 +86,7 @@ fn coordinator_plan_for_assignment(
     })
 }
 
-fn isolated_root_for_assignment(
+pub(super) fn isolated_root_for_assignment(
     assignment: &WorkflowV2WriteAssignment,
 ) -> archon_workflow::WorkflowResult<PathBuf> {
     assignment
@@ -101,7 +101,7 @@ fn isolated_root_for_assignment(
         })
 }
 
-fn normalized_assignment_targets(
+pub(super) fn normalized_assignment_targets(
     assignment: &WorkflowV2WriteAssignment,
     canonical_root: &Path,
 ) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
@@ -115,7 +115,7 @@ fn normalized_assignment_targets(
         .collect()
 }
 
-fn normalized_assignment_scopes(
+pub(super) fn normalized_assignment_scopes(
     assignment: &WorkflowV2WriteAssignment,
     canonical_root: &Path,
 ) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
@@ -129,7 +129,7 @@ fn normalized_assignment_scopes(
         .collect()
 }
 
-fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
+pub(super) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
     run_root
         .join("write-coordination")
         .join("stages")

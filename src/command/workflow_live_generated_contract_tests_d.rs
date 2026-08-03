@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn workflow_live_generated_contract_normalizes_direct_command_retry_fixture() {
     let fixture = include_str!("fixtures/wfc5d4_verification_repair_plan_1_3.json");

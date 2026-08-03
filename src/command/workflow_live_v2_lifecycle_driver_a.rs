@@ -4,7 +4,7 @@
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
 impl LifecycleDriver {
-    fn new(
+    pub(super) fn new(
         host: Arc<WorkflowScriptHost>,
         universe: WorkflowV2TaskUniverse,
         target_repository_root: Option<String>,
@@ -36,7 +36,7 @@ impl LifecycleDriver {
         }
     }
 
-    fn contract(&self) -> LifecycleContract<'_> {
+    pub(super) fn contract(&self) -> LifecycleContract<'_> {
         LifecycleContract {
             task_universe: &self.universe,
             target_repository_root: self.target_repository_root.as_deref(),
@@ -44,7 +44,7 @@ impl LifecycleDriver {
     }
 
     /// Mirror of the JS `__archonCall` payload shape.
-    async fn call(
+    pub(super) async fn call(
         &self,
         method: &str,
         id: &str,
@@ -63,7 +63,7 @@ impl LifecycleDriver {
         Ok(self.contract().normalize_canonical_id_fields(&value))
     }
 
-    async fn reduce(
+    pub(super) async fn reduce(
         &self,
         id: &str,
         source: serde_json::Value,
@@ -89,7 +89,7 @@ impl LifecycleDriver {
             } else if uses_verification_slimming(id) {
                 slim_reducer_source(id, &source, true)
             } else {
-                super::workflow_live_v2_data::source_pack_value(&source)
+                super::super::workflow_live_v2_data::source_pack_value(&source)
             };
             match self
                 .call(
@@ -123,7 +123,7 @@ impl LifecycleDriver {
         ))
     }
 
-    async fn parallel(
+    pub(super) async fn parallel(
         &self,
         id: &str,
         items: serde_json::Value,
@@ -132,7 +132,7 @@ impl LifecycleDriver {
         self.call("parallel", id, Some(items), options).await
     }
 
-    async fn write_fanout(
+    pub(super) async fn write_fanout(
         &self,
         id: &str,
         items: serde_json::Value,
@@ -161,7 +161,7 @@ impl LifecycleDriver {
     /// Declared artifact contract: every write-capable item carries the
     /// artifact requirements its task pack declares, so the implementing
     /// agent is always instructed to produce them.
-    fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
+    pub(super) fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
         let contract = self.contract();
         let enriched: Vec<serde_json::Value> = support::array(Some(&items))
             .into_iter()

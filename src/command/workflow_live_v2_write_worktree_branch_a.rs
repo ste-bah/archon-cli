@@ -1,4 +1,4 @@
-async fn run_one_worktree_branch(
+pub(super) async fn run_one_worktree_branch(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
@@ -48,20 +48,20 @@ async fn run_one_worktree_branch(
     Ok(completed_worktree_branch(branch, result, manifest, pre_hashes))
 }
 
-struct WorktreeBranchExecution {
-    id: String,
-    role: String,
-    input_hash: Option<String>,
-    workspace_root: PathBuf,
-    execution: WorkflowV2CallExecution,
+pub(super) struct WorktreeBranchExecution {
+    pub(super) id: String,
+    pub(super) role: String,
+    pub(super) input_hash: Option<String>,
+    pub(super) workspace_root: PathBuf,
+    pub(super) execution: WorkflowV2CallExecution,
 }
 
-type CapturedWorktreeManifest = (
+pub(super) type CapturedWorktreeManifest = (
     Option<PatchManifest>,
     Option<BTreeMap<String, String>>,
 );
 
-fn prepare_worktree_branch_execution(
+pub(super) fn prepare_worktree_branch_execution(
     execution: &WorkflowV2CallExecution,
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
@@ -88,7 +88,7 @@ fn prepare_worktree_branch_execution(
     })
 }
 
-fn completed_worktree_branch(
+pub(super) fn completed_worktree_branch(
     branch: WorktreeBranchExecution,
     result: WorkflowV2Result,
     manifest: Option<PatchManifest>,
@@ -105,7 +105,7 @@ fn completed_worktree_branch(
     }
 }
 
-async fn run_worktree_branch_agent(
+pub(super) async fn run_worktree_branch_agent(
     task: &str,
     target_repository_root: Option<String>,
     client: &LiveV2AgentClient,
@@ -127,7 +127,7 @@ async fn run_worktree_branch_agent(
     normalize_worktree_agent_result(result, branch)
 }
 
-fn normalize_worktree_agent_result(
+pub(super) fn normalize_worktree_agent_result(
     result: archon_workflow::WorkflowResult<WorkflowV2Result>,
     branch: &WorktreeBranchExecution,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
@@ -185,7 +185,7 @@ fn normalize_worktree_agent_result(
 /// partial write, or a worktree dirtied by something other than the patch all
 /// answer "yes" to the cheap question. Fails CLOSED: if the patch cannot be
 /// captured we cannot prove work landed, so the answer is `false`.
-fn worktree_patch_landed(prepared: &PreparedWorktreeBranch) -> bool {
+pub(super) fn worktree_patch_landed(prepared: &PreparedWorktreeBranch) -> bool {
     capture_patch(
         &prepared.workspace,
         &prepared.coordinator_plan.target_files,
@@ -234,7 +234,7 @@ fn worktree_patch_landed(prepared: &PreparedWorktreeBranch) -> bool {
 /// marker on a coordinated or serial branch will see it ABSENT, which
 /// `landedNothing` deliberately reads as "run the check" — the old behaviour,
 /// not a silent skip.
-fn mark_patch_landed(
+pub(super) fn mark_patch_landed(
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
     landed: bool,
@@ -276,7 +276,7 @@ fn mark_patch_landed(
 
 /// Keyed on the runtime's own error text for the bounded-retry exhaustion, which
 /// is the only place this phrasing is produced (`write_errors.rs:213`).
-fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool {
+pub(super) fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool {
     result
         .data
         .get("error")
@@ -284,7 +284,7 @@ fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool {
         .is_some_and(|error| error.contains("schema repair failed"))
 }
 
-fn validate_worktree_branch_result(
+pub(super) fn validate_worktree_branch_result(
     result: &mut WorkflowV2Result,
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
@@ -338,7 +338,7 @@ fn validate_worktree_branch_result(
     Ok(())
 }
 
-fn verify_declared_artifacts_for_result(
+pub(super) fn verify_declared_artifacts_for_result(
     input: &serde_json::Value,
     result: &WorkflowV2Result,
     workspace_root: &Path,
@@ -349,7 +349,7 @@ fn verify_declared_artifacts_for_result(
     run_declared_artifact_verifiers(input, workspace_root)
 }
 
-fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> bool {
+pub(super) fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> bool {
     matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -360,7 +360,7 @@ fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> 
         == Some(true)
 }
 
-fn run_declared_artifact_verifiers(
+pub(super) fn run_declared_artifact_verifiers(
     input: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<(), String> {
@@ -392,7 +392,7 @@ fn run_declared_artifact_verifiers(
     Ok(())
 }
 
-fn capture_worktree_branch_manifest(
+pub(super) fn capture_worktree_branch_manifest(
     run_root: &Path,
     run_id: &str,
     execution: &WorkflowV2CallExecution,
@@ -440,7 +440,7 @@ fn capture_worktree_branch_manifest(
     Ok((Some(manifest), Some(captured.pre_hashes)))
 }
 
-fn persist_rejected_worktree_result(
+pub(super) fn persist_rejected_worktree_result(
     store: &WorkflowV2ResultStore,
     branch_id: &str,
     attempt: &str,

@@ -1,4 +1,6 @@
-pub(super) fn fanout_items_for_call(
+use super::*;
+
+pub(in super::super) fn fanout_items_for_call(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<Vec<WorkflowV2FanoutItem>> {
@@ -19,7 +21,7 @@ pub(super) fn fanout_items_for_call(
             // at the single builder both write and read-only branches share,
             // so a nested forgery cannot reach allowed_mcp_tools or the no-op
             // guard (both scan the whole input recursively).
-            super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
+            super::super::super::workflow_live_mcp::strip_tool_declarations(&mut value);
             let item_id = fanout_item_id(&value, idx);
             let mut branch_call = execution.call.clone();
             branch_call.id = format!("{}-{item_id}", execution.call.id);
@@ -52,7 +54,7 @@ pub(super) fn fanout_items_for_call(
         .collect())
 }
 
-fn fanout_source_values(
+pub(super) fn fanout_source_values(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<(String, Vec<serde_json::Value>)> {
@@ -77,7 +79,7 @@ fn fanout_source_values(
     Ok((source.to_string(), resolve_fanout_source(source, v2_store)?))
 }
 
-fn array_from_source_data(
+pub(super) fn array_from_source_data(
     source_data: &serde_json::Value,
 ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
     if let Some(values) = source_data.as_array() {
@@ -94,7 +96,7 @@ fn array_from_source_data(
     ))
 }
 
-fn resolve_fanout_source(
+pub(super) fn resolve_fanout_source(
     source: &str,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
@@ -127,7 +129,7 @@ pub(super) fn resolve_source_value(
     resolve_single_source_value(trimmed, v2_store)
 }
 
-fn resolve_single_source_value(
+pub(super) fn resolve_single_source_value(
     source: &str,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<serde_json::Value> {
@@ -145,7 +147,7 @@ fn resolve_single_source_value(
     )))
 }
 
-fn source_value_from_call_path(
+pub(super) fn source_value_from_call_path(
     call_id: &str,
     path: Option<&str>,
     source: &str,
@@ -173,7 +175,7 @@ fn source_value_from_call_path(
     Ok(cursor)
 }
 
-fn fanout_item_id(value: &serde_json::Value, idx: usize) -> String {
+pub(super) fn fanout_item_id(value: &serde_json::Value, idx: usize) -> String {
     value
         .get("id")
         .or_else(|| value.get("task_id"))
@@ -184,7 +186,7 @@ fn fanout_item_id(value: &serde_json::Value, idx: usize) -> String {
         .unwrap_or_else(|| idx.to_string())
 }
 
-fn target_files_from_value(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn target_files_from_value(value: &serde_json::Value) -> Vec<String> {
     value
         .get("target_files")
         .or_else(|| value.get("expected_target_files"))
@@ -201,7 +203,7 @@ fn target_files_from_value(value: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn sanitize_v2_id(raw: &str) -> String {
+pub(super) fn sanitize_v2_id(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {

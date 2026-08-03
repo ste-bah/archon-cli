@@ -3,10 +3,12 @@
 // remediation loops, and the ownership-expansion follow-up (body_a.js lines
 // 222-500 plus the ownership splice), ported faithfully.
 
+use super::*;
+
 include!("workflow_live_v2_lifecycle_wave_phases.rs");
 
 impl LifecycleDriver {
-    pub(in super::super) async fn run_dependency_waves(
+    pub(in super::super::super) async fn run_dependency_waves(
         &self,
         mut inventory: serde_json::Value,
         discovery: &serde_json::Value,
@@ -20,16 +22,14 @@ impl LifecycleDriver {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             std::mem::take(&mut state.pending_implementation_items)
         };
-        inventory =
-            workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
-                &contract,
-                &inventory,
-                pending_implementation_items,
-            );
+        inventory = workflow_live_v2_lifecycle_terminal_gate::apply_pending_implementation_items(
+            &contract,
+            &inventory,
+            pending_implementation_items,
+        );
         let (reconciled_inventory, mut noop_reclassified_ids) =
             workflow_live_v2_lifecycle_noop_routing::reclassify_inventory_contradicted_noops(
-                &contract,
-                &inventory,
+                &contract, &inventory,
             );
         inventory = reconciled_inventory;
         {
@@ -60,7 +60,8 @@ impl LifecycleDriver {
         let mut implementation_wave_index = 1usize;
 
         while !remaining_items.is_empty() && dependency_iteration <= self.max_dependency_waves {
-            let ready_items = support::ready_items_from(&contract, &remaining_items, &completed_ids);
+            let ready_items =
+                support::ready_items_from(&contract, &remaining_items, &completed_ids);
             if ready_items.is_empty() {
                 let repaired = self
                     .repair_dependency_deadlock(
@@ -80,9 +81,7 @@ impl LifecycleDriver {
                     );
                     remaining_items = support::array(inventory.get("items"))
                         .into_iter()
-                        .filter(|item| {
-                            !support::item_is_completed(&contract, item, &completed_ids)
-                        })
+                        .filter(|item| !support::item_is_completed(&contract, item, &completed_ids))
                         .collect();
                     continue;
                 }
@@ -241,9 +240,8 @@ impl LifecycleDriver {
                     .completed_ids
                     .insert(id);
             }
-            remaining_items.retain(|item| {
-                !support::item_is_completed(&contract, item, &completed_ids)
-            });
+            remaining_items
+                .retain(|item| !support::item_is_completed(&contract, item, &completed_ids));
             if !ready_implementation_items.is_empty() {
                 implementation_wave_index += 1;
             }
@@ -272,7 +270,7 @@ impl LifecycleDriver {
         Ok(inventory)
     }
 
-    async fn repair_dependency_deadlock(
+    pub(super) async fn repair_dependency_deadlock(
         &self,
         inventory: &mut serde_json::Value,
         remaining_items: &mut Vec<serde_json::Value>,
@@ -310,8 +308,9 @@ impl LifecycleDriver {
                 &graph_issues,
                 &repair,
             );
-            *inventory = contract
-                .normalize_inventory(&support::merge_inventory_repair(&contract, inventory, &repair));
+            *inventory = contract.normalize_inventory(&support::merge_inventory_repair(
+                &contract, inventory, &repair,
+            ));
             *remaining_items = support::array(inventory.get("items"))
                 .into_iter()
                 .filter(|item| !support::item_is_completed(&contract, item, completed_ids))
@@ -324,7 +323,7 @@ impl LifecycleDriver {
         Ok(false)
     }
 
-    async fn repair_wave_completion_evidence(
+    pub(super) async fn repair_wave_completion_evidence(
         &self,
         ready_items: &[serde_json::Value],
         ready_noop_items: &[serde_json::Value],
@@ -376,12 +375,12 @@ impl LifecycleDriver {
     }
 }
 
-fn item_has_write_ownership(item: &serde_json::Value) -> bool {
+pub(super) fn item_has_write_ownership(item: &serde_json::Value) -> bool {
     support::present(item.get("target_files"))
         || support::present(item.get("artifact_requirements"))
 }
 
-fn preserve_host_pinned_implementation(
+pub(super) fn preserve_host_pinned_implementation(
     contract: &LifecycleContract<'_>,
     inventory: &serde_json::Value,
     noop_reclassified_ids: &std::collections::BTreeSet<String>,
@@ -398,7 +397,7 @@ fn preserve_host_pinned_implementation(
     contract.normalize_inventory(&serde_json::Value::Object(object))
 }
 
-fn preserve_host_pinned_items(
+pub(super) fn preserve_host_pinned_items(
     contract: &LifecycleContract<'_>,
     items: Vec<serde_json::Value>,
     noop_reclassified_ids: &std::collections::BTreeSet<String>,
@@ -424,7 +423,7 @@ fn preserve_host_pinned_items(
 
 /// JS `generatedContractInventoryGraphIssues(remainingItems, completedIds)` —
 /// deadlock diagnostics passed to the repair reducer.
-fn deadlock_graph_issues(
+pub(super) fn deadlock_graph_issues(
     contract: &LifecycleContract<'_>,
     remaining_items: &[serde_json::Value],
     completed_ids: &std::collections::BTreeSet<String>,

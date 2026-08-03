@@ -1,7 +1,9 @@
+use super::*;
+
 #[derive(Debug)]
-pub(super) struct WorkflowV2NormalizedFanout {
-    pub(super) result: WorkflowV2Result,
-    pub(super) outcomes: Vec<WorkflowV2BranchOutcome>,
+pub(in super::super) struct WorkflowV2NormalizedFanout {
+    pub(in super::super) result: WorkflowV2Result,
+    pub(in super::super) outcomes: Vec<WorkflowV2BranchOutcome>,
 }
 
 impl std::ops::Deref for WorkflowV2NormalizedFanout {
@@ -12,7 +14,7 @@ impl std::ops::Deref for WorkflowV2NormalizedFanout {
     }
 }
 
-pub(super) fn result_from_fanout_report(
+pub(in super::super) fn result_from_fanout_report(
     call: &WorkflowV2HostCall,
     report: archon_workflow::WorkflowV2FanoutReport,
 ) -> WorkflowV2NormalizedFanout {
@@ -142,7 +144,7 @@ pub(super) fn result_from_fanout_report(
     WorkflowV2NormalizedFanout { result, outcomes }
 }
 
-fn normalize_fanout_outcomes(
+pub(super) fn normalize_fanout_outcomes(
     call: &WorkflowV2HostCall,
     outcomes: Vec<WorkflowV2BranchOutcome>,
 ) -> Vec<WorkflowV2BranchOutcome> {
@@ -173,7 +175,7 @@ fn normalize_fanout_outcomes(
         .collect()
 }
 
-pub(super) fn attach_completion_evidence_for_call(
+pub(in super::super) fn attach_completion_evidence_for_call(
     call: &WorkflowV2HostCall,
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
@@ -238,7 +240,9 @@ pub(super) fn attach_completion_evidence_for_call(
     outcome.completion_evidence = evidence;
 }
 
-fn task_completion_evidence_kind(call_id: &str) -> Option<WorkflowV2TaskCompletionEvidenceKind> {
+pub(super) fn task_completion_evidence_kind(
+    call_id: &str,
+) -> Option<WorkflowV2TaskCompletionEvidenceKind> {
     if call_id.starts_with("noop-proof-verification-")
         || call_id.starts_with("noop-proof-reverification-")
     {
@@ -266,7 +270,7 @@ fn task_completion_evidence_kind(call_id: &str) -> Option<WorkflowV2TaskCompleti
     None
 }
 
-fn implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
     call.method == WorkflowV2HostMethod::Fanout
         && matches!(
             call.write_mode,

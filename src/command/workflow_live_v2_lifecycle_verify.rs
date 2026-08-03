@@ -3,8 +3,10 @@
 // plans — ported faithfully from the spliced verification lifecycle
 // (workflow_live_generated_scaffold_verification.rs::VERIFICATION_LIFECYCLE_JS).
 
+use super::*;
+
 impl LifecycleDriver {
-    pub(in super::super) async fn run_verification_lifecycle(
+    pub(in super::super::super) async fn run_verification_lifecycle(
         &self,
         ready_implementation_items: &[serde_json::Value],
         implementation_candidate_ids_unique: &[String],
@@ -127,7 +129,9 @@ impl LifecycleDriver {
                         .unwrap_or(serde_json::Value::Null);
                     data.get("verification_remediation_required")
                         == Some(&serde_json::Value::Bool(true))
-                        || data.get("verification_failure_class").and_then(|v| v.as_str())
+                        || data
+                            .get("verification_failure_class")
+                            .and_then(|v| v.as_str())
                             == Some("actionable_implementation_failure")
                         || data
                             .get("verification_failure_next_action")
@@ -157,17 +161,19 @@ impl LifecycleDriver {
                 continue;
             }
 
-            let repeated = workflow_live_v2_lifecycle_verify_routing::repeated_gap_write_remediation_outcomes(
+            let repeated =
+                workflow_live_v2_lifecycle_verify_routing::repeated_gap_write_remediation_outcomes(
                     &evidence.verification,
                     &verification,
                 );
             if !repeated.is_empty() {
-                let call_id = format!(
-                    "verification-repeated-gap-escalation-{wave_index}-{repair_attempt}"
-                );
+                let call_id =
+                    format!("verification-repeated-gap-escalation-{wave_index}-{repair_attempt}");
                 let source_ids = repeated
                     .iter()
-                    .filter_map(|outcome| outcome.get("item_id").and_then(serde_json::Value::as_str))
+                    .filter_map(|outcome| {
+                        outcome.get("item_id").and_then(serde_json::Value::as_str)
+                    })
                     .collect::<Vec<_>>();
                 let route = serde_json::json!({
                     "status": "accepted",
@@ -268,13 +274,15 @@ impl LifecycleDriver {
                 repair_attempt += 1;
                 continue;
             }
-            let repair_source = workflow_live_v2_lifecycle_verify_routing::predicate_rewrite_inventory(
+            let repair_source =
+                workflow_live_v2_lifecycle_verify_routing::predicate_rewrite_inventory(
                     &repair_plan,
                     &verification,
                 )
                 .unwrap_or_else(|| repair_plan.clone());
             let mut repair_inventory = contract.normalize_inventory(&repair_source);
-            repair_inventory = workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
+            repair_inventory =
+                workflow_live_v2_lifecycle_verify_invariants::enforce_retry_invariants(
                     &repair_inventory,
                     &verification,
                 );
@@ -321,11 +329,8 @@ impl LifecycleDriver {
                     &candidate,
                     &verification,
                 );
-                candidate = support::constrain_inventory_tasks(
-                    &contract,
-                    &candidate,
-                    &allowed_task_ids,
-                );
+                candidate =
+                    support::constrain_inventory_tasks(&contract, &candidate, &allowed_task_ids);
                 // D74: a shape repair is adopted only when it preserves the
                 // semantic identity of the items it reshaped; otherwise the
                 // violations feed the next bounded attempt as issues.
@@ -343,11 +348,8 @@ impl LifecycleDriver {
                         &semantic_preservation::violation_issues(&preservation.violations),
                         &candidate,
                     );
-                    self.record_preservation_rejection(
-                        &shape_call_id,
-                        &preservation.violations,
-                    )
-                    .await?;
+                    self.record_preservation_rejection(&shape_call_id, &preservation.violations)
+                        .await?;
                     semantic_preservation::append_preservation_issues(
                         &mut repair_inventory,
                         &preservation.violations,
@@ -426,10 +428,9 @@ impl LifecycleDriver {
         }
         Ok(())
     }
-
 }
 
-fn scope_repair_inventory_to_failed_outcomes(
+pub(super) fn scope_repair_inventory_to_failed_outcomes(
     contract: &LifecycleContract<'_>,
     inventory: &serde_json::Value,
     verification: &serde_json::Value,
@@ -448,24 +449,26 @@ fn scope_repair_inventory_to_failed_outcomes(
     let items = support::array(inventory.get("items"))
         .into_iter()
         .map(|item| contract.normalize_item(&item))
-        .filter(|item| item_matches_ids(item, &failed_ids) || !item_matches_ids(item, &accepted_ids))
+        .filter(|item| {
+            item_matches_ids(item, &failed_ids) || !item_matches_ids(item, &accepted_ids)
+        })
         .collect();
     let mut object = inventory.as_object().cloned().unwrap_or_default();
     object.insert("items".to_string(), serde_json::Value::Array(items));
     serde_json::Value::Object(object)
 }
 
-fn outcome_ids(outcomes: &[serde_json::Value]) -> std::collections::BTreeSet<String> {
+pub(super) fn outcome_ids(outcomes: &[serde_json::Value]) -> std::collections::BTreeSet<String> {
     outcomes.iter().flat_map(item_match_ids).collect()
 }
 
-fn item_matches_ids(
+pub(super) fn item_matches_ids(
     item: &serde_json::Value,
     ids: &std::collections::BTreeSet<String>,
 ) -> bool {
     item_match_ids(item).into_iter().any(|id| ids.contains(&id))
 }
 
-fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
+pub(super) fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
     workflow_live_v2_lifecycle_verify_invariants::verification_item_ids(item)
 }

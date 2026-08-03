@@ -1,4 +1,6 @@
-fn focused_verification_accepted_task_ids(
+use super::*;
+
+pub(super) fn focused_verification_accepted_task_ids(
     call: &WorkflowV2HostCall,
     result: &WorkflowV2Result,
 ) -> std::collections::BTreeSet<String> {
@@ -15,7 +17,7 @@ fn focused_verification_accepted_task_ids(
         .collect()
 }
 
-fn accepted_focused_completion_evidence(outcome: &serde_json::Value) -> Vec<String> {
+pub(super) fn accepted_focused_completion_evidence(outcome: &serde_json::Value) -> Vec<String> {
     outcome
         .get("completion_evidence")
         .and_then(serde_json::Value::as_array)
@@ -27,19 +29,23 @@ fn accepted_focused_completion_evidence(outcome: &serde_json::Value) -> Vec<Stri
         .collect()
 }
 
-fn focused_completion_evidence_valid(item: &serde_json::Value) -> bool {
+pub(super) fn focused_completion_evidence_valid(item: &serde_json::Value) -> bool {
     let accepted = matches!(
         item.get("status").and_then(serde_json::Value::as_str),
         Some("accepted" | "noop")
     );
-    let versioned = item.get("source_fingerprint").and_then(serde_json::Value::as_str)
+    let versioned = item
+        .get("source_fingerprint")
+        .and_then(serde_json::Value::as_str)
         == Some("focused-verification-evidence-v2");
-    let kind = item.get("evidence_kind").and_then(serde_json::Value::as_str)
+    let kind = item
+        .get("evidence_kind")
+        .and_then(serde_json::Value::as_str)
         == Some("focused_verification");
     accepted && versioned && kind && focused_completion_has_refs(item)
 }
 
-fn focused_completion_has_refs(item: &serde_json::Value) -> bool {
+pub(super) fn focused_completion_has_refs(item: &serde_json::Value) -> bool {
     ["artifact_paths", "command_refs", "evidence_refs"]
         .iter()
         .any(|key| {

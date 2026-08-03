@@ -316,25 +316,45 @@ fn branch_source_item_id(branch: &archon_workflow::WorkflowV2FanoutItem) -> Opti
         .filter(|value| !value.is_empty())
 }
 
-include!("workflow_live_v2_write_coordinated.rs");
+#[path = "workflow_live_v2_write_coordinated.rs"]
+mod workflow_live_v2_write_coordinated;
+use workflow_live_v2_write_coordinated::*;
 
-include!("workflow_live_v2_write_worktree.rs");
+#[path = "workflow_live_v2_write_worktree.rs"]
+mod workflow_live_v2_write_worktree;
+use workflow_live_v2_write_worktree::*;
 
-include!("workflow_live_v2_write_worktree_wave.rs");
+#[path = "workflow_live_v2_write_worktree_wave.rs"]
+mod workflow_live_v2_write_worktree_wave;
+use workflow_live_v2_write_worktree_wave::*;
 
-include!("workflow_live_v2_write_worktree_branch.rs");
+#[path = "workflow_live_v2_write_worktree_branch.rs"]
+mod workflow_live_v2_write_worktree_branch;
+use workflow_live_v2_write_worktree_branch::*;
 
-include!("workflow_live_v2_write_serial.rs");
+#[path = "workflow_live_v2_write_serial.rs"]
+mod workflow_live_v2_write_serial;
+use workflow_live_v2_write_serial::*;
 
-include!("workflow_live_v2_write_contract.rs");
+#[path = "workflow_live_v2_write_contract.rs"]
+mod workflow_live_v2_write_contract;
+use workflow_live_v2_write_contract::*;
 
-include!("workflow_live_v2_write_preflight.rs");
+#[path = "workflow_live_v2_write_preflight.rs"]
+mod workflow_live_v2_write_preflight;
+use workflow_live_v2_write_preflight::*;
 
-include!("workflow_live_v2_write_ownership.rs");
+#[path = "workflow_live_v2_write_ownership.rs"]
+mod workflow_live_v2_write_ownership;
+use workflow_live_v2_write_ownership::*;
 
-include!("workflow_live_v2_write_result.rs");
+#[path = "workflow_live_v2_write_result.rs"]
+mod workflow_live_v2_write_result;
+use workflow_live_v2_write_result::*;
 
-include!("workflow_live_v2_write_errors.rs");
+#[path = "workflow_live_v2_write_errors.rs"]
+mod workflow_live_v2_write_errors;
+use workflow_live_v2_write_errors::*;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_write_tests.rs"]

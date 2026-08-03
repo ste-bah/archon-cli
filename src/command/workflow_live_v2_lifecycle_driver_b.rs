@@ -7,7 +7,7 @@ impl LifecycleDriver {
     /// Terminal stop. The host raises the terminal marker for every
     /// non-accepted final report, which unwinds the lifecycle exactly as the
     /// JS throw did; an accepted report returns normally.
-    async fn final_report(
+    pub(super) async fn final_report(
         &self,
         id: &str,
         source: Option<serde_json::Value>,
@@ -149,7 +149,7 @@ impl LifecycleDriver {
         .map(|_| ())
     }
 
-    async fn run(&self) -> archon_workflow::WorkflowResult<()> {
+    pub(super) async fn run(&self) -> archon_workflow::WorkflowResult<()> {
         loop {
             match self.run_once().await {
                 Err(error) if is_terminal_gate_reroute(&error) => continue,
@@ -158,7 +158,7 @@ impl LifecycleDriver {
         }
     }
 
-    async fn run_once(&self) -> archon_workflow::WorkflowResult<()> {
+    pub(super) async fn run_once(&self) -> archon_workflow::WorkflowResult<()> {
         let discovery_items = self.discovery_items();
         let discovery = self
             .parallel(

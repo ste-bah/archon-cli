@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn workflow_live_generated_contract_normalizes_expected_completion_evidence() {
     let value = serde_json::json!({

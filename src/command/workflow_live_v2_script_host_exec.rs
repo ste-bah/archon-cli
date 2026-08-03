@@ -8,7 +8,7 @@
 /// kind: wave records carry `completed_ids`/`completion_evidence`, while a v3
 /// `implement-task-*`/`remediate-task-*` record carries no task-id evidence at
 /// all and names its task only in the call id.
-fn record_task_ids(
+pub(super) fn record_task_ids(
     record: &WorkflowV2CallRecord,
     universe: Option<&WorkflowV2TaskUniverse>,
 ) -> std::collections::BTreeSet<String> {
@@ -38,7 +38,7 @@ fn record_task_ids(
 /// whole token. A bare `contains` would let a shorter id (`TASK-01`) match the
 /// call id of a longer one (`TASK-010`) and taint an unrelated task, so the
 /// match must not be followed by another alphanumeric character.
-fn call_id_names_task(call_id_lower: &str, task_id_lower: &str) -> bool {
+pub(super) fn call_id_names_task(call_id_lower: &str, task_id_lower: &str) -> bool {
     if task_id_lower.is_empty() {
         return false;
     }
@@ -58,7 +58,7 @@ impl WorkflowScriptHost {
     /// can no longer be served from cache by a reuse path that cannot key on the
     /// input hash. Nothing else fires an invalidation mid-run: the store's
     /// `invalidate_*` routines are reachable only from `workflow restart`.
-    fn mark_tasks_reexecuted(&self, record: &WorkflowV2CallRecord) {
+    pub(super) fn mark_tasks_reexecuted(&self, record: &WorkflowV2CallRecord) {
         let Some(universe) = self.runner.task_universe.as_ref() else {
             // No task universe means no dependency graph — and also no
             // `resume_completed_ids`, so the hash-free reuse paths are inert.
@@ -79,7 +79,7 @@ impl WorkflowScriptHost {
 
     /// Whether reusing `record` WITHOUT an input-hash match would replay a
     /// result whose inputs have already moved under it in this run.
-    fn hash_free_reuse_stale(&self, record: &WorkflowV2CallRecord) -> bool {
+    pub(super) fn hash_free_reuse_stale(&self, record: &WorkflowV2CallRecord) -> bool {
         let Ok(dirty) = self.runner.reexecuted_task_closure.lock() else {
             // A poisoned lock means we cannot prove freshness; fail closed onto
             // the content-keyed paths rather than replay blind.
@@ -98,7 +98,7 @@ impl WorkflowScriptHost {
     /// task + kind (verify vs implement/remediate), preferring the latest
     /// accepted attempt. Only scans when the call actually belongs to a
     /// completed task, so non-completed calls pay no cost.
-    fn reusable_completed_task_record(
+    pub(super) fn reusable_completed_task_record(
         &self,
         execution: &WorkflowV2CallExecution,
     ) -> archon_workflow::WorkflowResult<Option<WorkflowV2CallRecord>> {
@@ -160,7 +160,7 @@ impl WorkflowScriptHost {
         Ok(best)
     }
 
-    async fn execute(
+    pub(super) async fn execute(
         &self,
         method: String,
         payload: String,

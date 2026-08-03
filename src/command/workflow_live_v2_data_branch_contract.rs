@@ -1,4 +1,6 @@
-fn normalize_implementation_branch_contract(outcome: &mut WorkflowV2BranchOutcome) {
+use super::*;
+
+pub(super) fn normalize_implementation_branch_contract(outcome: &mut WorkflowV2BranchOutcome) {
     if is_actual_execution_failure(outcome) || matches!(outcome.status, WorkflowV2Status::Cancelled)
     {
         return;
@@ -47,7 +49,7 @@ fn normalize_implementation_branch_contract(outcome: &mut WorkflowV2BranchOutcom
     outcome.result = Some(result);
 }
 
-fn is_actual_execution_failure(outcome: &WorkflowV2BranchOutcome) -> bool {
+pub(super) fn is_actual_execution_failure(outcome: &WorkflowV2BranchOutcome) -> bool {
     if matches!(
         outcome.failure_kind,
         Some(BranchFailureKind::Execution | BranchFailureKind::Safety)
@@ -75,7 +77,9 @@ fn is_actual_execution_failure(outcome: &WorkflowV2BranchOutcome) -> bool {
         || error.contains("rate limit")
 }
 
-fn failure_kind_for_outcome(outcome: &WorkflowV2BranchOutcome) -> Option<BranchFailureKind> {
+pub(super) fn failure_kind_for_outcome(
+    outcome: &WorkflowV2BranchOutcome,
+) -> Option<BranchFailureKind> {
     match outcome.status {
         WorkflowV2Status::Failed => {
             let error = outcome
@@ -117,7 +121,7 @@ fn failure_kind_for_outcome(outcome: &WorkflowV2BranchOutcome) -> Option<BranchF
     }
 }
 
-fn missing_contract_fields(
+pub(super) fn missing_contract_fields(
     missing_id: bool,
     canonical_task_ids: &[String],
     evidence: &[String],
@@ -135,7 +139,7 @@ fn missing_contract_fields(
     fields
 }
 
-fn merge_branch_contract_data(
+pub(super) fn merge_branch_contract_data(
     data: serde_json::Value,
     canonical_task_ids: &[String],
     evidence: &[String],
@@ -149,7 +153,7 @@ fn merge_branch_contract_data(
     serde_json::Value::Object(object)
 }
 
-fn fanout_outcome_views(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<serde_json::Value> {
+pub(super) fn fanout_outcome_views(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<serde_json::Value> {
     outcomes
         .iter()
         .map(|outcome| {

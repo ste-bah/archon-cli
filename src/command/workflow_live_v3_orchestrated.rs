@@ -3,10 +3,12 @@
 // deterministic orchestration ledger, and a bounded recent transcript tail.
 // It is intentionally independent from main-agent compaction segments.
 
-use super::super::workflow_live_v3_orchestrator_actions as orchestrator_actions;
-use orchestrator_actions::{ActionOutcome, OrchestratorAction};
+use super::*;
 
-const ORCHESTRATOR_TASK: &str = r#"You are the workflow orchestrator. You drive one decomposed task universe to completion using the authoritative task universe, deterministic ledger, and bounded recent outcomes supplied on each turn.
+pub(super) use super::super::super::workflow_live_v3_orchestrator_actions as orchestrator_actions;
+pub(super) use orchestrator_actions::{ActionOutcome, OrchestratorAction};
+
+pub(super) const ORCHESTRATOR_TASK: &str = r#"You are the workflow orchestrator. You drive one decomposed task universe to completion using the authoritative task universe, deterministic ledger, and bounded recent outcomes supplied on each turn.
 
 Rules:
 - You DECIDE; the host ENFORCES. You cannot accept work the gates rejected, and dishonest acceptance attempts are refused with a typed reason.
@@ -23,26 +25,26 @@ Rules:
   {"action":"block_task","task_id":"...","reason":"..."}
   {"action":"final_report","narrative":"..."}"#;
 
-const MAX_CODER_ATTEMPTS_PER_TASK: usize = 4;
-const MAX_VERIFIER_ATTEMPTS_PER_TASK: usize = 4;
-const MAX_EXPLORER_CALLS: usize = 6;
-const TRANSCRIPT_TAIL: usize = 40;
-const OUTCOME_JSON_MAX_CHARS: usize = 6000;
+pub(super) const MAX_CODER_ATTEMPTS_PER_TASK: usize = 4;
+pub(super) const MAX_VERIFIER_ATTEMPTS_PER_TASK: usize = 4;
+pub(super) const MAX_EXPLORER_CALLS: usize = 6;
+pub(super) const TRANSCRIPT_TAIL: usize = 40;
+pub(super) const OUTCOME_JSON_MAX_CHARS: usize = 6000;
 
 #[derive(Debug, Default, Clone, serde::Serialize)]
-struct OrchestratedTaskState {
-    coder_attempts: usize,
-    verifier_attempts: usize,
-    last_coder_status: Option<String>,
-    last_verifier_status: Option<String>,
-    status: OrchestratedTaskStatus,
+pub(super) struct OrchestratedTaskState {
+    pub(super) coder_attempts: usize,
+    pub(super) verifier_attempts: usize,
+    pub(super) last_coder_status: Option<String>,
+    pub(super) last_verifier_status: Option<String>,
+    pub(super) status: OrchestratedTaskStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
-    block_reason: Option<String>,
+    pub(super) block_reason: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-enum OrchestratedTaskStatus {
+pub(super) enum OrchestratedTaskStatus {
     #[default]
     Pending,
     Accepted,
@@ -50,13 +52,13 @@ enum OrchestratedTaskStatus {
 }
 
 #[derive(Debug, Default)]
-struct OrchestrationLedger {
-    tasks: std::collections::BTreeMap<String, OrchestratedTaskState>,
-    explorer_calls: usize,
+pub(super) struct OrchestrationLedger {
+    pub(super) tasks: std::collections::BTreeMap<String, OrchestratedTaskState>,
+    pub(super) explorer_calls: usize,
 }
 
 impl OrchestrationLedger {
-    fn for_universe(universe: &WorkflowV2TaskUniverse) -> Self {
+    pub(super) fn for_universe(universe: &WorkflowV2TaskUniverse) -> Self {
         let mut ledger = Self::default();
         for task in &universe.tasks {
             ledger
@@ -67,14 +69,14 @@ impl OrchestrationLedger {
         ledger
     }
 
-    fn summary(&self) -> serde_json::Value {
+    pub(super) fn summary(&self) -> serde_json::Value {
         serde_json::json!({
             "tasks": self.tasks,
             "explorer_calls": self.explorer_calls,
         })
     }
 
-    fn accounting(&self) -> serde_json::Value {
+    pub(super) fn accounting(&self) -> serde_json::Value {
         let mut accepted = Vec::new();
         let mut blocked = Vec::new();
         let mut pending = Vec::new();
@@ -144,7 +146,7 @@ impl LifecycleDriver {
         .await
     }
 
-    async fn orchestrator_reply(
+    pub(super) async fn orchestrator_reply(
         &self,
         ordinal: usize,
         ledger: &OrchestrationLedger,
@@ -164,7 +166,7 @@ impl LifecycleDriver {
         .await
     }
 
-    async fn dispatch_orchestrator_action(
+    pub(super) async fn dispatch_orchestrator_action(
         &self,
         ordinal: usize,
         action: &OrchestratorAction,
@@ -341,7 +343,7 @@ impl LifecycleDriver {
 
     /// Convert a wave result (or error) into a bounded, verbatim outcome for
     /// the conversation, recording the first branch status via `record`.
-    fn wave_outcome(
+    pub(super) fn wave_outcome(
         &self,
         ordinal: usize,
         tool: &str,
@@ -381,7 +383,7 @@ impl LifecycleDriver {
         }
     }
 
-    async fn orchestrated_terminal_checkpoint(
+    pub(super) async fn orchestrated_terminal_checkpoint(
         &self,
         id: &str,
         summary: &str,
@@ -403,7 +405,7 @@ impl LifecycleDriver {
     }
 }
 
-fn refusal(ordinal: usize, tool: &str, reason: &str) -> ActionOutcome {
+pub(super) fn refusal(ordinal: usize, tool: &str, reason: &str) -> ActionOutcome {
     ActionOutcome {
         action_ordinal: ordinal,
         tool: tool.to_string(),
@@ -412,7 +414,7 @@ fn refusal(ordinal: usize, tool: &str, reason: &str) -> ActionOutcome {
     }
 }
 
-fn outcome_json(outcome: &ActionOutcome) -> serde_json::Value {
+pub(super) fn outcome_json(outcome: &ActionOutcome) -> serde_json::Value {
     serde_json::json!({
         "tool": outcome.tool,
         "status": outcome.status,
@@ -422,7 +424,7 @@ fn outcome_json(outcome: &ActionOutcome) -> serde_json::Value {
 
 /// Verbatim-but-bounded: serialize and truncate at a character budget without
 /// reshaping any field the model needs to read.
-fn push_bounded_orchestrator_turn(
+pub(super) fn push_bounded_orchestrator_turn(
     transcript: &mut Vec<serde_json::Value>,
     turn: serde_json::Value,
 ) {
@@ -433,7 +435,7 @@ fn push_bounded_orchestrator_turn(
     }
 }
 
-fn bounded_json(value: &serde_json::Value, max_chars: usize) -> serde_json::Value {
+pub(super) fn bounded_json(value: &serde_json::Value, max_chars: usize) -> serde_json::Value {
     let text = value.to_string();
     if text.chars().count() <= max_chars {
         return value.clone();

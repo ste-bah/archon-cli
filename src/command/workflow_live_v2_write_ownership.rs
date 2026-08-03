@@ -1,4 +1,6 @@
-fn annotate_write_ownership_expansions(
+use super::*;
+
+pub(super) fn annotate_write_ownership_expansions(
     branch_results: &mut [WorkflowV2Result],
     plan: &WorkflowV2WritePlan,
 ) {
@@ -14,7 +16,7 @@ fn annotate_write_ownership_expansions(
     }
 }
 
-fn should_scan_for_ownership_expansion(result: &WorkflowV2Result) -> bool {
+pub(super) fn should_scan_for_ownership_expansion(result: &WorkflowV2Result) -> bool {
     matches!(
         result.status,
         WorkflowV2Status::Blocked | WorkflowV2Status::NeedsReview | WorkflowV2Status::Failed
@@ -24,7 +26,7 @@ fn should_scan_for_ownership_expansion(result: &WorkflowV2Result) -> bool {
     )
 }
 
-fn owned_targets_for_result(
+pub(super) fn owned_targets_for_result(
     result: &WorkflowV2Result,
     plan: &WorkflowV2WritePlan,
 ) -> BTreeSet<String> {
@@ -52,7 +54,7 @@ fn owned_targets_for_result(
     targets
 }
 
-fn proposed_ownership_expansions(
+pub(super) fn proposed_ownership_expansions(
     result: &WorkflowV2Result,
     owned: &BTreeSet<String>,
 ) -> Vec<serde_json::Value> {
@@ -73,7 +75,7 @@ fn proposed_ownership_expansions(
         .collect()
 }
 
-fn ownership_evidence_strings(result: &WorkflowV2Result) -> Vec<String> {
+pub(super) fn ownership_evidence_strings(result: &WorkflowV2Result) -> Vec<String> {
     let mut values = Vec::new();
     for evidence in &result.evidence {
         values.extend(evidence.source.clone());
@@ -89,7 +91,7 @@ fn ownership_evidence_strings(result: &WorkflowV2Result) -> Vec<String> {
     values
 }
 
-fn text_describes_ownership_gap(text: &str) -> bool {
+pub(super) fn text_describes_ownership_gap(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("ownership")
         || lower.contains("target_files")
@@ -99,13 +101,13 @@ fn text_describes_ownership_gap(text: &str) -> bool {
         || lower.contains("outside current owned")
 }
 
-fn path_tokens_from_text(text: &str) -> BTreeSet<String> {
+pub(super) fn path_tokens_from_text(text: &str) -> BTreeSet<String> {
     text.split(|ch: char| !is_path_char(ch))
         .filter_map(normalize_repo_path_token)
         .collect()
 }
 
-fn normalize_repo_path_token(raw: &str) -> Option<String> {
+pub(super) fn normalize_repo_path_token(raw: &str) -> Option<String> {
     let token = raw.trim_matches(|ch: char| matches!(ch, ',' | ':' | ';' | ')' | '(' | '"' | '\''));
     let token = token.strip_suffix('.').unwrap_or(token);
     if !looks_like_repo_path(token) || token.starts_with(".archon/") || token.starts_with('/') {
@@ -121,7 +123,7 @@ fn normalize_repo_path_token(raw: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-fn looks_like_repo_path(token: &str) -> bool {
+pub(super) fn looks_like_repo_path(token: &str) -> bool {
     token.contains('/')
         && !token.starts_with('-')
         && !token.contains("://")
@@ -131,11 +133,11 @@ fn looks_like_repo_path(token: &str) -> bool {
             .is_some_and(|name| name.contains('.'))
 }
 
-fn is_path_char(ch: char) -> bool {
+pub(super) fn is_path_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | '@' | '+')
 }
 
-fn ownership_role_for_path(path: &str) -> &'static str {
+pub(super) fn ownership_role_for_path(path: &str) -> &'static str {
     let name = path.rsplit('/').next().unwrap_or(path);
     if lockfile_name(name) {
         "lockfile"
@@ -150,21 +152,21 @@ fn ownership_role_for_path(path: &str) -> &'static str {
     }
 }
 
-fn lockfile_name(name: &str) -> bool {
+pub(super) fn lockfile_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("package-lock.json")
         || name.eq_ignore_ascii_case("pnpm-lock.yaml")
         || name.eq_ignore_ascii_case("yarn.lock")
         || name.ends_with(".lock")
 }
 
-fn manifest_name(name: &str) -> bool {
+pub(super) fn manifest_name(name: &str) -> bool {
     matches!(
         name,
         "package.json" | "pyproject.toml" | "go.mod" | "pom.xml" | "build.gradle"
     )
 }
 
-fn path_role_contains(path: &str, needles: &[&str]) -> bool {
+pub(super) fn path_role_contains(path: &str, needles: &[&str]) -> bool {
     path.split('/').any(|part| {
         needles
             .iter()
@@ -172,7 +174,7 @@ fn path_role_contains(path: &str, needles: &[&str]) -> bool {
     })
 }
 
-fn paths_overlap(left: &str, right: &str) -> bool {
+pub(super) fn paths_overlap(left: &str, right: &str) -> bool {
     left == right
         || left
             .strip_prefix(right)
@@ -182,7 +184,7 @@ fn paths_overlap(left: &str, right: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
-fn tag_ownership_expansion_required(
+pub(super) fn tag_ownership_expansion_required(
     result: &mut WorkflowV2Result,
     proposals: Vec<serde_json::Value>,
 ) {
@@ -207,7 +209,7 @@ fn tag_ownership_expansion_required(
     push_ownership_expansion_gap(result);
 }
 
-fn push_ownership_expansion_gap(result: &mut WorkflowV2Result) {
+pub(super) fn push_ownership_expansion_gap(result: &mut WorkflowV2Result) {
     if result
         .residual_gaps
         .iter()

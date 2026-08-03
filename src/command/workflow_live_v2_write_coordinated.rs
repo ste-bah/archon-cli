@@ -1,4 +1,6 @@
-async fn run_coordinated_v2_write_fanout(
+use super::*;
+
+pub(super) async fn run_coordinated_v2_write_fanout(
     task: &str,
     target_repository_root: Option<&str>,
     execution: &WorkflowV2CallExecution,
@@ -125,11 +127,8 @@ async fn run_coordinated_v2_write_fanout(
                 && let Err(error) =
                     verify_declared_artifacts_for_result(input, &result, Path::new(root))
             {
-                result = write_branch_validation_error_result(
-                    &assignment.item_id,
-                    Some(input),
-                    &error,
-                );
+                result =
+                    write_branch_validation_error_result(&assignment.item_id, Some(input), &error);
             }
             let role = branches
                 .iter()
@@ -164,7 +163,7 @@ async fn run_coordinated_v2_write_fanout(
     ))
 }
 
-fn branch_input_for_assignment<'a>(
+pub(super) fn branch_input_for_assignment<'a>(
     branches: &'a [archon_workflow::WorkflowV2FanoutItem],
     item_id: &str,
 ) -> Option<&'a serde_json::Value> {

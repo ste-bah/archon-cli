@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn unresolved_branch_reports_generic_ownership_expansion_need() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(

@@ -1,4 +1,6 @@
-fn write_branch_validation_error_result(
+use super::*;
+
+pub(super) fn write_branch_validation_error_result(
     item_id: &str,
     input: Option<&serde_json::Value>,
     error: &str,
@@ -66,7 +68,7 @@ fn write_branch_validation_error_result(
 /// ownership/scope error text. Domain-neutral: matches the quoted path the write
 /// guards report, plus the unquoted `target_files: <paths>` tail form. Returns an
 /// empty vec for any error that is not a scope rejection.
-fn undeclared_write_paths(error: &str) -> Vec<String> {
+pub(super) fn undeclared_write_paths(error: &str) -> Vec<String> {
     let lower = error.to_ascii_lowercase();
     let is_scope_error = lower.contains("undeclared path")
         || lower.contains("outside declared target_files")
@@ -107,7 +109,9 @@ fn undeclared_write_paths(error: &str) -> Vec<String> {
     paths
 }
 
-fn canonical_task_ids_from_write_error_input(input: Option<&serde_json::Value>) -> Vec<String> {
+pub(super) fn canonical_task_ids_from_write_error_input(
+    input: Option<&serde_json::Value>,
+) -> Vec<String> {
     let Some(input) = input else {
         return Vec::new();
     };
@@ -115,7 +119,7 @@ fn canonical_task_ids_from_write_error_input(input: Option<&serde_json::Value>) 
     canonical_task_ids_from_generated_value(source, None)
 }
 
-fn branch_validation_failure_fields(
+pub(super) fn branch_validation_failure_fields(
     failure_kind: &BranchFailureKind,
 ) -> (WorkflowV2Status, WorkflowV2EvidenceKind, &'static str) {
     match failure_kind {
@@ -132,7 +136,7 @@ fn branch_validation_failure_fields(
     }
 }
 
-fn write_branch_runtime_timeout_result(
+pub(super) fn write_branch_runtime_timeout_result(
     item_id: &str,
     input: &serde_json::Value,
     error: &str,
@@ -164,7 +168,9 @@ fn write_branch_runtime_timeout_result(
     result
 }
 
-fn failure_kind_from_write_result(result: &WorkflowV2Result) -> Option<BranchFailureKind> {
+pub(super) fn failure_kind_from_write_result(
+    result: &WorkflowV2Result,
+) -> Option<BranchFailureKind> {
     result
         .data
         .get("failure_kind")
@@ -178,12 +184,12 @@ fn failure_kind_from_write_result(result: &WorkflowV2Result) -> Option<BranchFai
         })
 }
 
-fn is_recoverable_write_branch_timeout(error: &str) -> bool {
+pub(super) fn is_recoverable_write_branch_timeout(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("subagent timed out") || lower.contains("timed out after")
 }
 
-fn write_branch_error_kind(error: &str) -> BranchFailureKind {
+pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {
     let lower = root_write_branch_error(error).to_ascii_lowercase();
     if lower.contains("changed files outside declared ownership")
         || lower.contains("implementation agent changed files outside declared target_files")
@@ -209,7 +215,7 @@ fn write_branch_error_kind(error: &str) -> BranchFailureKind {
     BranchFailureKind::Contract
 }
 
-fn root_write_branch_error(error: &str) -> &str {
+pub(super) fn root_write_branch_error(error: &str) -> &str {
     let marker = "schema repair failed after bounded retries: root=";
     let Some(root_and_last) = error.strip_prefix(marker) else {
         return error;
@@ -220,7 +226,7 @@ fn root_write_branch_error(error: &str) -> &str {
         .unwrap_or(root_and_last)
 }
 
-fn is_write_branch_validation_error(error: &str) -> bool {
+pub(super) fn is_write_branch_validation_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     !lower.contains("agent transport failed")
         && (lower.contains("schema repair failed")
@@ -244,20 +250,20 @@ fn is_write_branch_validation_error(error: &str) -> bool {
             || is_size_policy_error(&lower))
 }
 
-fn semantic_verification_blocker(lower_error: &str) -> bool {
+pub(super) fn semantic_verification_blocker(lower_error: &str) -> bool {
     lower_error.contains("verification")
         && lower_error.contains("blocked")
         && (lower_error.contains("agent output") || lower_error.contains("failed verification"))
 }
 
-fn is_size_policy_error(lower_error: &str) -> bool {
+pub(super) fn is_size_policy_error(lower_error: &str) -> bool {
     lower_error.contains("exceeds max")
         && (lower_error.contains("source file")
             || lower_error.contains("function")
             || lower_error.contains("file "))
 }
 
-fn truncate_for_result(value: &str, max_chars: usize) -> String {
+pub(super) fn truncate_for_result(value: &str, max_chars: usize) -> String {
     let mut output = String::new();
     for ch in value.chars().take(max_chars) {
         output.push(ch);
@@ -268,7 +274,7 @@ fn truncate_for_result(value: &str, max_chars: usize) -> String {
     output
 }
 
-fn sanitize_v2_path_segment(raw: &str) -> String {
+pub(super) fn sanitize_v2_path_segment(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {

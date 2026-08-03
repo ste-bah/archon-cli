@@ -119,10 +119,17 @@ fn neutral_prd_capabilities_are_stamped_without_task_id_heuristics() {
     );
 }
 
-include!("workflow_live_generated_contract_tests_a.rs");
-include!("workflow_live_generated_contract_tests_b.rs");
-include!("workflow_live_generated_contract_tests_c.rs");
-include!("workflow_live_generated_contract_tests_d.rs");
-include!("workflow_live_generated_contract_tests_e.rs");
-include!("workflow_live_generated_contract_tests_f.rs");
-include!("workflow_live_generated_contract_tests_g.rs");
+#[path = "workflow_live_generated_contract_tests_a.rs"]
+mod workflow_live_generated_contract_tests_a;
+#[path = "workflow_live_generated_contract_tests_b.rs"]
+mod workflow_live_generated_contract_tests_b;
+#[path = "workflow_live_generated_contract_tests_c.rs"]
+mod workflow_live_generated_contract_tests_c;
+#[path = "workflow_live_generated_contract_tests_d.rs"]
+mod workflow_live_generated_contract_tests_d;
+#[path = "workflow_live_generated_contract_tests_e.rs"]
+mod workflow_live_generated_contract_tests_e;
+#[path = "workflow_live_generated_contract_tests_f.rs"]
+mod workflow_live_generated_contract_tests_f;
+#[path = "workflow_live_generated_contract_tests_g.rs"]
+mod workflow_live_generated_contract_tests_g;

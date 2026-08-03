@@ -3,9 +3,9 @@
 // normalization shared by every dialect. Split from script_helpers to
 // respect the 500-line source ceiling.
 
-const V3_PRIMITIVES_JS: &str = include_str!("workflow_live_v3_primitives.js");
+pub(super) const V3_PRIMITIVES_JS: &str = include_str!("workflow_live_v3_primitives.js");
 
-fn normalize_workflow_export(source: &str) -> String {
+pub(super) fn normalize_workflow_export(source: &str) -> String {
     let mut normalized = source.trim().to_string();
     // v3 dialect marker: `export const meta` becomes a plain const plus the
     // global flag __archonRun uses to hand the script the primitive API.
@@ -45,7 +45,7 @@ fn normalize_workflow_export(source: &str) -> String {
         .replace("export default workflow", "")
 }
 
-fn has_workflow_function_declaration(source: &str) -> bool {
+pub(super) fn has_workflow_function_declaration(source: &str) -> bool {
     source.lines().any(|line| {
         let line = line.trim_start();
         [
@@ -62,7 +62,7 @@ fn has_workflow_function_declaration(source: &str) -> bool {
 /// Offset just past the end of the statement starting at `start` — the
 /// balanced close of its first `{...}` block plus an optional trailing `;`.
 /// Quote- and escape-aware so braces inside meta strings don't miscount.
-fn statement_end_offset(source: &str, start: usize) -> usize {
+pub(super) fn statement_end_offset(source: &str, start: usize) -> usize {
     let bytes = &source[start..];
     let Some(open) = bytes.find('{') else {
         return source.len();
@@ -99,7 +99,7 @@ fn statement_end_offset(source: &str, start: usize) -> usize {
     source.len()
 }
 
-fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
+pub(super) fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
     let marker = "export const meta";
     let mut offset = 0;
     for line in source.split_inclusive('\n') {

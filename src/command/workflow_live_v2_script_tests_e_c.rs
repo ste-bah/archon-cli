@@ -106,7 +106,7 @@ fn plain_task_work_after_review_is_still_rejected() {
 
 /// A complete, valid mandatory-review plan, plus whatever remediation calls the
 /// test wants to append after the reduces.
-fn remediation_details(extra: Vec<WorkflowV2HostCall>) -> WorkflowDryRunPlanDetails {
+pub(super) fn remediation_details(extra: Vec<WorkflowV2HostCall>) -> WorkflowDryRunPlanDetails {
     let mut details = review_details(
         vec![work_call("implement-task-1")],
         vec![
@@ -142,7 +142,7 @@ fn remediation_details(extra: Vec<WorkflowV2HostCall>) -> WorkflowDryRunPlanDeta
     details
 }
 
-fn remediation_call(
+pub(super) fn remediation_call(
     id: &str,
     stage: &str,
     task_id: &str,
@@ -173,7 +173,7 @@ fn remediation_call(
     call
 }
 
-fn set_remediation_field(call: &mut WorkflowV2HostCall, key: &str, value: serde_json::Value) {
+pub(super) fn set_remediation_field(call: &mut WorkflowV2HostCall, key: &str, value: serde_json::Value) {
     if let Some(contract) = call
         .options
         .extra

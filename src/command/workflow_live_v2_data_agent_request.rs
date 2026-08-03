@@ -1,8 +1,12 @@
-pub(super) fn v2_agent_request(
+use super::*;
+
+pub(in super::super) fn v2_agent_request(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
-    task_universe: Option<&super::super::workflow_live_task_universe::WorkflowV2TaskUniverse>,
+    task_universe: Option<
+        &super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse,
+    >,
 ) -> WorkflowV2AgentRequest {
     let mut constraints = vec![
         "Return exactly one typed WorkflowV2Result JSON object.".to_string(),
@@ -26,8 +30,8 @@ pub(super) fn v2_agent_request(
     if needs_request_task_universe(&execution.call.id)
         && let Some(universe) = task_universe
     {
-        let universe = serde_json::to_value(universe)
-            .expect("WorkflowV2TaskUniverse must serialize to JSON");
+        let universe =
+            serde_json::to_value(universe).expect("WorkflowV2TaskUniverse must serialize to JSON");
         if !contains_task_universe(&input, &universe) {
             match &mut input {
                 serde_json::Value::Object(object) => {
@@ -61,14 +65,17 @@ pub(super) fn v2_agent_request(
     }
 }
 
-fn needs_request_task_universe(call_id: &str) -> bool {
+pub(super) fn needs_request_task_universe(call_id: &str) -> bool {
     call_id
         .rsplit_once("-transport-retry-")
         .map_or(call_id, |(base, _)| base)
         .starts_with("completion-claim-repair-")
 }
 
-fn contains_task_universe(value: &serde_json::Value, authoritative: &serde_json::Value) -> bool {
+pub(super) fn contains_task_universe(
+    value: &serde_json::Value,
+    authoritative: &serde_json::Value,
+) -> bool {
     if value == authoritative {
         return true;
     }
@@ -83,7 +90,7 @@ fn contains_task_universe(value: &serde_json::Value, authoritative: &serde_json:
     }
 }
 
-fn target_ownership_scopes(
+pub(super) fn target_ownership_scopes(
     extra: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Vec<String> {
     extra
@@ -99,7 +106,7 @@ fn target_ownership_scopes(
         .unwrap_or_default()
 }
 
-fn call_declares_items_output(call: &WorkflowV2HostCall) -> bool {
+pub(super) fn call_declares_items_output(call: &WorkflowV2HostCall) -> bool {
     call.options
         .extra
         .get("outputs")
