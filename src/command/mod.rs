@@ -250,6 +250,7 @@ pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_live_learning_hooks;
+pub(crate) mod workflow_live_sona_tuning;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 

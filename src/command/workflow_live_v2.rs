@@ -102,6 +102,13 @@ struct GeneratedV2Metadata {
     governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generated_config: Option<GeneratedWorkflowConfig>,
+    /// Why `generated_config` differs from the operator's file, when it does.
+    ///
+    /// Persisted beside the config it explains so the run directory answers
+    /// "why did this run get 5 repair iterations?" on its own. Absent on every
+    /// run where SONA did not move anything, which is most of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
     /// Which lifecycle this run was CREATED with (true = v3 authored script,
     /// false = decomposed). Persisted so continue/resume runs the SAME engine
     /// instead of silently switching when the ARCHON_SCRIPT_LIFECYCLE env var
@@ -214,6 +221,7 @@ export default async function workflow(w) {
                     script_args: None,
                     governed_learning_context: Vec::new(),
                     generated_config: None,
+                    tuning_decisions: Vec::new(),
                     script_lifecycle: Some(true),
                 },
             )
@@ -229,6 +237,7 @@ export default async function workflow(w) {
             Vec::new(),
             LiveApprovalMode::CliYes,
             true,
+            &archon_core::config::LearningConfig::default(),
         )
         .await
         .expect_err("inconsistent v3 metadata must fail closed");

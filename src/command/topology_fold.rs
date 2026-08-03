@@ -285,7 +285,7 @@ pub(crate) fn fold_project_pending_blocking(
 
 /// Open a guarded sqlite store, registering its guard config so
 /// `run_bound_script_guarded` can resolve it.
-fn open_store(path: &Path, label: &str) -> Result<std::sync::Arc<DbInstance>> {
+pub(crate) fn open_store(path: &Path, label: &str) -> Result<std::sync::Arc<DbInstance>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

@@ -1,13 +1,13 @@
 use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
-use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig, LearningConfig};
+use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
 use archon_pipeline::runner::LlmClient;
 use archon_tui::app::TuiEvent;
 use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowPolicy, WorkflowRun,
-    WorkflowStageRunner, WorkflowStore,
+    CommandAction, RunStatus, StageStatus, WorkflowPolicy, WorkflowRun, WorkflowStageRunner,
+    WorkflowStore,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +32,8 @@ mod workflow_live_canary_retry_tests;
 #[cfg(test)]
 #[path = "workflow_live_canary_tests.rs"]
 mod workflow_live_canary_tests;
+#[path = "workflow_live_config_layers.rs"]
+mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
@@ -96,6 +98,9 @@ mod workflow_live_verification_contract;
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;
 
+use workflow_live_config_layers::{
+    live_policy, load_generated_workflow_config, load_learning_config,
+};
 use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
 
@@ -222,6 +227,38 @@ async fn run_live_action(
     let store = WorkflowStore::project(cwd);
     let policy = live_policy(cwd, config_path.as_deref());
     let learning = load_learning_config(cwd, config_path.as_deref());
+    // The one place a generated run's limits are decided. SONA is consulted
+    // here rather than inside the planner because every downstream consumer —
+    // the lifecycle driver's repair caps, the host-call client's timeout, the
+    // read-only branch budget, and the metadata a resume replays — reads the
+    // same `generated_config`, so a single substitution reaches all of them and
+    // no path can end up with a half-tuned config.
+    let task_class = live_task_class(&action);
+    let mut generated_config = generated_config;
+    let mut tuning_decisions = Vec::new();
+    if let Some(class) = task_class {
+        let tuning = crate::command::workflow_live_sona_tuning::tune_generated_config(
+            cwd,
+            class,
+            &learning,
+            &generated_config,
+        );
+        let report = tuning.report(class);
+        generated_config = tuning.config;
+        tuning_decisions = tuning.decisions;
+        if !report.is_empty() {
+            tracing::info!(class, %report, "generated limits tuned by SONA");
+            // Emitted before any work starts: a user who wonders why this run
+            // got five repair iterations must be able to read the answer in the
+            // run's own output rather than reconstruct it from the learning
+            // store by hand.
+            if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(report)).await {
+                tracing::debug!(%error, "tuning report delivery failed");
+            }
+        }
+    }
+    let generated_config = generated_config;
+    let tuning_decisions = tuning_decisions;
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
         tui_tx: tui_tx.clone(),
@@ -241,9 +278,14 @@ async fn run_live_action(
         let policy = &policy;
         let generated_config = &generated_config;
         let learning = &learning;
+        let tuning_decisions = &tuning_decisions;
         async move {
             let mut plan = plan_live(store, &task, llm, tui_tx, generated_config, learning).await?;
             cap_live_plan_parallelism(&mut plan, runner, policy);
+            // Attached here rather than inside the planner because the planner
+            // never sees the baseline it was tuned away from, and a decision
+            // record without its baseline explains nothing.
+            plan.tuning_decisions = tuning_decisions.clone();
             Ok::<_, anyhow::Error>(plan)
         }
     };
@@ -270,6 +312,7 @@ async fn run_live_action(
                 } else {
                     workflow_live_v2::script_lifecycle_from_env()
                 },
+                &learning,
             )
             .await;
         }
@@ -301,6 +344,7 @@ async fn run_live_action(
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
+                &learning,
             )
             .await;
         }
@@ -314,6 +358,7 @@ async fn run_live_action(
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
+                &learning,
             )
             .await?
             {
@@ -329,6 +374,24 @@ async fn run_live_action(
         }
         other => run_action(cwd, other),
     }
+}
+
+/// The task class a run's learned limits are keyed on, or `None` when this
+/// action has no task text of its own to classify.
+///
+/// Only `Plan` and `Run` classify. `RunTemplate` executes a saved spec, which
+/// carries `GeneratedWorkflowConfig::default()` by construction, and
+/// `Resume`/`Continue` replay the config persisted at creation — a run that
+/// changed its repair cap or its timeout halfway through would invalidate the
+/// records it had already written under the old one. Both therefore have
+/// nothing for the tuner to substitute, and classifying them would only produce
+/// a report about a value nobody reads.
+fn live_task_class(action: &CommandAction) -> Option<&'static str> {
+    let task = match action {
+        CommandAction::Plan { task } | CommandAction::Run { task, .. } => task,
+        _ => return None,
+    };
+    Some(crate::command::workflow_live_learning_hooks::classify_generated_run(task, None).as_str())
 }
 
 fn cap_live_plan_parallelism(
@@ -390,72 +453,6 @@ fn first_stage_with_status(run: &WorkflowRun, status: StageStatus) -> Option<&st
         .values()
         .find(|stage| stage.status == status)
         .map(|stage| stage.id.as_str())
-}
-
-fn live_policy(cwd: &Path, config_path: Option<&Path>) -> WorkflowPolicy {
-    WorkflowPolicy {
-        require_human_for_dangerous_tools: false,
-        ..WorkflowPolicy::from_config(&load_workflow_config(cwd, config_path))
-    }
-}
-
-/// The merged config layers, with unreadable or unparseable layers skipped.
-///
-/// Skipping rather than failing throughout: a malformed config layer must not
-/// take a workflow run down, and each reader below falls back to its type's
-/// defaults, which are the conservative choice in every case.
-fn merged_config_layers(cwd: &Path, config_path: Option<&Path>) -> toml::Value {
-    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
-    let mut merged = toml::Value::Table(toml::map::Map::new());
-    for layer in discover_config_paths(config_path, cwd, None) {
-        let Ok(text) = std::fs::read_to_string(&layer.path) else {
-            continue;
-        };
-        let Ok(value) = text.parse::<toml::Value>() else {
-            continue;
-        };
-        merged = deep_merge_toml(merged, value);
-    }
-    merged
-}
-
-fn config_table(merged: &toml::Value, path: &[&str]) -> toml::Value {
-    let mut cursor = Some(merged);
-    for key in path {
-        cursor = cursor.and_then(|value| value.get(key));
-    }
-    cursor
-        .cloned()
-        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-}
-
-fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
-    config_table(&merged_config_layers(cwd, config_path), &["workflow"])
-        .try_into()
-        .unwrap_or_else(|_| WorkflowConfig::default())
-}
-
-/// Read the layered `[learning]` table.
-///
-/// Read here rather than threaded from a caller because the planner is the one
-/// place that decides a generated run's `learning_hooks`, and those hooks must
-/// respect the operator's toggles.
-fn load_learning_config(cwd: &Path, config_path: Option<&Path>) -> LearningConfig {
-    config_table(&merged_config_layers(cwd, config_path), &["learning"])
-        .try_into()
-        .unwrap_or_else(|_| LearningConfig::default())
-}
-
-fn load_generated_workflow_config(
-    cwd: &Path,
-    config_path: Option<&Path>,
-) -> GeneratedWorkflowConfig {
-    config_table(
-        &merged_config_layers(cwd, config_path),
-        &["workflow", "generated"],
-    )
-    .try_into()
-    .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
 }
 
 /// Render compact write-coordination status blocks left on disk.
