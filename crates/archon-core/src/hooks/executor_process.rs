@@ -314,6 +314,19 @@ fn total_output_bytes(output: &CommandOutput) -> usize {
 mod tests {
     use super::*;
 
+    #[test]
+    fn stdin_timeout_preserves_cleanup_failure_context() {
+        let error = combine_cleanup_error(
+            RunError::Timeout("stdin write"),
+            Some("fixture cleanup failure".to_string()),
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "I/O error: timed out during stdin write; process cleanup failed: fixture cleanup failure"
+        );
+    }
+
     #[tokio::test]
     async fn stdout_only_truncation_stays_within_the_exact_shared_bound() {
         let stdout = truncated_pipe(b"stdout", 3).await;
