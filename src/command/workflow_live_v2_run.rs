@@ -249,6 +249,7 @@ pub(super) fn save_generated_v2_metadata(
             .as_ref()
             .map(|_| plan.generated_config.clone()),
         tuning_decisions: plan.tuning_decisions.clone(),
+        shape_decisions: plan.shape_decisions.clone(),
         // Only task-universe runs can enter the authored-script lifecycle.
         script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
     };

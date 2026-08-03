@@ -60,6 +60,14 @@ pub(super) struct WorkflowScriptPlan {
     /// iterations?" is answerable from the run directory months later — the
     /// learning store holds the evidence, but a run must carry its own reason.
     pub(super) tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
+    /// Why this run's plan has the shape it has.
+    ///
+    /// The structural counterpart of `tuning_decisions`: those explain how long
+    /// a stage may run, these explain how work was distributed across branches.
+    /// Empty on every path where SONA did not run — and also carries the
+    /// decisions where the value did *not* move because a pre-run lint refused
+    /// the proposal, which is the case that is otherwise invisible.
+    pub(super) shape_decisions: Vec<archon_core::config::ShapeDecision>,
 }
 
 impl WorkflowScriptPlan {
@@ -88,6 +96,7 @@ impl WorkflowScriptPlan {
             generated_config,
             learning_hooks,
             tuning_decisions: Vec::new(),
+            shape_decisions: Vec::new(),
         }
     }
 
@@ -110,6 +119,7 @@ impl WorkflowScriptPlan {
             generated_config: GeneratedWorkflowConfig::default(),
             learning_hooks: spec.learning_hooks,
             tuning_decisions: Vec::new(),
+            shape_decisions: Vec::new(),
         }
     }
 
@@ -216,6 +226,26 @@ pub(super) fn render_live_plan(plan: &WorkflowScriptPlan) -> Result<String> {
             decision.weight,
             decision.observations
         ));
+    }
+    // Rendered even when the value did not move, because the two cases that
+    // leave it unmoved — a drift rollback and a pre-run lint refusal — are
+    // exactly the ones an operator has to know about: the run looks like a
+    // default run and is not one by accident.
+    for decision in &plan.shape_decisions {
+        if !decision.source.noteworthy() {
+            continue;
+        }
+        out.push_str(&format!(
+            "SONA-shaped {}: {} -> {} (weight {:+.4}, {} observation(s))\n",
+            decision.knob.key(),
+            decision.baseline,
+            decision.applied,
+            decision.weight,
+            decision.observations
+        ));
+        if let Some(refusal) = &decision.refusal {
+            out.push_str(&format!("  refused before the run: {refusal}\n"));
+        }
     }
     for call in &plan.calls {
         out.push_str(&format!(

@@ -70,7 +70,7 @@ pub(super) fn decomposed_prd_scaffold(
 /// one entry per stage family, with the write mode, item kind, and source the
 /// lifecycle uses. This is the single declaration the approval surface, the
 /// persisted host-call manifest, and restart invalidation consume.
-pub(super) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
+pub(crate) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
     const WORKTREE: Option<WorkflowV2WriteMode> = Some(WorkflowV2WriteMode::Worktree);
     // The plan names its host methods as typed variants rather than strings, so
     // "every static plan method parses" is discharged by the type checker at

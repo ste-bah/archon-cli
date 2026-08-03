@@ -28,6 +28,9 @@ impl LifecycleDriver {
             max_investigation_iterations: usize::from(
                 generated_config.max_investigation_iterations.clamp(1, 8),
             ),
+            write_wave_width: generated_config
+                .implementation_wave_max_parallelism
+                .map(|width| usize::from(width.max(1))),
             max_dependency_waves: canonical.saturating_mul(3).max(1),
             runtime_state: std::sync::Mutex::new(
                 workflow_live_v2_lifecycle_terminal_gate::TerminalGateState {
@@ -142,8 +145,10 @@ impl LifecycleDriver {
     ) -> archon_workflow::WorkflowResult<serde_json::Value> {
         let items = self.with_declared_task_artifacts(items);
         let source_items = support::array(Some(&items));
-        let max_parallelism =
-            workflow_live_v2_lifecycle_verify_options::write_wave_parallelism(&source_items);
+        let max_parallelism = workflow_live_v2_lifecycle_verify_options::write_wave_parallelism(
+            &source_items,
+            self.write_wave_width,
+        );
         self.call(
             "fanout",
             id,

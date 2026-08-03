@@ -273,6 +273,19 @@ pub struct GeneratedWorkflowConfig {
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
     pub host_call_timeout_secs: u32,
+    /// How many ready tasks the write fan-out dispatches concurrently.
+    ///
+    /// `None` — the default — means "the configured subagent concurrency",
+    /// which is what every run got before this field existed. A value here is
+    /// a *lower* bound on nothing and an upper bound on concurrency: the
+    /// runtime clamps it into `1..=subagent_cap`, so setting it can only ever
+    /// narrow a wave, never widen one past what the executor allows.
+    ///
+    /// Learned narrowing writes here too, via
+    /// `archon_core::config::decide_fanout_width`; see that module for why the
+    /// learner may only move this value downward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_wave_max_parallelism: Option<u8>,
 }
 
 impl Default for GeneratedWorkflowConfig {
@@ -291,6 +304,10 @@ impl Default for GeneratedWorkflowConfig {
             // workflow.generated.verification_branch_timeout_secs.
             verification_branch_timeout_secs: 14_400,
             host_call_timeout_secs: 7_200,
+            // Unset: defer to the configured subagent concurrency. Naming a
+            // number here would pin every project to one wave width regardless
+            // of the executor it runs on.
+            implementation_wave_max_parallelism: None,
         }
     }
 }
