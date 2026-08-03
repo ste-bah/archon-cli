@@ -26,8 +26,21 @@ fn fixture_tasks() -> PathBuf {
 /// what the tasks claim — which is exactly the corpus the by-hand count of 93
 /// was taken over.
 fn write_corpus(dir: &Path) -> PathBuf {
-    let tasks = dir.join("PRD-TRADING-DATA-LAKE-AHDM-001");
-    fs::create_dir_all(&tasks).expect("create task dir");
+    write_corpus_into(
+        &dir.join("PRD-TRADING-DATA-LAKE-AHDM-001"),
+        &dir.join("PRD-TRADING-DATA-LAKE-AHDM-001.md"),
+    )
+}
+
+/// The same corpus, with the task directory and the PRD placed explicitly.
+///
+/// Split out so a test can put them in the two-root layout `/workflow-prd`
+/// writes (`tasks/` and `prds/`) rather than only the §3.1 adjacent one.
+fn write_corpus_into(tasks: &Path, prd_path: &Path) -> PathBuf {
+    fs::create_dir_all(tasks).expect("create task dir");
+    if let Some(parent) = prd_path.parent() {
+        fs::create_dir_all(parent).expect("create prd dir");
+    }
     let mut ids = BTreeSet::new();
     for entry in fs::read_dir(fixture_tasks()).expect("read fixtures") {
         let path = entry.expect("fixture entry").path();
@@ -51,9 +64,8 @@ fn write_corpus(dir: &Path) -> PathBuf {
     for id in &ids {
         prd.push_str(&format!("- {id}: declared by the fixture corpus.\n"));
     }
-    let prd_path = dir.join("PRD-TRADING-DATA-LAKE-AHDM-001.md");
-    fs::write(&prd_path, prd).expect("write prd");
-    prd_path
+    fs::write(prd_path, prd).expect("write prd");
+    prd_path.to_path_buf()
 }
 
 fn implements_line(raw: &str) -> &str {
@@ -134,6 +146,58 @@ fn an_unresolvable_prd_is_skipped_with_the_paths_it_tried() {
         !report.contains("every requirement is claimed"),
         "a skipped section must not read as a pass: {report}"
     );
+}
+
+/// The two-root layout: tasks under `tasks/`, the PRD under `prds/`.
+///
+/// This is what `/workflow-prd` and `/workflow-prd-spec` write, and it is the
+/// case the §3.1-only candidate list could not resolve — the PRD is a sibling
+/// of the `tasks/` root, not of the task directory. The section must produce a
+/// real coverage report, not the skip it used to.
+#[test]
+fn a_prd_under_the_prds_root_resolves_for_a_task_dir_under_tasks() {
+    let base = tempfile::tempdir().expect("tempdir");
+    let name = "PRD-TRADING-DATA-LAKE-AHDM-001";
+    let tasks = base.path().join("tasks").join(name);
+    write_corpus_into(
+        &tasks,
+        &base
+            .path()
+            .join("prds")
+            .join(name)
+            .join(format!("{name}.md")),
+    );
+
+    let report = section(Some(&tasks));
+    assert!(
+        !report.contains("skipped"),
+        "a PRD under prds/ must resolve: {report}"
+    );
+    assert!(
+        report.contains("every requirement is claimed"),
+        "the corpus covers itself in both directions: {report}"
+    );
+}
+
+/// The flat and skills-chain shapes under `prds/` resolve too. Same root, three
+/// filenames, because the two pipelines do not agree on how the file is named.
+#[test]
+fn the_other_prds_root_filenames_also_resolve() {
+    let name = "PRD-TRADING-DATA-LAKE-AHDM-001";
+    for relative in [
+        PathBuf::from(format!("{name}.md")),
+        PathBuf::from(name).join("PRD.md"),
+    ] {
+        let base = tempfile::tempdir().expect("tempdir");
+        let tasks = base.path().join("tasks").join(name);
+        write_corpus_into(&tasks, &base.path().join("prds").join(&relative));
+        let report = section(Some(&tasks));
+        assert!(
+            !report.contains("skipped"),
+            "prds/{} must resolve: {report}",
+            relative.display()
+        );
+    }
 }
 
 /// A spec or recorded graph carries no claims. Saying so is the point: a

@@ -17,11 +17,18 @@
 //! # What "cannot resolve the PRD" means here
 //!
 //! The check needs the PRD, and `archon workflow lint` is given a task
-//! directory. §3.1 of the task-spec guide fixes the relationship: the PRD file
-//! sits beside the task directory, named for the same PRD id, and each task
-//! names it in `prd:`. So the PRD is looked for at the paths those two rules
-//! predict, and when none of them exists the section says which paths it tried
-//! and stops. It does not fall back to scanning for any markdown file that
+//! directory. Two conventions fix where the PRD is, and both are tried.
+//!
+//! §3.1 of the task-spec guide puts the PRD file beside the task directory,
+//! named for the same PRD id. `/workflow-prd` instead writes every PRD under a
+//! repository-level `prds/` root, sibling to the `tasks/` root the task
+//! directory lives in — so a lint given `tasks/PRD-X/` must look in
+//! `prds/PRD-X/`, not only in `tasks/`. Each task also names its PRD in `prd:`,
+//! which supplies the id when the directory name does not.
+//!
+//! The PRD is looked for at the paths those rules predict, and when none of
+//! them exists the section says which paths it tried and stops. It does not
+//! fall back to scanning for any markdown file that
 //! happens to contain requirement IDs — a coverage report computed against the
 //! wrong document is worse than no coverage report, because it looks like one.
 
@@ -29,6 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use archon_core::skills::workflow_prd::PRD_ROOT;
 use regex::Regex;
 
 use crate::command::workflow_live::workflow_live_task_universe::{
@@ -67,7 +75,7 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
     };
     let Some(prd_path) = resolve_prd(root, &claims) else {
         out.push_str(&format!(
-            "  no PRD found beside {}; skipped. Tried: {}.\n",
+            "  no PRD found for {}; skipped. Tried: {}.\n",
             root.display(),
             render_candidates(&prd_candidates(root, &claims))
         ));
@@ -169,9 +177,21 @@ fn resolve_prd(root: &Path, claims: &[TaskRequirementClaims]) -> Option<PathBuf>
         .find(|candidate| candidate.is_file())
 }
 
-/// Where the PRD can be, in the order §3.1 predicts: the id each task declares
-/// in `prd:`, then the task directory's own name. Both resolved against the
-/// directory's parent, because the PRD is its sibling.
+/// Where the PRD can be, for each candidate id: the id each task declares in
+/// `prd:` first, then the task directory's own name.
+///
+/// Two layouts, tried in that order per id:
+///
+/// - **Beside the task directory** (§3.1) — `<parent>/<id>.md`.
+/// - **Under the `prds/` root** written by `/workflow-prd`, which is a sibling
+///   of the `tasks/` root rather than of the task directory, so it is resolved
+///   from the grandparent. Three shapes, because the two pipelines name the
+///   file differently: `prds/<id>/<id>.md` (the workflow path),
+///   `prds/<id>.md` (a flat root), and `prds/<id>/PRD.md` (the skills chain's
+///   fixed filename).
+///
+/// Order matters only for which path wins when several exist; §3.1 stays first
+/// so a task set that already had an adjacent PRD keeps resolving to it.
 fn prd_candidates(root: &Path, claims: &[TaskRequirementClaims]) -> Vec<PathBuf> {
     let Some(parent) = root.parent() else {
         return Vec::new();
@@ -180,12 +200,18 @@ fn prd_candidates(root: &Path, claims: &[TaskRequirementClaims]) -> Vec<PathBuf>
     if let Some(stem) = root.file_name().and_then(|name| name.to_str()) {
         names.push(stem.to_string());
     }
+    let prds_root = parent.parent().map(|base| base.join(PRD_ROOT));
     let mut seen = BTreeSet::new();
-    names
-        .into_iter()
-        .filter(|name| seen.insert(name.clone()))
-        .map(|name| parent.join(format!("{name}.md")))
-        .collect()
+    let mut candidates = Vec::new();
+    for name in names.into_iter().filter(|name| seen.insert(name.clone())) {
+        candidates.push(parent.join(format!("{name}.md")));
+        if let Some(prds_root) = prds_root.as_ref() {
+            candidates.push(prds_root.join(&name).join(format!("{name}.md")));
+            candidates.push(prds_root.join(format!("{name}.md")));
+            candidates.push(prds_root.join(&name).join("PRD.md"));
+        }
+    }
+    candidates
 }
 
 /// The `prd:` values the task files declare.
