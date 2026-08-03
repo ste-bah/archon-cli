@@ -4,7 +4,7 @@
 /// umbrella id-stuffing. Reports EVERY defect in one aggregated error.
 use super::*;
 
-pub(crate) async fn validate_authored_plan(
+pub async fn validate_authored_plan(
     source: &str,
     expected_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
@@ -87,11 +87,11 @@ pub(crate) async fn validate_authored_plan(
     Err(defects.join("; AND "))
 }
 
-pub(crate) const MANDATED_RESULT_FIELDS: [&str; 2] =
+pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
     ["adversarial_findings", "uncovered_requirements"];
-pub(crate) const CRITIC_TIER: &str = "critic";
-pub(crate) const REVIEW_MAP_STAGE: &str = "map";
-pub(crate) const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
+pub(super) const CRITIC_TIER: &str = "critic";
+pub(super) const REVIEW_MAP_STAGE: &str = "map";
+pub(super) const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
 pub(super) const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
 pub(super) const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
 pub(super) const REMEDIATION_CONTRACT_MARKER: &str = "remediationContract";
@@ -293,7 +293,7 @@ pub(super) fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<
 /// read-only critic map reviewers cover every accepted task exactly once,
 /// then bounded critic reducers preserve map findings into the accounting
 /// fields. Reports EVERY defect in one error and names near-misses.
-pub(crate) fn validate_map_reduce_review_calls(
+pub fn validate_map_reduce_review_calls(
     details: &WorkflowDryRunPlanDetails,
     accepted_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {

@@ -99,7 +99,7 @@ pub(super) fn statement_end_offset(source: &str, start: usize) -> usize {
     source.len()
 }
 
-pub fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
+pub(super) fn workflow_meta_marker_offset(source: &str) -> Option<usize> {
     let marker = "export const meta";
     let mut offset = 0;
     for line in source.split_inclusive('\n') {

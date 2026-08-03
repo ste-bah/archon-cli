@@ -348,22 +348,22 @@ mod workflow_live_v2_script_host;
 use workflow_live_v2_script_host::*;
 
 // The workflow.js script bridge — payload parsing, source composition, the
-// result/reuse reduction and the dry-run recorder — is
+// result/reuse reduction, the dry-run recorder and the v3 dialect — is
 // `archon_workflow::v2::script`. What is left here is the composition root that
 // executes against it. Named once, explicitly: this module used to glob six
 // siblings into one namespace every child inherited through `use super::*`.
+#[cfg(test)]
+use archon_workflow::v2::script::normalize_workflow_export;
 use archon_workflow::v2::script::{
-    ScriptHostRequest, WorkflowDryRunPlanDetails, completion_evidence_from_result,
-    evidence_snapshot_hash, frontier_resume_record_reusable, is_reusable_status,
-    mark_unresolved_dependency_metadata, merge_v2_status, next_action_for_terminal_call,
-    normalize_result_for_call, parse_script_options, record_tasks_all_completed, result_view_json,
+    ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, V3_PRIMITIVE_REFERENCE,
+    completion_evidence_from_result, compose_author_brief, evidence_snapshot_hash,
+    frontier_resume_record_reusable, is_reusable_status, mark_unresolved_dependency_metadata,
+    merge_v2_status, next_action_for_terminal_call, normalize_result_for_call,
+    parse_script_options, record_tasks_all_completed, result_view_json,
     reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
     sanitize_v2_gap_id, script_source, terminal_stop_for_call, v3_call_family,
-    workflow_meta_marker_offset,
-};
-#[cfg(test)]
-use archon_workflow::v2::script::{
-    WorkflowReviewMapClaim, WorkflowReviewReduceEdge, normalize_workflow_export,
+    validate_authored_plan, validate_authored_task_accounting, validate_authored_workflow_source,
+    validate_map_reduce_review_calls, validate_review_accounting_from_reducers,
 };
 
 // Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
@@ -389,14 +389,10 @@ mod workflow_live_v2_lifecycle;
 #[path = "lifecycle_script_host.rs"]
 mod lifecycle_script_host;
 
+// Composition root for the v3 authored-script lifecycle: the only code left
+// here that runs the concrete script host over the authoring bootstrap.
 #[path = "workflow_live_v3_author.rs"]
 mod workflow_live_v3_author;
-#[cfg(test)]
-use workflow_live_v3_author::*;
-
-#[path = "workflow_live_v3_author_checks.rs"]
-mod workflow_live_v3_author_checks;
-use workflow_live_v3_author_checks::*;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]

@@ -14,9 +14,11 @@
 //! `archon-pipeline` and `archon-tools`. They call into this module; nothing
 //! here names them.
 //!
-//! The v3 prelude lives here rather than beside the v3 authoring cluster
-//! because `script_source` injects it into every script it composes: it is a
-//! dependency of the bridge, not of the author.
+//! The v3 dialect sits alongside it: the primitive prelude `script_source`
+//! injects into every script it composes, the reference the author agent is
+//! handed, and the pre-flight that refuses an authored script which would plan
+//! no real work. That pre-flight IS a dry run, which is why it belongs to the
+//! bridge and not to the v3 composition root.
 
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -35,13 +37,19 @@ pub(crate) use crate::v2::result::{
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap, WorkflowV2Result,
     WorkflowV2Status, WorkflowV2TaskCoverageStatus,
 };
-pub(crate) use crate::v2::result_store::{WorkflowV2CallRecord, WorkflowV2TaskCompletionEvidence};
+pub(crate) use crate::v2::result_store::{
+    WorkflowV2CallRecord, WorkflowV2ResultStore, WorkflowV2TaskCompletionEvidence,
+};
 pub(crate) use crate::v2::scheduler::stable_value_hash;
 
 mod dry_run_a;
 mod dry_run_b;
 mod helpers_a;
 mod helpers_b;
+mod v3_author_a;
+mod v3_author_b;
+mod v3_author_checks_a;
+mod v3_author_checks_b;
 mod v3_prelude;
 mod verification;
 
@@ -49,10 +57,17 @@ pub use dry_run_a::*;
 use dry_run_b::*;
 pub use helpers_a::*;
 pub use helpers_b::*;
+pub use v3_author_a::*;
+pub use v3_author_b::*;
+pub use v3_author_checks_a::*;
+pub use v3_author_checks_b::*;
 use v3_prelude::*;
 use verification::*;
 
-// Two prelude entry points the v3 authoring cluster still reaches from the
-// binary: its source validator requires the `export const meta` marker, and its
-// tests assert on the normalized script text. Narrow when that cluster follows.
-pub use v3_prelude::{normalize_workflow_export, workflow_meta_marker_offset};
+// One prelude entry point outside this module: the binary's tests assert on the
+// normalized script text. The dialect's own callers are all in here.
+pub use v3_prelude::normalize_workflow_export;
+
+#[cfg(test)]
+#[path = "v3_author_checks_tests.rs"]
+mod v3_author_checks_tests;
