@@ -231,8 +231,10 @@ jobs:
             @{ Package = 'archon-core'; Target = @('--lib'); Name = 'windows_hook_output_has_a_shared_bound_and_reports_truncation' },
             @{ Package = 'archon-core'; Target = @('--lib'); Name = 'windows_hook_uses_isolated_environment_and_explicit_context' },
             @{ Package = 'archon-core'; Target = @('--lib'); Name = 'windows_hook_timeout_kills_descendant_process' },
+            @{ Package = 'archon-core'; Target = @('--lib'); Name = 'windows_hook_waits_for_descendant_after_parent_exits' },
             @{ Package = 'archon-core'; Target = @('--lib'); Name = 'windows_hook_process_exists_reports_existing_and_absent_processes' },
             @{ Package = 'archon-tools'; Target = @('--lib'); Name = 'windows_timeout_kills_background_descendant' },
+            @{ Package = 'archon-tools'; Target = @('--lib'); Name = 'windows_bash_waits_for_descendant_after_parent_exits' },
             @{ Package = 'archon-tools'; Target = @('--lib'); Name = 'windows_bash_process_exists_reports_existing_and_absent_processes' },
             @{ Package = 'archon-pipeline'; Target = @('--test', 'forbidden_pattern_scanner'); Name = 'windows_and_mixed_separator_test_paths_are_exempt' }
           )
