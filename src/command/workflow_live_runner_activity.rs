@@ -3,7 +3,8 @@ use archon_workflow::{
     WorkflowActivityUpdate, WorkflowError, WorkflowResult, WorkflowUiEvent,
 };
 
-use super::workflow_live_runner::{command_execution_stage, request_target_repository_root};
+use super::workflow_live_runner::request_target_repository_root;
+use archon_workflow::stage_command_policy::command_execution_stage;
 
 pub(super) async fn required_activity(
     ui_sink: &SharedWorkflowUiSink,

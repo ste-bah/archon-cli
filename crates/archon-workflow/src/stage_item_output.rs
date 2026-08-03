@@ -1,24 +1,37 @@
+//! Schema repair for stages that declare `outputs: [items]`.
+//!
+//! A stage whose downstream fanout iterates its `items` has a machine-readable
+//! contract, and an agent that answers with prose has produced nothing the next
+//! stage can consume. One repair round-trip asks for the structured document
+//! back; if that also fails, a read-only discovery stage with no dependencies
+//! gets a bounded fallback inventory built from paths the task itself named,
+//! and everything else fails closed.
+//!
+//! The fallback is deliberately narrow: it never claims implementation
+//! completion, and dependent or write-capable stages still require
+//! agent-provided structured evidence.
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use archon_workflow::{
+use serde_json::{Value, json};
+
+use crate::stage_prompt::workflow_stage_system_context;
+use crate::stage_retry::run_agent_with_transient_retry;
+use crate::{
     StageKind, StageRunRequest, WorkflowAgentCall, WorkflowAgentOutcome, WorkflowError,
     WorkflowLlmClient,
 };
-use serde_json::{Value, json};
 
-use super::workflow_live_retry;
-use super::workflow_live_runner::workflow_stage_system_context;
-
-pub(super) async fn repair_item_output<Fut>(
+pub async fn repair_item_output<Fut>(
     llm: &Arc<dyn WorkflowLlmClient>,
     request: &StageRunRequest,
     agent_request: &WorkflowAgentCall,
     first_response: WorkflowAgentOutcome,
     on_retry: impl FnMut(usize) -> Fut,
-) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome>
+) -> crate::WorkflowResult<WorkflowAgentOutcome>
 where
-    Fut: std::future::Future<Output = archon_workflow::WorkflowResult<()>>,
+    Fut: std::future::Future<Output = crate::WorkflowResult<()>>,
 {
     let mut repair_request = agent_request.clone();
     repair_request.messages = vec![serde_json::json!({
@@ -29,8 +42,7 @@ where
         "type": "text",
         "text": workflow_stage_system_context(request),
     })];
-    let mut repaired =
-        workflow_live_retry::run_agent_with_transient_retry(llm, repair_request, on_retry).await?;
+    let mut repaired = run_agent_with_transient_retry(llm, repair_request, on_retry).await?;
     if item_output_needs_schema_repair(request, &repaired.content) {
         if let Some(fallback) =
             fallback_read_only_discovery_items(request, first_response, repaired)
@@ -53,7 +65,7 @@ where
     Ok(repaired)
 }
 
-pub(super) fn item_output_needs_schema_repair(request: &StageRunRequest, body: &str) -> bool {
+pub fn item_output_needs_schema_repair(request: &StageRunRequest, body: &str) -> bool {
     stage_declares_items_output(request) && !has_parseable_items_or_completed_items(body)
 }
 

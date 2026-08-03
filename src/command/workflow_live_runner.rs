@@ -7,11 +7,12 @@ use archon_workflow::{
     WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
 };
 
-use super::workflow_live_items::{item_output_needs_schema_repair, repair_item_output};
-use super::workflow_live_prompt::workflow_prompt;
-use super::workflow_live_retry;
 use super::workflow_live_runner_activity::required_activity;
 use archon_workflow::agent_select::select_workflow_agent_key;
+use archon_workflow::stage_command_policy::command_execution_stage;
+use archon_workflow::stage_item_output::{item_output_needs_schema_repair, repair_item_output};
+use archon_workflow::stage_prompt::{workflow_prompt, workflow_stage_system_context};
+use archon_workflow::stage_retry::run_agent_with_transient_retry;
 
 pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn WorkflowLlmClient>,
@@ -79,10 +80,8 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             disable_auto_background: false,
             provider_env: None,
         };
-        let response = match workflow_live_retry::run_agent_with_transient_retry(
-            &self.llm,
-            agent_request.clone(),
-            |attempt| {
+        let response =
+            match run_agent_with_transient_retry(&self.llm, agent_request.clone(), |attempt| {
                 let ui_sink = self.ui_sink.clone();
                 let request = request.clone();
                 let agent_name = agent_name.clone();
@@ -100,25 +99,24 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                     )
                     .await
                 }
-            },
-        )
-        .await
-        {
-            Ok(response) => response,
-            Err(err) => {
-                required_activity(
-                    &self.ui_sink,
-                    &request,
-                    &agent_name,
-                    &provider_id,
-                    &resolved_model,
-                    WorkflowActivityStatus::Failed,
-                    "stage failed",
-                )
-                .await?;
-                return Err(err);
-            }
-        };
+            })
+            .await
+            {
+                Ok(response) => response,
+                Err(err) => {
+                    required_activity(
+                        &self.ui_sink,
+                        &request,
+                        &agent_name,
+                        &provider_id,
+                        &resolved_model,
+                        WorkflowActivityStatus::Failed,
+                        "stage failed",
+                    )
+                    .await?;
+                    return Err(err);
+                }
+            };
         let response = if item_output_needs_schema_repair(&request, &response.content) {
             required_activity(
                 &self.ui_sink,
@@ -246,15 +244,6 @@ fn sanitize_agent_session_component(value: &str) -> String {
     }
 }
 
-pub(crate) fn workflow_stage_system_context(request: &StageRunRequest) -> String {
-    format!(
-        "You are an Archon dynamic workflow stage agent. This is a fresh workflow stage invocation for run '{}', stage '{}', attempt {}. Ignore any restored conversational context, prior subagent memory, or earlier session summary that conflicts with this invocation. Follow only the current Workflow Task, Evidence Contract, Stage Input, and output schema. Do not ask what to do next, do not stop at a confirmation question, and do not return restored-context summaries. Return only useful public output for the stage artifact. Do not include private reasoning, hidden chain-of-thought, credentials, or provider internals.",
-        request.run_id,
-        request.stage_id,
-        request.attempt.max(1)
-    )
-}
-
 pub(crate) fn request_target_repository_root(request: &StageRunRequest) -> Option<PathBuf> {
     request
         .input
@@ -335,119 +324,6 @@ fn implementation_tools(_request: &StageRunRequest) -> Vec<&'static str> {
         "LargeEditAbort",
         "Bash",
     ]
-}
-
-pub(crate) fn command_execution_stage(request: &StageRunRequest) -> bool {
-    if stage_extra_requests_bash(request) {
-        return true;
-    }
-    // Typed V2 calls decide from declared fields: focused-verification waves
-    // run commands; every other read-only call gets no shell. Prose sniffing
-    // is reserved for requests without a typed call.
-    if request.input.get("v2_call").is_some() {
-        let id = request.stage_id.to_ascii_lowercase().replace('-', "_");
-        if id.starts_with("verification_wave_") || id.starts_with("review_verification_wave_") {
-            return true;
-        }
-        if generated_v2_read_only_call(request) {
-            return false;
-        }
-    }
-    if command_execution_stage_id(&request.stage_id) {
-        return true;
-    }
-    let haystack = format!(
-        "{}\n{}\n{}\n{}",
-        request.stage_id,
-        request.task,
-        request
-            .input
-            .get("stage_task")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default(),
-        request.input
-    )
-    .to_ascii_lowercase();
-    command_execution_text(&haystack)
-}
-
-fn generated_v2_read_only_call(request: &StageRunRequest) -> bool {
-    let Some(v2_call) = request.input.get("v2_call") else {
-        return false;
-    };
-    let write_mode = v2_call.get("write_mode");
-    if write_mode.is_some_and(|value| !value.is_null()) {
-        return false;
-    }
-    let method = v2_call
-        .get("method")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    matches!(
-        method,
-        "agent" | "fanout" | "parallel" | "reduce" | "finalReport" | "qualityGate" | "humanGate"
-    )
-}
-
-fn command_execution_stage_id(stage_id: &str) -> bool {
-    let id = stage_id.to_ascii_lowercase().replace('-', "_");
-    id.starts_with("verification_wave_")
-        || id.starts_with("review_verification_wave_")
-        || id.ends_with("_tests")
-        || id.contains("_post_tests")
-        || id.contains("_focused_tests")
-        || id.contains("_verification")
-}
-
-fn command_execution_text(haystack: &str) -> bool {
-    [
-        "focused_test",
-        "focused-test",
-        "focused test",
-        "focused tests",
-        "post-remediation tests",
-        "post remediation tests",
-        "cargo test",
-        "test command",
-        "test execution",
-        "test evidence",
-        "run tests",
-        "run focused",
-        "tests and checks",
-        "verification",
-        "verify",
-        "quality gate",
-        "cargo check",
-        "cargo build",
-        "cargo fmt",
-        "rustfmt",
-        "clippy",
-        "lint",
-    ]
-    .iter()
-    .any(|needle| haystack.contains(needle))
-}
-
-fn stage_extra_requests_bash(request: &StageRunRequest) -> bool {
-    let Some(extra) = request.input.get("stage_extra") else {
-        return false;
-    };
-    ["allowed_tools", "tools", "required_tools"]
-        .iter()
-        .filter_map(|key| extra.get(*key))
-        .flat_map(text_values)
-        .any(|tool| tool.eq_ignore_ascii_case("bash") || tool.eq_ignore_ascii_case("shell"))
-}
-
-fn text_values(value: &serde_json::Value) -> Vec<&str> {
-    match value {
-        serde_json::Value::String(value) => vec![value.as_str()],
-        serde_json::Value::Array(values) => values
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .collect(),
-        _ => Vec::new(),
-    }
 }
 
 pub(crate) fn tier_model_alias(tier: ProviderTier) -> &'static str {

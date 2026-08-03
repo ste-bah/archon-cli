@@ -34,14 +34,10 @@ mod workflow_live_execution_tests;
 #[cfg(test)]
 #[path = "workflow_live_generated_semantics_tests.rs"]
 mod workflow_live_generated_semantics_tests;
-#[path = "workflow_live_items.rs"]
-mod workflow_live_items;
 #[path = "workflow_live_mcp.rs"]
 mod workflow_live_mcp;
 #[path = "workflow_live_planner.rs"]
 mod workflow_live_planner;
-#[path = "workflow_live_prompt.rs"]
-mod workflow_live_prompt;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]

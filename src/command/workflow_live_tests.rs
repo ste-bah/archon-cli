@@ -8,10 +8,13 @@ use archon_workflow::{
 };
 use serde_json::json;
 
-use super::workflow_live_prompt::{harness_planner_prompt, workflow_prompt};
+use archon_workflow::stage_prompt::{
+    harness_planner_prompt, workflow_prompt, workflow_stage_system_context,
+};
+
 use super::workflow_live_runner::{
     allowed_tools, request_target_repository_root, workflow_agent_ordinal,
-    workflow_agent_session_id, workflow_stage_system_context,
+    workflow_agent_session_id,
 };
 use super::workflow_live_test_support::{InvalidPlanner, boundary_runner, request};
 use super::{spawn_live_workflow, terminal_resume_message};
