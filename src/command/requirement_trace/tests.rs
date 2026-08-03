@@ -317,6 +317,41 @@ fn every_task_in_the_real_corpus_declares_a_runnable_verifier_command() {
     );
 }
 
+/// `--falsify` is opt-in, and opt-in has to mean the read-only output does not
+/// move when the feature ships.
+///
+/// Two halves, because there are two outputs. The JSON must not gain a
+/// `falsification_outcome` key — a `null` where there was no field is a
+/// breaking change to anything parsing it — and the text must still say NOT
+/// EXECUTED for a plan nobody ran. Nothing here spawns a process or writes a
+/// byte, which is the claim itself: without the flag, that code is unreachable.
+#[test]
+fn without_the_flag_the_report_is_what_it_was_before_execution_existed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let prd = write_prd(
+        dir.path(),
+        &["- REQ-DL-100: any `error` check must have status=failed."],
+    );
+    let options = TraceOptions::new(prd, fixture_tasks());
+    assert!(!options.falsify, "execution must be off unless asked for");
+
+    let report = build_report(dir.path(), &options).expect("report");
+    assert!(
+        report
+            .rows
+            .iter()
+            .flat_map(|row| row.anchors.iter())
+            .all(|verdict| verdict.falsification_outcome.is_none())
+    );
+
+    let json = serde_json::to_string_pretty(&report).expect("json");
+    assert!(!json.contains("falsification_outcome"), "{json}");
+
+    let text = render::report(&report);
+    assert!(!text.contains("DECORATION"), "{text}");
+    assert!(!text.contains("FALSIFIABLE:"), "{text}");
+}
+
 #[test]
 fn a_task_directory_that_cannot_be_read_in_full_is_an_error_naming_the_file() {
     let dir = tempfile::tempdir().expect("tempdir");

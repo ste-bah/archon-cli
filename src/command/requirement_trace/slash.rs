@@ -61,12 +61,22 @@ pub(crate) fn options_from_slash_args(args: &[String]) -> Result<TraceOptions> {
     let mut leann_db: Option<PathBuf> = None;
     let mut persist: Option<PathBuf> = None;
     let mut json = false;
+    let mut falsify = false;
 
     let mut index = 0;
     while index < args.len() {
         let flag = args[index].as_str();
         if flag == "--json" {
             json = true;
+            index += 1;
+            continue;
+        }
+        // Spelled out here as well as in clap, because the TUI surface reads
+        // tokens by hand: a `--falsify` that fell through to the unknown-flag
+        // arm would be an error, and one that was silently ignored would be a
+        // user who asked to mutate their tree and got a read-only report.
+        if flag == "--falsify" {
+            falsify = true;
             index += 1;
             continue;
         }
@@ -85,7 +95,7 @@ pub(crate) fn options_from_slash_args(args: &[String]) -> Result<TraceOptions> {
                 return Err(anyhow!(
                     "requirements trace does not accept '{other}'; use --prd <PATH>, \
                      --tasks <DIR>, --graph <ID>, --evidence <PATH>, --leann-db <PATH>, \
-                     --persist <PATH>, or --json"
+                     --persist <PATH>, --falsify, or --json"
                 ));
             }
         }
@@ -99,6 +109,7 @@ pub(crate) fn options_from_slash_args(args: &[String]) -> Result<TraceOptions> {
         evidence,
         leann_db,
         persist,
+        falsify,
         json,
         ..TraceOptions::new(prd, tasks)
     })

@@ -34,6 +34,21 @@ pub enum RequirementsAction {
         /// Persist requirement entities and anchored edges into this store
         #[arg(long, value_name = "PATH")]
         persist: Option<std::path::PathBuf>,
+        /// Execute the falsification plans: MUTATES FILES IN YOUR WORKING TREE
+        ///
+        /// For each error-severity requirement whose edge already reached
+        /// `Exercised`, replaces the anchored lines with an abort, runs the
+        /// verifier the task declared, and restores. The edge promotes to
+        /// `Falsifiable` only if the verifier failed while mutated; if it still
+        /// passed, the edge was decoration and the report says so.
+        ///
+        /// Refuses, without writing anything: a file with uncommitted changes,
+        /// a workspace-wide verifier (NFR-004), a file whose hash no longer
+        /// matches the plan, and a verifier that does not pass before the
+        /// mutation. Off by default — without this flag the command is
+        /// read-only and its output is unchanged.
+        #[arg(long)]
+        falsify: bool,
         /// Emit the report model as JSON
         #[arg(long)]
         json: bool,

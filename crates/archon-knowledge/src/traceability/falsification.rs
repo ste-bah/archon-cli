@@ -23,12 +23,34 @@
 //! mutation, which command, and the criterion that decides. Running it is
 //! [`FalsificationPlan::shell_recipe`], reproducible by hand.
 //!
+//! # Where the decision to run one now lives
+//!
+//! `archon requirements trace --falsify` will execute these plans. The sentence
+//! above still holds, unchanged and load-bearing: the decision belongs to
+//! whoever runs it. `--falsify` *is* that decision, made explicitly, once, by a
+//! person typing a flag. Without it the command is byte-identical to what it was
+//! — same text, same JSON, no process spawned and no file written — because a
+//! report that could mutate a tree as a side effect of being run is not a
+//! read-only report no matter what its default is.
+//!
+//! What this crate contributes to that run is the vocabulary, not the machinery:
+//! [`mutate`] renders the mutant as a pure text transform, and [`outcome`] holds
+//! the verdict type and the one function that turns a verdict into a
+//! [`ProofLevel`]. The writing, the process and the restore live in the command
+//! layer. This crate still opens no file for writing and spawns nothing.
+//!
 //! # An unexecuted plan promotes nothing
 //!
 //! [`plan`] never returns a [`ProofLevel`]. A requirement with a plan and no
 //! result stays at `Exercised`, which is the fail-closed direction: the plan is
 //! a statement of what has not been checked yet, and §32 requires exactly that
 //! — an explicit, scoped gap with named fail-closed behaviour.
+//!
+//! Executing plans adds a third state, not a fourth meaning for the absent one.
+//! A plan with an outcome is decided; a plan without one is still exactly the
+//! declared gap it always was. See [`outcome::FalsificationOutcome::level_after`]
+//! for the whole of what an outcome may do to a level: one variant promotes,
+//! none demotes.
 //!
 //! # The scope is smaller than it looks, and that is a finding
 //!
@@ -40,11 +62,16 @@
 //! scope looks respectable would be inventing severity, which is the same class
 //! of error as inventing a mapping.
 
+pub mod mutate;
+pub mod outcome;
+
 use serde::{Deserialize, Serialize};
 
 use super::anchors::Anchor;
 use super::ladder::{ExercisedProof, ProofLevel};
 use super::requirements::Requirement;
+
+pub use outcome::{FalsificationOutcome, Inconclusive, RefusedToRun};
 
 /// How the anchored code would be broken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -16,7 +16,8 @@ use std::fmt::Write as _;
 
 use archon_knowledge::traceability::report::AnchorVerdict;
 use archon_knowledge::traceability::{
-    AnchorFreshness, ProofLevel, ReadScope, RequirementRow, Severity, TraceReport,
+    AnchorFreshness, FalsificationOutcome, FalsificationPlan, ProofLevel, ReadScope,
+    RequirementRow, Severity, TraceReport,
 };
 
 /// The whole report, as text.
@@ -199,12 +200,24 @@ fn shared_anchors(out: &mut String, report: &TraceReport) {
     let _ = writeln!(out);
 }
 
+/// The falsification section.
+///
+/// Every line that mentions an outcome is guarded on there being one. Without
+/// `--falsify` no plan has an outcome, so this renders exactly what it rendered
+/// before execution existed — the opt-in is not opt-in if the read-only output
+/// moves when the feature ships.
 fn falsification(out: &mut String, report: &TraceReport) {
-    let plans: Vec<_> = report
+    let plans: Vec<(&FalsificationPlan, Option<&FalsificationOutcome>)> = report
         .rows
         .iter()
         .flat_map(|row| row.anchors.iter())
-        .filter_map(|verdict| verdict.falsification.as_ref().ok())
+        .filter_map(|verdict| {
+            verdict
+                .falsification
+                .as_ref()
+                .ok()
+                .map(|plan| (plan, verdict.falsification_outcome.as_ref()))
+        })
         .collect();
 
     let in_scope = report
@@ -228,17 +241,24 @@ fn falsification(out: &mut String, report: &TraceReport) {
              Exercised on evidence."
         );
     }
-    for plan in plans {
+    for (plan, outcome) in plans {
         let _ = writeln!(
             out,
             "\n  {} — break {}:{}-{}, then `{}` must fail",
             plan.requirement_id, plan.file_path, plan.line_start, plan.line_end, plan.command
         );
         let _ = writeln!(out, "    criterion: {}", plan.pass_criterion());
-        let _ = writeln!(
-            out,
-            "    NOT EXECUTED. A plan promotes nothing; the edge stays at {}.",
-            ProofLevel::Exercised.as_str()
-        );
+        match outcome {
+            None => {
+                let _ = writeln!(
+                    out,
+                    "    NOT EXECUTED. A plan promotes nothing; the edge stays at {}.",
+                    ProofLevel::Exercised.as_str()
+                );
+            }
+            Some(outcome) => {
+                let _ = writeln!(out, "    {}", outcome.describe());
+            }
+        }
     }
 }

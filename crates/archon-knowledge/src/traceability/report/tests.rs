@@ -22,6 +22,7 @@ fn verdict(req: &str, path: &str, start: usize, level: ProofLevel) -> AnchorVerd
         proof: None,
         missing: (level < ProofLevel::Exercised).then_some(MissingForPromotion::NoTrace),
         falsification: Err(NotPlannable::OutOfSeverityScope),
+        falsification_outcome: None,
     }
 }
 
