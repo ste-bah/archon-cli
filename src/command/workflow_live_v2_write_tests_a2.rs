@@ -1,3 +1,5 @@
+use super::*;
+
     #[test]
     fn absolute_item_target_inside_repository_is_made_relative() {
         let temp = tempfile::tempdir().expect("tempdir");

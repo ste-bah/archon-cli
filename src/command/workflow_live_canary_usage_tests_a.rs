@@ -1,14 +1,16 @@
-const CANARY_TEST: &str = "command::workflow_live::workflow_live_canary_tests::usage_tests::canary_wf_afae6bee_provider_ledger";
-const CANARY_CHILD_ENV: &str = "ARCHON_CANARY_USAGE_CHILD";
+use super::*;
+
+pub(super) const CANARY_TEST: &str = "command::workflow_live::workflow_live_canary_tests::usage_tests::canary_wf_afae6bee_provider_ledger";
+pub(super) const CANARY_CHILD_ENV: &str = "ARCHON_CANARY_USAGE_CHILD";
 const CANARY_USAGE_SCOPE: &str = "wf-afae6bee-measurement";
 
 #[derive(Clone)]
-struct ScopedCanaryClient {
+pub(super) struct ScopedCanaryClient {
     inner: Arc<dyn LlmClient>,
 }
 
 impl ScopedCanaryClient {
-    fn new(inner: Arc<dyn LlmClient>) -> Self {
+    pub(super) fn new(inner: Arc<dyn LlmClient>) -> Self {
         Self { inner }
     }
 }
@@ -67,13 +69,13 @@ impl LlmClient for ScopedCanaryClient {
     }
 }
 
-struct CanaryProvider {
+pub(super) struct CanaryProvider {
     script: Arc<CanaryAgentClient>,
     request_bytes: Arc<Mutex<Vec<u64>>>,
 }
 
 impl CanaryProvider {
-    fn new(script: Arc<CanaryAgentClient>, request_bytes: Arc<Mutex<Vec<u64>>>) -> Self {
+    pub(super) fn new(script: Arc<CanaryAgentClient>, request_bytes: Arc<Mutex<Vec<u64>>>) -> Self {
         Self {
             script,
             request_bytes,
@@ -204,7 +206,7 @@ fn collect_text(value: &serde_json::Value, into: &mut String) {
     }
 }
 
-fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
+pub(super) fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
     let agent_config = AgentConfig {
         session_id: CANARY_USAGE_SCOPE.into(),
         working_dir: root.to_path_buf(),
@@ -234,7 +236,7 @@ fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Pat
     install_subagent_executor(Arc::new(executor));
 }
 
-fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, request_bytes: &[u64]) {
+pub(super) fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, request_bytes: &[u64]) {
     let db = archon_learning::cozo_guard::open_sqlite_guarded(
         path.to_str().expect("UTF-8 learning path"),
         "reopen canary learning db",

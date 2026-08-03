@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn blocked_review_final_report_collects_nested_verification_result() {
     let temp = tempfile::tempdir().expect("tempdir");

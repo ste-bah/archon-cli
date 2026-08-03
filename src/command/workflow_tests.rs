@@ -19,5 +19,9 @@ use archon_workflow::{
 use serde_json::json;
 use std::collections::BTreeMap;
 
-include!("workflow_tests_a.rs");
-include!("workflow_tests_b.rs");
+#[path = "workflow_tests_a.rs"]
+mod workflow_tests_a;
+use workflow_tests_a::*;
+#[path = "workflow_tests_b.rs"]
+mod workflow_tests_b;
+use workflow_tests_b::*;

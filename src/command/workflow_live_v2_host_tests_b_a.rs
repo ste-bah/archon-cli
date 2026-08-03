@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
     let temp = tempfile::tempdir().expect("tempdir");

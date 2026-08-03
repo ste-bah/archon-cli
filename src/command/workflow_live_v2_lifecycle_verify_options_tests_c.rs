@@ -1,5 +1,8 @@
 /// Without a declared calendar the check must stay silent -- it is opt-in, and
 /// a 24/7 venue trades every day.
+
+use super::*;
+
 #[test]
 fn a_venue_with_no_declared_calendar_keeps_every_session() {
     let rows: Vec<_> = (0..40)
@@ -31,7 +34,7 @@ fn a_textual_deliverable_is_checked_for_presence_not_parsed_as_json() {
         "artifact_path": ".archon/demo/inventory.md",
         "artifact_format": "text"
     });
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -53,7 +56,7 @@ fn a_missing_textual_deliverable_still_fails() {
         "artifact_path": ".archon/demo/absent.md",
         "artifact_format": "text"
     });
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -84,7 +87,7 @@ fn an_undeclared_json_extension_is_still_strictly_parsed() {
         "kind": "thing",
         "artifact_path": ".archon/demo/thing.json"
     });
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -126,7 +129,7 @@ fn a_parameterized_markdown_instance_is_not_parsed_as_json() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -155,7 +158,7 @@ fn a_missing_parameterized_instance_still_fails() {
         "instance_source_records_field": "records",
         "instance_artifact_field": "report_path"
     });
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );

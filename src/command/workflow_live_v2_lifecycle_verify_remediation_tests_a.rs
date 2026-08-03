@@ -1,4 +1,6 @@
-fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
+use super::*;
+
+pub(super) fn contract_fixture() -> (WorkflowV2TaskUniverse, serde_json::Value) {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),

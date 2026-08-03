@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn fabel_supersede_accepts_shape_failure_with_sibling_evidence() {
     let (universe, _) = contract_fixture();
@@ -399,7 +401,7 @@ fn d23_retry_merge_preserves_unretried_failures() {
     }));
 }
 
-fn accepted_outcome(id: &str) -> serde_json::Value {
+pub(super) fn accepted_outcome(id: &str) -> serde_json::Value {
     serde_json::json!({
         "item_id": id,
         "status": "accepted",
@@ -418,7 +420,7 @@ fn failed_outcome(id: &str) -> serde_json::Value {
     })
 }
 
-fn failed_outcome_with_gap(id: &str, gap_id: &str) -> serde_json::Value {
+pub(super) fn failed_outcome_with_gap(id: &str, gap_id: &str) -> serde_json::Value {
     let mut outcome = failed_outcome(id);
     outcome["result"]["residual_gaps"] = serde_json::json!([{
         "id": gap_id,

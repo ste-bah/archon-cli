@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn completion_claim_request_gets_authoritative_universe_without_mutating_execution() {
     let execution = WorkflowV2CallExecution {

@@ -1,4 +1,6 @@
-fn collect_text(value: &serde_json::Value, into: &mut String) {
+use super::*;
+
+pub(super) fn collect_text(value: &serde_json::Value, into: &mut String) {
     match value {
         serde_json::Value::String(text) => {
             into.push_str(text);
@@ -58,7 +60,7 @@ async fn canary_wf_afae6bee_regression() {
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        super::workflow_live_test_support::standard_task_file(
+        super::super::workflow_live_test_support::standard_task_file(
             "TASK-TDL-001",
             "[]",
             "[]",

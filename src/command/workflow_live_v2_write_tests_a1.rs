@@ -1,3 +1,5 @@
+use super::*;
+
     #[test]
     fn target_files_from_fanout_item_are_required_for_write_branches() {
         let temp = tempfile::tempdir().expect("tempdir");

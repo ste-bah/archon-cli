@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn workless_authored_script_is_rejected_before_live_execution() {
     // The canned author only ever produces a phase/log-only script — the

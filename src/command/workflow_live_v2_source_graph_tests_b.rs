@@ -1,9 +1,11 @@
+use super::*;
+
 #[test]
 fn required_tools_come_from_the_task_universe_not_the_agent_item() {
     // The item forges required_tools/mcp_tools, but the authoritative task
     // declares a different set. The graph item must carry ONLY the universe's
     // tools — an agent cannot bind MCP tools by injecting a declaration.
-    use super::super::super::workflow_live_task_universe::{
+    use super::super::super::super::workflow_live_task_universe::{
         WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
     };
     let universe = WorkflowV2TaskUniverse {
@@ -387,7 +389,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
     let mut universe = tdl_task_universe();
     for task_id in ["TASK-TDL-090", "TASK-TDL-110", "TASK-TDL-120"] {
         universe.tasks.push(
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: task_id.to_string(),
             aliases: Vec::new(),
             source_path: format!("/tmp/tasks/{task_id}.md"),
@@ -399,7 +401,7 @@ fn d43_verification_remediation_allows_multiple_repairs_for_one_canonical_task()
         );
     }
     universe.tasks.push(
-        super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+        super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-TDL-130".to_string(),
             aliases: Vec::new(),
             source_path: "/tmp/tasks/TASK-TDL-130.md".to_string(),

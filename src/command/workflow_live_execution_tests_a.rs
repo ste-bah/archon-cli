@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
     let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
@@ -75,7 +77,7 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
         first_error: "LLM stream error (server_error): temporary upstream failure",
     });
 
-    super::workflow_live_retry::send_message_with_transient_retry(
+    super::super::workflow_live_retry::send_message_with_transient_retry(
         &(planner.clone() as Arc<dyn LlmClient>),
         Vec::new(),
         Vec::new(),

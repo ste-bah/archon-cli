@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn missing_required_artifact_becomes_review_choice_not_blocked_engine_failure() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -102,7 +104,7 @@ fn human_gate_is_never_auto_accepted_and_returns_choices() {
     );
 }
 
-fn execution(
+pub(super) fn execution(
     id: &str,
     method: WorkflowV2HostMethod,
     source: Option<&str>,
@@ -122,7 +124,7 @@ fn execution(
     }
 }
 
-fn task_universe_080() -> WorkflowV2TaskUniverse {
+pub(super) fn task_universe_080() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
@@ -139,7 +141,7 @@ fn task_universe_080() -> WorkflowV2TaskUniverse {
     }
 }
 
-fn task_universe_010() -> WorkflowV2TaskUniverse {
+pub(super) fn task_universe_010() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
