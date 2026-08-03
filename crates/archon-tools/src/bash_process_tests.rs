@@ -325,6 +325,16 @@ async fn wait_until_process_is_absent(pid: &str) {
 
 #[cfg(unix)]
 fn process_exists(pid: &str) -> bool {
+    if std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| {
+            stat.rsplit_once(") ")
+                .map(|(_, fields)| fields.starts_with('Z'))
+        })
+        .unwrap_or(false)
+    {
+        return false;
+    }
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid)
