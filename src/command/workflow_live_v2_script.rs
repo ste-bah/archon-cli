@@ -17,12 +17,12 @@ use super::WorkflowV2ScriptRuntime;
 use super::execute_v2_live_call;
 use super::workflow_live_v2_client::LiveV2AgentClient;
 use super::workflow_live_v2_contracts::failed_v2_result;
-use super::workflow_live_v2_source_graph::{
-    complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
-};
 use super::workflow_live_v2_stable_json::stable_hash;
 use super::workflow_live_v2_state::{mark_v2_call_running, poll_v2_run_control};
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::source_graph::{
+    complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
+};
 
 const TERMINAL_HOST_CALL_MARKER: &str = "workflow terminal host call:";
 #[cfg(not(test))]

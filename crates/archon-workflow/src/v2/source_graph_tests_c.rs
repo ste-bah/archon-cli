@@ -4,7 +4,7 @@ use super::*;
 fn focused_verification_accepts_retry_plan_fixture() {
     let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_1_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_item_value(
+    let normalized = crate::generated_contract::normalize_generated_item_value(
         &value,
         Some(&tdl_task_universe()),
     )
@@ -24,7 +24,7 @@ fn focused_verification_accepts_retry_plan_fixture() {
 fn focused_verification_accepts_required_evidence_retry_commands_fixture() {
     let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_2_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_item_value(
+    let normalized = crate::generated_contract::normalize_generated_item_value(
         &value,
         Some(&tdl_task_universe()),
     )
@@ -60,7 +60,7 @@ fn focused_verification_rejects_embedded_retry_items_without_invariants() {
 fn focused_verification_rejects_direct_retry_without_invariants() {
     let fixture = archon_test_support::fixtures::WFC5D4_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+    let normalized = crate::generated_contract::normalize_generated_inventory_value(
         &source_data,
         Some(&tdl_task_universe()),
     );
@@ -284,7 +284,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -293,7 +293,7 @@ pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -311,7 +311,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -320,7 +320,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -329,7 +329,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-020".to_string(),
                 aliases: vec!["T020".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-020.md".to_string(),
@@ -338,7 +338,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-050".to_string(),
                 aliases: vec!["T050".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-050.md".to_string(),
@@ -347,7 +347,7 @@ pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-070".to_string(),
                 aliases: vec!["T070".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-070.md".to_string(),

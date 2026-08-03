@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) struct DynamicWaveSourceMetadata {
-    pub(crate) source_metadata_required: bool,
-    pub(crate) source_fingerprint: Option<String>,
-    pub(crate) source_task_graph: Option<WorkflowV2SourceTaskGraph>,
-    pub(crate) unresolved_dependencies: Vec<String>,
-    pub(crate) invalid_reason: Option<String>,
+pub struct DynamicWaveSourceMetadata {
+    pub source_metadata_required: bool,
+    pub source_fingerprint: Option<String>,
+    pub source_task_graph: Option<WorkflowV2SourceTaskGraph>,
+    pub unresolved_dependencies: Vec<String>,
+    pub invalid_reason: Option<String>,
 }
 
 impl DynamicWaveSourceMetadata {
@@ -21,7 +21,7 @@ impl DynamicWaveSourceMetadata {
     }
 }
 
-pub(crate) fn dynamic_wave_source_metadata(
+pub fn dynamic_wave_source_metadata(
     execution: &WorkflowV2CallExecution,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,
@@ -115,9 +115,9 @@ pub(crate) fn dynamic_wave_source_metadata(
     }
 }
 
-pub(crate) fn complete_source_task_graph(
+pub fn complete_source_task_graph(
     mut graph: WorkflowV2SourceTaskGraph,
-    result: &archon_workflow::WorkflowV2Result,
+    result: &crate::WorkflowV2Result,
 ) -> WorkflowV2SourceTaskGraph {
     let mut completed = BTreeSet::new();
     let item_assignments = graph
@@ -174,7 +174,7 @@ pub(crate) fn complete_source_task_graph(
     graph
 }
 
-pub(crate) fn input_hash_with_source_fingerprint(
+pub fn input_hash_with_source_fingerprint(
     input: &serde_json::Value,
     source_fingerprint: Option<&str>,
 ) -> String {
@@ -188,7 +188,7 @@ pub(crate) fn input_hash_with_source_fingerprint(
             serde_json::Value::String(fingerprint.to_string()),
         );
     }
-    stable_hash(&value)
+    stable_value_hash(&value)
 }
 
 fn assigned_ids_for_outcome(

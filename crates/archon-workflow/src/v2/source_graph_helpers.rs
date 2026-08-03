@@ -210,5 +210,5 @@ pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
 pub(super) fn source_fingerprint(
     graph: &WorkflowV2SourceTaskGraph,
 ) -> Result<String, serde_json::Error> {
-    Ok(stable_hash(&serde_json::to_value(graph)?))
+    Ok(stable_value_hash(&serde_json::to_value(graph)?))
 }

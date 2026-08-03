@@ -40,8 +40,6 @@ mod workflow_live_v2_manifest_scope;
 #[cfg(test)]
 #[path = "workflow_live_v2_manifest_scope_tests.rs"]
 mod workflow_live_v2_manifest_scope_tests;
-#[path = "workflow_live_v2_source_graph.rs"]
-mod workflow_live_v2_source_graph;
 #[path = "workflow_live_v2_stable_json.rs"]
 mod workflow_live_v2_stable_json;
 #[path = "workflow_live_v2_verification.rs"]

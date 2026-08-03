@@ -12,7 +12,7 @@ impl WorkflowScriptHost {
     pub(super) async fn persist_source_metadata_review(
         &self,
         execution: WorkflowV2CallExecution,
-        source_metadata: super::super::super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
+        source_metadata: archon_workflow::v2::source_graph::DynamicWaveSourceMetadata,
         input_hash: String,
         attempt: u32,
     ) -> archon_workflow::WorkflowResult<String> {
