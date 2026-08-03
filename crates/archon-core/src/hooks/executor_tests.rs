@@ -321,7 +321,7 @@ fn write_windows_detached_descendant_fixture(
     std::fs::write(
         &fixture,
         "\
-$command = \"Start-Sleep -Milliseconds 500; [IO.File]::WriteAllText((Join-Path '$PSScriptRoot' 'detached-descendant.complete'), 'complete')\"
+$command = \"Start-Sleep -Milliseconds 3000; [IO.File]::WriteAllText((Join-Path '$PSScriptRoot' 'detached-descendant.complete'), 'complete')\"
 Start-Process powershell -ArgumentList @('-NoProfile', '-Command', $command) -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
 ",
     )
