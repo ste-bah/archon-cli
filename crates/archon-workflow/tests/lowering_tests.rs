@@ -1,10 +1,7 @@
 //! `WorkflowSpec` → `TaskGraph` lowering.
 
-#![cfg(feature = "workflow")]
-
-use archon_topology::{
-    DataRef, GateKind, NodeRole, PermissionClass, WriteTarget, lower_workflow_spec,
-};
+use archon_topology::{DataRef, GateKind, NodeRole, PermissionClass, WriteTarget};
+use archon_workflow::lower_workflow::lower_workflow_spec;
 use archon_workflow::spec::WorkflowSpec;
 
 fn spec(yaml: &str) -> WorkflowSpec {

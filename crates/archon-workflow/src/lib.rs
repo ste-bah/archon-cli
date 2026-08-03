@@ -19,6 +19,7 @@ mod item_filter;
 pub mod learning;
 pub mod lifecycle;
 pub mod llm_client_port;
+pub mod lower_workflow;
 mod persistence;
 pub mod planner;
 pub mod policy;
@@ -73,6 +74,7 @@ pub use llm_client_port::{
     WorkflowAgentToolUse, WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest,
     WorkflowProviderEnv,
 };
+pub use lower_workflow::lower_workflow_spec;
 pub use planner::{HeuristicWorkflowPlanner, WorkflowPlanner};
 pub use policy::{PolicyDecision, WorkflowPolicy};
 pub use provider_tiers::{

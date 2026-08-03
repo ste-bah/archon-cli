@@ -52,22 +52,29 @@ the IR (`crates/archon-topology/src/analysis/edge_support.rs:95`).
 
 ### The two lowerings
 
+Neither of them lives in `archon-topology`. A lowering reads a type the topology
+crate does not own, so siting it there would invert the dependency edge — and in
+the `WorkflowSpec` case it closed a cycle
+(`archon-core → archon-workflow → archon-topology → archon-core`) that Cargo
+rejects outright.
+
 **`WorkflowSpec` → `TaskGraph`** is `lower_workflow_spec`
-(`crates/archon-topology/src/lower_workflow.rs:24`). It is infallible. Stage kinds map onto roles
-— `QualityGate` becomes `Verify`, `HumanGate` becomes `Gate(Human)`,
-`Checkpoint` becomes `Gate(Checkpoint)`, and `Agent`, `Implementation` and
-`Fanout` all become `Work` (`lower_workflow.rs:90`). `writes` comes from the
-stage's `expected_target_files`; `consumes` is recovered only from a fanout
-`${producer.accessor}` reference (`lower_workflow.rs:120`); `reads` is always
-empty (`lower_workflow.rs:70`). Permission classes are resolved per stage, then
-from a blanket `default`/`*` key (`lower_workflow.rs:158`).
+(`crates/archon-workflow/src/lower_workflow.rs:39`). It is infallible. Stage
+kinds map onto roles — `QualityGate` becomes `Verify`, `HumanGate` becomes
+`Gate(Human)`, `Checkpoint` becomes `Gate(Checkpoint)`, and `Agent`,
+`Implementation` and `Fanout` all become `Work` (`lower_workflow.rs:105`).
+`writes` comes from the stage's `expected_target_files`; `consumes` is recovered
+only from a fanout `${producer.accessor}` reference (`lower_workflow.rs:125`,
+which now calls `spec::parse_foreach_accessor` directly rather than carrying a
+byte-compatible copy of it); `reads` is always empty (`lower_workflow.rs:85`).
+Permission classes are resolved per stage, then from a blanket `default`/`*` key
+(`lower_workflow.rs:158`).
 
 **`Vec<Subtask>` → `TaskGraph`** is `lower_subtasks`, and it lives in
-`crates/archon-core/src/orchestrator/topology.rs:55` rather than in
-`archon-topology`, because `Subtask` is an `archon-core` type and the topology
-crate does not depend on `archon-core`. Every node is `Work`; only `depends_on`
-and `agent` are populated. `consumes`, `writes` and `reads` stay empty, and
-`permission` stays `Safe` for every node.
+`crates/archon-core/src/orchestrator/topology.rs:55`, because `Subtask` is an
+`archon-core` type and the topology crate does not depend on `archon-core`.
+Every node is `Work`; only `depends_on` and `agent` are populated. `consumes`,
+`writes` and `reads` stay empty, and `permission` stays `Safe` for every node.
 
 That asymmetry is the single most important fact about the IR in practice:
 **empty means unknown, not empty.** A team-lowered graph declares no dataflow,
@@ -115,9 +122,11 @@ they apply. `TraceKind` (`record.rs:23`) has ten written variants —
 This is a design constraint, not an aspiration, and it is enforced three ways:
 
 1. **By the dependency graph.** `archon-topology` depends on `petgraph`,
-   `serde`, `serde_json` and `dashmap`, and optionally `archon-workflow`
-   (`crates/archon-topology/Cargo.toml:47`). There is no Cozo dependency to
-   call.
+   `serde`, `serde_json`, `dashmap` and `archon-write-plan` — a leaf crate with
+   no `archon-*` dependencies of its own, holding the resource-key overlap table
+   that live admission and the write coordinator must both answer from
+   (`crates/archon-topology/Cargo.toml`). There is no Cozo dependency to call,
+   and since Wave E no `archon-workflow` dependency either.
 2. **By the write path.** `TraceWriter::append`
    (`crates/archon-topology/src/trace/writer.rs:64`) opens the file with
    `create(true).append(true)` and issues one `write_all`. Its caller
@@ -230,7 +239,8 @@ which declares nothing — it is admitted when any gate has passed at all
 
 **A `Checkpoint` gate never counts.** Nothing in the tree marks one passed, and
 there are tripwires in both the lowering and the live layer to keep it that way
-(`lower_workflow.rs:82`, `live.rs:359`).
+(`crates/archon-workflow/src/lower_workflow.rs:92`,
+`crates/archon-topology/src/live.rs:359`).
 
 The default of `where_declared` exists because `always` would block every
 irreversible action in every session that never declared a graph, which is every

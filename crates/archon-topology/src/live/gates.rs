@@ -13,7 +13,8 @@
 //!
 //! **`StageKind::Checkpoint` therefore never gates**, because nothing anywhere
 //! in the tree marks a checkpoint passed. That is intended and it is the
-//! fail-safe direction; the tripwire comment in `lower_workflow.rs` explains
+//! fail-safe direction; the tripwire comment in `archon-workflow`'s
+//! `lower_workflow.rs` explains
 //! why it must stay that way. Specs persisted before the W6 deletion
 //! deserialize a legacy `condition` stage to `Checkpoint`, and a condition
 //! stage never had an evaluator — so counting checkpoint presence as gating

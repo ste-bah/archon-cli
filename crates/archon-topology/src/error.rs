@@ -1,8 +1,8 @@
 //! Errors raised by graph construction.
 //!
 //! Hand-rolled rather than `thiserror`-derived: milestone 1 pins this crate's
-//! dependency set to petgraph + serde + archon-workflow, and a `Display` impl
-//! is cheaper than widening it.
+//! unconditional dependency set to petgraph + serde, and a `Display` impl is
+//! cheaper than widening it.
 
 use std::fmt;
 

@@ -6,6 +6,13 @@ publish = false
 
 [dependencies]
 archon-llm = { path = "../archon-llm" }
+# `lower_workflow` lowers a `WorkflowSpec` into the topology IR. The edge runs
+# this way round because `WorkflowSpec` is this crate's type: siting the lowering
+# next to the IR instead would mean `archon-topology -> archon-workflow` and
+# close the `archon-core -> archon-workflow -> archon-topology -> archon-core`
+# cycle. `default-features = false` because only the IR and its analyses are
+# needed here — not the trace, and not the live admission layer.
+archon-topology = { path = "../archon-topology", default-features = false }
 # The write coordinator's resource keys and overlap table. Extracted to a leaf
 # crate because `archon-topology`'s live admission has to reach the same table,
 # and reaching it through this crate closed a dependency cycle. Re-exported from

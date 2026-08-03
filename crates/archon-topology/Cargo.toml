@@ -6,21 +6,22 @@ publish = false
 description = "Topology IR (TaskGraph) and pure graph analyses shared by workflow, team, and session surfaces"
 
 [features]
-# `workflow` pulls in archon-workflow for the WorkflowSpec lowering. It is on by
-# default so `cargo check -p archon-topology` exercises the lowering, but
-# archon-core takes the crate with `default-features = false`: archon-core needs
-# only the IR plus the analyses, and it must not acquire a build edge onto the
-# 22k-LOC workflow crate to get them.
-default = ["workflow", "trace", "live"]
-# serde_json rides along because `WorkflowSpec::permissions` is typed
-# `BTreeMap<String, serde_json::Value>`; reading that field is impossible
-# without naming the type. Confined to this feature so the IR-and-analyses
-# build archon-core takes stays at petgraph + serde.
-workflow = ["dep:archon-workflow", "dep:serde_json"]
+# There is deliberately no `archon-*` dependency that is not itself a leaf.
+# `archon-core` takes this crate with `default-features = false` because it
+# needs only the IR plus the analyses, and the features below are what it is
+# opting out of.
+#
+# The `workflow` feature is gone. It existed to pull in `archon-workflow` for
+# the `WorkflowSpec` lowering, which now lives in `archon-workflow` itself —
+# that edge closed `archon-core -> archon-workflow -> archon-topology ->
+# archon-core`, and Cargo rejects a cyclic package graph outright. Do not
+# reintroduce it: a feature does not break a cycle, because Cargo features are
+# additive and a feature-gated dependency is still an edge in the package graph.
+default = ["trace", "live"]
 # Milestone 2's ambient trace: jsonl append/read plus post-hoc graph
-# reconstruction. Feature-gated for the same reason `workflow` is — it needs
-# serde_json, and archon-core takes this crate with `default-features = false`
-# to keep its own build graph at petgraph + serde. Note what is *not* here:
+# reconstruction. Feature-gated because it needs serde_json, and archon-core
+# takes this crate with `default-features = false` to keep its own build graph
+# at petgraph + serde. Note what is *not* here:
 # no cozo, no archon-core, no learning crate. The trace format lives beside the
 # IR, but every database write lives above this crate in `src/command/`, which
 # makes "no Cozo on the hot path" a property of the dependency graph rather
@@ -39,9 +40,9 @@ trace = ["dep:serde_json"]
 # that budget: it is the consumer the coordinator was written for.
 #
 # That table used to be reached through `archon-workflow`, which is why this
-# feature used to imply `workflow`. It no longer does: `archon-write-plan` is a
-# leaf with no `archon-*` dependencies, so sharing the table costs a dependency
-# on the table and nothing else.
+# feature used to imply `workflow`. `archon-write-plan` is a leaf with no
+# `archon-*` dependencies, so sharing the table now costs a dependency on the
+# table and nothing else.
 #
 # `dashmap` is the only new external crate, and it is already a workspace
 # dependency. Still no cozo, no archon-core, no learning crate — the property
@@ -55,13 +56,9 @@ live = ["dep:archon-write-plan", "dep:dashmap"]
 # a separate module boundary so these analyses stay usable with no database.
 petgraph.workspace = true
 serde.workspace = true
-archon-workflow = { path = "../archon-workflow", optional = true }
 archon-write-plan = { path = "../archon-write-plan", optional = true }
 serde_json = { workspace = true, optional = true }
 dashmap = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
-# Deliberately-defective spec fixtures must bypass `WorkflowSpec::from_yaml`,
-# which validates. Test-only; not in the production dependency set.
-serde_yaml_ng.workspace = true
