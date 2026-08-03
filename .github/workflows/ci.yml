@@ -229,9 +229,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tests = @(
             @{ Package = 'archon-core'; Name = 'windows_raw_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_sanitized_raw_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_job_object_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_sanitized_job_object_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_raw_shell_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_sanitized_raw_shell_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_job_object_shell_child_drains_large_output' },
+            @{ Package = 'archon-core'; Name = 'windows_sanitized_job_object_shell_child_drains_large_output' },
             @{ Package = 'archon-core'; Name = 'windows_hook_output_has_a_shared_bound_and_reports_truncation' },
             @{ Package = 'archon-core'; Name = 'windows_hook_uses_isolated_environment_and_explicit_context' },
             @{ Package = 'archon-core'; Name = 'windows_hook_timeout_kills_descendant_process' },
@@ -240,14 +244,24 @@ jobs:
             @{ Package = 'archon-tools'; Name = 'windows_bash_process_exists_reports_existing_and_absent_processes' },
             @{ Package = 'archon-pipeline'; Name = 'windows_and_mixed_separator_test_paths_are_exempt' }
           )
+          $failures = @()
           foreach ($test in $tests) {
             Write-Host "START Issue #92 test: $($test.Name)"
             & cargo test -p $test.Package --lib $test.Name -- --test-threads=1 2>&1 |
               Tee-Object -Variable output |
               Write-Host
-            if ($LASTEXITCODE -ne 0) { throw "Issue #92 test failed: $($test.Name)" }
-            if (($output | Out-String) -notmatch 'running 1 test') { throw "Issue #92 test did not run: $($test.Name)" }
+            if ($LASTEXITCODE -ne 0) {
+              $failures += $test.Name
+              Write-Host "FAILED Issue #92 test: $($test.Name)"
+              continue
+            }
+            if (($output | Out-String) -notmatch 'running 1 test') {
+              throw "Issue #92 test did not run: $($test.Name)"
+            }
             Write-Host "END Issue #92 test: $($test.Name)"
+          }
+          if ($failures.Count -gt 0) {
+            throw "Issue #92 tests failed: $($failures -join ', ')"
           }
 
       - name: Run tests (nextest)
