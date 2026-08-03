@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn canonical_task_ids_from_generated_value(
+pub fn canonical_task_ids_from_generated_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> Vec<String> {
@@ -16,7 +16,7 @@ pub(crate) fn canonical_task_ids_from_generated_value(
     embedded_task_ids_from_generated_value(value, &universe)
 }
 
-pub(crate) fn normalize_canonical_ids(
+pub fn normalize_canonical_ids(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     ids: impl IntoIterator<Item = String>,
 ) -> CanonicalIdNormalization {
@@ -89,7 +89,7 @@ pub(super) fn dependency_ids_from_generated_value(
     )
 }
 
-pub(crate) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+pub fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
     sorted_unique(
         raw_strings_from_aliases(
             value,
@@ -121,7 +121,7 @@ pub(crate) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> V
 
 /// Lifecycle shims: JS `generatedContractTargetFileIssue` and the item-less
 /// fallback of JS `generatedContractInventorySourceItems`.
-pub(crate) fn lifecycle_target_file_issue(
+pub fn lifecycle_target_file_issue(
     target: &str,
     target_repository_root: Option<&str>,
 ) -> Option<&'static str> {
@@ -129,8 +129,6 @@ pub(crate) fn lifecycle_target_file_issue(
     target_file_issue(target, &root)
 }
 
-pub(crate) fn lifecycle_inventory_source_items(
-    value: &serde_json::Value,
-) -> Vec<serde_json::Value> {
+pub fn lifecycle_inventory_source_items(value: &serde_json::Value) -> Vec<serde_json::Value> {
     collect_generated_inventory_items(value)
 }

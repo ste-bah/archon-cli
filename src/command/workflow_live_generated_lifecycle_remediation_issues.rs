@@ -18,7 +18,7 @@ fn target_file_issue_message(
     contract: &LifecycleContract<'_>,
     target: &str,
 ) -> Option<&'static str> {
-    super::super::workflow_live_generated_contract::lifecycle_target_file_issue(
+    archon_workflow::generated_contract::lifecycle_target_file_issue(
         target,
         contract.target_repository_root,
     )

@@ -45,7 +45,7 @@ fn inventory_source_items(value: &Value) -> Vec<Value> {
     if value.get("items").is_some_and(Value::is_array) {
         return array(value.get("items"));
     }
-    super::workflow_live_generated_contract::lifecycle_inventory_source_items(value)
+    archon_workflow::generated_contract::lifecycle_inventory_source_items(value)
 }
 
 /// JS `normalizeRemediationInventoryForSources`.

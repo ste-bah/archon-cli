@@ -6,13 +6,13 @@ use archon_workflow::{
     WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverageStatus, WorkflowV2WriteMode,
 };
 
-use super::super::workflow_live_generated_contract::{
-    canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
-};
 use super::workflow_live_v2_aggregate::attach_branch_evidence;
 use super::workflow_live_v2_verification::{
     FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION, normalize_focused_verification_outcome,
     stamp_focused_verification_input,
+};
+use archon_workflow::generated_contract::{
+    canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
 };
 
 pub(super) fn execution_with_resolved_source(

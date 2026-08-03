@@ -65,7 +65,7 @@ fn d70_artifact_only_work_without_declared_contract_is_repairable() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+        tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
@@ -99,17 +99,15 @@ fn d70_declared_contract_allows_artifact_only_ownership() {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),
-        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+        tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
             canonical_task_id: "TASK-EX-001".to_string(),
             source_path: "tasks/TASK-EX-001.md".to_string(),
             acceptance_criteria: vec!["Produce the audit report artifact.".to_string()],
-            deliverable_contracts: vec![
-                archon_workflow::task_universe::WorkflowV2DeliverableContract {
-                    kind: "audit_report".to_string(),
-                    artifact_path: ".archon/reports/current.json".to_string(),
-                    ..Default::default()
-                },
-            ],
+            deliverable_contracts: vec![crate::task_universe::WorkflowV2DeliverableContract {
+                kind: "audit_report".to_string(),
+                artifact_path: ".archon/reports/current.json".to_string(),
+                ..Default::default()
+            }],
             ..Default::default()
         }],
     };

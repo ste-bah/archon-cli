@@ -305,7 +305,7 @@ fn wave_assignment_is_a_correct_topological_layering() {
 
 #[test]
 fn required_tools_env_keys_and_deliverable_contracts_reach_the_per_task_inputs() {
-    use crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value;
+    use archon_workflow::generated_contract::normalize_generated_item_value;
 
     let universe = fixture_universe();
     let mut saw_tools = 0usize;
@@ -401,7 +401,7 @@ fn required_tools_env_keys_and_deliverable_contracts_reach_the_per_task_inputs()
 /// appeared by default is the failure this whole mechanism exists to prevent.
 #[test]
 fn a_declared_shared_append_path_reaches_the_payload_the_coordinator_reads() {
-    use crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value;
+    use archon_workflow::generated_contract::normalize_generated_item_value;
     use archon_workflow::write_coordinator::{
         SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,
     };

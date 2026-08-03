@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 mod executor_output;
 pub mod fanout;
+pub mod generated_contract;
 pub mod generated_workflow;
 mod item_filter;
 pub mod learning;

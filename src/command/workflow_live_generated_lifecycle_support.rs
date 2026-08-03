@@ -3,14 +3,14 @@
 //! Faithful ports of the scaffold's JS helpers (body_a/noop/remediation JS and
 //! the contract preflight JS). Items are `serde_json::Value` objects exactly
 //! as they were in the QuickJS realm; normalization delegates to the existing
-//! Rust contract twin (`workflow_live_generated_contract`), which the contract
+//! Rust contract twin (`archon_workflow::generated_contract`), which the contract
 //! test suites already pin against the JS behavior.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::workflow_live_generated_contract::{
+use archon_workflow::generated_contract::{
     GeneratedContractIssue, normalize_canonical_ids, normalize_generated_inventory_value_with_repo,
     normalize_generated_item_value_with_repo,
 };

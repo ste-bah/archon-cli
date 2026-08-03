@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum GeneratedContractIssueKind {
+pub enum GeneratedContractIssueKind {
     InventoryShapeRepair,
     TaskUniverseReconcile,
     DependencyGraphRepair,
@@ -30,30 +30,30 @@ impl GeneratedContractIssueKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct GeneratedContractIssue {
-    pub(crate) kind: GeneratedContractIssueKind,
-    pub(crate) field: String,
-    pub(crate) message: String,
+pub struct GeneratedContractIssue {
+    pub kind: GeneratedContractIssueKind,
+    pub field: String,
+    pub message: String,
     pub(super) item_id: Option<String>,
     pub(super) canonical_task_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct NormalizedGeneratedItem {
-    pub(crate) value: serde_json::Value,
-    pub(crate) issues: Vec<GeneratedContractIssue>,
+pub struct NormalizedGeneratedItem {
+    pub value: serde_json::Value,
+    pub issues: Vec<GeneratedContractIssue>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct NormalizedGeneratedInventory {
-    pub(crate) items: Vec<serde_json::Value>,
-    pub(crate) issues: Vec<GeneratedContractIssue>,
+pub struct NormalizedGeneratedInventory {
+    pub items: Vec<serde_json::Value>,
+    pub issues: Vec<GeneratedContractIssue>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CanonicalIdNormalization {
-    pub(crate) canonical_ids: Vec<String>,
-    pub(crate) unresolved_ids: Vec<String>,
+pub struct CanonicalIdNormalization {
+    pub canonical_ids: Vec<String>,
+    pub unresolved_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -139,15 +139,18 @@ impl ContractTaskUniverse {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn normalize_generated_inventory_value(
+/// The repo-less entry point. It was `#[cfg(test)]` while its only callers were
+/// tests in the same crate; those callers are now in the binary, where a
+/// `cfg(test)` item in this crate is invisible. Compiling it unconditionally is
+/// what keeps them able to call it at all.
+pub fn normalize_generated_inventory_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> NormalizedGeneratedInventory {
     normalize_generated_inventory_value_with_repo(value, task_universe, None)
 }
 
-pub(crate) fn normalize_generated_inventory_value_with_repo(
+pub fn normalize_generated_inventory_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,
@@ -182,14 +185,14 @@ fn empty_inventory_issue(universe: &ContractTaskUniverse) -> GeneratedContractIs
     }
 }
 
-pub(crate) fn normalize_generated_item_value(
+pub fn normalize_generated_item_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> NormalizedGeneratedItem {
     normalize_generated_item_value_with_repo(value, task_universe, None)
 }
 
-pub(crate) fn normalize_generated_item_value_with_repo(
+pub fn normalize_generated_item_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,
@@ -465,7 +468,7 @@ fn stamp_declared_capabilities(
     }
     if !shared_append_target_files.is_empty() {
         object.insert(
-            archon_workflow::write_coordinator::SHARED_APPEND_TARGETS_KEY.to_string(),
+            crate::write_coordinator::SHARED_APPEND_TARGETS_KEY.to_string(),
             serde_json::json!(shared_append_target_files),
         );
     }

@@ -33,8 +33,6 @@ mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
-#[path = "workflow_live_generated_contract.rs"]
-mod workflow_live_generated_contract;
 #[path = "workflow_live_generated_lifecycle_remediation.rs"]
 mod workflow_live_generated_lifecycle_remediation;
 #[path = "workflow_live_generated_lifecycle_support.rs"]

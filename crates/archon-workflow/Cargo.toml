@@ -37,4 +37,10 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# The workflow-live JSON fixture corpus. `include_str!` resolves relative to the
+# source file, so a fixture shared by a cluster that moved here and one that
+# stayed in the binary can follow neither; the corpus therefore has one home in
+# archon-test-support and every consumer names a `const`. Nothing in this crate
+# read a fixture until the generated-contract cluster arrived.
+archon-test-support = { path = "../archon-test-support" }
 tempfile.workspace = true
