@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
+use archon_workflow::generated_lifecycle_support as support;
 
 pub(super) fn enforce_retry_invariants(inventory: &Value, verification: &Value) -> Value {
     let failed = support::non_accepted_outcomes(&support::outcomes_of(verification));

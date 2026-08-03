@@ -28,12 +28,12 @@ pub(crate) fn outcome_status(outcome: &Value) -> Option<&str> {
     outcome.get("status").and_then(Value::as_str)
 }
 
-pub(crate) fn outcome_accepted_or_noop(outcome: &Value) -> bool {
+pub fn outcome_accepted_or_noop(outcome: &Value) -> bool {
     matches!(outcome_status(outcome), Some("accepted") | Some("noop"))
 }
 
 /// JS `acceptedOrNoopCanonicalTaskIdsFrom`.
-pub(crate) fn accepted_or_noop_canonical_task_ids_from(
+pub fn accepted_or_noop_canonical_task_ids_from(
     contract: &LifecycleContract<'_>,
     outcomes: &[Value],
 ) -> Vec<String> {
@@ -48,7 +48,7 @@ pub(crate) fn accepted_or_noop_canonical_task_ids_from(
 }
 
 /// JS `nonAcceptedOutcomes`.
-pub(crate) fn non_accepted_outcomes(outcomes: &[Value]) -> Vec<Value> {
+pub fn non_accepted_outcomes(outcomes: &[Value]) -> Vec<Value> {
     outcomes
         .iter()
         .filter(|outcome| !outcome_accepted_or_noop(outcome))
@@ -57,7 +57,7 @@ pub(crate) fn non_accepted_outcomes(outcomes: &[Value]) -> Vec<Value> {
 }
 
 /// JS `matchingAcceptedIds`.
-pub(crate) fn matching_accepted_ids(
+pub fn matching_accepted_ids(
     contract: &LifecycleContract<'_>,
     source_items: &[Value],
     outcomes: &[Value],
@@ -76,17 +76,23 @@ pub(crate) fn matching_accepted_ids(
 
 /// Outcome accessor across the host's known direct and merged envelopes.
 ///
-/// The definition moved to `archon_workflow::v2::outcome_envelope` with the
-/// local host that also reads it. Re-exported under the JS helper's name so the
+/// The definition lives in [`crate::v2::outcome_envelope`], beside the local
+/// host that also reads it. Re-exported here under the JS helper's name so the
 /// forty-odd lifecycle call sites keep their `support::outcomes_of` spelling.
-pub(crate) use archon_workflow::v2::outcome_envelope::outcomes_of;
+///
+/// Two waves moved this independently — one relocating the local host, one
+/// relocating this cluster — and both landed a copy in this crate. Keeping the
+/// re-export rather than the second definition is what stops the envelope
+/// search order existing twice: two copies would drift, and a caller reading
+/// the stale one would disagree about which envelope holds the outcomes.
+pub use crate::v2::outcome_envelope::outcomes_of;
 
-pub(crate) fn work_type_for(item: &Value) -> &str {
+pub fn work_type_for(item: &Value) -> &str {
     item.get("work_type").and_then(Value::as_str).unwrap_or("")
 }
 
 /// JS `validImplementationItem` / `validVerifiedNoopItem` / `validInventoryItem`.
-pub(crate) fn valid_inventory_item(contract: &LifecycleContract<'_>, item: &Value) -> bool {
+pub fn valid_inventory_item(contract: &LifecycleContract<'_>, item: &Value) -> bool {
     let has_id = item.get("item_id").is_some() || item.get("id").is_some();
     let canonical_ok = !contract.canonical_ids_for(item).is_empty()
         && contract.invalid_dependency_ids_for(item).is_empty();
@@ -119,7 +125,7 @@ pub(crate) fn valid_inventory_item(contract: &LifecycleContract<'_>, item: &Valu
 /// [`LifecycleContract::task_is_complete`] — so a task whose file says `done`
 /// counts exactly as one this run finished: it is not re-scheduled on a resume,
 /// and it unblocks its dependents rather than deadlocking them.
-pub(crate) fn ready_items_from(
+pub fn ready_items_from(
     contract: &LifecycleContract<'_>,
     items: &[Value],
     completed: &BTreeSet<String>,
@@ -142,7 +148,7 @@ pub(crate) fn ready_items_from(
 /// An item covering no canonical task is never complete — an item that claims
 /// nothing cannot claim to be finished — which is the pre-existing rule and the
 /// reason the empty check comes first.
-pub(crate) fn item_is_completed(
+pub fn item_is_completed(
     contract: &LifecycleContract<'_>,
     item: &Value,
     completed: &BTreeSet<String>,
@@ -176,7 +182,7 @@ fn outcome_has_noop_source_evidence(source_item: &Value, outcome: &Value) -> boo
 }
 
 /// JS noop.js: `matchingAcceptedNoopIds`.
-pub(crate) fn matching_accepted_noop_ids(
+pub fn matching_accepted_noop_ids(
     contract: &LifecycleContract<'_>,
     source_items: &[Value],
     outcomes: &[Value],
@@ -199,7 +205,7 @@ pub(crate) fn matching_accepted_noop_ids(
 }
 
 /// JS noop.js: `matchingAcceptedCompletionIds`.
-pub(crate) fn matching_accepted_completion_ids(
+pub fn matching_accepted_completion_ids(
     contract: &LifecycleContract<'_>,
     source_items: &[Value],
     outcomes: &[Value],

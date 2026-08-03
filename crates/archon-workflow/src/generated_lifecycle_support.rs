@@ -3,20 +3,24 @@
 //! Faithful ports of the scaffold's JS helpers (body_a/noop/remediation JS and
 //! the contract preflight JS). Items are `serde_json::Value` objects exactly
 //! as they were in the QuickJS realm; normalization delegates to the existing
-//! Rust contract twin (`workflow_live_generated_contract`), which the contract
-//! test suites already pin against the JS behavior.
+//! Rust contract twin ([`crate::generated_contract`]), which the contract test
+//! suites already pin against the JS behavior.
+//!
+//! The binary's lifecycle driver reaches this module as
+//! `archon_workflow::generated_lifecycle_support`; the items it names are `pub`
+//! and the rest stay `pub(crate)` or narrower.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::workflow_live_generated_contract::{
+use crate::generated_contract::{
     GeneratedContractIssue, normalize_canonical_ids, normalize_generated_inventory_value_with_repo,
     normalize_generated_item_value_with_repo,
 };
-use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use crate::task_universe::WorkflowV2TaskUniverse;
 
-pub(super) fn array(value: Option<&Value>) -> Vec<Value> {
+pub fn array(value: Option<&Value>) -> Vec<Value> {
     match value {
         Some(Value::Array(items)) => items.clone(),
         Some(Value::Null) | None => Vec::new(),
@@ -26,7 +30,7 @@ pub(super) fn array(value: Option<&Value>) -> Vec<Value> {
 
 /// JS `generatedContractPresent`: non-empty string/array/object, or any other
 /// non-null value.
-pub(super) fn present(value: Option<&Value>) -> bool {
+pub fn present(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::String(text)) => !text.trim().is_empty(),
@@ -36,7 +40,7 @@ pub(super) fn present(value: Option<&Value>) -> bool {
     }
 }
 
-pub(super) fn strings_of(value: Option<&Value>) -> Vec<String> {
+pub fn strings_of(value: Option<&Value>) -> Vec<String> {
     array(value)
         .into_iter()
         .filter_map(|entry| match entry {
@@ -49,7 +53,7 @@ pub(super) fn strings_of(value: Option<&Value>) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn raw_strings(value: &Value, keys: &[&str]) -> Vec<String> {
+pub fn raw_strings(value: &Value, keys: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     for key in keys {
         for entry in array(value.get(*key)) {
@@ -78,7 +82,7 @@ pub(super) fn raw_strings(value: &Value, keys: &[&str]) -> Vec<String> {
     out
 }
 
-pub(super) fn unique(values: Vec<String>) -> Vec<String> {
+pub fn unique(values: Vec<String>) -> Vec<String> {
     let mut seen = BTreeSet::new();
     values
         .into_iter()
@@ -86,13 +90,13 @@ pub(super) fn unique(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-pub(super) struct LifecycleContract<'a> {
-    pub(super) task_universe: &'a WorkflowV2TaskUniverse,
-    pub(super) target_repository_root: Option<&'a str>,
+pub struct LifecycleContract<'a> {
+    pub task_universe: &'a WorkflowV2TaskUniverse,
+    pub target_repository_root: Option<&'a str>,
 }
 
 impl LifecycleContract<'_> {
-    pub(super) fn canonical_universe(&self) -> BTreeSet<String> {
+    pub fn canonical_universe(&self) -> BTreeSet<String> {
         self.task_universe
             .tasks
             .iter()
@@ -100,7 +104,7 @@ impl LifecycleContract<'_> {
             .collect()
     }
 
-    pub(super) fn canonical_ids_for(&self, item: &Value) -> Vec<String> {
+    pub fn canonical_ids_for(&self, item: &Value) -> Vec<String> {
         normalize_canonical_ids(
             Some(self.task_universe),
             strings_of(item.get("canonical_task_ids")),
@@ -108,7 +112,7 @@ impl LifecycleContract<'_> {
         .canonical_ids
     }
 
-    pub(super) fn normalize_canonical_id_fields(&self, value: &Value) -> Value {
+    pub fn normalize_canonical_id_fields(&self, value: &Value) -> Value {
         match value {
             Value::Object(object) => {
                 let mut object = object
@@ -150,7 +154,7 @@ impl LifecycleContract<'_> {
         }
     }
 
-    pub(super) fn dependency_ids_for(&self, item: &Value) -> Vec<String> {
+    pub fn dependency_ids_for(&self, item: &Value) -> Vec<String> {
         let universe = self.canonical_universe();
         strings_of(item.get("dependency_ids"))
             .into_iter()
@@ -158,7 +162,7 @@ impl LifecycleContract<'_> {
             .collect()
     }
 
-    pub(super) fn invalid_dependency_ids_for(&self, item: &Value) -> Vec<String> {
+    pub(crate) fn invalid_dependency_ids_for(&self, item: &Value) -> Vec<String> {
         let universe = self.canonical_universe();
         strings_of(item.get("dependency_ids"))
             .into_iter()
@@ -166,7 +170,7 @@ impl LifecycleContract<'_> {
             .collect()
     }
 
-    pub(super) fn normalize_item(&self, item: &Value) -> Value {
+    pub fn normalize_item(&self, item: &Value) -> Value {
         normalize_generated_item_value_with_repo(
             item,
             Some(self.task_universe),
@@ -178,7 +182,7 @@ impl LifecycleContract<'_> {
     /// JS `normalizeGeneratedInventory`: spread of the source object plus
     /// normalized `items` (support items filtered out) and `unresolved_issues`
     /// (source issues + item issues + graph issues).
-    pub(super) fn normalize_inventory(&self, value: &Value) -> Value {
+    pub fn normalize_inventory(&self, value: &Value) -> Value {
         let normalized = normalize_generated_inventory_value_with_repo(
             value,
             Some(self.task_universe),
@@ -209,7 +213,7 @@ fn issue_to_value(issue: GeneratedContractIssue) -> Value {
 }
 
 /// JS `generatedContractInventorySourceIssues`.
-pub(super) fn inventory_source_issues(source: &Value) -> Vec<Value> {
+pub(crate) fn inventory_source_issues(source: &Value) -> Vec<Value> {
     if source.get("items").is_some_and(Value::is_array) {
         return array(source.get("unresolved_issues"));
     }
@@ -217,7 +221,7 @@ pub(super) fn inventory_source_issues(source: &Value) -> Vec<Value> {
 }
 
 /// JS `issuesOfKind`.
-pub(super) fn issues_of_kind(inventory: &Value, kind: &str) -> Vec<Value> {
+pub fn issues_of_kind(inventory: &Value, kind: &str) -> Vec<Value> {
     array(inventory.get("unresolved_issues"))
         .into_iter()
         .filter(|issue| issue.get("kind").and_then(Value::as_str) == Some(kind))
@@ -225,19 +229,19 @@ pub(super) fn issues_of_kind(inventory: &Value, kind: &str) -> Vec<Value> {
 }
 
 /// JS `generatedContractInventoryHasIssues`.
-pub(super) fn inventory_has_issues(inventory: &Value) -> bool {
+pub fn inventory_has_issues(inventory: &Value) -> bool {
     !array(inventory.get("unresolved_issues")).is_empty()
 }
 
 /// JS `generatedContractVerificationInventoryReady`.
-pub(super) fn verification_inventory_ready(inventory: &Value) -> bool {
+pub fn verification_inventory_ready(inventory: &Value) -> bool {
     !array(inventory.get("items")).is_empty() && !inventory_has_issues(inventory)
 }
 
 /// JS `mergeInventoryRepair`: fold repaired items into the existing inventory
 /// keyed by item_id then canonical task ids, replacing matches and appending
 /// new items in first-seen order.
-pub(super) fn merge_inventory_repair(
+pub fn merge_inventory_repair(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
     repair: &Value,
@@ -347,14 +351,14 @@ pub(super) fn merge_inventory_repair(
     Value::Object(object)
 }
 
-#[path = "workflow_live_generated_lifecycle_scheduling.rs"]
+#[path = "generated_lifecycle_scheduling.rs"]
 mod scheduling;
-pub(super) use scheduling::{
+pub use scheduling::{
     retry_verification_items, split_focused_verification_items, verification_items,
 };
 
 /// JS `generatedContractConstrainInventoryTasks`.
-pub(super) fn constrain_inventory_tasks(
+pub fn constrain_inventory_tasks(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
     allowed_task_ids: &[String],
@@ -388,7 +392,7 @@ pub(super) fn constrain_inventory_tasks(
 }
 
 /// JS `recordRepairAttempt`.
-pub(super) fn record_repair_attempt(
+pub fn record_repair_attempt(
     attempts: &mut Vec<Value>,
     call_id: &str,
     issue_kind: &str,
@@ -465,15 +469,22 @@ fn compact_routing_item(item: &Value) -> Value {
     })
 }
 
-#[path = "workflow_live_generated_lifecycle_outcomes.rs"]
+#[path = "generated_lifecycle_outcomes.rs"]
 mod outcomes;
-pub(super) use outcomes::*;
+pub use outcomes::*;
 
 /// The declared-`status:` half of the contract. A child module only because
 /// each source file in this tree is held under a 500-line ceiling.
-#[path = "workflow_live_generated_lifecycle_status.rs"]
+#[path = "generated_lifecycle_status.rs"]
 mod declared_status;
 
 #[cfg(test)]
-#[path = "workflow_live_generated_lifecycle_support_tests.rs"]
+#[path = "generated_lifecycle_support_tests.rs"]
 mod tests;
+
+// The other half of the task universe's tests. They stayed in the binary when
+// the universe moved in Wave D because they assert against this module, which
+// had not moved yet; it has now, so they sit beside the code they cover.
+#[cfg(test)]
+#[path = "generated_lifecycle_task_status_tests.rs"]
+mod task_status_tests;

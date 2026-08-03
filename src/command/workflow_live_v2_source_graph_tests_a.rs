@@ -247,7 +247,7 @@ fn review_remediation_source_metadata_accepts_wf580_fixture_shape() {
         .expect("fixture array")
         .iter()
         .map(|value| {
-            crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
+            archon_workflow::generated_contract::normalize_generated_item_value(
                 value,
                 Some(&tdl_task_universe()),
             )

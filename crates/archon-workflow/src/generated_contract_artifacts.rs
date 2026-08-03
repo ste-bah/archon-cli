@@ -1,6 +1,6 @@
 use super::*;
 
-use archon_workflow::v2::project_artifact_contract::{
+use crate::v2::project_artifact_contract::{
     ArtifactRequirementSplit, split_artifact_requirement_values,
 };
 

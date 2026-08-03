@@ -26,9 +26,6 @@ use archon_workflow::{
 };
 use tokio::sync::Semaphore;
 
-use super::super::workflow_live_generated_contract::{
-    canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
-};
 use super::workflow_live_v2_aggregate::attach_branch_evidence;
 use super::workflow_live_v2_data::{attach_completion_evidence_for_call, fanout_items_for_call};
 use super::workflow_live_v2_state::poll_v2_run_control;
@@ -38,6 +35,9 @@ use super::workflow_live_v2_target_expansion::{
 use super::{
     LiveV2AgentClient, run_single_v2_agent_call, run_single_v2_agent_call_in_repository,
     split_reusable_branch_outcomes,
+};
+use archon_workflow::generated_contract::{
+    canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
 };
 
 pub(super) async fn run_write_capable_v2_fanout(

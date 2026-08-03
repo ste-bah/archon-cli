@@ -103,7 +103,7 @@ fn workflow_live_generated_contract_ignores_unowned_support_items_for_scheduling
         Some(&WorkflowV2TaskUniverse {
             schema_version: "workflow-v2-task-universe-v1".to_string(),
             source_roots: vec!["/tmp/tasks".to_string()],
-            tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            tasks: vec![crate::task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/TASK-TDL-001.md".to_string(),

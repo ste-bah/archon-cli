@@ -4,12 +4,11 @@ use super::*;
 fn focused_verification_accepts_retry_plan_fixture() {
     let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_1_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
-            &value,
-            Some(&tdl_task_universe()),
-        )
-        .value;
+    let normalized = archon_workflow::generated_contract::normalize_generated_item_value(
+        &value,
+        Some(&tdl_task_universe()),
+    )
+    .value;
     let execution = focused_verification_execution(serde_json::json!([normalized]));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
@@ -25,12 +24,11 @@ fn focused_verification_accepts_retry_plan_fixture() {
 fn focused_verification_accepts_required_evidence_retry_commands_fixture() {
     let fixture = archon_test_support::fixtures::WF0ECA_VERIFICATION_REPAIR_PLAN_1_2_ITEM;
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_item_value(
-            &value,
-            Some(&tdl_task_universe()),
-        )
-        .value;
+    let normalized = archon_workflow::generated_contract::normalize_generated_item_value(
+        &value,
+        Some(&tdl_task_universe()),
+    )
+    .value;
     let execution = focused_verification_execution(serde_json::json!([normalized]));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
@@ -62,11 +60,10 @@ fn focused_verification_rejects_embedded_retry_items_without_invariants() {
 fn focused_verification_rejects_direct_retry_without_invariants() {
     let fixture = archon_test_support::fixtures::WFC5D4_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
-            &source_data,
-            Some(&tdl_task_universe()),
-        );
+    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+        &source_data,
+        Some(&tdl_task_universe()),
+    );
     let execution = focused_verification_execution(serde_json::Value::Array(normalized.items));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);

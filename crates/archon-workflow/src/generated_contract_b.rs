@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn canonical_task_ids_from_generated_value(
+pub fn canonical_task_ids_from_generated_value(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> Vec<String> {
@@ -89,7 +89,7 @@ pub(super) fn dependency_ids_from_generated_value(
     )
 }
 
-pub(crate) fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+pub fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<String> {
     sorted_unique(
         raw_strings_from_aliases(
             value,

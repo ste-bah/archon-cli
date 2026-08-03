@@ -216,11 +216,10 @@ fn focused_verification_rejects_retry_steps_without_invariants() {
 fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
     let fixture = archon_test_support::fixtures::WFF68_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
-            &source_data,
-            Some(&tdl_task_universe()),
-        );
+    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+        &source_data,
+        Some(&tdl_task_universe()),
+    );
     let execution = focused_verification_execution(serde_json::Value::Array(normalized.items));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
@@ -240,11 +239,10 @@ fn focused_verification_accepts_nested_retry_repair_plan_fixture() {
 fn focused_verification_rejects_direct_retry_items_without_invariants() {
     let fixture = archon_test_support::fixtures::WF1CA_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
-            &source_data,
-            Some(&tdl_task_universe()),
-        );
+    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+        &source_data,
+        Some(&tdl_task_universe()),
+    );
     let execution = focused_verification_execution(serde_json::Value::Array(normalized.items));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
@@ -257,11 +255,10 @@ fn focused_verification_rejects_direct_retry_items_without_invariants() {
 fn focused_verification_accepts_retry_command_fixture() {
     let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_1;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
-            &source_data,
-            Some(&tdl_task_universe()),
-        );
+    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+        &source_data,
+        Some(&tdl_task_universe()),
+    );
     let execution = focused_verification_execution(serde_json::Value::Array(normalized.items));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);
@@ -281,11 +278,10 @@ fn focused_verification_accepts_retry_command_fixture() {
 fn focused_verification_rejects_nested_retry_without_invariants() {
     let fixture = archon_test_support::fixtures::WF19F5_VERIFICATION_REPAIR_PLAN_1_3;
     let source_data: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
-    let normalized =
-        crate::command::workflow_live::workflow_live_generated_contract::normalize_generated_inventory_value(
-            &source_data,
-            Some(&tdl_task_universe()),
-        );
+    let normalized = archon_workflow::generated_contract::normalize_generated_inventory_value(
+        &source_data,
+        Some(&tdl_task_universe()),
+    );
     let execution = focused_verification_execution(serde_json::Value::Array(normalized.items));
 
     let metadata = dynamic_wave_source_metadata(&execution, Some(&tdl_task_universe()), None);

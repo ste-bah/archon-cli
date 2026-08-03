@@ -5,10 +5,10 @@
 
 use super::*;
 
-pub(super) use super::super::super::workflow_live_generated_lifecycle_remediation as remediation;
-pub(super) use super::super::super::workflow_live_generated_lifecycle_support as support;
-pub(super) use super::super::super::workflow_live_generated_lifecycle_support::LifecycleContract;
 pub(super) use super::super::super::workflow_live_semantic_preservation as semantic_preservation;
+pub(super) use archon_workflow::generated_lifecycle_remediation as remediation;
+pub(super) use archon_workflow::generated_lifecycle_support as support;
+pub(super) use archon_workflow::generated_lifecycle_support::LifecycleContract;
 pub(super) use archon_workflow::v2::lifecycle_prompts as prompts;
 
 pub(super) const TERMINAL_GATE_REROUTE_MARKER: &str = "workflow terminal gate reroute:";

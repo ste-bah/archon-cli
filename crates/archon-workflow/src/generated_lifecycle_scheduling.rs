@@ -7,7 +7,7 @@ use super::{LifecycleContract, array, strings_of};
 /// Verification plan items are atomic scheduling units. A plan may name several
 /// focused checks, but those checks run in one branch so retries cannot multiply
 /// an item into successively larger `-check-N` fanouts.
-pub(in crate::command) fn split_focused_verification_items(
+pub fn split_focused_verification_items(
     contract: &LifecycleContract<'_>,
     items: &[Value],
 ) -> Vec<Value> {
@@ -29,10 +29,7 @@ pub(in crate::command) fn split_focused_verification_items(
 }
 
 /// JS `generatedContractVerificationItems`.
-pub(in crate::command) fn verification_items(
-    contract: &LifecycleContract<'_>,
-    inventory: &Value,
-) -> Vec<Value> {
+pub fn verification_items(contract: &LifecycleContract<'_>, inventory: &Value) -> Vec<Value> {
     let items: Vec<Value> = array(inventory.get("items"))
         .iter()
         .map(|item| contract.normalize_item(item))
@@ -40,10 +37,7 @@ pub(in crate::command) fn verification_items(
     split_focused_verification_items(contract, &items)
 }
 
-pub(in crate::command) fn retry_verification_items(
-    contract: &LifecycleContract<'_>,
-    inventory: &Value,
-) -> Vec<Value> {
+pub fn retry_verification_items(contract: &LifecycleContract<'_>, inventory: &Value) -> Vec<Value> {
     let mut items = verification_items(contract, inventory)
         .into_iter()
         .map(canonicalize_retry_identity)

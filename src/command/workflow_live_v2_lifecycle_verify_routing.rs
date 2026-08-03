@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
+use archon_workflow::generated_lifecycle_support as support;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RetryProducer {
