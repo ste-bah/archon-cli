@@ -150,12 +150,13 @@ impl LiveV2AgentClient {
     }
 }
 
+/// One definition, shared with the shape tuner.
+///
+/// The learner's baseline has to be the cap this function returns, or a
+/// "narrowing" could be reported against a number the runtime never used. Two
+/// copies of this resolution is how that happens, so there is one.
 fn live_v2_subagent_max_concurrency() -> Option<usize> {
-    archon_tools::subagent_executor::get_subagent_executor()
-        .and_then(|exec| exec.max_concurrency())
-        .or(Some(
-            archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
-        ))
+    crate::command::workflow_live_shape_tuning::resolved_subagent_cap()
 }
 
 fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {

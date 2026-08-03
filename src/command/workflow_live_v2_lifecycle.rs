@@ -119,6 +119,11 @@ pub(super) struct LifecycleDriver {
     pub(super) max_repair_iterations: usize,
     pub(super) max_investigation_iterations: usize,
     pub(super) max_dependency_waves: usize,
+    /// How many ready tasks the write fan-out may dispatch at once, or `None`
+    /// for the configured subagent concurrency. See
+    /// `archon_core::config::decide_fanout_width` — this value can only ever be
+    /// narrower than the cap, and the runtime clamps it again on the way out.
+    pub(super) write_wave_width: Option<usize>,
     pub(super) runtime_state:
         std::sync::Mutex<workflow_live_v2_lifecycle_terminal_gate::TerminalGateState>,
 }

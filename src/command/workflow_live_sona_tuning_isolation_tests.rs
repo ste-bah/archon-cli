@@ -27,6 +27,13 @@ const SONA_SYMBOLS: &[&str] = &[
     "provide_feedback",
     "GeneratedTuningDecision",
     "apply_generated_tuning",
+    // The Phase 8 structural knob. It is fenced for the same reason and by the
+    // same scan: a learned number that could reach a satisfaction verdict is
+    // finding F1 with better arithmetic, and it makes no difference whether the
+    // number is a timeout or a fan-out width.
+    "ShapeDecision",
+    "decide_fanout_width",
+    "TunableShapeKnob",
     "learning::sona",
     "archon_pipeline",
 ];
@@ -137,5 +144,26 @@ fn the_tuner_can_only_move_timeouts_and_retry_counts() {
         ],
         "the tuner's parameter set changed; every entry must be a retry count or a timeout, \
          never anything that decides whether work is accepted"
+    );
+}
+
+/// The structural knobs get their own sentence, because theirs is a different
+/// one. A budget knob may only change how long something runs; a shape knob may
+/// only change how work is distributed, and only in the direction the runtime
+/// already clamps. Neither may decide whether work is accepted, and neither may
+/// remove a stage.
+#[test]
+fn the_shape_tuner_can_only_move_how_work_is_distributed() {
+    let keys: Vec<&str> = archon_core::config::TunableShapeKnob::ALL
+        .into_iter()
+        .map(archon_core::config::TunableShapeKnob::key)
+        .collect();
+    assert_eq!(
+        keys,
+        ["implementation_wave_fanout_width"],
+        "the shape knob set changed; every entry must be a distribution knob whose dangerous \
+         direction is already closed by a shipped clamp. A knob that could move a stage, \
+         remove a reviewer, or decide acceptance does not belong in this set — see \
+         workflow_live_shape_gate for what a structural knob has to prove before it runs"
     );
 }

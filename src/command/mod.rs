@@ -249,6 +249,8 @@ pub(crate) mod web_chat;
 pub(crate) mod workflow;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_live_learning_hooks;
+pub(crate) mod workflow_live_shape_gate;
+pub(crate) mod workflow_live_shape_tuning;
 pub(crate) mod workflow_live_sona_tuning;
 pub(crate) mod workflow_llm_client_factory;
 pub(crate) mod world_model;

@@ -43,7 +43,7 @@ mod workflow_live_generated_lifecycle_remediation;
 #[path = "workflow_live_generated_lifecycle_support.rs"]
 mod workflow_live_generated_lifecycle_support;
 #[path = "workflow_live_generated_scaffold.rs"]
-mod workflow_live_generated_scaffold;
+pub(crate) mod workflow_live_generated_scaffold;
 #[cfg(test)]
 #[path = "workflow_live_generated_semantics_tests.rs"]
 mod workflow_live_generated_semantics_tests;
@@ -68,6 +68,8 @@ mod workflow_live_runner_activity;
 mod workflow_live_runner_tests;
 #[path = "workflow_live_semantic_preservation.rs"]
 mod workflow_live_semantic_preservation;
+#[path = "workflow_live_shape_apply.rs"]
+mod workflow_live_shape_apply;
 // Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
 // driver wiring lands incrementally; the action contract compiles and is
 // tested from day one.
@@ -101,6 +103,7 @@ use workflow_live_config_layers::{
 };
 use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
+use workflow_live_shape_apply::{apply_generated_shape, live_task_class};
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
     matches!(
@@ -283,12 +286,26 @@ async fn run_live_action(
         let learning = &learning;
         let tuning_decisions = &tuning_decisions;
         async move {
-            let mut plan = plan_live(store, &task, llm, tui_tx, generated_config, learning).await?;
+            let mut plan = plan_live(
+                store,
+                &task,
+                llm,
+                tui_tx.clone(),
+                generated_config,
+                learning,
+            )
+            .await?;
             cap_live_plan_parallelism(&mut plan, runner, policy);
             // Attached here rather than inside the planner because the planner
             // never sees the baseline it was tuned away from, and a decision
             // record without its baseline explains nothing.
             plan.tuning_decisions = tuning_decisions.clone();
+            // Shape comes after the plan, not before it like the budgets: the
+            // knob is scored against the plan's own stage families and the
+            // declared task graph, and neither exists until the planner has
+            // run. Budgets have no such dependency, which is why they are
+            // resolved earlier and reach the planner itself.
+            apply_generated_shape(cwd, task_class, learning, &mut plan, &tui_tx).await;
             Ok::<_, anyhow::Error>(plan)
         }
     };
@@ -377,24 +394,6 @@ async fn run_live_action(
         }
         other => run_action(cwd, other),
     }
-}
-
-/// The task class a run's learned limits are keyed on, or `None` when this
-/// action has no task text of its own to classify.
-///
-/// Only `Plan` and `Run` classify. `RunTemplate` executes a saved spec, which
-/// carries `GeneratedWorkflowConfig::default()` by construction, and
-/// `Resume`/`Continue` replay the config persisted at creation — a run that
-/// changed its repair cap or its timeout halfway through would invalidate the
-/// records it had already written under the old one. Both therefore have
-/// nothing for the tuner to substitute, and classifying them would only produce
-/// a report about a value nobody reads.
-fn live_task_class(action: &CommandAction) -> Option<&'static str> {
-    let task = match action {
-        CommandAction::Plan { task } | CommandAction::Run { task, .. } => task,
-        _ => return None,
-    };
-    Some(crate::command::workflow_live_learning_hooks::classify_generated_run(task, None).as_str())
 }
 
 fn cap_live_plan_parallelism(

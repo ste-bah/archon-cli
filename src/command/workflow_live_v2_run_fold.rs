@@ -59,6 +59,20 @@ pub(super) async fn fold_run_topology(
             class.as_str(),
             &learning,
         );
+        // The write half of the shape loop, on the same class and the same
+        // store. Kept a separate call rather than folded into the one above
+        // because the two answer different questions and must be able to have
+        // different amounts of evidence behind them: a run that dispatched no
+        // write wave says nothing about width while still saying plenty about
+        // timeouts, and merging them would let one supply the other's
+        // observation count.
+        crate::command::workflow_live_shape_tuning::record_generated_shape_outcome(
+            &cwd,
+            &store,
+            &run_id,
+            class.as_str(),
+            &learning,
+        );
     })
     .await;
 }

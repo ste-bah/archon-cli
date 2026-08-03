@@ -109,6 +109,15 @@ struct GeneratedV2Metadata {
     /// run where SONA did not move anything, which is most of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
+    /// Why this run's plan had the shape it had.
+    ///
+    /// The structural counterpart of `tuning_decisions`. Persisted for the same
+    /// reason and absent on the same runs: a run that got the configured
+    /// concurrency carries nothing, and a run that did not carries the weight,
+    /// the evidence count, and — when a pre-run lint withdrew the proposal —
+    /// which lint and what it found.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shape_decisions: Vec<archon_core::config::ShapeDecision>,
     /// Which lifecycle this run was CREATED with (true = v3 authored script,
     /// false = decomposed). Persisted so continue/resume runs the SAME engine
     /// instead of silently switching when the ARCHON_SCRIPT_LIFECYCLE env var
@@ -222,6 +231,7 @@ export default async function workflow(w) {
                     governed_learning_context: Vec::new(),
                     generated_config: None,
                     tuning_decisions: Vec::new(),
+                    shape_decisions: Vec::new(),
                     script_lifecycle: Some(true),
                 },
             )

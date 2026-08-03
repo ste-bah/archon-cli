@@ -65,6 +65,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
             max_investigation_iterations: 1,
             verification_branch_timeout_secs: 30,
             host_call_timeout_secs: 30,
+            implementation_wave_max_parallelism: None,
         },
     };
     let runner = WorkflowV2ScriptRunner::new(
@@ -247,6 +248,7 @@ async fn failed_final_report_emits_host_built_fallback() {
         max_investigation_iterations: 1,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
+        implementation_wave_max_parallelism: None,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,

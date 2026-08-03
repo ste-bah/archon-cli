@@ -319,7 +319,7 @@ fn cargo_write_waves_serialize_before_agent_launch() {
         "focused_verification": ["cargo test focused"]
     })];
 
-    assert_eq!(write_wave_parallelism(&items), 1);
+    assert_eq!(write_wave_parallelism(&items, None), 1);
 }
 
 /// Build a project whose payload rows are supplied by the caller, so a test can

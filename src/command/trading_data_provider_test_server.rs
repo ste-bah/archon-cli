@@ -83,7 +83,22 @@ fn accept_before_deadline(listener: &TcpListener, stop: &AtomicBool) -> Result<T
     let deadline = Instant::now() + REQUEST_DEADLINE;
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return Ok(stream),
+            // The listener is non-blocking so the deadline above can be
+            // enforced. On Windows the accepted socket INHERITS that mode, so
+            // `serve_response`'s first `read` returns WSAEWOULDBLOCK (os error
+            // 10035) whenever the client's request bytes have not landed yet —
+            // a race the reader lost intermittently under full-suite load and
+            // won when run alone, which is why it looked like a flaky test
+            // rather than the unconditional bug it is. Restoring blocking mode
+            // here is what makes the read wait for the request instead of
+            // failing closed on its absence; the deadline has already done its
+            // job by this point.
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("mock OpenBB server could not block: {error}"))?;
+                return Ok(stream);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if stop.load(Ordering::Acquire) {
                     return Err("mock OpenBB server stopped before a request".into());

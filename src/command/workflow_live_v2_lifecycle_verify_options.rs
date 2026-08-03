@@ -267,11 +267,25 @@ pub(super) fn verification_options(items: &[Value], task: &str, focused: bool) -
     options
 }
 
-pub(super) fn write_wave_parallelism(items: &[Value]) -> Value {
-    if items_have_cargo_commands(items) {
-        serde_json::json!(1)
-    } else {
-        Value::String("configured".to_string())
+/// The width for one write fan-out.
+///
+/// `learned_width` is the tuned narrowing, or `None` for the configured
+/// subagent concurrency.
+///
+/// The cargo pin wins over any learned width, and wins by being a floor rather
+/// than a preference: concurrent `cargo` invocations contend on the same
+/// target-directory lock, and the branches that lose that race report build
+/// failures the verification stages then triage and the repair loop then
+/// re-attempts. A knob that could raise this to 2 would be manufacturing the
+/// failures the earned failure handling exists to resolve. So the two combine
+/// with `min`, never `max` — there is no setting of this knob that can widen a
+/// wave the rest of the system decided must be serial.
+pub(super) fn write_wave_parallelism(items: &[Value], learned_width: Option<usize>) -> Value {
+    let serial_required = items_have_cargo_commands(items);
+    match (serial_required, learned_width) {
+        (true, _) => serde_json::json!(1),
+        (false, Some(width)) => serde_json::json!(width.max(1)),
+        (false, None) => Value::String("configured".to_string()),
     }
 }
 
