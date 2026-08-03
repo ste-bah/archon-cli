@@ -169,22 +169,17 @@ fn serve_response(
 /// One 4096-byte `read()` was wrong on two counts, and both let the
 /// `expected_parts` check above assert against a fragment of a request.
 ///
-/// First, on Windows the socket returned by `accept()` inherits the listener's
-/// non-blocking mode, which `http_server` sets so the accept loop can poll for
-/// the stop flag. A `read()` issued before the client's bytes land therefore
-/// failed outright with WSAEWOULDBLOCK (os error 10035) rather than waiting.
-/// The 10ms accept poll usually meant the request had already arrived, so this
-/// surfaced as an occasional failure rather than a constant one. Clearing
-/// non-blocking on the accepted socket is what makes the read wait; the read
-/// timeout keeps that wait bounded.
+/// First, the accepted socket inherited the listener's non-blocking mode on
+/// Windows, so a `read()` issued before the client's bytes landed failed with
+/// WSAEWOULDBLOCK instead of waiting. That is fixed where the socket is
+/// accepted — see [`accept_before_deadline`], which explains it in full — so by
+/// the time it arrives here it blocks, and the read timeout below is what keeps
+/// that wait bounded.
 ///
 /// Second, TCP may split a request across segments, so even a blocking read can
 /// return a prefix. Looping to the end of the head is the only way to know the
-/// whole request was seen.
+/// whole request was seen. That half is this function's own job.
 fn read_request_head(stream: &mut TcpStream) -> Result<String, String> {
-    stream
-        .set_nonblocking(false)
-        .map_err(|error| format!("mock OpenBB could not block the accepted socket: {error}"))?;
     stream
         .set_read_timeout(Some(READ_DEADLINE))
         .map_err(|error| format!("mock OpenBB could not bound the request read: {error}"))?;
