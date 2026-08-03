@@ -8,6 +8,9 @@ enum ProbeEnvironment {
     Inherited,
     Empty,
     Sanitized,
+    SanitizedPowerShell,
+    SanitizedCi,
+    SanitizedWindows,
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -23,6 +26,21 @@ async fn windows_empty_env_raw_child_drains_large_output() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn windows_sanitized_raw_child_drains_large_output() {
     run_probe(false, false, ProbeEnvironment::Sanitized).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn windows_powershell_env_raw_child_drains_large_output() {
+    run_probe(false, false, ProbeEnvironment::SanitizedPowerShell).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn windows_ci_env_raw_child_drains_large_output() {
+    run_probe(false, false, ProbeEnvironment::SanitizedCi).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn windows_metadata_env_raw_child_drains_large_output() {
+    run_probe(false, false, ProbeEnvironment::SanitizedWindows).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -132,11 +150,38 @@ fn output_command(
         ProbeEnvironment::Empty => {
             command.env_clear();
         }
-        ProbeEnvironment::Sanitized => {
-            command
-                .env_clear()
-                .envs(archon_tools::bash::sanitized_env());
-        }
+        ProbeEnvironment::Sanitized => apply_sanitized_env(&mut command, &[]),
+        ProbeEnvironment::SanitizedPowerShell => apply_sanitized_env(
+            &mut command,
+            &["PSModulePath", "POWERSHELL_DISTRIBUTION_CHANNEL"],
+        ),
+        ProbeEnvironment::SanitizedCi => apply_sanitized_env(
+            &mut command,
+            &["CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "RUNNER_TEMP"],
+        ),
+        ProbeEnvironment::SanitizedWindows => apply_sanitized_env(
+            &mut command,
+            &[
+                "ALLUSERSPROFILE",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "PROGRAMDATA",
+                "PROGRAMFILES",
+                "PROGRAMFILES(X86)",
+                "PROCESSOR_ARCHITECTURE",
+            ],
+        ),
     }
     command
+}
+
+fn apply_sanitized_env(command: &mut tokio::process::Command, extras: &[&str]) {
+    command
+        .env_clear()
+        .envs(archon_tools::bash::sanitized_env());
+    for name in extras {
+        if let Ok(value) = std::env::var(name) {
+            command.env(name, value);
+        }
+    }
 }
