@@ -60,8 +60,6 @@ mod workflow_live_runner_tests;
 #[cfg(test)]
 #[path = "workflow_live_runtime_genericity_tests.rs"]
 mod workflow_live_runtime_genericity_tests;
-#[path = "workflow_live_semantic_preservation.rs"]
-mod workflow_live_semantic_preservation;
 #[path = "workflow_live_shape_apply.rs"]
 mod workflow_live_shape_apply;
 #[cfg(test)]
@@ -69,11 +67,6 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
-// Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
-// driver wiring lands incrementally; the action contract compiles and is
-// tested from day one.
-#[path = "workflow_live_v3_orchestrator_actions.rs"]
-mod workflow_live_v3_orchestrator_actions;
 #[path = "workflow_live_verification_contract.rs"]
 mod workflow_live_verification_contract;
 #[cfg(test)]

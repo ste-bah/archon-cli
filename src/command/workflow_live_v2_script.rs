@@ -357,14 +357,10 @@ use workflow_live_v3_prelude::*;
 mod workflow_live_v2_script_verification;
 use workflow_live_v2_script_verification::*;
 
-// The lifecycle's value-level policy now lives in archon-workflow. One import
-// here, and the driver parts below reach every module through it.
-use archon_workflow::v2::lifecycle_policy;
+// Terminal-status accounting keys on the same transport detector the driver's
+// reducer retry path does; one definition, in the crate that owns the driver.
+use archon_workflow::v2::lifecycle_driver::is_transport_failure_text;
 
-#[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
-mod workflow_live_v2_lifecycle_review_remediation;
-#[path = "workflow_live_v2_lifecycle_review_verification.rs"]
-mod workflow_live_v2_lifecycle_review_verification;
 // Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
 // inside this subsystem because that is the only scope from which the planner,
 // the task universe, the scheduler primitives and the per-task review item
@@ -381,19 +377,15 @@ use workflow_live_v2_script_dry_run::*;
 // splice used to satisfy implicitly.
 pub(crate) use workflow_live_v2_script_dry_run::dry_run_workflow_plan;
 
+// Composition root for `archon_workflow::v2::lifecycle_driver`: the only code
+// left here that touches the concrete script host.
 #[path = "workflow_live_v2_lifecycle.rs"]
 mod workflow_live_v2_lifecycle;
-use workflow_live_v2_lifecycle::*;
 
 // Host side of `archon_workflow::lifecycle_host_port`. Outside the `workflow_*`
 // prefix on purpose — see the file's module doc.
 #[path = "lifecycle_script_host.rs"]
 mod lifecycle_script_host;
-
-#[path = "workflow_live_v3_orchestrated.rs"]
-mod workflow_live_v3_orchestrated;
-#[cfg(test)]
-use workflow_live_v3_orchestrated::*;
 
 #[path = "workflow_live_v3_author.rs"]
 mod workflow_live_v3_author;
@@ -404,51 +396,15 @@ use workflow_live_v3_author::*;
 mod workflow_live_v3_author_checks;
 use workflow_live_v3_author_checks::*;
 
-#[path = "workflow_live_v2_lifecycle_waves.rs"]
-mod workflow_live_v2_lifecycle_waves;
-
-#[path = "workflow_live_v2_lifecycle_impl.rs"]
-mod workflow_live_v2_lifecycle_impl;
-
-#[path = "workflow_live_v2_lifecycle_boundary_repair_driver.rs"]
-mod workflow_live_v2_lifecycle_boundary_repair_driver;
-
-#[path = "workflow_live_v2_lifecycle_verify.rs"]
-mod workflow_live_v2_lifecycle_verify;
-#[cfg(test)]
-use workflow_live_v2_lifecycle_verify::*;
-
-#[path = "workflow_live_v2_lifecycle_verify_triage.rs"]
-mod workflow_live_v2_lifecycle_verify_triage;
-
-#[path = "workflow_live_v2_lifecycle_verify_remediation.rs"]
-mod workflow_live_v2_lifecycle_verify_remediation;
-use workflow_live_v2_lifecycle_verify_remediation::*;
-
-#[path = "workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs"]
-mod workflow_live_v2_lifecycle_verify_outcome_repair_driver;
-
-#[path = "workflow_live_v2_lifecycle_review.rs"]
-mod workflow_live_v2_lifecycle_review;
-
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+// End-to-end lifecycle coverage stays here: it drives the real
+// `LiveV2AgentClient`/`WorkflowScriptHost` stack through the driver's public
+// surface, which is exactly what cannot be built from inside archon-workflow.
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_e2e_tests.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_review_remediation_tests.rs"]
-mod workflow_live_v2_lifecycle_review_remediation_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_review_verification_tests.rs"]
-mod workflow_live_v2_lifecycle_review_verification_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_remediation_tests;
-#[cfg(test)]
-#[path = "workflow_live_v3_boundary_tests.rs"]
-mod workflow_live_v3_boundary_tests;
 #[cfg(test)]
 #[path = "workflow_live_v3_compaction_tests.rs"]
 mod workflow_live_v3_compaction_tests;

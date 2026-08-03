@@ -6,14 +6,14 @@
 use super::*;
 
 impl LifecycleDriver {
-    pub(in super::super::super) async fn run_implementation_wave(
+    pub(crate) async fn run_implementation_wave(
         &self,
         ready_implementation_items: &[serde_json::Value],
         wave_index: usize,
         dependency_iteration: usize,
         implementation_candidate_ids: &mut Vec<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
         let wave = self
             .write_fanout(

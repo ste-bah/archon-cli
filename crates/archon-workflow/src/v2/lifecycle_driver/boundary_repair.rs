@@ -6,11 +6,11 @@ impl LifecycleDriver {
     /// otherwise live only in in-memory repair-attempt evidence until the
     /// terminal report, leaving external observers unable to distinguish a
     /// rejected repair's raw envelope from adopted state.
-    pub(super) async fn record_preservation_rejection(
+    pub(crate) async fn record_preservation_rejection(
         &self,
         repair_id: &str,
         violations: &[String],
-    ) -> archon_workflow::WorkflowResult<()> {
+    ) -> crate::WorkflowResult<()> {
         self.call(
             "checkpoint",
             &format!("{repair_id}-semantic-preservation-rejected"),
@@ -28,7 +28,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn enforce_outcome_repair_accounting(
+    pub(crate) async fn enforce_outcome_repair_accounting(
         &self,
         call_id: &str,
         raw: serde_json::Value,
@@ -38,7 +38,7 @@ impl LifecycleDriver {
         source_call_id: &str,
         allowed_task_ids: &std::collections::BTreeSet<String>,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let normalize = |value: &serde_json::Value| {
             let harvested = lifecycle_policy::boundary_repair::harvest_outcome_repair_items(value);
             remediation::filter_remediation_inventory_by_task_ids(
@@ -113,12 +113,12 @@ impl LifecycleDriver {
         }
     }
 
-    pub(super) async fn enforce_final_reconciliation_shape(
+    pub(crate) async fn enforce_final_reconciliation_shape(
         &self,
         call_id: &str,
         reconciliation: serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let reconciliation =
             lifecycle_policy::boundary_repair::harvest_reconciliation_items(&reconciliation);
         let quality = lifecycle_policy::boundary_repair::reconciliation_quality(&reconciliation);

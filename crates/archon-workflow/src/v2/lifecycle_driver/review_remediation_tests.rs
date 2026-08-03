@@ -9,7 +9,7 @@ fn failed_review_wave_fixture() -> serde_json::Value {
 fn failed_review_remediation_wave_records_blocker_before_verification() {
     let review_fixes = failed_review_wave_fixture();
     let mut evidence = LifecycleEvidence::default();
-    let block = workflow_live_v2_lifecycle_review_remediation::review_remediation_block(
+    let block = review_remediation::review_remediation_block(
         &mut evidence,
         1,
         &serde_json::json!({ "tasks": [] }),
@@ -40,7 +40,7 @@ fn accepted_review_remediation_wave_does_not_block() {
     review_fixes["data"]["items"][0]["status"] = serde_json::json!("accepted");
     let mut evidence = LifecycleEvidence::default();
 
-    let block = workflow_live_v2_lifecycle_review_remediation::review_remediation_block(
+    let block = review_remediation::review_remediation_block(
         &mut evidence,
         1,
         &serde_json::json!({ "tasks": [] }),

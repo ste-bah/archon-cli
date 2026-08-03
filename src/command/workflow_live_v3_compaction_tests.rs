@@ -16,6 +16,10 @@ use archon_llm::types::ContentBlockType;
 use archon_tools::subagent_executor::install_subagent_executor;
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
+use archon_workflow::v2::lifecycle_driver::{
+    LifecycleDriver, LifecycleLimits, OrchestrationLedger,
+};
+use archon_workflow::v2::orchestrator_actions::OrchestratorAction;
 use archon_workflow::{WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2ResultStore};
 use tokio::sync::mpsc;
 
@@ -301,7 +305,11 @@ async fn run_fixture(scenario: FixtureScenario) {
         Some(temp.path().display().to_string()),
         serde_json::json!([]),
         Default::default(),
-        &generated,
+        LifecycleLimits {
+            max_repair_iterations: generated.max_repair_iterations,
+            max_investigation_iterations: generated.max_investigation_iterations,
+            implementation_wave_max_parallelism: generated.implementation_wave_max_parallelism,
+        },
     );
     let mut ledger = OrchestrationLedger::for_universe(&driver.universe);
     let outcome = driver

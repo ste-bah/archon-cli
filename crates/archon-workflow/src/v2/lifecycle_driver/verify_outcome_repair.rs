@@ -4,7 +4,7 @@ use super::*;
 
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_verification_remediation_wave(
+    pub(crate) async fn run_verification_remediation_wave(
         &self,
         ready_items: &[serde_json::Value],
         remediation_inventory: &serde_json::Value,
@@ -12,7 +12,7 @@ impl LifecycleDriver {
         dependency_iteration: usize,
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let items = lifecycle_policy::verify_merge::verification_remediation_source_items(
             remediation_inventory,
         );
@@ -54,7 +54,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn repair_verification_remediation_outcomes(
+    pub(crate) async fn repair_verification_remediation_outcomes(
         &self,
         ready_items: &[serde_json::Value],
         initial_inventory: &serde_json::Value,
@@ -63,7 +63,7 @@ impl LifecycleDriver {
         dependency_iteration: usize,
         remediation_attempt: &usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
         let allowed = remediation::remediation_task_id_set(
             &contract,
@@ -123,7 +123,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn verification_remediation_followup_inventory(
+    pub(crate) async fn verification_remediation_followup_inventory(
         &self,
         ready_items: &[serde_json::Value],
         source_inventory: &serde_json::Value,
@@ -134,7 +134,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         repair_attempt: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let call_id = format!(
             "verification-remediation-outcome-repair-{wave_index}-{remediation_attempt}-{repair_attempt}"
         );
@@ -179,7 +179,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_verification_remediation_followup(
+    pub(crate) async fn run_verification_remediation_followup(
         &self,
         inventory: &serde_json::Value,
         wave: serde_json::Value,
@@ -188,7 +188,7 @@ impl LifecycleDriver {
         remediation_attempt: &usize,
         repair_attempt: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<(serde_json::Value, serde_json::Value)> {
+    ) -> crate::WorkflowResult<(serde_json::Value, serde_json::Value)> {
         let items =
             lifecycle_policy::verify_merge::verification_remediation_source_items(inventory);
         let call_id =
@@ -218,7 +218,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn verification_remediation_wave_id(
+pub(crate) fn verification_remediation_wave_id(
     wave_index: usize,
     remediation_attempt: &usize,
     repair_attempt: Option<usize>,
@@ -228,7 +228,7 @@ pub(super) fn verification_remediation_wave_id(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn record_verification_remediation_wave(
+pub(crate) fn record_verification_remediation_wave(
     evidence: &mut LifecycleEvidence,
     wave_index: usize,
     dependency_iteration: usize,

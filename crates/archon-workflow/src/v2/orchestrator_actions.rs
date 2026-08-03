@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// object matching this enum (tagged by `action`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(crate) enum OrchestratorAction {
+pub enum OrchestratorAction {
     /// Spawn a coder subagent in a sealed worktree through the write gauntlet.
     SpawnCoder {
         task_id: String,
@@ -52,13 +52,13 @@ pub(crate) enum OrchestratorAction {
 /// Typed result of dispatching one action, fed back verbatim into the
 /// orchestrator conversation as the next user turn.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct ActionOutcome {
-    pub(crate) action_ordinal: usize,
-    pub(crate) tool: String,
+pub struct ActionOutcome {
+    pub action_ordinal: usize,
+    pub tool: String,
     /// "ok" | "gate_rejected" | "refused" | "error"
-    pub(crate) status: String,
+    pub status: String,
     /// Subagent final report and/or host gate verdict, verbatim.
-    pub(crate) report: serde_json::Value,
+    pub report: serde_json::Value,
 }
 
 /// Extract the action from an orchestrator reply envelope. Accepts the action

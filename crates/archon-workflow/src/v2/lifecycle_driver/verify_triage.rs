@@ -1,11 +1,11 @@
 // Verification-failure triage and its single bounded re-triage path.
 
 use super::*;
-use archon_workflow::v2::lifecycle_policy::triage_outcomes::triage_failed_outcomes;
+use crate::v2::lifecycle_policy::triage_outcomes::triage_failed_outcomes;
 
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_verification_remediation(
+    pub(crate) async fn run_verification_remediation(
         &self,
         ready_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -15,7 +15,7 @@ impl LifecycleDriver {
         remediation_attempt: &mut usize,
         verification: &mut serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let triage_id = format!("verification-failure-triage-{wave_index}-{repair_attempt}");
         let failed_outcomes = triage_failed_outcomes(verification);
         let triage = self
@@ -96,14 +96,14 @@ impl LifecycleDriver {
         Ok(retried || superseded || remediated)
     }
 
-    pub(super) async fn verification_failure_triage(
+    pub(crate) async fn verification_failure_triage(
         &self,
         triage_id: &str,
         ready_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
         actionable: &[serde_json::Value],
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let triage = self
             .reduce(
                 triage_id,
@@ -140,13 +140,13 @@ impl LifecycleDriver {
     /// for in a canonical route array. Unaccounted outcomes get one bounded
     /// shape-repair re-ask; the repair is adopted only if it accounts for
     /// more of them.
-    pub(super) async fn enforce_triage_accounting(
+    pub async fn enforce_triage_accounting(
         &self,
         triage_id: &str,
         failed_outcomes: &[serde_json::Value],
         triage: serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let triage = lifecycle_policy::verify_routing::harvest_nested_triage_routes(&triage);
         let unaccounted =
             lifecycle_policy::verify_routing::unaccounted_failed_outcomes(&triage, failed_outcomes);
@@ -201,7 +201,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn bounded_verification_retriage(
+    pub(crate) async fn bounded_verification_retriage(
         &self,
         triage: serde_json::Value,
         triage_id: &str,
@@ -211,7 +211,7 @@ impl LifecycleDriver {
         repair_attempt: usize,
         verification: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<(
+    ) -> crate::WorkflowResult<(
         serde_json::Value,
         String,
         lifecycle_policy::verify_routing::RetryProducer,
@@ -255,7 +255,7 @@ impl LifecycleDriver {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_producer_retry(
+    pub(crate) async fn run_producer_retry(
         &self,
         producer_output: &serde_json::Value,
         producer: lifecycle_policy::verify_routing::RetryProducer,
@@ -266,7 +266,7 @@ impl LifecycleDriver {
         repair_attempt: usize,
         verification: &mut serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let contract = self.contract();
         let Some(retry_items) = producer_retry_items(
             &contract,
@@ -315,7 +315,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn record_triage_retry(
+pub(crate) fn record_triage_retry(
     evidence: &mut LifecycleEvidence,
     producer: lifecycle_policy::verify_routing::RetryProducer,
     wave_index: usize,

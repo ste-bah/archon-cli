@@ -120,7 +120,7 @@ fn d32_unprovable_supersede_requires_one_bounded_retriage() {
 
 #[test]
 fn d32_triage_prompt_routes_stale_filters_to_corrected_retries() {
-    let prompt = archon_workflow::v2::lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
+    let prompt = crate::v2::lifecycle_prompts::VERIFICATION_FAILURE_TRIAGE_TASK;
 
     assert!(prompt.contains("zero-match"));
     assert!(prompt.contains("repository-search-verified"));
@@ -394,7 +394,7 @@ fn d23_retry_merge_preserves_unretried_failures() {
     }));
 }
 
-pub(super) fn accepted_outcome(id: &str) -> serde_json::Value {
+pub(crate) fn accepted_outcome(id: &str) -> serde_json::Value {
     serde_json::json!({
         "item_id": id,
         "status": "accepted",
@@ -413,7 +413,7 @@ fn failed_outcome(id: &str) -> serde_json::Value {
     })
 }
 
-pub(super) fn failed_outcome_with_gap(id: &str, gap_id: &str) -> serde_json::Value {
+pub(crate) fn failed_outcome_with_gap(id: &str, gap_id: &str) -> serde_json::Value {
     let mut outcome = failed_outcome(id);
     outcome["result"]["residual_gaps"] = serde_json::json!([{
         "id": gap_id,

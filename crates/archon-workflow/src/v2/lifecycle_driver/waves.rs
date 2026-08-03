@@ -4,21 +4,22 @@
 // 222-500 plus the ownership splice), ported faithfully.
 
 use super::*;
-use archon_workflow::v2::lifecycle_policy::inventory_items::{
+use crate::v2::lifecycle_policy::inventory_items::{
     item_has_write_ownership, preserve_host_pinned_implementation, preserve_host_pinned_items,
 };
 
-#[path = "workflow_live_v2_lifecycle_wave_phases.rs"]
-mod workflow_live_v2_lifecycle_wave_phases;
-pub(crate) use workflow_live_v2_lifecycle_wave_phases::*;
+// Wave phases are inherent `impl LifecycleDriver` blocks only — there is
+// nothing to re-export.
+#[path = "wave_phases.rs"]
+mod wave_phases;
 
 impl LifecycleDriver {
-    pub(in super::super::super) async fn run_dependency_waves(
+    pub(crate) async fn run_dependency_waves(
         &self,
         mut inventory: serde_json::Value,
         discovery: &serde_json::Value,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+    ) -> crate::WorkflowResult<serde_json::Value> {
         let contract = self.contract();
         let pending_implementation_items = {
             let mut state = self
@@ -282,7 +283,7 @@ impl LifecycleDriver {
         Ok(inventory)
     }
 
-    pub(super) async fn repair_dependency_deadlock(
+    pub(crate) async fn repair_dependency_deadlock(
         &self,
         inventory: &mut serde_json::Value,
         remaining_items: &mut Vec<serde_json::Value>,
@@ -290,7 +291,7 @@ impl LifecycleDriver {
         discovery: &serde_json::Value,
         dependency_iteration: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<bool> {
+    ) -> crate::WorkflowResult<bool> {
         let contract = self.contract();
         let mut attempt = 1usize;
         while attempt <= self.max_repair_iterations {
@@ -335,7 +336,7 @@ impl LifecycleDriver {
         Ok(false)
     }
 
-    pub(super) async fn repair_wave_completion_evidence(
+    pub(crate) async fn repair_wave_completion_evidence(
         &self,
         ready_items: &[serde_json::Value],
         ready_noop_items: &[serde_json::Value],
@@ -344,7 +345,7 @@ impl LifecycleDriver {
         completed_ids: &std::collections::BTreeSet<String>,
         dependency_iteration: usize,
         evidence: &mut LifecycleEvidence,
-    ) -> archon_workflow::WorkflowResult<Vec<String>> {
+    ) -> crate::WorkflowResult<Vec<String>> {
         let contract = self.contract();
         let call_id = format!("wave-completion-evidence-repair-{dependency_iteration}");
         let repair = self
@@ -389,7 +390,7 @@ impl LifecycleDriver {
 
 /// JS `generatedContractInventoryGraphIssues(remainingItems, completedIds)` —
 /// deadlock diagnostics passed to the repair reducer.
-pub(super) fn deadlock_graph_issues(
+pub(crate) fn deadlock_graph_issues(
     contract: &LifecycleContract<'_>,
     remaining_items: &[serde_json::Value],
     completed_ids: &std::collections::BTreeSet<String>,

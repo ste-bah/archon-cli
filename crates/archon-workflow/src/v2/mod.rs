@@ -15,9 +15,11 @@ pub mod completion_credit;
 pub mod deliverable_contract;
 pub mod host_api;
 pub mod implementation_inspection;
+pub mod lifecycle_driver;
 pub mod lifecycle_policy;
 pub mod lifecycle_prompts;
 pub mod local_host;
+pub mod orchestrator_actions;
 pub mod outcome_envelope;
 pub mod prd_intake;
 mod project_artifact_completion;
@@ -29,6 +31,9 @@ pub mod report;
 pub mod result;
 pub mod result_store;
 pub mod scheduler;
+/// Host-side semantic-preservation enforcement for LLM repair adoption. Only
+/// the lifecycle driver consults it.
+pub(crate) mod semantic_preservation;
 pub mod source_graph;
 pub mod target_expansion;
 pub mod task_record;
