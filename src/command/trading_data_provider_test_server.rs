@@ -63,8 +63,24 @@ fn http_server(
     }
 }
 
+/// How long the mock server waits for its one request before giving up.
+///
+/// This is a hang guard, not an assertion about speed: without it a test whose
+/// client never connects blocks the suite forever. So it should be as generous
+/// as a bounded wait allows.
+///
+/// It was 5s, which is a claim about machine load rather than about
+/// correctness, and the claim was false. Under `cargo test` the whole module
+/// runs concurrently on a machine that is also linking; the client would
+/// occasionally not connect inside 5s, the server thread returned "received no
+/// request within 5s", and `join().unwrap()` panicked — while holding the env
+/// lock, so the poison took several unrelated tests with it. Single-threaded it
+/// never reproduced, which is the signature of a load-sensitive deadline rather
+/// than a logic error.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
+
 fn accept_before_deadline(listener: &TcpListener, stop: &AtomicBool) -> Result<TcpStream, String> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + REQUEST_DEADLINE;
     loop {
         match listener.accept() {
             Ok((stream, _)) => return Ok(stream),
@@ -73,7 +89,10 @@ fn accept_before_deadline(listener: &TcpListener, stop: &AtomicBool) -> Result<T
                     return Err("mock OpenBB server stopped before a request".into());
                 }
                 if Instant::now() >= deadline {
-                    return Err("mock OpenBB server received no request within 5s".into());
+                    return Err(format!(
+                        "mock OpenBB server received no request within {}s",
+                        REQUEST_DEADLINE.as_secs()
+                    ));
                 }
                 thread::sleep(Duration::from_millis(10));
             }
