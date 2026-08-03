@@ -1,6 +1,7 @@
 //! Provider-neutral dynamic workflow runtime for Archon.
 
 pub mod acceptance;
+pub mod agent_dispatch_port;
 pub mod approval;
 pub mod bundle;
 pub mod command;
@@ -52,6 +53,7 @@ mod work_unit_gate;
 pub mod write_coordinator;
 
 pub use acceptance::{AcceptanceOutcome, TargetFingerprints};
+pub use agent_dispatch_port::WorkflowAgentDispatch;
 pub use approval::{
     WorkflowApprovalDecision, WorkflowApprovalInspection, WorkflowApprovalRecord,
     WorkflowApprovalStore,

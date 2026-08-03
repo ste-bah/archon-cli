@@ -5,7 +5,7 @@ pub(crate) async fn run_one_worktree_branch(
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
-    client: &LiveV2AgentClient,
+    dispatch: &dyn WorkflowAgentDispatch,
     store_for_control: &archon_workflow::WorkflowStore,
     run_id: &str,
     run_root: &Path,
@@ -19,7 +19,7 @@ pub(crate) async fn run_one_worktree_branch(
     let mut result = run_worktree_branch_agent(
         task,
         target_repository_root,
-        client,
+        dispatch,
         v2_store,
         adapter,
         &branch,
@@ -109,22 +109,26 @@ pub(super) fn completed_worktree_branch(
 pub(super) async fn run_worktree_branch_agent(
     task: &str,
     target_repository_root: Option<String>,
-    client: &LiveV2AgentClient,
+    dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
     adapter: WorkflowV2AgentAdapter,
     branch: &WorktreeBranchExecution,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let result = run_single_v2_agent_call_in_repository(
-        task,
-        target_repository_root,
-        &branch.execution,
-        &adapter,
-        client,
-        Some(v2_store),
-        None,
-        Some(branch.workspace_root.display().to_string()),
-    )
-    .await;
+    // The worktree branch runs against its own sealed workspace, which takes
+    // precedence over the run's target repository root — the same `or`
+    // precedence the two-parameter host function applied.
+    let repository_root =
+        Some(branch.workspace_root.display().to_string()).or(target_repository_root);
+    let result = dispatch
+        .run_call(
+            task,
+            repository_root,
+            &branch.execution,
+            &adapter,
+            Some(v2_store),
+            None,
+        )
+        .await;
     normalize_worktree_agent_result(result, branch)
 }
 

@@ -21,6 +21,10 @@ use archon_workflow::{
     workflow_scaffold_hash,
 };
 
+// Host side of `archon_workflow::agent_dispatch_port`. Outside the `workflow_*`
+// prefix on purpose — see the file's module doc.
+#[path = "live_agent_dispatch.rs"]
+mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
 mod workflow_live_provider_env;
 #[path = "workflow_live_v2_aggregate.rs"]
