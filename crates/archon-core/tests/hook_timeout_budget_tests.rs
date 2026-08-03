@@ -9,8 +9,8 @@
 /// - Budget-exhausted hooks apply their configured/event-default failure policy
 /// - HookExecutionConfig serialization round-trip
 use archon_core::hooks::{
-    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookExecutionConfig, HookMatcher,
-    HookRegistry,
+    AggregatedHookResult, HookCommandType, HookConfig, HookEvent, HookExecutionConfig,
+    HookFailurePolicy, HookMatcher, HookRegistry,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,6 +41,22 @@ fn matcher_with_hooks(hooks: Vec<HookConfig>) -> HookMatcher {
         matcher: None,
         hooks,
     }
+}
+
+/// A leading hook whose only job is to burn a 1ms aggregate budget so that the
+/// hook registered after it is budget-skipped.
+///
+/// It declares `Allow` so it cannot contribute to `is_blocked()`, because the
+/// tests below assert about the *second* hook and this one must not be able to
+/// answer for it. That matters: `HookConfig.timeout` has second granularity, so
+/// a sub-millisecond remaining budget clamps this hook's 5s timeout to the 1s
+/// floor, and a shell spawn on a loaded machine can exceed 1s. When it does the
+/// hook is cut short by the budget and — on a gating event — the default policy
+/// blocks, which is correct behaviour but is not the fact under test.
+fn budget_burner() -> HookConfig {
+    let mut hook = cmd_hook("sleep 0.01", Some(5));
+    hook.on_failure = Some(HookFailurePolicy::Allow);
+    hook
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +199,7 @@ async fn test_budget_exhausted_applies_default_failure_policy() {
     registry.register_matchers(
         HookEvent::PreToolUse,
         vec![matcher_with_hooks(vec![
-            cmd_hook("sleep 0.01", Some(5)),
+            budget_burner(),
             cmd_hook("exit 0", Some(5)),
         ])],
         None,
@@ -209,14 +225,11 @@ async fn test_budget_exhausted_respects_explicit_allow_policy() {
     };
     let registry = HookRegistry::with_config(config);
     let mut skipped_hook = cmd_hook("exit 0", Some(5));
-    skipped_hook.on_failure = Some(archon_core::hooks::HookFailurePolicy::Allow);
+    skipped_hook.on_failure = Some(HookFailurePolicy::Allow);
 
     registry.register_matchers(
         HookEvent::PreToolUse,
-        vec![matcher_with_hooks(vec![
-            cmd_hook("sleep 0.01", Some(5)),
-            skipped_hook,
-        ])],
+        vec![matcher_with_hooks(vec![budget_burner(), skipped_hook])],
         None,
     );
 
@@ -230,7 +243,7 @@ async fn test_budget_exhausted_respects_explicit_allow_policy() {
         .await;
 
     assert!(result.skipped_count > 0);
-    assert!(!result.is_blocked());
+    assert!(!result.is_blocked(), "blocked: {:?}", result.block_reason());
 }
 
 #[tokio::test]
@@ -243,10 +256,7 @@ async fn test_budget_exhaustion_does_not_apply_policy_to_non_matching_hook() {
 
     registry.register_matchers(
         HookEvent::PreToolUse,
-        vec![matcher_with_hooks(vec![
-            cmd_hook("sleep 0.01", Some(5)),
-            non_matching,
-        ])],
+        vec![matcher_with_hooks(vec![budget_burner(), non_matching])],
         None,
     );
 
@@ -259,7 +269,7 @@ async fn test_budget_exhaustion_does_not_apply_policy_to_non_matching_hook() {
         )
         .await;
 
-    assert!(!result.is_blocked());
+    assert!(!result.is_blocked(), "blocked: {:?}", result.block_reason());
     assert_eq!(
         result.skipped_count, 0,
         "a hook that does not match is ineligible, not timeout-skipped"

@@ -12,8 +12,18 @@ pub(super) struct MockOpenBbServer {
 }
 
 impl MockOpenBbServer {
+    /// Wait for the server thread and fail the test with whatever it reported.
+    ///
+    /// Nested `unwrap()`s here would print `Err("...")` from a `Result<Result<>>`
+    /// and lose which layer failed; the server's own error string is the only
+    /// description of what the client got wrong.
     pub(super) fn join(mut self) {
-        self.handle.take().unwrap().join().unwrap().unwrap();
+        let handle = self.handle.take().expect("mock OpenBB server joined once");
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("mock OpenBB server: {error}"),
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
     }
 }
 
@@ -101,17 +111,28 @@ fn accept_before_deadline(listener: &TcpListener, stop: &AtomicBool) -> Result<T
     }
 }
 
+/// How long the mock server waits for the request once a client has connected.
+///
+/// Sibling of `REQUEST_DEADLINE`, which bounds the wait for the connection
+/// itself, and generous for the same reason: a client that connects and then
+/// never finishes its request must not hang the suite, but the bound is a hang
+/// guard and not a claim about how fast a loopback write should be.
+const READ_DEADLINE: Duration = Duration::from_secs(60);
+
+/// Largest request head this mock will buffer before refusing.
+///
+/// The clients under test send GETs a few hundred bytes long. A head past this
+/// is a client defect; refusing tells the test that, where reading on would
+/// block until `READ_DEADLINE` and report a timeout instead.
+const MAX_REQUEST_HEAD: usize = 64 * 1024;
+
 fn serve_response(
     mut stream: TcpStream,
     body: &str,
     content_type: &str,
     expected_parts: &[&str],
 ) -> Result<(), String> {
-    let mut buffer = [0_u8; 4096];
-    let read = stream
-        .read(&mut buffer)
-        .map_err(|error| error.to_string())?;
-    let request = String::from_utf8_lossy(&buffer[..read]);
+    let request = read_request_head(&mut stream)?;
     if let Some(expected) = expected_parts
         .iter()
         .find(|expected| !request.contains(**expected))
@@ -125,5 +146,48 @@ fn serve_response(
     );
     stream
         .write_all(response.as_bytes())
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("mock OpenBB response write failed: {error}"))
+}
+
+/// Read the request head — everything up to the blank line that terminates it.
+///
+/// One 4096-byte `read()` was wrong on two counts, and both let the
+/// `expected_parts` check above assert against a fragment of a request.
+///
+/// First, on Windows the socket returned by `accept()` inherits the listener's
+/// non-blocking mode, which `http_server` sets so the accept loop can poll for
+/// the stop flag. A `read()` issued before the client's bytes land therefore
+/// failed outright with WSAEWOULDBLOCK (os error 10035) rather than waiting.
+/// The 10ms accept poll usually meant the request had already arrived, so this
+/// surfaced as an occasional failure rather than a constant one. Clearing
+/// non-blocking on the accepted socket is what makes the read wait; the read
+/// timeout keeps that wait bounded.
+///
+/// Second, TCP may split a request across segments, so even a blocking read can
+/// return a prefix. Looping to the end of the head is the only way to know the
+/// whole request was seen.
+fn read_request_head(stream: &mut TcpStream) -> Result<String, String> {
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("mock OpenBB could not block the accepted socket: {error}"))?;
+    stream
+        .set_read_timeout(Some(READ_DEADLINE))
+        .map_err(|error| format!("mock OpenBB could not bound the request read: {error}"))?;
+    let mut head = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        if head.windows(4).any(|window| window == b"\r\n\r\n") {
+            return Ok(String::from_utf8_lossy(&head).into_owned());
+        }
+        if head.len() > MAX_REQUEST_HEAD {
+            return Err(format!(
+                "mock OpenBB request head passed {MAX_REQUEST_HEAD} bytes with no blank line"
+            ));
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return Err("mock OpenBB client closed mid-request".into()),
+            Ok(read) => head.extend_from_slice(&chunk[..read]),
+            Err(error) => return Err(format!("mock OpenBB request read failed: {error}")),
+        }
+    }
 }

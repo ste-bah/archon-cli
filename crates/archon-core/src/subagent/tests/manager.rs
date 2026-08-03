@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::{Mutex, MutexGuard};
 
 #[test]
 fn register_returns_uuid() {
@@ -174,6 +175,54 @@ fn get_status_nonexistent_returns_none() {
 // Auto-background tests (AGT-025)
 // -----------------------------------------------------------------------
 
+const AUTO_BACKGROUND_KEY: &str = "ARCHON_AUTO_BACKGROUND_TASKS";
+
+/// Exclusive, restoring access to `ARCHON_AUTO_BACKGROUND_TASKS` for one test.
+///
+/// The variable is process-wide and the five tests below set or clear it, so
+/// run concurrently they read each other's writes: `auto_background_disabled_by_default`
+/// clearing it between another test's write and that test's assertion is enough
+/// to fail the assertion. That is what this cost — roughly one run in ten,
+/// landing on whichever test lost the race, which reads as a flake rather than
+/// as the missing mutual exclusion it is.
+///
+/// Poison is recovered rather than propagated: `Drop` restores the variable
+/// during the panic that poisoned the lock, so the environment is consistent
+/// before the next test acquires. Propagating would turn one real failure into
+/// four more that say only "mutex poisoned".
+struct AutoBackgroundEnv {
+    _lock: MutexGuard<'static, ()>,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl AutoBackgroundEnv {
+    fn acquire() -> Self {
+        static LOCK: Mutex<()> = Mutex::new(());
+        let lock = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self {
+            previous: std::env::var_os(AUTO_BACKGROUND_KEY),
+            _lock: lock,
+        }
+    }
+
+    fn set(&self, value: &str) {
+        unsafe { std::env::set_var(AUTO_BACKGROUND_KEY, value) };
+    }
+
+    fn unset(&self) {
+        unsafe { std::env::remove_var(AUTO_BACKGROUND_KEY) };
+    }
+}
+
+impl Drop for AutoBackgroundEnv {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe { std::env::set_var(AUTO_BACKGROUND_KEY, value) },
+            None => unsafe { std::env::remove_var(AUTO_BACKGROUND_KEY) },
+        }
+    }
+}
+
 #[test]
 fn auto_background_constant_is_120s() {
     assert_eq!(AUTO_BACKGROUND_MS, 120_000);
@@ -181,61 +230,42 @@ fn auto_background_constant_is_120s() {
 
 #[test]
 fn auto_background_disabled_by_default() {
-    unsafe {
-        std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
-    }
+    let env = AutoBackgroundEnv::acquire();
+    env.unset();
     assert!(!is_auto_background_enabled());
     assert_eq!(get_auto_background_ms(), 0);
 }
 
 #[test]
 fn auto_background_enabled_with_1() {
-    unsafe {
-        std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "1");
-    }
+    let env = AutoBackgroundEnv::acquire();
+    env.set("1");
     assert!(is_auto_background_enabled());
     assert_eq!(get_auto_background_ms(), 120_000);
-    unsafe {
-        std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
-    }
 }
 
 #[test]
 fn auto_background_enabled_with_true() {
-    unsafe {
-        std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "true");
-    }
+    let env = AutoBackgroundEnv::acquire();
+    env.set("true");
     assert!(is_auto_background_enabled());
-    unsafe {
-        std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
-    }
 }
 
 #[test]
 fn auto_background_disabled_for_zero() {
-    unsafe {
-        std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "0");
-    }
+    let env = AutoBackgroundEnv::acquire();
+    env.set("0");
     assert!(!is_auto_background_enabled());
     assert_eq!(get_auto_background_ms(), 0);
-    unsafe {
-        std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
-    }
 }
 
 #[test]
 fn auto_background_case_insensitive() {
-    unsafe {
-        std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "TRUE");
-    }
+    let env = AutoBackgroundEnv::acquire();
+    env.set("TRUE");
     assert!(is_auto_background_enabled());
-    unsafe {
-        std::env::set_var("ARCHON_AUTO_BACKGROUND_TASKS", "True");
-    }
+    env.set("True");
     assert!(is_auto_background_enabled());
-    unsafe {
-        std::env::remove_var("ARCHON_AUTO_BACKGROUND_TASKS");
-    }
 }
 
 // -----------------------------------------------------------------------
