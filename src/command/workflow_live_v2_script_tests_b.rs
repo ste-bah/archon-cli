@@ -7,12 +7,12 @@ async fn awaited_host_call_time_does_not_trip_js_watchdog() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(SlowAcceptedLlm {
             delay: WORKFLOW_JS_WATCHDOG + Duration::from_millis(25),
         }),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -67,10 +67,10 @@ async fn workflow_js_error_returns_failed_summary_for_state_sync() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,

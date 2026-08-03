@@ -198,10 +198,10 @@ async fn wire_harness() -> WireHarness {
         root.clone(),
         crate::command::pipeline_workflow_llm::TestClientFallback::Provider,
     );
-    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         llm,
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "workflow-wire-test".into(),
         Some(root.display().to_string()),

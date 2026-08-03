@@ -38,7 +38,7 @@ fn canary_git(repo: &std::path::Path, args: &[&str]) {
 #[tokio::test]
 async fn canary_wf_afae6bee_regression() {
     let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set().await;
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path();
 
@@ -88,7 +88,7 @@ async fn canary_wf_afae6bee_regression() {
             decomposed: false,
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         true,

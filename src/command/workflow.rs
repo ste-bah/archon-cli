@@ -47,7 +47,10 @@ impl CommandHandler for WorkflowHandler {
                 // The interactive surface hands out the session's pipeline
                 // client; the live workflow only ever sees it through the port.
                 crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::arc(llm),
-                ctx.tui_tx.clone(),
+                // Same shape as the LLM client above: the interactive surface
+                // owns the TUI channel, and the live workflow only ever sees it
+                // through the port.
+                crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink::arc(ctx.tui_tx.clone()),
                 ctx.config_path.clone(),
             );
             ctx.emit(TuiEvent::SlashCommandComplete);

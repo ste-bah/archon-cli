@@ -7,9 +7,7 @@
 
 use std::path::Path;
 
-use archon_tui::app::TuiEvent;
-use archon_tui::event_channel::TuiEventSender;
-use archon_workflow::CommandAction;
+use archon_workflow::{CommandAction, SharedWorkflowUiSink, WorkflowUiEvent};
 
 use super::workflow_live_planner::WorkflowScriptPlan;
 
@@ -47,7 +45,7 @@ pub(super) async fn apply_generated_shape(
     class: Option<&str>,
     learning: &archon_core::config::LearningConfig,
     plan: &mut WorkflowScriptPlan,
-    tui_tx: &TuiEventSender,
+    ui_sink: &SharedWorkflowUiSink,
 ) {
     let (Some(class), Some(universe)) = (class, plan.task_universe.as_ref()) else {
         return;
@@ -71,7 +69,7 @@ pub(super) async fn apply_generated_shape(
         return;
     }
     tracing::info!(class, %report, "generated shape tuned by SONA");
-    if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(report)).await {
+    if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(report)).await {
         tracing::debug!(%error, "shape report delivery failed");
     }
 }

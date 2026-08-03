@@ -232,8 +232,8 @@ impl WorkflowScriptHost {
             {
                 self.runner
                     .client
-                    .tui_tx
-                    .send_async(TuiEvent::TextDelta(format!(
+                    .ui_sink
+                    .emit(WorkflowUiEvent::Text(format!(
                         "Workflow V2 script call reused: {} via w.{}\n",
                         execution.call.id,
                         execution.call.method.as_str()
@@ -269,8 +269,8 @@ impl WorkflowScriptHost {
 
         self.runner
             .client
-            .tui_tx
-            .send_async(TuiEvent::TextDelta(format!(
+            .ui_sink
+            .emit(WorkflowUiEvent::Text(format!(
                 "Workflow V2 script call running: {} via w.{}\n",
                 execution.call.id,
                 execution.call.method.as_str()

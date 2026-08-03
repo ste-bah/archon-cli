@@ -2,7 +2,7 @@ pub(super) use std::collections::BTreeMap;
 pub(super) use std::sync::Arc;
 pub(super) use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(super) use archon_tui::event_channel::bounded_tui_event_channel;
+pub(super) use crate::command::tui_workflow_ui_sink::default_workflow_ui_sink;
 pub(super) use archon_workflow::{RunStatus, StageStatus, WorkflowSpec, WorkflowV2TaskCoverage};
 pub(super) use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -15,11 +15,11 @@ async fn closed_tui_prevents_script_host_call_execution() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = default_workflow_ui_sink();
     drop(tui_rx);
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -88,10 +88,10 @@ async fn human_gate_stops_script_before_later_calls() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -147,12 +147,12 @@ async fn failed_reduce_returns_error_value_for_script_owned_remediation() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(AlwaysInvalidLlm {
             calls: AtomicUsize::new(0),
         }),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -217,12 +217,12 @@ async fn generated_inventory_schema_failure_returns_script_repair_data() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(AlwaysInvalidLlm {
             calls: AtomicUsize::new(0),
         }),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -299,10 +299,10 @@ async fn non_accepted_quality_gate_returns_value_the_script_consumes() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -358,10 +358,10 @@ async fn non_accepted_final_report_still_ends_the_script() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -409,10 +409,10 @@ async fn explicit_source_argument_wins_over_options_inputs() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,

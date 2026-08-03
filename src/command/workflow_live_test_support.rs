@@ -4,7 +4,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use archon_tui::event_channel::{TuiEventReceiver, bounded_tui_event_channel_with_capacity};
+use archon_tui::event_channel::TuiEventReceiver;
+
+use crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink;
 use archon_workflow::{
     ProviderTier, StageKind, StageRunRequest, WorkflowAgentCall, WorkflowAgentOutcome,
     WorkflowLlmClient,
@@ -429,11 +431,11 @@ pub(crate) fn request(input: serde_json::Value) -> StageRunRequest {
 pub(crate) fn runner(
     llm: Arc<dyn WorkflowLlmClient>,
 ) -> (PipelineWorkflowRunner, TuiEventReceiver) {
-    let (tui_tx, tui_rx) = bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, tui_rx) = bounded_workflow_ui_sink(16);
     (
         PipelineWorkflowRunner {
             llm,
-            tui_tx,
+            ui_sink,
             agent_names: Vec::new(),
             workspace_boundary_supported: false,
         },

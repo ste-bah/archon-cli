@@ -7,10 +7,10 @@ async fn v3_dialect_scripts_receive_claude_code_primitives() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -74,10 +74,10 @@ async fn legacy_scripts_still_receive_raw_host_api() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -192,12 +192,12 @@ export default async function workflow({ agent, phase, log, w }) {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(CannedAuthorLlm {
             script: authored_script.to_string(),
         }),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -323,12 +323,12 @@ async fn workflow_returning_with_pending_calls_fails_with_dropped_call_error() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(SlowAcceptedLlm {
             delay: Duration::from_secs(30),
         }),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -376,10 +376,10 @@ async fn phase_with_body_callback_runs_and_awaits_the_body() {
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         Arc::new(PanicLlm),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,

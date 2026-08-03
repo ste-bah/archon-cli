@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subject() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
@@ -29,7 +29,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
         &store,
         &task,
         planner.clone(),
-        tui_tx.clone(),
+        ui_sink.clone(),
         &default_generated_workflow_config(),
         &archon_core::config::LearningConfig::default(),
     )
@@ -87,7 +87,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
             decomposed: false,
         },
         planner,
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -120,7 +120,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
 
 #[tokio::test]
 async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let client = Arc::new(GeneratedV2RunClient {
         calls: AtomicUsize::new(0),
@@ -133,7 +133,7 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
             task: "Inspect this repository with a generated V2 workflow".to_string(),
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -199,7 +199,7 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
 
 #[tokio::test]
 async fn saved_v2_template_runs_through_v2_runtime() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let harness = r#"
 export default async function workflow(w) {
@@ -264,7 +264,7 @@ export default async function workflow(w) {
             args: None,
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,

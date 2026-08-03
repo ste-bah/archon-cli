@@ -203,13 +203,13 @@ pub(super) fn boundary_driver(
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     // 87e2bb69 made TUI delivery *required*: send_async returns
     // NotificationDelivery when the receiver is gone, where v3 previously
-    // ignored the result via `let _ = tui_tx.send(..)`. The two fixtures above
+    // ignored the result via `let _ = ui_sink.send(..)`. The two fixtures above
     // bind their receiver inside the #[tokio::test] body, so it lives for the
     // whole test; this helper RETURNS, so a local receiver drops here and
     // closes the channel -- failing the fixture on teardown rather than on the
     // lifecycle behaviour under test. Drain in the background so the bounded
     // capacity also cannot stall a long run.
-    let (tui_tx, mut tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = default_workflow_ui_sink();
     tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let llm = Arc::new(CannedLifecycleLlm {
         scenario,
@@ -221,7 +221,7 @@ pub(super) fn boundary_driver(
     });
     let client = LiveV2AgentClient::new(
         llm.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,

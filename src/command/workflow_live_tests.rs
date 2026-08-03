@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_tui::event_channel::bounded_tui_event_channel_with_capacity;
+use crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink;
 use archon_workflow::{
     CommandAction, RunStatus, StageKind, StageRunRequest, StageStatus, WorkflowRun, WorkflowSpec,
     WriteBoundaryProbe,
@@ -45,10 +45,16 @@ fn workflow_and_session_paths_do_not_ignore_tui_delivery() {
             .chars()
             .filter(|character| !character.is_whitespace())
             .collect();
+        // Two vocabularies, because two layers now emit. `session*` still
+        // holds a `TuiEventSender` directly; workflow execution reaches the
+        // same channel through `archon_workflow::ui_sink_port`. Dropping a
+        // status is the same bug either way, so both spellings are offences.
         let ignores_tui_delivery = compact.split(';').any(|statement| {
             statement.contains("let_=")
                 && (statement.contains(".send(TuiEvent")
-                    || statement.contains(".send(archon_tui::app::TuiEvent"))
+                    || statement.contains(".send(archon_tui::app::TuiEvent")
+                    || statement.contains(".emit(WorkflowUiEvent")
+                    || statement.contains(".emit(archon_workflow::WorkflowUiEvent"))
         });
         if ignores_tui_delivery {
             offenders.push(path.to_path_buf());
@@ -84,7 +90,7 @@ async fn closed_tui_prevents_workflow_planner_launch() {
             calls: std::sync::atomic::AtomicUsize::new(0),
         },
     );
-    let (tui_tx, rx) = bounded_tui_event_channel_with_capacity(1);
+    let (ui_sink, rx) = bounded_workflow_ui_sink(1);
     drop(rx);
 
     spawn_live_workflow(
@@ -93,7 +99,7 @@ async fn closed_tui_prevents_workflow_planner_launch() {
             task: "must not launch".into(),
         },
         planner.clone(),
-        tui_tx,
+        ui_sink,
         None,
     );
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

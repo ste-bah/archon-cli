@@ -238,6 +238,7 @@ pub mod test_support;
 pub(crate) mod theme;
 pub(crate) mod thinking;
 pub(crate) mod tui_helpers;
+pub(crate) mod tui_workflow_ui_sink;
 pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;

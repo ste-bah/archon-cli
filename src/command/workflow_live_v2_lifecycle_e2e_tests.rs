@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::command::tui_workflow_ui_sink::default_workflow_ui_sink;
 use anyhow::Result;
-use archon_tui::event_channel::bounded_tui_event_channel;
 use archon_workflow::{
     BranchFailureKind, WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter,
     WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandRecord,

@@ -248,11 +248,11 @@ async fn run_fixture(scenario: FixtureScenario) {
         temp.path().to_path_buf(),
         crate::command::pipeline_workflow_llm::TestClientFallback::Forbidden,
     );
-    let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let client = LiveV2AgentClient::new(
         llm,
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "v3-compaction".into(),
         Some(temp.path().display().to_string()),

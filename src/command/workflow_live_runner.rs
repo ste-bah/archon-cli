@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archon_tui::event_channel::TuiEventSender;
-use archon_tui::events::AgentActivityStatus;
 use archon_workflow::{
-    ProviderTier, StageKind, StageRunOutput, StageRunRequest, WorkflowAgentCall, WorkflowAgentSpec,
-    WorkflowAgentToolAccess, WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
+    ProviderTier, SharedWorkflowUiSink, StageKind, StageRunOutput, StageRunRequest,
+    WorkflowActivityStatus, WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
+    WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
 };
 
 use super::workflow_agent_select::select_workflow_agent_key;
@@ -16,7 +15,7 @@ use super::workflow_live_runner_activity::required_activity;
 
 pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn WorkflowLlmClient>,
-    pub(crate) tui_tx: TuiEventSender,
+    pub(crate) ui_sink: SharedWorkflowUiSink,
     pub(crate) agent_names: Vec<String>,
     pub(crate) workspace_boundary_supported: bool,
 }
@@ -50,12 +49,12 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         let agent = workflow_agent(&request, &model_alias, &self.agent_names);
         let agent_name = agent.key.clone();
         required_activity(
-            &self.tui_tx,
+            &self.ui_sink,
             &request,
             &agent_name,
             &provider_id,
             &resolved_model,
-            AgentActivityStatus::Running,
+            WorkflowActivityStatus::Running,
             "stage running",
         )
         .await?;
@@ -84,19 +83,19 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             &self.llm,
             agent_request.clone(),
             |attempt| {
-                let tui_tx = self.tui_tx.clone();
+                let ui_sink = self.ui_sink.clone();
                 let request = request.clone();
                 let agent_name = agent_name.clone();
                 let provider_id = provider_id.clone();
                 let resolved_model = resolved_model.clone();
                 async move {
                     required_activity(
-                        &tui_tx,
+                        &ui_sink,
                         &request,
                         &agent_name,
                         &provider_id,
                         &resolved_model,
-                        AgentActivityStatus::Running,
+                        WorkflowActivityStatus::Running,
                         &format!("stage retrying after transient provider error ({attempt}/3)"),
                     )
                     .await
@@ -108,12 +107,12 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             Ok(response) => response,
             Err(err) => {
                 required_activity(
-                    &self.tui_tx,
+                    &self.ui_sink,
                     &request,
                     &agent_name,
                     &provider_id,
                     &resolved_model,
-                    AgentActivityStatus::Failed,
+                    WorkflowActivityStatus::Failed,
                     "stage failed",
                 )
                 .await?;
@@ -122,12 +121,12 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         };
         let response = if item_output_needs_schema_repair(&request, &response.content) {
             required_activity(
-                &self.tui_tx,
+                &self.ui_sink,
                 &request,
                 &agent_name,
                 &provider_id,
                 &resolved_model,
-                AgentActivityStatus::Running,
+                WorkflowActivityStatus::Running,
                 "stage repairing invalid item output",
             )
             .await?;
@@ -137,19 +136,19 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                 &agent_request,
                 response,
                 |attempt| {
-                    let tui_tx = self.tui_tx.clone();
+                    let ui_sink = self.ui_sink.clone();
                     let request = request.clone();
                     let agent_name = agent_name.clone();
                     let provider_id = provider_id.clone();
                     let resolved_model = resolved_model.clone();
                     async move {
                         required_activity(
-                            &tui_tx,
+                            &ui_sink,
                             &request,
                             &agent_name,
                             &provider_id,
                             &resolved_model,
-                            AgentActivityStatus::Running,
+                            WorkflowActivityStatus::Running,
                             &format!("stage item-output repair retrying after transient provider error ({attempt}/3)"),
                         )
                         .await
@@ -161,12 +160,12 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
                 Ok(response) => response,
                 Err(err) => {
                     required_activity(
-                        &self.tui_tx,
+                        &self.ui_sink,
                         &request,
                         &agent_name,
                         &provider_id,
                         &resolved_model,
-                        AgentActivityStatus::Failed,
+                        WorkflowActivityStatus::Failed,
                         "stage failed item-output repair",
                     )
                     .await?;
@@ -177,12 +176,12 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             response
         };
         required_activity(
-            &self.tui_tx,
+            &self.ui_sink,
             &request,
             &agent_name,
             &provider_id,
             &resolved_model,
-            AgentActivityStatus::Complete,
+            WorkflowActivityStatus::Complete,
             "stage complete",
         )
         .await?;
