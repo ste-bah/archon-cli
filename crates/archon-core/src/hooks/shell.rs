@@ -20,8 +20,7 @@ pub(super) fn resolve_hook_shell() -> &'static HookShell {
 }
 
 fn select_hook_shell(is_windows: bool, sh: Option<PathBuf>, bash: Option<PathBuf>) -> HookShell {
-    let posix_shell = if is_windows { bash.or(sh) } else { sh.or(bash) };
-    if let Some(program) = posix_shell {
+    if let Some(program) = sh.or(bash) {
         return HookShell {
             program,
             command_arg: "-c",
@@ -47,7 +46,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn windows_prefers_discovered_bash() {
+    fn windows_prefers_discovered_posix_shell() {
         let shell = select_hook_shell(
             true,
             Some(PathBuf::from(r"C:\Program Files\Git\bin\sh.exe")),
@@ -57,7 +56,7 @@ mod tests {
         assert_eq!(
             shell,
             HookShell {
-                program: PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"),
+                program: PathBuf::from(r"C:\Program Files\Git\bin\sh.exe"),
                 command_arg: "-c",
             }
         );
