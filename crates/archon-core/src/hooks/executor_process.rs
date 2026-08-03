@@ -37,8 +37,12 @@ pub(super) async fn run_command(
     let write_error = match deadline.wait(write_payload(&mut child, payload)).await {
         Some(error) => error,
         None => {
-            timeout_with_cleanup(&mut child, process_group, &stdout, &stderr).await;
-            return Err(RunError::Timeout("stdin write"));
+            let cleanup_error =
+                timeout_with_cleanup(&mut child, process_group, &stdout, &stderr).await;
+            return Err(combine_cleanup_error(
+                RunError::Timeout("stdin write"),
+                cleanup_error,
+            ));
         }
     };
     let status = match wait_or_terminate(&mut child, &deadline).await {
@@ -75,12 +79,10 @@ async fn timeout_with_cleanup(
     process_group: Option<u32>,
     stdout: &JoinHandle<PipeOutput>,
     stderr: &JoinHandle<PipeOutput>,
-) {
+) -> Option<String> {
     let cleanup_error = terminate_process_tree(child, process_group).await;
-    if let Some(error) = cleanup_error {
-        tracing::warn!(error, "hook timeout cleanup failed");
-    }
     abort_pipe_tasks(stdout, stderr);
+    cleanup_error
 }
 
 fn spawn_command(
