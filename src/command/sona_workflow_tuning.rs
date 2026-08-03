@@ -13,7 +13,7 @@
 //! # Keying
 //!
 //! One weight per `(task class, parameter)`. The class comes from
-//! [`crate::command::workflow_live_learning_hooks::classify_generated_run`],
+//! [`crate::command::learning_workflow_hooks::classify_generated_run`],
 //! the same classification that already decides the run's learning hooks, so a
 //! run is classified once and everything keyed on that classification agrees.
 //! Project identity is *not* part of the key: the store is already per-project

@@ -26,7 +26,7 @@ pub(super) fn live_task_class(action: &CommandAction) -> Option<&'static str> {
         CommandAction::Plan { task } | CommandAction::Run { task, .. } => task,
         _ => return None,
     };
-    Some(crate::command::workflow_live_learning_hooks::classify_generated_run(task, None).as_str())
+    Some(crate::command::learning_workflow_hooks::classify_generated_run(task, None).as_str())
 }
 
 /// Resolve this run's learned plan *shape* and attach it to the plan.

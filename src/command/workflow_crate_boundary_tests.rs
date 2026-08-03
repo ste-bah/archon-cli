@@ -36,6 +36,13 @@ const FORBIDDEN: &[(&str, &str)] = &[
          archon_workflow::ui_sink_port and let the host decide where it lands, as \
          tui_workflow_ui_sink.rs does.",
     ),
+    (
+        "archon_topology",
+        "archon-topology depends on archon-workflow directly, so this is the tightest \
+         cycle of the three and default-features = false does not break it -- Cargo \
+         rejects the package-level cycle whether or not the optional feature is on. \
+         Topology-facing code belongs beside its consumers in topology_task_graph.rs.",
+    ),
 ];
 
 /// Files under `src/command/workflow*.rs` that may still name a forbidden

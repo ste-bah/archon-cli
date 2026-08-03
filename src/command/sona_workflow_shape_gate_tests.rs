@@ -244,9 +244,8 @@ fn a_clean_declared_graph_admits_and_supplies_the_wave_ceiling() {
         GateOutcome::Refused(reason) => panic!("the real corpus must admit: {reason}"),
     }
 
-    let graph =
-        crate::command::workflow_live::workflow_live_task_universe::task_graph_from_root(&root)
-            .expect("the fixture lowers");
+    let graph = crate::command::topology_task_graph::task_graph_from_root(&root)
+        .expect("the fixture lowers");
     let widest = graph
         .waves()
         .expect("valid graph")

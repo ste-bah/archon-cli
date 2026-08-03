@@ -50,8 +50,7 @@ pub(super) async fn fold_run_topology(
         // `classify_generated_run` the read side used — a run whose outcome
         // were filed under a different class than the weight it consumed would
         // never converge on anything.
-        let class =
-            crate::command::workflow_live_learning_hooks::classify_generated_run(&task, None);
+        let class = crate::command::learning_workflow_hooks::classify_generated_run(&task, None);
         crate::command::sona_workflow_tuning::record_generated_tuning_outcome(
             &cwd,
             &store,

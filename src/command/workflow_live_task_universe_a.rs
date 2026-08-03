@@ -416,7 +416,7 @@ fn directory_has_task_files(path: &Path) -> bool {
         })
 }
 
-pub(super) fn task_files_under(root: &Path) -> WorkflowResult<Vec<PathBuf>> {
+pub(crate) fn task_files_under(root: &Path) -> WorkflowResult<Vec<PathBuf>> {
     let entries = fs::read_dir(root).map_err(|err| WorkflowError::Io {
         path: root.to_path_buf(),
         source: err,

@@ -176,7 +176,7 @@ fn hooks_derived_for_a_generated_run_are_all_routable_here() {
     learning.sona.pipeline_recording = true;
     learning.reasoning_bank.enabled = true;
     learning.desc.enabled = true;
-    let derived = crate::command::workflow_live_learning_hooks::derive_learning_hooks(
+    let derived = crate::command::learning_workflow_hooks::derive_learning_hooks(
         "audit and review the decomposed PRD tasks",
         None,
         &learning,

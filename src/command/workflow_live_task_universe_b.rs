@@ -62,7 +62,7 @@ fn canonical_task_id_from_stem(stem: &str) -> Option<String> {
     Some(format!("{first}-{second}-{third}"))
 }
 
-pub(super) fn short_task_alias(canonical: &str) -> Option<String> {
+pub(crate) fn short_task_alias(canonical: &str) -> Option<String> {
     let digits = canonical.rsplit('-').next()?;
     (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("T{digits}"))
@@ -80,7 +80,7 @@ pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
 
 /// Resolve a declared list of task references to canonical ids, or fail naming
 /// the file and the unresolved reference.
-pub(super) fn resolve_task_references(
+pub(crate) fn resolve_task_references(
     declared: &[String],
     aliases: &BTreeMap<String, String>,
     source_path: &str,
@@ -112,7 +112,7 @@ pub(super) fn resolve_task_references(
 /// `B` each claiming to block the other). Folding those would manufacture a
 /// two-cycle and the cycle detector would report it as a graph shape rather than
 /// as the authoring mistake it is, so they are named here with both files.
-pub(super) fn reconcile_blocks_into_dependencies(
+pub(crate) fn reconcile_blocks_into_dependencies(
     tasks: &mut [WorkflowV2TaskUniverseTask],
 ) -> WorkflowResult<()> {
     let mut declared_blocks: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -180,7 +180,7 @@ pub(super) fn reconcile_blocks_into_dependencies(
 ///   nothing is making a claim the task set cannot discharge: no other task
 ///   completing will ever unblock it, so either the dependency is missing or
 ///   the status is stale, and both are edits to the file named here.
-pub(super) fn validate_declared_statuses(
+pub(crate) fn validate_declared_statuses(
     tasks: &[WorkflowV2TaskUniverseTask],
 ) -> WorkflowResult<()> {
     for task in tasks {
@@ -216,7 +216,7 @@ impl WorkflowV2TaskUniverseTask {
     }
 }
 
-pub(super) fn validate_task_dependency_graph(
+pub(crate) fn validate_task_dependency_graph(
     tasks: &[WorkflowV2TaskUniverseTask],
 ) -> WorkflowResult<()> {
     let graph = tasks

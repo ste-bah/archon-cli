@@ -12,7 +12,7 @@ use archon_topology::EdgeSupport;
 use archon_topology::ir::{TaskGraph, WriteTarget};
 
 use crate::command::topology_lint::{LintSource, run_lint};
-use crate::command::workflow_live::workflow_live_task_universe::task_graph_from_root;
+use crate::command::topology_task_graph::task_graph_from_root;
 
 pub(super) fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prd-trading-data-lake-ahdm-001")

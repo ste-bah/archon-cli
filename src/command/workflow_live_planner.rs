@@ -12,7 +12,7 @@ use archon_workflow::{
     workflow_scaffold_hash,
 };
 
-use crate::command::workflow_live_learning_hooks::derive_learning_hooks;
+use crate::command::learning_workflow_hooks::derive_learning_hooks;
 
 use super::workflow_live_generated_scaffold::decomposed_prd_scaffold;
 use super::workflow_live_prompt::{harness_planner_prompt, harness_repair_prompt};
@@ -46,7 +46,7 @@ pub(super) struct WorkflowScriptPlan {
     /// For a *generated* plan it used to be hardcoded empty, which meant no
     /// generated run ever dispatched learning at all. It is now derived from
     /// the run's own content by
-    /// [`crate::command::workflow_live_learning_hooks::derive_learning_hooks`],
+    /// [`crate::command::learning_workflow_hooks::derive_learning_hooks`],
     /// at this one construction site so no planner path can forget it. Still
     /// empty when every candidate subsystem is disabled — and empty still
     /// dispatches nothing.

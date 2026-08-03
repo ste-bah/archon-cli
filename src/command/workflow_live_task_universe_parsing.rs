@@ -65,7 +65,7 @@ pub(super) const REQUIRED_TASK_KEYS: &[&str] = &[
     "deliverable_contracts",
 ];
 
-pub(super) fn parse_task_file(
+pub(crate) fn parse_task_file(
     path: &Path,
     raw: &str,
 ) -> WorkflowResult<WorkflowV2TaskUniverseTask> {
@@ -233,7 +233,7 @@ fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
     }
 }
 
-pub(super) fn merge_project_capabilities(
+pub(crate) fn merge_project_capabilities(
     task: &mut WorkflowV2TaskUniverseTask,
     task_path: &Path,
 ) -> WorkflowResult<()> {

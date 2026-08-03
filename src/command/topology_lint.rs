@@ -36,7 +36,7 @@ use archon_topology::ir::{GraphOrigin, TaskGraph};
 use archon_topology::reconstruct::reconstruct_graph;
 use archon_topology::trace::{TopologyPaths, read_trace};
 
-use crate::command::workflow_live::workflow_live_task_universe::task_graph_from_root;
+use crate::command::topology_task_graph::task_graph_from_root;
 
 /// Which graph to lint.
 #[derive(Debug, Clone, PartialEq, Eq)]
