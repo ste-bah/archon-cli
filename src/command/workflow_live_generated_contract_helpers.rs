@@ -109,10 +109,7 @@ pub(super) fn append_alias_values(
     }
 }
 
-fn append_unique_values(
-    merged: &mut Vec<serde_json::Value>,
-    values: Vec<serde_json::Value>,
-) {
+fn append_unique_values(merged: &mut Vec<serde_json::Value>, values: Vec<serde_json::Value>) {
     for value in values {
         if !merged.iter().any(|existing| existing == &value) {
             merged.push(value);
@@ -139,12 +136,12 @@ pub(super) fn normalize_remediation_context(
             ],
         )
         .or_else(|| first_string(value, &["id", "item_id", "task_id", "taskId"]))
-        {
-            object.insert(
-                "source_item_id".to_string(),
-                serde_json::Value::String(source_item_id),
-            );
-        }
+    {
+        object.insert(
+            "source_item_id".to_string(),
+            serde_json::Value::String(source_item_id),
+        );
+    }
     if !object.contains_key("failure_status") {
         if let Some(status) = first_string(
             value,
@@ -210,12 +207,13 @@ pub(super) fn normalize_remediation_context(
                 "acceptanceBlocker",
                 "blocker",
             ],
-        ) {
-            object.insert(
-                "required_fix".to_string(),
-                serde_json::Value::String(required_fix),
-            );
-        }
+        )
+    {
+        object.insert(
+            "required_fix".to_string(),
+            serde_json::Value::String(required_fix),
+        );
+    }
     if !object.contains_key("verification_requirements") {
         let requirements = raw_values_from_aliases(
             value,
@@ -307,7 +305,10 @@ fn embedded_task_candidates(canonical: &str) -> Vec<String> {
     sorted_unique(candidates)
 }
 
-pub(super) fn raw_values_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<serde_json::Value> {
+pub(super) fn raw_values_from_aliases(
+    value: &serde_json::Value,
+    aliases: &[&str],
+) -> Vec<serde_json::Value> {
     aliases
         .iter()
         .filter_map(|key| value.get(*key))

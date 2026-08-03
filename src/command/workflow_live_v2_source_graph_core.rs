@@ -180,13 +180,14 @@ pub(crate) fn input_hash_with_source_fingerprint(
 ) -> String {
     let mut value = input.clone();
     if let Some(fingerprint) = source_fingerprint
-        && let Some(object) = value.as_object_mut() {
-            object.remove("source_data");
-            object.insert(
-                "source_fingerprint".to_string(),
-                serde_json::Value::String(fingerprint.to_string()),
-            );
-        }
+        && let Some(object) = value.as_object_mut()
+    {
+        object.remove("source_data");
+        object.insert(
+            "source_fingerprint".to_string(),
+            serde_json::Value::String(fingerprint.to_string()),
+        );
+    }
     stable_hash(&value)
 }
 

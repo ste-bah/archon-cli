@@ -19,7 +19,13 @@ pub(super) async fn run_v2_agent_repair_with_rejected_output_log(
         Err(repair_error) if repair_error.differs_from(&first_error) => {
             save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
             run_v2_agent_second_repair(
-                adapter, client, request, v2_store, repaired, first_error, repair_error,
+                adapter,
+                client,
+                request,
+                v2_store,
+                repaired,
+                first_error,
+                repair_error,
             )
             .await
         }
@@ -40,8 +46,7 @@ async fn run_v2_agent_second_repair(
     repair_error: WorkflowV2AgentError,
 ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
     let prompt = adapter.build_repair_prompt(request, &repaired, &repair_error);
-    let (second, first_error) =
-        request_repair_output(client, request, prompt, first_error).await?;
+    let (second, first_error) = request_repair_output(client, request, prompt, first_error).await?;
     match adapter.parse_agent_output(request, &second) {
         Ok(result) => {
             save_rejected_write_result(v2_store, request, "second_repair", &second, &result);

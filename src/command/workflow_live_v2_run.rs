@@ -436,9 +436,7 @@ async fn execute_generated_v2_run(
         Err(err) => {
             // Best-effort: the original error is what the caller must see, so a
             // failure to persist here is logged rather than masking it.
-            if let Err(state_err) =
-                persist_terminal_run_status(store, &run.id, RunStatus::Failed)
-            {
+            if let Err(state_err) = persist_terminal_run_status(store, &run.id, RunStatus::Failed) {
                 tracing::warn!(
                     run_id = %run.id,
                     error = %state_err,

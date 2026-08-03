@@ -456,4 +456,3 @@ fn stamp_declared_capabilities(
         );
     }
 }
-

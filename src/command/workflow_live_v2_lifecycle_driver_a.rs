@@ -119,9 +119,9 @@ impl LifecycleDriver {
             id,
             max_transport_attempts,
             max_transport_attempts,
-            last_transport_failure.as_deref().unwrap_or(
-                "reducer transport failed without a recorded transport error",
-            ),
+            last_transport_failure
+                .as_deref()
+                .unwrap_or("reducer transport failed without a recorded transport error"),
         ))
     }
 
@@ -163,7 +163,10 @@ impl LifecycleDriver {
     /// Declared artifact contract: every write-capable item carries the
     /// artifact requirements its task pack declares, so the implementing
     /// agent is always instructed to produce them.
-    pub(crate) fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
+    pub(crate) fn with_declared_task_artifacts(
+        &self,
+        items: serde_json::Value,
+    ) -> serde_json::Value {
         let contract = self.contract();
         let enriched: Vec<serde_json::Value> = support::array(Some(&items))
             .into_iter()
@@ -195,8 +198,8 @@ impl LifecycleDriver {
                     }
                     if let Some(root) = self.project_artifact_root.as_deref() {
                         for declared in &task.deliverable_contracts {
-                            let value = serde_json::to_value(declared)
-                                .unwrap_or(serde_json::Value::Null);
+                            let value =
+                                serde_json::to_value(declared).unwrap_or(serde_json::Value::Null);
                             if let Some(command) =
                                 workflow_live_v2_deliverable_contract::typed_verification_command(
                                     root, &value,
@@ -222,5 +225,4 @@ impl LifecycleDriver {
             .collect();
         serde_json::Value::Array(enriched)
     }
-
 }

@@ -243,7 +243,9 @@ pub(super) fn required_task_ids_from_results(results: &[WorkflowV2Result]) -> Ve
     ids
 }
 
-pub(super) fn authoritative_task_ids(task_universe: Option<&WorkflowV2TaskUniverse>) -> Option<Vec<String>> {
+pub(super) fn authoritative_task_ids(
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+) -> Option<Vec<String>> {
     let mut ids = task_universe?
         .tasks
         .iter()
@@ -321,10 +323,8 @@ fn collect_valid_credit(
             && item.status == WorkflowV2Status::Noop);
         let noop_criteria_valid = !is_noop_credit
             || noop_acceptance_criteria_satisfied(&item.task_id, result, task_universe);
-        let contradicted_claims = contradicted_artifact_existence_claims(
-            store.root(),
-            &item.artifact_paths,
-        );
+        let contradicted_claims =
+            contradicted_artifact_existence_claims(store.root(), &item.artifact_paths);
         if artifact_paths_exist(store.root(), &item.artifact_paths)
             && noop_criteria_valid
             && contradicted_claims.is_empty()
@@ -416,7 +416,10 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for raw in text.split_whitespace() {
         let mut token = raw.trim_matches(|ch: char| {
-            matches!(ch, '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';')
+            matches!(
+                ch,
+                '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
         });
         if let Some((_, value)) = token.split_once('=') {
             token = value;
@@ -453,4 +456,3 @@ fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
     ];
     candidates.into_iter().flatten().find(|path| path.exists())
 }
-

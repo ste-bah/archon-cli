@@ -488,4 +488,3 @@ fn task_ids_from_text(raw: &str) -> Vec<String> {
             .collect(),
     )
 }
-

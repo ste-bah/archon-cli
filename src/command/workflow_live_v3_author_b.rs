@@ -189,7 +189,9 @@ impl WorkflowV2ScriptRunner {
     }
 }
 
-pub(crate) fn validate_authored_workflow_source(source: &str) -> archon_workflow::WorkflowResult<String> {
+pub(crate) fn validate_authored_workflow_source(
+    source: &str,
+) -> archon_workflow::WorkflowResult<String> {
     let source = source.trim();
     if source.len() < 80 {
         return Err(WorkflowError::SpecInvalid(

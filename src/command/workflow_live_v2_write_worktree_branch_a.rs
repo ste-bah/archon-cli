@@ -14,7 +14,8 @@ pub(crate) async fn run_one_worktree_branch(
     cfg: &WriteCoordinatorConfig,
     prepared: PreparedWorktreeBranch,
 ) -> archon_workflow::WorkflowResult<CompletedWorktreeBranch> {
-    let branch = prepare_worktree_branch_execution(execution, store_for_control, run_id, &prepared)?;
+    let branch =
+        prepare_worktree_branch_execution(execution, store_for_control, run_id, &prepared)?;
     let mut result = run_worktree_branch_agent(
         task,
         target_repository_root,
@@ -23,8 +24,7 @@ pub(crate) async fn run_one_worktree_branch(
         adapter,
         &branch,
     )
-    .await
-    ?;
+    .await?;
     poll_v2_run_control(store_for_control, run_id, &branch.id)?;
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
@@ -35,19 +35,20 @@ pub(crate) async fn run_one_worktree_branch(
     let landed = worktree_patch_landed(&prepared);
     let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, v2_store)?;
-    let (manifest, pre_hashes) =
-        capture_worktree_branch_manifest(
-            run_root,
-            run_id,
-            execution,
-            cfg,
-            v2_store,
-            &mut result,
-            &prepared,
-        )?;
+    let (manifest, pre_hashes) = capture_worktree_branch_manifest(
+        run_root,
+        run_id,
+        execution,
+        cfg,
+        v2_store,
+        &mut result,
+        &prepared,
+    )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     let _ = canonical_root;
-    Ok(completed_worktree_branch(branch, result, manifest, pre_hashes))
+    Ok(completed_worktree_branch(
+        branch, result, manifest, pre_hashes,
+    ))
 }
 
 pub(super) struct WorktreeBranchExecution {
@@ -58,10 +59,8 @@ pub(super) struct WorktreeBranchExecution {
     pub(super) execution: WorkflowV2CallExecution,
 }
 
-pub(super) type CapturedWorktreeManifest = (
-    Option<PatchManifest>,
-    Option<BTreeMap<String, String>>,
-);
+pub(super) type CapturedWorktreeManifest =
+    (Option<PatchManifest>, Option<BTreeMap<String, String>>);
 
 pub(super) fn prepare_worktree_branch_execution(
     execution: &WorkflowV2CallExecution,
@@ -135,12 +134,20 @@ pub(super) fn normalize_worktree_agent_result(
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     match result {
         Ok(result) => Ok(result),
-        Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => Ok(
-            write_branch_runtime_timeout_result(&branch.id, &branch.execution.input, &err.to_string()),
-        ),
-        Err(err) if is_write_branch_validation_error(&err.to_string()) => Ok(
-            write_branch_validation_error_result(&branch.id, Some(&branch.execution.input), &err.to_string()),
-        ),
+        Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {
+            Ok(write_branch_runtime_timeout_result(
+                &branch.id,
+                &branch.execution.input,
+                &err.to_string(),
+            ))
+        }
+        Err(err) if is_write_branch_validation_error(&err.to_string()) => {
+            Ok(write_branch_validation_error_result(
+                &branch.id,
+                Some(&branch.execution.input),
+                &err.to_string(),
+            ))
+        }
         Err(err) => Err(err),
     }
 }
@@ -193,9 +200,7 @@ pub(super) fn worktree_patch_landed(prepared: &PreparedWorktreeBranch) -> bool {
         &prepared.coordinator_plan.target_files,
         &prepared.baseline,
     )
-    .is_ok_and(|captured| {
-        !captured.changed_files.is_empty() || !captured.created_files.is_empty()
-    })
+    .is_ok_and(|captured| !captured.changed_files.is_empty() || !captured.created_files.is_empty())
 }
 
 /// Record on EVERY write branch whether a patch landed.
@@ -243,10 +248,7 @@ pub(super) fn mark_patch_landed(
     schema_repair_failed: bool,
 ) {
     if let Some(data) = result.data.as_object_mut() {
-        data.insert(
-            "patch_landed".to_string(),
-            serde_json::Value::Bool(landed),
-        );
+        data.insert("patch_landed".to_string(), serde_json::Value::Bool(landed));
     }
     if !schema_repair_failed || !landed {
         return;
@@ -322,8 +324,7 @@ pub(super) fn validate_worktree_branch_result(
         &branch.execution.input,
         result,
         &branch.workspace_root,
-    )
-    {
+    ) {
         persist_rejected_worktree_result(
             v2_store,
             &branch.id,
@@ -331,11 +332,8 @@ pub(super) fn validate_worktree_branch_result(
             result,
             &error,
         );
-        *result = write_branch_validation_error_result(
-            &branch.id,
-            Some(&branch.execution.input),
-            &error,
-        );
+        *result =
+            write_branch_validation_error_result(&branch.id, Some(&branch.execution.input), &error);
     }
     Ok(())
 }
@@ -457,4 +455,3 @@ pub(crate) fn persist_rejected_worktree_result(
     };
     let _ = store.append_rejected_output(branch_id, record);
 }
-

@@ -26,9 +26,17 @@ pub(super) fn persist_worktree_manifest(
         ManifestStatus::PendingApply
     };
     let branch_id = branch_id.to_string();
-    let path = persist_manifest(run_root, run_id, &execution.call.id, &branch_id, captured, status)
-        .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-    let body = std::fs::read_to_string(&path).map_err(|err| WorkflowError::Io { path, source: err })?;
+    let path = persist_manifest(
+        run_root,
+        run_id,
+        &execution.call.id,
+        &branch_id,
+        captured,
+        status,
+    )
+    .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+    let body =
+        std::fs::read_to_string(&path).map_err(|err| WorkflowError::Io { path, source: err })?;
     Ok(serde_json::from_str(&body)?)
 }
 

@@ -39,7 +39,11 @@ pub(super) fn repair_workflow(store: &WorkflowStore, run_id: &str) -> Result<Str
     ))
 }
 
-pub(super) fn restart_task_workflow(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<String> {
+pub(super) fn restart_task_workflow(
+    store: &WorkflowStore,
+    run_id: &str,
+    task_id: &str,
+) -> Result<String> {
     let run = store.load_state(run_id)?;
     if let Some(output) = restart_generated_v2_task_workflow(store, &run, task_id)? {
         return Ok(output);

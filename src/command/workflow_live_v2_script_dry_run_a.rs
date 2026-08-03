@@ -454,4 +454,3 @@ pub(super) fn reject_malformed_write_targets(
     }
     Ok(())
 }
-

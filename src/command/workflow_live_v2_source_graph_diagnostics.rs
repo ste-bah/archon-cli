@@ -55,7 +55,12 @@ fn missing_remediation_field(value: &serde_json::Value) -> Option<&'static str> 
 }
 
 fn missing_review_remediation_field(value: &serde_json::Value) -> Option<&'static str> {
-    for field in ["source_item_id", "failure_status", "failure_evidence", "required_fix"] {
+    for field in [
+        "source_item_id",
+        "failure_status",
+        "failure_evidence",
+        "required_fix",
+    ] {
         if !value_present(value.get(field)) {
             return Some(field);
         }
@@ -78,14 +83,15 @@ fn missing_noop_field(value: &serde_json::Value) -> Option<&'static str> {
 }
 
 fn missing_evidence_field(value: &serde_json::Value) -> Option<&'static str> {
-    (!verification_evidence_fields_present(value)).then_some("expected_evidence/artifact_requirements")
+    (!verification_evidence_fields_present(value))
+        .then_some("expected_evidence/artifact_requirements")
 }
 
-fn missing_present_key(
-    value: &serde_json::Value,
-    fields: &[&'static str],
-) -> Option<&'static str> {
-    fields.iter().copied().find(|field| value.get(*field).is_none())
+fn missing_present_key(value: &serde_json::Value, fields: &[&'static str]) -> Option<&'static str> {
+    fields
+        .iter()
+        .copied()
+        .find(|field| value.get(*field).is_none())
 }
 
 fn source_field_issue(index: usize, field: &str, reason: &str) -> String {

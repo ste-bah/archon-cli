@@ -6,7 +6,6 @@
 use super::*;
 
 impl LifecycleDriver {
-
     pub(super) fn discovery_items(&self) -> Vec<serde_json::Value> {
         let paths = serde_json::json!(self.universe.source_roots);
         vec![
@@ -104,24 +103,14 @@ impl LifecycleDriver {
                 let (tier, source) = match kind {
                     "task_universe_reconcile" => (
                         "reducer",
-                        serde_json::json!([
-                            self.task_universe,
-                            inventory,
-                            issues,
-                            discovery
-                        ]),
+                        serde_json::json!([self.task_universe, inventory, issues, discovery]),
                     ),
                     "target_file_discovery"
                     | "verification_requirements_discovery"
                     | "artifact_requirements_discovery"
                     | "provider_environment_discovery" => (
                         "analysis",
-                        serde_json::json!([
-                            self.task_universe,
-                            inventory,
-                            issues,
-                            discovery
-                        ]),
+                        serde_json::json!([self.task_universe, inventory, issues, discovery]),
                     ),
                     _ => (
                         "reducer",
@@ -142,10 +131,9 @@ impl LifecycleDriver {
                     &issues,
                     &repair,
                 );
-                inventory = contract
-                    .normalize_inventory(&support::merge_inventory_repair(
-                        &contract, &inventory, &repair,
-                    ));
+                inventory = contract.normalize_inventory(&support::merge_inventory_repair(
+                    &contract, &inventory, &repair,
+                ));
             }
             attempt += 1;
         }

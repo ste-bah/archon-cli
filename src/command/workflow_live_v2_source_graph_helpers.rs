@@ -207,6 +207,8 @@ pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
 /// digest of `null` — colliding with each other and with a legitimately empty
 /// graph — and that hash lands in a reuse cache key. The error is returned so
 /// the caller records "no fingerprint" plus a reason instead.
-pub(super) fn source_fingerprint(graph: &WorkflowV2SourceTaskGraph) -> Result<String, serde_json::Error> {
+pub(super) fn source_fingerprint(
+    graph: &WorkflowV2SourceTaskGraph,
+) -> Result<String, serde_json::Error> {
     Ok(stable_hash(&serde_json::to_value(graph)?))
 }

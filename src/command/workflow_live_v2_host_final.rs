@@ -202,10 +202,16 @@ fn guard_final_report_against_dynamic_wave_evidence(
         .intersection(&completed_ids)
         .cloned()
         .collect();
-    ledger_noop_ids = ledger_noop_ids.intersection(&completed_ids).cloned().collect();
-    report.accepted_tasks =
-        merge_sorted_strings(std::mem::take(&mut report.accepted_tasks), ledger_accepted_ids);
-    report.noop_tasks = merge_sorted_strings(std::mem::take(&mut report.noop_tasks), ledger_noop_ids);
+    ledger_noop_ids = ledger_noop_ids
+        .intersection(&completed_ids)
+        .cloned()
+        .collect();
+    report.accepted_tasks = merge_sorted_strings(
+        std::mem::take(&mut report.accepted_tasks),
+        ledger_accepted_ids,
+    );
+    report.noop_tasks =
+        merge_sorted_strings(std::mem::take(&mut report.noop_tasks), ledger_noop_ids);
     merge_ledger_task_coverage(report, ledger_task_coverage, &completed_ids);
     merge_ledger_commands(report, ledger_commands);
     let claimed = report
@@ -303,7 +309,11 @@ fn merge_ledger_commands(
     report: &mut WorkflowV2FinalReport,
     extra: Vec<archon_workflow::WorkflowV2CommandRecord>,
 ) {
-    let mut seen = report.commands_run.iter().map(command_key).collect::<BTreeSet<_>>();
+    let mut seen = report
+        .commands_run
+        .iter()
+        .map(command_key)
+        .collect::<BTreeSet<_>>();
     for command in extra {
         if seen.insert(command_key(&command)) {
             report.commands_run.push(command);
@@ -320,9 +330,9 @@ fn command_key(command: &archon_workflow::WorkflowV2CommandRecord) -> String {
 
 fn guard_final_report_artifact_paths_exist(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
     let project_root = project_root_for_v2_root(v2_root);
-    report
-        .artifacts
-        .retain(|artifact| final_artifact_path_exists(artifact.path.trim(), project_root.as_deref()));
+    report.artifacts.retain(|artifact| {
+        final_artifact_path_exists(artifact.path.trim(), project_root.as_deref())
+    });
 }
 
 fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
@@ -375,12 +385,11 @@ pub(super) fn final_acceptance_gate_result(
         });
         return Ok(result);
     };
-    let (completed, missing, artifact_gaps) =
-        completion_ledger_state(
-            v2_store,
-            required_task_ids.iter().cloned().collect(),
-            task_universe,
-        )?;
+    let (completed, missing, artifact_gaps) = completion_ledger_state(
+        v2_store,
+        required_task_ids.iter().cloned().collect(),
+        task_universe,
+    )?;
     if failed_inputs == 0 && missing.is_empty() && artifact_gaps.is_empty() && checked_inputs > 0 {
         let mut result = WorkflowV2Result::accepted(format!(
             "final acceptance gate '{}' accepted {} authoritative task(s)",

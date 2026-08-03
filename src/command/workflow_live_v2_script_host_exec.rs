@@ -8,7 +8,6 @@
 /// kind: wave records carry `completed_ids`/`completion_evidence`, while a v3
 /// `implement-task-*`/`remediate-task-*` record carries no task-id evidence at
 /// all and names its task only in the call id.
-
 use super::*;
 
 pub(super) fn record_task_ids(
@@ -405,5 +404,4 @@ impl WorkflowScriptHost {
         }
         result_view_json(&record.result)
     }
-
 }

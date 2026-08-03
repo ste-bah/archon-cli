@@ -251,7 +251,6 @@ async fn run_v2_agent_call_with_rejected_output_log(
     }
 }
 
-
 pub(crate) fn save_rejected_write_output(
     v2_store: Option<&WorkflowV2ResultStore>,
     request: &archon_workflow::WorkflowV2AgentRequest,
@@ -367,7 +366,8 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
             repairable_agent_contract_error(first_error)
                 && repairable_agent_contract_error(repair_error)
         }
-        WorkflowV2AgentError::Transport(_) | WorkflowV2AgentError::NotificationDelivery(_)
+        WorkflowV2AgentError::Transport(_)
+        | WorkflowV2AgentError::NotificationDelivery(_)
         | WorkflowV2AgentError::PlanOnlyImplementation
         | WorkflowV2AgentError::ImplementationAcceptedWithoutChanges
         | WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage

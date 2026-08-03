@@ -56,7 +56,10 @@ pub(super) fn downgrade_read_only_accepted_task_coverage(
     });
 }
 
-pub(super) fn guard_empty_items_output(execution: &WorkflowV2CallExecution, result: &mut WorkflowV2Result) {
+pub(super) fn guard_empty_items_output(
+    execution: &WorkflowV2CallExecution,
+    result: &mut WorkflowV2Result,
+) {
     if !call_declares_items_output(execution) || !items_output_is_empty(result) {
         return;
     }

@@ -83,7 +83,10 @@ pub(super) fn string_array(value: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
-pub(crate) fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
+pub(crate) fn script_source(
+    harness_source: &str,
+    script_args: Option<&serde_json::Value>,
+) -> String {
     let normalized = normalize_workflow_export(harness_source);
     let v3_primitives = V3_PRIMITIVES_JS;
     let args_literal = script_args
@@ -205,7 +208,9 @@ __archonRun()
 "#
     )
 }
-pub(crate) fn result_view_json(result: &WorkflowV2Result) -> archon_workflow::WorkflowResult<String> {
+pub(crate) fn result_view_json(
+    result: &WorkflowV2Result,
+) -> archon_workflow::WorkflowResult<String> {
     let mut view = match &result.data {
         serde_json::Value::Object(object) => object.clone(),
         serde_json::Value::Null => serde_json::Map::new(),
@@ -251,7 +256,9 @@ pub(crate) fn completion_evidence_from_result(
     }
     evidence
 }
-pub(crate) fn reusable_record_has_required_completion_evidence(record: &WorkflowV2CallRecord) -> bool {
+pub(crate) fn reusable_record_has_required_completion_evidence(
+    record: &WorkflowV2CallRecord,
+) -> bool {
     !completion_evidence_call_id(&record.call.id) || !record.completion_evidence.is_empty()
 }
 
@@ -317,7 +324,9 @@ pub(in super::super::super) fn frontier_resume_record_reusable(
     record.is_reusable_for(input_hash) && record.scaffold_hash.as_deref() == Some(scaffold_hash)
 }
 
-pub(crate) fn evidence_snapshot_hash(evidence: &[WorkflowV2TaskCompletionEvidence]) -> Option<String> {
+pub(crate) fn evidence_snapshot_hash(
+    evidence: &[WorkflowV2TaskCompletionEvidence],
+) -> Option<String> {
     if evidence.is_empty() {
         return None;
     }
@@ -409,7 +418,9 @@ pub(crate) fn normalize_result_for_call(
     execution: &WorkflowV2CallExecution,
     mut result: WorkflowV2Result,
 ) -> WorkflowV2Result {
-    super::super::super::super::workflow_live_artifact_refs::retain_filesystem_artifacts(&mut result);
+    super::super::super::super::workflow_live_artifact_refs::retain_filesystem_artifacts(
+        &mut result,
+    );
     downgrade_read_only_accepted_task_coverage(&execution.call, &mut result);
     guard_empty_items_output(execution, &mut result);
     result
@@ -449,4 +460,3 @@ pub(crate) fn mark_unresolved_dependency_metadata(
         severity: Some("review".to_string()),
     });
 }
-

@@ -292,7 +292,10 @@ pub(super) fn extract_review_findings_from_record(
     Ok(findings)
 }
 
-pub(super) fn collect_findings_arrays(value: &serde_json::Value, findings: &mut Vec<serde_json::Value>) {
+pub(super) fn collect_findings_arrays(
+    value: &serde_json::Value,
+    findings: &mut Vec<serde_json::Value>,
+) {
     match value {
         serde_json::Value::Array(items) => {
             for item in items {

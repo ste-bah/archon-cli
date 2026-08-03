@@ -6,7 +6,6 @@
 /// declared relative to it); items lacking either a contract or a root are
 /// skipped — nothing is invented. Domain-agnostic: the contract's own content
 /// decides what gets checked.
-
 use super::*;
 
 pub(super) fn declared_contracts_by_item(
@@ -174,4 +173,3 @@ fn branch_canonical_task_ids(input: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
-

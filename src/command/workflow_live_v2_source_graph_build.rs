@@ -23,7 +23,9 @@ impl std::fmt::Display for DynamicSourceKind {
     }
 }
 
-pub(super) fn dynamic_source_kind(execution: &WorkflowV2CallExecution) -> Option<DynamicSourceKind> {
+pub(super) fn dynamic_source_kind(
+    execution: &WorkflowV2CallExecution,
+) -> Option<DynamicSourceKind> {
     if execution.call.id.starts_with("noop-proof-verification-")
         || execution.call.id.starts_with("noop-proof-reverification-")
     {
@@ -137,8 +139,7 @@ pub(super) fn source_task_graph_from_items(
                     issue.field.as_str(),
                     "source_residual_gap_ids" | "failed_predicate"
                 )
-        })
-        {
+        }) {
             return None;
         }
         let normalized_value = normalized.value;
@@ -325,7 +326,11 @@ fn authoritative_required_tools(
         task_universe
             .tasks
             .iter()
-            .filter(|task| canonical_task_ids.iter().any(|id| id == &task.canonical_task_id))
+            .filter(|task| {
+                canonical_task_ids
+                    .iter()
+                    .any(|id| id == &task.canonical_task_id)
+            })
             .flat_map(|task| task.required_tools.iter().cloned())
             .collect(),
     )

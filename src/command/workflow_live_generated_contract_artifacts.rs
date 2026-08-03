@@ -8,14 +8,9 @@ pub(super) fn copy_artifact_requirement_aliases(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
-    let explicit = ARTIFACT_ALIASES
-        .iter()
-        .any(|key| value.get(*key).is_some());
+    let explicit = ARTIFACT_ALIASES.iter().any(|key| value.get(*key).is_some());
     object.remove("artifact_requirements");
-    let split = split_artifact_requirement_values(raw_values_from_aliases(
-        value,
-        ARTIFACT_ALIASES,
-    ));
+    let split = split_artifact_requirement_values(raw_values_from_aliases(value, ARTIFACT_ALIASES));
     append_artifact_split(object, split, explicit);
 }
 

@@ -33,9 +33,8 @@ impl LifecycleDriver {
                     &mut state,
                 )
             };
-            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(
-                event,
-            ) = decision
+            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(event) =
+                decision
             {
                 let reroute_count = event
                     .get("reroute_count")
@@ -70,13 +69,14 @@ impl LifecycleDriver {
             }
         }
         normalize_null_report_collections(&mut inputs);
-        let result = self.call(
-            "finalReport",
-            id,
-            source,
-            serde_json::json!({ "status": status, "inputs": inputs, "task": task }),
-        )
-        .await;
+        let result = self
+            .call(
+                "finalReport",
+                id,
+                source,
+                serde_json::json!({ "status": status, "inputs": inputs, "task": task }),
+            )
+            .await;
         let report_error = match result {
             Ok(_) => return Ok(()),
             Err(error) if error.to_string().contains(TERMINAL_HOST_CALL_MARKER) => {

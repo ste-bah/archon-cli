@@ -276,7 +276,12 @@ pub(crate) fn slim_reducer_source(
     }
     let values = source.as_array().cloned().unwrap_or_default();
     let item_limit = if aggressive { 16 } else { 48 };
-    let at = |index: usize| values.get(index).cloned().unwrap_or(serde_json::Value::Null);
+    let at = |index: usize| {
+        values
+            .get(index)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
     if id.starts_with("verification-failure-triage-") {
         return serde_json::json!([
             at(0),
@@ -298,12 +303,18 @@ pub(crate) fn slim_reducer_source(
     serde_json::json!([
         at(0),
         slim_items(&support::array(values.get(1)), item_limit),
-        slim_result_with_outcomes(values.get(2).unwrap_or(&serde_json::Value::Null), item_limit),
+        slim_result_with_outcomes(
+            values.get(2).unwrap_or(&serde_json::Value::Null),
+            item_limit
+        ),
         slim_verification_records(&support::array(values.get(3)), aggressive),
     ])
 }
 
-pub(super) fn slim_retriage_feedback(value: Option<&serde_json::Value>, limit: usize) -> serde_json::Value {
+pub(super) fn slim_retriage_feedback(
+    value: Option<&serde_json::Value>,
+    limit: usize,
+) -> serde_json::Value {
     let Some(value) = value.and_then(serde_json::Value::as_object) else {
         return serde_json::Value::Null;
     };
@@ -377,7 +388,10 @@ pub(crate) fn slim_verification_records(
     slim
 }
 
-pub(super) fn slim_evidence_record(record: &serde_json::Value, outcome_limit: usize) -> serde_json::Value {
+pub(super) fn slim_evidence_record(
+    record: &serde_json::Value,
+    outcome_limit: usize,
+) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for key in [
         "kind",
@@ -446,4 +460,3 @@ pub(super) fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
     }
     serde_json::Value::Object(out)
 }
-

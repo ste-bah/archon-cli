@@ -1,6 +1,5 @@
 /// Reference handed to the author agent. Generic by construction: it
 /// documents the dialect, never the fixture domain.
-
 use super::*;
 
 pub(crate) const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
@@ -218,4 +217,3 @@ pub(super) fn compose_author_brief(values: &[(&str, &str)]) -> String {
     );
     out
 }
-

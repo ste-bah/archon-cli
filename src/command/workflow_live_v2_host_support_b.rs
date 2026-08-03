@@ -135,7 +135,10 @@ pub(super) fn sanitize_id(raw: &str) -> String {
         .collect()
 }
 
-pub(super) fn write_json(path: &Path, value: &impl serde::Serialize) -> archon_workflow::WorkflowResult<()> {
+pub(super) fn write_json(
+    path: &Path,
+    value: &impl serde::Serialize,
+) -> archon_workflow::WorkflowResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| WorkflowError::Io {
             path: parent.to_path_buf(),

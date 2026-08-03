@@ -43,7 +43,9 @@ pub(crate) fn normalize_canonical_ids(
     }
 }
 
-pub(super) fn raw_canonical_task_ids_from_generated_value(value: &serde_json::Value) -> Vec<String> {
+pub(super) fn raw_canonical_task_ids_from_generated_value(
+    value: &serde_json::Value,
+) -> Vec<String> {
     raw_strings_from_aliases(
         value,
         &[

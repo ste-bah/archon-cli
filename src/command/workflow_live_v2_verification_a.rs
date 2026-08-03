@@ -477,4 +477,3 @@ fn has_duplicate_harness_false_gap(result: &WorkflowV2Result) -> bool {
         is_duplicate_harness_gap(&lower) || lower.contains("exactly one targeted test")
     })
 }
-

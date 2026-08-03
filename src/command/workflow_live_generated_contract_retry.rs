@@ -78,12 +78,12 @@ pub(super) fn normalize_retry_context(
     if !object.contains_key("source_item_id")
         && let Some(source_item_id) =
             first_string(value, &["source_failed_item_id", "sourceFailedItemId"])
-        {
-            object.insert(
-                "source_item_id".to_string(),
-                serde_json::Value::String(source_item_id),
-            );
-        }
+    {
+        object.insert(
+            "source_item_id".to_string(),
+            serde_json::Value::String(source_item_id),
+        );
+    }
 }
 
 pub(super) fn normalize_provider_env_context(
@@ -138,7 +138,9 @@ fn provider_env_requirement_values(value: &serde_json::Value) -> Vec<serde_json:
         .collect()
 }
 
-pub(super) fn collect_generated_inventory_items(value: &serde_json::Value) -> Vec<serde_json::Value> {
+pub(super) fn collect_generated_inventory_items(
+    value: &serde_json::Value,
+) -> Vec<serde_json::Value> {
     if let Some(items) = top_level_items(value) {
         return items.clone();
     }
@@ -151,9 +153,7 @@ pub(super) fn collect_generated_inventory_items(value: &serde_json::Value) -> Ve
 }
 
 fn top_level_items(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
-    value
-        .get("items")
-        .and_then(serde_json::Value::as_array)
+    value.get("items").and_then(serde_json::Value::as_array)
 }
 
 fn generated_inventory_roots(value: &serde_json::Value) -> Vec<&serde_json::Value> {
@@ -174,11 +174,9 @@ fn generated_inventory_roots(value: &serde_json::Value) -> Vec<&serde_json::Valu
     roots
 }
 
-fn value_at_path<'a>(
-    value: &'a serde_json::Value,
-    path: &[&str],
-) -> Option<&'a serde_json::Value> {
-    path.iter().try_fold(value, |current, key| current.get(*key))
+fn value_at_path<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
 }
 
 fn push_inventory_root_items(root: &serde_json::Value, out: &mut Vec<serde_json::Value>) {

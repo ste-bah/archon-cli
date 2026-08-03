@@ -2,7 +2,6 @@
 /// host and require it to PLAN real work — with every universe task claimed
 /// by EXACTLY ONE write call, mandatory map→reduce reviews present, and no
 /// umbrella id-stuffing. Reports EVERY defect in one aggregated error.
-
 use super::*;
 
 pub(crate) async fn validate_authored_plan(
@@ -114,7 +113,10 @@ pub(super) fn review_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::
         .or_else(|| call.options.extra.get("review_contract"))
 }
 
-pub(super) fn review_contract_string<'a>(contract: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+pub(super) fn review_contract_string<'a>(
+    contract: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a str> {
     contract.get(key).and_then(serde_json::Value::as_str)
 }
 
@@ -137,7 +139,10 @@ pub(super) fn remediation_contract(call: &WorkflowV2HostCall) -> Option<&serde_j
         .or_else(|| call.options.extra.get("remediation_contract"))
 }
 
-pub(super) fn remediation_contract_string<'a>(call: &'a WorkflowV2HostCall, key: &str) -> Option<&'a str> {
+pub(super) fn remediation_contract_string<'a>(
+    call: &'a WorkflowV2HostCall,
+    key: &str,
+) -> Option<&'a str> {
     remediation_contract(call).and_then(|contract| contract.get(key).and_then(|v| v.as_str()))
 }
 
@@ -399,4 +404,3 @@ pub(crate) fn validate_map_reduce_review_calls(
         defects.join("; AND ")
     ))
 }
-

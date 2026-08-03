@@ -110,8 +110,8 @@ fn workflow_live_generated_contract_ignores_unowned_support_items_for_scheduling
                     source_path: "/tmp/TASK-TDL-001.md".to_string(),
                     dependency_ids: Vec::new(),
                     title: None,
-                artifact_requirements: Vec::new(),
-                ..Default::default()
+                    artifact_requirements: Vec::new(),
+                    ..Default::default()
                 },
             ],
         }),

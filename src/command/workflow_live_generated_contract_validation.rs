@@ -173,9 +173,7 @@ fn explicit_no_artifact_verified_noop(value: &serde_json::Value, work_type: &str
 }
 
 fn artifact_producing_intent(value: &serde_json::Value) -> bool {
-    if value_present(value.get("artifact_requirements"))
-        || value_present(value.get("artifacts"))
-    {
+    if value_present(value.get("artifact_requirements")) || value_present(value.get("artifacts")) {
         return true;
     }
     let text = [
@@ -194,19 +192,23 @@ fn artifact_producing_intent(value: &serde_json::Value) -> bool {
     .join(" ")
     .to_ascii_lowercase();
     let artifact_noun = [
-        "artifact", "report", "registry", "manifest", "dataset", "output file",
+        "artifact",
+        "report",
+        "registry",
+        "manifest",
+        "dataset",
+        "output file",
     ]
     .iter()
     .any(|term| text.contains(term));
     let production_or_claim = [
-        "produce", "write", "create", "generate", "persist", "update", "emit", "exists",
-        "present", "missing", "absent",
+        "produce", "write", "create", "generate", "persist", "update", "emit", "exists", "present",
+        "missing", "absent",
     ]
     .iter()
     .any(|term| text.contains(term));
     artifact_noun && production_or_claim
 }
-
 
 /// task_id -> claiming (item_id, canonical_task_ids) pairs.
 type TaskClaims = BTreeMap<String, Vec<(Option<String>, Vec<String>)>>;
@@ -350,12 +352,22 @@ fn generated_verification_intent(value: &serde_json::Value) -> bool {
 }
 
 fn generated_retry_verification_intent(value: &serde_json::Value) -> bool {
-    ["retry_command_shape", "retryCommandShape", "retry_steps", "retrySteps"]
+    [
+        "retry_command_shape",
+        "retryCommandShape",
+        "retry_steps",
+        "retrySteps",
+    ]
+    .iter()
+    .any(|key| value_present(value.get(*key)))
+        || [
+            "expected_result_shape",
+            "expectedResultShape",
+            "retry_plan",
+            "retryPlan",
+        ]
         .iter()
         .any(|key| value_present(value.get(*key)))
-        || ["expected_result_shape", "expectedResultShape", "retry_plan", "retryPlan"]
-            .iter()
-            .any(|key| value_present(value.get(*key)))
 }
 
 fn target_files_issue(
@@ -381,9 +393,7 @@ pub(super) fn target_file_issue(target: &str, root: &str) -> Option<&'static str
         return Some("implementation item has an empty target file");
     }
     if trimmed.chars().any(char::is_whitespace) {
-        return Some(
-            "target_files must hold repository file paths, not instruction text or prose",
-        );
+        return Some("target_files must hold repository file paths, not instruction text or prose");
     }
     let normalized = normalized_contract_path(trimmed)?;
     let absolute = is_contract_absolute_path(trimmed);

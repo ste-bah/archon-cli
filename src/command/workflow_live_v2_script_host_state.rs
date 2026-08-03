@@ -105,7 +105,11 @@ impl WorkflowScriptHost {
         Ok(())
     }
 
-    pub(super) async fn mark_executed(&self, record: &WorkflowV2CallRecord, status: WorkflowV2Status) {
+    pub(super) async fn mark_executed(
+        &self,
+        record: &WorkflowV2CallRecord,
+        status: WorkflowV2Status,
+    ) {
         let mut acc = self.accumulator.lock().await;
         // A final report is the script speaking for the whole run: its status
         // overrides accumulated call severities so script-recovered failures
@@ -172,5 +176,4 @@ impl WorkflowScriptHost {
         }
         self.summary().await
     }
-
 }

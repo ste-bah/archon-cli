@@ -38,9 +38,9 @@ async fn send_planner_notification(
     event: TuiEvent,
 ) -> Result<()> {
     tui_tx.send_async(event).await.map_err(|error| {
-        anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(format!(
-            "workflow planner notification delivery failed: phase={phase}: {error}"
-        )))
+        anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(
+            format!("workflow planner notification delivery failed: phase={phase}: {error}"),
+        ))
     })
 }
 
@@ -72,8 +72,14 @@ pub(crate) async fn plan_live(
             &governed_learning_context,
             generated_config,
         )?;
-        match compile_harness_plan(task, Some(task_universe), &harness, generated_config, learning)
-            .await
+        match compile_harness_plan(
+            task,
+            Some(task_universe),
+            &harness,
+            generated_config,
+            learning,
+        )
+        .await
         {
             Ok(mut plan) => {
                 plan.governed_learning_context = governed_learning_context;

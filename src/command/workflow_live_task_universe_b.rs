@@ -165,7 +165,9 @@ pub(super) fn reconcile_blocks_into_dependencies(
     Ok(())
 }
 
-pub(super) fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
+pub(super) fn validate_task_dependency_graph(
+    tasks: &[WorkflowV2TaskUniverseTask],
+) -> WorkflowResult<()> {
     let graph = tasks
         .iter()
         .map(|task| {
@@ -375,7 +377,10 @@ mod capability_and_genericity_tests {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if name.starts_with("workflow_live") && name.ends_with(".rs") && !name.contains("_tests") {
+            if name.starts_with("workflow_live")
+                && name.ends_with(".rs")
+                && !name.contains("_tests")
+            {
                 runtime_sources.push(path);
             }
         }
@@ -431,5 +436,4 @@ mod capability_and_genericity_tests {
             }
         }
     }
-
 }
