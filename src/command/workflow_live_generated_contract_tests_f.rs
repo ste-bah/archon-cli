@@ -148,7 +148,10 @@ fn artifact_requirements_keep_concrete_paths_and_path_objects() {
         normalized["artifact_requirements"][0],
         ".archon/artifacts/evidence.json"
     );
-    assert_eq!(normalized["artifact_requirements"][1]["path"], "artifacts/report.json");
+    assert_eq!(
+        normalized["artifact_requirements"][1]["path"],
+        "artifacts/report.json"
+    );
     assert!(normalized.get("expected_evidence").is_none());
 }
 
@@ -187,16 +190,20 @@ fn artifact_requirements_placeholder_fixture_moves_to_expected_evidence() {
     let value: serde_json::Value = serde_json::from_str(fixture).expect("fixture json");
     let inventory = normalize_generated_inventory_value(&value, Some(&placeholder_task_universe()));
 
-    assert!(inventory.issues.is_empty(), "issues: {:?}", inventory.issues);
+    assert!(
+        inventory.issues.is_empty(),
+        "issues: {:?}",
+        inventory.issues
+    );
     assert_eq!(inventory.items.len(), 2);
     for item in inventory.items {
         assert_eq!(item["artifact_requirements"], serde_json::json!([]));
         assert!(
             item["expected_evidence"]
                 .as_array()
-                .is_some_and(|items| items.iter().any(|entry| entry
-                    .as_str()
-                    .is_some_and(|text| text.contains('<')))),
+                .is_some_and(|items| items
+                    .iter()
+                    .any(|entry| entry.as_str().is_some_and(|text| text.contains('<')))),
             "item should retain placeholder as evidence: {item}"
         );
     }
@@ -236,7 +243,9 @@ fn fabel_verification_plan_items_normalize_idempotently() {
 
 #[test]
 fn fabel_shape_repair_items_normalize_idempotently() {
-    assert_fixture_items_are_idempotent("fixtures/wffed_verification_repair_shape_repair_1_1_1.json");
+    assert_fixture_items_are_idempotent(
+        "fixtures/wffed_verification_repair_shape_repair_1_1_1.json",
+    );
 }
 
 #[test]
@@ -281,7 +290,8 @@ pub(super) fn assert_fixture_items_are_idempotent(fixture: &str) {
     }
 }
 
-pub(super) fn placeholder_task_universe() -> super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
+pub(super) fn placeholder_task_universe()
+-> super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
     super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: Vec::new(),

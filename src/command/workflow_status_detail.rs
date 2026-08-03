@@ -1,11 +1,13 @@
+use super::*;
+
 #[derive(Debug, Clone, Copy)]
-enum ApprovalCommand {
+pub(super) enum ApprovalCommand {
     RunOnce,
     Always,
     Deny,
 }
 
-fn approval(
+pub(super) fn approval(
     store: &WorkflowStore,
     cwd: &Path,
     run_id: &str,
@@ -65,7 +67,7 @@ fn approval_subject_summary(record: &archon_workflow::WorkflowApprovalRecord) ->
     )
 }
 
-fn status_text(run: &archon_workflow::WorkflowRun) -> String {
+pub(super) fn status_text(run: &archon_workflow::WorkflowRun) -> String {
     let accepted = run
         .stages
         .values()
@@ -106,7 +108,7 @@ fn status_text(run: &archon_workflow::WorkflowRun) -> String {
     )
 }
 
-fn visible_stage_summary(run: &WorkflowRun) -> String {
+pub(super) fn visible_stage_summary(run: &WorkflowRun) -> String {
     for status in [
         StageStatus::Running,
         StageStatus::NeedsReview,
@@ -139,7 +141,7 @@ fn visible_stage_summary(run: &WorkflowRun) -> String {
     "none".to_string()
 }
 
-fn next_workflow_action(run: &WorkflowRun) -> String {
+pub(super) fn next_workflow_action(run: &WorkflowRun) -> String {
     match run.status {
         RunStatus::NeedsReview => format!("/workflow resume --live {}", run.id),
         RunStatus::Failed | RunStatus::Blocked => format!("/workflow repair {}", run.id),
@@ -150,7 +152,7 @@ fn next_workflow_action(run: &WorkflowRun) -> String {
     }
 }
 
-fn status_detail_text(store: &WorkflowStore, run_id: &str) -> Result<String> {
+pub(super) fn status_detail_text(store: &WorkflowStore, run_id: &str) -> Result<String> {
     let run = store.load_state(run_id)?;
     let mut out = status_text(&run);
     out.push('\n');
@@ -418,7 +420,7 @@ fn short_hash(value: &str) -> String {
     value.chars().take(12).collect()
 }
 
-fn list_text(store: &WorkflowStore) -> Result<String> {
+pub(super) fn list_text(store: &WorkflowStore) -> Result<String> {
     let runs = store.list_runs()?;
     if runs.is_empty() {
         return Ok("No workflow runs found.".to_string());

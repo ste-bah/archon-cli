@@ -1,5 +1,7 @@
+use super::*;
+
 #[derive(Debug, Clone, Copy)]
-enum DynamicSourceKind {
+pub(super) enum DynamicSourceKind {
     NoopProof,
     Implementation,
     Remediation,
@@ -21,7 +23,9 @@ impl std::fmt::Display for DynamicSourceKind {
     }
 }
 
-fn dynamic_source_kind(execution: &WorkflowV2CallExecution) -> Option<DynamicSourceKind> {
+pub(super) fn dynamic_source_kind(
+    execution: &WorkflowV2CallExecution,
+) -> Option<DynamicSourceKind> {
     if execution.call.id.starts_with("noop-proof-verification-")
         || execution.call.id.starts_with("noop-proof-reverification-")
     {
@@ -60,13 +64,13 @@ fn dynamic_source_kind(execution: &WorkflowV2CallExecution) -> Option<DynamicSou
 }
 
 #[derive(Debug, Clone, Default)]
-struct TaskUniverse {
+pub(super) struct TaskUniverse {
     canonical: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
 }
 
 impl TaskUniverse {
-    fn from_authoritative(task_universe: &WorkflowV2TaskUniverse) -> Self {
+    pub(super) fn from_authoritative(task_universe: &WorkflowV2TaskUniverse) -> Self {
         let mut out = Self::default();
         for task in &task_universe.tasks {
             out.add_canonical(task.canonical_task_id.clone());
@@ -94,7 +98,7 @@ impl TaskUniverse {
         }
     }
 
-    fn resolve(&self, value: &str) -> Option<String> {
+    pub(super) fn resolve(&self, value: &str) -> Option<String> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             return None;
@@ -112,7 +116,7 @@ impl TaskUniverse {
     }
 }
 
-fn source_task_graph_from_items(
+pub(super) fn source_task_graph_from_items(
     values: &[serde_json::Value],
     universe: &TaskUniverse,
     authoritative_task_universe: &WorkflowV2TaskUniverse,
@@ -135,8 +139,7 @@ fn source_task_graph_from_items(
                     issue.field.as_str(),
                     "source_residual_gap_ids" | "failed_predicate"
                 )
-        })
-        {
+        }) {
             return None;
         }
         let normalized_value = normalized.value;
@@ -323,7 +326,11 @@ fn authoritative_required_tools(
         task_universe
             .tasks
             .iter()
-            .filter(|task| canonical_task_ids.iter().any(|id| id == &task.canonical_task_id))
+            .filter(|task| {
+                canonical_task_ids
+                    .iter()
+                    .any(|id| id == &task.canonical_task_id)
+            })
             .flat_map(|task| task.required_tools.iter().cloned())
             .collect(),
     )

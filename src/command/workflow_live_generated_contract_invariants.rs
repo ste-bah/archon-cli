@@ -1,4 +1,6 @@
-fn normalize_retry_invariant_context(
+use super::*;
+
+pub(super) fn normalize_retry_invariant_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -39,7 +41,7 @@ fn normalize_retry_invariant_context(
     }
 }
 
-fn retry_invariant_missing_fields(value: &serde_json::Value) -> Vec<&'static str> {
+pub(super) fn retry_invariant_missing_fields(value: &serde_json::Value) -> Vec<&'static str> {
     if !generated_retry_verification_item(value) {
         return Vec::new();
     }
@@ -55,23 +57,23 @@ fn retry_invariant_missing_fields(value: &serde_json::Value) -> Vec<&'static str
 
 fn generated_retry_verification_item(value: &serde_json::Value) -> bool {
     let retry_metadata = [
-            "retry_type",
-            "retryType",
-            "retry_reason",
-            "retryReason",
-            "repair_type",
-            "repairType",
-            "source_failed_item_id",
-            "sourceFailedItemId",
-            "source_outcome_item_ids",
-            "sourceOutcomeItemIds",
-            "retry_steps",
-            "retrySteps",
-            "recommended_retry",
-            "recommendedRetry",
-        ]
-        .iter()
-        .any(|key| value_present(value.get(*key)));
+        "retry_type",
+        "retryType",
+        "retry_reason",
+        "retryReason",
+        "repair_type",
+        "repairType",
+        "source_failed_item_id",
+        "sourceFailedItemId",
+        "source_outcome_item_ids",
+        "sourceOutcomeItemIds",
+        "retry_steps",
+        "retrySteps",
+        "recommended_retry",
+        "recommendedRetry",
+    ]
+    .iter()
+    .any(|key| value_present(value.get(*key)));
     let retry_class = value
         .get("classification")
         .and_then(serde_json::Value::as_str)

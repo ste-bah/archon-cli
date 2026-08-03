@@ -14,12 +14,28 @@ use super::workflow_live_v2_completion_credit::{
     CompletionCredit, noop_acceptance_criteria_satisfied,
 };
 
-include!("workflow_live_v2_host_local.rs");
+#[path = "workflow_live_v2_host_local.rs"]
+mod workflow_live_v2_host_local;
+pub(crate) use workflow_live_v2_host_local::*;
 
-include!("workflow_live_v2_host_final.rs");
+#[path = "workflow_live_v2_host_final.rs"]
+mod workflow_live_v2_host_final;
+pub(super) use workflow_live_v2_host_final::*;
 
-include!("workflow_live_v2_final_accounting.rs");
+#[path = "workflow_live_v2_final_accounting.rs"]
+mod workflow_live_v2_final_accounting;
+pub(crate) use workflow_live_v2_final_accounting::*;
 
-include!("workflow_live_v2_host_support.rs");
+#[path = "workflow_live_v2_host_support.rs"]
+mod workflow_live_v2_host_support;
+use workflow_live_v2_host_support::*;
+#[path = "workflow_live_v2_host_support_a.rs"]
+mod workflow_live_v2_host_support_a;
+pub(crate) use workflow_live_v2_host_support_a::*;
+#[path = "workflow_live_v2_host_support_b.rs"]
+mod workflow_live_v2_host_support_b;
+pub(crate) use workflow_live_v2_host_support_b::*;
 
-include!("workflow_live_v2_host_blocker.rs");
+#[path = "workflow_live_v2_host_blocker.rs"]
+mod workflow_live_v2_host_blocker;
+pub(super) use workflow_live_v2_host_blocker::*;

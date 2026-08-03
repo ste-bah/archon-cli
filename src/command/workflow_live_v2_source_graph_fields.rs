@@ -1,4 +1,6 @@
-fn remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
+use super::*;
+
+pub(super) fn remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
     value_present(
         value
             .get("source_item_id")
@@ -39,7 +41,7 @@ fn remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
         && verification_evidence_fields_present(value)
 }
 
-fn review_remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
+pub(super) fn review_remediation_item_has_required_fields(value: &serde_json::Value) -> bool {
     value_present(
         value
             .get("source_item_id")
@@ -78,7 +80,7 @@ fn review_remediation_item_has_required_fields(value: &serde_json::Value) -> boo
         && verification_evidence_fields_present(value)
 }
 
-fn noop_item_has_required_fields(value: &serde_json::Value) -> bool {
+pub(super) fn noop_item_has_required_fields(value: &serde_json::Value) -> bool {
     value_present(value.get("noop_proof").or_else(|| value.get("noopProof")))
         && value_present(
             value
@@ -94,7 +96,7 @@ fn noop_item_has_required_fields(value: &serde_json::Value) -> bool {
         )
 }
 
-fn verification_item_has_required_fields(value: &serde_json::Value) -> bool {
+pub(super) fn verification_item_has_required_fields(value: &serde_json::Value) -> bool {
     value_present(
         value
             .get("focused_verification")
@@ -106,7 +108,7 @@ fn verification_item_has_required_fields(value: &serde_json::Value) -> bool {
     ) && verification_evidence_fields_present(value)
 }
 
-fn review_verification_item_has_required_fields(value: &serde_json::Value) -> bool {
+pub(super) fn review_verification_item_has_required_fields(value: &serde_json::Value) -> bool {
     value_present(
         value
             .get("focused_verification")
@@ -118,7 +120,7 @@ fn review_verification_item_has_required_fields(value: &serde_json::Value) -> bo
     ) && verification_evidence_fields_present(value)
 }
 
-fn verification_evidence_fields_present(value: &serde_json::Value) -> bool {
+pub(super) fn verification_evidence_fields_present(value: &serde_json::Value) -> bool {
     value
         .get("artifact_requirements")
         .or_else(|| value.get("artifactRequirements"))

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn blocked_review_final_report_collects_nested_verification_result() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -7,11 +9,13 @@ fn blocked_review_final_report_collects_nested_verification_result() {
         summary: "review verification found residual gaps".to_string(),
         ..WorkflowV2Result::default()
     };
-    review_verification.residual_gaps.push(WorkflowV2ResidualGap {
-        id: "review_verification_gap".to_string(),
-        description: "coverage artifact is incomplete".to_string(),
-        severity: Some("blocking".to_string()),
-    });
+    review_verification
+        .residual_gaps
+        .push(WorkflowV2ResidualGap {
+            id: "review_verification_gap".to_string(),
+            description: "coverage artifact is incomplete".to_string(),
+            severity: Some("blocking".to_string()),
+        });
     let final_report = WorkflowV2CallExecution {
         input: serde_json::json!({
             "status": "needs_review",
@@ -32,7 +36,9 @@ fn blocked_review_final_report_collects_nested_verification_result() {
     assert!(
         report.data["residual_gaps"]
             .as_array()
-            .is_some_and(|gaps| gaps.iter().any(|gap| gap["id"] == "review_verification_gap")),
+            .is_some_and(|gaps| gaps
+                .iter()
+                .any(|gap| gap["id"] == "review_verification_gap")),
         "{:#?}",
         report.data
     );
@@ -52,11 +58,13 @@ fn blocked_final_report_ignores_accepted_metadata_without_evidence() {
         summary: "focused verification failed".to_string(),
         ..WorkflowV2Result::default()
     };
-    failed_verification.residual_gaps.push(WorkflowV2ResidualGap {
-        id: "focused_test_failed".to_string(),
-        description: "focused test ran and failed".to_string(),
-        severity: Some("high".to_string()),
-    });
+    failed_verification
+        .residual_gaps
+        .push(WorkflowV2ResidualGap {
+            id: "focused_test_failed".to_string(),
+            description: "focused test ran and failed".to_string(),
+            severity: Some("high".to_string()),
+        });
     let final_report = WorkflowV2CallExecution {
         input: serde_json::json!({
             "status": "needs_review",

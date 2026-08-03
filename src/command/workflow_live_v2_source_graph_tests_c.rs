@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn focused_verification_accepts_retry_plan_fixture() {
     let fixture = include_str!("fixtures/wf0eca_verification_repair_plan_1_1_item.json");
@@ -160,7 +162,7 @@ fn source_metadata_error_names_the_failing_source_field() {
     );
 }
 
-fn execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "implementation-wave-1".to_string(),
@@ -180,7 +182,9 @@ fn execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
     }
 }
 
-fn review_remediation_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn review_remediation_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "review-remediation-wave-1".to_string(),
@@ -200,7 +204,9 @@ fn review_remediation_execution(source_data: serde_json::Value) -> WorkflowV2Cal
     }
 }
 
-fn review_verification_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn review_verification_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "review-verification-wave-1".to_string(),
@@ -219,7 +225,9 @@ fn review_verification_execution(source_data: serde_json::Value) -> WorkflowV2Ca
     }
 }
 
-fn focused_verification_execution(source_data: serde_json::Value) -> WorkflowV2CallExecution {
+pub(super) fn focused_verification_execution(
+    source_data: serde_json::Value,
+) -> WorkflowV2CallExecution {
     WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
             id: "verification-wave-1".to_string(),
@@ -274,12 +282,12 @@ fn focused_verification_retry_with_source_invariant_is_schedulable() {
     assert!(metadata.source_fingerprint.is_some());
 }
 
-fn task_universe() -> WorkflowV2TaskUniverse {
+pub(super) fn task_universe() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -288,7 +296,7 @@ fn task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -301,12 +309,12 @@ fn task_universe() -> WorkflowV2TaskUniverse {
     }
 }
 
-fn tdl_task_universe() -> WorkflowV2TaskUniverse {
+pub(super) fn tdl_task_universe() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),
         source_roots: vec!["/tmp/tasks".to_string()],
         tasks: vec![
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-001".to_string(),
                 aliases: vec!["T001".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-001.md".to_string(),
@@ -315,7 +323,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-010".to_string(),
                 aliases: vec!["T010".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-010.md".to_string(),
@@ -324,7 +332,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-020".to_string(),
                 aliases: vec!["T020".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-020.md".to_string(),
@@ -333,7 +341,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-050".to_string(),
                 aliases: vec!["T050".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-050.md".to_string(),
@@ -342,7 +350,7 @@ fn tdl_task_universe() -> WorkflowV2TaskUniverse {
                 artifact_requirements: Vec::new(),
                 ..Default::default()
             },
-            super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
+            super::super::super::super::workflow_live_task_universe::WorkflowV2TaskUniverseTask {
                 canonical_task_id: "TASK-TDL-070".to_string(),
                 aliases: vec!["T070".to_string()],
                 source_path: "/tmp/tasks/TASK-TDL-070.md".to_string(),

@@ -161,11 +161,11 @@ fn workflow_live_generated_contract_normalizes_retry_command_fixture() {
         inventory.items[1]["artifact_requirements"],
         serde_json::json!([".archon/trading-lab/data/registry.json"])
     );
-    assert!(
-        inventory.items.iter().all(|item| item["expected_evidence"]
+    assert!(inventory.items.iter().all(|item| {
+        item["expected_evidence"]
             .as_array()
-            .is_some_and(|items| items.iter().any(|value| value == "terminal output")))
-    );
+            .is_some_and(|items| items.iter().any(|value| value == "terminal output"))
+    }));
 }
 
 #[test]

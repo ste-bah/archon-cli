@@ -5,7 +5,9 @@
 
 use super::*;
 
-include!("workflow_live_v2_lifecycle_wave_phases.rs");
+#[path = "workflow_live_v2_lifecycle_wave_phases.rs"]
+mod workflow_live_v2_lifecycle_wave_phases;
+pub(crate) use workflow_live_v2_lifecycle_wave_phases::*;
 
 impl LifecycleDriver {
     pub(in super::super::super) async fn run_dependency_waves(

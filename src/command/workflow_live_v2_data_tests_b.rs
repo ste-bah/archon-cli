@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn completion_claim_request_gets_authoritative_universe_without_mutating_execution() {
     let execution = WorkflowV2CallExecution {
@@ -35,17 +37,19 @@ fn completion_claim_request_gets_authoritative_universe_without_mutating_executi
     );
 
     assert_eq!(execution.input, original);
-    assert_eq!(serde_json::to_string(&execution.input).unwrap(), original_hash);
+    assert_eq!(
+        serde_json::to_string(&execution.input).unwrap(),
+        original_hash
+    );
     assert!(
-        request.input.to_string().contains("completion acceptance detail")
+        request
+            .input
+            .to_string()
+            .contains("completion acceptance detail")
     );
     assert!(request.input.to_string().contains("deliverable_contracts"));
     let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
-    assert!(
-        prompt
-            .invocation
-            .contains("completion acceptance detail")
-    );
+    assert!(prompt.invocation.contains("completion acceptance detail"));
     assert!(prompt.invocation.contains("deliverable_contracts"));
 }
 
@@ -74,7 +78,10 @@ fn completion_claim_transport_retry_gets_authoritative_universe_once() {
     let request = v2_agent_request("objective", None, &execution, Some(&universe));
     let serialized = request.input.to_string();
 
-    assert_eq!(serialized.matches("workflow-v2-task-universe-v1").count(), 1);
+    assert_eq!(
+        serialized.matches("workflow-v2-task-universe-v1").count(),
+        1
+    );
     assert!(serialized.contains("retry acceptance detail"));
 }
 
@@ -130,12 +137,7 @@ fn item_producer_request_demands_flat_items_array() {
         depends_on: Vec::new(),
     };
 
-    let request = v2_agent_request(
-        "objective",
-        Some("/repo".to_string()),
-        &execution,
-        None,
-    );
+    let request = v2_agent_request("objective", Some("/repo".to_string()), &execution, None);
 
     assert!(
         request

@@ -1,6 +1,9 @@
 // WorkflowScriptHost: metadata review, summary and event emission.
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
+
+use super::*;
+
 impl WorkflowScriptHost {
     pub(super) fn generated_decomposed_prd_run(&self) -> bool {
         self.runner.task_universe.is_some()
@@ -9,7 +12,7 @@ impl WorkflowScriptHost {
     pub(super) async fn persist_source_metadata_review(
         &self,
         execution: WorkflowV2CallExecution,
-        source_metadata: super::super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
+        source_metadata: super::super::super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
         input_hash: String,
         attempt: u32,
     ) -> archon_workflow::WorkflowResult<String> {
@@ -67,7 +70,7 @@ impl WorkflowScriptHost {
         result_view_json(&record.result)
     }
 
-    pub(super) async fn summary(&self) -> WorkflowV2ScriptSummary {
+    pub(crate) async fn summary(&self) -> WorkflowV2ScriptSummary {
         let acc = self.accumulator.lock().await;
         WorkflowV2ScriptSummary {
             status: acc.status,
@@ -123,7 +126,7 @@ impl WorkflowScriptHost {
         );
     }
 
-    pub(super) fn emit_terminal_status(&self, status: WorkflowV2Status) {
+    pub(crate) fn emit_terminal_status(&self, status: WorkflowV2Status) {
         self.emit_v2_event(
             match status {
                 WorkflowV2Status::Accepted | WorkflowV2Status::Noop => {

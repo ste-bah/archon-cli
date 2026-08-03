@@ -2,7 +2,9 @@
 /// host and require it to PLAN real work — with every universe task claimed
 /// by EXACTLY ONE write call, mandatory map→reduce reviews present, and no
 /// umbrella id-stuffing. Reports EVERY defect in one aggregated error.
-pub(super) async fn validate_authored_plan(
+use super::*;
+
+pub(crate) async fn validate_authored_plan(
     source: &str,
     expected_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
@@ -85,11 +87,11 @@ pub(super) async fn validate_authored_plan(
     Err(defects.join("; AND "))
 }
 
-pub(super) const MANDATED_RESULT_FIELDS: [&str; 2] =
+pub(crate) const MANDATED_RESULT_FIELDS: [&str; 2] =
     ["adversarial_findings", "uncovered_requirements"];
-pub(super) const CRITIC_TIER: &str = "critic";
-pub(super) const REVIEW_MAP_STAGE: &str = "map";
-pub(super) const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
+pub(crate) const CRITIC_TIER: &str = "critic";
+pub(crate) const REVIEW_MAP_STAGE: &str = "map";
+pub(crate) const REVIEW_REDUCE_FINAL_STAGE: &str = "reduce_final";
 pub(super) const REVIEW_REDUCE_CHUNK_STAGE: &str = "reduce_chunk";
 pub(super) const REVIEW_CONTRACT_MARKER: &str = "reviewContract";
 pub(super) const REMEDIATION_CONTRACT_MARKER: &str = "remediationContract";
@@ -111,7 +113,10 @@ pub(super) fn review_contract(call: &WorkflowV2HostCall) -> Option<&serde_json::
         .or_else(|| call.options.extra.get("review_contract"))
 }
 
-pub(super) fn review_contract_string<'a>(contract: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+pub(super) fn review_contract_string<'a>(
+    contract: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a str> {
     contract.get(key).and_then(serde_json::Value::as_str)
 }
 
@@ -134,7 +139,10 @@ pub(super) fn remediation_contract(call: &WorkflowV2HostCall) -> Option<&serde_j
         .or_else(|| call.options.extra.get("remediation_contract"))
 }
 
-pub(super) fn remediation_contract_string<'a>(call: &'a WorkflowV2HostCall, key: &str) -> Option<&'a str> {
+pub(super) fn remediation_contract_string<'a>(
+    call: &'a WorkflowV2HostCall,
+    key: &str,
+) -> Option<&'a str> {
     remediation_contract(call).and_then(|contract| contract.get(key).and_then(|v| v.as_str()))
 }
 
@@ -285,7 +293,7 @@ pub(super) fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<
 /// read-only critic map reviewers cover every accepted task exactly once,
 /// then bounded critic reducers preserve map findings into the accounting
 /// fields. Reports EVERY defect in one error and names near-misses.
-pub(super) fn validate_map_reduce_review_calls(
+pub(crate) fn validate_map_reduce_review_calls(
     details: &WorkflowDryRunPlanDetails,
     accepted_task_ids: &std::collections::BTreeSet<String>,
 ) -> Result<(), String> {
@@ -396,4 +404,3 @@ pub(super) fn validate_map_reduce_review_calls(
         defects.join("; AND ")
     ))
 }
-

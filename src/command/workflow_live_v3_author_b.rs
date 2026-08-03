@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) const V3_AUTHOR_BOOTSTRAP: &str = r#"
 async function workflow(w) {
   const authored = await w.agent(
@@ -21,7 +23,7 @@ impl WorkflowV2ScriptRunner {
     /// v3 entry: author workflow.js if absent (journaled, cache-keyed on the composed brief
     /// (task paths + per-file content fingerprints + lessons)), persist it, then execute it. Re-runs with an unchanged
     /// authored script replay unchanged call prefixes from the store.
-    pub(in super::super) async fn run_authored_script_lifecycle(
+    pub(in super::super::super) async fn run_authored_script_lifecycle(
         self,
         authored_path: std::path::PathBuf,
         governed_learning_context: serde_json::Value,
@@ -187,7 +189,9 @@ impl WorkflowV2ScriptRunner {
     }
 }
 
-pub(super) fn validate_authored_workflow_source(source: &str) -> archon_workflow::WorkflowResult<String> {
+pub(crate) fn validate_authored_workflow_source(
+    source: &str,
+) -> archon_workflow::WorkflowResult<String> {
     let source = source.trim();
     if source.len() < 80 {
         return Err(WorkflowError::SpecInvalid(
@@ -203,7 +207,7 @@ pub(super) fn validate_authored_workflow_source(source: &str) -> archon_workflow
     Ok(source.to_string())
 }
 
-pub(super) fn validate_authored_task_accounting(
+pub(crate) fn validate_authored_task_accounting(
     script_result: Option<&str>,
     expected: &std::collections::BTreeSet<String>,
 ) -> archon_workflow::WorkflowResult<()> {

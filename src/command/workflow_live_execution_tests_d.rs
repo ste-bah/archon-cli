@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn workflow_live_fails_item_producer_when_repair_is_still_invalid() {
     let client = Arc::new(AlwaysInvalidItemsAgentClient {
@@ -88,7 +90,7 @@ fn transient_classifier_matches_provider_decode_but_not_permission_errors() {
     ));
 }
 
-fn init_git_repo(repo: &std::path::Path) {
+pub(super) fn init_git_repo(repo: &std::path::Path) {
     run_git(repo, &["init"]);
     run_git(repo, &["config", "user.name", "archon-test"]);
     run_git(
@@ -114,7 +116,7 @@ fn run_git(repo: &std::path::Path, args: &[&str]) {
     );
 }
 
-async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
+pub(super) async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
     let workflow_root = cwd.join(".archon/workflows");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -128,9 +130,10 @@ async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
                 } else {
                     None
                 }
-            }) {
-                return run_id;
-            }
+            })
+        {
+            return run_id;
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "generated workflow run directory was not created"

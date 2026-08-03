@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
     // The stub must carry the same envelope keys the live result view exposes
     // ({status, summary, data, result, ...}): reference-following scripts read
@@ -15,7 +17,9 @@ pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
     .to_string()
 }
 
-pub(super) fn artifact_requirements(value: &serde_json::Value) -> Vec<WorkflowV2ArtifactRequirement> {
+pub(crate) fn artifact_requirements(
+    value: &serde_json::Value,
+) -> Vec<WorkflowV2ArtifactRequirement> {
     value
         .as_array()
         .into_iter()

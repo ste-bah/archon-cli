@@ -1,4 +1,6 @@
-pub(super) fn reconcile_final_task_statuses(
+use super::*;
+
+pub(crate) fn reconcile_final_task_statuses(
     report: &mut WorkflowV2FinalReport,
     required_task_ids: &[String],
 ) {
@@ -16,10 +18,14 @@ pub(super) fn reconcile_final_task_statuses(
     report
         .blocked_tasks
         .retain(|id| required.contains(id) && !completed.contains(id));
-    let blocked = report.blocked_tasks.iter().cloned().collect::<BTreeSet<_>>();
-    report.failed_tasks.retain(|id| {
-        required.contains(id) && !completed.contains(id) && !blocked.contains(id)
-    });
+    let blocked = report
+        .blocked_tasks
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    report
+        .failed_tasks
+        .retain(|id| required.contains(id) && !completed.contains(id) && !blocked.contains(id));
     let failed = report.failed_tasks.iter().cloned().collect::<BTreeSet<_>>();
     report.missing_tasks.retain(|id| {
         required.contains(id)

@@ -1,15 +1,16 @@
+use super::*;
 
-struct CannedLifecycleLlm {
-    scenario: CannedLifecycleScenario,
-    calls: Mutex<Vec<String>>,
-    deliverable_contract_executed: AtomicBool,
-    parameterized_contract_executed: AtomicBool,
-    inventory_calls: AtomicUsize,
-    verification_failure_emitted: AtomicBool,
+pub(super) struct CannedLifecycleLlm {
+    pub(super) scenario: CannedLifecycleScenario,
+    pub(super) calls: Mutex<Vec<String>>,
+    pub(super) deliverable_contract_executed: AtomicBool,
+    pub(super) parameterized_contract_executed: AtomicBool,
+    pub(super) inventory_calls: AtomicUsize,
+    pub(super) verification_failure_emitted: AtomicBool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum CannedLifecycleScenario {
+pub(super) enum CannedLifecycleScenario {
     #[default]
     FullLifecycle,
     TriagePreservation,
@@ -351,4 +352,3 @@ impl LlmClient for CannedLifecycleLlm {
         })
     }
 }
-

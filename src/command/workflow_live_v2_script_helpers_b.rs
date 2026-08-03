@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn downgrade_read_only_accepted_task_coverage(
     call: &WorkflowV2HostCall,
     result: &mut WorkflowV2Result,
@@ -54,7 +56,10 @@ pub(super) fn downgrade_read_only_accepted_task_coverage(
     });
 }
 
-pub(super) fn guard_empty_items_output(execution: &WorkflowV2CallExecution, result: &mut WorkflowV2Result) {
+pub(super) fn guard_empty_items_output(
+    execution: &WorkflowV2CallExecution,
+    result: &mut WorkflowV2Result,
+) {
     if !call_declares_items_output(execution) || !items_output_is_empty(result) {
         return;
     }
@@ -115,7 +120,7 @@ pub(super) fn items_output_is_empty(result: &WorkflowV2Result) -> bool {
         .is_some_and(Vec::is_empty)
 }
 
-pub(super) fn sanitize_v2_gap_id(raw: &str) -> String {
+pub(crate) fn sanitize_v2_gap_id(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {

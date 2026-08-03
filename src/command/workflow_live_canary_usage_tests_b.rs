@@ -1,4 +1,6 @@
-fn print_canary_evidence(
+use super::*;
+
+pub(super) fn print_canary_evidence(
     rows: &[archon_learning::llm_call_usage::LlmCallUsageRecord],
     request_bytes: &[u64],
 ) {
@@ -68,7 +70,7 @@ fn seed_canary_project(root: &std::path::Path) -> (std::path::PathBuf, std::path
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        super::super::workflow_live_test_support::standard_task_file(
+        super::super::super::super::workflow_live_test_support::standard_task_file(
             "TASK-TDL-001",
             "[]",
             "[]",

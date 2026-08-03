@@ -1,4 +1,6 @@
-fn quality_gate_result(
+use super::*;
+
+pub(super) fn quality_gate_result(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -80,7 +82,7 @@ fn quality_gate_result(
     Ok(result)
 }
 
-fn human_gate_result(execution: &WorkflowV2CallExecution) -> WorkflowV2Result {
+pub(super) fn human_gate_result(execution: &WorkflowV2CallExecution) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
         summary: format!("human gate '{}' requires a user choice", execution.call.id),
@@ -117,7 +119,7 @@ fn human_gate_result(execution: &WorkflowV2CallExecution) -> WorkflowV2Result {
     result
 }
 
-fn source_results(
+pub(super) fn source_results(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
 ) -> archon_workflow::WorkflowResult<Vec<WorkflowV2Result>> {
@@ -181,7 +183,7 @@ fn push_source_result(
     Ok(())
 }
 
-fn source_result_has_concrete_evidence(result: &WorkflowV2Result) -> bool {
+pub(super) fn source_result_has_concrete_evidence(result: &WorkflowV2Result) -> bool {
     result
         .evidence
         .iter()
@@ -229,7 +231,7 @@ fn source_call_ids(source: &str) -> Vec<String> {
         .collect()
 }
 
-fn required_task_ids_from_results(results: &[WorkflowV2Result]) -> Vec<String> {
+pub(super) fn required_task_ids_from_results(results: &[WorkflowV2Result]) -> Vec<String> {
     let mut ids = results
         .iter()
         .flat_map(|result| result.task_coverage.iter())
@@ -241,7 +243,9 @@ fn required_task_ids_from_results(results: &[WorkflowV2Result]) -> Vec<String> {
     ids
 }
 
-fn authoritative_task_ids(task_universe: Option<&WorkflowV2TaskUniverse>) -> Option<Vec<String>> {
+pub(super) fn authoritative_task_ids(
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+) -> Option<Vec<String>> {
     let mut ids = task_universe?
         .tasks
         .iter()
@@ -253,7 +257,7 @@ fn authoritative_task_ids(task_universe: Option<&WorkflowV2TaskUniverse>) -> Opt
     (!ids.is_empty()).then_some(ids)
 }
 
-fn completion_ledger_state(
+pub(super) fn completion_ledger_state(
     v2_store: &WorkflowV2ResultStore,
     required_task_ids: BTreeSet<String>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
@@ -273,7 +277,7 @@ fn completion_ledger_state(
     Ok((completed, missing, artifact_gaps))
 }
 
-pub(super) fn validated_completion_credit(
+pub(crate) fn validated_completion_credit(
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<(CompletionCredit, Vec<String>)> {
@@ -319,10 +323,8 @@ fn collect_valid_credit(
             && item.status == WorkflowV2Status::Noop);
         let noop_criteria_valid = !is_noop_credit
             || noop_acceptance_criteria_satisfied(&item.task_id, result, task_universe);
-        let contradicted_claims = contradicted_artifact_existence_claims(
-            store.root(),
-            &item.artifact_paths,
-        );
+        let contradicted_claims =
+            contradicted_artifact_existence_claims(store.root(), &item.artifact_paths);
         if artifact_paths_exist(store.root(), &item.artifact_paths)
             && noop_criteria_valid
             && contradicted_claims.is_empty()
@@ -376,7 +378,7 @@ fn contradicted_artifact_existence_claims(v2_root: &Path, paths: &[String]) -> V
     contradictions
 }
 
-fn contradicted_existence_claims(v2_root: &Path, text: &str) -> Vec<String> {
+pub(super) fn contradicted_existence_claims(v2_root: &Path, text: &str) -> Vec<String> {
     let mut contradictions = Vec::new();
     for line in text.lines() {
         let lower = line.to_ascii_lowercase();
@@ -414,7 +416,10 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for raw in text.split_whitespace() {
         let mut token = raw.trim_matches(|ch: char| {
-            matches!(ch, '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';')
+            matches!(
+                ch,
+                '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
         });
         if let Some((_, value)) = token.split_once('=') {
             token = value;
@@ -437,7 +442,7 @@ fn filesystem_paths_in_text(text: &str) -> Vec<String> {
 }
 
 fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
-    if super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
+    if super::super::workflow_live_artifact_refs::is_nonfilesystem_artifact_ref(raw) {
         return None;
     }
     let path = Path::new(raw);
@@ -451,4 +456,3 @@ fn resolve_artifact_path(v2_root: &Path, raw: &str) -> Option<PathBuf> {
     ];
     candidates.into_iter().flatten().find(|path| path.exists())
 }
-

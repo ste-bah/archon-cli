@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug, Clone, serde::Serialize)]
 struct PlannerFailureAttempt {
     kind: &'static str,
@@ -36,13 +38,13 @@ async fn send_planner_notification(
     event: TuiEvent,
 ) -> Result<()> {
     tui_tx.send_async(event).await.map_err(|error| {
-        anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(format!(
-            "workflow planner notification delivery failed: phase={phase}: {error}"
-        )))
+        anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(
+            format!("workflow planner notification delivery failed: phase={phase}: {error}"),
+        ))
     })
 }
 
-pub(super) async fn plan_live(
+pub(crate) async fn plan_live(
     store: &WorkflowStore,
     task: &str,
     llm: Arc<dyn LlmClient>,
@@ -70,8 +72,14 @@ pub(super) async fn plan_live(
             &governed_learning_context,
             generated_config,
         )?;
-        match compile_harness_plan(task, Some(task_universe), &harness, generated_config, learning)
-            .await
+        match compile_harness_plan(
+            task,
+            Some(task_universe),
+            &harness,
+            generated_config,
+            learning,
+        )
+        .await
         {
             Ok(mut plan) => {
                 plan.governed_learning_context = governed_learning_context;
@@ -361,11 +369,11 @@ async fn compile_harness_plan(
     let calls = if task_universe.is_some() {
         // Native lifecycle: the plan is declared by the Rust generator and
         // the recorded document is a descriptor, not an executable script.
-        super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
+        super::super::workflow_live_generated_scaffold::decomposed_prd_plan_calls()
     } else {
         // QuickJS is the single grammar for LLM-authored scripts: the dry-run
         // compiles the script and records its typed host calls.
-        super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?
+        super::super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?
     };
     Ok(WorkflowScriptPlan::generated(
         task,

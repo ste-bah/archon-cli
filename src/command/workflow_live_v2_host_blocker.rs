@@ -7,11 +7,13 @@
 // stored report so the blocker survives into `results/` instead of being
 // reduced to aggregate missing-task counts.
 
-use super::workflow_live_generated_lifecycle_support::outcomes_of;
+use super::*;
+
+use super::super::workflow_live_generated_lifecycle_support::outcomes_of;
 
 const DIGEST_TEXT_LIMIT: usize = 400;
 
-fn final_report_blocker_context(
+pub(super) fn final_report_blocker_context(
     execution: &WorkflowV2CallExecution,
 ) -> Option<serde_json::Value> {
     let inputs = execution.input.get("inputs")?;

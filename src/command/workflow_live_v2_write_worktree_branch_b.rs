@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn push_patch_manifest_artifact(
     result: &mut WorkflowV2Result,
     run_root: &Path,
@@ -24,9 +26,17 @@ pub(super) fn persist_worktree_manifest(
         ManifestStatus::PendingApply
     };
     let branch_id = branch_id.to_string();
-    let path = persist_manifest(run_root, run_id, &execution.call.id, &branch_id, captured, status)
-        .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-    let body = std::fs::read_to_string(&path).map_err(|err| WorkflowError::Io { path, source: err })?;
+    let path = persist_manifest(
+        run_root,
+        run_id,
+        &execution.call.id,
+        &branch_id,
+        captured,
+        status,
+    )
+    .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+    let body =
+        std::fs::read_to_string(&path).map_err(|err| WorkflowError::Io { path, source: err })?;
     Ok(serde_json::from_str(&body)?)
 }
 
@@ -59,7 +69,7 @@ pub(super) fn validate_captured_patch(
     Ok(captured)
 }
 
-pub(super) fn coordinator_plan_for_assignment(
+pub(crate) fn coordinator_plan_for_assignment(
     run_id: &str,
     stage_id: &str,
     assignment: &WorkflowV2WriteAssignment,
@@ -129,7 +139,7 @@ pub(super) fn normalized_assignment_scopes(
         .collect()
 }
 
-pub(super) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
+pub(crate) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) -> String {
     run_root
         .join("write-coordination")
         .join("stages")

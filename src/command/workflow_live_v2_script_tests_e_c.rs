@@ -1,5 +1,7 @@
 /// The exemption must cost more than it grants: a forged contract naming a
 /// reduce that does not exist buys nothing.
+use super::*;
+
 #[test]
 fn remediation_naming_a_nonexistent_reduce_is_rejected() {
     let mut call = remediation_call("sneak-work-in", "remediate", "TASK-EX-001", 1, 2);
@@ -173,7 +175,11 @@ pub(super) fn remediation_call(
     call
 }
 
-pub(super) fn set_remediation_field(call: &mut WorkflowV2HostCall, key: &str, value: serde_json::Value) {
+pub(super) fn set_remediation_field(
+    call: &mut WorkflowV2HostCall,
+    key: &str,
+    value: serde_json::Value,
+) {
     if let Some(contract) = call
         .options
         .extra

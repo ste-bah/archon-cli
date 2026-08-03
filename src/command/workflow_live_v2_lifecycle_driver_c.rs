@@ -3,8 +3,9 @@
 // One of three inherent `impl LifecycleDriver` blocks split out of
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
-impl LifecycleDriver {
+use super::*;
 
+impl LifecycleDriver {
     pub(super) fn discovery_items(&self) -> Vec<serde_json::Value> {
         let paths = serde_json::json!(self.universe.source_roots);
         vec![
@@ -28,7 +29,7 @@ impl LifecycleDriver {
 
     /// body_a.js inventory repair loop: one pass per attempt over the issue
     /// kinds, each reduce gated by its own iteration cap.
-    pub(super) async fn repair_inventory(
+    pub(crate) async fn repair_inventory(
         &self,
         raw_inventory: serde_json::Value,
         discovery: &serde_json::Value,
@@ -102,24 +103,14 @@ impl LifecycleDriver {
                 let (tier, source) = match kind {
                     "task_universe_reconcile" => (
                         "reducer",
-                        serde_json::json!([
-                            self.task_universe,
-                            inventory,
-                            issues,
-                            discovery
-                        ]),
+                        serde_json::json!([self.task_universe, inventory, issues, discovery]),
                     ),
                     "target_file_discovery"
                     | "verification_requirements_discovery"
                     | "artifact_requirements_discovery"
                     | "provider_environment_discovery" => (
                         "analysis",
-                        serde_json::json!([
-                            self.task_universe,
-                            inventory,
-                            issues,
-                            discovery
-                        ]),
+                        serde_json::json!([self.task_universe, inventory, issues, discovery]),
                     ),
                     _ => (
                         "reducer",
@@ -140,10 +131,9 @@ impl LifecycleDriver {
                     &issues,
                     &repair,
                 );
-                inventory = contract
-                    .normalize_inventory(&support::merge_inventory_repair(
-                        &contract, &inventory, &repair,
-                    ));
+                inventory = contract.normalize_inventory(&support::merge_inventory_repair(
+                    &contract, &inventory, &repair,
+                ));
             }
             attempt += 1;
         }

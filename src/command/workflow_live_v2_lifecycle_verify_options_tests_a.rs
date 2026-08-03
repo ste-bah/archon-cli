@@ -1,5 +1,6 @@
+use super::*;
 
-fn record_series_contract() -> serde_json::Value {
+pub(super) fn record_series_contract() -> serde_json::Value {
     serde_json::json!({
         "kind": "required_universe_registry",
         "artifact_path": ".archon/demo/coverage.json",
@@ -45,12 +46,12 @@ fn record_series_contract() -> serde_json::Value {
     })
 }
 
-fn write_json(path: &std::path::Path, value: &serde_json::Value) {
+pub(super) fn write_json(path: &std::path::Path, value: &serde_json::Value) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
     std::fs::write(path, value.to_string()).expect("JSON artifact");
 }
 
-fn write_jsonl(path: &std::path::Path, rows: &[serde_json::Value]) {
+pub(super) fn write_jsonl(path: &std::path::Path, rows: &[serde_json::Value]) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
     let body = rows
         .iter()
@@ -92,7 +93,7 @@ fn parameterized_verifier(project: &std::path::Path) -> String {
         .expect("generated parameterized verifier")
 }
 
-fn run_verifier(command: &str) -> std::process::Output {
+pub(super) fn run_verifier(command: &str) -> std::process::Output {
     // `sh`, not `/bin/zsh`: production runs focused verifiers through
     // `Command::new(crate::command::posix_shell::posix_shell())` (workflow_live_v2_verification.rs:287), as does every
     // other verifier path in the workspace. Executing them under a different
@@ -214,7 +215,7 @@ fn parameterized_contract_honors_min_instances() {
     );
     let mut contract = parameterized_source_contract();
     contract["min_instances"] = serde_json::json!(1);
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -249,7 +250,7 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
         "validation_failed_values": ["failed"],
         "validation_passed_values": ["passed"]
     });
-    let unbound = super::workflow_live_v2_deliverable_contract::verification_command(
+    let unbound = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -265,7 +266,7 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
     );
 
     contract["min_instances"] = serde_json::json!(1);
-    let command = super::workflow_live_v2_deliverable_contract::verification_command(
+    let command = super::super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
@@ -394,4 +395,3 @@ fn declared_required_universe_gets_substantive_registry_backed_verification() {
         serde_json::json!(["mcp__demo__fetch_cells"])
     );
 }
-

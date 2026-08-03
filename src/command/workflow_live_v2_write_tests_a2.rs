@@ -1,260 +1,256 @@
-    #[test]
-    fn absolute_item_target_inside_repository_is_made_relative() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo = temp.path().join("repo");
-        std::fs::create_dir_all(repo.join("crates/example/src")).expect("repo");
-        let repo_root = repo.display().to_string();
-        let call = WorkflowV2HostCall {
-            id: "impl".to_string(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Serial),
-            options: WorkflowV2HostOptions {
-                target_files_from_item: true,
-                ..WorkflowV2HostOptions::default()
-            },
-        };
-        let target = repo.join("crates/example/src/lib.rs");
-        let branch = WorkflowV2FanoutItem::read_only(
-            "impl-T001",
-            "coder",
-            call.clone(),
-            serde_json::json!({
-                "item": {
-                    "id": "T001",
-                    "target_files": [target.display().to_string()]
-                }
-            }),
-        );
+use super::*;
 
-        let targets =
-            target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
+#[test]
+fn absolute_item_target_inside_repository_is_made_relative() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/example/src")).expect("repo");
+    let repo_root = repo.display().to_string();
+    let call = WorkflowV2HostCall {
+        id: "impl".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Serial),
+        options: WorkflowV2HostOptions {
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let target = repo.join("crates/example/src/lib.rs");
+    let branch = WorkflowV2FanoutItem::read_only(
+        "impl-T001",
+        "coder",
+        call.clone(),
+        serde_json::json!({
+            "item": {
+                "id": "T001",
+                "target_files": [target.display().to_string()]
+            }
+        }),
+    );
 
-        assert_eq!(targets, vec!["crates/example/src/lib.rs"]);
-    }
+    let targets = target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
 
-    #[test]
-    fn rust_module_child_declared_by_owned_target_is_owned_for_write_branch() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo = temp.path().join("repo");
-        std::fs::create_dir_all(repo.join("crates/archon-trading/src/data_store"))
-            .expect("module dir");
-        std::fs::write(
-            repo.join("crates/archon-trading/src/data_store.rs"),
-            "mod io;\nmod missing;\n",
-        )
-        .expect("data_store");
-        std::fs::write(repo.join("crates/archon-trading/src/data_store/io.rs"), "").expect("io");
-        let repo_root = repo.display().to_string();
-        let call = WorkflowV2HostCall {
-            id: "implementation-wave-1".to_string(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Coordinated),
-            options: WorkflowV2HostOptions {
-                target_files_from_item: true,
-                ..WorkflowV2HostOptions::default()
-            },
-        };
-        let branch = WorkflowV2FanoutItem::read_only(
-            "implementation-wave-1-inventory-tdl-010-registry-schema-v2",
-            "coder",
-            call.clone(),
-            serde_json::json!({
-                "item": {
-                    "id": "inventory-tdl-010-registry-schema-v2",
-                    "target_files": ["crates/archon-trading/src/data_store.rs"]
-                }
-            }),
-        );
+    assert_eq!(targets, vec!["crates/example/src/lib.rs"]);
+}
 
-        let targets =
-            target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
+#[test]
+fn rust_module_child_declared_by_owned_target_is_owned_for_write_branch() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(repo.join("crates/archon-trading/src/data_store")).expect("module dir");
+    std::fs::write(
+        repo.join("crates/archon-trading/src/data_store.rs"),
+        "mod io;\nmod missing;\n",
+    )
+    .expect("data_store");
+    std::fs::write(repo.join("crates/archon-trading/src/data_store/io.rs"), "").expect("io");
+    let repo_root = repo.display().to_string();
+    let call = WorkflowV2HostCall {
+        id: "implementation-wave-1".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Coordinated),
+        options: WorkflowV2HostOptions {
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let branch = WorkflowV2FanoutItem::read_only(
+        "implementation-wave-1-inventory-tdl-010-registry-schema-v2",
+        "coder",
+        call.clone(),
+        serde_json::json!({
+            "item": {
+                "id": "inventory-tdl-010-registry-schema-v2",
+                "target_files": ["crates/archon-trading/src/data_store.rs"]
+            }
+        }),
+    );
 
-        assert!(targets.contains(&"crates/archon-trading/src/data_store.rs".to_string()));
-        assert!(targets.contains(&"crates/archon-trading/src/data_store/io.rs".to_string()));
+    let targets = target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
 
-        let write_item =
-            WorkflowV2WriteItem::new(branch.id, WorkflowV2WriteMode::Coordinated, targets);
-        let mut result = WorkflowV2Result::accepted("changed declared module child");
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Implementation,
-            "changed data_store/io.rs through data_store.rs module ownership",
-        ));
-        result.files_changed.push(WorkflowV2FileRecord::new(
-            "crates/archon-trading/src/data_store/io.rs",
-        ));
+    assert!(targets.contains(&"crates/archon-trading/src/data_store.rs".to_string()));
+    assert!(targets.contains(&"crates/archon-trading/src/data_store/io.rs".to_string()));
 
-        validate_changed_files_for_repository(&write_item, &result, Some(&repo_root))
-            .expect("declared module child is owned");
-    }
+    let write_item = WorkflowV2WriteItem::new(branch.id, WorkflowV2WriteMode::Coordinated, targets);
+    let mut result = WorkflowV2Result::accepted("changed declared module child");
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        "changed data_store/io.rs through data_store.rs module ownership",
+    ));
+    result.files_changed.push(WorkflowV2FileRecord::new(
+        "crates/archon-trading/src/data_store/io.rs",
+    ));
 
-    #[test]
-    fn wf98_module_child_ownership_fixture_no_longer_reports_undeclared_path() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "fixtures/wf98_implementation_wave_1_module_child_ownership.json"
-        ))
-        .expect("fixture");
-        let repo_root = env!("CARGO_MANIFEST_DIR").to_string();
-        let branch_id = fixture["branch_id"].as_str().expect("branch id");
-        let call = WorkflowV2HostCall {
-            id: fixture["call_id"].as_str().expect("call id").to_string(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Coordinated),
-            options: WorkflowV2HostOptions {
-                target_files_from_item: true,
-                ..WorkflowV2HostOptions::default()
-            },
-        };
-        let branch = WorkflowV2FanoutItem::read_only(
-            branch_id,
-            "coder",
-            call.clone(),
-            serde_json::json!({
-                "item": fixture["source_item"].clone()
-            }),
-        );
-        assert!(
-            fixture["old_error"]
-                .as_str()
-                .expect("old error")
-                .contains("changed undeclared path 'crates/archon-trading/src/data_store/io.rs'")
-        );
+    validate_changed_files_for_repository(&write_item, &result, Some(&repo_root))
+        .expect("declared module child is owned");
+}
 
-        let targets =
-            target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
-
-        assert!(targets.contains(&"crates/archon-trading/src/data_store.rs".to_string()));
-        assert!(targets.contains(&"crates/archon-trading/src/data_store/io.rs".to_string()));
-        let write_item =
-            WorkflowV2WriteItem::new(branch_id, WorkflowV2WriteMode::Coordinated, targets);
-        let mut result = WorkflowV2Result::accepted("changed module child");
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Implementation,
-            "changed data_store/io.rs through declared module ownership",
-        ));
-        result.files_changed.push(WorkflowV2FileRecord::new(
-            fixture["changed_file"].as_str().expect("changed file"),
-        ));
-
-        validate_changed_files_for_repository(&write_item, &result, Some(&repo_root))
-            .expect("wf98 module child is owned");
-    }
-
-    #[test]
-    fn absolute_item_target_outside_repository_is_rejected() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo = temp.path().join("repo");
-        std::fs::create_dir_all(&repo).expect("repo");
-        let repo_root = repo.display().to_string();
-        let call = WorkflowV2HostCall {
-            id: "impl".to_string(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Serial),
-            options: WorkflowV2HostOptions {
-                target_files_from_item: true,
-                ..WorkflowV2HostOptions::default()
-            },
-        };
-        let branch = WorkflowV2FanoutItem::read_only(
-            "impl-T001",
-            "coder",
-            call.clone(),
-            serde_json::json!({
-                "item": {
-                    "id": "T001",
-                    "target_files": [temp.path().join("other/src/lib.rs").display().to_string()]
-                }
-            }),
-        );
-
-        let error =
-            target_files_for_branch(Some(&repo_root), &call, &branch).expect_err("outside repo");
-
-        assert!(error.to_string().contains("unsafe"));
-    }
-
-    #[test]
-    fn wf98_false_safety_fixture_accepts_declared_absolute_in_repo_change() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "fixtures/wf98_implementation_wave_2_false_safety.json"
-        ))
-        .expect("fixture");
-        let repo_root = fixture["repository_root"]
+#[test]
+fn wf98_module_child_ownership_fixture_no_longer_reports_undeclared_path() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf98_implementation_wave_1_module_child_ownership.json"
+    ))
+    .expect("fixture");
+    let repo_root = env!("CARGO_MANIFEST_DIR").to_string();
+    let branch_id = fixture["branch_id"].as_str().expect("branch id");
+    let call = WorkflowV2HostCall {
+        id: fixture["call_id"].as_str().expect("call id").to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Coordinated),
+        options: WorkflowV2HostOptions {
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let branch = WorkflowV2FanoutItem::read_only(
+        branch_id,
+        "coder",
+        call.clone(),
+        serde_json::json!({
+            "item": fixture["source_item"].clone()
+        }),
+    );
+    assert!(
+        fixture["old_error"]
             .as_str()
-            .expect("repository root");
-        let branch_id = fixture["branch_id"].as_str().expect("branch id");
-        let owned_targets = fixture["assignment"]["owned_targets"]
-            .as_array()
-            .expect("owned targets")
-            .iter()
-            .map(|value| value.as_str().expect("target").to_string())
-            .collect::<Vec<_>>();
-        let absolute_changed_file = fixture["source_item"]["target_files"][0]
+            .expect("old error")
+            .contains("changed undeclared path 'crates/archon-trading/src/data_store/io.rs'")
+    );
+
+    let targets = target_files_for_branch(Some(&repo_root), &call, &branch).expect("target files");
+
+    assert!(targets.contains(&"crates/archon-trading/src/data_store.rs".to_string()));
+    assert!(targets.contains(&"crates/archon-trading/src/data_store/io.rs".to_string()));
+    let write_item = WorkflowV2WriteItem::new(branch_id, WorkflowV2WriteMode::Coordinated, targets);
+    let mut result = WorkflowV2Result::accepted("changed module child");
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        "changed data_store/io.rs through declared module ownership",
+    ));
+    result.files_changed.push(WorkflowV2FileRecord::new(
+        fixture["changed_file"].as_str().expect("changed file"),
+    ));
+
+    validate_changed_files_for_repository(&write_item, &result, Some(&repo_root))
+        .expect("wf98 module child is owned");
+}
+
+#[test]
+fn absolute_item_target_outside_repository_is_rejected() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
+    let repo_root = repo.display().to_string();
+    let call = WorkflowV2HostCall {
+        id: "impl".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Serial),
+        options: WorkflowV2HostOptions {
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let branch = WorkflowV2FanoutItem::read_only(
+        "impl-T001",
+        "coder",
+        call.clone(),
+        serde_json::json!({
+            "item": {
+                "id": "T001",
+                "target_files": [temp.path().join("other/src/lib.rs").display().to_string()]
+            }
+        }),
+    );
+
+    let error =
+        target_files_for_branch(Some(&repo_root), &call, &branch).expect_err("outside repo");
+
+    assert!(error.to_string().contains("unsafe"));
+}
+
+#[test]
+fn wf98_false_safety_fixture_accepts_declared_absolute_in_repo_change() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/wf98_implementation_wave_2_false_safety.json"
+    ))
+    .expect("fixture");
+    let repo_root = fixture["repository_root"]
+        .as_str()
+        .expect("repository root");
+    let branch_id = fixture["branch_id"].as_str().expect("branch id");
+    let owned_targets = fixture["assignment"]["owned_targets"]
+        .as_array()
+        .expect("owned targets")
+        .iter()
+        .map(|value| value.as_str().expect("target").to_string())
+        .collect::<Vec<_>>();
+    let absolute_changed_file = fixture["source_item"]["target_files"][0]
+        .as_str()
+        .expect("changed file");
+    assert!(
+        fixture["old_error"]
             .as_str()
-            .expect("changed file");
-        assert!(
-            fixture["old_error"]
-                .as_str()
-                .expect("old error")
-                .contains("outside declared target_files")
-        );
-        let write_item =
-            WorkflowV2WriteItem::new(branch_id, WorkflowV2WriteMode::Coordinated, owned_targets);
-        let mut result = WorkflowV2Result::accepted("changed declared target");
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Implementation,
-            "changed declared TASK-TDL-020 target",
-        ));
+            .expect("old error")
+            .contains("outside declared target_files")
+    );
+    let write_item =
+        WorkflowV2WriteItem::new(branch_id, WorkflowV2WriteMode::Coordinated, owned_targets);
+    let mut result = WorkflowV2Result::accepted("changed declared target");
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        "changed declared TASK-TDL-020 target",
+    ));
+    result
+        .files_changed
+        .push(WorkflowV2FileRecord::new(absolute_changed_file));
+
+    validate_changed_files_for_repository(&write_item, &result, Some(repo_root))
+        .expect("absolute declared in-repo change is owned");
+}
+
+#[test]
+fn write_fanout_result_records_serial_fallback_reason() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let call = WorkflowV2HostCall {
+        id: "impl".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Worktree),
+        options: WorkflowV2HostOptions::default(),
+    };
+    let plan = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&[WorkflowV2WriteItem::new(
+            "impl-T001",
+            WorkflowV2WriteMode::Worktree,
+            vec!["src/lib.rs".to_string()],
+        )])
+        .expect("write plan");
+    let mut branch_result = WorkflowV2Result::accepted("changed file");
+    branch_result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        "changed src/lib.rs",
+    ));
+    branch_result
+        .files_changed
+        .push(WorkflowV2FileRecord::new("src/lib.rs"));
+    branch_result.data = serde_json::json!({
+        "item_id": "impl-T001",
+        "canonical_task_ids": ["TASK-TDL-001"],
+    });
+
+    let result = result_from_write_fanout(
+        &call,
+        vec![branch_result],
+        &plan,
+        1,
+        Some("workspace boundary support is unavailable; serialized fallback used".to_string()),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert_eq!(
         result
-            .files_changed
-            .push(WorkflowV2FileRecord::new(absolute_changed_file));
-
-        validate_changed_files_for_repository(&write_item, &result, Some(repo_root))
-            .expect("absolute declared in-repo change is owned");
-    }
-
-    #[test]
-    fn write_fanout_result_records_serial_fallback_reason() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let call = WorkflowV2HostCall {
-            id: "impl".to_string(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Worktree),
-            options: WorkflowV2HostOptions::default(),
-        };
-        let plan = WorkflowV2WritePlanner::new(temp.path())
-            .plan(&[WorkflowV2WriteItem::new(
-                "impl-T001",
-                WorkflowV2WriteMode::Worktree,
-                vec!["src/lib.rs".to_string()],
-            )])
-            .expect("write plan");
-        let mut branch_result = WorkflowV2Result::accepted("changed file");
-        branch_result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Implementation,
-            "changed src/lib.rs",
-        ));
-        branch_result
-            .files_changed
-            .push(WorkflowV2FileRecord::new("src/lib.rs"));
-        branch_result.data = serde_json::json!({
-            "item_id": "impl-T001",
-            "canonical_task_ids": ["TASK-TDL-001"],
-        });
-
-        let result = result_from_write_fanout(
-            &call,
-            vec![branch_result],
-            &plan,
-            1,
-            Some("workspace boundary support is unavailable; serialized fallback used".to_string()),
-        );
-
-        assert_eq!(result.status, WorkflowV2Status::Accepted);
-        assert_eq!(
-            result
-                .data
-                .get("serial_fallback_reason")
-                .and_then(serde_json::Value::as_str),
-            Some("workspace boundary support is unavailable; serialized fallback used")
-        );
-    }
+            .data
+            .get("serial_fallback_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("workspace boundary support is unavailable; serialized fallback used")
+    );
+}

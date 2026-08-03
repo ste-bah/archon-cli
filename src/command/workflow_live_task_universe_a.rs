@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct WorkflowV2TaskUniverse {
     pub(crate) schema_version: String,
@@ -92,10 +94,10 @@ fn normalized_task_alias(value: &str) -> String {
 pub(crate) struct WorkflowV2TaskUniverseTask {
     pub(crate) canonical_task_id: String,
     #[serde(default)]
-    pub(super) aliases: Vec<String>,
-    pub(super) source_path: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) source_path: String,
     #[serde(default)]
-    pub(super) dependency_ids: Vec<String>,
+    pub(crate) dependency_ids: Vec<String>,
     /// The task file's declared `blocks:` — the reverse edge of `depends_on`.
     ///
     /// Kept verbatim as declared rather than folded away, so the reconciled
@@ -103,21 +105,21 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     /// to be parsed by nothing at all: a task file that expressed its ordering
     /// only in that direction contributed no edge and its dependents ran early.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) blocks_ids: Vec<String>,
+    pub(crate) blocks_ids: Vec<String>,
     #[serde(default)]
-    pub(super) title: Option<String>,
+    pub(crate) title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) complexity: Option<String>,
+    pub(crate) complexity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) status: Option<String>,
+    pub(crate) status: Option<String>,
     /// Declared `implements:` and `shared_append_target_files:` — empty only
     /// because the author declared them so; see `parsing` for why absent differs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) implements: Vec<String>,
+    pub(crate) implements: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) shared_append_target_files: Vec<String>,
+    pub(crate) shared_append_target_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) acceptance_criteria: Vec<String>,
+    pub(crate) acceptance_criteria: Vec<String>,
     /// Per-task adversarial checks declared under an `## Adversarial Review
     /// Notes` heading in the TASK file. Consumed ONLY by the per-task
     /// `adversarial-review` stage: they are the task author's own falsification
@@ -125,83 +127,83 @@ pub(crate) struct WorkflowV2TaskUniverseTask {
     /// once, which is why they were unreachable while review was a single
     /// terminal reduce.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) adversarial_review_notes: Vec<String>,
+    pub(crate) adversarial_review_notes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) files_expected_to_change: Vec<String>,
+    pub(crate) files_expected_to_change: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) files_forbidden_to_change: Vec<String>,
+    pub(crate) files_forbidden_to_change: Vec<String>,
     /// Explicit artifact declarations from the task file (paths relative to
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) artifact_requirements: Vec<String>,
+    pub(crate) artifact_requirements: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) required_env_keys: Vec<String>,
+    pub(crate) required_env_keys: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) required_tools: Vec<String>,
+    pub(crate) required_tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) deliverable_contracts: Vec<WorkflowV2DeliverableContract>,
+    pub(crate) deliverable_contracts: Vec<WorkflowV2DeliverableContract>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(super) struct WorkflowV2DeliverableContract {
-    pub(super) kind: String,
-    pub(super) artifact_path: String,
+pub(crate) struct WorkflowV2DeliverableContract {
+    pub(crate) kind: String,
+    pub(crate) artifact_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) typed_verifier_command: Option<String>,
+    pub(crate) typed_verifier_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) registry_path: Option<String>,
+    pub(crate) registry_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) instance_source_path: Option<String>,
+    pub(crate) instance_source_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) instance_source_records_field: Option<String>,
+    pub(crate) instance_source_records_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) instance_artifact_field: Option<String>,
+    pub(crate) instance_artifact_field: Option<String>,
     #[serde(default)]
-    pub(super) min_instances: usize,
+    pub(crate) min_instances: usize,
     #[serde(default)]
-    pub(super) required_universe: bool,
+    pub(crate) required_universe: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) data_kind: Option<String>,
+    pub(crate) data_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) universe_fields: Vec<String>,
+    pub(crate) universe_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) cells_field: Option<String>,
+    pub(crate) cells_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) cell_identity_fields: Vec<String>,
+    pub(crate) cell_identity_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) required_true_fields: Vec<String>,
+    pub(crate) required_true_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) required_nonempty_fields: Vec<String>,
+    pub(crate) required_nonempty_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) positive_count_fields: Vec<String>,
+    pub(crate) positive_count_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) minimum_count_fields: BTreeMap<String, u64>,
+    pub(crate) minimum_count_fields: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) gaps_field: Option<String>,
+    pub(crate) gaps_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) registry_records_field: Option<String>,
+    pub(crate) registry_records_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) registry_key_fields: Vec<String>,
+    pub(crate) registry_key_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) registry_required_true_fields: Vec<String>,
+    pub(crate) registry_required_true_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) registry_status_field: Option<String>,
+    pub(crate) registry_status_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) registry_allowed_statuses: Vec<String>,
+    pub(crate) registry_allowed_statuses: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) registry_count_field: Option<String>,
+    pub(crate) registry_count_field: Option<String>,
     #[serde(default)]
-    pub(super) registry_minimum_count: u64,
+    pub(crate) registry_minimum_count: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) registry_identity_fields: BTreeMap<String, String>,
+    pub(crate) registry_identity_fields: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) payload_path_field: Option<String>,
+    pub(crate) payload_path_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) payload_format: Option<String>,
+    pub(crate) payload_format: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) required_fields: Vec<String>,
+    pub(crate) required_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) non_constant_fields: Vec<String>,
+    pub(crate) non_constant_fields: Vec<String>,
     /// Name of the payload field holding each record's observation instant. When
     /// declared, the verifier rejects any record dated after the verification
     /// time: an observed series cannot contain future records, and fabricated
@@ -217,18 +219,18 @@ pub(super) struct WorkflowV2DeliverableContract {
     /// checked for existence and non-emptiness, which is all a contract can
     /// honestly assert about unstructured content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) artifact_format: Option<String>,
+    pub(crate) artifact_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) observed_time_field: Option<String>,
+    pub(crate) observed_time_field: Option<String>,
     /// Weekday indices (Mon=0 … Sun=6) on which the observed venue does not
     /// trade, and specific non-trading dates. When either is declared the
     /// verifier rejects records dated to a closed session. This is external
     /// truth rather than a threshold: an evenly spaced generated series lands on
     /// closed days by construction, and there is no number to fabricate toward.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) closed_weekdays: Option<Vec<u8>>,
+    pub(crate) closed_weekdays: Option<Vec<u8>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) closed_dates: Vec<String>,
+    pub(crate) closed_dates: Vec<String>,
     /// Overrides for the synthetic-series step-variety check, the minimum
     /// percentage of first differences that must be distinct. Left unset in task
     /// specs by design — a declared numeric threshold is a target to fabricate
@@ -236,36 +238,36 @@ pub(super) struct WorkflowV2DeliverableContract {
     /// them. Integer percent rather than a float ratio because this struct
     /// derives Ord and f64 does not implement it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) step_variety_min_rows: Option<usize>,
+    pub(crate) step_variety_min_rows: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) step_variety_min_percent: Option<u32>,
+    pub(crate) step_variety_min_percent: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) series_value_fields: Vec<String>,
+    pub(crate) series_value_fields: Vec<String>,
     #[serde(default)]
-    pub(super) series_overlap_min_rows: usize,
+    pub(crate) series_overlap_min_rows: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) request_path_field: Option<String>,
+    pub(crate) request_path_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) requested_count_field: Option<String>,
+    pub(crate) requested_count_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) response_path_field: Option<String>,
+    pub(crate) response_path_field: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) response_identity_fields: BTreeMap<String, String>,
+    pub(crate) response_identity_fields: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) validation_path_field: Option<String>,
+    pub(crate) validation_path_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) validation_status_field: Option<String>,
+    pub(crate) validation_status_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) validation_checks_field: Option<String>,
+    pub(crate) validation_checks_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) validation_check_status_field: Option<String>,
+    pub(crate) validation_check_status_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) validation_failed_values: Vec<String>,
+    pub(crate) validation_failed_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) validation_passed_values: Vec<String>,
+    pub(crate) validation_passed_values: Vec<String>,
 }
 
-pub(super) fn extract_task_universe_for_generated_run(
+pub(crate) fn extract_task_universe_for_generated_run(
     task: &str,
 ) -> WorkflowResult<Option<WorkflowV2TaskUniverse>> {
     if !requires_authoritative_task_universe(task) {
@@ -414,7 +416,7 @@ fn directory_has_task_files(path: &Path) -> bool {
         })
 }
 
-fn task_files_under(root: &Path) -> WorkflowResult<Vec<PathBuf>> {
+pub(super) fn task_files_under(root: &Path) -> WorkflowResult<Vec<PathBuf>> {
     let entries = fs::read_dir(root).map_err(|err| WorkflowError::Io {
         path: root.to_path_buf(),
         source: err,
@@ -441,10 +443,6 @@ fn task_files_under(root: &Path) -> WorkflowResult<Vec<PathBuf>> {
 fn is_task_markdown_name(name: &str) -> bool {
     name.starts_with("TASK-") && name.ends_with(".md")
 }
-
-#[path = "workflow_live_task_universe_parsing.rs"]
-mod parsing;
-use parsing::{merge_project_capabilities, parse_task_file};
 
 fn absolute_paths_from_text(text: &str) -> Vec<PathBuf> {
     text.split_whitespace()
@@ -497,4 +495,3 @@ fn task_ids_from_text(raw: &str) -> Vec<String> {
             .collect(),
     )
 }
-

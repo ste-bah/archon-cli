@@ -1,4 +1,6 @@
-fn generated_item_issues(
+use super::*;
+
+pub(super) fn generated_item_issues(
     value: &serde_json::Value,
     universe: &ContractTaskUniverse,
     target_repository_root: Option<&str>,
@@ -171,9 +173,7 @@ fn explicit_no_artifact_verified_noop(value: &serde_json::Value, work_type: &str
 }
 
 fn artifact_producing_intent(value: &serde_json::Value) -> bool {
-    if value_present(value.get("artifact_requirements"))
-        || value_present(value.get("artifacts"))
-    {
+    if value_present(value.get("artifact_requirements")) || value_present(value.get("artifacts")) {
         return true;
     }
     let text = [
@@ -192,23 +192,27 @@ fn artifact_producing_intent(value: &serde_json::Value) -> bool {
     .join(" ")
     .to_ascii_lowercase();
     let artifact_noun = [
-        "artifact", "report", "registry", "manifest", "dataset", "output file",
+        "artifact",
+        "report",
+        "registry",
+        "manifest",
+        "dataset",
+        "output file",
     ]
     .iter()
     .any(|term| text.contains(term));
     let production_or_claim = [
-        "produce", "write", "create", "generate", "persist", "update", "emit", "exists",
-        "present", "missing", "absent",
+        "produce", "write", "create", "generate", "persist", "update", "emit", "exists", "present",
+        "missing", "absent",
     ]
     .iter()
     .any(|term| text.contains(term));
     artifact_noun && production_or_claim
 }
 
-
 /// task_id -> claiming (item_id, canonical_task_ids) pairs.
 type TaskClaims = BTreeMap<String, Vec<(Option<String>, Vec<String>)>>;
-fn generated_support_item(value: &serde_json::Value) -> bool {
+pub(super) fn generated_support_item(value: &serde_json::Value) -> bool {
     let work_type = first_string(value, &["work_type", "workType", "kind"])
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -218,7 +222,7 @@ fn generated_support_item(value: &serde_json::Value) -> bool {
     raw_strings_from_aliases(value, &["canonical_task_ids"]).is_empty()
 }
 
-fn generated_inventory_graph_issues(
+pub(super) fn generated_inventory_graph_issues(
     items: &[serde_json::Value],
     universe: &ContractTaskUniverse,
 ) -> Vec<GeneratedContractIssue> {
@@ -329,7 +333,7 @@ fn generated_inventory_graph_issues(
     dedupe_issues(issues)
 }
 
-fn generated_focused_verification_item(value: &serde_json::Value) -> bool {
+pub(super) fn generated_focused_verification_item(value: &serde_json::Value) -> bool {
     generated_verification_intent(value)
         && value_present(value.get("focused_verification"))
         && (value.get("expected_evidence").is_some()
@@ -348,12 +352,22 @@ fn generated_verification_intent(value: &serde_json::Value) -> bool {
 }
 
 fn generated_retry_verification_intent(value: &serde_json::Value) -> bool {
-    ["retry_command_shape", "retryCommandShape", "retry_steps", "retrySteps"]
+    [
+        "retry_command_shape",
+        "retryCommandShape",
+        "retry_steps",
+        "retrySteps",
+    ]
+    .iter()
+    .any(|key| value_present(value.get(*key)))
+        || [
+            "expected_result_shape",
+            "expectedResultShape",
+            "retry_plan",
+            "retryPlan",
+        ]
         .iter()
         .any(|key| value_present(value.get(*key)))
-        || ["expected_result_shape", "expectedResultShape", "retry_plan", "retryPlan"]
-            .iter()
-            .any(|key| value_present(value.get(*key)))
 }
 
 fn target_files_issue(
@@ -373,15 +387,13 @@ fn target_files_issue(
     None
 }
 
-fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
+pub(super) fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
         return Some("implementation item has an empty target file");
     }
     if trimmed.chars().any(char::is_whitespace) {
-        return Some(
-            "target_files must hold repository file paths, not instruction text or prose",
-        );
+        return Some("target_files must hold repository file paths, not instruction text or prose");
     }
     let normalized = normalized_contract_path(trimmed)?;
     let absolute = is_contract_absolute_path(trimmed);
@@ -401,7 +413,7 @@ fn target_file_issue(target: &str, root: &str) -> Option<&'static str> {
     None
 }
 
-fn normalized_contract_path(path: &str) -> Option<String> {
+pub(super) fn normalized_contract_path(path: &str) -> Option<String> {
     let raw = path.trim().replace('\\', "/");
     if raw.is_empty() {
         return None;

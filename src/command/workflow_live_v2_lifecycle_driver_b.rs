@@ -3,11 +3,13 @@
 // One of three inherent `impl LifecycleDriver` blocks split out of
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
+use super::*;
+
 impl LifecycleDriver {
     /// Terminal stop. The host raises the terminal marker for every
     /// non-accepted final report, which unwinds the lifecycle exactly as the
     /// JS throw did; an accepted report returns normally.
-    pub(super) async fn final_report(
+    pub(crate) async fn final_report(
         &self,
         id: &str,
         source: Option<serde_json::Value>,
@@ -31,9 +33,8 @@ impl LifecycleDriver {
                     &mut state,
                 )
             };
-            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(
-                event,
-            ) = decision
+            if let workflow_live_v2_lifecycle_terminal_gate::TerminalGateDecision::Reroute(event) =
+                decision
             {
                 let reroute_count = event
                     .get("reroute_count")
@@ -68,13 +69,14 @@ impl LifecycleDriver {
             }
         }
         normalize_null_report_collections(&mut inputs);
-        let result = self.call(
-            "finalReport",
-            id,
-            source,
-            serde_json::json!({ "status": status, "inputs": inputs, "task": task }),
-        )
-        .await;
+        let result = self
+            .call(
+                "finalReport",
+                id,
+                source,
+                serde_json::json!({ "status": status, "inputs": inputs, "task": task }),
+            )
+            .await;
         let report_error = match result {
             Ok(_) => return Ok(()),
             Err(error) if error.to_string().contains(TERMINAL_HOST_CALL_MARKER) => {

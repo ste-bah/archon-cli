@@ -3,8 +3,10 @@
 // One of three inherent `impl LifecycleDriver` blocks split out of
 // `workflow_live_v2_lifecycle.rs` to hold the 500-line ceiling.
 
+use super::*;
+
 impl LifecycleDriver {
-    pub(super) fn new(
+    pub(crate) fn new(
         host: Arc<WorkflowScriptHost>,
         universe: WorkflowV2TaskUniverse,
         target_repository_root: Option<String>,
@@ -36,7 +38,7 @@ impl LifecycleDriver {
         }
     }
 
-    pub(super) fn contract(&self) -> LifecycleContract<'_> {
+    pub(crate) fn contract(&self) -> LifecycleContract<'_> {
         LifecycleContract {
             task_universe: &self.universe,
             target_repository_root: self.target_repository_root.as_deref(),
@@ -44,7 +46,7 @@ impl LifecycleDriver {
     }
 
     /// Mirror of the JS `__archonCall` payload shape.
-    pub(super) async fn call(
+    pub(crate) async fn call(
         &self,
         method: &str,
         id: &str,
@@ -63,7 +65,7 @@ impl LifecycleDriver {
         Ok(self.contract().normalize_canonical_id_fields(&value))
     }
 
-    pub(super) async fn reduce(
+    pub(crate) async fn reduce(
         &self,
         id: &str,
         source: serde_json::Value,
@@ -89,7 +91,7 @@ impl LifecycleDriver {
             } else if uses_verification_slimming(id) {
                 slim_reducer_source(id, &source, true)
             } else {
-                super::super::workflow_live_v2_data::source_pack_value(&source)
+                super::super::super::workflow_live_v2_data::source_pack_value(&source)
             };
             match self
                 .call(
@@ -117,13 +119,13 @@ impl LifecycleDriver {
             id,
             max_transport_attempts,
             max_transport_attempts,
-            last_transport_failure.as_deref().unwrap_or(
-                "reducer transport failed without a recorded transport error",
-            ),
+            last_transport_failure
+                .as_deref()
+                .unwrap_or("reducer transport failed without a recorded transport error"),
         ))
     }
 
-    pub(super) async fn parallel(
+    pub(crate) async fn parallel(
         &self,
         id: &str,
         items: serde_json::Value,
@@ -132,7 +134,7 @@ impl LifecycleDriver {
         self.call("parallel", id, Some(items), options).await
     }
 
-    pub(super) async fn write_fanout(
+    pub(crate) async fn write_fanout(
         &self,
         id: &str,
         items: serde_json::Value,
@@ -161,7 +163,10 @@ impl LifecycleDriver {
     /// Declared artifact contract: every write-capable item carries the
     /// artifact requirements its task pack declares, so the implementing
     /// agent is always instructed to produce them.
-    pub(super) fn with_declared_task_artifacts(&self, items: serde_json::Value) -> serde_json::Value {
+    pub(crate) fn with_declared_task_artifacts(
+        &self,
+        items: serde_json::Value,
+    ) -> serde_json::Value {
         let contract = self.contract();
         let enriched: Vec<serde_json::Value> = support::array(Some(&items))
             .into_iter()
@@ -193,8 +198,8 @@ impl LifecycleDriver {
                     }
                     if let Some(root) = self.project_artifact_root.as_deref() {
                         for declared in &task.deliverable_contracts {
-                            let value = serde_json::to_value(declared)
-                                .unwrap_or(serde_json::Value::Null);
+                            let value =
+                                serde_json::to_value(declared).unwrap_or(serde_json::Value::Null);
                             if let Some(command) =
                                 workflow_live_v2_deliverable_contract::typed_verification_command(
                                     root, &value,
@@ -220,5 +225,4 @@ impl LifecycleDriver {
             .collect();
         serde_json::Value::Array(enriched)
     }
-
 }

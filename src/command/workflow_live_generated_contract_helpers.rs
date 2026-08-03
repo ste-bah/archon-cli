@@ -1,4 +1,6 @@
-fn copy_alias_array(
+use super::*;
+
+pub(super) fn copy_alias_array(
     value: &serde_json::Value,
     aliases: &[&str],
     object: &mut serde_json::Map<String, serde_json::Value>,
@@ -10,7 +12,7 @@ fn copy_alias_array(
     }
 }
 
-fn copy_alias_value(
+pub(super) fn copy_alias_value(
     value: &serde_json::Value,
     aliases: &[&str],
     object: &mut serde_json::Map<String, serde_json::Value>,
@@ -21,7 +23,7 @@ fn copy_alias_value(
     }
 }
 
-fn copy_target_file_aliases(
+pub(super) fn copy_target_file_aliases(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -50,7 +52,7 @@ const TARGET_FILE_ALIASES: &[&str] = &[
     "ownedGeneratedOutputs",
 ];
 
-fn copy_nested_required_evidence_array(
+pub(super) fn copy_nested_required_evidence_array(
     value: &serde_json::Value,
     aliases: &[&str],
     object: &mut serde_json::Map<String, serde_json::Value>,
@@ -74,7 +76,7 @@ fn copy_nested_required_evidence_array(
     }
 }
 
-fn copy_nested_object_array(
+pub(super) fn copy_nested_object_array(
     value: &serde_json::Value,
     object_aliases: &[&str],
     aliases: &[&str],
@@ -91,7 +93,7 @@ fn copy_nested_object_array(
     }
 }
 
-fn append_alias_values(
+pub(super) fn append_alias_values(
     object: &mut serde_json::Map<String, serde_json::Value>,
     target: &str,
     values: Vec<serde_json::Value>,
@@ -107,10 +109,7 @@ fn append_alias_values(
     }
 }
 
-fn append_unique_values(
-    merged: &mut Vec<serde_json::Value>,
-    values: Vec<serde_json::Value>,
-) {
+fn append_unique_values(merged: &mut Vec<serde_json::Value>, values: Vec<serde_json::Value>) {
     for value in values {
         if !merged.iter().any(|existing| existing == &value) {
             merged.push(value);
@@ -118,7 +117,7 @@ fn append_unique_values(
     }
 }
 
-fn normalize_remediation_context(
+pub(super) fn normalize_remediation_context(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -137,12 +136,12 @@ fn normalize_remediation_context(
             ],
         )
         .or_else(|| first_string(value, &["id", "item_id", "task_id", "taskId"]))
-        {
-            object.insert(
-                "source_item_id".to_string(),
-                serde_json::Value::String(source_item_id),
-            );
-        }
+    {
+        object.insert(
+            "source_item_id".to_string(),
+            serde_json::Value::String(source_item_id),
+        );
+    }
     if !object.contains_key("failure_status") {
         if let Some(status) = first_string(
             value,
@@ -208,12 +207,13 @@ fn normalize_remediation_context(
                 "acceptanceBlocker",
                 "blocker",
             ],
-        ) {
-            object.insert(
-                "required_fix".to_string(),
-                serde_json::Value::String(required_fix),
-            );
-        }
+        )
+    {
+        object.insert(
+            "required_fix".to_string(),
+            serde_json::Value::String(required_fix),
+        );
+    }
     if !object.contains_key("verification_requirements") {
         let requirements = raw_values_from_aliases(
             value,
@@ -236,7 +236,7 @@ fn normalize_remediation_context(
     }
 }
 
-fn first_string(value: &serde_json::Value, aliases: &[&str]) -> Option<String> {
+pub(super) fn first_string(value: &serde_json::Value, aliases: &[&str]) -> Option<String> {
     aliases
         .iter()
         .find_map(|key| value.get(*key))
@@ -251,7 +251,7 @@ fn string_value(value: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn raw_strings_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<String> {
+pub(super) fn raw_strings_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<String> {
     sorted_unique(
         raw_values_from_aliases(value, aliases)
             .into_iter()
@@ -260,7 +260,7 @@ fn raw_strings_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<
     )
 }
 
-fn embedded_task_ids_from_generated_value(
+pub(super) fn embedded_task_ids_from_generated_value(
     value: &serde_json::Value,
     universe: &ContractTaskUniverse,
 ) -> Vec<String> {
@@ -305,7 +305,10 @@ fn embedded_task_candidates(canonical: &str) -> Vec<String> {
     sorted_unique(candidates)
 }
 
-fn raw_values_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<serde_json::Value> {
+pub(super) fn raw_values_from_aliases(
+    value: &serde_json::Value,
+    aliases: &[&str],
+) -> Vec<serde_json::Value> {
     aliases
         .iter()
         .filter_map(|key| value.get(*key))
@@ -317,7 +320,7 @@ fn raw_values_from_aliases(value: &serde_json::Value, aliases: &[&str]) -> Vec<s
         .collect()
 }
 
-fn value_to_strings(value: serde_json::Value) -> Vec<String> {
+pub(super) fn value_to_strings(value: serde_json::Value) -> Vec<String> {
     match value {
         serde_json::Value::String(value) => value
             .split(',')
@@ -339,7 +342,7 @@ fn value_to_strings(value: serde_json::Value) -> Vec<String> {
     }
 }
 
-fn value_present(value: Option<&serde_json::Value>) -> bool {
+pub(super) fn value_present(value: Option<&serde_json::Value>) -> bool {
     match value {
         Some(serde_json::Value::String(value)) => !value.trim().is_empty(),
         Some(serde_json::Value::Array(values)) => !values.is_empty(),
@@ -349,7 +352,7 @@ fn value_present(value: Option<&serde_json::Value>) -> bool {
     }
 }
 
-fn dedupe_issues(issues: Vec<GeneratedContractIssue>) -> Vec<GeneratedContractIssue> {
+pub(super) fn dedupe_issues(issues: Vec<GeneratedContractIssue>) -> Vec<GeneratedContractIssue> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
     for issue in issues {
@@ -367,7 +370,7 @@ fn dedupe_issues(issues: Vec<GeneratedContractIssue>) -> Vec<GeneratedContractIs
     out
 }
 
-fn sorted_unique(values: Vec<String>) -> Vec<String> {
+pub(super) fn sorted_unique(values: Vec<String>) -> Vec<String> {
     values
         .into_iter()
         .map(|value| value.trim().to_string())
@@ -377,7 +380,7 @@ fn sorted_unique(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn short_task_alias(canonical: &str) -> Option<String> {
+pub(super) fn short_task_alias(canonical: &str) -> Option<String> {
     let digits = canonical.rsplit('-').next()?;
     (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("T{digits}"))

@@ -1,14 +1,15 @@
+use super::*;
 
-use super::super::workflow_live_verification_contract::annotate_verification_failure_outcome;
+use super::super::super::workflow_live_verification_contract::annotate_verification_failure_outcome;
 
-pub(super) const FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION: &str =
+pub(crate) const FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION: &str =
     "focused-verification-evidence-v2";
 
 pub(super) fn is_focused_verification_call(call_id: &str) -> bool {
     call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
 }
 
-pub(super) fn stamp_focused_verification_input(call_id: &str, input: &mut serde_json::Value) {
+pub(crate) fn stamp_focused_verification_input(call_id: &str, input: &mut serde_json::Value) {
     if !is_focused_verification_call(call_id) {
         return;
     }
@@ -21,7 +22,7 @@ pub(super) fn stamp_focused_verification_input(call_id: &str, input: &mut serde_
     );
 }
 
-pub(super) fn normalize_focused_verification_outcome(
+pub(crate) fn normalize_focused_verification_outcome(
     call_id: &str,
     outcome: &mut WorkflowV2BranchOutcome,
 ) {
@@ -205,7 +206,7 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 ///
 /// Domain-agnostic: the contract declares its own artifact paths and predicates;
 /// this only runs the command and reads the JSON verdicts from its stdout.
-pub(super) async fn enforce_declared_contracts(
+pub(crate) async fn enforce_declared_contracts(
     outcomes: &mut [WorkflowV2BranchOutcome],
     contracts: &std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)>,
 ) {
@@ -229,7 +230,7 @@ pub(super) async fn enforce_declared_contracts(
         let mut failed = false;
         for contract in declared {
             let command =
-                super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
+                super::super::workflow_live_v2_script::workflow_live_v2_deliverable_contract::verification_command(root, contract);
             match run_contract_verifier(&command).await {
                 ContractVerification::Passed => passed += 1,
                 ContractVerification::Failed(detail) => {
@@ -253,7 +254,7 @@ pub(super) async fn enforce_declared_contracts(
 /// how this enforcement sat dead through several runs while looking fine — so
 /// a pass leaves a trace too, and absence of the field now means the host did
 /// not check.
-fn stamp_passed_contracts(outcome: &mut WorkflowV2BranchOutcome, passed: usize) {
+pub(super) fn stamp_passed_contracts(outcome: &mut WorkflowV2BranchOutcome, passed: usize) {
     let Some(result) = outcome.result.as_mut() else {
         return;
     };
@@ -274,12 +275,12 @@ fn stamp_passed_contracts(outcome: &mut WorkflowV2BranchOutcome, passed: usize) 
 /// the branch is then demoted as unverified instead of stalling the fanout.
 const CONTRACT_VERIFIER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-enum ContractVerification {
+pub(super) enum ContractVerification {
     Passed,
     Failed(String),
 }
 
-async fn run_contract_verifier(command: &str) -> ContractVerification {
+pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification {
     // Fed to the shell on stdin rather than as `-c <command>`.
     //
     // The generated deliverable verifier embeds a ~29 KB Python program, and
@@ -367,7 +368,7 @@ async fn run_contract_verifier(command: &str) -> ContractVerification {
 /// `verification_command` may chain a typed pre-check ahead of the contract
 /// verifier, so stdout routinely carries more than one verdict and they must
 /// all be considered.
-fn verifier_verdicts(stdout: &str) -> Vec<serde_json::Value> {
+pub(super) fn verifier_verdicts(stdout: &str) -> Vec<serde_json::Value> {
     let mut verdicts = Vec::new();
     let mut offset = 0usize;
     while let Some(open) = stdout[offset..].find('{') {
@@ -393,7 +394,7 @@ fn verifier_verdicts(stdout: &str) -> Vec<serde_json::Value> {
 /// A verdict fails either by saying `status: failed` or by carrying a non-empty
 /// `failures` array — the verifier's early exits print the latter with no
 /// `status` field at all, and their text is the only account of what broke.
-fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
+pub(super) fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
     let failed_status = verdict
         .get("status")
         .and_then(serde_json::Value::as_str)
@@ -422,7 +423,7 @@ fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
     })
 }
 
-fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, detail: &str) {
+pub(super) fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, detail: &str) {
     let truncated: String = detail.chars().take(500).collect();
     if let Some(result) = outcome.result.as_mut() {
         result.status = WorkflowV2Status::NeedsReview;
@@ -476,4 +477,3 @@ fn has_duplicate_harness_false_gap(result: &WorkflowV2Result) -> bool {
         is_duplicate_harness_gap(&lower) || lower.contains("exactly one targeted test")
     })
 }
-

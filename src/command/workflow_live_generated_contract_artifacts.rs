@@ -1,23 +1,20 @@
+use super::*;
+
 use archon_workflow::v2::project_artifact_contract::{
     ArtifactRequirementSplit, split_artifact_requirement_values,
 };
 
-fn copy_artifact_requirement_aliases(
+pub(super) fn copy_artifact_requirement_aliases(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
-    let explicit = ARTIFACT_ALIASES
-        .iter()
-        .any(|key| value.get(*key).is_some());
+    let explicit = ARTIFACT_ALIASES.iter().any(|key| value.get(*key).is_some());
     object.remove("artifact_requirements");
-    let split = split_artifact_requirement_values(raw_values_from_aliases(
-        value,
-        ARTIFACT_ALIASES,
-    ));
+    let split = split_artifact_requirement_values(raw_values_from_aliases(value, ARTIFACT_ALIASES));
     append_artifact_split(object, split, explicit);
 }
 
-fn copy_nested_artifact_requirement_aliases(
+pub(super) fn copy_nested_artifact_requirement_aliases(
     value: &serde_json::Value,
     object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
@@ -36,7 +33,7 @@ fn copy_nested_artifact_requirement_aliases(
     append_artifact_split(object, split, false);
 }
 
-fn copy_nested_object_artifact_aliases(
+pub(super) fn copy_nested_object_artifact_aliases(
     value: &serde_json::Value,
     object_aliases: &[&str],
     aliases: &[&str],
@@ -50,7 +47,7 @@ fn copy_nested_object_artifact_aliases(
     append_artifact_requirement_values(object, values, false);
 }
 
-fn append_artifact_requirement_values(
+pub(super) fn append_artifact_requirement_values(
     object: &mut serde_json::Map<String, serde_json::Value>,
     values: Vec<serde_json::Value>,
     explicit: bool,

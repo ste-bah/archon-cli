@@ -116,19 +116,41 @@ pub(super) struct WorkflowV2ScriptRuntime {
     pub(super) generated_config: GeneratedWorkflowConfig,
 }
 
-include!("workflow_live_v2_run.rs");
+#[path = "workflow_live_v2_run.rs"]
+mod workflow_live_v2_run;
+pub(crate) use workflow_live_v2_run::*;
 
-include!("workflow_live_v2_learning.rs");
+#[path = "workflow_live_v2_learning.rs"]
+mod workflow_live_v2_learning;
+pub(super) use workflow_live_v2_learning::*;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_learning_tests.rs"]
 mod learning_fidelity_tests;
 
-include!("workflow_live_v2_host_dispatch.rs");
+#[path = "workflow_live_v2_host_dispatch.rs"]
+mod workflow_live_v2_host_dispatch;
+pub(crate) use workflow_live_v2_host_dispatch::*;
+#[path = "workflow_live_v2_host_dispatch_repair.rs"]
+mod workflow_live_v2_host_dispatch_repair;
+pub(super) use workflow_live_v2_host_dispatch_repair::*;
+#[cfg(test)]
+#[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
+mod rejected_output_tests;
 
-include!("workflow_live_v2_read_only.rs");
+#[path = "workflow_live_v2_read_only.rs"]
+mod workflow_live_v2_read_only;
+use workflow_live_v2_read_only::*;
+#[path = "workflow_live_v2_read_only_a.rs"]
+mod workflow_live_v2_read_only_a;
+pub(super) use workflow_live_v2_read_only_a::*;
+#[path = "workflow_live_v2_read_only_b.rs"]
+mod workflow_live_v2_read_only_b;
+pub(super) use workflow_live_v2_read_only_b::*;
 
-include!("workflow_live_v2_branch_cache.rs");
+#[path = "workflow_live_v2_branch_cache.rs"]
+mod workflow_live_v2_branch_cache;
+pub(super) use workflow_live_v2_branch_cache::*;
 
 #[cfg(test)]
 mod generated_resume_tests {

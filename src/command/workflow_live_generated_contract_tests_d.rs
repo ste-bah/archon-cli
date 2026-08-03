@@ -50,16 +50,25 @@ fn workflow_live_generated_contract_requires_invariants_for_consolidated_retry_i
         2
     );
     let item = &inventory.items[0];
-    assert_eq!(item["canonical_task_ids"], serde_json::json!(["TASK-TDL-001"]));
-    assert!(item["focused_verification"].as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            item.as_str()
-                .is_some_and(|text| text.contains("Read registry.json"))
-        })
-    }));
-    assert!(item["artifact_requirements"]
-        .as_array()
-        .is_some_and(|items| items.len() == 2));
+    assert_eq!(
+        item["canonical_task_ids"],
+        serde_json::json!(["TASK-TDL-001"])
+    );
+    assert!(
+        item["focused_verification"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.as_str()
+                        .is_some_and(|text| text.contains("Read registry.json"))
+                })
+            })
+    );
+    assert!(
+        item["artifact_requirements"]
+            .as_array()
+            .is_some_and(|items| items.len() == 2)
+    );
 }
 
 #[test]

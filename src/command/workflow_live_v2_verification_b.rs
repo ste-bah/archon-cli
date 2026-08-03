@@ -1,4 +1,6 @@
-fn is_duplicate_harness_gap(text: &str) -> bool {
+use super::*;
+
+pub(super) fn is_duplicate_harness_gap(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     (lower.contains("duplicate") && lower.contains("targeted") && lower.contains("test"))
         || (lower.contains("reported") && lower.contains("twice") && lower.contains("passed"))
@@ -6,7 +8,7 @@ fn is_duplicate_harness_gap(text: &str) -> bool {
         || lower.contains("same exact test passing in two")
 }
 
-fn focused_verification_command_passed(result: &WorkflowV2Result) -> bool {
+pub(super) fn focused_verification_command_passed(result: &WorkflowV2Result) -> bool {
     result.commands_run.iter().any(|command| {
         command.status == WorkflowV2CommandStatus::Succeeded
             && command.exit_code == Some(0)
@@ -48,7 +50,7 @@ fn command_output_has_failure_marker(text: &str) -> bool {
         || lower.contains("panicked at")
 }
 
-fn verification_text(result: &WorkflowV2Result) -> Vec<String> {
+pub(super) fn verification_text(result: &WorkflowV2Result) -> Vec<String> {
     let mut text = vec![result.summary.clone()];
     text.extend(result.evidence.iter().map(|item| item.summary.clone()));
     text.extend(

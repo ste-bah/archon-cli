@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -89,16 +91,20 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
     assert!(
         report.data["task_coverage"]
             .as_array()
-            .is_some_and(|coverage| coverage.iter().any(|value| value["task_id"] == "TASK-TDL-010")),
+            .is_some_and(|coverage| coverage
+                .iter()
+                .any(|value| value["task_id"] == "TASK-TDL-010")),
         "{:#?}",
         report.data
     );
     assert!(
-        report.data["commands_run"].as_array().is_some_and(|commands| {
-            commands
-                .iter()
-                .any(|value| value["command"] == "cargo test registry_schema")
-        }),
+        report.data["commands_run"]
+            .as_array()
+            .is_some_and(|commands| {
+                commands
+                    .iter()
+                    .any(|value| value["command"] == "cargo test registry_schema")
+            }),
         "{:#?}",
         report.data
     );
@@ -140,19 +146,27 @@ fn final_report_rejects_branch_level_noop_without_criteria_results() {
         input: serde_json::json!({
             "source_data": WorkflowV2Result::accepted("review complete")
         }),
-        ..execution("final-acceptance-report", WorkflowV2HostMethod::FinalReport, None)
+        ..execution(
+            "final-acceptance-report",
+            WorkflowV2HostMethod::FinalReport,
+            None,
+        )
     };
 
     let report = execute_local_host_call(&final_report, &store, Some(&task_universe_010()))
         .expect("final")
         .expect("local result");
 
-    assert!(report.data["missing_tasks"].as_array().is_some_and(|tasks| {
-        tasks.iter().any(|task| task == "TASK-TDL-010")
-    }));
-    assert!(report.data["noop_tasks"].as_array().is_some_and(|tasks| {
-        tasks.iter().all(|task| task != "TASK-TDL-010")
-    }));
+    assert!(
+        report.data["missing_tasks"]
+            .as_array()
+            .is_some_and(|tasks| { tasks.iter().any(|task| task == "TASK-TDL-010") })
+    );
+    assert!(
+        report.data["noop_tasks"]
+            .as_array()
+            .is_some_and(|tasks| { tasks.iter().all(|task| task != "TASK-TDL-010") })
+    );
 }
 
 #[test]
@@ -184,16 +198,22 @@ fn final_report_rejects_branch_credit_with_missing_artifact() {
         input: serde_json::json!({
             "source_data": WorkflowV2Result::accepted("review complete")
         }),
-        ..execution("final-acceptance-report", WorkflowV2HostMethod::FinalReport, None)
+        ..execution(
+            "final-acceptance-report",
+            WorkflowV2HostMethod::FinalReport,
+            None,
+        )
     };
 
     let report = execute_local_host_call(&final_report, &store, Some(&task_universe_010()))
         .expect("final")
         .expect("local result");
 
-    assert!(report.data["missing_tasks"].as_array().is_some_and(|tasks| {
-        tasks.iter().any(|task| task == "TASK-TDL-010")
-    }));
+    assert!(
+        report.data["missing_tasks"]
+            .as_array()
+            .is_some_and(|tasks| { tasks.iter().any(|task| task == "TASK-TDL-010") })
+    );
 }
 
 #[test]
@@ -236,8 +256,8 @@ fn d70_completion_credit_rejects_artifact_claim_contradicted_by_disk() {
         )
         .expect("branch outcome");
 
-    let (credit, gaps) = validated_completion_credit(&store, Some(&task_universe_010()))
-        .expect("validated credit");
+    let (credit, gaps) =
+        validated_completion_credit(&store, Some(&task_universe_010())).expect("validated credit");
 
     assert!(!credit.implementation.contains("TASK-TDL-010"));
     assert!(gaps.iter().any(|gap| {
@@ -279,16 +299,20 @@ fn d70_final_report_drops_stale_missing_blocker_with_record() {
         .expect("final")
         .expect("local result");
 
-    assert!(report.data["residual_gaps"]
-        .as_array()
-        .is_some_and(|gaps| gaps.iter().all(|gap| gap["id"] != "registry-missing")));
-    assert!(report.data["review_findings"]
-        .as_array()
-        .is_some_and(|findings| findings.iter().any(|finding| {
-            finding
-                .as_str()
-                .is_some_and(|text| text.contains("superseded by current state"))
-        })));
+    assert!(
+        report.data["residual_gaps"]
+            .as_array()
+            .is_some_and(|gaps| gaps.iter().all(|gap| gap["id"] != "registry-missing"))
+    );
+    assert!(
+        report.data["review_findings"]
+            .as_array()
+            .is_some_and(|findings| findings.iter().any(|finding| {
+                finding
+                    .as_str()
+                    .is_some_and(|text| text.contains("superseded by current state"))
+            }))
+    );
 }
 
 #[test]
@@ -438,4 +462,3 @@ fn final_report_accepts_repository_relative_focused_verification_artifacts() {
         report.data
     );
 }
-

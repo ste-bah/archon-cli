@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn focused_verification_duplicate_cargo_harness_pass_is_accepted() {
     let first: WorkflowV2BranchOutcome = serde_json::from_str(include_str!(
@@ -189,7 +191,7 @@ fn focused_verification_nonzero_exit_stays_failed() {
     assert_eq!(result.data["outcomes"][0]["status"], "failed");
 }
 
-fn fanout_call(id: &str) -> WorkflowV2HostCall {
+pub(super) fn fanout_call(id: &str) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),
         method: WorkflowV2HostMethod::Fanout,
@@ -198,7 +200,7 @@ fn fanout_call(id: &str) -> WorkflowV2HostCall {
     }
 }
 
-fn implementation_fanout_call(id: &str) -> WorkflowV2HostCall {
+pub(super) fn implementation_fanout_call(id: &str) -> WorkflowV2HostCall {
     WorkflowV2HostCall {
         id: id.to_string(),
         method: WorkflowV2HostMethod::Fanout,
@@ -211,7 +213,7 @@ fn implementation_fanout_call(id: &str) -> WorkflowV2HostCall {
     }
 }
 
-fn report(outcomes: Vec<WorkflowV2BranchOutcome>) -> WorkflowV2FanoutReport {
+pub(super) fn report(outcomes: Vec<WorkflowV2BranchOutcome>) -> WorkflowV2FanoutReport {
     WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: 8,
@@ -220,7 +222,7 @@ fn report(outcomes: Vec<WorkflowV2BranchOutcome>) -> WorkflowV2FanoutReport {
     }
 }
 
-fn accepted_outcome(id: &str) -> WorkflowV2BranchOutcome {
+pub(super) fn accepted_outcome(id: &str) -> WorkflowV2BranchOutcome {
     let mut result = WorkflowV2Result::accepted(format!("{id} accepted"));
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Inspection,
@@ -229,7 +231,7 @@ fn accepted_outcome(id: &str) -> WorkflowV2BranchOutcome {
     outcome(id, WorkflowV2Status::Accepted, Some(result), None)
 }
 
-fn review_outcome(id: &str) -> WorkflowV2BranchOutcome {
+pub(super) fn review_outcome(id: &str) -> WorkflowV2BranchOutcome {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
         summary: format!("{id} needs review"),
@@ -242,7 +244,7 @@ fn review_outcome(id: &str) -> WorkflowV2BranchOutcome {
     outcome(id, WorkflowV2Status::NeedsReview, Some(result), None)
 }
 
-fn blocked_outcome(id: &str) -> WorkflowV2BranchOutcome {
+pub(super) fn blocked_outcome(id: &str) -> WorkflowV2BranchOutcome {
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::Blocked,
         summary: format!("{id} blocked"),
@@ -262,11 +264,11 @@ fn blocked_outcome(id: &str) -> WorkflowV2BranchOutcome {
     outcome(id, WorkflowV2Status::Blocked, Some(result), None)
 }
 
-fn failed_error_outcome(id: &str, error: &str) -> WorkflowV2BranchOutcome {
+pub(super) fn failed_error_outcome(id: &str, error: &str) -> WorkflowV2BranchOutcome {
     outcome(id, WorkflowV2Status::Failed, None, Some(error.to_string()))
 }
 
-fn outcome(
+pub(super) fn outcome(
     id: &str,
     status: WorkflowV2Status,
     result: Option<WorkflowV2Result>,

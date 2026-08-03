@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn repair_plan_shape_repair_cannot_drop_source_gap_identity() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -171,7 +173,7 @@ async fn inventory_repair_tombstone_cannot_remove_scheduled_work() {
     );
 }
 
-fn boundary_driver(
+pub(super) fn boundary_driver(
     temp: &tempfile::TempDir,
     scenario: CannedLifecycleScenario,
 ) -> (LifecycleDriver, Arc<CannedLifecycleLlm>) {
@@ -263,7 +265,7 @@ fn boundary_driver(
     (driver, llm)
 }
 
-fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
+pub(super) fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     let task = |id: &str, criterion: &str| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.to_string(),
         source_path: root
@@ -324,7 +326,7 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     }
 }
 
-fn synthetic_inventory_items() -> Vec<serde_json::Value> {
+pub(super) fn synthetic_inventory_items() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({
             "item_id": "noop-legit",
@@ -377,7 +379,7 @@ fn synthetic_inventory_items() -> Vec<serde_json::Value> {
     ]
 }
 
-fn implementation_item(
+pub(super) fn implementation_item(
     item_id: &str,
     task_id: &str,
     target_file: &str,
@@ -399,7 +401,11 @@ fn implementation_item(
     })
 }
 
-fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_json::Value {
+pub(super) fn verification_item(
+    item_id: &str,
+    task_id: &str,
+    target_file: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "item_id": item_id,
         "source_item_id": item_id.replace("verify-", "implementation-"),
@@ -410,7 +416,7 @@ fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_j
     })
 }
 
-fn verification_remediation_item() -> serde_json::Value {
+pub(super) fn verification_remediation_item() -> serde_json::Value {
     serde_json::json!({
         "item_id": "remediate-plain",
         "source_item_id": "implementation-plain",
@@ -425,4 +431,3 @@ fn verification_remediation_item() -> serde_json::Value {
         "artifact_requirements": [],
     })
 }
-

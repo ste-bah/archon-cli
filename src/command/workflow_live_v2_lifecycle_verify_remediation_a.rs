@@ -1,6 +1,8 @@
+use super::*;
+
 impl LifecycleDriver {
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_write_verification_remediation(
+    pub(crate) async fn run_write_verification_remediation(
         &self,
         ready_implementation_items: &[serde_json::Value],
         plan_items: &[serde_json::Value],
@@ -146,7 +148,7 @@ impl LifecycleDriver {
     }
 }
 
-pub(super) fn transport_failure_result(
+pub(crate) fn transport_failure_result(
     call_id: &str,
     attempts: usize,
     max_attempts: usize,
@@ -179,13 +181,13 @@ pub(super) fn transport_failure_result(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum InventoryTransportRoute {
+pub(crate) enum InventoryTransportRoute {
     UseResult,
     Retry,
     Exhausted(String),
 }
 
-pub(super) fn inventory_transport_route(
+pub(crate) fn inventory_transport_route(
     result: &serde_json::Value,
     attempt: usize,
     max_attempts: usize,
@@ -200,7 +202,7 @@ pub(super) fn inventory_transport_route(
     }
 }
 
-pub(super) fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
+pub(crate) fn transport_failure_summary(result: &serde_json::Value) -> Option<String> {
     let status = result
         .get("status")
         .or_else(|| result.pointer("/result/status"))
@@ -223,7 +225,7 @@ pub(super) fn transport_failure_summary(result: &serde_json::Value) -> Option<St
     Some(summary.to_string())
 }
 
-pub(super) fn is_transport_failure_text(text: &str) -> bool {
+pub(crate) fn is_transport_failure_text(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("agent transport failed")
         || text.contains("reducer transport exhausted")
@@ -257,14 +259,14 @@ pub(super) fn verification_remediation_inventory_source(
     ])
 }
 
-pub(super) fn uses_verification_slimming(id: &str) -> bool {
+pub(crate) fn uses_verification_slimming(id: &str) -> bool {
     id.starts_with("verification-failure-triage-")
         || id.starts_with("verification-failure-retriage-")
         || (id.starts_with("verification-repair-plan-")
             && !id.starts_with("verification-repair-plan-repair-"))
 }
 
-pub(super) fn slim_reducer_source(
+pub(crate) fn slim_reducer_source(
     id: &str,
     source: &serde_json::Value,
     aggressive: bool,
@@ -274,7 +276,12 @@ pub(super) fn slim_reducer_source(
     }
     let values = source.as_array().cloned().unwrap_or_default();
     let item_limit = if aggressive { 16 } else { 48 };
-    let at = |index: usize| values.get(index).cloned().unwrap_or(serde_json::Value::Null);
+    let at = |index: usize| {
+        values
+            .get(index)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
     if id.starts_with("verification-failure-triage-") {
         return serde_json::json!([
             at(0),
@@ -296,12 +303,18 @@ pub(super) fn slim_reducer_source(
     serde_json::json!([
         at(0),
         slim_items(&support::array(values.get(1)), item_limit),
-        slim_result_with_outcomes(values.get(2).unwrap_or(&serde_json::Value::Null), item_limit),
+        slim_result_with_outcomes(
+            values.get(2).unwrap_or(&serde_json::Value::Null),
+            item_limit
+        ),
         slim_verification_records(&support::array(values.get(3)), aggressive),
     ])
 }
 
-pub(super) fn slim_retriage_feedback(value: Option<&serde_json::Value>, limit: usize) -> serde_json::Value {
+pub(super) fn slim_retriage_feedback(
+    value: Option<&serde_json::Value>,
+    limit: usize,
+) -> serde_json::Value {
     let Some(value) = value.and_then(serde_json::Value::as_object) else {
         return serde_json::Value::Null;
     };
@@ -352,7 +365,7 @@ pub(super) fn slim_items(items: &[serde_json::Value], limit: usize) -> Vec<serde
         .collect()
 }
 
-pub(super) fn slim_verification_records(
+pub(crate) fn slim_verification_records(
     records: &[serde_json::Value],
     aggressive: bool,
 ) -> Vec<serde_json::Value> {
@@ -375,7 +388,10 @@ pub(super) fn slim_verification_records(
     slim
 }
 
-pub(super) fn slim_evidence_record(record: &serde_json::Value, outcome_limit: usize) -> serde_json::Value {
+pub(super) fn slim_evidence_record(
+    record: &serde_json::Value,
+    outcome_limit: usize,
+) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for key in [
         "kind",
@@ -444,4 +460,3 @@ pub(super) fn slim_result_data(data: &serde_json::Value) -> serde_json::Value {
     }
     serde_json::Value::Object(out)
 }
-

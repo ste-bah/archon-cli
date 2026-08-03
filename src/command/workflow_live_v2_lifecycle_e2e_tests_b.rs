@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
     let started = Instant::now();
@@ -398,4 +400,3 @@ fn persisted_semantic_rejection_record(root: &std::path::Path, repair_id: &str) 
     }
     walk(root, &format!("{repair_id}-semantic-preservation-rejected"))
 }
-

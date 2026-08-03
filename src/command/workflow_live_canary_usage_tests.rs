@@ -25,6 +25,9 @@ use tokio::sync::mpsc::Receiver;
 use super::{CANARY_ARTIFACT_REL, CanaryAgentClient};
 use crate::command::workflow_live::{LiveApprovalMode, run_live_action};
 
-
-include!("workflow_live_canary_usage_tests_a.rs");
-include!("workflow_live_canary_usage_tests_b.rs");
+#[path = "workflow_live_canary_usage_tests_a.rs"]
+mod workflow_live_canary_usage_tests_a;
+use workflow_live_canary_usage_tests_a::*;
+#[path = "workflow_live_canary_usage_tests_b.rs"]
+mod workflow_live_canary_usage_tests_b;
+use workflow_live_canary_usage_tests_b::*;

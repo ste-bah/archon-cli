@@ -1,3 +1,5 @@
+use super::*;
+
 impl LifecycleDriver {
     /// Per-task adversarial review: ONE read-only critic branch per task, over
     /// that task's diff, acceptance criteria and declared
@@ -41,8 +43,7 @@ impl LifecycleDriver {
                 }),
             )
             .await?;
-        let findings =
-            workflow_live_v2_lifecycle_adversarial::attributed_findings(&items, &result);
+        let findings = workflow_live_v2_lifecycle_adversarial::attributed_findings(&items, &result);
         evidence.review.push(serde_json::json!({
             "kind": "adversarial-review-task",
             "reviewRound": round_id,
@@ -63,7 +64,7 @@ impl LifecycleDriver {
     /// findings and what derives the status: a cross-cutting reduce returning
     /// "accepted" over outstanding per-task findings would otherwise short
     /// `review_needs_remediation` and discard every one of them.
-    pub(super) async fn run_review_round(
+    pub(crate) async fn run_review_round(
         &self,
         review_iteration: usize,
         re_review: Option<&std::collections::BTreeSet<String>>,
@@ -150,11 +151,8 @@ impl LifecycleDriver {
                 &ready_noop_items,
                 &support::outcomes_of(&noop_proof),
             );
-        for id in support::matching_accepted_noop_ids(
-            &contract,
-            &ready_noop_items,
-            &noop_outcomes,
-        ) {
+        for id in support::matching_accepted_noop_ids(&contract, &ready_noop_items, &noop_outcomes)
+        {
             accepted_this_wave.insert(id);
         }
         let mut failed = support::non_accepted_outcomes(&noop_outcomes);
@@ -166,12 +164,7 @@ impl LifecycleDriver {
                 let repair = self
                     .reduce(
                         &repair_id,
-                        serde_json::json!([
-                            self.task_universe,
-                            retry_items,
-                            noop_proof,
-                            failed
-                        ]),
+                        serde_json::json!([self.task_universe, retry_items, noop_proof, failed]),
                         "reducer",
                         prompts::NOOP_EVIDENCE_REPAIR_TASK,
                     )
@@ -188,11 +181,10 @@ impl LifecycleDriver {
                     &serde_json::json!({ "items": retry_items }),
                     &repair,
                 );
-                retry_items =
-                    workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
-                        &contract,
-                        &support::array(merged.get("items")),
-                    );
+                retry_items = workflow_live_v2_lifecycle_noop_routing::pin_noop_acceptance_criteria(
+                    &contract,
+                    &support::array(merged.get("items")),
+                );
                 if retry_items.is_empty() {
                     break;
                 }
@@ -294,13 +286,9 @@ impl LifecycleDriver {
         let contract = self.contract();
         let mut inventory = contract.normalize_inventory(&serde_json::json!({ "items": items }));
         let mut attempt = 1usize;
-        while support::array(inventory.get("items"))
-            .iter()
-            .any(|item| {
-                support::work_type_for(item) == "implementation"
-                    && !item_has_write_ownership(item)
-            })
-            && attempt <= self.max_investigation_iterations
+        while support::array(inventory.get("items")).iter().any(|item| {
+            support::work_type_for(item) == "implementation" && !item_has_write_ownership(item)
+        }) && attempt <= self.max_investigation_iterations
         {
             let issues = support::array(inventory.get("items"))
                 .into_iter()
@@ -337,11 +325,8 @@ impl LifecycleDriver {
             inventory = contract.normalize_inventory(&support::merge_inventory_repair(
                 &contract, &inventory, &repair,
             ));
-            inventory = preserve_host_pinned_implementation(
-                &contract,
-                &inventory,
-                noop_reclassified_ids,
-            );
+            inventory =
+                preserve_host_pinned_implementation(&contract, &inventory, noop_reclassified_ids);
             let mut enriched_inventory = inventory.as_object().cloned().unwrap_or_default();
             enriched_inventory.insert(
                 "items".to_string(),
@@ -349,7 +334,8 @@ impl LifecycleDriver {
                     inventory.get("items"),
                 ))),
             );
-            inventory = contract.normalize_inventory(&serde_json::Value::Object(enriched_inventory));
+            inventory =
+                contract.normalize_inventory(&serde_json::Value::Object(enriched_inventory));
             attempt += 1;
         }
         let items = support::array(inventory.get("items"));

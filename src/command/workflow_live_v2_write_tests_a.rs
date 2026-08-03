@@ -6,5 +6,9 @@ pub(super) use archon_workflow::{
 
 use super::*;
 
-include!("workflow_live_v2_write_tests_a1.rs");
-include!("workflow_live_v2_write_tests_a2.rs");
+#[path = "workflow_live_v2_write_tests_a1.rs"]
+mod workflow_live_v2_write_tests_a1;
+use workflow_live_v2_write_tests_a1::*;
+#[path = "workflow_live_v2_write_tests_a2.rs"]
+mod workflow_live_v2_write_tests_a2;
+use workflow_live_v2_write_tests_a2::*;
