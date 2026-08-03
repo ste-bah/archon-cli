@@ -1,7 +1,7 @@
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support::LifecycleContract;
+use archon_workflow::generated_lifecycle_support as support;
+use archon_workflow::generated_lifecycle_support::LifecycleContract;
 
 use super::workflow_live_v2_lifecycle_verify_invariants;
 

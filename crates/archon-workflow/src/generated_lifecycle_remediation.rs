@@ -7,21 +7,19 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::workflow_live_generated_lifecycle_support::{
+use crate::generated_lifecycle_support::{
     LifecycleContract, array, inventory_source_issues, present, raw_strings,
 };
 
-mod workflow_live_generated_lifecycle_remediation_issues;
+#[path = "generated_lifecycle_remediation_issues.rs"]
+mod generated_lifecycle_remediation_issues;
 
-use workflow_live_generated_lifecycle_remediation_issues::{
+use generated_lifecycle_remediation_issues::{
     remediation_item_issues, review_remediation_item_issues,
 };
 
 /// JS `normalizeRemediationInventory`.
-pub(super) fn normalize_remediation_inventory(
-    contract: &LifecycleContract<'_>,
-    value: &Value,
-) -> Value {
+pub fn normalize_remediation_inventory(contract: &LifecycleContract<'_>, value: &Value) -> Value {
     let raw_items = inventory_source_items(value);
     let items: Vec<Value> = raw_items
         .iter()
@@ -45,11 +43,11 @@ fn inventory_source_items(value: &Value) -> Vec<Value> {
     if value.get("items").is_some_and(Value::is_array) {
         return array(value.get("items"));
     }
-    archon_workflow::generated_contract::lifecycle_inventory_source_items(value)
+    crate::generated_contract::lifecycle_inventory_source_items(value)
 }
 
 /// JS `normalizeRemediationInventoryForSources`.
-pub(super) fn normalize_remediation_inventory_for_sources(
+pub fn normalize_remediation_inventory_for_sources(
     contract: &LifecycleContract<'_>,
     value: &Value,
     source_items: &[Value],
@@ -217,13 +215,13 @@ fn remediation_item_with_source_ownership(
 }
 
 /// JS `remediationInventoryReady`.
-pub(super) fn remediation_inventory_ready(inventory: &Value) -> bool {
+pub fn remediation_inventory_ready(inventory: &Value) -> bool {
     !array(inventory.get("items")).is_empty()
         && array(inventory.get("unresolved_issues")).is_empty()
 }
 
 /// JS `remediationTaskIdSet`.
-pub(super) fn remediation_task_id_set(
+pub fn remediation_task_id_set(
     contract: &LifecycleContract<'_>,
     items: &[Value],
 ) -> BTreeSet<String> {
@@ -237,7 +235,7 @@ pub(super) fn remediation_task_id_set(
 }
 
 /// JS `filterRemediationInventoryByTaskIds`.
-pub(super) fn filter_remediation_inventory_by_task_ids(
+pub fn filter_remediation_inventory_by_task_ids(
     contract: &LifecycleContract<'_>,
     inventory: &Value,
     allowed: &BTreeSet<String>,
@@ -260,7 +258,7 @@ pub(super) fn filter_remediation_inventory_by_task_ids(
 }
 
 /// JS body_b.js `normalizeReviewRemediationInventory`.
-pub(super) fn normalize_review_remediation_inventory(
+pub fn normalize_review_remediation_inventory(
     contract: &LifecycleContract<'_>,
     value: &Value,
 ) -> Value {
@@ -280,7 +278,7 @@ pub(super) fn normalize_review_remediation_inventory(
 }
 
 /// JS body_b.js `reviewNeedsRemediation`.
-pub(super) fn review_needs_remediation(review: &Value) -> bool {
+pub fn review_needs_remediation(review: &Value) -> bool {
     if matches!(
         review.get("status").and_then(Value::as_str),
         Some("accepted") | Some("noop")
@@ -297,7 +295,7 @@ pub(super) fn review_needs_remediation(review: &Value) -> bool {
 }
 
 /// JS body_b.js `reviewRemediationInput`.
-pub(super) fn review_remediation_input(review: &Value) -> Value {
+pub fn review_remediation_input(review: &Value) -> Value {
     let items = array(review.get("items"));
     if !items.is_empty() {
         Value::Array(items)
@@ -307,5 +305,5 @@ pub(super) fn review_remediation_input(review: &Value) -> Value {
 }
 
 #[cfg(test)]
-#[path = "workflow_live_generated_lifecycle_remediation_tests.rs"]
+#[path = "generated_lifecycle_remediation_tests.rs"]
 mod tests;

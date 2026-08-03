@@ -16,7 +16,7 @@ pub fn canonical_task_ids_from_generated_value(
     embedded_task_ids_from_generated_value(value, &universe)
 }
 
-pub fn normalize_canonical_ids(
+pub(crate) fn normalize_canonical_ids(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     ids: impl IntoIterator<Item = String>,
 ) -> CanonicalIdNormalization {
@@ -121,7 +121,7 @@ pub fn evidence_refs_from_generated_value(value: &serde_json::Value) -> Vec<Stri
 
 /// Lifecycle shims: JS `generatedContractTargetFileIssue` and the item-less
 /// fallback of JS `generatedContractInventorySourceItems`.
-pub fn lifecycle_target_file_issue(
+pub(crate) fn lifecycle_target_file_issue(
     target: &str,
     target_repository_root: Option<&str>,
 ) -> Option<&'static str> {
@@ -129,6 +129,8 @@ pub fn lifecycle_target_file_issue(
     target_file_issue(target, &root)
 }
 
-pub fn lifecycle_inventory_source_items(value: &serde_json::Value) -> Vec<serde_json::Value> {
+pub(crate) fn lifecycle_inventory_source_items(
+    value: &serde_json::Value,
+) -> Vec<serde_json::Value> {
     collect_generated_inventory_items(value)
 }

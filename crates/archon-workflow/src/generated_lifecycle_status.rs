@@ -3,7 +3,7 @@
 //! [`super::LifecycleContract`] is the one place that already holds both the
 //! task universe and the run's completed set, so it is where "is this task
 //! done?" gets answered. The classification itself lives in
-//! [`archon_workflow::task_universe::task_status`],
+//! [`crate::task_universe::task_status`],
 //! which carries the full table of what each value causes.
 
 use std::collections::BTreeSet;
@@ -11,14 +11,14 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 use super::LifecycleContract;
-use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
+use crate::task_universe::WorkflowV2TaskUniverseTask;
 
 impl LifecycleContract<'_> {
     /// Whether the task universe declares this canonical task already finished.
     ///
     /// `done` means done on a resume as well as on a fresh run; nothing else in
     /// the table implies completion, `in_review` least of all.
-    pub(in super::super) fn declared_complete(&self, canonical_task_id: &str) -> bool {
+    pub(super) fn declared_complete(&self, canonical_task_id: &str) -> bool {
         self.task_universe.tasks.iter().any(|task| {
             task.canonical_task_id == canonical_task_id && task.declared_status_is_complete()
         })
@@ -26,7 +26,7 @@ impl LifecycleContract<'_> {
 
     /// A task is complete when this run completed it, or its file declares it
     /// was already complete before the run started.
-    pub(in super::super) fn task_is_complete(
+    pub(super) fn task_is_complete(
         &self,
         canonical_task_id: &str,
         completed: &BTreeSet<String>,
@@ -41,7 +41,7 @@ impl LifecycleContract<'_> {
     /// why the task is not eligible yet. Neither is applied silently: both are
     /// written into the run's evidence with the file that made the claim, so a
     /// reader can go and check it. `None` when no task declared either.
-    pub(in super::super) fn declared_status_notice(&self) -> Option<Value> {
+    pub fn declared_status_notice(&self) -> Option<Value> {
         let complete =
             self.declared_entries(WorkflowV2TaskUniverseTask::declared_status_is_complete);
         let blocked = self.declared_entries(WorkflowV2TaskUniverseTask::declared_status_is_blocked);

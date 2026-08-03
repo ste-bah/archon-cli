@@ -26,11 +26,11 @@ use std::path::PathBuf;
 use archon_core::config::{GeneratedWorkflowConfig, LearningConfig};
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
 use crate::command::workflow_live::workflow_live_generated_scaffold::{
     decomposed_prd_plan_calls, decomposed_prd_scaffold,
 };
 use crate::command::workflow_live::workflow_live_planner::WorkflowScriptPlan;
+use archon_workflow::generated_lifecycle_support as support;
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
 };

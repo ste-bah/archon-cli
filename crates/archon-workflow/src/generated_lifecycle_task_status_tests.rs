@@ -3,12 +3,10 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use archon_workflow::WorkflowResult;
-use archon_workflow::task_universe::{
-    WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
-};
+use crate::WorkflowResult;
+use crate::task_universe::{WorkflowV2TaskUniverse, extract_task_universe_for_generated_run};
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support as support;
+use crate::generated_lifecycle_support as support;
 
 /// A task file in the standard shape, with a chosen `status:`.
 fn task_file(task_id: &str, status: &str, depends_on: &str) -> String {

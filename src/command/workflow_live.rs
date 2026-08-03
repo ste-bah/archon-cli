@@ -33,10 +33,6 @@ mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
-#[path = "workflow_live_generated_lifecycle_remediation.rs"]
-mod workflow_live_generated_lifecycle_remediation;
-#[path = "workflow_live_generated_lifecycle_support.rs"]
-mod workflow_live_generated_lifecycle_support;
 #[path = "workflow_live_generated_scaffold.rs"]
 pub(crate) mod workflow_live_generated_scaffold;
 #[cfg(test)]
@@ -68,13 +64,6 @@ mod workflow_live_runtime_genericity_tests;
 mod workflow_live_semantic_preservation;
 #[path = "workflow_live_shape_apply.rs"]
 mod workflow_live_shape_apply;
-// The task universe itself moved to `archon_workflow::task_universe`. What
-// stayed is this half of its tests: they assert against
-// `workflow_live_generated_lifecycle_support`, which is still in this crate,
-// so they cannot live beside the code they cover until it moves too.
-#[cfg(test)]
-#[path = "workflow_live_task_status_tests.rs"]
-mod workflow_live_task_status_tests;
 #[cfg(test)]
 #[path = "workflow_live_test_support.rs"]
 mod workflow_live_test_support;

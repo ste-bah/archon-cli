@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_lifecycle_support::{
-    self as support, LifecycleContract,
-};
+use archon_workflow::generated_lifecycle_support::{self as support, LifecycleContract};
 
 #[path = "workflow_live_v2_lifecycle_noop_acceptance.rs"]
 mod acceptance;

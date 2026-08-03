@@ -33,7 +33,7 @@ impl GeneratedContractIssueKind {
 pub struct GeneratedContractIssue {
     pub kind: GeneratedContractIssueKind,
     pub field: String,
-    pub message: String,
+    pub(crate) message: String,
     pub(super) item_id: Option<String>,
     pub(super) canonical_task_ids: Vec<String>,
 }
@@ -51,9 +51,9 @@ pub struct NormalizedGeneratedInventory {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CanonicalIdNormalization {
-    pub canonical_ids: Vec<String>,
-    pub unresolved_ids: Vec<String>,
+pub(crate) struct CanonicalIdNormalization {
+    pub(crate) canonical_ids: Vec<String>,
+    pub(crate) unresolved_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -150,7 +150,7 @@ pub fn normalize_generated_inventory_value(
     normalize_generated_inventory_value_with_repo(value, task_universe, None)
 }
 
-pub fn normalize_generated_inventory_value_with_repo(
+pub(crate) fn normalize_generated_inventory_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,
@@ -192,7 +192,7 @@ pub fn normalize_generated_item_value(
     normalize_generated_item_value_with_repo(value, task_universe, None)
 }
 
-pub fn normalize_generated_item_value_with_repo(
+pub(crate) fn normalize_generated_item_value_with_repo(
     value: &serde_json::Value,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     target_repository_root: Option<&str>,

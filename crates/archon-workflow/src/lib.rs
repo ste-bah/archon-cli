@@ -15,6 +15,8 @@ pub mod events;
 mod executor_output;
 pub mod fanout;
 pub mod generated_contract;
+pub mod generated_lifecycle_remediation;
+pub mod generated_lifecycle_support;
 pub mod generated_workflow;
 mod item_filter;
 pub mod learning;

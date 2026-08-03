@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::super::workflow_live_generated_lifecycle_support::{
+use crate::generated_lifecycle_support::{
     LifecycleContract, array, present, raw_strings, strings_of,
 };
 
@@ -18,10 +18,7 @@ fn target_file_issue_message(
     contract: &LifecycleContract<'_>,
     target: &str,
 ) -> Option<&'static str> {
-    archon_workflow::generated_contract::lifecycle_target_file_issue(
-        target,
-        contract.target_repository_root,
-    )
+    crate::generated_contract::lifecycle_target_file_issue(target, contract.target_repository_root)
 }
 
 pub(super) fn remediation_item_issues(

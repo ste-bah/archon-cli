@@ -9,7 +9,7 @@
 
 use super::*;
 
-use super::super::workflow_live_generated_lifecycle_support::outcomes_of;
+use archon_workflow::generated_lifecycle_support::outcomes_of;
 
 const DIGEST_TEXT_LIMIT: usize = 400;
 
