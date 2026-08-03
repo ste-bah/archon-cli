@@ -59,7 +59,7 @@ async fn run_probe(use_job_object: bool, use_hook_shell: bool, environment: Prob
     let dir = tempfile::tempdir().unwrap();
     let phase_file = dir.path().join("direct-output.phase");
     let fixture = write_windows_output_fixture(dir.path(), &phase_file);
-    let command = output_command(&fixture, use_hook_shell, environment);
+    let mut command = output_command(&fixture, use_hook_shell, environment);
     let mut child: Box<dyn ChildWrapper> = if use_job_object {
         let mut wrapped = CommandWrap::from(command);
         wrapped.wrap(KillOnDrop).wrap(JobObject);
