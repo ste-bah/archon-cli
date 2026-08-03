@@ -222,6 +222,34 @@ async fn windows_hook_uses_isolated_environment_and_explicit_context() {
 
 #[tokio::test]
 #[cfg(windows)]
+async fn windows_hook_waits_for_descendant_after_parent_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("detached-descendant.pid");
+    let fixture = write_windows_detached_descendant_fixture(&pid_file);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(4),
+        super::executor_process::run_command(
+            &windows_file_command(&fixture),
+            b"{}",
+            dir.path(),
+            "issue92-session",
+            "PreToolUse",
+            1,
+        ),
+    )
+    .await
+    .expect("hook invocation exceeded its strict outer deadline");
+
+    let pid = std::fs::read_to_string(&pid_file).expect("detached descendant pid file");
+    assert!(
+        matches!(result, Err(super::RunError::Timeout("process wait"))),
+        "hook must wait for the complete Windows job"
+    );
+    wait_until_process_is_absent(pid.trim()).await;
+}
+
+#[tokio::test]
+#[cfg(windows)]
 async fn windows_hook_timeout_kills_descendant_process() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("descendant.pid");
@@ -268,6 +296,20 @@ fn windows_environment_command() -> String {
 fn windows_descendant_command(pid_file: &std::path::Path) -> String {
     let fixture = write_windows_descendant_fixture(pid_file);
     windows_file_command(&fixture)
+}
+
+#[cfg(windows)]
+fn write_windows_detached_descendant_fixture(pid_file: &std::path::Path) -> std::path::PathBuf {
+    let fixture = pid_file.with_extension("ps1");
+    std::fs::write(
+        &fixture,
+        "\
+$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'detached-descendant.pid'), [string]$child.Id)
+",
+    )
+    .unwrap();
+    fixture
 }
 
 #[cfg(windows)]

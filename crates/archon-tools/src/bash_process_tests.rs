@@ -106,6 +106,39 @@ async fn timeout_kills_background_process_group() {
 
 #[tokio::test]
 #[cfg(windows)]
+async fn windows_bash_waits_for_descendant_after_parent_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("detached-child.pid");
+    let fixture = write_windows_detached_descendant_fixture(&pid_file);
+    let tool = BashTool {
+        timeout_secs: 1,
+        max_output_bytes: 1024,
+        ..Default::default()
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(4),
+        tool.execute(
+            json!({
+                "command": windows_powershell_file_command(&fixture),
+                "timeout": 1_000
+            }),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        ),
+    )
+    .await
+    .expect("Bash invocation exceeded its strict outer deadline");
+
+    let pid = std::fs::read_to_string(&pid_file).expect("detached descendant pid file");
+    assert!(result.is_error, "complete Windows job must time out");
+    assert!(result.content.contains("timed out"), "{}", result.content);
+    wait_until_windows_process_is_absent(pid.trim()).await;
+}
+
+#[tokio::test]
+#[cfg(windows)]
 async fn windows_timeout_kills_background_descendant() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("child.pid");
@@ -148,6 +181,20 @@ async fn windows_timeout_kills_background_descendant() {
         result.content
     );
     wait_until_windows_process_is_absent(&pid).await;
+}
+
+#[cfg(windows)]
+fn write_windows_detached_descendant_fixture(pid_file: &std::path::Path) -> std::path::PathBuf {
+    let fixture = pid_file.with_extension("ps1");
+    std::fs::write(
+        &fixture,
+        "\
+$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'detached-child.pid'), [string]$child.Id)
+",
+    )
+    .unwrap();
+    fixture
 }
 
 #[cfg(windows)]
