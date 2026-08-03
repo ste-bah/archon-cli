@@ -26,13 +26,13 @@ use std::path::PathBuf;
 use archon_core::config::{GeneratedWorkflowConfig, LearningConfig};
 use serde_json::Value;
 
-use crate::command::workflow_live::workflow_live_generated_scaffold::{
-    decomposed_prd_plan_calls, decomposed_prd_scaffold,
-};
 use crate::command::workflow_live::workflow_live_planner::WorkflowScriptPlan;
 use archon_workflow::generated_lifecycle_support as support;
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
+};
+use archon_workflow::v2::decomposed_prd_plan::{
+    decomposed_prd_plan_calls, decomposed_prd_scaffold,
 };
 
 #[path = "workflow_live_v2_prd_pipeline_prd_tests.rs"]
@@ -67,8 +67,18 @@ pub(super) fn generated_plan() -> WorkflowScriptPlan {
     let task = plan_task_text(&fixture_root());
     let universe = fixture_universe();
     let config = GeneratedWorkflowConfig::default();
-    let harness = decomposed_prd_scaffold(&task, None, &universe, &[], &config)
-        .expect("the deterministic scaffold renders");
+    let harness = decomposed_prd_scaffold(
+        &task,
+        None,
+        &universe,
+        &[],
+        &archon_workflow::v2::lifecycle_driver::LifecycleLimits {
+            max_repair_iterations: config.max_repair_iterations,
+            max_investigation_iterations: config.max_investigation_iterations,
+            implementation_wave_max_parallelism: config.implementation_wave_max_parallelism,
+        },
+    )
+    .expect("the deterministic scaffold renders");
     WorkflowScriptPlan::generated(
         &task,
         &harness,

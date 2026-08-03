@@ -1,12 +1,11 @@
 use std::path::Path;
 
-use archon_core::config::GeneratedWorkflowConfig;
-use archon_workflow::{
-    GeneratedWorkflowLearningContext, WorkflowResult, WorkflowV2HostCall, WorkflowV2HostMethod,
-    WorkflowV2HostOptions, WorkflowV2WriteMode,
-};
+use crate::error::WorkflowResult;
+use crate::generated_workflow::GeneratedWorkflowLearningContext;
+use crate::task_universe::WorkflowV2TaskUniverse;
 
-use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use super::lifecycle_driver::LifecycleLimits;
+use super::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2WriteMode};
 
 /// The recorded plan document for a decomposed-PRD run.
 ///
@@ -14,17 +13,22 @@ use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 /// descriptor is the run's durable record and hash identity — what the
 /// maintainer approves and what result reuse keys on. It is deterministic for
 /// a given task universe, learning context, and configuration.
-pub(super) fn decomposed_prd_scaffold(
+///
+/// Takes the same [`LifecycleLimits`] the driver runs under rather than the
+/// CLI's configuration type: the recorded plan and the executed lifecycle must
+/// agree on these bounds, and sharing the struct is what keeps them from
+/// drifting. `implementation_wave_max_parallelism` is not part of the record.
+pub fn decomposed_prd_scaffold(
     task: &str,
     target_repository_root: Option<&str>,
     task_universe: &WorkflowV2TaskUniverse,
     governed_learning_context: &[GeneratedWorkflowLearningContext],
-    generated_config: &GeneratedWorkflowConfig,
+    limits: &LifecycleLimits,
 ) -> WorkflowResult<String> {
     let universe_json = serde_json::to_string_pretty(task_universe)?;
     let learning_json = serde_json::to_string_pretty(governed_learning_context)?;
-    let max_repair_iterations = generated_config.max_repair_iterations.clamp(1, 8);
-    let max_investigation_iterations = generated_config.max_investigation_iterations.clamp(1, 8);
+    let max_repair_iterations = limits.max_repair_iterations.clamp(1, 8);
+    let max_investigation_iterations = limits.max_investigation_iterations.clamp(1, 8);
     let max_dependency_waves = task_universe.tasks.len().saturating_mul(3).max(1);
 
     let mut descriptor = String::new();
@@ -70,7 +74,7 @@ pub(super) fn decomposed_prd_scaffold(
 /// one entry per stage family, with the write mode, item kind, and source the
 /// lifecycle uses. This is the single declaration the approval surface, the
 /// persisted host-call manifest, and restart invalidation consume.
-pub(crate) fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
+pub fn decomposed_prd_plan_calls() -> Vec<WorkflowV2HostCall> {
     const WORKTREE: Option<WorkflowV2WriteMode> = Some(WorkflowV2WriteMode::Worktree);
     // The plan names its host methods as typed variants rather than strings, so
     // "every static plan method parses" is discharged by the type checker at

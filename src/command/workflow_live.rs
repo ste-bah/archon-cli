@@ -33,8 +33,6 @@ mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
-#[path = "workflow_live_generated_scaffold.rs"]
-pub(crate) mod workflow_live_generated_scaffold;
 #[cfg(test)]
 #[path = "workflow_live_generated_semantics_tests.rs"]
 mod workflow_live_generated_semantics_tests;

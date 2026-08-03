@@ -13,6 +13,7 @@ mod branch_evidence;
 pub mod branch_stamping;
 pub mod call_execution;
 pub mod completion_credit;
+pub mod decomposed_prd_plan;
 pub mod deliverable_contract;
 pub mod host_api;
 pub mod implementation_inspection;
