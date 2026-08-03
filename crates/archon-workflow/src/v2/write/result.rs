@@ -419,7 +419,7 @@ pub(super) fn add_write_fanout_evidence(
 ) {
     let status_evidence = match result.status {
         WorkflowV2Status::NeedsReview => Some((
-            archon_workflow::WorkflowV2EvidenceKind::Review,
+            crate::WorkflowV2EvidenceKind::Review,
             "write fanout branch findings were retained as typed review/remediation data for workflow.js",
         )),
         _ => None,
@@ -427,7 +427,7 @@ pub(super) fn add_write_fanout_evidence(
     if let Some((kind, summary)) = status_evidence {
         result
             .evidence
-            .push(archon_workflow::WorkflowV2Evidence::new(kind, summary));
+            .push(crate::WorkflowV2Evidence::new(kind, summary));
     }
     let detail = fallback_reason.unwrap_or_else(|| {
         format!(
@@ -436,12 +436,10 @@ pub(super) fn add_write_fanout_evidence(
             plan.waves.len()
         )
     });
-    result
-        .evidence
-        .push(archon_workflow::WorkflowV2Evidence::new(
-            archon_workflow::WorkflowV2EvidenceKind::Implementation,
-            detail,
-        ));
+    result.evidence.push(crate::WorkflowV2Evidence::new(
+        crate::WorkflowV2EvidenceKind::Implementation,
+        detail,
+    ));
 }
 
 pub(super) fn count_results_with_status(

@@ -233,7 +233,7 @@ fn wf139_runtime_project_artifact_is_not_repo_source_write() {
             .contains("outside declared target_files")
     );
 
-    let request = archon_workflow::WorkflowV2AgentRequest {
+    let request = crate::WorkflowV2AgentRequest {
         call: WorkflowV2HostCall {
             id: fixture["branch_id"]
                 .as_str()
@@ -248,7 +248,7 @@ fn wf139_runtime_project_artifact_is_not_repo_source_write() {
         constraints: Vec::new(),
         input: serde_json::Value::Null,
         repository_root: Some(repo_root.display().to_string()),
-        project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
+        project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
         target_ownership_scopes: Vec::new(),
     };
@@ -262,7 +262,7 @@ fn wf139_runtime_project_artifact_is_not_repo_source_write() {
         .push(WorkflowV2FileRecord::new(artifact_path));
     branch_result
         .task_coverage
-        .push(archon_workflow::WorkflowV2TaskCoverage {
+        .push(crate::WorkflowV2TaskCoverage {
             task_id: "TASK-TDL-001".to_string(),
             status: WorkflowV2TaskCoverageStatus::Accepted,
             summary: "gap audit artifact created".to_string(),
@@ -325,7 +325,7 @@ fn missing_runtime_project_artifact_is_needs_review_not_safety() {
             .contains("outside declared target_files")
     );
 
-    let request = archon_workflow::WorkflowV2AgentRequest {
+    let request = crate::WorkflowV2AgentRequest {
         call: WorkflowV2HostCall {
             id: fixture["branch_id"]
                 .as_str()
@@ -340,7 +340,7 @@ fn missing_runtime_project_artifact_is_needs_review_not_safety() {
         constraints: Vec::new(),
         input: serde_json::Value::Null,
         repository_root: Some(repo_root.display().to_string()),
-        project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
+        project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
         target_ownership_scopes: Vec::new(),
     };
@@ -350,7 +350,7 @@ fn missing_runtime_project_artifact_is_needs_review_not_safety() {
         .push(WorkflowV2FileRecord::new(artifact_path));
     branch_result
         .task_coverage
-        .push(archon_workflow::WorkflowV2TaskCoverage {
+        .push(crate::WorkflowV2TaskCoverage {
             task_id: "TASK-TDL-001".to_string(),
             status: WorkflowV2TaskCoverageStatus::Accepted,
             summary: "gap audit artifact reported".to_string(),
@@ -396,7 +396,7 @@ fn missing_declared_project_artifact_does_not_count_as_evidence() {
     std::fs::create_dir_all(repo_root.join("src")).expect("repo src");
     let artifact_path = ".archon/workflows/wf-missing-artifact/artifacts/missing.json";
 
-    let request = archon_workflow::WorkflowV2AgentRequest {
+    let request = crate::WorkflowV2AgentRequest {
         call: WorkflowV2HostCall {
             id: "impl-artifact".to_string(),
             method: WorkflowV2HostMethod::Implementation,
@@ -408,7 +408,7 @@ fn missing_declared_project_artifact_does_not_count_as_evidence() {
         constraints: Vec::new(),
         input: serde_json::Value::Null,
         repository_root: Some(repo_root.display().to_string()),
-        project_artifacts: archon_workflow::project_artifact_context_from_v2_root(&v2_root),
+        project_artifacts: crate::project_artifact_context_from_v2_root(&v2_root),
         target_files: vec!["src/lib.rs".to_string()],
         target_ownership_scopes: Vec::new(),
     };
@@ -417,13 +417,11 @@ fn missing_declared_project_artifact_does_not_count_as_evidence() {
         WorkflowV2EvidenceKind::Artifact,
         artifact_path,
     ));
-    branch_result
-        .artifacts
-        .push(archon_workflow::WorkflowV2Artifact {
-            id: "missing".to_string(),
-            path: artifact_path.to_string(),
-            description: None,
-        });
+    branch_result.artifacts.push(crate::WorkflowV2Artifact {
+        id: "missing".to_string(),
+        path: artifact_path.to_string(),
+        description: None,
+    });
 
     let parsed = WorkflowV2AgentAdapter::new()
         .parse_agent_output(
@@ -447,7 +445,7 @@ fn write_branch_input_hash_includes_project_artifact_policy() {
         .path()
         .join("runtime-project/.archon/workflows/wf-test/v2");
     std::fs::create_dir_all(&v2_root).expect("v2 root");
-    let v2_store = archon_workflow::WorkflowV2ResultStore::new(&v2_root);
+    let v2_store = crate::WorkflowV2ResultStore::new(&v2_root);
     let call = WorkflowV2HostCall {
         id: "implementation-wave-test".to_string(),
         method: WorkflowV2HostMethod::Fanout,
@@ -466,10 +464,7 @@ fn write_branch_input_hash_includes_project_artifact_policy() {
 
     assert_ne!(old_hash, stamped[0].input_hash());
     let policy = &stamped[0].input["_workflow_project_artifact_policy"];
-    assert_eq!(
-        policy["version"],
-        archon_workflow::PROJECT_ARTIFACT_POLICY_VERSION
-    );
+    assert_eq!(policy["version"], crate::PROJECT_ARTIFACT_POLICY_VERSION);
     assert!(
         policy["project_root"]
             .as_str()

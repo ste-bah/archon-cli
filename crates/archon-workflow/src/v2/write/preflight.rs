@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn preflight_write_fanout_source_contract(
     call: &WorkflowV2HostCall,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     write_items: &[WorkflowV2WriteItem],
     plan: &WorkflowV2WritePlan,
     _repository_root: Option<&str>,
@@ -23,7 +23,7 @@ pub(super) fn preflight_write_fanout_source_contract(
 }
 
 pub(super) fn is_implementation_write_fanout(call: &WorkflowV2HostCall) -> bool {
-    call.method == archon_workflow::WorkflowV2HostMethod::Fanout
+    call.method == crate::WorkflowV2HostMethod::Fanout
         && call
             .options
             .item_kind
@@ -89,7 +89,7 @@ pub(super) fn issue(kind: &str, item_ids: Vec<String>, targets: Vec<String>) -> 
 
 pub(super) fn write_source_preflight_result(
     call: &WorkflowV2HostCall,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     plan: &WorkflowV2WritePlan,
     issues: Vec<serde_json::Value>,
 ) -> WorkflowV2Result {
@@ -125,7 +125,7 @@ pub(super) fn write_source_preflight_result(
 }
 
 pub(super) fn preflight_branch_result(
-    branch: &archon_workflow::WorkflowV2FanoutItem,
+    branch: &crate::WorkflowV2FanoutItem,
     issues: &[serde_json::Value],
 ) -> WorkflowV2Result {
     let mut result = WorkflowV2Result {
@@ -150,7 +150,7 @@ pub(super) fn preflight_branch_result(
     result
 }
 
-pub(super) fn branch_task_ids(branch: &archon_workflow::WorkflowV2FanoutItem) -> Vec<String> {
+pub(super) fn branch_task_ids(branch: &crate::WorkflowV2FanoutItem) -> Vec<String> {
     branch
         .input
         .get("item")

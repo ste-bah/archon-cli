@@ -15,10 +15,9 @@ use archon_workflow::{
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, WorkflowLlmClient, WorkflowRun,
     WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError,
     WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence,
-    WorkflowV2EvidenceKind, WorkflowV2FanoutReport, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status,
-    workflow_scaffold_hash,
+    WorkflowV2EvidenceKind, WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
 };
 
 // Host side of `archon_workflow::agent_dispatch_port`. Outside the `workflow_*`
@@ -58,10 +57,7 @@ use workflow_live_v2_client::LiveV2AgentClient;
 #[path = "workflow_live_v2_contracts.rs"]
 mod workflow_live_v2_contracts;
 
-#[path = "workflow_live_v2_write.rs"]
-mod workflow_live_v2_write;
-
-use workflow_live_v2_write::run_write_capable_v2_fanout;
+use archon_workflow::v2::write::run_write_capable_v2_fanout;
 #[path = "workflow_live_v2_state.rs"]
 mod workflow_live_v2_state;
 

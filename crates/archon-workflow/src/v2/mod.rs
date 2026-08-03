@@ -40,6 +40,7 @@ pub mod source_graph;
 pub mod target_expansion;
 pub mod task_record;
 pub mod validation;
+pub mod write;
 pub mod write_mode;
 mod write_mode_paths;
 

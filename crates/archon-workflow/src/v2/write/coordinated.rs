@@ -7,12 +7,12 @@ pub(super) async fn run_coordinated_v2_write_fanout(
     adapter: WorkflowV2AgentAdapter,
     dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &crate::WorkflowStore,
     run_id: &str,
-    branches: Vec<archon_workflow::WorkflowV2FanoutItem>,
+    branches: Vec<crate::WorkflowV2FanoutItem>,
     plan: WorkflowV2WritePlan,
     reused_results: Vec<WorkflowV2Result>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let mut results = Vec::new();
     let mut peak_parallelism = 0usize;
@@ -164,7 +164,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
 }
 
 pub(super) fn branch_input_for_assignment<'a>(
-    branches: &'a [archon_workflow::WorkflowV2FanoutItem],
+    branches: &'a [crate::WorkflowV2FanoutItem],
     item_id: &str,
 ) -> Option<&'a serde_json::Value> {
     branches

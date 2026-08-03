@@ -16,7 +16,7 @@ pub(super) async fn run_read_only_v2_fanout(
     // too: without it verifiers fall back to repo-relative paths and cannot
     // resolve declared artifacts, which the reference tells them to check
     // absolutely. Write branches already get this stamp.
-    let items = workflow_live_v2_write::stamp_project_artifact_policy(items, v2_store);
+    let items = archon_workflow::v2::write::stamp_project_artifact_policy(items, v2_store);
     // Bind each branch to the contracts its task declared. The v3 authored
     // prelude builds its own verification items and never attaches one, so
     // without this the host verifier below has nothing to enforce.

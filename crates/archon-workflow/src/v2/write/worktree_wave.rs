@@ -24,7 +24,7 @@ pub(super) struct WorktreePlanRunContext<'a> {
     pub(super) adapter: WorkflowV2AgentAdapter,
     pub(super) dispatch: &'a dyn WorkflowAgentDispatch,
     pub(super) v2_store: &'a WorkflowV2ResultStore,
-    pub(super) store_for_control: &'a archon_workflow::WorkflowStore,
+    pub(super) store_for_control: &'a crate::WorkflowStore,
     pub(super) run_id: &'a str,
     pub(super) setup: &'a WorktreeFanoutSetup,
     pub(super) semaphore: Arc<Semaphore>,
@@ -39,7 +39,7 @@ pub(super) fn worktree_plan_context<'a>(
     adapter: WorkflowV2AgentAdapter,
     dispatch: &'a dyn WorkflowAgentDispatch,
     v2_store: &'a WorkflowV2ResultStore,
-    store_for_control: &'a archon_workflow::WorkflowStore,
+    store_for_control: &'a crate::WorkflowStore,
     run_id: &'a str,
     setup: &'a WorktreeFanoutSetup,
 ) -> WorktreePlanRunContext<'a> {
@@ -63,8 +63,8 @@ pub(super) fn worktree_plan_context<'a>(
 pub(super) async fn run_worktree_plan_waves(
     ctx: WorktreePlanRunContext<'_>,
     plan: &WorkflowV2WritePlan,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
-) -> archon_workflow::WorkflowResult<WorktreePlanArtifacts> {
+    branches: &[crate::WorkflowV2FanoutItem],
+) -> crate::WorkflowResult<WorktreePlanArtifacts> {
     let mut output = WorktreePlanArtifacts::default();
     for (wave_index, wave) in plan.waves.iter().enumerate() {
         let artifacts = run_one_worktree_wave(&ctx, branches, wave_index, wave).await?;
@@ -82,10 +82,10 @@ pub(super) async fn run_worktree_plan_waves(
 
 pub(super) async fn run_one_worktree_wave(
     ctx: &WorktreePlanRunContext<'_>,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     wave_index: usize,
     wave: &WorkflowV2WriteWave,
-) -> archon_workflow::WorkflowResult<WorktreeWaveArtifacts> {
+) -> crate::WorkflowResult<WorktreeWaveArtifacts> {
     let prepared = prepare_worktree_wave(
         wave,
         branches,
@@ -110,13 +110,13 @@ pub(super) async fn run_one_worktree_wave(
 
 pub(super) fn prepare_worktree_wave(
     wave: &WorkflowV2WriteWave,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     run_id: &str,
     call_id: &str,
     canonical_root: &Path,
     cfg: &WriteCoordinatorConfig,
-    store_for_control: &archon_workflow::WorkflowStore,
-) -> archon_workflow::WorkflowResult<Vec<PreparedWorktreeBranch>> {
+    store_for_control: &crate::WorkflowStore,
+) -> crate::WorkflowResult<Vec<PreparedWorktreeBranch>> {
     let mut prepared = Vec::new();
     for assignment in &wave.assignments {
         let branch = branch_for_assignment(branches, assignment)?;
@@ -144,9 +144,9 @@ pub(super) fn prepare_worktree_wave(
 }
 
 pub(super) fn branch_for_assignment(
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     assignment: &WorkflowV2WriteAssignment,
-) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowV2FanoutItem> {
+) -> crate::WorkflowResult<crate::WorkflowV2FanoutItem> {
     branches
         .iter()
         .find(|branch| branch.id == assignment.item_id)
@@ -162,7 +162,7 @@ pub(super) fn branch_for_assignment(
 pub(super) async fn run_prepared_worktree_wave(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: Vec<PreparedWorktreeBranch>,
-) -> archon_workflow::WorkflowResult<Vec<CompletedWorktreeBranch>> {
+) -> crate::WorkflowResult<Vec<CompletedWorktreeBranch>> {
     let jobs = prepared
         .into_iter()
         .map(|prepared| worktree_branch_job(ctx.clone(), prepared));
@@ -181,7 +181,7 @@ pub(super) struct WorktreeWaveRunContext<'a> {
     pub(super) adapter: WorkflowV2AgentAdapter,
     pub(super) dispatch: &'a dyn WorkflowAgentDispatch,
     pub(super) v2_store: &'a WorkflowV2ResultStore,
-    pub(super) store_for_control: &'a archon_workflow::WorkflowStore,
+    pub(super) store_for_control: &'a crate::WorkflowStore,
     pub(super) run_id: &'a str,
     pub(super) run_root: &'a Path,
     pub(super) canonical_root: &'a Path,
@@ -215,7 +215,7 @@ impl WorktreePlanRunContext<'_> {
 pub(super) async fn worktree_branch_job(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
-) -> archon_workflow::WorkflowResult<CompletedWorktreeBranch> {
+) -> crate::WorkflowResult<CompletedWorktreeBranch> {
     let _permit = ctx
         .semaphore
         .clone()
@@ -248,7 +248,7 @@ pub(super) fn collect_worktree_wave_artifacts(
     completed: Vec<CompletedWorktreeBranch>,
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
-) -> archon_workflow::WorkflowResult<WorktreeWaveArtifacts> {
+) -> crate::WorkflowResult<WorktreeWaveArtifacts> {
     let mut artifacts = WorktreeWaveArtifacts::default();
     for completed_branch in completed {
         let mut result = completed_branch.result.clone();
@@ -306,7 +306,7 @@ pub(super) fn apply_worktree_wave(
 }
 
 pub(super) fn worktree_apply_gap(
-    result: Result<archon_workflow::write_coordinator::ApplyRecord, impl std::fmt::Display>,
+    result: Result<crate::write_coordinator::ApplyRecord, impl std::fmt::Display>,
 ) -> Option<String> {
     match result {
         Ok(record) if !record.items_failed.is_empty() => Some(format!(

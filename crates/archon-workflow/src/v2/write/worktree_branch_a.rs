@@ -6,14 +6,14 @@ pub(crate) async fn run_one_worktree_branch(
     execution: &WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
     dispatch: &dyn WorkflowAgentDispatch,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &crate::WorkflowStore,
     run_id: &str,
     run_root: &Path,
     canonical_root: &Path,
     v2_store: &WorkflowV2ResultStore,
     cfg: &WriteCoordinatorConfig,
     prepared: PreparedWorktreeBranch,
-) -> archon_workflow::WorkflowResult<CompletedWorktreeBranch> {
+) -> crate::WorkflowResult<CompletedWorktreeBranch> {
     let branch =
         prepare_worktree_branch_execution(execution, store_for_control, run_id, &prepared)?;
     let mut result = run_worktree_branch_agent(
@@ -64,10 +64,10 @@ pub(super) type CapturedWorktreeManifest =
 
 pub(super) fn prepare_worktree_branch_execution(
     execution: &WorkflowV2CallExecution,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &crate::WorkflowStore,
     run_id: &str,
     prepared: &PreparedWorktreeBranch,
-) -> archon_workflow::WorkflowResult<WorktreeBranchExecution> {
+) -> crate::WorkflowResult<WorktreeBranchExecution> {
     let id = prepared.branch.id.clone();
     poll_v2_run_control(store_for_control, run_id, &id)?;
     let mut call = prepared.branch.call.clone();
@@ -113,7 +113,7 @@ pub(super) async fn run_worktree_branch_agent(
     v2_store: &WorkflowV2ResultStore,
     adapter: WorkflowV2AgentAdapter,
     branch: &WorktreeBranchExecution,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     // The worktree branch runs against its own sealed workspace, which takes
     // precedence over the run's target repository root — the same `or`
     // precedence the two-parameter host function applied.
@@ -133,9 +133,9 @@ pub(super) async fn run_worktree_branch_agent(
 }
 
 pub(super) fn normalize_worktree_agent_result(
-    result: archon_workflow::WorkflowResult<WorkflowV2Result>,
+    result: crate::WorkflowResult<WorkflowV2Result>,
     branch: &WorktreeBranchExecution,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     match result {
         Ok(result) => Ok(result),
         Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {
@@ -297,7 +297,7 @@ pub(super) fn validate_worktree_branch_result(
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let mut item = WorkflowV2WriteItem::new(
         branch.execution.call.id.clone(),
         WorkflowV2WriteMode::Worktree,
@@ -404,7 +404,7 @@ pub(super) fn capture_worktree_branch_manifest(
     v2_store: &WorkflowV2ResultStore,
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
-) -> archon_workflow::WorkflowResult<CapturedWorktreeManifest> {
+) -> crate::WorkflowResult<CapturedWorktreeManifest> {
     if !matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop

@@ -52,6 +52,10 @@ pub(super) async fn execute_v2_live_call(
             .await
         }
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel => {
+            // Built here, not inside the write layer: the item builder is
+            // shared with read-only fan-out and resolves stored source
+            // expressions, which is host policy about where items come from.
+            let branches = fanout_items_for_call(&execution, v2_store)?;
             run_write_capable_v2_fanout(
                 task,
                 runtime.target_repository_root.as_deref(),
@@ -62,6 +66,7 @@ pub(super) async fn execute_v2_live_call(
                 store_for_control,
                 run_id,
                 workspace_boundary_supported,
+                branches,
                 task_universe,
                 source_task_graph,
             )

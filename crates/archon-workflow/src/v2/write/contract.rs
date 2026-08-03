@@ -170,10 +170,10 @@ pub(super) fn save_write_branch_outcome(
     role: &str,
     item_input_hash: Option<String>,
     result: &WorkflowV2Result,
-) -> archon_workflow::WorkflowResult<()> {
+) -> crate::WorkflowResult<()> {
     let call = WorkflowV2HostCall {
         id: call_id.to_string(),
-        method: archon_workflow::WorkflowV2HostMethod::Fanout,
+        method: crate::WorkflowV2HostMethod::Fanout,
         write_mode: Some(WorkflowV2WriteMode::Coordinated),
         options: Default::default(),
     };
@@ -195,8 +195,8 @@ pub(super) fn save_write_branch_outcome(
 pub(super) fn write_items_for_branches(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
-) -> archon_workflow::WorkflowResult<Vec<WorkflowV2WriteItem>> {
+    branches: &[crate::WorkflowV2FanoutItem],
+) -> crate::WorkflowResult<Vec<WorkflowV2WriteItem>> {
     let mode = call.write_mode.unwrap_or(WorkflowV2WriteMode::Serial);
     branches
         .iter()
@@ -218,16 +218,16 @@ pub(super) fn write_items_for_branches(
 pub(super) fn target_files_for_branch(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
-    branch: &archon_workflow::WorkflowV2FanoutItem,
-) -> archon_workflow::WorkflowResult<Vec<String>> {
+    branch: &crate::WorkflowV2FanoutItem,
+) -> crate::WorkflowResult<Vec<String>> {
     Ok(expanded_targets_for_branch(target_repository_root, call, branch)?.target_files)
 }
 
 pub(super) fn expanded_targets_for_branch(
     target_repository_root: Option<&str>,
     call: &WorkflowV2HostCall,
-    branch: &archon_workflow::WorkflowV2FanoutItem,
-) -> archon_workflow::WorkflowResult<ExpandedTargetFiles> {
+    branch: &crate::WorkflowV2FanoutItem,
+) -> crate::WorkflowResult<ExpandedTargetFiles> {
     let branch_targets = &branch.call.options.target_files;
     if !branch_targets.is_empty() && branch_targets != &call.options.target_files {
         return expand_declared_targets(&branch.id, branch_targets, target_repository_root);
@@ -259,9 +259,7 @@ pub(super) fn expanded_targets_for_branch(
     )))
 }
 
-pub(super) fn target_files_from_branch_item(
-    branch: &archon_workflow::WorkflowV2FanoutItem,
-) -> Vec<String> {
+pub(super) fn target_files_from_branch_item(branch: &crate::WorkflowV2FanoutItem) -> Vec<String> {
     branch
         .input
         .get("item")
@@ -284,9 +282,7 @@ pub(super) fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn branch_has_artifact_requirements(
-    branch: &archon_workflow::WorkflowV2FanoutItem,
-) -> bool {
+pub(super) fn branch_has_artifact_requirements(branch: &crate::WorkflowV2FanoutItem) -> bool {
     branch
         .input
         .get("item")
@@ -312,7 +308,7 @@ pub(super) fn expand_declared_targets(
     item_id: &str,
     targets: &[String],
     target_repository_root: Option<&str>,
-) -> archon_workflow::WorkflowResult<ExpandedTargetFiles> {
+) -> crate::WorkflowResult<ExpandedTargetFiles> {
     expand_declared_rust_module_targets(item_id, targets, target_repository_root)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))
 }

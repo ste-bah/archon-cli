@@ -6,7 +6,7 @@ pub(super) fn push_patch_manifest_artifact(
     call_id: &str,
     branch_id: &str,
 ) {
-    result.artifacts.push(archon_workflow::WorkflowV2Artifact {
+    result.artifacts.push(crate::WorkflowV2Artifact {
         id: format!("patch_manifest_{branch_id}"),
         path: manifest_path_for(run_root, call_id, branch_id),
         description: Some("worktree patch manifest".to_string()),
@@ -19,7 +19,7 @@ pub(super) fn persist_worktree_manifest(
     execution: &WorkflowV2CallExecution,
     branch_id: &str,
     captured: &CapturedPatch,
-) -> archon_workflow::WorkflowResult<PatchManifest> {
+) -> crate::WorkflowResult<PatchManifest> {
     let status = if captured.patch_bytes.is_empty() {
         ManifestStatus::IdempotentNoop
     } else {
@@ -46,7 +46,7 @@ pub(super) fn capture_and_validate_worktree_patch(
     baseline: &CanonicalBaseline,
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
-) -> archon_workflow::WorkflowResult<CapturedPatch> {
+) -> crate::WorkflowResult<CapturedPatch> {
     let captured = capture_patch(workspace, &coordinator_plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let agent_body = serde_json::to_string(result)?;
@@ -58,8 +58,8 @@ pub(super) fn validate_captured_patch(
     cfg: &WriteCoordinatorConfig,
     agent_body: &str,
     captured: CapturedPatch,
-) -> archon_workflow::WorkflowResult<CapturedPatch> {
-    archon_workflow::write_coordinator::patch_manifest::validate_patch(
+) -> crate::WorkflowResult<CapturedPatch> {
+    crate::write_coordinator::patch_manifest::validate_patch(
         &captured,
         coordinator_plan,
         cfg,
@@ -74,7 +74,7 @@ pub(crate) fn coordinator_plan_for_assignment(
     stage_id: &str,
     assignment: &WorkflowV2WriteAssignment,
     canonical_root: &Path,
-) -> archon_workflow::WorkflowResult<WritePlan> {
+) -> crate::WorkflowResult<WritePlan> {
     let isolated_root = isolated_root_for_assignment(assignment)?;
     let targets = normalized_assignment_targets(assignment, canonical_root)?;
     let resource_keys = resource_keys_for_targets(&targets, canonical_root, &[])
@@ -98,7 +98,7 @@ pub(crate) fn coordinator_plan_for_assignment(
 
 pub(super) fn isolated_root_for_assignment(
     assignment: &WorkflowV2WriteAssignment,
-) -> archon_workflow::WorkflowResult<PathBuf> {
+) -> crate::WorkflowResult<PathBuf> {
     assignment
         .worktree_path
         .as_deref()
@@ -114,7 +114,7 @@ pub(super) fn isolated_root_for_assignment(
 pub(super) fn normalized_assignment_targets(
     assignment: &WorkflowV2WriteAssignment,
     canonical_root: &Path,
-) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
+) -> crate::WorkflowResult<Vec<NormalizedPath>> {
     assignment
         .owned_targets
         .iter()
@@ -128,7 +128,7 @@ pub(super) fn normalized_assignment_targets(
 pub(super) fn normalized_assignment_scopes(
     assignment: &WorkflowV2WriteAssignment,
     canonical_root: &Path,
-) -> archon_workflow::WorkflowResult<Vec<NormalizedPath>> {
+) -> crate::WorkflowResult<Vec<NormalizedPath>> {
     assignment
         .owned_scopes
         .iter()

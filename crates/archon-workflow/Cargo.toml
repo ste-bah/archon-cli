@@ -18,6 +18,12 @@ archon-topology = { path = "../archon-topology", default-features = false }
 # and reaching it through this crate closed a dependency cycle. Re-exported from
 # `write_coordinator` so every existing call site keeps its path.
 archon-write-plan = { path = "../archon-write-plan" }
+# The declared-artifact verifiers a write branch runs are generated shell, so
+# the write layer resolves the same POSIX shell the rest of the runtime does.
+# archon-shell is a deliberate leaf (no archon-* deps) precisely so both
+# archon-core and this crate can hold the edge; it cannot close a cycle. It was
+# already here as a dev-dependency for the deliverable-contract tests.
+archon-shell = { path = "../archon-shell" }
 async-trait.workspace = true
 blake3.workspace = true
 chrono.workspace = true
@@ -46,8 +52,4 @@ uuid.workspace = true
 # Dev-only deliberately: pulling it in at build time would put wiremock and the
 # mock doubles into this crate's production dependency graph.
 archon-test-support = { path = "../archon-test-support" }
-# The deliverable-contract verifiers are generated shell and the tests execute
-# them, so they need the same POSIX shell the runtime resolves. archon-shell is
-# a deliberate leaf (no archon-* deps), so this cannot close a cycle.
-archon-shell = { path = "../archon-shell" }
 tempfile.workspace = true
