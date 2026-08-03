@@ -1,4 +1,6 @@
-//! D76 — templated artifact paths are excluded from literal evidence checks.
+//! Templated artifact paths are excluded from literal evidence checks (D76) and
+//! fail closed rather than passing silently (D3, superseding the second half of
+//! D76 — see `note_templated_project_artifact`).
 
 use archon_workflow::{
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ProjectArtifactContext, WorkflowV2Result,
@@ -23,8 +25,11 @@ fn accepted_result() -> WorkflowV2Result {
     }
 }
 
+/// A declared artifact whose path still carries `<...>` names no file. It is
+/// kept out of the literal checks (D76) *and* refused as evidence: prior-run
+/// finding F4 is exactly an artifact reported present against a wildcard path.
 #[test]
-fn templated_artifact_path_is_not_a_missing_gap() {
+fn templated_artifact_path_is_excluded_and_fails_closed() {
     let root = std::env::temp_dir().join("archon-d76-templated");
     std::fs::create_dir_all(&root).unwrap();
     let mut result = accepted_result();
@@ -40,11 +45,28 @@ fn templated_artifact_path_is_not_a_missing_gap() {
     normalize_project_artifact_files("item-1", &mut result, &context_for(&root)).unwrap();
 
     assert!(
-        result.residual_gaps.is_empty(),
-        "templated path must not become a missing_project_artifact gap: {:?}",
+        !result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id.starts_with("missing_project_artifact_")),
+        "a template is not a concrete path that is merely absent: {:?}",
         result.residual_gaps
     );
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    let gap = result
+        .residual_gaps
+        .iter()
+        .find(|gap| gap.id.starts_with("unexpanded_artifact_template_"))
+        .expect("an unexpanded template raises its own gap");
+    assert!(
+        gap.description.contains("unexpanded template placeholder"),
+        "the gap names what is wrong: {}",
+        gap.description
+    );
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::NeedsReview,
+        "an unexpanded <...> must never leave a result accepted"
+    );
     assert!(
         result.evidence.iter().any(|entry| entry
             .summary

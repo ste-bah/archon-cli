@@ -132,7 +132,13 @@ pub(crate) fn valid_inventory_item(contract: &LifecycleContract<'_>, item: &Valu
     }
 }
 
-/// JS `readyItemsFrom`.
+/// JS `readyItemsFrom`, with the task files' declared status consulted.
+///
+/// An item is ready when it is not already complete and every dependency it
+/// declares is complete. Both halves take completion from the same place —
+/// [`LifecycleContract::task_is_complete`] — so a task whose file says `done`
+/// counts exactly as one this run finished: it is not re-scheduled on a resume,
+/// and it unblocks its dependents rather than deadlocking them.
 pub(crate) fn ready_items_from(
     contract: &LifecycleContract<'_>,
     items: &[Value],
@@ -140,24 +146,32 @@ pub(crate) fn ready_items_from(
 ) -> Vec<Value> {
     items
         .iter()
+        .filter(|item| !item_is_completed(contract, item, completed))
         .filter(|item| {
             contract
                 .dependency_ids_for(item)
                 .iter()
-                .all(|id| completed.contains(id))
+                .all(|id| contract.task_is_complete(id, completed))
         })
         .cloned()
         .collect()
 }
 
-/// JS `itemIsCompleted`.
+/// JS `itemIsCompleted`, with the task files' declared status consulted.
+///
+/// An item covering no canonical task is never complete — an item that claims
+/// nothing cannot claim to be finished — which is the pre-existing rule and the
+/// reason the empty check comes first.
 pub(crate) fn item_is_completed(
     contract: &LifecycleContract<'_>,
     item: &Value,
     completed: &BTreeSet<String>,
 ) -> bool {
     let ids = contract.canonical_ids_for(item);
-    !ids.is_empty() && ids.iter().all(|id| completed.contains(id))
+    !ids.is_empty()
+        && ids
+            .iter()
+            .all(|id| contract.task_is_complete(id, completed))
 }
 
 /// JS noop.js: `outcomeHasNoopSourceEvidence`.

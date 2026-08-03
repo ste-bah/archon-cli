@@ -157,33 +157,63 @@ def source_instances(art_field, source_path_value, records_field):
     return paths
 
 def glob_instances(pattern_text):
-    # Fallback when no source collection is declared: every <segment> is a
-    # wildcard. Weaker than source-bound (cannot detect a missing instance,
-    # and will inspect filesystem orphans) but still generic and fail-closed.
+    # Glob binding: every <segment> is a wildcard. Weaker than source-bound (it
+    # cannot see an instance nobody wrote, and it inspects filesystem orphans),
+    # so it is only accepted alongside a declared min_instances floor -- see
+    # below. Without a floor, zero matches would satisfy the gate vacuously,
+    # which is prior-run finding F4.
     pattern = _re.sub(r'<[^>]+>', '*', str(pattern_text))
     base = pathlib.Path(pattern)
     concrete = str(base) if base.is_absolute() else str(root / base)
     return sorted(pathlib.Path(match) for match in _glob.glob(concrete))
 
+def template_tokens(text):
+    return _re.findall(r'<[^>]+>', str(text))
+
+def unbound_template_failure(pattern_text):
+    tokens = ' '.join(template_tokens(pattern_text))
+    return (
+        f'declared deliverable path {pattern_text} carries unexpanded template token(s) '
+        f'{tokens} with no instance binding, so the gate can neither pass nor fail against '
+        'it. Declare instance_artifact_field with instance_source_path (or registry_path) '
+        'and instance_source_records_field (or registry_records_field), or declare '
+        'min_instances >= 1.'
+    )
+
 # Parameterized deliverable path (e.g. .../<dataset-id>/<version>/x.json): one
-# artifact per runtime-determined instance. Generic across any PRD. Prefer a
-# declared source collection; fall back to glob. Zero instances is vacuously
-# satisfied unless the contract declares min_instances. required_universe
-# contracts keep the single-file path below (their instances are enumerated via
-# the registry records loop already present further down).
+# artifact per runtime-determined instance. Generic across any PRD.
+#
+# D3. An unexpanded <...> is NEVER treated as satisfied. It resolves through the
+# instance fields the contract already carries -- a declared source collection,
+# else a glob with a declared min_instances floor -- and fails closed naming the
+# token when neither is declared. required_universe names one enumerated
+# artifact, so no instance binding applies to it and a templated path there is a
+# contract defect rather than a family of files.
 raw_artifact_path = str(contract.get('artifact_path') or '')
-if has_placeholder(raw_artifact_path) and not contract.get('required_universe'):
+if has_placeholder(raw_artifact_path):
     art_field = contract.get('instance_artifact_field')
     source_path_value = contract.get('instance_source_path') or contract.get('registry_path')
     records_field = contract.get('instance_source_records_field') or contract.get('registry_records_field')
-    if art_field and source_path_value and records_field:
-        instance_paths = source_instances(art_field, source_path_value, records_field)
-    else:
-        instance_paths = glob_instances(raw_artifact_path)
     try:
         min_instances = int(contract.get('min_instances', 0) or 0)
     except (TypeError, ValueError):
         min_instances = 0
+    if contract.get('required_universe'):
+        failures.append(
+            f'required_universe contract declares templated artifact_path {raw_artifact_path} '
+            f'carrying unexpanded template token(s) {" ".join(template_tokens(raw_artifact_path))}; '
+            'a required-universe contract names one enumerated artifact'
+        )
+        print(json.dumps({'failures': failures}, indent=2))
+        raise SystemExit(1)
+    if art_field and source_path_value and records_field:
+        instance_paths = source_instances(art_field, source_path_value, records_field)
+    elif min_instances >= 1:
+        instance_paths = glob_instances(raw_artifact_path)
+    else:
+        failures.append(unbound_template_failure(raw_artifact_path))
+        print(json.dumps({'failures': failures}, indent=2))
+        raise SystemExit(1)
     if len(instance_paths) < min_instances:
         failures.append(
             f'declared deliverable requires >= {min_instances} instance(s), '

@@ -451,8 +451,23 @@ fn push_unique_artifact(result: &mut WorkflowV2Result, artifact: WorkflowV2Artif
     result.artifacts.push(artifact);
 }
 
-/// A templated path (placeholder tokens) is a contract shape, not a checkable
-/// artifact; noting it as "missing" would manufacture unsatisfiable gaps.
+/// An unexpanded template placeholder is never satisfied evidence.
+///
+/// # Supersedes D76
+///
+/// D76 excluded a templated path from literal evidence checks and left the
+/// result `Accepted`, on the reasoning that reporting it "missing" would
+/// manufacture an unsatisfiable gap. The first half was right and is kept: a
+/// path containing `<dataset-id>` is not a file, so it is still dropped from
+/// `artifacts` and never checked literally. The second half is what prior-run
+/// finding F4 (`wf-ee4a92fc`) caught — an artifact recorded as present against a
+/// wildcard path, on "observed or contract-required" rather than on a file
+/// anyone opened. Passing silently is the failure mode, not the safeguard.
+///
+/// The gap it raises is *not* unsatisfiable, which is why it is raised: the
+/// remedy is to name the expanded instance path that was actually written. A
+/// distinct id keeps it separable from `missing_project_artifact_*`, which
+/// remains reserved for a concrete path that is genuinely absent.
 fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
     let summary =
         format!("templated artifact requirement excluded from literal evidence checks: {path}");
@@ -461,6 +476,27 @@ fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
             WorkflowV2EvidenceKind::Inspection,
             summary,
         ));
+    }
+    let id = format!(
+        "unexpanded_artifact_template_{}",
+        artifact_id_for_path(path)
+    );
+    if !result.residual_gaps.iter().any(|gap| gap.id == id) {
+        result.residual_gaps.push(WorkflowV2ResidualGap {
+            id,
+            description: format!(
+                "declared artifact path {path} still carries unexpanded template placeholder(s); \
+                 report the expanded instance path that was written, or bind the contract's \
+                 instance fields so its instances can be enumerated"
+            ),
+            severity: Some("blocking".to_string()),
+        });
+    }
+    if matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
+        result.status = WorkflowV2Status::NeedsReview;
     }
 }
 

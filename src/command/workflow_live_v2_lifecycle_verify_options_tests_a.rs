@@ -229,10 +229,18 @@ fn parameterized_contract_honors_min_instances() {
     );
 }
 
+/// The glob form of instance binding, and the floor that makes it a claim.
+///
+/// This test used to assert that a glob with no declared floor passes on zero
+/// matches — "vacuous" was in its name. That is prior-run finding F4: a
+/// deliverable reported present against a wildcard path nobody could have
+/// written to. Under D3 the unbound form is refused outright, and the same
+/// contract with `min_instances` declared behaves as it always did: zero matches
+/// fails the floor, and a match that is internally inconsistent still fails.
 #[test]
-fn parameterized_glob_fallback_is_vacuous_and_validates_matches() {
+fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
     let project = tempfile::tempdir().expect("project");
-    let contract = serde_json::json!({
+    let mut contract = serde_json::json!({
         "kind": "instance_report",
         "artifact_path": ".archon/demo/glob/<instance-id>/report.json",
         "validation_status_field": "status",
@@ -241,12 +249,29 @@ fn parameterized_glob_fallback_is_vacuous_and_validates_matches() {
         "validation_failed_values": ["failed"],
         "validation_passed_values": ["passed"]
     });
+    let unbound = super::workflow_live_v2_deliverable_contract::verification_command(
+        project.path().to_str().expect("project path"),
+        &contract,
+    );
+    let refused = run_verifier(&unbound);
+    assert!(
+        !refused.status.success(),
+        "a glob with no declared floor can never fail, so it must not be run"
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("<instance-id>"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+
+    contract["min_instances"] = serde_json::json!(1);
     let command = super::workflow_live_v2_deliverable_contract::verification_command(
         project.path().to_str().expect("project path"),
         &contract,
     );
+    let empty = run_verifier(&command);
+    assert!(!empty.status.success(), "zero matches is below the floor");
 
-    assert!(run_verifier(&command).status.success());
     write_json(
         &project.path().join(".archon/demo/glob/alpha/report.json"),
         &serde_json::json!({

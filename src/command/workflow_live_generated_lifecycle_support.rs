@@ -469,6 +469,11 @@ fn compact_routing_item(item: &Value) -> Value {
 mod outcomes;
 pub(super) use outcomes::*;
 
+/// The declared-`status:` half of the contract. A child module only because
+/// each source file in this tree is held under a 500-line ceiling.
+#[path = "workflow_live_generated_lifecycle_status.rs"]
+mod declared_status;
+
 #[cfg(test)]
 #[path = "workflow_live_generated_lifecycle_support_tests.rs"]
 mod tests;

@@ -376,10 +376,14 @@ fn two_tasks_blocking_each_other_fails_the_run_naming_both_files() {
     }
 }
 
-/// A cycle is reported as a closed path of task ids, not as a file path — the
-/// cycle is a property of the graph and no single file owns it. The last
-/// assertion pins that gap rather than wishing it away: a reader has to map
-/// ids back to files themselves, which for a 17-task set is a real cost.
+/// A cycle is reported as a closed path of tasks, each with the file it was
+/// declared in.
+///
+/// This test previously pinned the *absence* of those file paths as a known gap:
+/// a cycle is a property of the graph and no single file owns it, so the
+/// diagnostic named ids only and a reader of a 17-task set had to map them back
+/// to filenames by hand. Every other failure in the universe builder already
+/// named its file. The gap is closed, and the assertion is inverted.
 #[test]
 fn a_dependency_cycle_fails_the_run_naming_every_task_on_the_cycle() {
     const FILE: &str = "TASK-TDL-001-data-lake-gap-audit.md";
@@ -406,13 +410,25 @@ fn a_dependency_cycle_fails_the_run_naming_every_task_on_the_cycle() {
         "reported cycle does not close: {message}"
     );
     // The edge the mutation introduced must be on the reported path.
+    let ids = path
+        .iter()
+        .map(|entry| entry.split_whitespace().next().unwrap_or(entry))
+        .collect::<Vec<_>>();
     assert!(
-        path.windows(2)
+        ids.windows(2)
             .any(|pair| pair == ["TASK-TDL-001", "TASK-TDL-140"]),
         "the injected edge is not on the reported cycle: {message}"
     );
+    // Every task on the cycle names the file the reader has to open, including
+    // the one the mutation edited.
+    for entry in &path {
+        assert!(
+            entry.contains(".md)"),
+            "every task on the cycle carries its file: {entry} in {message}"
+        );
+    }
     assert!(
-        !message.contains(&task_path(dir.path(), FILE)),
-        "the cycle diagnostic now names a file; update this test and the report"
+        message.contains(&task_path(dir.path(), FILE)),
+        "the mutated file is named: {message}"
     );
 }

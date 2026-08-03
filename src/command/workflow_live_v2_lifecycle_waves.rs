@@ -48,6 +48,13 @@ impl LifecycleDriver {
                 "canonical_task_ids": noop_reclassified_ids,
             }));
         }
+        // `status:` changes what gets scheduled, so it is recorded before
+        // anything is scheduled. A `done` declaration removes work on the
+        // strength of one line in a task file; a reader must be able to see
+        // which file made that claim without re-deriving it from the plan.
+        if let Some(notice) = contract.declared_status_notice() {
+            evidence.implementation.push(notice);
+        }
         let mut remaining_items = support::array(inventory.get("items"));
         let mut completed_ids = self
             .runtime_state

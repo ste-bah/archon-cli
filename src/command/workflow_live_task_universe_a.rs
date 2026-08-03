@@ -348,6 +348,7 @@ pub(super) fn extract_task_universe_for_generated_run(
     tasks.sort_by(|left, right| left.canonical_task_id.cmp(&right.canonical_task_id));
     reconcile_blocks_into_dependencies(&mut tasks)?;
     validate_task_dependency_graph(&tasks)?;
+    validate_declared_statuses(&tasks)?;
 
     Ok(Some(WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".to_string(),

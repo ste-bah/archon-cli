@@ -163,6 +163,55 @@ fn reconcile_blocks_into_dependencies(
     Ok(())
 }
 
+/// Refuse a task set whose declared `status:` values cannot be scheduled
+/// honestly. See [`task_status`] for the full table of what each value causes.
+///
+/// Two things are refused here, both because the alternative is a run that
+/// looks right:
+///
+/// - **A status nobody can classify.** Neither default is safe — runnable runs
+///   work the author may have cancelled, complete skips work nobody proved —
+///   and a typo reaches whichever default in silence.
+/// - **`blocked` with no declared dependency.** `blocked` in these files means
+///   "waiting on what I depend on", which is why fifteen of the seventeen real
+///   tasks carry it and the corpus still runs. A `blocked` task that depends on
+///   nothing is making a claim the task set cannot discharge: no other task
+///   completing will ever unblock it, so either the dependency is missing or
+///   the status is stale, and both are edits to the file named here.
+fn validate_declared_statuses(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
+    for task in tasks {
+        let status = task_status::declared_status(task.status.as_deref()).map_err(|detail| {
+            WorkflowError::SpecInvalid(format!(
+                "generated decomposed PRD workflow task {} declares {detail}, in {}",
+                task.canonical_task_id, task.source_path
+            ))
+        })?;
+        if status == task_status::WorkflowV2DeclaredStatus::Blocked
+            && task.dependency_ids.is_empty()
+        {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "generated decomposed PRD workflow task {} declares status: blocked but declares \
+                 no dependency, in {}; nothing in this task set can ever unblock it, so either \
+                 the dependency is missing or the status is stale",
+                task.canonical_task_id, task.source_path
+            )));
+        }
+    }
+    Ok(())
+}
+
+impl WorkflowV2TaskUniverseTask {
+    /// Whether the task file declares the work already finished.
+    pub(crate) fn declared_status_is_complete(&self) -> bool {
+        task_status::declared_status_is_complete(self.status.as_deref())
+    }
+
+    /// Whether the task file declares the task blocked by its author.
+    pub(crate) fn declared_status_is_blocked(&self) -> bool {
+        task_status::declared_status_is_blocked(self.status.as_deref())
+    }
+}
+
 fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     let graph = tasks
         .iter()
@@ -173,11 +222,44 @@ fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> Workf
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let source_paths = tasks
+        .iter()
+        .map(|task| (task.canonical_task_id.clone(), task.source_path.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut state = BTreeMap::<String, VisitState>::new();
     for task_id in graph.keys() {
-        visit_dependency_node(task_id, &graph, &mut state, &mut Vec::new())?;
+        visit_dependency_node(task_id, &graph, &source_paths, &mut state, &mut Vec::new())?;
     }
     Ok(())
+}
+
+/// The cycle, from its first repeated task, with the file each task was
+/// declared in.
+///
+/// Every other failure in this module names the offending file — the unresolved
+/// reference, both `blocks` contradictions — because a task id is not something
+/// a reader can open. A cycle was the one exception, and across seventeen files
+/// it left the reader mapping ids back to filenames by hand.
+///
+/// The walk prefix is dropped rather than printed. A node the search merely
+/// passed through on the way in is not on the cycle, and naming its file would
+/// send the reader to a file that needs no edit.
+fn cycle_description(stack: &[String], source_paths: &BTreeMap<String, String>) -> String {
+    let Some(repeated) = stack.last() else {
+        return String::new();
+    };
+    let start = stack
+        .iter()
+        .position(|entry| entry == repeated)
+        .unwrap_or_default();
+    stack[start..]
+        .iter()
+        .map(|task_id| match source_paths.get(task_id) {
+            Some(path) => format!("{task_id} ({path})"),
+            None => task_id.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(" -> ")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +271,7 @@ enum VisitState {
 fn visit_dependency_node(
     task_id: &str,
     graph: &BTreeMap<String, Vec<String>>,
+    source_paths: &BTreeMap<String, String>,
     state: &mut BTreeMap<String, VisitState>,
     stack: &mut Vec<String>,
 ) -> WorkflowResult<()> {
@@ -198,7 +281,7 @@ fn visit_dependency_node(
             stack.push(task_id.to_string());
             return Err(WorkflowError::SpecInvalid(format!(
                 "generated decomposed PRD workflow task dependency cycle detected: {}",
-                stack.join(" -> ")
+                cycle_description(stack, source_paths)
             )));
         }
         None => {}
@@ -206,7 +289,7 @@ fn visit_dependency_node(
     state.insert(task_id.to_string(), VisitState::Visiting);
     stack.push(task_id.to_string());
     for dependency in graph.get(task_id).into_iter().flatten() {
-        visit_dependency_node(dependency, graph, state, stack)?;
+        visit_dependency_node(dependency, graph, source_paths, state, stack)?;
     }
     stack.pop();
     state.insert(task_id.to_string(), VisitState::Done);
@@ -216,6 +299,14 @@ fn visit_dependency_node(
 #[cfg(test)]
 #[path = "workflow_live_task_universe_tests.rs"]
 mod tests;
+
+/// The cycle diagnostic's file paths, and everything `status:` now causes.
+///
+/// A separate file from `tests` only because each source file in this tree is
+/// held under a 500-line ceiling.
+#[cfg(test)]
+#[path = "workflow_live_task_status_tests.rs"]
+mod status_tests;
 
 /// Declaration-driven capability merging, and the runtime-genericity gate.
 ///

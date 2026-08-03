@@ -6,6 +6,9 @@ use archon_topology::ir::{GraphBudget, GraphOrigin, NodeRole, TaskGraph, TaskNod
 use archon_workflow::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 
+#[path = "workflow_live_task_status.rs"]
+pub(crate) mod task_status;
+
 include!("workflow_live_task_universe_a.rs");
 include!("workflow_live_task_universe_b.rs");
 
@@ -82,6 +85,7 @@ pub(crate) fn task_graph_from_root(root: &Path) -> WorkflowResult<TaskGraph> {
         parsed.iter().map(|(task, _)| task.clone()).collect();
     reconcile_blocks_into_dependencies(&mut tasks)?;
     validate_task_dependency_graph(&tasks)?;
+    validate_declared_statuses(&tasks)?;
 
     // Artifact path → the tasks contracted to produce it. Several tasks
     // legitimately produce the same templated path (`…/<dataset-id>/…`), which
