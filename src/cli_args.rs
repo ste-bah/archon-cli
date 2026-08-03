@@ -10,6 +10,7 @@ mod commands;
 mod data_actions;
 mod permissions_actions;
 mod reasoning_actions;
+mod requirements_actions;
 mod root;
 mod strategy_actions;
 mod trading_actions;
@@ -29,6 +30,7 @@ pub use data_actions::{
 };
 pub use permissions_actions::PermissionsAction;
 pub use reasoning_actions::{BriefingAction, ReasoningAction, ReasoningCostAction};
+pub use requirements_actions::RequirementsAction;
 pub use root::Cli;
 pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,

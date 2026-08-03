@@ -63,6 +63,15 @@ pub(crate) async fn handle_subcommand(
         command @ (Commands::SelfCmd { .. }
         | Commands::Gametheory { .. }
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
+        // Its own arm rather than a group: the report reads a PRD, a task
+        // directory and an existing code index, and needs neither the runtime
+        // config nor the learning stack that every group handler threads.
+        Commands::Requirements { action } => {
+            crate::command::requirement_trace::handle_requirements_command(
+                &action,
+                working_dir_for_config,
+            )
+        }
         Commands::Draft {
             pack,
             workdir,

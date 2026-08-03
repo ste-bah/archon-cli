@@ -12,6 +12,10 @@ pub mod relation_inferer;
 pub mod schema;
 pub mod source_quality;
 pub mod store;
+/// Requirement → code traceability with a proof ladder. Read-only against the
+/// code index by construction: it never indexes and never takes the LEANN write
+/// lock.
+pub mod traceability;
 
 use cozo::DbInstance;
 use serde::{Deserialize, Serialize};
