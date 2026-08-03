@@ -1,57 +1,79 @@
+//! Write-capable fan-out: the layer that turns one host call into isolated,
+//! ownership-bounded branches that may change the repository.
+//!
+//! It plans which branches may touch which files, runs them in waves under one
+//! of three isolation modes (serial, coordinated, worktree), validates what
+//! each branch actually changed against what it was allowed to change, and
+//! merges the surviving work back. Everything it decides is expressed in types
+//! this crate already owns.
+//!
+//! The one thing it does not own is the moment a branch hands its execution to
+//! an agent; that goes through [`crate::agent_dispatch_port`], which the
+//! binary supplies. The fan-out ITEMS are likewise built by the caller and
+//! passed in — the builder is shared with read-only fan-out and resolves stored
+//! source, which is host territory, not write-layer territory.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use archon_workflow::write_coordinator::patch_apply::apply_wave;
-use archon_workflow::write_coordinator::patch_manifest::{capture_patch, persist_manifest};
-use archon_workflow::write_coordinator::worktree_isolation::{
-    capture_canonical_baseline, cleanup_workspace, create_item_workspace,
-};
-use archon_workflow::write_coordinator::write_plan::{
-    NormalizedPath, normalize_target, resource_keys_for_targets,
-};
-use archon_workflow::write_coordinator::{
-    CanonicalBaseline, CapturedPatch, ItemWorkspace, ManifestStatus, PatchManifest,
-    WorkspaceStatus, with_repo_lock,
-};
-use archon_workflow::{
-    BranchFailureKind, TargetFilesSource, WorkflowError, WorkflowV2AgentAdapter,
-    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CommandStatus, WorkflowV2Evidence,
-    WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2RejectedOutput, WorkflowV2ResidualGap,
-    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCoverage,
-    WorkflowV2TaskCoverageStatus, WorkflowV2WriteAssignment, WorkflowV2WriteItem,
-    WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner, WorkflowV2WriteWave,
-    WriteCoordinatorConfig, WritePlan, validate_changed_files_for_repository,
-};
 use tokio::sync::Semaphore;
 
-use super::split_reusable_branch_outcomes;
-use super::workflow_live_v2_aggregate::attach_branch_evidence;
-use super::workflow_live_v2_data::{attach_completion_evidence_for_call, fanout_items_for_call};
-use super::workflow_live_v2_state::poll_v2_run_control;
-use archon_workflow::WorkflowAgentDispatch;
-use archon_workflow::generated_contract::{
+use crate::agent_dispatch_port::WorkflowAgentDispatch;
+use crate::control::poll_v2_run_control;
+use crate::error::{WorkflowError, WorkflowResult};
+use crate::generated_contract::{
     canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
 };
-use archon_workflow::v2::target_expansion::{
-    ExpandedTargetFiles, expand_declared_rust_module_targets,
+use crate::store::WorkflowStore;
+use crate::task_universe::WorkflowV2TaskUniverse;
+use crate::v2::branch_cache::split_reusable_branch_outcomes;
+use crate::v2::branch_evidence::attach_branch_evidence;
+use crate::v2::completion_evidence::attach_completion_evidence_for_call;
+use crate::v2::target_expansion::{ExpandedTargetFiles, expand_declared_rust_module_targets};
+use crate::v2::{
+    BranchFailureKind, WorkflowV2AgentAdapter, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
+    WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem,
+    WorkflowV2HostCall, WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2SourceTaskGraph, WorkflowV2Status, WorkflowV2TaskCoverage,
+    WorkflowV2TaskCoverageStatus, WorkflowV2WriteAssignment, WorkflowV2WriteItem,
+    WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner, WorkflowV2WriteWave,
+    validate_changed_files_for_repository,
+};
+use crate::write_coordinator::patch_apply::apply_wave;
+use crate::write_coordinator::patch_manifest::{capture_patch, persist_manifest};
+use crate::write_coordinator::worktree_isolation::{
+    capture_canonical_baseline, cleanup_workspace, create_item_workspace,
+};
+use crate::write_coordinator::write_plan::{
+    NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
+};
+use crate::write_coordinator::{
+    CanonicalBaseline, CapturedPatch, ItemWorkspace, ManifestStatus, PatchManifest,
+    WorkspaceStatus, WriteCoordinatorConfig, with_repo_lock,
 };
 
-pub(super) async fn run_write_capable_v2_fanout(
+/// Run one write-capable fan-out call to completion.
+///
+/// `branches` are the fan-out items the caller built. They arrive already
+/// derived because the builder is shared with read-only fan-out and resolves
+/// stored source expressions against the result store — host policy about
+/// where items come from, not a decision this layer makes.
+pub async fn run_write_capable_v2_fanout(
     task: &str,
     target_repository_root: Option<&str>,
     execution: WorkflowV2CallExecution,
     adapter: WorkflowV2AgentAdapter,
     dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &WorkflowStore,
     run_id: &str,
     workspace_boundary_supported: bool,
-    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
-    source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let branches = fanout_items_for_call(&execution, v2_store)?;
+    branches: Vec<WorkflowV2FanoutItem>,
+    task_universe: Option<&WorkflowV2TaskUniverse>,
+    source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
+) -> WorkflowResult<WorkflowV2Result> {
     let mut branches = stamp_project_artifact_policy(branches, v2_store);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
     // Authoritative tool binding does NOT depend on the source graph: v3
@@ -160,7 +182,7 @@ pub(super) async fn run_write_capable_v2_fanout(
 }
 
 fn revalidate_reused_artifact_results(
-    branches: &[archon_workflow::WorkflowV2FanoutItem],
+    branches: &[crate::WorkflowV2FanoutItem],
     results: &mut [WorkflowV2Result],
     target_repository_root: Option<&str>,
 ) {
@@ -189,11 +211,16 @@ fn revalidate_reused_artifact_results(
     }
 }
 
-pub(super) fn stamp_project_artifact_policy(
-    mut branches: Vec<archon_workflow::WorkflowV2FanoutItem>,
+/// Stamp the project's artifact-root policy onto every branch item.
+///
+/// Read-only verification branches need this as much as write branches: without
+/// the project root a verifier falls back to repo-relative paths and cannot
+/// resolve a declared artifact the reference told it to check absolutely.
+pub fn stamp_project_artifact_policy(
+    mut branches: Vec<crate::WorkflowV2FanoutItem>,
     v2_store: &WorkflowV2ResultStore,
-) -> Vec<archon_workflow::WorkflowV2FanoutItem> {
-    let context = archon_workflow::project_artifact_context_from_v2_root(v2_store.root());
+) -> Vec<crate::WorkflowV2FanoutItem> {
+    let context = crate::project_artifact_context_from_v2_root(v2_store.root());
     if context.is_empty() {
         return branches;
     }
@@ -220,8 +247,8 @@ pub(super) fn stamp_project_artifact_policy(
 /// tool declarations were already stripped at the shared builder, so this is
 /// the only writer of the field.
 fn stamp_required_tools_from_universe(
-    branches: &mut [archon_workflow::WorkflowV2FanoutItem],
-    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
+    branches: &mut [crate::WorkflowV2FanoutItem],
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) {
     let Some(universe) = task_universe else {
         return;
@@ -261,8 +288,8 @@ fn stamp_required_tools_from_universe(
 }
 
 fn apply_source_graph_targets_to_branches(
-    branches: &mut [archon_workflow::WorkflowV2FanoutItem],
-    source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
+    branches: &mut [crate::WorkflowV2FanoutItem],
+    source_task_graph: Option<&crate::WorkflowV2SourceTaskGraph>,
 ) {
     // Defense in depth: the shared builder (fanout_items_for_call) already
     // recursively strips agent-authored tool declarations from every item;
@@ -270,7 +297,7 @@ fn apply_source_graph_targets_to_branches(
     // stamp below is the only tool source, regardless of caller.
     for branch in branches.iter_mut() {
         if let Some(item_value) = branch.input.get_mut("item") {
-            super::super::workflow_live_mcp::strip_tool_declarations(item_value);
+            crate::tool_declarations::strip_tool_declarations(item_value);
         }
     }
     let Some(graph) = source_task_graph else {
@@ -304,7 +331,7 @@ fn apply_source_graph_targets_to_branches(
     }
 }
 
-fn branch_source_item_id(branch: &archon_workflow::WorkflowV2FanoutItem) -> Option<&str> {
+fn branch_source_item_id(branch: &crate::WorkflowV2FanoutItem) -> Option<&str> {
     branch
         .input
         .get("item")
@@ -314,46 +341,31 @@ fn branch_source_item_id(branch: &archon_workflow::WorkflowV2FanoutItem) -> Opti
         .filter(|value| !value.is_empty())
 }
 
-#[path = "workflow_live_v2_write_coordinated.rs"]
-mod workflow_live_v2_write_coordinated;
-use workflow_live_v2_write_coordinated::*;
+mod contract;
+mod coordinated;
+mod errors;
+mod ownership;
+mod preflight;
+mod result;
+mod serial;
+mod worktree;
+mod worktree_branch;
+mod worktree_wave;
 
-#[path = "workflow_live_v2_write_worktree.rs"]
-mod workflow_live_v2_write_worktree;
-use workflow_live_v2_write_worktree::*;
+use contract::*;
+use coordinated::*;
+use errors::*;
+use ownership::*;
+use preflight::*;
+use result::*;
+use serial::*;
+use worktree::*;
+use worktree_branch::*;
+use worktree_wave::*;
 
-#[path = "workflow_live_v2_write_worktree_wave.rs"]
-mod workflow_live_v2_write_worktree_wave;
-use workflow_live_v2_write_worktree_wave::*;
-
-#[path = "workflow_live_v2_write_worktree_branch.rs"]
-mod workflow_live_v2_write_worktree_branch;
-use workflow_live_v2_write_worktree_branch::*;
-
-#[path = "workflow_live_v2_write_serial.rs"]
-mod workflow_live_v2_write_serial;
-use workflow_live_v2_write_serial::*;
-
-#[path = "workflow_live_v2_write_contract.rs"]
-mod workflow_live_v2_write_contract;
-use workflow_live_v2_write_contract::*;
-
-#[path = "workflow_live_v2_write_preflight.rs"]
-mod workflow_live_v2_write_preflight;
-use workflow_live_v2_write_preflight::*;
-
-#[path = "workflow_live_v2_write_ownership.rs"]
-mod workflow_live_v2_write_ownership;
-use workflow_live_v2_write_ownership::*;
-
-#[path = "workflow_live_v2_write_result.rs"]
-mod workflow_live_v2_write_result;
-use workflow_live_v2_write_result::*;
-
-#[path = "workflow_live_v2_write_errors.rs"]
-mod workflow_live_v2_write_errors;
-use workflow_live_v2_write_errors::*;
-
+// `write_tests*`, not `tests*`: the runtime-genericity gate identifies test
+// sources by a `_tests` infix and would otherwise scan these as runtime code —
+// they carry fixture-domain vocabulary by design.
 #[cfg(test)]
-#[path = "workflow_live_v2_write_tests.rs"]
+#[path = "write_tests.rs"]
 mod tests;

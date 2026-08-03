@@ -1,18 +1,17 @@
 use archon_workflow::{
     BranchFailureKind, WorkflowError, WorkflowV2AgentRequest, WorkflowV2BranchOutcome,
-    WorkflowV2CallExecution, WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2EvidenceKind,
-    WorkflowV2FanoutItem, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap,
-    WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
-    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskCoverageStatus, WorkflowV2WriteMode,
+    WorkflowV2CallExecution, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2WriteMode,
 };
 
-use super::workflow_live_v2_aggregate::attach_branch_evidence;
 use super::workflow_live_v2_verification::{
-    FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION, normalize_focused_verification_outcome,
-    stamp_focused_verification_input,
+    normalize_focused_verification_outcome, stamp_focused_verification_input,
 };
-use archon_workflow::generated_contract::{
-    canonical_task_ids_from_generated_value, evidence_refs_from_generated_value,
+use archon_workflow::v2::branch_evidence::attach_branch_evidence;
+use archon_workflow::v2::completion_evidence::{
+    attach_completion_evidence_for_call, canonical_task_ids_from_result,
+    evidence_summaries_from_result,
 };
 
 pub(super) fn execution_with_resolved_source(
@@ -64,9 +63,7 @@ use workflow_live_v2_data_source::*;
 
 #[path = "workflow_live_v2_data_fanout_result.rs"]
 mod workflow_live_v2_data_fanout_result;
-pub(super) use workflow_live_v2_data_fanout_result::{
-    attach_completion_evidence_for_call, result_from_fanout_report,
-};
+pub(super) use workflow_live_v2_data_fanout_result::result_from_fanout_report;
 
 #[path = "workflow_live_v2_data_branch_contract.rs"]
 mod workflow_live_v2_data_branch_contract;

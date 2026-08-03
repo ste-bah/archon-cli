@@ -2,8 +2,10 @@ use super::*;
 
 use super::super::super::workflow_live_verification_contract::annotate_verification_failure_outcome;
 
-pub(crate) const FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION: &str =
-    "focused-verification-evidence-v2";
+// Defined beside the evidence it versions, in archon-workflow, so the stamp
+// written into a call's input and the fingerprint read back off its minted
+// completion evidence cannot drift apart.
+pub(crate) use archon_workflow::v2::completion_evidence::FOCUSED_VERIFICATION_EVIDENCE_CONTRACT_VERSION;
 
 pub(super) fn is_focused_verification_call(call_id: &str) -> bool {
     call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")

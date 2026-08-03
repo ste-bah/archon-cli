@@ -7,14 +7,14 @@ pub(super) async fn run_serial_v2_write_fanout(
     adapter: WorkflowV2AgentAdapter,
     dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &crate::WorkflowStore,
     run_id: &str,
-    branches: Vec<archon_workflow::WorkflowV2FanoutItem>,
+    branches: Vec<crate::WorkflowV2FanoutItem>,
     write_items: Vec<WorkflowV2WriteItem>,
     plan: WorkflowV2WritePlan,
     fallback_reason: Option<String>,
     reused_results: Vec<WorkflowV2Result>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let mut branch_results = Vec::new();
     for branch in branches {
         let branch_id = branch.id.clone();

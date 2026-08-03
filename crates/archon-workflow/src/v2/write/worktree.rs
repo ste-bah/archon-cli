@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) struct PreparedWorktreeBranch {
-    pub(super) branch: archon_workflow::WorkflowV2FanoutItem,
+    pub(super) branch: crate::WorkflowV2FanoutItem,
     pub(super) assignment: WorkflowV2WriteAssignment,
     pub(super) coordinator_plan: WritePlan,
     pub(super) baseline: CanonicalBaseline,
@@ -31,12 +31,12 @@ pub(super) async fn run_worktree_v2_write_fanout(
     adapter: WorkflowV2AgentAdapter,
     dispatch: &dyn WorkflowAgentDispatch,
     v2_store: &WorkflowV2ResultStore,
-    store_for_control: &archon_workflow::WorkflowStore,
+    store_for_control: &crate::WorkflowStore,
     run_id: &str,
-    branches: Vec<archon_workflow::WorkflowV2FanoutItem>,
+    branches: Vec<crate::WorkflowV2FanoutItem>,
     plan: WorkflowV2WritePlan,
     reused_results: Vec<WorkflowV2Result>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+) -> crate::WorkflowResult<WorkflowV2Result> {
     let setup = worktree_fanout_setup(target_repository_root, v2_store)?;
     let artifacts = run_worktree_plan_waves(
         worktree_plan_context(
@@ -67,7 +67,7 @@ pub(super) async fn run_worktree_v2_write_fanout(
 pub(super) fn worktree_fanout_setup(
     target_repository_root: Option<&str>,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<WorktreeFanoutSetup> {
+) -> crate::WorkflowResult<WorktreeFanoutSetup> {
     let canonical_root = target_repository_root
         .filter(|root| !root.trim().is_empty())
         .map(PathBuf::from)

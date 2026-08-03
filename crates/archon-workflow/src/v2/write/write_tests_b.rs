@@ -100,10 +100,9 @@ fn owned_module_scope_allows_new_child_file_but_not_sibling() {
 
     result.files_changed = vec![WorkflowV2FileRecord::new("src/other/new_tests.rs")];
     match validate_changed_files_for_repository(&item, &result, Some(&repo_root)) {
-        Err(archon_workflow::WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership {
-            path,
-            ..
-        }) => assert_eq!(path, "src/other/new_tests.rs"),
+        Err(crate::WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership { path, .. }) => {
+            assert_eq!(path, "src/other/new_tests.rs")
+        }
         other => panic!("expected ChangedFileOutsideOwnership, got {other:?}"),
     }
 }

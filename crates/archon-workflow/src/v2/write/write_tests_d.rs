@@ -72,10 +72,10 @@ fn ownership_expansion_does_not_propose_artifact_or_owned_paths() {
     });
     branch_result
         .commands_run
-        .push(archon_workflow::WorkflowV2CommandRecord {
-            kind: archon_workflow::WorkflowV2CommandKind::Test,
+        .push(crate::WorkflowV2CommandRecord {
+            kind: crate::WorkflowV2CommandKind::Test,
             command: "focused command".to_string(),
-            status: archon_workflow::WorkflowV2CommandStatus::Failed,
+            status: crate::WorkflowV2CommandStatus::Failed,
             exit_code: Some(1),
             output_summary: ".archon/workflows/run/artifacts/out.json".to_string(),
         });
