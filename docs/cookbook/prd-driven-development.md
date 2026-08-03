@@ -1,5 +1,50 @@
 # PRD-driven development
 
+There are **two** routes from a PRD to running code. Both write under the same
+two roots — `prds/` for PRD documents, `tasks/` for decomposed task sets — in
+different subfolders, so they coexist without colliding. They are not
+interchangeable: each has its own skills, its own templates, and its own
+consumer.
+
+## Choosing a pipeline
+
+| | Skills chain | Workflow path |
+|---|---|---|
+| Skills | `/to-prd` → `/prd-to-spec` → `/spec-to-tasks` → `/archon-code` | `/workflow-prd` → `/workflow-prd-spec` |
+| Templates | `ai-agent-prd.md`, `prdtospec.md` | `workflow-prd.md`, `workflow-prdtospec.md` |
+| PRD lands at | `prds/<slug>/PRD.md` | `prds/PRD-<NAME>/PRD-<NAME>.md` |
+| Tasks land at | `tasks/INDEX.md` + `tasks/phase<N>/task<M>.md` | `tasks/PRD-<NAME>/TASK-<DOMAIN>-<NNN>-<slug>.md` |
+| Executed by | the 50-agent `/archon-code` pipeline | the workflow engine, as a generated run |
+
+**Use the workflow path when you want the run to refuse to proceed on a
+contradiction.** It gives you:
+
+- a **dependency graph** — `depends_on` and `blocks` are both parsed and
+  reconciled into one graph; a cycle, an unresolved reference, a task that
+  blocks itself, or a pair declaring both directions is refused by name;
+- **single-writer enforcement** — the write coordinator serialises tasks that
+  target the same path, and a task opts a path out only by declaring
+  `shared_append_target_files`;
+- **per-task adversarial review** against declared `## Adversarial Review
+  Notes`, with prior-run findings appended back into the task file;
+- **requirement traceability** — `archon requirements trace` walks
+  `REQ-<AREA>-<NNN>` from the PRD to the tasks claiming them to the commands
+  and files that prove them, and `archon workflow lint --tasks` reports
+  write conflicts, fake edges, and requirement coverage.
+
+**Use the skills chain when you want the 50-agent pipeline** — test-first
+implementation, six dev-flow gates per task, Sherlock review at gates 3 and 6,
+phase reviewers. It is the richer execution model; it does not give you the
+declared dependency graph or the requirement trace.
+
+Do not mix them. `/spec-to-tasks` and `/archon-code` read `tasks/phase<N>/` and
+will not find a workflow task set; the workflow engine walks
+`tasks/PRD-<NAME>/` and will not find a phase tree.
+
+---
+
+# Pipeline 1 — the skills chain
+
 The full PRD-to-code pipeline: from a feature description to a running implementation through four composable skills.
 
 ## Pipeline overview
@@ -183,6 +228,15 @@ Picks up the refined `tasks/` tree. Each task triggers a 50-agent run with:
 
 See [god-code-pipeline.md](god-code-pipeline.md) for the full agent breakdown and TUI status commands.
 
+### Task atomicity criteria
+
+`/spec-to-tasks` checks each task against:
+
+- **Single responsibility** — one clear deliverable
+- **Testable** — can you write a test that verifies completion?
+- **< 1 working day** — if it looks bigger, split it
+- **No implicit dependencies** — dependencies must be listed explicitly by task ID
+
 ### Inspecting and resuming mid-pipeline
 
 ```
@@ -198,14 +252,131 @@ If `/archon-code` crashes (rare) or you Ctrl-C deliberately, the resume path is
 git-aware and verifier-gated: it refuses to continue if files have changed
 under it or if bundle artifacts no longer match their hashes.
 
-## Task atomicity criteria
+---
 
-`/spec-to-tasks` checks each task against:
+# Pipeline 2 — the workflow path
 
-- **Single responsibility** — one clear deliverable
-- **Testable** — can you write a test that verifies completion?
-- **< 1 working day** — if it looks bigger, split it
-- **No implicit dependencies** — dependencies must be listed explicitly by task ID
+```
+/workflow-prd  →  /workflow-prd-spec  →  archon workflow run
+```
+
+| Step | Skill | Output |
+|------|-------|--------|
+| 1. Generate PRD | `/workflow-prd "feature description"` | `prds/PRD-<NAME>/PRD-<NAME>.md` |
+| 2. Decompose | `/workflow-prd-spec prds/PRD-<NAME>/PRD-<NAME>.md` | `tasks/PRD-<NAME>/TASK-<DOMAIN>-<NNN>-<slug>.md` |
+| 3. Verify | `archon workflow lint` + `archon requirements trace` | coverage and topology report |
+| 4. Execute | a generated run naming the task directory | workflow execution |
+
+Aliases: `/wf-prd` and `/wf-prd-spec`.
+
+## Step 1 — `/workflow-prd`
+
+```
+> /workflow-prd "trading data lake with a coverage matrix and native-interval enforcement"
+```
+
+Writes `prds/PRD-<NAME>/PRD-<NAME>.md`, where `<NAME>` is a
+SCREAMING-KEBAB-CASE id ending in a three-digit sequence
+(`TRADING-DATA-LAKE-AHDM-001`). That id is reused verbatim for the task
+directory, so it is chosen once.
+
+What this PRD format requires that `ai-agent-prd` does not:
+
+- **Numbered sections.** Task files cite them in `source_sections:`, so
+  numbering is contract, not presentation. Renumbering invalidates citations.
+- **Requirement bullets in an exact grammar** — `- REQ-<AREA>-<NNN>: text` at
+  column 0, `<AREA>` uppercase letters only, three digits, colon-space, one per
+  line, never inside a fenced code block. IDs are extracted by regex, so an ID
+  buried mid-paragraph is never extracted and silently does not exist.
+- **Per-requirement severity**, as a trailing ``Violation severity: `error` —
+  <what fails closed>.`` clause. Severity attached to validation *checks*
+  instead has to be recovered by phrase-matching, which on the reference corpus
+  classified 2 of 93 requirements.
+- **A `## Hard Rules` section**, harvested verbatim into every agent prompt for
+  the run.
+- **A decomposition section and a traceability table**, so every requirement
+  has a named home before any task is written.
+
+## Step 2 — `/workflow-prd-spec <path to PRD>`
+
+```
+> /workflow-prd-spec prds/PRD-TRADING-DATA-LAKE-AHDM-001/PRD-TRADING-DATA-LAKE-AHDM-001.md
+```
+
+Writes a **flat** directory at `tasks/PRD-<NAME>/`. Discovery is a single
+non-recursive read for `TASK-*.md`, so a task file one level deeper is not
+found at all — not warned about, not partially loaded.
+
+What this task format requires that `prdtospec` does not:
+
+- **A fenced ```yaml block, first in the file, with ten keys present** —
+  `task_id`, `title`, `complexity`, `status`, `depends_on`, `blocks`,
+  `implements`, `required_env_keys`, `required_tools`,
+  `deliverable_contracts`. Presence, not non-emptiness: `[]` is a valid and
+  meaningful declaration, and a missing key is refused naming the file and the
+  key.
+- **A `task_id` equal to the id in the filename.** A mismatch is refused naming
+  both.
+- **`## Focused Tests` as runnable commands.** A bullet counts only when it
+  contains a backticked span whose first token is a known runner (`cargo`,
+  `pytest`, `npm`, `archon`, …). `cargo test -p archon-trading
+  registry_migration` proves something; "Registry schema migration test."
+  cannot. This is the single highest-value rule: on the reference 17-task
+  corpus every entry was prose, and `archon requirements trace` reported
+  **0 of 93 requirements satisfied** despite the tasks and requirements
+  covering each other exactly.
+- **`## Files Expected to Change` as real backtick-quoted paths.** Backticked
+  spans are what gets lifted; a section with none yields no anchors and the
+  task's requirements cannot promote. "Likely anchors: …" hedges repeated
+  across tasks make the section useless as a dataflow signal.
+- **`implements: [REQ-...]` always declared**, as a single-line flow sequence,
+  `[]` for an audit or review task. Enables both coverage checks: every cited
+  ID must exist in the PRD, and every requirement must be claimed by some task.
+- **Instance bindings for templated artifact paths.** A path containing
+  `<...>` needs `instance_source_path`, `instance_source_records_field`,
+  `instance_artifact_field`, and a `min_instances` floor. `min_instances: 0` is
+  vacuous — zero matches satisfy it. A typed verifier takes one concrete path
+  and cannot be combined with a template.
+- **Distinct `kind` for create versus append** on the same path —
+  `x_registry` creates, `x_registry_entry` appends.
+
+## Step 3 — verify
+
+```
+archon workflow lint --tasks tasks/PRD-<NAME>/
+archon requirements trace --prd prds/PRD-<NAME>/PRD-<NAME>.md --tasks tasks/PRD-<NAME>/
+```
+
+The lint's `## requirement coverage` section looks for the PRD as a **sibling
+of the task directory**. Because PRDs live under `prds/`, that section reports
+`no PRD found beside tasks/PRD-<NAME>/; skipped` and names the paths it tried.
+That is expected. `archon requirements trace` takes both paths explicitly and
+is the authoritative coverage and traceability check — use its output.
+
+A requirement is reported satisfied only when a declared verifier command
+actually ran and passed **and** the trace shows that run read the anchored
+file. Both halves come from the task file: the command from `## Focused
+Tests`, the anchor from `## Files Expected to Change`.
+
+## Ordering-only dependencies
+
+A dependency where the upstream task produces no artifact the downstream task
+consumes is a sequencing edge, and the lint reports it as such. That is
+information, not a defect. **Do not fabricate a deliverable contract to silence
+it** — an invented artifact path turns a truthful ordering edge into a false
+dataflow claim and creates a gate nothing produces.
+
+## Reference corpus
+
+`tests/fixtures/prd-trading-data-lake-ahdm-001/` holds a real 17-task set in
+this format, with `expected-parse.json` pinning what the parser reads from it.
+It is the worked example — including its two known defects, prose focused tests
+and repeated anchor lists, which are exactly what the template above exists to
+prevent.
+
+---
+
+# Both pipelines
 
 ## Project initialisation
 
@@ -219,7 +390,9 @@ bash scripts/archon-init.sh --target $(pwd)
 curl -L https://raw.githubusercontent.com/ste-bah/archon-cli/main/scripts/archon-init.sh | bash
 ```
 
-This creates `.archon/`, `prds/`, and `tasks/` directories.
+This creates `.archon/`, `prds/`, and `tasks/` directories. Both pipelines use
+those same two roots — the skills chain in `prds/<slug>/` and `tasks/phase<N>/`,
+the workflow path in `prds/PRD-<NAME>/` and `tasks/PRD-<NAME>/`.
 
 ## See also
 
