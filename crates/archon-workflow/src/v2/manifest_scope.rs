@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
 
-use archon_workflow::{
+use serde_json::Value;
+
+use super::{
     WorkflowV2CommandKind, WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2Evidence,
     WorkflowV2EvidenceKind, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2Status,
     WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
 };
-use serde_json::Value;
 
-pub(super) fn manifest_scope_verification_result(input: &Value) -> Option<WorkflowV2Result> {
+pub fn manifest_scope_verification_result(input: &Value) -> Option<WorkflowV2Result> {
     if !is_diff_scope_check(input) {
         return None;
     }
@@ -107,3 +108,7 @@ fn string_values(value: Option<&Value>) -> Vec<String> {
         _ => Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "manifest_scope_tests.rs"]
+mod tests;
