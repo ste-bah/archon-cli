@@ -2470,10 +2470,10 @@ archon-core::lib::archon_core::hooks::registry::matching::tests::summaries_empty
 archon-core::lib::archon_core::hooks::registry::matching::tests::summaries_exposes_every_hook_with_source_and_matcher_and_ids
 archon-core::lib::archon_core::hooks::registry::persist::tests::merge_overrides_preserves_non_overrides_sections
 archon-core::lib::archon_core::hooks::registry::persist::tests::set_enabled_persists_and_toggles
-archon-core::lib::archon_core::hooks::shell::tests::plain_windows_falls_back_to_cmd
-archon-core::lib::archon_core::hooks::shell::tests::unix_falls_back_to_sh
-archon-core::lib::archon_core::hooks::shell::tests::windows_prefers_discovered_posix_shell
-archon-core::lib::archon_core::hooks::shell::tests::windows_uses_bash_when_sh_is_unavailable
+archon-shell::lib::archon_shell::tests::plain_windows_falls_back_to_cmd
+archon-shell::lib::archon_shell::tests::unix_falls_back_to_sh
+archon-shell::lib::archon_shell::tests::windows_prefers_discovered_posix_shell
+archon-shell::lib::archon_shell::tests::windows_uses_bash_when_sh_is_unavailable
 archon-core::lib::archon_core::hooks::toml_loader::tests::load_malformed_toml_file_returns_error
 archon-core::lib::archon_core::hooks::toml_loader::tests::load_missing_file_returns_empty
 archon-core::lib::archon_core::hooks::toml_loader::tests::load_real_toml_file
