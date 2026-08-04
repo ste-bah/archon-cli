@@ -234,12 +234,16 @@ async fn windows_hook_timeout_kills_descendant_process() {
     let working_dir = dir.path().to_path_buf();
     let invocation = tokio::spawn(async move {
         execute_hook(
-            // 15s, not 3s: the test must observe the descendant ALIVE before the
-            // timeout fires, and the pid-file wait above can take seconds under
-            // load. Three seconds left a one-second probe window and this test
-            // failed 4 runs in 6. The test still proves the descendant is killed
-            // at the timeout; it just no longer races the machine.
-            &config(&command, 15),
+            // 60s, not 15s. The test must observe the descendant ALIVE before
+            // the timeout fires, so this budget has to clear a cold PowerShell
+            // start plus the `Start-Process` inside the fixture, with margin.
+            // 3s left a one-second probe window and failed 4 runs in 6; 15s then
+            // failed on the GitHub Windows runner, where the fixture had not yet
+            // written its pid file when the 5s wait below expired. Cold start
+            // there exceeds 15s on its own -- the sibling output fixture needed
+            // the same 60s. The test still proves the descendant is killed at
+            // the timeout; it just no longer races the machine.
+            &config(&command, 60),
             &serde_json::json!({}),
             &working_dir,
             "issue92-session",
@@ -259,7 +263,8 @@ async fn windows_hook_timeout_kills_descendant_process() {
     );
     // Outer bound is a hang guard: the hook's own timeout has already fired by
     // now, and this exists only so a hang fails rather than blocks the suite.
-    let output = tokio::time::timeout(std::time::Duration::from_secs(60), invocation)
+    // Must stay above the hook timeout plus process-tree teardown.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), invocation)
         .await
         .expect("hook invocation exceeded its outer deadline")
         .expect("hook invocation task panicked");
@@ -287,8 +292,14 @@ fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::Pa
     let fixture = pid_file.with_extension("ps1");
     std::fs::write(
         &fixture,
+        // The child must outlive the hook timeout, or the fixture returns from
+        // `Wait-Process` and exits normally and the hook never times out at all
+        // -- `outcome` comes back non-Blocking and the test fails for the wrong
+        // reason. The real invariant is a chain: pid-file wait < hook timeout <
+        // this sleep. At 30s it capped the hook timeout below the cold-start
+        // cost on the GitHub Windows runner, so it has to lead, not follow.
         "\
-$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'descendant.pid'), [string]$child.Id)
 Wait-Process -Id $child.Id
 ",
@@ -333,8 +344,11 @@ async fn wait_for_windows_pid_file(pid_file: &std::path::Path) -> String {
     // probes `!invocation.is_finished()` after this returns, so the gap between
     // this bound and the hook timeout IS the probe window. At 2s against a 3s
     // timeout the window was one second, and under full-suite load the wait
-    // routinely outlasted the timeout it was supposed to precede.
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    // routinely outlasted the timeout it was supposed to precede. 5s against 15s
+    // then failed on the GitHub Windows runner: a cold PowerShell start had not
+    // reached the fixture's `Start-Process` within 5s, so the pid file did not
+    // exist yet. 30s against 60s keeps the same shape with room for that start.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         if let Ok(pid) = std::fs::read_to_string(pid_file) {
             let pid = pid.trim();
