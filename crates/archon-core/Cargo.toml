@@ -19,6 +19,17 @@ archon-leann = { path = "../archon-leann" }
 # + impl all live in one crate — orphan-rule constraint). No cycle:
 # archon-observability has zero archon-* deps.
 archon-observability = { path = "../archon-observability" }
+# Topology IR + graph analyses. `default-features = false` deliberately: the
+# `workflow` feature would drag archon-workflow (22k LOC) into archon-core's
+# build graph, and archon-core needs only the IR and the analyses. The
+# Vec<Subtask> lowering lives here (orchestrator::topology) rather than in
+# archon-topology so the dependency edge points core → topology, never back.
+archon-topology = { path = "../archon-topology", default-features = false }
+# Shell discovery for the hook process executor. A leaf with zero archon-*
+# deps, so both archon-core and archon-workflow can hold this edge — which is
+# the point: the two used to resolve a shell independently and disagree on
+# Windows.
+archon-shell = { path = "../archon-shell" }
 
 # Workspace dependencies
 serde.workspace = true
@@ -41,6 +52,8 @@ async-trait.workspace = true
 # crosses archon-core boundaries. (dashmap + once_cell were moved to
 # archon-tools in TASK-AGS-104 along with the background_agents module.)
 tokio-util.workspace = true
+process-wrap.workspace = true
+libc = "0.2"
 dashmap.workspace = true
 tokio-stream.workspace = true
 russh.workspace = true

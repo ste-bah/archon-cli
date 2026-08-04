@@ -97,6 +97,13 @@ pub(crate) mod kb_reprocess;
 pub(crate) mod kb_url;
 pub(crate) mod learning;
 pub(crate) mod learning_status;
+/// What a generated workflow run feeds back to the learning stack, derived
+/// from the run's own content by `archon_topology::classify_task`.
+///
+/// Named outside the `workflow*` prefix for the reason
+/// `sona_workflow_tuning` is: `archon-topology` depends on `archon-workflow`,
+/// so nothing destined for that crate may name it back.
+pub(crate) mod learning_workflow_hooks;
 pub(crate) mod login;
 pub(crate) mod logout;
 // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry status.
@@ -117,6 +124,7 @@ pub(crate) mod pipeline_rewind;
 pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
+pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod provider_gate;
 pub(crate) mod workflow_mcp;
 // TASK-TUI-626: /plan Plan Mode toggle via SNAPSHOT+EFFECT pattern.
@@ -149,6 +157,12 @@ pub(crate) mod reasoning_label;
 pub(crate) mod refresh;
 pub(crate) mod remote;
 pub(crate) mod rename;
+/// Phase 6 traceability: `archon requirements trace`. Read-only over a PRD, a
+/// task directory and an already-built code index. It never indexes — that
+/// holds the Cozo write lock across a whole `multi_transaction` — and it never
+/// fails a run, because an unproven requirement is a declared residual gap
+/// (PRD §32), not a failure and not a pass.
+pub(crate) mod requirement_trace;
 pub(crate) mod resume;
 // TASK-HOTFIX-V0.1.7: /run-agent primary command (#248).
 /// `/archon-code` — 50-agent coding pipeline TUI primary.
@@ -172,9 +186,20 @@ pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.
 pub(crate) mod session;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
-pub(crate) mod posix_shell;
 pub(crate) mod skills;
 pub(crate) mod slash;
+/// The SONA learning loop over a generated workflow run: the budget tuner, the
+/// shape tuner, and the pre-run topology lint that admits a shape proposal.
+///
+/// Named outside the `workflow*` prefix on purpose. These read and write the
+/// Cozo learning store through `archon_pipeline::learning` and
+/// `topology_fold::open_store`, none of which `archon-workflow` may reach; the
+/// prefix is reserved for files destined for that crate, so keeping these out
+/// of it makes the boundary a one-line grep rather than a convention. The same
+/// reason `pipeline_workflow_llm` is not called `workflow_pipeline_llm`.
+pub(crate) mod sona_workflow_shape_gate;
+pub(crate) mod sona_workflow_shape_tuning;
+pub(crate) mod sona_workflow_tuning;
 pub(crate) mod status;
 pub(crate) mod store_paths;
 pub(crate) mod style;
@@ -184,6 +209,27 @@ pub(crate) mod surface_matrix;
 pub(crate) mod summary;
 pub(crate) mod task;
 pub(crate) mod team;
+/// Milestone 3 topology: guardrail admission. Synchronous, in-memory only —
+/// no database access of any kind, not even a read.
+pub(crate) mod topology_admission;
+/// Milestone 2 topology: the batched fold from ambient traces into
+/// `.archon/topology.db` plus one `learning_events` summary row per graph.
+/// Lives here rather than in `archon-pipeline` because the fold needs
+/// `archon-workflow`, `archon-topology`, and the learning stack at once, and
+/// `archon-pipeline` must not acquire an edge onto `archon-workflow`.
+pub(crate) mod topology_fold;
+/// Milestone 4 topology: the advisory lint suite behind `archon workflow lint`.
+/// Read-only and non-blocking by construction — it loads a graph, runs pure
+/// analyses, and prints. It never writes and never fails a run.
+pub(crate) mod topology_lint;
+/// Lowering a decomposed-PRD task directory into the topology IR, for the
+/// lints and the shape gate that score one. Named outside the `workflow*`
+/// prefix because it names `archon_topology`, and `archon-topology` depends on
+/// `archon-workflow`.
+pub(crate) mod topology_task_graph;
+/// Milestone 2 topology: the ambient trace recorder. Hot path, file-only,
+/// never touches a database.
+pub(crate) mod topology_trace;
 pub(crate) mod trading;
 pub(crate) mod trading_backtest;
 pub(crate) mod trading_data;
@@ -206,12 +252,17 @@ pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod behaviour;
+/// Pins `/workflow-prd-spec`'s `tasks/PRD-<NAME>/` output location against the
+/// workflow engine's directory walk — the two live in different crates.
+#[cfg(test)]
+mod prd_pipeline_layout_tests;
 pub(crate) mod teleport;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub(crate) mod theme;
 pub(crate) mod thinking;
 pub(crate) mod tui_helpers;
+pub(crate) mod tui_workflow_ui_sink;
 pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;
@@ -222,6 +273,10 @@ pub(crate) mod voice;
 pub(crate) mod web;
 pub(crate) mod web_chat;
 pub(crate) mod workflow;
+/// What `src/command/workflow*.rs` may name, pinned as a scan rather than a
+/// convention.
+#[cfg(test)]
+pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod world_model;
 pub(crate) mod world_view;

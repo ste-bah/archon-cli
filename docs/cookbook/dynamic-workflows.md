@@ -209,29 +209,34 @@ payloads, credentials, and stale artifact hashes are not carried forward.
 
 ## Learning output
 
-After a run finishes, inspect:
+Every run gets a `.archon/workflows/<run-id>/learning/` directory with two
+files in it.
+
+`write-coordination/outcomes.jsonl` holds metadata-only rows (file paths,
+blake3 hashes, sizes — never patch content) recorded when a coordinated write
+completes:
 
 ```bash
-ls .archon/workflows/<run-id>/learning
+cat .archon/workflows/<run-id>/learning/write-coordination/outcomes.jsonl
 ```
 
-`records.jsonl` contains every stage outcome. `durable-memory.jsonl` contains
-only accepted stages with artifacts. This separation is intentional: failed,
-forced, or unverified stages stay auditable without poisoning durable learning.
+`records.jsonl` holds one line per stage outcome, written at run completion:
 
-Direct handoff files are also written for learning consumers:
-
-```text
-adapter-sona.jsonl
-adapter-rlm.jsonl
-adapter-reflexion.jsonl
-adapter-reasoning-bank.jsonl
-adapter-jepa.jsonl
-adapter-world-model.jsonl
+```bash
+cat .archon/workflows/<run-id>/learning/records.jsonl
 ```
 
-These records give each subsystem a direct workflow trace to consume without
-parsing the generic audit ledger.
+Each line carries the stage's status, verification, quality score, artifact
+references, retry telemetry, and the spec's `learning_hooks`. That hook list
+is the routing selector: the topology fold reads this file after the run and
+dispatches hooked, completed stages into the learning stack. A spec with no
+`learning_hooks` still writes records — it just dispatches nothing.
+
+There is exactly one record stream. An earlier design also promised
+`durable-memory.jsonl`, `world-traces.jsonl`, `governed-proposals.jsonl` and
+six `adapter-*.jsonl` files; those were never written and no longer exist in
+the design. See
+[docs/architecture/dynamic-workflows.md](../architecture/dynamic-workflows.md#learning-records).
 
 ## Save and reuse a workflow
 

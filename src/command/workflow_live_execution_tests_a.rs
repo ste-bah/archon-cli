@@ -1,14 +1,17 @@
+use super::*;
+
 #[tokio::test]
 async fn live_planner_validation_failure_does_not_fallback_to_smoke_plan() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let err = plan_live(
         &store,
         "implement the whole PRD",
         Arc::new(InvalidPlanner),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect_err("invalid live plans must fail instead of using heuristic fallback");
@@ -38,8 +41,7 @@ async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
         repair_started: tokio::sync::Notify::new(),
         release_repair: tokio::sync::Notify::new(),
     });
-    let (tui_tx, mut tui_rx) =
-        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(8);
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(8);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::project(temp.path());
     let run_planner = planner.clone();
@@ -48,8 +50,9 @@ async fn transient_planner_repair_retry_aborts_when_notification_is_rejected() {
             &store,
             "Inspect the repository",
             run_planner,
-            tui_tx,
+            ui_sink,
             &default_generated_workflow_config(),
+            &archon_core::config::LearningConfig::default(),
         )
         .await
     });
@@ -73,13 +76,17 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
         first_error: "LLM stream error (server_error): temporary upstream failure",
     });
 
-    super::workflow_live_retry::send_message_with_transient_retry(
-        &(planner.clone() as Arc<dyn LlmClient>),
+    super::super::workflow_live_retry::send_message_with_transient_retry(
+        &(planner.clone() as Arc<dyn WorkflowLlmClient>),
         Vec::new(),
         Vec::new(),
         Vec::new(),
         "sonnet",
-        |_| async { anyhow::bail!("retry notification rejected") },
+        |_| async {
+            Err(archon_workflow::WorkflowError::NotificationDelivery(
+                "retry notification rejected".to_string(),
+            ))
+        },
     )
     .await
     .expect_err("rejected notification must prevent transient planner retry");
@@ -89,7 +96,7 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
 
 #[tokio::test]
 async fn live_planner_retries_transient_stream_server_errors() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let planner = Arc::new(FlakyPlanner {
@@ -101,8 +108,9 @@ async fn live_planner_retries_transient_stream_server_errors() {
         &store,
         "inspect the repository",
         planner.clone(),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("transient planner stream failure should retry and recover");
@@ -114,18 +122,18 @@ async fn live_planner_retries_transient_stream_server_errors() {
 
 #[tokio::test]
 async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
     )
     .expect("task 1");
     std::fs::write(
         tasks.join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: ['TASK-TDL-001']\n",
+        standard_task_file("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
     )
     .expect("task 10");
     let store = WorkflowStore::new(temp.path().join("workflows"));
@@ -141,8 +149,9 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
             temp.path().display()
         ),
         planner.clone(),
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("decomposed PRD planning should use the deterministic scaffold");
@@ -224,13 +233,13 @@ async fn implementation_prd_plan_uses_deterministic_scaffold_not_provider_fanout
 
 #[tokio::test]
 async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_runs() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "[]", ""),
     )
     .expect("task 1");
     let store = WorkflowStore::new(temp.path().join("workflows"));
@@ -242,11 +251,8 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
             target_repository_root: None,
             max_parallelism: 4,
             max_agents: 16,
-            provider_tiers: Default::default(),
             stages: Vec::new(),
-            artifact_policy: Default::default(),
             permissions: Default::default(),
-            quality_gates: Default::default(),
             learning_hooks: Vec::new(),
         })
         .expect("prior run");
@@ -283,16 +289,14 @@ async fn implementation_prd_plan_embeds_governed_learning_context_from_prior_run
             temp.path().display()
         ),
         planner,
-        tui_tx,
+        ui_sink,
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("decomposed PRD planning should use deterministic scaffold");
 
-    assert!(
-        plan.harness_source
-            .contains("governed_learning_context:")
-    );
+    assert!(plan.harness_source.contains("governed_learning_context:"));
     assert!(plan.harness_source.contains("final_evidence_gap"));
     assert_eq!(plan.governed_learning_context.len(), 1);
     let scaffold = plan

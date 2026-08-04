@@ -8,29 +8,57 @@ pub mod agent_adapter;
 mod agent_output_normalize;
 mod agent_prompt;
 mod agent_repair;
-mod branch_evidence;
+pub mod artifact_refs;
+pub mod branch_cache;
+pub mod branch_evidence;
+pub mod branch_stamping;
+pub mod call_data;
+pub mod call_execution;
+pub mod completion_credit;
+pub mod completion_evidence;
+pub mod decomposed_prd_plan;
+pub mod deliverable_contract;
 pub mod host_api;
 pub mod implementation_inspection;
+pub mod lifecycle_driver;
+pub mod lifecycle_policy;
+pub mod lifecycle_prompts;
+pub mod local_host;
+pub mod manifest_scope;
+pub mod orchestrator_actions;
+pub mod outcome_envelope;
+pub mod plan_metadata;
 pub mod prd_intake;
 mod project_artifact_completion;
 pub mod project_artifact_contract;
 mod project_artifact_prompt;
 pub mod project_artifact_results;
+pub mod project_artifact_stamping;
 pub mod project_artifacts;
 pub mod report;
+pub mod restart;
 pub mod result;
 pub mod result_store;
-pub mod resume;
-pub mod runtime;
+pub mod run_state_sync;
 pub mod scheduler;
+pub mod script;
+/// Host-side semantic-preservation enforcement for LLM repair adoption. Only
+/// the lifecycle driver consults it.
+pub(crate) mod semantic_preservation;
+pub mod source_graph;
+pub mod source_pack;
+pub mod target_expansion;
 pub mod task_record;
 pub mod validation;
+pub mod verification;
+pub mod write;
 pub mod write_mode;
 mod write_mode_paths;
 
 pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
 };
+pub use call_execution::WorkflowV2CallExecution;
 pub use host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,
@@ -61,11 +89,9 @@ pub use result_store::{
     WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem, WorkflowV2TaskCompletionEvidence,
     WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskInvalidation,
 };
-pub use resume::WorkflowV2ResumeDecision;
-pub use runtime::{WorkflowV2CallExecution, WorkflowV2RunSummary, WorkflowV2Runtime};
 pub use scheduler::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CancellationToken, WorkflowV2FanoutItem,
-    WorkflowV2FanoutReport, WorkflowV2Scheduler, WorkflowV2SchedulerConfig,
+    WorkflowV2FanoutReport, WorkflowV2Scheduler, WorkflowV2SchedulerConfig, stable_value_hash,
 };
 pub use task_record::{
     WorkflowV2ImplementationStatus, WorkflowV2TaskFileStatus, WorkflowV2TaskRecord,

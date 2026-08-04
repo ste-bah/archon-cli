@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn repair_plan_shape_repair_cannot_drop_source_gap_identity() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -114,7 +116,7 @@ async fn accepted_zero_match_verification_is_demoted_and_routed_to_retry() {
         .await
         .expect("zero-test triage repair");
 
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&triage);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&triage);
     assert_eq!(routes.retry_items.len(), 1);
     assert_eq!(
         routes.retry_items[0]["classification"],
@@ -171,7 +173,7 @@ async fn inventory_repair_tombstone_cannot_remove_scheduled_work() {
     );
 }
 
-fn boundary_driver(
+pub(super) fn boundary_driver(
     temp: &tempfile::TempDir,
     scenario: CannedLifecycleScenario,
 ) -> (LifecycleDriver, Arc<CannedLifecycleLlm>) {
@@ -192,11 +194,8 @@ fn boundary_driver(
         target_repository_root: None,
         max_parallelism: 1,
         max_agents: 1,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
@@ -204,13 +203,13 @@ fn boundary_driver(
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     // 87e2bb69 made TUI delivery *required*: send_async returns
     // NotificationDelivery when the receiver is gone, where v3 previously
-    // ignored the result via `let _ = tui_tx.send(..)`. The two fixtures above
+    // ignored the result via `let _ = ui_sink.send(..)`. The two fixtures above
     // bind their receiver inside the #[tokio::test] body, so it lives for the
     // whole test; this helper RETURNS, so a local receiver drops here and
     // closes the channel -- failing the fixture on teardown rather than on the
     // lifecycle behaviour under test. Drain in the background so the bounded
     // capacity also cannot stall a long run.
-    let (tui_tx, mut tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = default_workflow_ui_sink();
     tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let llm = Arc::new(CannedLifecycleLlm {
         scenario,
@@ -222,7 +221,7 @@ fn boundary_driver(
     });
     let client = LiveV2AgentClient::new(
         llm.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         None,
@@ -233,6 +232,7 @@ fn boundary_driver(
         max_investigation_iterations: 1,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
+        implementation_wave_max_parallelism: None,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
@@ -261,12 +261,17 @@ fn boundary_driver(
         Some(temp.path().display().to_string()),
         serde_json::json!([]),
         Default::default(),
-        &generated_config,
+        LifecycleLimits {
+            max_repair_iterations: generated_config.max_repair_iterations,
+            max_investigation_iterations: generated_config.max_investigation_iterations,
+            implementation_wave_max_parallelism: generated_config
+                .implementation_wave_max_parallelism,
+        },
     );
     (driver, llm)
 }
 
-fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
+pub(super) fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     let task = |id: &str, criterion: &str| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.to_string(),
         source_path: root
@@ -327,7 +332,7 @@ fn synthetic_task_universe(root: &std::path::Path) -> WorkflowV2TaskUniverse {
     }
 }
 
-fn synthetic_inventory_items() -> Vec<serde_json::Value> {
+pub(super) fn synthetic_inventory_items() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({
             "item_id": "noop-legit",
@@ -380,7 +385,7 @@ fn synthetic_inventory_items() -> Vec<serde_json::Value> {
     ]
 }
 
-fn implementation_item(
+pub(super) fn implementation_item(
     item_id: &str,
     task_id: &str,
     target_file: &str,
@@ -402,7 +407,11 @@ fn implementation_item(
     })
 }
 
-fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_json::Value {
+pub(super) fn verification_item(
+    item_id: &str,
+    task_id: &str,
+    target_file: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "item_id": item_id,
         "source_item_id": item_id.replace("verify-", "implementation-"),
@@ -413,7 +422,7 @@ fn verification_item(item_id: &str, task_id: &str, target_file: &str) -> serde_j
     })
 }
 
-fn verification_remediation_item() -> serde_json::Value {
+pub(super) fn verification_remediation_item() -> serde_json::Value {
     serde_json::json!({
         "item_id": "remediate-plain",
         "source_item_id": "implementation-plain",
@@ -428,4 +437,3 @@ fn verification_remediation_item() -> serde_json::Value {
         "artifact_requirements": [],
     })
 }
-

@@ -1,8 +1,12 @@
 use archon_core::orchestrator::{
     config::{ExecutionMode, OrchestratorConfig, TeamConfig},
-    dag::build_dag_waves,
     events::{OrchestratorEvent, Subtask, SubtaskStatus},
     pool::AgentPool,
+    // `dag::build_dag_waves` moved to `topology::build_dag_waves` when
+    // orchestrator/dag.rs was deleted in favour of the shared topology IR
+    // (archon-topology). Semantics are unchanged — cases 10-12 below are the
+    // acceptance test for that and are byte-identical to their previous form.
+    topology::build_dag_waves,
 };
 
 // 1. OrchestratorConfig::default() has max_concurrent=4, timeout_secs=300

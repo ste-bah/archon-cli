@@ -54,6 +54,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[remote]` / `[remote.ssh]`](#remote) — SSH remote agent
 - [`[ws_remote]`](#ws_remote) — WebSocket server
 - [`[orchestrator]`](#orchestrator) — multi-agent teams
+- [`[topology]`](#topology-guardrail-admission) — guardrail admission
 - [`[voice]`](#voice) — speech-to-text
 - [`[web]`](#web) — browser UI
 - [Workspace policy](#workspace-policy) — VLM, retrieval, game-theory, learning gates
@@ -1341,15 +1342,78 @@ Multi-agent team coordination.
 ```toml
 [orchestrator]
 max_concurrent = 4
+max_agents = 200
 timeout_secs = 300
 max_retries = 2
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
-| `max_concurrent` | `4` | Maximum concurrent agents in a parallel team. Limits memory pressure during fan-out. |
+| `max_concurrent` | `4` | Maximum agents running **at once** in a team. Limits memory pressure during fan-out. Now enforced in every execution mode: `Dag` previously bypassed the agent pool entirely and had no concurrency cap at all. |
+| `max_agents` | `200` | Maximum agents started **in total** over one team run. Distinct from `max_concurrent`, which is released on completion and so imposed no lifetime ceiling. Matches the `max_agents` default a `WorkflowSpec` uses, so a team and a workflow that declare nothing agree. |
 | `timeout_secs` | `300` (5 min) | Per-agent timeout in a team run. Raise for slow tasks; lower to fail fast. |
 | `max_retries` | `2` | Retry attempts when a team agent fails. |
+
+---
+
+## `[topology]` (Guardrail admission)
+
+Safety invariants checked on the synchronous critical path of every non-`Safe`
+tool call. Every invariant is individually disableable and every one defaults to
+on. Admission is **in-memory only** — it performs no database access of any
+kind, not even a read — and a session with no tracked state admits everything,
+so the feature never fails closed on a bookkeeping gap.
+
+```toml
+[topology]
+admission_enabled = true
+agent_cap = true
+single_writer = true
+ungated_irreversible = "where_declared"
+max_agents = 200
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `admission_enabled` | `true` | Master switch. When `false`, no session is tracked and every tool call is admitted. |
+| `agent_cap` | `true` | Invariant 1. Blocks a subagent spawn past the session's **lifetime** agent budget. A lifetime total, not a concurrency cap — concurrency stays `[orchestrator] max_concurrent`'s job. |
+| `single_writer` | `true` | Invariant 2. Blocks a write to a path already claimed by a concurrently live node with no dependency path to the writer. Overlap is decided by the write coordinator's resource-key table, so a glob and a literal path that intersect are caught. |
+| `ungated_irreversible` | `"where_declared"` | Invariant 3. Blocks a tool call classified irreversible (`PermissionLevel::Dangerous` — `git push`, `rm -rf`, `sudo`) that no **passed** gate dominates. See the scope table below. |
+| `max_agents` | `200` | Lifetime agent ceiling for a session that declares no graph. A declared graph carries its own budget and that wins. |
+
+### `ungated_irreversible` scope
+
+| Value | Behaviour |
+|---|---|
+| `"off"` | Never blocks. |
+| `"where_declared"` | Blocks only when the session's structure declares at least one gate. A graph with no gates never opted into gating, so blocking against it would assert an intent nobody expressed. |
+| `"always"` | Blocks whenever no passed gate dominates the action, gates declared or not. **This blocks every irreversible action in every session that never declared a graph** — including every ordinary coding turn — because a plain turn has no gate construct, so no gate can ever have passed. Use only where that is the intent. |
+
+A `checkpoint` stage never counts as a passed gate. Nothing in the tree marks a
+checkpoint passed, and specs written before the `condition` stage kind was
+removed deserialize `condition` to `checkpoint` — a condition never had an
+evaluator, so treating its presence as gating would let something nobody
+evaluated authorise a deploy.
+
+### Declaring stage permissions
+
+`WorkflowSpec::permissions` feeds invariant 3. The value is a
+`PermissionLevel`: `safe`, `risky`, or `dangerous` (case-insensitive), given
+either as a string or as an object under `level` (aliases: `class`,
+`permission`). `irreversible` is accepted as an alias of `dangerous`. Keys are
+stage ids, plus the blanket key `default` (alias `*`).
+
+```yaml
+permissions:
+  default: safe
+  deploy: dangerous
+  review: { level: risky }
+```
+
+`dangerous` maps to the IR's `Irreversible` class, not to `Risky` —
+under-classifying an irreversible effect is the failure that matters. Anything
+unrecognised lowers to `safe` rather than to the strictest class, because
+enforcement must never fail closed on a typo.
 
 ---
 
@@ -1724,6 +1788,29 @@ max_investigation_iterations = 3
 |---|---|---|
 | `max_repair_iterations` | `3` | Maximum script-owned semantic repair attempts for malformed or incomplete generated-PRD inventory/evidence before the workflow stops visibly with blocked/needs-review evidence. Valid range: `1..=8`. |
 | `max_investigation_iterations` | `3` | Maximum script-owned investigation attempts for missing target files, verification requirements, artifact requirements, or provider/environment evidence before terminal blocked/needs-review reporting. Valid range: `1..=8`. |
+| `verification_branch_timeout_secs` | `14400` | Wall-clock a read-only verification or review branch may run. Four hours because a verifier that runs out of clock does not fail honestly — it disappears, and its silence has been observed voiding an already-accepted remediation. Valid range: `300..=86400`. |
+| `host_call_timeout_secs` | `7200` | Wall-clock a non-verification host call may run. Valid range: `300..=86400`. |
+
+### SONA-learned values
+
+When `[learning.sona] enabled = true` **and** `pipeline_recording = true`, these
+four values are learned per task class from recorded run outcomes rather than
+read verbatim. With either toggle off — the default, since `pipeline_recording`
+defaults to `false` — the configured value is used exactly as written.
+
+Even with learning on, the configured value is what a run gets until that
+`(task class, parameter)` key has at least five recorded outcomes; there is no
+exploration. A learned value is clamped into a range narrower than the validated
+one (`max_*_iterations` to `2..=6`, `verification_branch_timeout_secs` to
+`7200..=28800`, `host_call_timeout_secs` to `1800..=14400`), and
+`verification_branch_timeout_secs` is then raised if needed so that it is never
+below `host_call_timeout_secs`. The timeout budgets are a ratchet: recorded
+evidence can only lengthen them.
+
+A run that got a learned value says so in its output and records the reason in
+`.archon/workflows/<run-id>/v2/generated-metadata.json` under
+`tuning_decisions`, with the baseline, the applied value, the weight and the
+observation count.
 
 ---
 

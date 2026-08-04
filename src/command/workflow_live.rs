@@ -2,17 +2,15 @@ use anyhow::{Result, anyhow};
 use archon_core::agents::AgentRegistry;
 use archon_core::config::{ArchonConfig, GeneratedWorkflowConfig};
 use archon_core::env_vars::ArchonEnvVars;
-use archon_pipeline::runner::LlmClient;
-use archon_tui::app::TuiEvent;
-use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
-    CommandAction, RunStatus, StageStatus, WorkflowConfig, WorkflowPolicy, WorkflowRun,
-    WorkflowStageRunner, WorkflowStore,
+    CommandAction, RunStatus, SharedWorkflowUiSink, StageStatus, WorkflowConfig, WorkflowLlmClient,
+    WorkflowLlmClientFactory, WorkflowLlmClientRequest, WorkflowPolicy, WorkflowRun,
+    WorkflowStageRunner, WorkflowStore, WorkflowUiEvent,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::command::pipeline_support::build_subagent_pipeline_adapter;
+use crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
@@ -20,84 +18,53 @@ mod planner_repair_tests;
 #[cfg(test)]
 #[path = "workflow_live_tests.rs"]
 mod tests;
-#[path = "workflow_agent_select.rs"]
-mod workflow_agent_select;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
-#[path = "workflow_live_artifact_refs.rs"]
-mod workflow_live_artifact_refs;
 #[cfg(test)]
 #[path = "workflow_live_canary_retry_tests.rs"]
 mod workflow_live_canary_retry_tests;
 #[cfg(test)]
 #[path = "workflow_live_canary_tests.rs"]
 mod workflow_live_canary_tests;
+#[path = "workflow_live_config_layers.rs"]
+mod workflow_live_config_layers;
 #[cfg(test)]
 #[path = "workflow_live_execution_tests.rs"]
 mod workflow_live_execution_tests;
-#[path = "workflow_live_generated_contract.rs"]
-mod workflow_live_generated_contract;
-#[path = "workflow_live_generated_lifecycle_remediation.rs"]
-mod workflow_live_generated_lifecycle_remediation;
-#[path = "workflow_live_generated_lifecycle_support.rs"]
-mod workflow_live_generated_lifecycle_support;
-#[path = "workflow_live_generated_scaffold.rs"]
-mod workflow_live_generated_scaffold;
 #[cfg(test)]
 #[path = "workflow_live_generated_semantics_tests.rs"]
 mod workflow_live_generated_semantics_tests;
-#[path = "workflow_live_items.rs"]
-mod workflow_live_items;
 #[path = "workflow_live_mcp.rs"]
 mod workflow_live_mcp;
 #[path = "workflow_live_planner.rs"]
 mod workflow_live_planner;
-#[path = "workflow_live_prompt.rs"]
-mod workflow_live_prompt;
-#[path = "workflow_live_repo_root.rs"]
-mod workflow_live_repo_root;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
 mod workflow_live_runner;
-#[path = "workflow_live_runner_activity.rs"]
-mod workflow_live_runner_activity;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;
-#[path = "workflow_live_semantic_preservation.rs"]
-mod workflow_live_semantic_preservation;
-// Orchestrated lifecycle (v3): persistent-orchestrator action layer. The
-// driver wiring lands incrementally; the action contract compiles and is
-// tested from day one.
-#[path = "workflow_live_task_universe.rs"]
-pub(crate) mod workflow_live_task_universe;
+#[cfg(test)]
+#[path = "workflow_live_runtime_genericity_tests.rs"]
+mod workflow_live_runtime_genericity_tests;
+#[path = "workflow_live_shape_apply.rs"]
+mod workflow_live_shape_apply;
 #[cfg(test)]
 #[path = "workflow_live_test_support.rs"]
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
-#[path = "workflow_live_v2_completion_credit.rs"]
-mod workflow_live_v2_completion_credit;
-#[cfg(test)]
-#[path = "workflow_live_v2_completion_credit_tests.rs"]
-mod workflow_live_v2_completion_credit_tests;
-#[path = "workflow_live_v2_host.rs"]
-mod workflow_live_v2_host;
-#[cfg(test)]
-#[path = "workflow_live_v2_host_tests.rs"]
-mod workflow_live_v2_host_tests;
-#[allow(dead_code)]
-#[path = "workflow_live_v3_orchestrator_actions.rs"]
-mod workflow_live_v3_orchestrator_actions;
-#[path = "workflow_live_verification_contract.rs"]
-mod workflow_live_verification_contract;
 #[cfg(test)]
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;
 
+use workflow_live_config_layers::{
+    live_policy, load_generated_workflow_config, load_learning_config,
+};
 use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
+use workflow_live_shape_apply::{apply_generated_shape, live_task_class};
 
 pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
     matches!(
@@ -114,13 +81,13 @@ pub(crate) fn should_spawn_live(action: &CommandAction) -> bool {
 pub(crate) fn spawn_live_workflow(
     cwd: PathBuf,
     action: CommandAction,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     config_path: Option<PathBuf>,
 ) {
     archon_observability::spawn_named("dynamic-workflow-run", async move {
-        if let Err(error) = tui_tx
-            .send_async(TuiEvent::TextDelta(live_start_message(&action)))
+        if let Err(error) = ui_sink
+            .emit(WorkflowUiEvent::Text(live_start_message(&action)))
             .await
         {
             tracing::error!(%error, "workflow start notification delivery failed");
@@ -131,7 +98,7 @@ pub(crate) fn spawn_live_workflow(
             &cwd,
             action,
             llm,
-            tui_tx.clone(),
+            ui_sink.clone(),
             config_path,
             generated_config,
             true,
@@ -140,20 +107,20 @@ pub(crate) fn spawn_live_workflow(
         .await;
         match result {
             Ok(text) => {
-                if let Err(error) = tui_tx.send_async(TuiEvent::TextDelta(text)).await {
+                if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(text)).await {
                     tracing::error!(%error, "workflow completion notification delivery failed");
                 }
             }
             Err(err) => {
                 let message = format!("Workflow failed: {err}");
-                if let Err(error) = tui_tx
-                    .send_async(TuiEvent::TextDelta(format!("{message}\n")))
+                if let Err(error) = ui_sink
+                    .emit(WorkflowUiEvent::Text(format!("{message}\n")))
                     .await
                 {
                     tracing::error!(%error, "workflow failure text delivery failed");
                     return;
                 }
-                if let Err(error) = tui_tx.send_async(TuiEvent::Error(message)).await {
+                if let Err(error) = ui_sink.emit(WorkflowUiEvent::Error(message)).await {
                     tracing::error!(%error, "workflow failure notification delivery failed");
                 }
             }
@@ -166,11 +133,22 @@ pub(crate) async fn run_live_cli_action(
     action: CommandAction,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
+    llm_factory: &dyn WorkflowLlmClientFactory,
 ) -> Result<String> {
-    let llm =
-        build_subagent_pipeline_adapter(config, env_vars, "workflow_cli", cwd, "workflow-cli")
-            .await?;
+    let llm = llm_factory
+        .build_client(WorkflowLlmClientRequest {
+            cwd: cwd.to_path_buf(),
+            origin: "workflow_cli".to_string(),
+            session_id: "workflow-cli".to_string(),
+        })
+        .await?;
+    // The one place in this file that still names the TUI. A CLI run has no
+    // terminal UI attached, but it must still exert the same backpressure and
+    // coalescing a TUI run does, or the two paths would differ in exactly the
+    // conditions that produce bugs. So the CLI builds the real channel and
+    // drains it, and passes the sender through the same port a TUI run uses.
     let (tui_tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
+    let ui_sink = TuiWorkflowUiSink::arc(tui_tx);
     let drain = archon_observability::spawn_named("workflow-cli-tui-drain", async move {
         while rx.recv().await.is_some() {}
     });
@@ -183,7 +161,7 @@ pub(crate) async fn run_live_cli_action(
         cwd,
         action,
         llm,
-        tui_tx,
+        ui_sink,
         Some(config_path),
         config.workflow.generated.clone(),
         true,
@@ -212,8 +190,8 @@ impl LiveApprovalMode {
 async fn run_live_action(
     cwd: &Path,
     action: CommandAction,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     config_path: Option<PathBuf>,
     generated_config: GeneratedWorkflowConfig,
     workspace_boundary_supported: bool,
@@ -221,9 +199,42 @@ async fn run_live_action(
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
     let policy = live_policy(cwd, config_path.as_deref());
+    let learning = load_learning_config(cwd, config_path.as_deref());
+    // The one place a generated run's limits are decided. SONA is consulted
+    // here rather than inside the planner because every downstream consumer —
+    // the lifecycle driver's repair caps, the host-call client's timeout, the
+    // read-only branch budget, and the metadata a resume replays — reads the
+    // same `generated_config`, so a single substitution reaches all of them and
+    // no path can end up with a half-tuned config.
+    let task_class = live_task_class(&action);
+    let mut generated_config = generated_config;
+    let mut tuning_decisions = Vec::new();
+    if let Some(class) = task_class {
+        let tuning = crate::command::sona_workflow_tuning::tune_generated_config(
+            cwd,
+            class,
+            &learning,
+            &generated_config,
+        );
+        let report = tuning.report(class);
+        generated_config = tuning.config;
+        tuning_decisions = tuning.decisions;
+        if !report.is_empty() {
+            tracing::info!(class, %report, "generated limits tuned by SONA");
+            // Emitted before any work starts: a user who wonders why this run
+            // got five repair iterations must be able to read the answer in the
+            // run's own output rather than reconstruct it from the learning
+            // store by hand.
+            if let Err(error) = ui_sink.emit(WorkflowUiEvent::Text(report)).await {
+                tracing::debug!(%error, "tuning report delivery failed");
+            }
+        }
+    }
+    let generated_config = generated_config;
+    let tuning_decisions = tuning_decisions;
     let runner = PipelineWorkflowRunner {
         llm: llm.clone(),
-        tui_tx: tui_tx.clone(),
+        ui_sink: ui_sink.clone(),
         agent_names: AgentRegistry::load(cwd)
             .available_agent_names()
             .into_iter()
@@ -233,15 +244,35 @@ async fn run_live_action(
     };
     let capped_live_plan = |task: &str| {
         let llm = llm.clone();
-        let tui_tx = tui_tx.clone();
+        let ui_sink = ui_sink.clone();
         let task = task.to_string();
         let store = &store;
         let runner = &runner;
         let policy = &policy;
         let generated_config = &generated_config;
+        let learning = &learning;
+        let tuning_decisions = &tuning_decisions;
         async move {
-            let mut plan = plan_live(store, &task, llm, tui_tx, generated_config).await?;
+            let mut plan = plan_live(
+                store,
+                &task,
+                llm,
+                ui_sink.clone(),
+                generated_config,
+                learning,
+            )
+            .await?;
             cap_live_plan_parallelism(&mut plan, runner, policy);
+            // Attached here rather than inside the planner because the planner
+            // never sees the baseline it was tuned away from, and a decision
+            // record without its baseline explains nothing.
+            plan.tuning_decisions = tuning_decisions.clone();
+            // Shape comes after the plan, not before it like the budgets: the
+            // knob is scored against the plan's own stage families and the
+            // declared task graph, and neither exists until the planner has
+            // run. Budgets have no such dependency, which is why they are
+            // resolved earlier and reach the planner itself.
+            apply_generated_shape(cwd, task_class, learning, &mut plan, &ui_sink).await;
             Ok::<_, anyhow::Error>(plan)
         }
     };
@@ -259,7 +290,7 @@ async fn run_live_action(
                 plan,
                 task,
                 llm,
-                tui_tx,
+                ui_sink,
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
@@ -268,6 +299,7 @@ async fn run_live_action(
                 } else {
                     workflow_live_v2::script_lifecycle_from_env()
                 },
+                &learning,
             )
             .await;
         }
@@ -295,10 +327,11 @@ async fn run_live_action(
                 plan,
                 task,
                 llm,
-                tui_tx,
+                ui_sink,
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
+                &learning,
             )
             .await;
         }
@@ -308,10 +341,11 @@ async fn run_live_action(
                 &store,
                 &run_id,
                 llm.clone(),
-                tui_tx.clone(),
+                ui_sink.clone(),
                 runner.agent_names.clone(),
                 approval_mode,
                 workspace_boundary_supported,
+                &learning,
             )
             .await?
             {
@@ -388,57 +422,6 @@ fn first_stage_with_status(run: &WorkflowRun, status: StageStatus) -> Option<&st
         .values()
         .find(|stage| stage.status == status)
         .map(|stage| stage.id.as_str())
-}
-
-fn live_policy(cwd: &Path, config_path: Option<&Path>) -> WorkflowPolicy {
-    WorkflowPolicy {
-        require_human_for_dangerous_tools: false,
-        ..WorkflowPolicy::from_config(&load_workflow_config(cwd, config_path))
-    }
-}
-
-fn load_workflow_config(cwd: &Path, config_path: Option<&Path>) -> WorkflowConfig {
-    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
-    let mut merged = toml::Value::Table(toml::map::Map::new());
-    for layer in discover_config_paths(config_path, cwd, None) {
-        let Ok(text) = std::fs::read_to_string(&layer.path) else {
-            continue;
-        };
-        let Ok(value) = text.parse::<toml::Value>() else {
-            continue;
-        };
-        merged = deep_merge_toml(merged, value);
-    }
-    merged
-        .get("workflow")
-        .cloned()
-        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-        .try_into()
-        .unwrap_or_else(|_| WorkflowConfig::default())
-}
-
-fn load_generated_workflow_config(
-    cwd: &Path,
-    config_path: Option<&Path>,
-) -> GeneratedWorkflowConfig {
-    use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
-    let mut merged = toml::Value::Table(toml::map::Map::new());
-    for layer in discover_config_paths(config_path, cwd, None) {
-        let Ok(text) = std::fs::read_to_string(&layer.path) else {
-            continue;
-        };
-        let Ok(value) = text.parse::<toml::Value>() else {
-            continue;
-        };
-        merged = deep_merge_toml(merged, value);
-    }
-    merged
-        .get("workflow")
-        .and_then(|workflow| workflow.get("generated"))
-        .cloned()
-        .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
-        .try_into()
-        .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
 }
 
 /// Render compact write-coordination status blocks left on disk.

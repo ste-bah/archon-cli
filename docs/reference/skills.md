@@ -36,8 +36,10 @@ When you type `/foo`, archon first checks the primary registry. If no primary ma
 | `/remote-control` | Show remote control mode info |
 | `/btw` | Aside marker (tangent, don't change focus) |
 | `/refresh-identity` | Clear beta header cache & reprobe |
-| `/to-prd` | Generate a PRD from a feature description using ai-agent-prd template |
-| `/prd-to-spec` | Convert a PRD to a phased task specification |
+| `/to-prd` | Skills chain: generate a PRD using the ai-agent-prd template → `prds/<slug>/PRD.md` |
+| `/prd-to-spec` | Skills chain: convert a PRD to a phased task specification → `tasks/phase<N>/task<M>.md` |
+| `/workflow-prd` (`/wf-prd`) | Workflow path: generate a PRD in the workflow-engine format → `prds/PRD-<NAME>/PRD-<NAME>.md` |
+| `/workflow-prd-spec` (`/wf-prd-spec`) | Workflow path: decompose into the flat task directory the engine walks → `tasks/PRD-<NAME>/TASK-<DOMAIN>-<NNN>-<slug>.md` |
 | `/grill-me` | Non-code alignment session — relentlessly interviews you about a plan |
 | `/grill-with-docs` | Alignment + documentation — builds context glossary and ADRs |
 | `/diagnose` | Systematic 6-phase debugging workflow |

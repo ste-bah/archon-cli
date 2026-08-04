@@ -437,6 +437,21 @@ impl Drop for EnvGuard {
     }
 }
 
+/// Serialise the tests that mutate process-wide environment variables.
+///
+/// Poisoning is recovered from rather than propagated, which looks wrong and
+/// is not. This mutex guards no data — it exists only so two tests do not hold
+/// conflicting `EnvGuard`s at once, and every `EnvGuard` restores its variable
+/// in `Drop`, which runs during the panic that poisoned the lock. So the
+/// environment is already consistent by the time the next test acquires it.
+///
+/// Propagating the poison instead turns one failing test into every subsequent
+/// env-locked test failing with "mutex poisoned", which buries the one real
+/// failure under six imitations and moves the count around run to run
+/// depending on scheduling. That is what this cost before: a mock-server
+/// timeout in one test presented as a six-test env-isolation problem.
 pub(super) fn env_lock() -> MutexGuard<'static, ()> {
-    ENV_LOCK.lock().expect("provider test env mutex poisoned")
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

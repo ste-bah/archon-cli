@@ -1,4 +1,6 @@
-fn record_generated_learning_event(
+use super::*;
+
+pub(super) fn record_generated_learning_event(
     store: &WorkflowStore,
     run_id: &str,
     plan: &WorkflowScriptPlan,

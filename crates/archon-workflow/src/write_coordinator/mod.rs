@@ -4,6 +4,15 @@
 //! canonical id aliases shared by every coordinator task. Coordinator behavior
 //! (worktree isolation, conflict graph, patch capture/apply) lives in sibling
 //! modules added by later tasks.
+//!
+//! # `write_plan` and `shared_append` are re-exports
+//!
+//! Both modules moved into the `archon-write-plan` leaf crate, because live
+//! admission in `archon-topology` needs the same overlap table and reaching it
+//! through this crate closed a dependency cycle (see that crate's docs). They
+//! are re-exported here under their original paths, so
+//! `write_coordinator::write_plan::…` and `write_coordinator::shared_append::…`
+//! still resolve for every existing caller.
 
 pub mod config;
 pub mod conflict_graph;
@@ -12,10 +21,10 @@ pub mod patch_apply;
 pub mod patch_manifest;
 pub mod status;
 pub mod worktree_isolation;
-pub mod write_plan;
 
 use std::path::{Path, PathBuf};
 
+pub use archon_write_plan::{ItemId, shared_append, write_plan};
 pub use config::WriteCoordinatorConfig;
 pub use conflict_graph::{Schedule, ScheduleError, ScheduleSummary, Wave, WaveCaps};
 pub use coordinator::{
@@ -23,13 +32,18 @@ pub use coordinator::{
 };
 pub use patch_apply::{ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock};
 pub use patch_manifest::{CapturedPatch, ManifestStatus, PatchError, PatchManifest};
+pub use shared_append::{
+    SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,
+    resource_keys_for_targets_with_shared_append, shared_append_key,
+    shared_append_key_for_raw_target,
+};
 pub use worktree_isolation::{
     CanonicalBaseline, FileMeta, IsolationError, ItemWorkspace, WorkspaceStatus,
 };
-pub use write_plan::{NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError};
-
-/// Canonical fan-out item identifier (matches `FanoutItem.id`).
-pub type ItemId = String;
+pub use write_plan::{
+    NormalizedPath, ResourceKey, TargetFilesSource, WritePlan, WritePlanError, fold_resource_case,
+    keys_conflict, resource_key_for_raw_target,
+};
 
 /// Canonical wave index within a coordinated implementation fanout.
 pub type WaveId = u32;

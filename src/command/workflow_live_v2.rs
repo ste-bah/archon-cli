@@ -8,49 +8,29 @@ use std::{
 
 use anyhow::Result;
 use archon_core::config::GeneratedWorkflowConfig;
-use archon_pipeline::runner::LlmClient;
-use archon_tui::event_channel::TuiEventSender;
 use archon_workflow::{
     GeneratedWorkflowKind, GeneratedWorkflowLearningContext, LifecycleAction, LifecycleController,
-    ProviderTier, RunStatus, WorkflowBundle, WorkflowBundleOrigin, WorkflowError,
-    WorkflowEventKind, WorkflowEventLog, WorkflowGeneratedScaffold, WorkflowLearningEvent,
-    WorkflowLearningEvidenceRef, WorkflowRun, WorkflowStore, WorkflowV2AgentAdapter,
-    WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
-    WorkflowV2CallRecord, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem,
-    WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2RejectedOutput,
-    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Scheduler,
-    WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
+    ProviderTier, RunStatus, SharedWorkflowUiSink, WorkflowBundle, WorkflowBundleOrigin,
+    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowGeneratedScaffold,
+    WorkflowLearningEvent, WorkflowLearningEvidenceRef, WorkflowLlmClient, WorkflowRun,
+    WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError,
+    WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence,
+    WorkflowV2EvidenceKind, WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
 };
 
+// Host side of `archon_workflow::agent_dispatch_port`. Outside the `workflow_*`
+// prefix on purpose — see the file's module doc.
+#[path = "live_agent_dispatch.rs"]
+mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
 mod workflow_live_provider_env;
-#[path = "workflow_live_v2_aggregate.rs"]
-mod workflow_live_v2_aggregate;
-#[path = "workflow_live_v2_artifact_paths.rs"]
-mod workflow_live_v2_artifact_paths;
-#[path = "workflow_live_v2_data.rs"]
-mod workflow_live_v2_data;
-#[cfg(test)]
-#[path = "workflow_live_v2_data_tests.rs"]
-mod workflow_live_v2_data_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_frontier_resume_tests.rs"]
 mod workflow_live_v2_frontier_resume_tests;
-#[path = "workflow_live_v2_manifest_scope.rs"]
-mod workflow_live_v2_manifest_scope;
-#[cfg(test)]
-#[path = "workflow_live_v2_manifest_scope_tests.rs"]
-mod workflow_live_v2_manifest_scope_tests;
-#[path = "workflow_live_v2_source_graph.rs"]
-mod workflow_live_v2_source_graph;
-#[path = "workflow_live_v2_stable_json.rs"]
-mod workflow_live_v2_stable_json;
-#[path = "workflow_live_v2_target_expansion.rs"]
-mod workflow_live_v2_target_expansion;
-#[path = "workflow_live_v2_verification.rs"]
-mod workflow_live_v2_verification;
 
-use workflow_live_v2_data::{
+use archon_workflow::v2::call_data::{
     execution_with_resolved_source, fanout_items_for_call, result_from_fanout_report,
     v2_agent_request,
 };
@@ -58,30 +38,22 @@ use workflow_live_v2_data::{
 mod workflow_live_v2_client;
 
 use workflow_live_v2_client::LiveV2AgentClient;
-#[path = "workflow_live_v2_contracts.rs"]
-mod workflow_live_v2_contracts;
 
-#[path = "workflow_live_v2_write.rs"]
-mod workflow_live_v2_write;
+use archon_workflow::v2::write::run_write_capable_v2_fanout;
 
-use workflow_live_v2_write::run_write_capable_v2_fanout;
-#[path = "workflow_live_v2_state.rs"]
-mod workflow_live_v2_state;
-
-use workflow_live_v2_state::{
-    persist_terminal_run_status, poll_v2_run_control, sync_v2_summary_to_run,
-};
+use archon_workflow::poll_v2_run_control;
+use archon_workflow::v2::run_state_sync::{persist_terminal_run_status, sync_v2_summary_to_run};
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
+pub(super) use archon_workflow::v2::script::dry_run_workflow_plan;
 use workflow_live_v2_script::WorkflowV2ScriptRunner;
-pub(super) use workflow_live_v2_script::dry_run_workflow_plan;
 
 use super::LiveApprovalMode;
 use super::workflow_live_approval::{LiveApprovalOutcome, gate_live_approval};
 use super::workflow_live_planner::WorkflowScriptPlan;
-use super::workflow_live_task_universe::WorkflowV2TaskUniverse;
-use super::workflow_live_v2_host::execute_local_host_call;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::local_host::execute_local_host_call;
 
 const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
 
@@ -102,6 +74,22 @@ struct GeneratedV2Metadata {
     governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generated_config: Option<GeneratedWorkflowConfig>,
+    /// Why `generated_config` differs from the operator's file, when it does.
+    ///
+    /// Persisted beside the config it explains so the run directory answers
+    /// "why did this run get 5 repair iterations?" on its own. Absent on every
+    /// run where SONA did not move anything, which is most of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
+    /// Why this run's plan had the shape it had.
+    ///
+    /// The structural counterpart of `tuning_decisions`. Persisted for the same
+    /// reason and absent on the same runs: a run that got the configured
+    /// concurrency carries nothing, and a run that did not carries the weight,
+    /// the evidence count, and — when a pre-run lint withdrew the proposal —
+    /// which lint and what it found.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shape_decisions: Vec<archon_core::config::ShapeDecision>,
     /// Which lifecycle this run was CREATED with (true = v3 authored script,
     /// false = decomposed). Persisted so continue/resume runs the SAME engine
     /// instead of silently switching when the ARCHON_SCRIPT_LIFECYCLE env var
@@ -116,37 +104,51 @@ pub(super) struct WorkflowV2ScriptRuntime {
     pub(super) generated_config: GeneratedWorkflowConfig,
 }
 
-include!("workflow_live_v2_run.rs");
+#[path = "workflow_live_v2_run.rs"]
+mod workflow_live_v2_run;
+pub(crate) use workflow_live_v2_run::*;
 
-include!("workflow_live_v2_learning.rs");
+#[path = "workflow_live_v2_learning.rs"]
+mod workflow_live_v2_learning;
+pub(super) use workflow_live_v2_learning::*;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_learning_tests.rs"]
 mod learning_fidelity_tests;
 
-include!("workflow_live_v2_host_dispatch.rs");
+#[path = "workflow_live_v2_host_dispatch.rs"]
+mod workflow_live_v2_host_dispatch;
+pub(crate) use workflow_live_v2_host_dispatch::*;
+#[path = "workflow_live_v2_host_dispatch_repair.rs"]
+mod workflow_live_v2_host_dispatch_repair;
+pub(super) use workflow_live_v2_host_dispatch_repair::*;
+#[cfg(test)]
+#[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
+mod rejected_output_tests;
 
-include!("workflow_live_v2_read_only.rs");
+#[path = "workflow_live_v2_read_only_b.rs"]
+mod workflow_live_v2_read_only_b;
+pub(super) use workflow_live_v2_read_only_b::*;
 
-include!("workflow_live_v2_branch_cache.rs");
+pub(super) use archon_workflow::v2::branch_cache::*;
 
 #[cfg(test)]
 mod generated_resume_tests {
     use super::*;
-    use archon_pipeline::runner::LlmResponse;
-    use archon_tui::event_channel::bounded_tui_event_channel;
+    use crate::command::tui_workflow_ui_sink::default_workflow_ui_sink;
+    use archon_workflow::WorkflowAgentOutcome;
 
     struct PanicLlm;
 
     #[async_trait::async_trait]
-    impl LlmClient for PanicLlm {
+    impl WorkflowLlmClient for PanicLlm {
         async fn send_message(
             &self,
             _messages: Vec<serde_json::Value>,
             _system: Vec<serde_json::Value>,
             _tools: Vec<serde_json::Value>,
             _model: &str,
-        ) -> Result<LlmResponse> {
+        ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
             panic!("resume guard must fail before scaffold execution")
         }
     }
@@ -162,11 +164,8 @@ mod generated_resume_tests {
             target_repository_root: None,
             max_parallelism: 4,
             max_agents: 16,
-            provider_tiers: BTreeMap::new(),
             stages: Vec::new(),
-            artifact_policy: Default::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: Vec::new(),
         };
         let run = store.create_run(spec).expect("seed run");
@@ -195,21 +194,24 @@ export default async function workflow(w) {
                     script_args: None,
                     governed_learning_context: Vec::new(),
                     generated_config: None,
+                    tuning_decisions: Vec::new(),
+                    shape_decisions: Vec::new(),
                     script_lifecycle: Some(true),
                 },
             )
             .expect("seed inconsistent metadata");
-        let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+        let (ui_sink, _tui_rx) = default_workflow_ui_sink();
 
         let err = resume_generated_v2_workflow(
             temp.path(),
             &store,
             &run.id,
             Arc::new(PanicLlm),
-            tui_tx,
+            ui_sink,
             Vec::new(),
             LiveApprovalMode::CliYes,
             true,
+            &archon_core::config::LearningConfig::default(),
         )
         .await
         .expect_err("inconsistent v3 metadata must fail closed");
@@ -244,11 +246,8 @@ export default async function workflow(w) {
             target_repository_root: None,
             max_parallelism: 4,
             max_agents: 16,
-            provider_tiers: BTreeMap::new(),
             stages: Vec::new(),
-            artifact_policy: Default::default(),
             permissions: BTreeMap::new(),
-            quality_gates: BTreeMap::new(),
             learning_hooks: Vec::new(),
         };
         let run = store.create_run(spec).expect("seed run");
@@ -258,6 +257,7 @@ export default async function workflow(w) {
             Vec::new(),
             None, // no task universe -> provider-authored path
             GeneratedWorkflowConfig::default(),
+            &archon_core::config::LearningConfig::default(),
         );
         // Caller requests v3 (the default); the universe-less plan must still be
         // recorded as NOT script-lifecycle so the guard does not refuse it.

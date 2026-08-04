@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn generated_v2_restart_stage_invalidates_downstream_script_consumers() {
     let temp = tempfile::tempdir().unwrap();
@@ -128,7 +130,7 @@ export default async function workflow(w) {
     }
 }
 
-fn test_spec() -> WorkflowSpec {
+pub(super) fn test_spec() -> WorkflowSpec {
     WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
         name: "test".to_string(),
@@ -136,7 +138,6 @@ fn test_spec() -> WorkflowSpec {
         target_repository_root: None,
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: BTreeMap::from([(ProviderTier::Coder, "test".to_string())]),
         stages: vec![
             test_stage(
                 "read-only-review",
@@ -151,9 +152,7 @@ fn test_spec() -> WorkflowSpec {
                 vec!["read-only-review".to_string()],
             ),
         ],
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     }
 }
@@ -172,7 +171,6 @@ fn test_stage(
         foreach: None,
         reducer: None,
         tool: None,
-        condition: None,
         depends_on,
         provider_tier: Some(ProviderTier::Coder),
         retry: RetryPolicy::default(),
@@ -188,7 +186,7 @@ fn test_stage(
     }
 }
 
-fn save_test_branch(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) {
+pub(super) fn save_test_branch(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) {
     let mut result = WorkflowV2Result::accepted(format!("branch {item_id} accepted"));
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Implementation,
@@ -211,7 +209,7 @@ fn save_test_branch(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &s
         .unwrap();
 }
 
-fn save_test_task_branch(
+pub(super) fn save_test_task_branch(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
     item_id: &str,
@@ -241,13 +239,13 @@ fn save_test_task_branch(
         .unwrap();
 }
 
-fn running_stage(id: &str) -> StageState {
+pub(super) fn running_stage(id: &str) -> StageState {
     let mut state = StageState::pending(id);
     state.status = StageStatus::Running;
     state
 }
 
-fn test_v2_call(
+pub(super) fn test_v2_call(
     id: &str,
     method: WorkflowV2HostMethod,
     source: Option<&str>,
@@ -291,7 +289,7 @@ fn save_test_call_record(
         .unwrap();
 }
 
-fn save_test_task_call_record(
+pub(super) fn save_test_task_call_record(
     v2_store: &WorkflowV2ResultStore,
     run_id: &str,
     call: WorkflowV2HostCall,

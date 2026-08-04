@@ -1,12 +1,14 @@
+use super::*;
+
 #[async_trait::async_trait]
-impl LlmClient for GeneratedV2RunClient {
+impl WorkflowLlmClient for GeneratedV2RunClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         let content = if call == 0 {
             r#"
@@ -39,7 +41,7 @@ export default async function workflow(w) {
             })
             .to_string()
         };
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -49,14 +51,14 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for GeneratedV2FanoutRunClient {
+impl WorkflowLlmClient for GeneratedV2FanoutRunClient {
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         let content = match call {
             0 => {
@@ -140,7 +142,7 @@ export default async function workflow(w) {
             }
             _ => unreachable!("unexpected generated fanout test call"),
         };
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -150,14 +152,14 @@ export default async function workflow(w) {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for GeneratedV2SlowFanoutRunClient {
+impl WorkflowLlmClient for GeneratedV2SlowFanoutRunClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         let content = match call {
             0 => {
@@ -209,7 +211,7 @@ export default async function workflow(w) {
                 .to_string()
             }
         };
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,

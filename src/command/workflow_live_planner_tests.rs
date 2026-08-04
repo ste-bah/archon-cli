@@ -35,6 +35,7 @@ fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields
         }],
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
 
     let spec = plan.approval_metadata_spec();
@@ -46,9 +47,13 @@ fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields
         .iter()
         .find(|stage| stage.id == "missing-plan-escalation")
         .expect("metadata stage exists");
+    // `condition` is not a typed StageSpec field: nothing ever evaluated it.
+    // The authored text still round-trips verbatim through the flattened extras.
     assert_eq!(
-        stage.condition.as_deref(),
-        Some("plannedItems.length === 0 && proofReview.status !== \"accepted\"")
+        stage.extra.get("condition"),
+        Some(&json!(
+            "plannedItems.length === 0 && proofReview.status !== \"accepted\""
+        ))
     );
     assert_eq!(stage.input["runtime"], "script_first_v2");
     assert_eq!(stage.extra.get("runtime_loop"), Some(&json!("while")));
@@ -77,6 +82,7 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
         }],
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
     );
 
     let spec = plan.approval_metadata_spec();
@@ -89,4 +95,64 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
     assert_eq!(stage.kind, StageKind::Tool);
     assert_eq!(stage.tool.as_deref(), Some("requireArtifact"));
     assert_eq!(stage.provider_tier, Some(ProviderTier::Local));
+}
+
+#[test]
+fn a_saved_template_keeps_its_learning_hooks_and_a_generated_plan_derives_them() {
+    // `learning_hooks` is the learning bridge's routing selector. A saved
+    // workflow that authored hooks used to lose them here, which left the only
+    // surface that can populate the field unable to reach its consumer.
+    let spec = archon_workflow::WorkflowSpec::from_yaml(
+        r#"
+schema: archon.workflow.v1
+name: hooked-template
+task: Template with hooks
+learning_hooks: [sona, reasoning_bank]
+stages:
+  - id: a
+    kind: agent
+    agent: tester
+"#,
+    )
+    .expect("template spec");
+    let plan =
+        WorkflowScriptPlan::from_template(spec, "export default async function w() {}", Vec::new());
+    // The spec deserializer sorts and dedupes hooks, so the authored order is
+    // not preserved — only the set is.
+    assert_eq!(
+        plan.approval_metadata_spec().learning_hooks,
+        vec!["reasoning_bank".to_string(), "sona".to_string()]
+    );
+
+    // A generated plan authors nothing, so its hooks are DERIVED. This used to
+    // be hardcoded empty, which is why no generated run ever dispatched.
+    let generated = WorkflowScriptPlan::generated(
+        "Implement a decomposed PRD",
+        "export default async function w() {}",
+        Vec::new(),
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
+    );
+    assert_eq!(
+        generated.approval_metadata_spec().learning_hooks,
+        vec!["desc".to_string()],
+        "a generated plan must reach the learning bridge with a routable hook"
+    );
+
+    // With every candidate subsystem turned off the list is empty again, and
+    // an empty list dispatches nothing.
+    let mut all_off = archon_core::config::LearningConfig::default();
+    all_off.sona.pipeline_recording = false;
+    all_off.reasoning_bank.enabled = false;
+    all_off.desc.enabled = false;
+    let silent = WorkflowScriptPlan::generated(
+        "Implement a decomposed PRD",
+        "export default async function w() {}",
+        Vec::new(),
+        None,
+        archon_core::config::GeneratedWorkflowConfig::default(),
+        &all_off,
+    );
+    assert!(silent.approval_metadata_spec().learning_hooks.is_empty());
 }

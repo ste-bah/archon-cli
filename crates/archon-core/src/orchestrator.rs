@@ -1,14 +1,25 @@
 pub mod config;
-pub mod dag;
 pub mod events;
 #[path = "orchestrator_executor.rs"]
 mod executor;
 pub mod pool;
+mod scheduling;
+pub mod topology;
 pub use executor::RealSubtaskExecutor;
 
 #[cfg(test)]
 #[path = "orchestrator_compaction_tests.rs"]
 mod compaction_tests;
+
+// Ordinary `mod` — resolves to orchestrator/wave_scheduling_tests.rs. No
+// `#[path]` splicing; see docs/architecture/topology-engineering.md, CL2.
+#[cfg(test)]
+mod wave_scheduling_tests;
+
+// Findings O2 and O4 — that every runner actually consults `AgentPool`, and
+// that the pool imposes a lifetime total and not only a concurrency cap.
+#[cfg(test)]
+mod pool_wiring_tests;
 
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -16,6 +27,7 @@ use tokio::sync::{Mutex, mpsc};
 use config::{ExecutionMode, OrchestratorConfig, TeamConfig};
 use events::{OrchestratorEvent, Subtask, SubtaskStatus};
 use pool::AgentPool;
+use scheduling::{dependency_context, flatten_waves, retry_execute};
 
 /// Trait for executing a single subtask. Tests supply mocks; production wires the agent loop.
 #[async_trait::async_trait]
@@ -54,6 +66,15 @@ impl Orchestrator {
             config,
             cancelled: Arc::new(Mutex::new(false)),
         }
+    }
+
+    /// A pool carrying both ceilings this orchestrator is configured with.
+    ///
+    /// One constructor for every runner, so the O4 defect — one runner using
+    /// the pool and another not — cannot recur by omission at a second call
+    /// site.
+    fn agent_pool(&self) -> AgentPool {
+        AgentPool::with_lifetime_cap(self.config.max_concurrent, self.config.max_agents)
     }
 
     pub async fn run_team(
@@ -95,13 +116,32 @@ impl Orchestrator {
             })
             .await;
 
+        // Every mode schedules against the same topology IR. Dependencies used
+        // to be honoured only in `Dag` (finding O1); now the graph decides
+        // *ordering* in all four modes and the mode decides only concurrency
+        // within a wave and what happens on failure. For a decomposition that
+        // declares no dependencies this collapses to a single wave, which is
+        // exactly the old behaviour.
+        let (graph, waves) = topology::plan(&subtasks, &team.name, self.config.max_concurrent)?;
+        if let Ok(path) = graph.critical_path() {
+            tracing::debug!(
+                "orchestrator: team '{}' has {} wave(s), span {}",
+                team.name,
+                waves.len(),
+                path.span()
+            );
+        }
+
         let result = match team.mode {
             ExecutionMode::Sequential | ExecutionMode::Pipeline => {
-                self.run_sequential(subtasks, executor, &event_tx).await?
+                self.run_sequential(subtasks, waves, executor, &event_tx)
+                    .await?
             }
-            ExecutionMode::Parallel => self.run_parallel(subtasks, executor, &event_tx).await?,
+            ExecutionMode::Parallel => {
+                self.run_parallel(subtasks, waves, executor, &event_tx)
+                    .await?
+            }
             ExecutionMode::Dag => {
-                let waves = dag::build_dag_waves(&subtasks)?;
                 self.run_dag_waves(subtasks, waves, executor, &event_tx)
                     .await?
             }
@@ -116,23 +156,60 @@ impl Orchestrator {
         Ok(result)
     }
 
+    /// One task at a time, in dependency order, stopping at the first failure.
+    ///
+    /// Ordering comes from the waves rather than from the vector, so a
+    /// dependency-carrying decomposition is now executed in a valid order
+    /// instead of whatever order it was constructed in. `Sequential` declares
+    /// no dependencies and `Pipeline` declares a linear chain, so for both the
+    /// flattened wave order equals the original vector order and this is
+    /// behaviour-identical to the previous implementation.
     async fn run_sequential(
         &self,
-        mut subtasks: Vec<Subtask>,
+        subtasks: Vec<Subtask>,
+        waves: Vec<Vec<String>>,
         executor: Arc<dyn SubtaskExecutor>,
         event_tx: &mpsc::Sender<OrchestratorEvent>,
     ) -> anyhow::Result<String> {
+        // One at a time, so concurrency is never in question — but the lifetime
+        // budget still applies, and applying it here rather than only in the
+        // concurrent runners is what makes `max_agents` a property of the team
+        // rather than of the execution mode it happens to run under.
+        let pool = self.agent_pool();
+        let mut ordered = flatten_waves(&subtasks, &waves);
+        let mut completed: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let mut context = String::new();
         let mut results = Vec::new();
 
-        for subtask in &mut subtasks {
+        for subtask in &mut ordered {
             if *self.cancelled.lock().await {
                 // agent-event-tx-lint: ignore — channel holds OrchestratorEvent, not AgentEvent
                 let _ = event_tx.send(OrchestratorEvent::TeamCancelled).await;
                 anyhow::bail!("team cancelled");
             }
 
+            // No declared dependencies means dataflow is *unknown*, not
+            // *none* — so keep threading the previous result forward rather
+            // than handing the task an empty context it never asked for. When
+            // dependencies are declared, they are the dataflow.
+            if !subtask.dependencies.is_empty() {
+                context = subtask
+                    .dependencies
+                    .iter()
+                    .filter_map(|dependency| completed.get(dependency))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+
             let agent_id = format!("agent-{}", subtask.id);
+            pool.acquire(
+                agent_id.clone(),
+                subtask.id.clone(),
+                subtask.agent_type.clone(),
+            )
+            .await?;
             let _ = event_tx
                 .send(OrchestratorEvent::AgentSpawned {
                     agent_id: agent_id.clone(),
@@ -143,10 +220,13 @@ impl Orchestrator {
 
             subtask.status = SubtaskStatus::Running;
 
-            match self
+            let attempt = self
                 .execute_with_retry(subtask, &context, executor.as_ref())
-                .await
-            {
+                .await;
+            // Concurrency slot back immediately; the lifetime unit stays spent.
+            pool.release(&agent_id).await;
+
+            match attempt {
                 Ok(result) => {
                     let _ = event_tx
                         .send(OrchestratorEvent::AgentComplete {
@@ -155,6 +235,7 @@ impl Orchestrator {
                             result: result.clone(),
                         })
                         .await;
+                    completed.insert(subtask.id.clone(), result.clone());
                     context = result.clone();
                     results.push(result);
                     subtask.status = SubtaskStatus::Complete {
@@ -181,82 +262,115 @@ impl Orchestrator {
         Ok(results.join("\n---\n"))
     }
 
+    /// Maximum concurrency inside each wave, bounded by the agent pool,
+    /// joining between waves. Failures are recorded, not propagated.
+    ///
+    /// This is the O1 fix: `run_parallel` previously ignored
+    /// `Subtask::dependencies` entirely and spawned every task at once, so a
+    /// dependency-carrying decomposition handed to `ExecutionMode::Parallel`
+    /// ran its dependents before their dependencies. A decomposition with no
+    /// dependencies — which is what `Parallel` constructs today — lowers to a
+    /// single wave, so that path is unchanged.
     async fn run_parallel(
         &self,
         subtasks: Vec<Subtask>,
+        waves: Vec<Vec<String>>,
         executor: Arc<dyn SubtaskExecutor>,
         event_tx: &mpsc::Sender<OrchestratorEvent>,
     ) -> anyhow::Result<String> {
-        let pool = AgentPool::new(self.config.max_concurrent);
-        let mut handles = Vec::new();
+        let pool = self.agent_pool();
+        let mut completed: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut results = Vec::new();
 
-        for subtask in subtasks {
-            while !pool.can_spawn().await {
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        for wave in &waves {
+            let mut handles = Vec::new();
+
+            for subtask in flatten_waves(&subtasks, std::slice::from_ref(wave)) {
+                // The lifetime budget is not something waiting can clear, so
+                // stop polling once it is exhausted and let `acquire` report it.
+                while !pool.can_spawn().await && !pool.lifetime_exhausted().await {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+
+                // Empty for a dependency-free task, which is the same context
+                // the previous implementation always passed.
+                let context = dependency_context(&subtask, &completed);
+
+                let agent_id = format!("agent-{}", subtask.id);
+                pool.acquire(
+                    agent_id.clone(),
+                    subtask.id.clone(),
+                    subtask.agent_type.clone(),
+                )
+                .await?;
+
+                let _ = event_tx
+                    .send(OrchestratorEvent::AgentSpawned {
+                        agent_id: agent_id.clone(),
+                        agent_type: subtask.agent_type.clone(),
+                        subtask_id: subtask.id.clone(),
+                    })
+                    .await;
+
+                let exec = executor.clone();
+                let pool_clone = pool.clone();
+                let tx = event_tx.clone();
+                let max_retries = self.config.max_retries;
+
+                handles.push(tokio::spawn(async move {
+                    let result =
+                        retry_execute(&subtask, &context, exec.as_ref(), max_retries).await;
+                    pool_clone.release(&agent_id).await;
+                    match result {
+                        Ok(r) => {
+                            let _ = tx
+                                .send(OrchestratorEvent::AgentComplete {
+                                    agent_id,
+                                    subtask_id: subtask.id.clone(),
+                                    result: r.clone(),
+                                })
+                                .await;
+                            Ok((subtask.id, r))
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send(OrchestratorEvent::AgentFailed {
+                                    agent_id,
+                                    subtask_id: subtask.id,
+                                    error: e.to_string(),
+                                    will_retry: false,
+                                })
+                                .await;
+                            Err(e.to_string())
+                        }
+                    }
+                }));
             }
 
-            let agent_id = format!("agent-{}", subtask.id);
-            pool.acquire(
-                agent_id.clone(),
-                subtask.id.clone(),
-                subtask.agent_type.clone(),
-            )
-            .await?;
-
-            let _ = event_tx
-                .send(OrchestratorEvent::AgentSpawned {
-                    agent_id: agent_id.clone(),
-                    agent_type: subtask.agent_type.clone(),
-                    subtask_id: subtask.id.clone(),
-                })
-                .await;
-
-            let exec = executor.clone();
-            let pool_clone = pool.clone();
-            let tx = event_tx.clone();
-            let max_retries = self.config.max_retries;
-
-            handles.push(tokio::spawn(async move {
-                let result = retry_execute(&subtask, "", exec.as_ref(), max_retries).await;
-                pool_clone.release(&agent_id).await;
-                match result {
-                    Ok(r) => {
-                        let _ = tx
-                            .send(OrchestratorEvent::AgentComplete {
-                                agent_id,
-                                subtask_id: subtask.id,
-                                result: r.clone(),
-                            })
-                            .await;
-                        Ok(r)
+            for handle in handles {
+                match handle.await {
+                    Ok(Ok((id, r))) => {
+                        results.push(r.clone());
+                        completed.insert(id, r);
                     }
-                    Err(e) => {
-                        let _ = tx
-                            .send(OrchestratorEvent::AgentFailed {
-                                agent_id,
-                                subtask_id: subtask.id,
-                                error: e.to_string(),
-                                will_retry: false,
-                            })
-                            .await;
-                        Err(e.to_string())
-                    }
+                    Ok(Err(e)) => results.push(format!("[FAILED: {e}]")),
+                    Err(e) => results.push(format!("[PANIC: {e}]")),
                 }
-            }));
-        }
-
-        let mut results = Vec::new();
-        for handle in handles {
-            match handle.await {
-                Ok(Ok(r)) => results.push(r),
-                Ok(Err(e)) => results.push(format!("[FAILED: {e}]")),
-                Err(e) => results.push(format!("[PANIC: {e}]")),
             }
         }
 
         Ok(results.join("\n---\n"))
     }
 
+    /// Maximum concurrency inside each wave, bounded by the agent pool,
+    /// joining between waves. Failures are recorded, not propagated.
+    ///
+    /// This is the O4 fix. `run_dag_waves` never touched `AgentPool` at all
+    /// while `run_parallel` did, so `ExecutionMode::Dag` — the *only* mode that
+    /// honoured dependencies before milestone 1 — had no concurrency cap
+    /// whatsoever, not merely no lifetime total. A wide wave spawned every task
+    /// in it at once regardless of `max_concurrent`.
     async fn run_dag_waves(
         &self,
         subtasks: Vec<Subtask>,
@@ -264,6 +378,7 @@ impl Orchestrator {
         executor: Arc<dyn SubtaskExecutor>,
         event_tx: &mpsc::Sender<OrchestratorEvent>,
     ) -> anyhow::Result<String> {
+        let pool = self.agent_pool();
         let mut all_results: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut wave_results = Vec::new();
@@ -276,15 +391,21 @@ impl Orchestrator {
 
             let mut handles = Vec::new();
             for subtask in wave_tasks {
-                let context = subtask
-                    .dependencies
-                    .iter()
-                    .filter_map(|dep_id| all_results.get(dep_id))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let context = dependency_context(&subtask, &all_results);
 
                 let agent_id = format!("agent-{}", subtask.id);
+                // Wait for a concurrency slot, but never for the lifetime
+                // budget — that one no amount of waiting clears, so `acquire`
+                // is left to fail and the error propagates.
+                while !pool.can_spawn().await && !pool.lifetime_exhausted().await {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+                pool.acquire(
+                    agent_id.clone(),
+                    subtask.id.clone(),
+                    subtask.agent_type.clone(),
+                )
+                .await?;
                 let _ = event_tx
                     .send(OrchestratorEvent::AgentSpawned {
                         agent_id: agent_id.clone(),
@@ -295,11 +416,13 @@ impl Orchestrator {
 
                 let exec = executor.clone();
                 let tx = event_tx.clone();
+                let pool_clone = pool.clone();
                 let max_retries = self.config.max_retries;
 
                 handles.push(tokio::spawn(async move {
                     let result =
                         retry_execute(&subtask, &context, exec.as_ref(), max_retries).await;
+                    pool_clone.release(&agent_id).await;
                     match result {
                         Ok(r) => {
                             let _ = tx
@@ -349,39 +472,4 @@ impl Orchestrator {
     ) -> anyhow::Result<String> {
         retry_execute(subtask, context, executor, self.config.max_retries).await
     }
-}
-
-async fn retry_execute(
-    subtask: &Subtask,
-    context: &str,
-    executor: &dyn SubtaskExecutor,
-    max_retries: u32,
-) -> anyhow::Result<String> {
-    let mut last_err = String::new();
-    for attempt in 0..=max_retries {
-        match executor.execute(subtask, context).await {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                last_err = e.to_string();
-                if attempt < max_retries {
-                    tracing::warn!(
-                        "subtask {} failed (attempt {}/{}): {e}",
-                        subtask.id,
-                        attempt + 1,
-                        max_retries + 1
-                    );
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        100 * u64::from(attempt + 1),
-                    ))
-                    .await;
-                }
-            }
-        }
-    }
-    anyhow::bail!(
-        "subtask '{}' failed after {} attempts: {}",
-        subtask.id,
-        max_retries + 1,
-        last_err
-    )
 }

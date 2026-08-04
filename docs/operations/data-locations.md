@@ -26,12 +26,18 @@ Where archon-cli writes everything.
 | `~/.config/archon/skills/` | `%APPDATA%\archon\skills\` | Global user-authored skills and embedded-skill overrides |
 | `~/.local/share/archon/skills/` | `...\skills\` | User-installed global skills |
 
-XDG environment variable overrides (Linux/macOS):
+XDG environment variable overrides (Linux only):
 - `XDG_CONFIG_HOME` overrides `~/.config` base
 - `XDG_DATA_HOME` overrides `~/.local/share` base
 
+These are read only on Linux. Archon resolves the per-user data directory with
+`dirs::data_dir()`, which uses the shell known-folder API on Windows and
+`~/Library/Application Support` on macOS — neither consults `XDG_DATA_HOME` or
+`HOME`. Use `ARCHON_DATA_DIR` to redirect state on those platforms.
+
 archon-cli specific overrides:
-- `ARCHON_DATA_DIR` overrides per-user state base
+- `ARCHON_DATA_DIR` overrides the archon state directory itself — set it to the
+  equivalent of `~/.local/share/archon`, not to `~/.local/share`
 - `ARCHON_SESSION_DB_PATH` overrides the session database path
 - `ARCHON_LOG_DIR` overrides the per-session log directory
 - `ARCHON_CONFIG_DIR` overrides the config directory searched for `config.toml`

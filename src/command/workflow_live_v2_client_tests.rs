@@ -1,24 +1,24 @@
 use super::*;
-use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
+use archon_workflow::{WorkflowAgentOutcome, WorkflowV2HostCall, WorkflowV2HostMethod};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[derive(Default)]
 struct RecordingClient {
-    last_request: Mutex<Option<AgentExecutionRequest>>,
-    requests: Mutex<Vec<AgentExecutionRequest>>,
+    last_request: Mutex<Option<WorkflowAgentCall>>,
+    requests: Mutex<Vec<WorkflowAgentCall>>,
 }
 
 #[async_trait::async_trait]
-impl LlmClient for RecordingClient {
+impl WorkflowLlmClient for RecordingClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        Ok(archon_pipeline::runner::LlmResponse {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(WorkflowAgentOutcome {
             content: "fallback".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -28,14 +28,14 @@ impl LlmClient for RecordingClient {
 
     async fn run_agent(
         &self,
-        request: AgentExecutionRequest,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.requests
             .lock()
             .expect("requests lock")
             .push(request.clone());
         *self.last_request.lock().expect("recording lock") = Some(request);
-        Ok(archon_pipeline::runner::LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "recorded".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -74,10 +74,10 @@ fn request(
 #[tokio::test]
 async fn generated_v2_request_keeps_stable_prompt_in_system_context() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -206,7 +206,7 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
             .expect("dataset directory");
         std::fs::write(validation, "{}\n").expect("validation artifact");
     }
-    let fixture = include_str!("fixtures/wf346_verification_project_relative_item.json");
+    let fixture = archon_test_support::fixtures::WF346_VERIFICATION_PROJECT_RELATIVE_ITEM;
     let mut req = request(WorkflowV2HostMethod::Parallel, None);
     req.call.id = "verification-wave-2".to_string();
     req.project_artifacts = archon_workflow::project_artifact_context_from_v2_root(&v2_root);
@@ -366,11 +366,11 @@ fn read_only_fanout_parallelism_uses_default_subagent_cap_when_executor_missing(
 #[tokio::test]
 async fn closed_tui_prevents_v2_agent_launch() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     drop(tui_rx);
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -391,10 +391,10 @@ async fn closed_tui_prevents_v2_agent_launch() {
 #[tokio::test]
 async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),
@@ -416,7 +416,9 @@ async fn generated_v2_agent_requests_are_foreground_with_configured_timeout() {
         .expect("recording lock")
         .clone()
         .expect("recorded request");
-    assert_eq!(recorded.pipeline_type, PipelineType::Workflow);
+    // The pipeline type is no longer carried on the call: every call reaching
+    // the port is a workflow stage, and the host adapter stamps it. See
+    // `pipeline_workflow_llm::tests::workflow_calls_stay_workflow_pipeline_type`.
     assert_eq!(recorded.timeout_secs, Some(17));
     assert!(
         recorded.disable_auto_background,
@@ -437,10 +439,10 @@ async fn d47_one_run_uses_identical_provider_presence_for_subagents_and_final_ga
     let resolution = archon_tools::provider_env::resolve_provider_env(&policy).await;
     let expected_proof = resolution.proof.clone();
     let recorder = Arc::new(RecordingClient::default());
-    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-provider-invariant".to_string(),
         Some("/repo".to_string()),
@@ -469,9 +471,11 @@ async fn d47_one_run_uses_identical_provider_presence_for_subagents_and_final_ga
     assert_eq!(recorded.len(), 3);
     for request in recorded.iter() {
         let proof = &request
-            .provider_env_resolution
+            .provider_env
             .as_ref()
             .expect("run-scoped provider resolution")
+            .downcast_ref::<archon_tools::provider_env::ProviderEnvResolution>()
+            .expect("host provider environment")
             .proof;
         assert_eq!(proof, &expected_proof);
     }

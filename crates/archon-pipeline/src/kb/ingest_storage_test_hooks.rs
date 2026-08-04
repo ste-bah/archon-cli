@@ -1,4 +1,5 @@
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -9,8 +10,97 @@ type ConflictWriter = Box<dyn FnOnce(String) + Send>;
 type ConflictWriterSlot = Arc<Mutex<Option<ConflictWriter>>>;
 
 #[derive(Default)]
+struct RendezvousState {
+    /// Threads currently parked between their stale read and their reservation.
+    in_flight: usize,
+    /// High-water mark of `in_flight` — the thing actually under test.
+    peak_in_flight: usize,
+    /// Cumulative arrivals, so a test can tell "never overlapped" apart from
+    /// "one of them never got here".
+    arrivals: usize,
+}
+
+/// A rendezvous that gives up rather than blocking forever, and records how
+/// many ingest threads were ever inside the reservation window at once.
+///
+/// The duplicate-node defect needs two writers holding reads taken before
+/// either committed. This hook sits at exactly that point, so its high-water
+/// mark is a direct measurement: a peak of 1 means the reservation window was
+/// mutually exclusive, a peak of 2 means two writers were racing on stale
+/// snapshots and the outcome was left to chance.
+///
+/// It has to time out rather than block. A plain `Barrier` used to express the
+/// rendezvous and cannot any more: now that reservations serialise on the
+/// database write lock, the second thread is parked on that lock and can never
+/// arrive, so the first would wait for it forever.
+pub(super) struct ReservationRendezvous {
+    state: Mutex<RendezvousState>,
+    ready: Condvar,
+    parties: usize,
+    timeout: Duration,
+}
+
+impl ReservationRendezvous {
+    pub(super) fn new(parties: usize, timeout: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(RendezvousState::default()),
+            ready: Condvar::new(),
+            parties,
+            timeout,
+        })
+    }
+
+    /// Highest number of threads ever simultaneously inside the reservation.
+    pub(super) fn peak_in_flight(&self) -> usize {
+        self.state
+            .lock()
+            .expect("reservation rendezvous lock")
+            .peak_in_flight
+    }
+
+    /// How many threads reached the reservation at all.
+    pub(super) fn arrivals(&self) -> usize {
+        self.state
+            .lock()
+            .expect("reservation rendezvous lock")
+            .arrivals
+    }
+
+    fn arrive(&self) {
+        let mut state = self.state.lock().expect("reservation rendezvous lock");
+        state.arrivals += 1;
+        state.in_flight += 1;
+        state.peak_in_flight = state.peak_in_flight.max(state.in_flight);
+
+        if state.in_flight >= self.parties {
+            self.ready.notify_all();
+        } else {
+            let deadline = Instant::now() + self.timeout;
+            while state.in_flight < self.parties {
+                let Some(remaining) = deadline
+                    .checked_duration_since(Instant::now())
+                    .filter(|remaining| !remaining.is_zero())
+                else {
+                    break;
+                };
+                let (next, wait) = self
+                    .ready
+                    .wait_timeout(state, remaining)
+                    .expect("reservation rendezvous lock");
+                state = next;
+                if wait.timed_out() {
+                    break;
+                }
+            }
+        }
+
+        state.in_flight -= 1;
+    }
+}
+
+#[derive(Default)]
 pub(super) struct ReservationTestHooks {
-    barrier: Arc<Mutex<Option<Arc<Barrier>>>>,
+    rendezvous: Arc<Mutex<Option<Arc<ReservationRendezvous>>>>,
     failure: Arc<Mutex<Option<String>>>,
     conflict_writer: Arc<Mutex<Option<ConflictWriterSlot>>>,
     pending_conflict_writer: Arc<Mutex<Option<ConflictWriterSlot>>>,
@@ -57,13 +147,13 @@ impl ReservationTestHooks {
     }
 
     pub(super) fn wait_before_reservation(&self) {
-        if let Some(barrier) = self
-            .barrier
+        let rendezvous = self
+            .rendezvous
             .lock()
-            .expect("reservation barrier lock")
-            .take()
-        {
-            barrier.wait();
+            .expect("reservation rendezvous slot")
+            .take();
+        if let Some(rendezvous) = rendezvous {
+            rendezvous.arrive();
         }
     }
 }
@@ -84,11 +174,11 @@ impl Drop for ReservationFailureGuard {
     }
 }
 
-pub(super) struct ReservationBarrierGuard(Arc<Mutex<Option<Arc<Barrier>>>>);
+pub(super) struct ReservationRendezvousGuard(Arc<Mutex<Option<Arc<ReservationRendezvous>>>>);
 
-impl Drop for ReservationBarrierGuard {
+impl Drop for ReservationRendezvousGuard {
     fn drop(&mut self) {
-        *self.0.lock().expect("reservation barrier lock") = None;
+        *self.0.lock().expect("reservation rendezvous slot") = None;
     }
 }
 
@@ -96,7 +186,7 @@ impl ChunkStorage {
     pub(super) fn fail_hash_reservation_for_tests(
         &self,
         message: impl Into<String>,
-        _barrier: Option<Arc<Barrier>>,
+        _rendezvous: Option<Arc<ReservationRendezvous>>,
     ) -> ReservationFailureGuard {
         let slot = Arc::clone(&self.test_hooks.failure);
         *slot.lock().expect("reservation failure lock") = Some(message.into());
@@ -105,11 +195,11 @@ impl ChunkStorage {
 
     pub(super) fn pause_before_hash_reservation_for_tests(
         &self,
-        barrier: Arc<Barrier>,
-    ) -> ReservationBarrierGuard {
-        let slot = Arc::clone(&self.test_hooks.barrier);
-        *slot.lock().expect("reservation barrier lock") = Some(barrier);
-        ReservationBarrierGuard(slot)
+        rendezvous: Arc<ReservationRendezvous>,
+    ) -> ReservationRendezvousGuard {
+        let slot = Arc::clone(&self.test_hooks.rendezvous);
+        *slot.lock().expect("reservation rendezvous slot") = Some(rendezvous);
+        ReservationRendezvousGuard(slot)
     }
 
     pub(super) fn persist_conflict_then_fail_hash_reservation_for_tests<F>(

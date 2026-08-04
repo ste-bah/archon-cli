@@ -1,17 +1,19 @@
+use super::*;
+
 #[tokio::test]
 async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subject() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-foundation.md"),
-        "# Foundation\n\ntask_id: TASK-TDL-001\ndepends_on: []\n",
+        standard_task_file("TASK-TDL-001", "[]", "['TASK-TDL-010']", ""),
     )
     .expect("task 1");
     std::fs::write(
         tasks.join("TASK-TDL-010-dependent.md"),
-        "# Dependent\n\ntask_id: TASK-TDL-010\ndepends_on: ['TASK-TDL-001']\n",
+        standard_task_file("TASK-TDL-010", "['TASK-TDL-001']", "[]", ""),
     )
     .expect("task 10");
     let task = format!(
@@ -27,8 +29,9 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
         &store,
         &task,
         planner.clone(),
-        tui_tx.clone(),
+        ui_sink.clone(),
         &default_generated_workflow_config(),
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("seed deterministic generated plan");
@@ -79,9 +82,12 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
 
     let output = run_live_action(
         temp.path(),
-        CommandAction::Run { task, decomposed: false },
+        CommandAction::Run {
+            task,
+            decomposed: false,
+        },
         planner,
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -114,7 +120,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
 
 #[tokio::test]
 async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let client = Arc::new(GeneratedV2RunClient {
         calls: AtomicUsize::new(0),
@@ -127,7 +133,7 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
             task: "Inspect this repository with a generated V2 workflow".to_string(),
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -193,7 +199,7 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
 
 #[tokio::test]
 async fn saved_v2_template_runs_through_v2_runtime() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let harness = r#"
 export default async function workflow(w) {
@@ -207,7 +213,6 @@ export default async function workflow(w) {
         target_repository_root: None,
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: Default::default(),
         stages: vec![archon_workflow::StageSpec {
             id: "inspect".to_string(),
             kind: StageKind::Agent,
@@ -216,7 +221,6 @@ export default async function workflow(w) {
             foreach: None,
             reducer: None,
             tool: None,
-            condition: None,
             depends_on: Vec::new(),
             provider_tier: Some(ProviderTier::Researcher),
             retry: archon_workflow::RetryPolicy::default(),
@@ -234,9 +238,7 @@ export default async function workflow(w) {
             filter: None,
             extra: Default::default(),
         }],
-        artifact_policy: Default::default(),
         permissions: Default::default(),
-        quality_gates: Default::default(),
         learning_hooks: Vec::new(),
     };
     let store = WorkflowStore::project(temp.path());
@@ -262,7 +264,7 @@ export default async function workflow(w) {
             args: None,
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,

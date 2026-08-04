@@ -63,19 +63,3 @@ pub trait WorkflowStageRunner: Send + Sync + WriteBoundaryProbe {
         None
     }
 }
-
-#[derive(Debug, Default)]
-pub struct DeterministicStageRunner;
-
-impl WriteBoundaryProbe for DeterministicStageRunner {}
-
-#[async_trait]
-impl WorkflowStageRunner for DeterministicStageRunner {
-    async fn run_stage(&self, request: StageRunRequest) -> WorkflowResult<StageRunOutput> {
-        let agent = request.agent.as_deref().unwrap_or("none");
-        Ok(StageRunOutput::markdown(format!(
-            "# Stage {}\n\nKind: `{:?}`\nAgent: `{}`\n",
-            request.stage_id, request.stage_kind, agent
-        )))
-    }
-}

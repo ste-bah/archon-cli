@@ -1,5 +1,5 @@
 use super::*;
-use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
+use archon_workflow::{WorkflowAgentOutcome, WorkflowV2HostCall, WorkflowV2HostMethod};
 
 #[derive(Default)]
 struct CompletionBlockedClient {
@@ -8,24 +8,24 @@ struct CompletionBlockedClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CompletionBlockedClient {
+impl WorkflowLlmClient for CompletionBlockedClient {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         unreachable!("test uses run_agent")
     }
 
     async fn run_agent(
         &self,
-        _request: AgentExecutionRequest,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        _request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.started.notify_one();
         self.release.notified().await;
-        Ok(archon_pipeline::runner::LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: "recorded".to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -56,10 +56,10 @@ fn request() -> WorkflowV2AgentRequest {
 #[tokio::test]
 async fn closed_tui_prevents_v2_success_publication() {
     let recorder = Arc::new(CompletionBlockedClient::default());
-    let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
         recorder.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         "wf-test".to_string(),
         Some("/repo".to_string()),

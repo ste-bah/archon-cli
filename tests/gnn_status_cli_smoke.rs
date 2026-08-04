@@ -19,6 +19,10 @@ fn gnn_status_cli_smoke() {
         .current_dir(tmp.path())
         .env("HOME", tmp.path())
         .env("XDG_CONFIG_HOME", &config_home)
+        // XDG_DATA_HOME only redirects `dirs::data_dir()` on Linux -- Windows
+        // reads the shell known-folder API and macOS ~/Library/Application
+        // Support, so without this the child opens the real user database.
+        .env("ARCHON_DATA_DIR", data_home.join("archon"))
         .env("XDG_DATA_HOME", &data_home)
         .args(["learning", "gnn", "status"])
         .output()

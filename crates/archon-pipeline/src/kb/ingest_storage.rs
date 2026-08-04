@@ -1,17 +1,18 @@
 //! Atomic, bounded CozoDB storage for knowledge-base ingest chunks.
 
+mod rows;
+
 use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[cfg(test)]
 use super::ingest_storage_test_hooks::ReservationTestHooks;
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, MultiTransaction, Vector};
-use ndarray::Array1;
+use cozo::{DataValue, DbInstance, MultiTransaction};
 
 use super::IngestResult;
-use super::schema::KbNodeType;
 
 pub(super) const KB_INGEST_BATCH_SIZE: usize = 64;
 
@@ -27,9 +28,16 @@ struct PendingChunk<'a> {
     embedding: Option<&'a [f32]>,
 }
 
+const RESERVATION_LOCK_CONTEXT: &str = "KB ingest content-hash reservation";
+
 /// Stores raw chunks and their keyed content hashes in the same transaction.
 pub(super) struct ChunkStorage {
     db: DbInstance,
+    /// Sidecar write-lock file for the backing database, when it is persisted.
+    ///
+    /// `None` for in-memory stores, which cannot be opened twice, and for
+    /// callers that never told us where the database lives.
+    reservation_lock: Option<PathBuf>,
     fail_after_hash_write: AtomicBool,
     transaction_count: AtomicUsize,
     #[cfg(test)]
@@ -37,9 +45,35 @@ pub(super) struct ChunkStorage {
 }
 
 impl ChunkStorage {
+    /// Storage with no cross-handle serialisation.
+    ///
+    /// Correct only when nothing else can write this database: an in-memory
+    /// store, or a single `DbInstance` shared by the whole process. Deliberately
+    /// does *not* try to recover the path from the guard registry — that
+    /// registry is keyed on the address of a `DbInstance`, and `DbInstance` is
+    /// `Clone`, so a lookup here would miss for every clone and quietly leave
+    /// reservations unserialised. Callers that know the path say so, via
+    /// [`ChunkStorage::for_db_path`].
     pub(super) fn new(db: DbInstance) -> Self {
+        Self::with_reservation_lock(db, None)
+    }
+
+    /// Build a storage that serialises reservations on `db_path`'s write lock.
+    ///
+    /// Required for correctness whenever more than one `DbInstance` — in this
+    /// process or another — can be open on the same file. The in-transaction
+    /// `:insert` conflict only compares against the transaction's own snapshot,
+    /// so two handles that read before either commits both see a hash as absent
+    /// and both create a node for it.
+    pub(super) fn for_db_path(db: DbInstance, db_path: impl AsRef<Path>) -> Self {
+        let lock = archon_cozo::write_lock_path_for_db(db_path);
+        Self::with_reservation_lock(db, Some(lock))
+    }
+
+    fn with_reservation_lock(db: DbInstance, reservation_lock: Option<PathBuf>) -> Self {
         Self {
             db,
+            reservation_lock,
             fail_after_hash_write: AtomicBool::new(false),
             transaction_count: AtomicUsize::new(0),
             #[cfg(test)]
@@ -49,6 +83,22 @@ impl ChunkStorage {
 
     pub(super) fn db(&self) -> &DbInstance {
         &self.db
+    }
+
+    /// Run `reserve` with exclusive access to the backing database.
+    ///
+    /// The blocking variant, not the fail-fast one: losing this race is not
+    /// recoverable by retrying, because the whole point is that the read and
+    /// the reservation must not be interleaved. It is re-entrant, so an ingest
+    /// nested inside an already-guarded mutable operation on the same database
+    /// runs inline rather than blocking on the lock its own thread holds.
+    fn with_reservation_lock_held<T>(&self, reserve: impl FnOnce() -> Result<T>) -> Result<T> {
+        match &self.reservation_lock {
+            Some(path) => {
+                archon_cozo::with_write_lock_blocking(path, RESERVATION_LOCK_CONTEXT, reserve)
+            }
+            None => reserve(),
+        }
     }
 
     pub(super) fn store(
@@ -136,6 +186,23 @@ impl ChunkStorage {
     }
 
     fn store_batch_attempt(
+        &self,
+        batch: &[PendingChunk<'_>],
+        source: &str,
+        domain_tag: &str,
+        now: f64,
+    ) -> Result<usize> {
+        self.with_reservation_lock_held(|| self.reserve_and_commit(batch, source, domain_tag, now))
+    }
+
+    /// The reserve-through-commit span: open a transaction, re-read the hashes
+    /// for this batch, reserve the missing ones, and commit.
+    ///
+    /// Must run under [`Self::with_reservation_lock_held`]. The transaction is
+    /// opened *inside* the lock so its snapshot already contains whatever the
+    /// previous holder committed — reading before the lock is what let both
+    /// writers conclude a shared hash was unclaimed.
+    fn reserve_and_commit(
         &self,
         batch: &[PendingChunk<'_>],
         source: &str,
@@ -261,6 +328,10 @@ impl ChunkStorage {
             .iter()
             .map(|chunk| (uuid::Uuid::new_v4().to_string(), *chunk))
             .collect();
+        // Stays inside the reservation window: the defect this guards against
+        // is two writers holding stale reads at this exact point. The hook is a
+        // *bounded* rendezvous precisely so it survives being serialised — see
+        // `ReservationRendezvous`.
         self.wait_before_hash_reservation();
         self.insert_hash_rows(transaction, &rows)?;
         if self.fail_after_hash_write.swap(false, Ordering::SeqCst) {
@@ -269,103 +340,6 @@ impl ChunkStorage {
         self.insert_node_rows(transaction, &rows, source, domain_tag, now)?;
         self.insert_embedding_rows(transaction, &rows)?;
         Ok(rows.len())
-    }
-
-    fn insert_hash_rows(
-        &self,
-        transaction: &MultiTransaction,
-        rows: &[(String, &PendingChunk<'_>)],
-    ) -> Result<()> {
-        self.inject_hash_reservation_failure_for_tests()?;
-        let hash_rows = DataValue::List(
-            rows.iter()
-                .map(|(node_id, chunk)| {
-                    DataValue::List(vec![
-                        DataValue::from(chunk.content_hash.as_str()),
-                        DataValue::from(node_id.as_str()),
-                    ])
-                })
-                .collect(),
-        );
-        let mut params = BTreeMap::new();
-        params.insert("rows".to_string(), hash_rows);
-        transaction
-            .run_script(
-                "?[content_hash, node_id] <- $rows\n                 :insert kb_content_hashes { content_hash => node_id }",
-                params,
-            )
-            .map_err(|error| {
-                let details = error.chain().map(ToString::to_string).collect::<Vec<_>>().join(" :: ");
-                anyhow::anyhow!("reserve content hashes failed: {details}")
-            })?;
-        Ok(())
-    }
-
-    fn insert_node_rows(
-        &self,
-        transaction: &MultiTransaction,
-        rows: &[(String, &PendingChunk<'_>)],
-        source: &str,
-        domain_tag: &str,
-        now: f64,
-    ) -> Result<()> {
-        let node_rows = DataValue::List(
-            rows.iter()
-                .map(|(node_id, chunk)| {
-                    DataValue::List(vec![
-                        DataValue::from(node_id.as_str()),
-                        DataValue::from(node_type_str(&KbNodeType::Raw)),
-                        DataValue::from(source),
-                        DataValue::from(domain_tag),
-                        DataValue::from(chunk.chunk.title.as_str()),
-                        DataValue::from(chunk.chunk.content.as_str()),
-                        DataValue::from(chunk.content_hash.as_str()),
-                        DataValue::from(chunk.chunk_index as i64),
-                        DataValue::from(now),
-                        DataValue::from(now),
-                    ])
-                })
-                .collect(),
-        );
-        let mut params = BTreeMap::new();
-        params.insert("rows".to_string(), node_rows);
-        transaction
-            .run_script(
-                "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] <- $rows\n                 :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-                params,
-            )
-            .map_err(|error| anyhow::anyhow!("insert KB nodes failed: {error}"))?;
-        Ok(())
-    }
-
-    fn insert_embedding_rows(
-        &self,
-        transaction: &MultiTransaction,
-        rows: &[(String, &PendingChunk<'_>)],
-    ) -> Result<()> {
-        let embedding_rows: Vec<_> = rows
-            .iter()
-            .filter_map(|(node_id, chunk)| {
-                chunk.embedding.map(|embedding| {
-                    DataValue::List(vec![
-                        DataValue::from(node_id.as_str()),
-                        DataValue::Vec(Vector::F32(Array1::from_vec(embedding.to_vec()))),
-                    ])
-                })
-            })
-            .collect();
-        if embedding_rows.is_empty() {
-            return Ok(());
-        }
-        let mut params = BTreeMap::new();
-        params.insert("rows".to_string(), DataValue::List(embedding_rows));
-        transaction
-            .run_script(
-                "?[node_id, embedding] <- $rows\n                 :put kb_embeddings { node_id => embedding }",
-                params,
-            )
-            .map_err(|error| anyhow::anyhow!("insert KB embeddings failed: {error}"))?;
-        Ok(())
     }
 
     #[cfg(test)]
@@ -425,14 +399,4 @@ fn pending_missing_chunks<'a>(
             embedding: chunk.embedding,
         })
         .collect()
-}
-
-fn node_type_str(node_type: &KbNodeType) -> &'static str {
-    match node_type {
-        KbNodeType::Raw => "raw",
-        KbNodeType::Compiled => "compiled",
-        KbNodeType::Concept => "concept",
-        KbNodeType::Answer => "answer",
-        KbNodeType::Index => "index",
-    }
 }

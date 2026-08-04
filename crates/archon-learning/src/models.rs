@@ -32,6 +32,19 @@ pub enum LearningEventType {
     ManifestRolledBack,
     AgentKnowledgeClaim,
     ReasoningQuality,
+    /// One summary row per folded task graph: span, wave occupancy, fan-out
+    /// widths, verifier independence, gate placement, and outcome, in the
+    /// `signal` column. Written by the milestone 2 topology fold
+    /// (`src/command/topology_fold.rs`), one row per graph and never one per
+    /// node.
+    ///
+    /// The design document specifies the wire form as `"topology_outcome"`.
+    /// This column is not a free string — it is written from
+    /// [`LearningEventType::as_str`] and every one of the twenty-three
+    /// pre-existing variants is PascalCase, as are both
+    /// `learning_events:by_type_created_at` queries in the tree. A snake_case
+    /// value would round-trip to `None` through [`LearningEventType::from_str`].
+    TopologyOutcome,
 }
 
 impl LearningEventType {
@@ -60,6 +73,7 @@ impl LearningEventType {
             Self::ManifestRolledBack => "ManifestRolledBack",
             Self::AgentKnowledgeClaim => "AgentKnowledgeClaim",
             Self::ReasoningQuality => "ReasoningQuality",
+            Self::TopologyOutcome => "TopologyOutcome",
         }
     }
 
@@ -89,6 +103,7 @@ impl LearningEventType {
             "ManifestRolledBack" => Some(Self::ManifestRolledBack),
             "AgentKnowledgeClaim" => Some(Self::AgentKnowledgeClaim),
             "ReasoningQuality" => Some(Self::ReasoningQuality),
+            "TopologyOutcome" => Some(Self::TopologyOutcome),
             _ => None,
         }
     }

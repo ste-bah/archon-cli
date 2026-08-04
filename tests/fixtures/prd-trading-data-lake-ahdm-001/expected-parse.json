@@ -1,0 +1,762 @@
+[
+  {
+    "file": "TASK-TDL-001-data-lake-gap-audit.md",
+    "task_id": "TASK-TDL-001",
+    "title": "Data Lake Gap Audit",
+    "complexity": "medium",
+    "status": "ready",
+    "depends_on": [],
+    "blocks": [
+      "TASK-TDL-010"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "audit_report",
+        "artifact_path": ".archon/trading-lab/data/gap-audit-current.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "Existing registry behavior is documented honestly, including zero-dataset state if still true.",
+      "Gap report maps current code and missing implementation to every normative PRD requirement: `REQ-DL-001..133`, `REQ-AHDM-001..033`, `REQ-BT-001..004`, acceptance criteria, command contract, storage contract, provider-specific contracts, migration plan, residual-gap policy, and done definition.",
+      "No storage-root change is proposed."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-010-registry-schema-v1.md",
+    "task_id": "TASK-TDL-010",
+    "title": "Registry Schema v2 + Migration",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-001"
+    ],
+    "blocks": [
+      "TASK-TDL-020"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "trading_data_registry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      },
+      {
+        "kind": "registry_migration_report",
+        "artifact_path": ".archon/trading-lab/data/registry-migration-report.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-001 partly satisfied: status can show root and registry.",
+      "First write migrates to v2 preserving records.",
+      "Migration is idempotent and never deletes artifacts.",
+      "Registry entries must only point to complete dataset versions satisfying the artifact contract. Unavailable or incomplete provider results must be recorded as provider capability, coverage, or residual-gap records and must not create healthy dataset registry entries.",
+      "Unknown native/production fields fail closed.",
+      "`archon trading data export --dataset-id <ID> --version <VERSION> --out <PATH>` is implemented and tested; existing `export-ohlcv` cannot be the only supported spelling.",
+      "`archon trading data list --json` is implemented and tested.",
+      "v1 registry remains readable."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-020-ohlcv-validation-reports.md",
+    "task_id": "TASK-TDL-020",
+    "title": "OHLCV Validation Reports + Native Gates",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-010"
+    ],
+    "blocks": [
+      "TASK-TDL-030",
+      "TASK-TDL-090"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "dataset_validation_report",
+        "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-005 and AC-DL-006 are covered at validation layer.",
+      "Any validation error makes production eligibility fail.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "Missing `native_interval` or `production_eligible` means false.",
+      "Validation report schema matches PRD §21."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-030-provider-capability-interface.md",
+    "task_id": "TASK-TDL-030",
+    "title": "Provider Capability Interface",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-020"
+    ],
+    "blocks": [
+      "TASK-TDL-040",
+      "TASK-TDL-050",
+      "TASK-TDL-060",
+      "TASK-TDL-070"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "provider_capability_registry",
+        "artifact_path": ".archon/trading-lab/data/provider-capabilities.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "401/403/404/missing credentials/missing native interval return `can_fetch=false`.",
+      "AC-DL-002 foundation exists.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "Current snapshots are stale after 5 minutes; stale/missing snapshot state is reported explicitly and cannot satisfy production or promotion gates.",
+      "Interface is provider-neutral.",
+      "Provider blocks are represented, not bypassed.",
+      "`.archon/trading-lab/data/provider-capabilities.json` is refreshed atomically and never treats missing/unknown capability fields as fetchable.",
+      "`archon trading data snapshot --provider <PROVIDER> --symbol <SYMBOL> [--target <PROJECT>]` parses and dispatches generically before provider-specific support checks."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-040-tradingview-mcp-native-ingest.md",
+    "task_id": "TASK-TDL-040",
+    "title": "TradingView MCP Native Ingest",
+    "complexity": "medium",
+    "status": "in_review",
+    "depends_on": [
+      "TASK-TDL-030"
+    ],
+    "blocks": [
+      "TASK-TDL-041",
+      "TASK-TDL-042",
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [],
+    "required_tools": [
+      "chart_get_state",
+      "data_get_ohlcv",
+      "tv_health_check"
+    ],
+    "deliverable_contracts": [
+      {
+        "kind": "native_dataset_manifest",
+        "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
+      },
+      {
+        "kind": "trading_data_registry_entry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-003 and AC-DL-007 for TradingView path.",
+      "Chart-equivalent semantics are documented in metadata.",
+      "If the TradingView MCP/session is unreachable, BLOCK HONESTLY with the captured failure; do NOT mint a placeholder dataset to pass. A no-op that asserts pre-existing code satisfies the task is NOT acceptance — the declared MCP tools must be exercised live this run.",
+      "Limited bar coverage is recorded honestly, AND the fetch pages the provider call when the requested span exceeds the per-call cap rather than failing closed.",
+      "No mock, fixture, synthetic, or placeholder dataset may be recorded `production_eligible=true`/Healthy. Absent captured live-MCP-fetch evidence the registry entry MUST be `production_eligible=false`.",
+      "REAL LIVE MCP FETCH REQUIRED (production deliverable — not a mock/fixture): the delivered native dataset MUST originate from an actual live invocation of the declared TradingView MCP tools this run (`tv_health_check`, `chart_get_state`, `data_get_ohlcv`), evidenced by captured `raw/request.json` and `raw/provider-notes.md` showing the real MCP call and its returned native candles. The `mocked MCP response` focused test may validate capability mapping only; it MUST NOT satisfy the dataset deliverable or back a `production_eligible=true`/Healthy registry entry.",
+      "REAL VOLUME REQUIRED, NOT A PROBE: the delivered production dataset's bar count MUST be consistent with the requested `--start`/`--end` span (a multi-year daily request means hundreds+ bars, not a handful). A token/probe fetch (e.g. `count: 5`) proves connectivity ONLY — it is diagnostic evidence and MUST NOT be recorded `production_eligible=true`/Healthy, and MUST NOT satisfy this task's dataset deliverable. State the requested span and the returned bar count explicitly; if the provider returns materially fewer bars than the requested span, record the shortfall as a residual gap and keep the dataset non-production-eligible.",
+      "Successful ingest writes a v2 registry entry pointing to metadata, validation report, manifest, normalized JSONL, and raw artifacts; interrupted ingest must not leave a healthy registry entry.",
+      "Visible chart/session requirements return actionable errors."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "KNOWN DEFECT TO FIX IN THIS TASK: `src/command/trading_data_provider/tradingview.rs` requests a fixed bar count (`const TRADINGVIEW_REQUESTED_BARS: usize = 100`) instead of deriving the count from the requested `--start`/`--end` span, so a requested span can never be satisfied and real volume cannot be proven. Derive the requested count from the span and timeframe (and page/repeat the MCP call if the provider caps per-call bars), then record requested-vs-returned counts honestly. A previous run diagnosed this correctly but its fix was discarded because the file was outside the declared write scope — the scope above now includes it.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, **`src/command/trading_data_provider/tradingview.rs`** (the TradingView MCP fetch implementation — REQUIRED write scope for this task), relevant dispatch files, and command-specific tests. CLI argument and TUI routing files belong to TASK-TDL-042."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-041-tradingview-snapshot-freshness.md",
+    "task_id": "TASK-TDL-041",
+    "title": "TradingView Snapshot + Freshness",
+    "complexity": "medium",
+    "status": "pending",
+    "depends_on": [
+      "TASK-TDL-040"
+    ],
+    "blocks": [
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [],
+    "required_tools": [
+      "chart_get_state",
+      "quote_get",
+      "tv_health_check"
+    ],
+    "deliverable_contracts": [
+      {
+        "kind": "provider_snapshot",
+        "artifact_path": ".archon/trading-lab/data/snapshots/<provider>/<symbol>.json"
+      },
+      {
+        "kind": "trading_data_registry_entry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "If the MCP/session is unreachable, BLOCK HONESTLY with captured failure evidence rather than writing a synthesized snapshot.",
+      "REAL LIVE MCP CAPTURE REQUIRED: the delivered snapshot MUST originate from an actual live invocation of the declared MCP tools this run, evidenced by captured provider timestamp metadata. A mocked or fixture snapshot does NOT satisfy the deliverable.",
+      "Snapshot artifacts include provider timestamp and captured-at metadata.",
+      "Snapshot capture failure is reported honestly with the captured provider error; no placeholder snapshot is written.",
+      "Snapshots are classified stale after 5 minutes per the PRD contract."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_store.rs`, **`src/command/trading_data_provider/tradingview.rs`** (the TradingView MCP implementation — REQUIRED write scope), `src/command/trading_data.rs`, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-042-tradingview-cli-tui-surface.md",
+    "task_id": "TASK-TDL-042",
+    "title": "TradingView CLI + TUI Surface",
+    "complexity": "medium",
+    "status": "pending",
+    "depends_on": [
+      "TASK-TDL-040"
+    ],
+    "blocks": [
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [],
+    "acceptance_criteria": [
+      "Alias routing is proven by an executed test, not by inspection alone.",
+      "CLI parse tests require all mandatory `fetch-native` flags: `--provider`, `--symbol`, `--timeframe`, `--start`, `--end`, and `--dataset-id`; `--target` remains optional.",
+      "Clap parsing and command dispatch exist for every owned CLI command.",
+      "Every owned `/trading data ...` TUI alias routes to its command, proven against the REAL registry/parser rather than an assumed one — name the router file you found in the evidence."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, the real TUI slash-command registry/parser (discover it — do not assume), relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Provider implementation modules owned by TASK-TDL-040/041.",
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-050-openbb-polygon-native-ingest.md",
+    "task_id": "TASK-TDL-050",
+    "title": "OpenBB/Polygon Native Ingest",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-030"
+    ],
+    "blocks": [
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [
+      "OPENBB_API_URL",
+      "POLYGON_API_KEY"
+    ],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "native_dataset_manifest",
+        "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
+      },
+      {
+        "kind": "trading_data_registry_entry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-003 and AC-DL-007 for OpenBB/Polygon path.",
+      "Adjusted/unadjusted policy is recorded.",
+      "CLI parse tests require all mandatory `fetch-native` flags: `--provider`, `--symbol`, `--timeframe`, `--start`, `--end`, and `--dataset-id`; `--target` remains optional.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "If the provider is unreachable (missing/invalid credentials, blocked, rate-limited), BLOCK HONESTLY with the captured provider-failure evidence; do NOT mint a placeholder or fixture-derived dataset to pass acceptance. An empty/unavailable result is valid only with captured provider-failure evidence.",
+      "Missing credentials return exact unavailable reason.",
+      "No fixture, synthetic, or placeholder dataset may be recorded `production_eligible=true`/Healthy. Absent captured live-fetch evidence the registry entry MUST be `production_eligible=false`.",
+      "PLAN ENTITLEMENT IS NOT UNAVAILABILITY — FETCH WHAT THE PLAN ALLOWS: a subscription/plan rejection (e.g. HTTP 403 `NOT_AUTHORIZED` with a \"plan doesn't include this data timeframe\" message) means the credential is VALID but the requested window exceeds the entitlement. Do NOT treat this as provider-unavailable and do NOT block outright. Narrow the request to the maximum entitled window (bisect or step the `--start` forward), ingest the real candles that ARE entitled, and record the entitlement boundary as an explicit residual gap naming the provider message and the earliest date actually served. Only a request that fails at EVERY window is a true unavailable.",
+      "Provider identity is never mislabelled.",
+      "REAL LIVE FETCH REQUIRED (production deliverable — not a fixture): the delivered native dataset MUST originate from an actual live provider fetch performed this run, evidenced by captured `raw/request.json`, `raw/response.<json|csv|zip|txt>`, and `raw/provider-notes.md` proving a real call returned real native candles. Fixture/mock tests may validate parse, normalization, and redaction logic but MUST NOT satisfy the dataset deliverable and MUST NOT back a `production_eligible=true`/Healthy registry entry.",
+      "REAL VOLUME REQUIRED, NOT A PROBE: the delivered production dataset's bar count MUST be consistent with the requested `--start`/`--end` span (a multi-year daily request means hundreds+ bars, not a handful). A token/probe fetch proves connectivity ONLY — it is diagnostic evidence and MUST NOT be recorded `production_eligible=true`/Healthy or satisfy the dataset deliverable. State the requested span and returned bar count explicitly; a material shortfall is a residual gap and keeps the dataset non-production-eligible.",
+      "REQUIRE THE LOCAL PROVIDER SERVICE TO BE UP FIRST: when the provider is reached through a local service (e.g. `OPENBB_API_URL`), verify that endpoint responds before concluding anything about credentials. A connection failure to the local service is a SERVICE-DOWN residual gap (start it via `scripts/start-openbb-api.sh` with the environment loaded), never evidence that the provider or credential is unavailable.",
+      "Successful ingest writes a v2 registry entry pointing to metadata, validation report, manifest, normalized JSONL, and raw artifacts; interrupted ingest must not leave a healthy registry entry."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "KNOWN DEFECTS TO FIX IN THIS TASK: (a) the success path sets `expected_bars` from the OBSERVED bar count, which is circular and can never detect a short fetch — derive expected bars from the requested span + timeframe and compare honestly; (b) non-yfinance providers are marked `production_eligible` without proving requested-span coverage; (c) `src/cli_args/tests.rs` has `fetch-native` parse tests for yfinance and stooq only — add the missing polygon/openbb parse contract tests. A previous run diagnosed these correctly but could not act because the provider modules were outside the declared write scope — the scope above now includes them.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, **the OpenBB/Polygon provider implementation modules `src/command/trading_data_provider_openbb.rs`, `..._openbb_request.rs`, `..._openbb_http.rs`, `..._openbb_parse.rs`, `..._openbb_metadata.rs` (REQUIRED write scope for this task)**, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-060-stooq-native-ingest-or-unavailable.md",
+    "task_id": "TASK-TDL-060",
+    "title": "Stooq Native Ingest or Unavailable",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-030"
+    ],
+    "blocks": [
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "native_dataset_manifest",
+        "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
+      },
+      {
+        "kind": "provider_capability_record",
+        "artifact_path": ".archon/trading-lab/data/provider-capabilities.json"
+      },
+      {
+        "kind": "trading_data_registry_entry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-007 for Stooq path.",
+      "Blocks and non-data HTML are reported honestly.",
+      "CLI parse tests require all mandatory `fetch-native` flags: `--provider`, `--symbol`, `--timeframe`, `--start`, `--end`, and `--dataset-id`; `--target` remains optional.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "No fixture, synthetic, or placeholder dataset may be recorded `production_eligible=true`/Healthy. If Stooq is unavailable/blocked, record an honest `provider_capability_record` unavailable state with captured evidence and `production_eligible=false` — never a fabricated dataset.",
+      "No resampling path can produce production-eligible Stooq data.",
+      "REAL LIVE FETCH REQUIRED (production deliverable — not a fixture): any Stooq dataset recorded `production_eligible=true`/Healthy MUST originate from an actual live Stooq fetch this run, evidenced by captured `raw/request.json`, `raw/response.<json|csv|zip|txt>`, and `raw/provider-notes.md` showing the real call returned real native candles. The CSV-parse and HTML-block fixture tests may validate parse/detection logic only; they MUST NOT satisfy the dataset deliverable or back a production-eligible registry entry.",
+      "REAL VOLUME REQUIRED, NOT A PROBE: any production-eligible Stooq dataset's bar count MUST be consistent with the requested `--start`/`--end` span (hundreds+ bars for a multi-year daily request). A token/probe fetch proves connectivity ONLY and MUST NOT be recorded `production_eligible=true`/Healthy. State the requested span and returned bar count explicitly; a material shortfall is a residual gap.",
+      "Successful ingest writes a v2 registry entry pointing to metadata, validation report, manifest, normalized JSONL, and raw artifacts; interrupted ingest must not leave a healthy registry entry."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, **`src/command/trading_data_provider/stooq.rs`** (the Stooq fetch implementation — REQUIRED write scope for this task), `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-070-yfinance-fallback-ingest.md",
+    "task_id": "TASK-TDL-070",
+    "title": "yfinance Fallback Ingest",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-030"
+    ],
+    "blocks": [
+      "TASK-TDL-080"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "diagnostic_dataset_manifest",
+        "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
+      },
+      {
+        "kind": "trading_data_registry_entry",
+        "artifact_path": ".archon/trading-lab/data/registry.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-007 for yfinance fallback path.",
+      "CLI parse tests require all mandatory `fetch-native` flags: `--provider`, `--symbol`, `--timeframe`, `--start`, `--end`, and `--dataset-id`; `--target` remains optional.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "REAL LIVE FALLBACK FETCH REQUIRED (not a fixture): the delivered yfinance dataset MUST originate from an actual live yfinance fetch this run, evidenced by captured `raw/request.json`, `raw/response.<json|csv|zip|txt>`, and `raw/provider-notes.md`. Fixture/mock tests may validate fallback metadata and interval mapping only; they MUST NOT satisfy the dataset deliverable. The dataset remains degraded / diagnostic-ineligible-for-promotion by design — but it must be a REAL fetch, never synthetic or placeholder. If yfinance is unreachable, block honestly with the captured failure rather than minting a fixture dataset.",
+      "REAL VOLUME REQUIRED, NOT A PROBE: the delivered fallback dataset's bar count MUST be consistent with the requested `--start`/`--end` span. A token/probe fetch proves connectivity ONLY and does not satisfy the dataset deliverable. State the requested span and returned bar count explicitly; a material shortfall is a residual gap. (The dataset remains degraded / ineligible for promotion by design.)",
+      "Successful fallback ingest writes a v2 registry entry marked degraded/diagnostic-ineligible-for-promotion and pointing to metadata, validation report, manifest, normalized JSONL, and raw artifacts; interrupted ingest must not leave a healthy registry entry.",
+      "yfinance datasets are degraded by default.",
+      "yfinance datasets never satisfy promotion gates, even when `--diagnostic-allow-degraded-data` is used for exploratory reports."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-080-coverage-matrix-command.md",
+    "task_id": "TASK-TDL-080",
+    "title": "Coverage Matrix Command",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-040",
+      "TASK-TDL-041",
+      "TASK-TDL-042",
+      "TASK-TDL-050",
+      "TASK-TDL-060",
+      "TASK-TDL-070"
+    ],
+    "blocks": [
+      "TASK-TDL-090",
+      "TASK-TDL-100"
+    ],
+    "required_env_keys": [
+      "OPENBB_API_URL",
+      "POLYGON_API_KEY"
+    ],
+    "required_tools": [
+      "data_get_ohlcv"
+    ],
+    "deliverable_contracts": [
+      {
+        "kind": "required_universe_registry",
+        "artifact_path": ".archon/trading-lab/data/coverage/latest.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-DL-004 satisfied.",
+      "COVERAGE REQUIRES REAL VOLUME: a cell counts as covered only when its backing dataset meets the contract's declared `minimum_count_fields` / `registry_minimum_count` thresholds. Probe-sized datasets (a handful of bars) are NOT coverage and must be reported as gaps with the observed bar count in the reason.",
+      "Clap parsing and command dispatch exist for every owned CLI command, with matching TUI slash alias routing where required.",
+      "Coverage JSON schema matches PRD §23.",
+      "Coverage consumes the snapshot freshness contract from TASK-TDL-030; snapshots older than 5 minutes are stale.",
+      "Gaps include exact reasons.",
+      "NO FIXTURE-BACKED COVERAGE: a coverage cell may be marked `available=true` / `production_eligible=true` / `native_interval=true` ONLY when its backing registry dataset originated from a real live provider fetch (captured `raw/request.json` + `raw/response.*` provenance) with genuine native candles. A dataset that is fixture-, mock-, synthetic-, or placeholder-derived, or that lacks captured live-fetch evidence, MUST appear as a gap with an exact reason — never as satisfied coverage. Minimal-row placeholder datasets crafted only to clear `series_overlap_min_rows` do NOT constitute coverage.",
+      "Text report is human-readable.",
+      "`--target` is supported consistently.",
+      "`/trading data coverage ...` provides TUI command parity with the CLI coverage command."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-090-backtest-data-gates.md",
+    "task_id": "TASK-TDL-090",
+    "title": "Backtest Data Gates",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-020",
+      "TASK-TDL-080"
+    ],
+    "blocks": [
+      "TASK-TDL-100",
+      "TASK-TDL-130"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [],
+    "acceptance_criteria": [
+      "AC-AHDM-003 foundation and AC-DL-005 satisfied for backtests.",
+      "Diagnostic override never satisfies promotion gates.",
+      "Loose file paths are refused for promotion backtests.",
+      "Reports list every overridden dataset issue."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-100-ahdm-kb-evidence-inventory.md",
+    "task_id": "TASK-TDL-100",
+    "title": "AHDM KB Evidence Inventory",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-080",
+      "TASK-TDL-090"
+    ],
+    "blocks": [
+      "TASK-TDL-110"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "kb_rule_inventory",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/evidence/kb-rule-inventory.md"
+      },
+      {
+        "kind": "kb_citations",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/evidence/citations.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-AHDM-004 evidence-risk input exists.",
+      "Every extracted rule has citation or is explicitly marked hypothesis.",
+      "Hypotheses are barred from promotion until cited.",
+      "Writes `.archon/trading-lab/strategies/AHDM-v1/evidence/citations.json`.",
+      "Writes `.archon/trading-lab/strategies/AHDM-v1/evidence/kb-rule-inventory.md`.",
+      "`citations.json` validates the PRD rule/citation/hypothesis promotion policy."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-110-ahdm-strategy-spec.md",
+    "task_id": "TASK-TDL-110",
+    "title": "AHDM-v1 StrategySpec",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-100"
+    ],
+    "blocks": [
+      "TASK-TDL-120",
+      "TASK-TDL-130"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "strategy_spec",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/strategy-spec.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-AHDM-001 satisfied.",
+      "Confidence is a score, not probability.",
+      "StrategySpec encodes the exact initial bias components, weights, evidence requirements, and three entry models from the PRD.",
+      "StrategySpec is written to `.archon/trading-lab/strategies/AHDM-v1/strategy-spec.json` and includes all PRD §27 required fields.",
+      "StrategySpec references datasets, not loose files.",
+      "`confidence < 0.55` produces no-trade.",
+      "`confidence >= 0.70` only allows paper consideration after backtest gates pass."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-120-pine-v6-artifacts.md",
+    "task_id": "TASK-TDL-120",
+    "title": "Pine v6 Artifacts",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-110"
+    ],
+    "blocks": [
+      "TASK-TDL-130",
+      "TASK-TDL-140"
+    ],
+    "required_env_keys": [],
+    "required_tools": [
+      "pine_analyze",
+      "pine_check",
+      "pine_compile",
+      "pine_get_console",
+      "pine_get_errors",
+      "pine_smart_compile"
+    ],
+    "deliverable_contracts": [
+      {
+        "kind": "pine_indicator",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-indicator.pine"
+      },
+      {
+        "kind": "pine_strategy",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/pine/AHDM-v1-strategy.pine"
+      },
+      {
+        "kind": "pine_compile_report",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/pine/compile-report.json"
+      }
+    ],
+    "acceptance_criteria": [
+      "A fail-closed residual gap for Pine compile/check tooling is valid **only** when backed by a captured failure from an actual `mcp__tradingview__pine_compile`/`pine_smart_compile` invocation — never a `PATH`/`which`/availability probe, a source-file mention, or a bare assertion. Such a gap cannot satisfy Pine readiness or promotion evidence.",
+      "AC-AHDM-002 satisfied.",
+      "Pine and native rules are traceable through shared manifest.",
+      "Pine artifacts are stored under `.archon/trading-lab/strategies/AHDM-v1/pine/` as exact files `AHDM-v1-indicator.pine`, `AHDM-v1-strategy.pine`, and `compile-report.json`.",
+      "Pine results are marked exploratory only.",
+      "`compile-report.json` tooling results record **real `mcp__tradingview__*` invocations** — each entry cites the MCP call and its returned result or error."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-130-ahdm-native-backtest.md",
+    "task_id": "TASK-TDL-130",
+    "title": "AHDM Native Backtest",
+    "complexity": "large",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-090",
+      "TASK-TDL-110",
+      "TASK-TDL-120"
+    ],
+    "blocks": [
+      "TASK-TDL-140"
+    ],
+    "required_env_keys": [],
+    "required_tools": [],
+    "deliverable_contracts": [
+      {
+        "kind": "backtest_config",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/config.json"
+      },
+      {
+        "kind": "backtest_report",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/report.json"
+      },
+      {
+        "kind": "backtest_trades",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/trades.jsonl"
+      },
+      {
+        "kind": "backtest_equity_curve",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/equity_curve.jsonl"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-AHDM-003 satisfied.",
+      "Backtest reports are replayable from registry artifacts.",
+      "Backtest run writes required artifact layout under `.archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/` with `config.json`, `report.json`, `trades.jsonl`, and `equity_curve.jsonl`.",
+      "Diagnostic reports cannot satisfy promotion gates.",
+      "Invalid/non-native/degraded datasets are refused unless diagnostic override is explicit.",
+      "Native backtest rules match the shared rule manifest used by Pine artifacts; divergence fails review.",
+      "REAL DATA BACKTEST (not a fixture): the delivered `report.json` / `trades.jsonl` / `equity_curve.jsonl` MUST be produced by running the backtest against real production-eligible datasets with captured live-fetch provenance (as gated by TASK-TDL-090). The happy-path fixture may exercise the backtest engine in tests only; it MUST NOT satisfy the backtest deliverables. If no real production-eligible dataset exists for the required universe, BLOCK HONESTLY rather than backtesting on fixture/synthetic data.",
+      "SUFFICIENT HISTORY REQUIRED: the backtest MUST run over datasets whose bar counts are statistically meaningful for the strategy's timeframe (a probe-sized dataset of a handful of bars is not a backtest). If only probe/fixture-sized datasets exist, BLOCK HONESTLY and record the observed bar counts rather than reporting backtest metrics."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  },
+  {
+    "file": "TASK-TDL-140-adversarial-review-and-readiness.md",
+    "task_id": "TASK-TDL-140",
+    "title": "Adversarial Review + Paper Readiness",
+    "complexity": "medium",
+    "status": "blocked",
+    "depends_on": [
+      "TASK-TDL-120",
+      "TASK-TDL-130"
+    ],
+    "blocks": [],
+    "required_env_keys": [],
+    "required_tools": [
+      "data_get_ohlcv",
+      "pine_analyze",
+      "pine_check",
+      "pine_compile",
+      "pine_get_console",
+      "pine_get_errors",
+      "pine_smart_compile"
+    ],
+    "deliverable_contracts": [
+      {
+        "kind": "paper_trading_readiness",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/readiness/paper-trading-readiness.md"
+      },
+      {
+        "kind": "adversarial_review",
+        "artifact_path": ".archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/adversarial-review.md"
+      }
+    ],
+    "acceptance_criteria": [
+      "AC-AHDM-004 satisfied.",
+      "Any failed gate blocks paper-readiness promotion.",
+      "Done definition items are checked.",
+      "Failed gates are recorded in the readiness artifact and block readiness promotion.",
+      "Residual gaps use PRD §32 schema.",
+      "Verifies each backtest run has `.archon/trading-lab/strategies/AHDM-v1/backtests/<run-id>/adversarial-review.md`.",
+      "Writes `.archon/trading-lab/strategies/AHDM-v1/readiness/paper-trading-readiness.md`."
+    ],
+    "files_expected_to_change": [
+      "Existing files only unless implementation requires a new module and user approval is obtained.",
+      "Likely anchors: `crates/archon-trading/src/data_lake.rs`, `crates/archon-trading/src/data_store.rs`, `src/command/trading_data.rs`, `src/cli_args/trading_market_actions.rs`, `src/cli_args/tests.rs`, relevant dispatch files, and command-specific tests."
+    ],
+    "files_forbidden_to_change": [
+      "Repository-root scratch files.",
+      "Secrets, credentials, or local provider tokens.",
+      "Unrelated crates and command surfaces."
+    ]
+  }
+]

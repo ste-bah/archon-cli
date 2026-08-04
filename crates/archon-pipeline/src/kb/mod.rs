@@ -15,81 +15,18 @@ mod query_search;
 #[cfg(test)]
 mod runtime_evidence_tests;
 pub mod schema;
+mod types;
 
 pub use schema::{KbEdge, KbEdgeType, KbNode, KbNodeType};
+pub use types::{
+    CompileResult, IngestResult, IngestSource, KbStats, LintResult, QueryOptions, QueryResult,
+};
 
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
 use archon_docs::embed::LocalEmbeddingProvider;
-use serde::{Deserialize, Serialize};
-
-// --- Supporting types ---
-
-/// Source of content to ingest into the knowledge base.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum IngestSource {
-    FilePath(std::path::PathBuf),
-    Url(String),
-    Directory(std::path::PathBuf),
-}
-
-/// Result of an ingest operation.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct IngestResult {
-    pub nodes_created: usize,
-    pub chunks_processed: usize,
-    pub errors: Vec<String>,
-}
-
-/// Result of a compile (synthesis) pass over ingested content.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct CompileResult {
-    pub articles_created: usize,
-    pub concepts_extracted: usize,
-}
-
-/// Options for querying the knowledge base.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QueryOptions {
-    pub max_results: usize,
-    pub min_relevance: f64,
-    pub domain_filter: Option<String>,
-}
-
-impl Default for QueryOptions {
-    fn default() -> Self {
-        Self {
-            max_results: 10,
-            min_relevance: 0.0,
-            domain_filter: None,
-        }
-    }
-}
-
-/// Result of a knowledge base query.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct QueryResult {
-    pub answer: String,
-    pub sources: Vec<KbNode>,
-    pub confidence: f64,
-}
-
-/// Result of a lint pass over the knowledge base.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct LintResult {
-    pub issues_found: usize,
-    pub suggestions: Vec<String>,
-}
-
-/// Aggregate statistics about the knowledge base.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct KbStats {
-    pub total_nodes: usize,
-    pub total_edges: usize,
-    pub nodes_by_type: std::collections::HashMap<String, usize>,
-}
 
 /// Knowledge base for external document management.
 ///
@@ -103,12 +40,28 @@ pub struct KnowledgeBase {
 
 impl KnowledgeBase {
     /// Create a new knowledge base, ensuring the schema exists.
+    ///
+    /// For a persisted database prefer [`KnowledgeBase::for_db_path`]: ingest
+    /// can only serialise content-hash reservations against other handles on
+    /// the same file when it knows where that file is.
     pub fn new(db: cozo::DbInstance) -> Result<Self> {
+        Self::open(db, None)
+    }
+
+    /// Knowledge base over a persisted database at a known path.
+    pub fn for_db_path(db: cozo::DbInstance, db_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::open(db, Some(db_path.as_ref()))
+    }
+
+    fn open(db: cozo::DbInstance, db_path: Option<&std::path::Path>) -> Result<Self> {
         if let Some(embedder) = archon_docs::embed::get_provider() {
-            return Self::from_shared_embedder(db, embedder);
+            return Self::from_shared_embedder(db, embedder, db_path);
         }
         schema::ensure_kb_schema(&db)?;
-        let ingester = ingest::Ingester::new(db.clone())?;
+        let ingester = match db_path {
+            Some(db_path) => ingest::Ingester::for_db_path(db.clone(), db_path)?,
+            None => ingest::Ingester::new(db.clone())?,
+        };
         Ok(Self {
             db,
             ingester,
@@ -120,15 +73,32 @@ impl KnowledgeBase {
         db: cozo::DbInstance,
         embedder: Box<dyn LocalEmbeddingProvider>,
     ) -> Result<Self> {
-        Self::from_shared_embedder(db, Arc::from(embedder))
+        Self::from_shared_embedder(db, Arc::from(embedder), None)
+    }
+
+    /// [`KnowledgeBase::with_embedder`] for a persisted database at a known path.
+    pub fn with_embedder_for_db_path(
+        db: cozo::DbInstance,
+        embedder: Box<dyn LocalEmbeddingProvider>,
+        db_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self> {
+        Self::from_shared_embedder(db, Arc::from(embedder), Some(db_path.as_ref()))
     }
 
     fn from_shared_embedder(
         db: cozo::DbInstance,
         embedder: Arc<dyn LocalEmbeddingProvider>,
+        db_path: Option<&std::path::Path>,
     ) -> Result<Self> {
         schema::ensure_kb_schema(&db)?;
-        let ingester = ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?;
+        let ingester = match db_path {
+            Some(db_path) => ingest::Ingester::with_embedder_for_db_path(
+                db.clone(),
+                Arc::clone(&embedder),
+                db_path,
+            )?,
+            None => ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?,
+        };
         Ok(Self {
             db,
             ingester,

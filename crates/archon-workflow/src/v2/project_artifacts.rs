@@ -324,100 +324,13 @@ fn project_artifact_status(
     Ok(ProjectArtifactPath::Existing(output_path))
 }
 
-fn ensure_existing_project_path(
-    item_id: &str,
-    project_root: &Path,
-    absolute: &Path,
-    relative: &str,
-) -> Result<(), WorkflowV2WriteSafetyError> {
-    let Ok(canonical_project) = std::fs::canonicalize(project_root) else {
-        return Err(unsafe_target(item_id, relative));
-    };
-    let canonical_path =
-        std::fs::canonicalize(absolute).map_err(|_| unsafe_target(item_id, relative))?;
-    if canonical_path.starts_with(canonical_project) {
-        Ok(())
-    } else {
-        Err(unsafe_target(item_id, relative))
-    }
-}
-
-fn ensure_project_path_parent_safe(
-    item_id: &str,
-    project_root: &Path,
-    absolute: &Path,
-    relative: &str,
-) -> Result<(), WorkflowV2WriteSafetyError> {
-    let parent =
-        nearest_existing_parent(absolute).ok_or_else(|| unsafe_target(item_id, relative))?;
-    ensure_existing_project_path(item_id, project_root, &parent, relative)
-}
-
-fn nearest_existing_parent(path: &Path) -> Option<PathBuf> {
-    let mut current = path.parent();
-    while let Some(parent) = current {
-        if parent.exists() {
-            return Some(parent.to_path_buf());
-        }
-        current = parent.parent();
-    }
-    None
-}
-
-fn absolute_artifact_candidate(
-    project_root: &Path,
-    relative: &str,
-    context: &WorkflowV2ProjectArtifactContext,
-) -> PathBuf {
-    if let Some(run_id) = context.run_id.as_deref().filter(|id| !id.is_empty())
-        && relative.starts_with("artifacts/")
-    {
-        return project_root
-            .join(".archon")
-            .join("workflows")
-            .join(run_id)
-            .join(relative);
-    }
-    project_root.join(relative)
-}
-
-fn clean_absolute_artifact_path(
-    item_id: &str,
-    raw: &str,
-) -> Result<PathBuf, WorkflowV2WriteSafetyError> {
-    let path = Path::new(raw);
-    let mut clean = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::RootDir | Component::Prefix(_) | Component::Normal(_) => {
-                clean.push(component.as_os_str())
-            }
-            Component::CurDir => {}
-            Component::ParentDir => return Err(unsafe_target(item_id, raw)),
-        }
-    }
-    Ok(clean)
-}
-
-fn normalize_relative_path(item_id: &str, raw: &str) -> Result<String, WorkflowV2WriteSafetyError> {
-    let path = Path::new(raw.trim());
-    if raw.trim().is_empty() || path.is_absolute() {
-        return Err(unsafe_target(item_id, raw));
-    }
-    let mut parts = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(unsafe_target(item_id, raw));
-            }
-        }
-    }
-    (!parts.is_empty())
-        .then(|| parts.join("/"))
-        .ok_or_else(|| unsafe_target(item_id, raw))
-}
+/// Path confinement helpers. See [`paths`] for why they are a separate file.
+#[path = "project_artifacts_paths.rs"]
+mod paths;
+use paths::{
+    absolute_artifact_candidate, clean_absolute_artifact_path, ensure_existing_project_path,
+    ensure_project_path_parent_safe, normalize_relative_path,
+};
 
 fn artifact_from_file(path: String, purpose: Option<String>) -> WorkflowV2Artifact {
     WorkflowV2Artifact {
@@ -451,8 +364,23 @@ fn push_unique_artifact(result: &mut WorkflowV2Result, artifact: WorkflowV2Artif
     result.artifacts.push(artifact);
 }
 
-/// A templated path (placeholder tokens) is a contract shape, not a checkable
-/// artifact; noting it as "missing" would manufacture unsatisfiable gaps.
+/// An unexpanded template placeholder is never satisfied evidence.
+///
+/// # Supersedes D76
+///
+/// D76 excluded a templated path from literal evidence checks and left the
+/// result `Accepted`, on the reasoning that reporting it "missing" would
+/// manufacture an unsatisfiable gap. The first half was right and is kept: a
+/// path containing `<dataset-id>` is not a file, so it is still dropped from
+/// `artifacts` and never checked literally. The second half is what prior-run
+/// finding F4 (`wf-ee4a92fc`) caught — an artifact recorded as present against a
+/// wildcard path, on "observed or contract-required" rather than on a file
+/// anyone opened. Passing silently is the failure mode, not the safeguard.
+///
+/// The gap it raises is *not* unsatisfiable, which is why it is raised: the
+/// remedy is to name the expanded instance path that was actually written. A
+/// distinct id keeps it separable from `missing_project_artifact_*`, which
+/// remains reserved for a concrete path that is genuinely absent.
 fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
     let summary =
         format!("templated artifact requirement excluded from literal evidence checks: {path}");
@@ -461,6 +389,27 @@ fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
             WorkflowV2EvidenceKind::Inspection,
             summary,
         ));
+    }
+    let id = format!(
+        "unexpanded_artifact_template_{}",
+        artifact_id_for_path(path)
+    );
+    if !result.residual_gaps.iter().any(|gap| gap.id == id) {
+        result.residual_gaps.push(WorkflowV2ResidualGap {
+            id,
+            description: format!(
+                "declared artifact path {path} still carries unexpanded template placeholder(s); \
+                 report the expanded instance path that was written, or bind the contract's \
+                 instance fields so its instances can be enumerated"
+            ),
+            severity: Some("blocking".to_string()),
+        });
+    }
+    if matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
+        result.status = WorkflowV2Status::NeedsReview;
     }
 }
 

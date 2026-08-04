@@ -6,16 +6,38 @@ publish = false
 
 [dependencies]
 archon-llm = { path = "../archon-llm" }
+# `lower_workflow` lowers a `WorkflowSpec` into the topology IR. The edge runs
+# this way round because `WorkflowSpec` is this crate's type: siting the lowering
+# next to the IR instead would mean `archon-topology -> archon-workflow` and
+# close the `archon-core -> archon-workflow -> archon-topology -> archon-core`
+# cycle. `default-features = false` because only the IR and its analyses are
+# needed here — not the trace, and not the live admission layer.
+archon-topology = { path = "../archon-topology", default-features = false }
+# The write coordinator's resource keys and overlap table. Extracted to a leaf
+# crate because `archon-topology`'s live admission has to reach the same table,
+# and reaching it through this crate closed a dependency cycle. Re-exported from
+# `write_coordinator` so every existing call site keeps its path.
+archon-write-plan = { path = "../archon-write-plan" }
+# The declared-artifact verifiers a write branch runs are generated shell, so
+# the write layer resolves the same POSIX shell the rest of the runtime does.
+# archon-shell is a deliberate leaf (no archon-* deps) precisely so both
+# archon-core and this crate can hold the edge; it cannot close a cycle. It was
+# already here as a dev-dependency for the deliverable-contract tests.
+archon-shell = { path = "../archon-shell" }
 async-trait.workspace = true
 blake3.workspace = true
 chrono.workspace = true
 fd-lock.workspace = true
 futures-util.workspace = true
 glob.workspace = true
-globset.workspace = true
 hex.workspace = true
 libc = "0.2"
 regex.workspace = true
+# The workflow.js grammar. `v2::script` composes and EXECUTES script source for
+# both the live host and the dry-run recorder, so the engine has to live with
+# the bridge; validation IS execution against a recording host, and a second
+# non-QuickJS interpretation of script text is the drift that sharing prevents.
+rquickjs.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,4 +48,13 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# The workflow-live JSON fixture corpus. `include_str!` resolves relative to the
+# source file, so a fixture shared by a cluster that moved here and one that
+# stayed in the binary can follow neither; the corpus therefore has one home in
+# archon-test-support and every consumer names a `const`. Nothing in this crate
+# read a fixture until the generated-contract cluster arrived.
+#
+# Dev-only deliberately: pulling it in at build time would put wiremock and the
+# mock doubles into this crate's production dependency graph.
+archon-test-support = { path = "../archon-test-support" }
 tempfile.workspace = true

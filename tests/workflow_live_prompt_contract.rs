@@ -1,6 +1,9 @@
 #[test]
 fn live_workflow_prompt_advertises_write_capable_contract() {
-    let source = include_str!("../src/command/workflow_live_prompt.rs");
+    // The prompts moved to archon-workflow; this gate stays in the workspace
+    // crate because `include_str!` resolves relative to the source file and
+    // this path only reads from here.
+    let source = include_str!("../crates/archon-workflow/src/stage_prompt.rs");
     assert!(
         source.contains("implementation.")
             || source.contains("implementation\\n")

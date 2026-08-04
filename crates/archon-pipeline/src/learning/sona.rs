@@ -10,6 +10,7 @@ mod errors;
 mod helpers;
 mod math;
 mod step_capture;
+mod tuning;
 mod types;
 
 pub use config::SonaConfig;
@@ -26,6 +27,10 @@ pub use math::{
     crc32_checksum, update_fisher_information,
 };
 pub use step_capture::StepCaptureService;
+pub use tuning::{
+    AdmissionOutcome, MIN_OBSERVATIONS, SonaParameterTuner, TUNING_LEARNING_RATE,
+    TUNING_ROUTE_PREFIX, TunedWeight, TuningObservation,
+};
 pub use types::{
     DriftReport, DriftStatus, FeedbackInput, Trajectory, TrajectoryStep, WeightCheckpoint,
     WeightUpdateResult,

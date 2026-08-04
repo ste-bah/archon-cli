@@ -54,7 +54,11 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon workflow restart-agent <RUN_ID> <STAGE_ID>` | Rewind one workflow stage/agent before resume |
 | `archon workflow force-accept <RUN_ID> <STAGE_ID> <RATIONALE>` | Audit and continue past a reviewed failed stage without marking it clean durable memory |
 | `archon workflow save <RUN_ID> <NAME>` | Save a sanitized reusable workflow template |
+| `archon workflow restart-task <RUN_ID> <TASK_ID>` | Rewind one workflow task by canonical task ID rather than internal stage ID |
 | `archon workflow list` | List dynamic workflow runs |
+| `archon workflow lint --tasks <DIR>\|--spec-file <PATH>\|--graph <ID>` | Run the four advisory topology analyses over a task set, spec, or recorded graph. Exactly one source is required. Reports only — it never writes and never fails a run. See [workflow lint](workflow-lint.md) |
+| `archon requirements trace --prd <PATH> --tasks <DIR>` | Trace PRD requirement IDs to code with a four-level proof ladder. Optional: `--leann-db <PATH>` (an existing code index; never built here), `--graph <ID>`, `--evidence <PATH>`, `--persist <PATH>`, `--json`, `--limit-per-scope <N>`, `--max-scopes <N>`. Exit status is success either way — an unproven requirement is a declared gap, not a failure. See [requirements trace](requirements-trace.md) |
+| `archon requirements trace ... --falsify` | **Mutates files in your working tree.** Executes the falsification plans: replaces anchored lines with an abort, runs the task's declared verifier, and restores. Refuses on a dirty file, a workspace-wide verifier, a changed file hash, or a verifier that did not pass beforehand |
 | `archon trading data ingest-ohlcv --source <CSV_OR_JSON> --format csv\|json --dataset-id <ID> --version <VERSION> --provider <NAME> --symbol <SYMBOL>` | Persist OHLCV market data under `.archon/trading-lab/data` with normalized JSONL, raw source, metadata, checksum, and registry entry |
 | `archon trading data list\|show\|status\|export-ohlcv` | Inspect or export the persistent Trading Lab market-data registry |
 | `archon trading openbb fetch --request <JSON> --metadata <JSON> --quality <JSON> [--store-ohlcv --response-format json\|csv]` | Fetch through OpenBB and optionally persist parseable OHLCV responses into the Trading Lab data lake |

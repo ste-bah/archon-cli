@@ -1,8 +1,11 @@
 // WorkflowScriptHost: execution records and checkpoint state.
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
+
+use super::*;
+
 impl WorkflowScriptHost {
-    fn execution_from_request(
+    pub(super) fn execution_from_request(
         &self,
         method: &str,
         request: ScriptHostRequest,
@@ -55,7 +58,7 @@ impl WorkflowScriptHost {
         })
     }
 
-    fn update_checkpoint(
+    pub(super) fn update_checkpoint(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<()> {
@@ -72,7 +75,7 @@ impl WorkflowScriptHost {
         self.runner.v2_store.save_checkpoint(&checkpoint)
     }
 
-    async fn mark_reused(
+    pub(super) async fn mark_reused(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<()> {
@@ -102,7 +105,11 @@ impl WorkflowScriptHost {
         Ok(())
     }
 
-    async fn mark_executed(&self, record: &WorkflowV2CallRecord, status: WorkflowV2Status) {
+    pub(super) async fn mark_executed(
+        &self,
+        record: &WorkflowV2CallRecord,
+        status: WorkflowV2Status,
+    ) {
         let mut acc = self.accumulator.lock().await;
         // A final report is the script speaking for the whole run: its status
         // overrides accumulated call severities so script-recovered failures
@@ -120,7 +127,7 @@ impl WorkflowScriptHost {
         acc.calls.push(record.call.clone());
     }
 
-    async fn mark_terminal(
+    pub(super) async fn mark_terminal(
         &self,
         record: &WorkflowV2CallRecord,
         result_path: String,
@@ -140,7 +147,7 @@ impl WorkflowScriptHost {
         acc.next_action = Some(next_action);
     }
 
-    async fn mark_script_failure(
+    pub(crate) async fn mark_script_failure(
         &self,
         error: &str,
         emit_terminal_status: bool,
@@ -169,5 +176,4 @@ impl WorkflowScriptHost {
         }
         self.summary().await
     }
-
 }

@@ -44,6 +44,19 @@ pub struct ToolRunAttemptOutcome {
     pub permission_level: PermissionLevel,
     pub blocked: bool,
     pub is_error: bool,
+    /// Whether `ToolRunAdmissionCallback` ran for this attempt.
+    ///
+    /// This callback used to fire only when admission ran — i.e. only for
+    /// non-`Safe` tools with an admission callback installed. Ambient topology
+    /// tracing needs *every* attempt, so the filter was removed and this flag
+    /// took its place.
+    ///
+    /// **A consumer that correlates against admission state must check this
+    /// field.** The world-model guardrail does: it looks up the persisted
+    /// admission decision by action id, and for an attempt that was never
+    /// admitted there is nothing to find. Before this flag existed the absence
+    /// of a decision was inferred from the callback simply not firing.
+    pub admission_evaluated: bool,
 }
 
 pub type ToolRunAdmissionCallback =

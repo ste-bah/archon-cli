@@ -1,15 +1,16 @@
+use super::*;
 
-struct CannedLifecycleLlm {
-    scenario: CannedLifecycleScenario,
-    calls: Mutex<Vec<String>>,
-    deliverable_contract_executed: AtomicBool,
-    parameterized_contract_executed: AtomicBool,
-    inventory_calls: AtomicUsize,
-    verification_failure_emitted: AtomicBool,
+pub(super) struct CannedLifecycleLlm {
+    pub(super) scenario: CannedLifecycleScenario,
+    pub(super) calls: Mutex<Vec<String>>,
+    pub(super) deliverable_contract_executed: AtomicBool,
+    pub(super) parameterized_contract_executed: AtomicBool,
+    pub(super) inventory_calls: AtomicUsize,
+    pub(super) verification_failure_emitted: AtomicBool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum CannedLifecycleScenario {
+pub(super) enum CannedLifecycleScenario {
     #[default]
     FullLifecycle,
     TriagePreservation,
@@ -19,18 +20,23 @@ enum CannedLifecycleScenario {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CannedLifecycleLlm {
+impl WorkflowLlmClient for CannedLifecycleLlm {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
-        anyhow::bail!("D64 lifecycle harness must use the agent execution seam")
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Err(archon_workflow::WorkflowError::port(
+            "D64 lifecycle harness must use the agent execution seam",
+        ))
     }
 
-    async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+    async fn run_agent(
+        &self,
+        request: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let prompt = request
             .messages
             .iter()
@@ -270,11 +276,21 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
             )
         } else if call_id.starts_with("adversarial-review-") {
+            // Per-task review branches: read-only, one per accepted task, and
+            // deliberately silent about which task they reviewed — attribution
+            // comes from the branch, not from the reviewer.
             accepted_result(
-                "synthetic adversarial review accepted",
-                serde_json::json!({ "items": [] }),
+                "synthetic per-task adversarial review found nothing to falsify",
+                serde_json::json!({ "findings": [] }),
                 all_task_coverage(),
                 vec![test_command("true", true, "review found no residual gaps")],
+            )
+        } else if call_id.starts_with("cross-cutting-review-") {
+            accepted_result(
+                "synthetic cross-cutting review accepted",
+                serde_json::json!({ "items": [] }),
+                all_task_coverage(),
+                vec![test_command("true", true, "no cross-task contradiction")],
             )
         } else if call_id.starts_with("final-evidence-reconciliation-") {
             accepted_result(
@@ -305,7 +321,8 @@ impl LlmClient for CannedLifecycleLlm {
                 .task
                 .contains("Fix only the assigned focused-verification failure")
         {
-            implementation_result(&request, &input, &call_id)?
+            implementation_result(&request, &input, &call_id)
+                .map_err(archon_workflow::WorkflowError::port)?
         } else if request.task.contains("Run focused verification only")
             || request
                 .task
@@ -318,7 +335,8 @@ impl LlmClient for CannedLifecycleLlm {
                 &self.deliverable_contract_executed,
                 &self.parameterized_contract_executed,
                 &self.verification_failure_emitted,
-            )?
+            )
+            .map_err(archon_workflow::WorkflowError::port)?
         } else if matches!(
             call_id.as_str(),
             "prd-task-review" | "repository-implementation-audit" | "acceptance-evidence-audit"
@@ -330,10 +348,12 @@ impl LlmClient for CannedLifecycleLlm {
                 Vec::new(),
             )
         } else {
-            anyhow::bail!("unexpected D64 lifecycle harness call: {call_id}");
+            return Err(archon_workflow::WorkflowError::port(format!(
+                "unexpected D64 lifecycle harness call: {call_id}"
+            )));
         };
 
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: content.to_string(),
             tool_uses: Vec::new(),
             tokens_in: 0,
@@ -341,4 +361,3 @@ impl LlmClient for CannedLifecycleLlm {
         })
     }
 }
-

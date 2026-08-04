@@ -1,4 +1,6 @@
-fn collect_text(value: &serde_json::Value, into: &mut String) {
+use super::*;
+
+pub(super) fn collect_text(value: &serde_json::Value, into: &mut String) {
     match value {
         serde_json::Value::String(text) => {
             into.push_str(text);
@@ -36,7 +38,7 @@ fn canary_git(repo: &std::path::Path, args: &[&str]) {
 #[tokio::test]
 async fn canary_wf_afae6bee_regression() {
     let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set().await;
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path();
 
@@ -58,15 +60,16 @@ async fn canary_wf_afae6bee_regression() {
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        format!(
-            "# Data Lake Gap Audit\n\n\
-             task_id: TASK-TDL-001\n\
-             depends_on: []\n\n\
-             ## Acceptance Criteria\n\n\
-             - Gap audit implemented in the target repository.\n\
-             - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
-             ## Artifact Requirements\n\n\
-             - `{CANARY_ARTIFACT_REL}`\n"
+        super::super::workflow_live_test_support::standard_task_file(
+            "TASK-TDL-001",
+            "[]",
+            "[]",
+            &format!(
+                "\n## Acceptance Criteria\n\n\
+                 - Gap audit implemented in the target repository.\n\
+                 - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
+                 ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+            ),
         ),
     )
     .expect("task file");
@@ -85,7 +88,7 @@ async fn canary_wf_afae6bee_regression() {
             decomposed: false,
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         true,

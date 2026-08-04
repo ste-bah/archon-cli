@@ -100,6 +100,39 @@ pub fn store_trajectory(db: &DbInstance, trajectory: &Trajectory) -> Result<()> 
     .map_err(|e| anyhow::anyhow!("trajectory_store::store_trajectory: {e}"))
 }
 
+/// Read back every trajectory recorded on one route as `(quality, created_at)`.
+///
+/// The projection is deliberately narrow. Its only caller is the parameter
+/// tuner, which replays recorded outcomes through `SonaEngine` to rebuild
+/// weights; pulling embeddings and context back for that would move megabytes
+/// to compute two floats. Returned unordered — the tuner sorts by `created_at`,
+/// because relying on a store's row order to define replay order is how a
+/// learner silently changes its answer when the store is compacted.
+pub fn load_route_outcomes(db: &DbInstance, route: &str) -> Result<Vec<(f64, i64)>> {
+    let mut params = BTreeMap::new();
+    params.insert("route".to_string(), DataValue::Str(route.into()));
+
+    let rows = super::run_script_guarded(
+        db,
+        "?[quality, created_at] := *trajectories{ route, quality, created_at }, route = $route",
+        params,
+        ScriptMutability::Immutable,
+        "load pipeline learning trajectories for one route",
+    )
+    .map_err(|e| anyhow::anyhow!("trajectory_store::load_route_outcomes: {e}"))?;
+
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| {
+            // A row missing either column is a schema the tuner does not
+            // understand; dropping it keeps the replay honest rather than
+            // substituting a zero that would read as "no pressure".
+            Some((row.first()?.get_float()?, row.get(1)?.get_int()?))
+        })
+        .collect())
+}
+
 /// Persist multiple trajectories in a single CozoDB transaction.
 ///
 /// Uses repeated `:put` rows for batch insert. If any row fails,

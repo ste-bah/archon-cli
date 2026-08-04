@@ -1,11 +1,12 @@
+mod rows;
+
 use std::collections::BTreeMap;
 
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
 use crate::errors::{KnowledgeError, Result};
 use crate::schema::{
-    ClaimPolarity, ClaimRecord, ContradictionRecord, EntityRecord, RelationRecord,
-    SourceQualityRecord,
+    ClaimRecord, ContradictionRecord, EntityRecord, RelationRecord, SourceQualityRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +26,7 @@ pub fn list_doc_chunks(db: &DbInstance) -> Result<Vec<DocumentChunk>> {
         Ok(result) => Ok(result
             .rows
             .iter()
-            .map(|row| row_to_doc_chunk(row))
+            .map(|row| rows::row_to_doc_chunk(row))
             .collect()),
         Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
         Err(e) => Err(KnowledgeError::Store(format!(
@@ -74,7 +75,7 @@ pub fn search_doc_chunks_fts(
         Ok(result) => Ok(result
             .rows
             .iter()
-            .map(|row| row_to_doc_chunk(&row[1..]))
+            .map(|row| rows::row_to_doc_chunk(&row[1..]))
             .collect()),
         Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
         Err(e) => Err(KnowledgeError::Store(format!(
@@ -115,7 +116,7 @@ pub fn list_doc_chunks_for_kb(db: &DbInstance, kb_id: &str) -> Result<Vec<Docume
         Ok(result) => Ok(result
             .rows
             .iter()
-            .map(|row| row_to_doc_chunk(row))
+            .map(|row| rows::row_to_doc_chunk(row))
             .collect()),
         Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
         Err(e) => Err(KnowledgeError::Store(format!(
@@ -141,7 +142,8 @@ pub fn insert_claim(db: &DbInstance, claim: &ClaimRecord) -> Result<()> {
     params.insert("pol".into(), DataValue::from(claim.polarity.as_str()));
     params.insert("conf".into(), DataValue::from(claim.confidence));
     params.insert("ts".into(), DataValue::from(claim.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[claim_id, chunk_id, document_id, text, normalized_subject, normalized_predicate, polarity, confidence, created_at]
             <- [[$id, $cid, $did, $txt, $subj, $pred, $pol, $conf, $ts]]
@@ -152,6 +154,7 @@ pub fn insert_claim(db: &DbInstance, claim: &ClaimRecord) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_claims row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert claim failed: {e}")))?;
     Ok(())
@@ -169,7 +172,8 @@ pub fn insert_entity(db: &DbInstance, entity: &EntityRecord) -> Result<()> {
     params.insert("mentions".into(), DataValue::from(entity.mentions));
     params.insert("conf".into(), DataValue::from(entity.confidence));
     params.insert("ts".into(), DataValue::from(entity.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[entity_id, name, entity_type, source_chunk_id, mentions, confidence, created_at]
             <- [[$id, $name, $typ, $cid, $mentions, $conf, $ts]]
@@ -179,6 +183,7 @@ pub fn insert_entity(db: &DbInstance, entity: &EntityRecord) -> Result<()> {
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_entities row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert entity failed: {e}")))?;
     Ok(())
@@ -205,7 +210,8 @@ pub fn insert_relation(db: &DbInstance, relation: &RelationRecord) -> Result<()>
     );
     params.insert("conf".into(), DataValue::from(relation.confidence));
     params.insert("ts".into(), DataValue::from(relation.created_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[relation_id, source_entity_id, target_entity_id, relation_type, source_chunk_id, confidence, created_at]
             <- [[$id, $src, $dst, $typ, $cid, $conf, $ts]]
@@ -216,6 +222,7 @@ pub fn insert_relation(db: &DbInstance, relation: &RelationRecord) -> Result<()>
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_relations row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert relation failed: {e}")))?;
     Ok(())
@@ -228,7 +235,8 @@ pub fn upsert_source_quality(db: &DbInstance, record: &SourceQualityRecord) -> R
     params.insert("obs".into(), DataValue::from(record.observations));
     params.insert("out".into(), DataValue::from(record.last_outcome.as_str()));
     params.insert("ts".into(), DataValue::from(record.updated_at.as_str()));
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[source_id, score, observations, last_outcome, updated_at]
             <- [[$sid, $score, $obs, $out, $ts]]
@@ -236,6 +244,7 @@ pub fn upsert_source_quality(db: &DbInstance, record: &SourceQualityRecord) -> R
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: upsert kb_source_quality row",
     )
     .map_err(|e| KnowledgeError::Store(format!("upsert source quality failed: {e}")))?;
     Ok(())
@@ -268,7 +277,8 @@ pub fn insert_contradiction(db: &DbInstance, contradiction: &ContradictionRecord
         "ts".into(),
         DataValue::from(contradiction.created_at.as_str()),
     );
-    db.run_script(
+    archon_cozo::run_bound_script_guarded(
+        db,
         r#"
         ?[contradiction_id, left_claim_id, right_claim_id, contradiction_type, explanation, confidence, created_at]
             <- [[$id, $left, $right, $typ, $exp, $conf, $ts]]
@@ -279,6 +289,7 @@ pub fn insert_contradiction(db: &DbInstance, contradiction: &ContradictionRecord
         "#,
         params,
         ScriptMutability::Mutable,
+        "knowledge store: insert kb_contradictions row",
     )
     .map_err(|e| KnowledgeError::Store(format!("insert contradiction failed: {e}")))?;
     Ok(())
@@ -295,7 +306,11 @@ pub fn list_claims(db: &DbInstance) -> Result<Vec<ClaimRecord>> {
             ScriptMutability::Immutable,
         )
         .map_err(|e| KnowledgeError::Store(format!("list claims failed: {e}")))?;
-    Ok(result.rows.iter().map(|row| row_to_claim(row)).collect())
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| rows::row_to_claim(row))
+        .collect())
 }
 
 pub fn list_entities(db: &DbInstance) -> Result<Vec<EntityRecord>> {
@@ -309,7 +324,11 @@ pub fn list_entities(db: &DbInstance) -> Result<Vec<EntityRecord>> {
             ScriptMutability::Immutable,
         )
         .map_err(|e| KnowledgeError::Store(format!("list entities failed: {e}")))?;
-    Ok(result.rows.iter().map(|row| row_to_entity(row)).collect())
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| rows::row_to_entity(row))
+        .collect())
 }
 
 pub fn list_relations(db: &DbInstance) -> Result<Vec<RelationRecord>> {
@@ -323,7 +342,11 @@ pub fn list_relations(db: &DbInstance) -> Result<Vec<RelationRecord>> {
             ScriptMutability::Immutable,
         )
         .map_err(|e| KnowledgeError::Store(format!("list relations failed: {e}")))?;
-    Ok(result.rows.iter().map(|row| row_to_relation(row)).collect())
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| rows::row_to_relation(row))
+        .collect())
 }
 
 pub fn list_source_quality(db: &DbInstance) -> Result<Vec<SourceQualityRecord>> {
@@ -340,7 +363,7 @@ pub fn list_source_quality(db: &DbInstance) -> Result<Vec<SourceQualityRecord>> 
     Ok(result
         .rows
         .iter()
-        .map(|row| row_to_source_quality(row))
+        .map(|row| rows::row_to_source_quality(row))
         .collect())
 }
 
@@ -358,7 +381,7 @@ pub fn list_contradictions(db: &DbInstance) -> Result<Vec<ContradictionRecord>> 
     Ok(result
         .rows
         .iter()
-        .map(|row| row_to_contradiction(row))
+        .map(|row| rows::row_to_contradiction(row))
         .collect())
 }
 
@@ -376,91 +399,10 @@ pub fn get_source_quality(db: &DbInstance, source_id: &str) -> Result<Option<Sou
             ScriptMutability::Immutable,
         )
         .map_err(|e| KnowledgeError::Store(format!("get source quality failed: {e}")))?;
-    Ok(result.rows.first().map(|row| row_to_source_quality(row)))
-}
-
-fn row_to_doc_chunk(row: &[DataValue]) -> DocumentChunk {
-    DocumentChunk {
-        chunk_id: str_col(row, 0),
-        document_id: str_col(row, 1),
-        content: str_col(row, 2),
-        content_hash: str_col(row, 3),
-    }
-}
-
-fn row_to_claim(row: &[DataValue]) -> ClaimRecord {
-    ClaimRecord {
-        claim_id: str_col(row, 0),
-        chunk_id: str_col(row, 1),
-        document_id: str_col(row, 2),
-        text: str_col(row, 3),
-        normalized_subject: str_col(row, 4),
-        normalized_predicate: str_col(row, 5),
-        polarity: ClaimPolarity::parse(&str_col(row, 6)),
-        confidence: float_col(row, 7),
-        created_at: str_col(row, 8),
-    }
-}
-
-fn row_to_entity(row: &[DataValue]) -> EntityRecord {
-    EntityRecord {
-        entity_id: str_col(row, 0),
-        name: str_col(row, 1),
-        entity_type: str_col(row, 2),
-        source_chunk_id: str_col(row, 3),
-        mentions: int_col(row, 4),
-        confidence: float_col(row, 5),
-        created_at: str_col(row, 6),
-    }
-}
-
-fn row_to_relation(row: &[DataValue]) -> RelationRecord {
-    RelationRecord {
-        relation_id: str_col(row, 0),
-        source_entity_id: str_col(row, 1),
-        target_entity_id: str_col(row, 2),
-        relation_type: str_col(row, 3),
-        source_chunk_id: str_col(row, 4),
-        confidence: float_col(row, 5),
-        created_at: str_col(row, 6),
-    }
-}
-
-fn row_to_source_quality(row: &[DataValue]) -> SourceQualityRecord {
-    SourceQualityRecord {
-        source_id: str_col(row, 0),
-        score: float_col(row, 1),
-        observations: int_col(row, 2),
-        last_outcome: str_col(row, 3),
-        updated_at: str_col(row, 4),
-    }
-}
-
-fn row_to_contradiction(row: &[DataValue]) -> ContradictionRecord {
-    ContradictionRecord {
-        contradiction_id: str_col(row, 0),
-        left_claim_id: str_col(row, 1),
-        right_claim_id: str_col(row, 2),
-        contradiction_type: str_col(row, 3),
-        explanation: str_col(row, 4),
-        confidence: float_col(row, 5),
-        created_at: str_col(row, 6),
-    }
-}
-
-fn str_col(row: &[DataValue], idx: usize) -> String {
-    row.get(idx)
-        .and_then(DataValue::get_str)
-        .unwrap_or("")
-        .to_string()
-}
-
-fn float_col(row: &[DataValue], idx: usize) -> f64 {
-    row.get(idx).and_then(DataValue::get_float).unwrap_or(0.0)
-}
-
-fn int_col(row: &[DataValue], idx: usize) -> i64 {
-    row.get(idx).and_then(DataValue::get_int).unwrap_or(0)
+    Ok(result
+        .rows
+        .first()
+        .map(|row| rows::row_to_source_quality(row)))
 }
 
 pub(crate) fn relation_missing(message: &str) -> bool {

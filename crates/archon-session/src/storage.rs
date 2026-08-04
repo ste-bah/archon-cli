@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use archon_cozo::GuardedDbInstance;
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
 pub struct SessionDb {
-    inner: DbInstance,
+    inner: GuardedDbInstance,
     #[cfg(test)]
     query_count: std::sync::atomic::AtomicUsize,
 }
 
 impl SessionDb {
-    fn new(inner: DbInstance) -> Self {
+    fn new(inner: GuardedDbInstance) -> Self {
         Self {
             inner,
             #[cfg(test)]
@@ -18,6 +19,10 @@ impl SessionDb {
         }
     }
 
+    /// Run a read-only script.
+    ///
+    /// `Immutable` scripts take no locks in the guard, so they stay on the
+    /// direct Cozo path. Writes must go through [`SessionDb::run_mutable`].
     pub fn run_script(
         &self,
         script: &str,
@@ -27,7 +32,25 @@ impl SessionDb {
         #[cfg(test)]
         self.query_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.run_script(script, params, mutability)
+        self.inner.db().run_script(script, params, mutability)
+    }
+
+    /// Run a `Mutable` script under the shared Cozo write guard.
+    ///
+    /// The session store is SQLite-backed and therefore single-writer; this
+    /// routes every mutation through the process-wide mutex, the cross-process
+    /// file lock, and the SQLITE_BUSY retry loop in `archon-cozo`.
+    pub fn run_mutable(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        context: &str,
+    ) -> anyhow::Result<NamedRows> {
+        #[cfg(test)]
+        self.query_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner
+            .run_script_guarded(script, params, ScriptMutability::Mutable, context)
     }
 }
 
@@ -35,7 +58,7 @@ impl std::ops::Deref for SessionDb {
     type Target = DbInstance;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.inner.db()
     }
 }
 
@@ -115,14 +138,14 @@ impl SessionStore {
             std::fs::create_dir_all(parent)?;
         }
         let path_str = path.to_string_lossy().to_string();
-        let db = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            DbInstance::new("sqlite", &path_str, "")
-        }))
-        .map_err(|_| {
-            SessionError::DbError(
-                "cozo panicked during sqlite init — concurrent access or filesystem error".into(),
-            )
-        })?
+        // `open_sqlite_guarded_instance` already takes the write lock for the
+        // open itself and converts a Cozo panic into an error, so the previous
+        // hand-rolled `catch_unwind` is no longer needed.
+        let db = archon_cozo::open_sqlite_guarded_instance(
+            &path_str,
+            "open session store",
+            archon_cozo::CozoGuardConfig::for_db_path(path),
+        )
         .map_err(db_err)?;
         #[cfg(unix)]
         secure_file_permissions(path)?;
@@ -195,7 +218,11 @@ impl SessionStore {
 
     fn create_relation(&self, script: &str) -> Result<(), SessionError> {
         self.db
-            .run_script(script, BTreeMap::new(), ScriptMutability::Mutable)
+            .run_mutable(
+                script,
+                BTreeMap::new(),
+                "session store schema: create relation",
+            )
             .or_else(|error| {
                 let message = error.to_string();
                 if message.contains("already exists") || message.contains("conflicts") {
@@ -254,7 +281,6 @@ impl SessionStore {
 
 pub fn default_db_path() -> PathBuf {
     crate::background::archon_data_dir()
-        .join("archon")
         .join("sessions")
         .join("sessions.db")
 }

@@ -1,6 +1,8 @@
+use super::*;
+
 #[tokio::test]
 async fn generated_live_run_executes_read_only_fanout_in_parallel() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let client = Arc::new(GeneratedV2FanoutRunClient {
         calls: AtomicUsize::new(0),
@@ -16,7 +18,7 @@ async fn generated_live_run_executes_read_only_fanout_in_parallel() {
             task: "Inspect and fan out over typed items".to_string(),
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -83,7 +85,7 @@ async fn generated_live_run_executes_read_only_fanout_in_parallel() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn generated_v2_pause_during_read_only_fanout_stops_pending_branch_launch() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let client = Arc::new(GeneratedV2SlowFanoutRunClient {
         calls: AtomicUsize::new(0),
@@ -101,7 +103,7 @@ async fn generated_v2_pause_during_read_only_fanout_stops_pending_branch_launch(
                     .to_string(),
             },
             run_client,
-            tui_tx,
+            ui_sink,
             None,
             default_generated_workflow_config(),
             true,
@@ -134,7 +136,7 @@ async fn generated_v2_pause_during_read_only_fanout_stops_pending_branch_launch(
 
 #[tokio::test]
 async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(32);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(32);
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
     std::fs::create_dir_all(repo.join("src")).expect("repo src");
@@ -160,7 +162,7 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
             ),
         },
         client.clone(),
-        tui_tx,
+        ui_sink,
         None,
         default_generated_workflow_config(),
         true,
@@ -225,11 +227,10 @@ async fn closed_tui_prevents_stage_success_publication() {
         started: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
     });
-    let (tui_tx, mut tui_rx) =
-        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(4);
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(4);
     let stage_runner = PipelineWorkflowRunner {
         llm: client.clone(),
-        tui_tx,
+        ui_sink,
         agent_names: Vec::new(),
         workspace_boundary_supported: false,
     };
@@ -253,11 +254,10 @@ async fn closed_tui_prevents_item_output_repair_launch() {
         started: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
     });
-    let (tui_tx, mut tui_rx) =
-        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(4);
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(4);
     let stage_runner = PipelineWorkflowRunner {
         llm: client.clone(),
-        tui_tx,
+        ui_sink,
         agent_names: Vec::new(),
         workspace_boundary_supported: false,
     };
@@ -290,11 +290,11 @@ async fn closed_tui_prevents_stage_agent_launch() {
         calls: AtomicUsize::new(0),
         first_error: "unused",
     });
-    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
+    let (ui_sink, tui_rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(1);
     drop(tui_rx);
     let stage_runner = PipelineWorkflowRunner {
         llm: client.clone(),
-        tui_tx,
+        ui_sink,
         agent_names: Vec::new(),
         workspace_boundary_supported: false,
     };

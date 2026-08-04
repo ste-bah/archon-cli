@@ -131,6 +131,11 @@ impl PlanDocument {
 /// Plans are stored as JSON blobs in a `plans` relation, keyed by session_id + plan_id.
 pub struct PlanStore {
     db: DbInstance,
+    /// Write-guard config resolved from the *caller's* handle before it was
+    /// cloned. `DbInstance::clone` produces a new value at a new address, and
+    /// the guard registry keys on pointer identity, so the config has to be
+    /// captured up front and carried explicitly.
+    guard: archon_cozo::CozoGuardConfig,
 }
 
 fn db_err(e: impl std::fmt::Display) -> std::io::Error {
@@ -144,32 +149,51 @@ fn empty_rows() -> NamedRows {
 impl PlanStore {
     /// Open a plan store backed by an existing DbInstance (shared with session store).
     pub fn new(db: &DbInstance) -> Result<Self, std::io::Error> {
-        let store = Self { db: db.clone() };
+        let guard = archon_cozo::guarded_config_for(db).unwrap_or_default();
+        let store = Self {
+            db: db.clone(),
+            guard,
+        };
         store.init_schema()?;
         Ok(store)
     }
 
+    fn run_mutable(
+        &self,
+        script: &str,
+        params: BTreeMap<String, DataValue>,
+        context: &str,
+    ) -> anyhow::Result<NamedRows> {
+        archon_cozo::run_script_guarded(
+            &self.db,
+            script,
+            params,
+            ScriptMutability::Mutable,
+            context,
+            &self.guard,
+        )
+    }
+
     fn init_schema(&self) -> Result<(), std::io::Error> {
-        self.db
-            .run_script(
-                ":create plans {
+        self.run_mutable(
+            ":create plans {
                 session_id: String,
                 plan_id: String
                 =>
                 plan_json: String,
                 updated_at: String
             }",
-                Default::default(),
-                ScriptMutability::Mutable,
-            )
-            .or_else(|e| {
-                let msg = e.to_string();
-                if msg.contains("already exists") || msg.contains("conflicts") {
-                    Ok(empty_rows())
-                } else {
-                    Err(db_err(e))
-                }
-            })?;
+            Default::default(),
+            "plan store schema: create plans relation",
+        )
+        .or_else(|e| {
+            let msg = e.to_string();
+            if msg.contains("already exists") || msg.contains("conflicts") {
+                Ok(empty_rows())
+            } else {
+                Err(db_err(e))
+            }
+        })?;
         Ok(())
     }
 
@@ -184,14 +208,13 @@ impl PlanStore {
         params.insert("plan_json".to_string(), DataValue::from(json.as_str()));
         params.insert("updated_at".to_string(), DataValue::from(now.as_str()));
 
-        self.db
-            .run_script(
-                "?[session_id, plan_id, plan_json, updated_at] <- [[$session_id, $plan_id, $plan_json, $updated_at]]
+        self.run_mutable(
+            "?[session_id, plan_id, plan_json, updated_at] <- [[$session_id, $plan_id, $plan_json, $updated_at]]
              :put plans {session_id, plan_id => plan_json, updated_at}",
-                params,
-                ScriptMutability::Mutable,
-            )
-            .map_err(db_err)?;
+            params,
+            "plan store: save plan document",
+        )
+        .map_err(db_err)?;
 
         Ok(())
     }

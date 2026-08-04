@@ -1,4 +1,6 @@
-fn mode(live: bool) -> CliExecutionMode {
+use super::*;
+
+pub(super) fn mode(live: bool) -> CliExecutionMode {
     if live {
         CliExecutionMode::Live
     } else {
@@ -6,7 +8,7 @@ fn mode(live: bool) -> CliExecutionMode {
     }
 }
 
-fn run_cli_action(
+pub(super) fn run_cli_action(
     spec_file: Option<&PathBuf>,
     from_template: Option<&String>,
     task: &[String],
@@ -37,7 +39,7 @@ fn run_cli_action(
     })
 }
 
-fn ensure_resume_from_compatible(
+pub(super) fn ensure_resume_from_compatible(
     spec_file: &Option<PathBuf>,
     from_template: &Option<String>,
     decomposed: bool,
@@ -60,7 +62,7 @@ fn template_args_from_task(task: &[String]) -> Result<Option<serde_json::Value>>
     ))
 }
 
-fn ensure_no_task(task: &[String], flag: &str) -> Result<()> {
+pub(super) fn ensure_no_task(task: &[String], flag: &str) -> Result<()> {
     if task.is_empty() {
         Ok(())
     } else {
@@ -68,7 +70,7 @@ fn ensure_no_task(task: &[String], flag: &str) -> Result<()> {
     }
 }
 
-fn task_string(parts: &[String]) -> Result<String> {
+pub(super) fn task_string(parts: &[String]) -> Result<String> {
     let task = parts.join(" ");
     if task.trim().is_empty() {
         return Err(anyhow!("workflow task is required"));
@@ -76,7 +78,7 @@ fn task_string(parts: &[String]) -> Result<String> {
     Ok(task)
 }
 
-fn require_live_approval(live: bool, yes: bool, command: &str) -> Result<()> {
+pub(super) fn require_live_approval(live: bool, yes: bool, command: &str) -> Result<()> {
     if live && !yes {
         return Err(anyhow!(
             "{command} requires --yes in non-interactive CLI mode so the generated workflow is explicitly approved"
@@ -85,7 +87,7 @@ fn require_live_approval(live: bool, yes: bool, command: &str) -> Result<()> {
     Ok(())
 }
 
-fn resolve_input_path(cwd: &Path, path: &str) -> PathBuf {
+pub(super) fn resolve_input_path(cwd: &Path, path: &str) -> PathBuf {
     let path = Path::new(path);
     if path.is_absolute() {
         path.to_path_buf()

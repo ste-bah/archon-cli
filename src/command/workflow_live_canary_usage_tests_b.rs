@@ -1,4 +1,6 @@
-fn print_canary_evidence(
+use super::*;
+
+pub(super) fn print_canary_evidence(
     rows: &[archon_learning::llm_call_usage::LlmCallUsageRecord],
     request_bytes: &[u64],
 ) {
@@ -68,11 +70,16 @@ fn seed_canary_project(root: &std::path::Path) -> (std::path::PathBuf, std::path
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
         tasks.join("TASK-TDL-001-data-lake-gap-audit.md"),
-        format!(
-            "# Data Lake Gap Audit\n\ntask_id: TASK-TDL-001\ndepends_on: []\n\n\
-             ## Acceptance Criteria\n\n- Gap audit implemented in the target repository.\n\
-             - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
-             ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+        super::super::super::super::workflow_live_test_support::standard_task_file(
+            "TASK-TDL-001",
+            "[]",
+            "[]",
+            &format!(
+                "\n## Acceptance Criteria\n\n\
+                 - Gap audit implemented in the target repository.\n\
+                 - Artifact evidence written to `{CANARY_ARTIFACT_REL}`.\n\n\
+                 ## Artifact Requirements\n\n- `{CANARY_ARTIFACT_REL}`\n"
+            ),
         ),
     )
     .expect("task file");
@@ -82,7 +89,7 @@ fn seed_canary_project(root: &std::path::Path) -> (std::path::PathBuf, std::path
 struct CanaryRunHarness {
     script: Arc<CanaryAgentClient>,
     request_bytes: Arc<Mutex<Vec<u64>>>,
-    client: Arc<dyn LlmClient>,
+    client: Arc<dyn archon_workflow::WorkflowLlmClient>,
 }
 
 async fn build_canary_harness(root: &std::path::Path) -> CanaryRunHarness {
@@ -99,17 +106,12 @@ async fn build_canary_harness(root: &std::path::Path) -> CanaryRunHarness {
     )
     .await;
     install_canary_executor(Arc::clone(&provider), root);
-    let raw: Arc<dyn LlmClient> =
-        Arc::new(ProviderLlmAdapter::new(Arc::clone(&provider)).with_origin("workflow-canary"));
-    let fallback: Arc<dyn LlmClient> = Arc::new(ScopedCanaryClient::new(raw));
-    let client = Arc::new(SubagentPipelineClient::with_provider(
-        fallback,
-        ToolContext {
-            working_dir: root.to_path_buf(),
-            ..ToolContext::default()
-        },
+    let client = subagent_workflow_client_for_test(
         provider,
-    ));
+        "workflow-canary",
+        root.to_path_buf(),
+        TestClientFallback::ProviderScopedTo(CANARY_USAGE_SCOPE),
+    );
     CanaryRunHarness {
         script,
         request_bytes,
@@ -135,7 +137,7 @@ fn assert_canary_output(output: &str, script: &CanaryAgentClient) -> usize {
 }
 
 async fn run_canary() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(64);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     let learning_db_path = root.join(".archon").join("learning-state.db");
@@ -161,7 +163,7 @@ async fn run_canary() {
             decomposed: true,
         },
         harness.client,
-        tui_tx,
+        ui_sink,
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         true,

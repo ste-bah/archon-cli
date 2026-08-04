@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,12 +5,11 @@ use anyhow::{Result, anyhow};
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_tui::app::{EvidenceRowPayload, TuiEvent, ViewId};
-use archon_workflow::run::StageState;
 use archon_workflow::{
     CommandAction, HeuristicWorkflowPlanner, LifecycleAction, LifecycleController, RunStatus,
-    StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundle, WorkflowBundleOrigin,
-    WorkflowCommand, WorkflowCommandRegistry, WorkflowPlanner, WorkflowRun, WorkflowSpec,
-    WorkflowStore, WorkflowV2CallExecution, WorkflowV2ResultStore, WorkflowV2TaskInvalidation,
+    StageStatus, TemplateRegistry, WorkflowApprovalStore, WorkflowBundleOrigin, WorkflowCommand,
+    WorkflowCommandRegistry, WorkflowPlanner, WorkflowRun, WorkflowSpec, WorkflowStore,
+    WorkflowV2TaskInvalidation,
 };
 
 use crate::cli_args::WorkflowAction;
@@ -22,19 +20,35 @@ pub(crate) struct WorkflowHandler;
 
 impl CommandHandler for WorkflowHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> Result<()> {
-        let command = WorkflowCommand::parse(args)?;
         let cwd = ctx
             .working_dir
             .clone()
             .ok_or_else(|| anyhow!("workflow command requires working directory context"))?;
+        // Intercepted ahead of `WorkflowCommand::parse` for the same reason the
+        // CLI path intercepts ahead of `cli_action`: `CommandAction` is
+        // `archon-workflow`'s execution vocabulary and an advisory read-only
+        // analysis does not belong in it. Both surfaces therefore route `lint`
+        // around the crate rather than through it.
+        if args.first().is_some_and(|first| first == "lint") {
+            let output = lint_from_slash_args(&cwd, &args[1..])?;
+            ctx.emit(TuiEvent::TextDelta(output));
+            ctx.emit(TuiEvent::SlashCommandComplete);
+            return Ok(());
+        }
+        let command = WorkflowCommand::parse(args)?;
         if should_spawn_live(&command.action)
             && let Some(llm) = ctx.llm_adapter.clone()
         {
             spawn_live_workflow(
                 cwd,
                 command.action,
-                llm,
-                ctx.tui_tx.clone(),
+                // The interactive surface hands out the session's pipeline
+                // client; the live workflow only ever sees it through the port.
+                crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::arc(llm),
+                // Same shape as the LLM client above: the interactive surface
+                // owns the TUI channel, and the live workflow only ever sees it
+                // through the port.
+                crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink::arc(ctx.tui_tx.clone()),
                 ctx.config_path.clone(),
             );
             ctx.emit(TuiEvent::SlashCommandComplete);
@@ -55,8 +69,44 @@ impl CommandHandler for WorkflowHandler {
     }
 
     fn description(&self) -> &str {
-        "Plan, run, resume, and inspect dynamic workflows"
+        "Plan, run, resume, lint, and inspect dynamic workflows"
     }
+}
+
+/// `/workflow lint --tasks <DIR>` and friends, parsed by hand.
+///
+/// The slash surface hands over raw tokens rather than a clap-parsed struct, so
+/// the three flags are read directly. An unrecognised token is an error naming
+/// the accepted flags: silently ignoring it would produce a report of something
+/// other than what was asked for, which for a lint is worse than no report.
+pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
+    let mut tasks: Option<PathBuf> = None;
+    let mut spec_file: Option<PathBuf> = None;
+    let mut graph: Option<String> = None;
+    let mut index = 0;
+    while index < args.len() {
+        let value = args.get(index + 1).cloned();
+        let missing = |flag: &str| anyhow!("workflow lint {flag} needs a value");
+        match args[index].as_str() {
+            "--tasks" => tasks = Some(PathBuf::from(value.ok_or_else(|| missing("--tasks"))?)),
+            "--spec-file" => {
+                spec_file = Some(PathBuf::from(value.ok_or_else(|| missing("--spec-file"))?));
+            }
+            "--graph" => graph = Some(value.ok_or_else(|| missing("--graph"))?),
+            other => {
+                return Err(anyhow!(
+                    "workflow lint does not accept '{other}'; use --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
+                ));
+            }
+        }
+        index += 2;
+    }
+    let source = crate::command::topology_lint::LintSource::from_flags(
+        tasks.as_deref(),
+        spec_file.as_deref(),
+        graph.as_deref(),
+    )?;
+    crate::command::topology_lint::run_lint(cwd, &source)
 }
 
 pub(crate) async fn handle_workflow_command(
@@ -65,10 +115,41 @@ pub(crate) async fn handle_workflow_command(
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
+    // Intercepted before conversion: `lint` has no `CommandAction` counterpart
+    // and deliberately does not gain one. `CommandAction` is `archon-workflow`'s
+    // *execution* vocabulary — every variant names something that runs, resumes,
+    // or mutates a run — and an advisory read-only analysis is none of those.
+    // Adding a variant would put a milestone 4 concept inside the thin
+    // provider-neutral crate for no gain.
+    if let WorkflowAction::Lint {
+        tasks,
+        spec_file,
+        graph,
+    } = action
+    {
+        let source = crate::command::topology_lint::LintSource::from_flags(
+            tasks.as_deref(),
+            spec_file.as_deref(),
+            graph.as_deref(),
+        )?;
+        println!(
+            "{}",
+            crate::command::topology_lint::run_lint(&cwd, &source)?
+        );
+        return Ok(());
+    }
     let (action, mode) = cli_action(action)?;
     let output = match mode {
         CliExecutionMode::Deterministic => run_action(&cwd, action)?,
-        CliExecutionMode::Live => run_live_cli_action(&cwd, action, config, env_vars).await?,
+        CliExecutionMode::Live => {
+            // The bin crate is where the port gets its concrete implementation:
+            // this is the last layer that can still name `archon-pipeline`.
+            let llm_factory =
+                crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(
+                    config, env_vars,
+                );
+            run_live_cli_action(&cwd, action, config, env_vars, &llm_factory).await?
+        }
     };
     println!("{output}");
     Ok(())
@@ -201,6 +282,13 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             name: name.clone(),
         },
         WorkflowAction::List => CommandAction::List,
+        // Handled in `handle_workflow_command` before conversion; see the note
+        // there on why it has no `CommandAction`.
+        WorkflowAction::Lint { .. } => {
+            return Err(anyhow!(
+                "workflow lint is handled before action conversion and must not reach it"
+            ));
+        }
     };
     Ok((converted, CliExecutionMode::Deterministic))
 }
@@ -279,15 +367,25 @@ pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
     Ok(text)
 }
 
-include!("workflow_spec_execution.rs");
+#[path = "workflow_spec_execution.rs"]
+mod workflow_spec_execution;
+pub(crate) use workflow_spec_execution::*;
 
-include!("workflow_rows.rs");
+#[path = "workflow_rows.rs"]
+mod workflow_rows;
+pub(super) use workflow_rows::*;
 
-include!("workflow_restart.rs");
+#[path = "workflow_restart.rs"]
+mod workflow_restart;
+pub(super) use workflow_restart::*;
 
-include!("workflow_status_detail.rs");
+#[path = "workflow_status_detail.rs"]
+mod workflow_status_detail;
+pub(super) use workflow_status_detail::*;
 
-include!("workflow_cli_helpers.rs");
+#[path = "workflow_cli_helpers.rs"]
+mod workflow_cli_helpers;
+pub(super) use workflow_cli_helpers::*;
 
 #[cfg(test)]
 #[path = "workflow_tests.rs"]

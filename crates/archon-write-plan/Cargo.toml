@@ -1,0 +1,27 @@
+[package]
+name = "archon-write-plan"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Resource keys and the single-writer overlap table (PRD-012 §8, §10.1) that decide whether two declared write sets collide. Deliberately a leaf — no archon-* dependencies — so archon-workflow's write coordinator and archon-topology's live admission can both answer that question from one table instead of carrying two opinions, without a dependency edge between them."
+
+# Dependency discipline: every dep MUST come from [workspace.dependencies].
+[dependencies]
+# `WritePlan` and `ResourceKey` are persisted in the coordinator's patch
+# manifests, so the shapes here are wire types, not just in-memory ones.
+serde.workspace = true
+# Every declaration surface hands the target list over as untyped JSON —
+# `resolve_target_files` and `resolve_shared_append_targets` read it.
+serde_json.workspace = true
+thiserror.workspace = true
+# `keys_conflict` matches a Glob key against a File key, and treats a malformed
+# pattern as *conflicting*. That fail-safe is the reason archon-topology's own
+# `TaskGraph::write_conflicts` documents itself as an exact-string floor —
+# globset was outside its milestone-1 budget — and the reason live admission
+# calls this table rather than reimplementing it.
+globset.workspace = true
+
+[dev-dependencies]
+# `normalize_target` resolves against the live filesystem, so its tests need a
+# real repository root to resolve into.
+tempfile.workspace = true

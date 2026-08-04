@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.4.0"
+version = "1.5.0"
 edition = "2024"
 # 1.88 is the floor because the tree uses let-chains (`if cond && let Some(x) =
 # ...`), which are unstable in edition 2024 before then: 1.86 and 1.87 both
@@ -157,6 +157,9 @@ archon-permissions = { path = "crates/archon-permissions" }
 archon-plugin = { path = "crates/archon-plugin" }
 archon-sdk = { path = "crates/archon-sdk" }
 archon-session = { path = "crates/archon-session" }
+# Shell discovery for `/draft` streaming and workflow v2 verification. Leaf
+# crate, shared with archon-core's hook executor so both resolve the same shell.
+archon-shell = { path = "crates/archon-shell" }
 archon-docs = { path = "crates/archon-docs" }
 archon-knowledge = { path = "crates/archon-knowledge" }
 archon-meaning = { path = "crates/archon-meaning" }
@@ -177,6 +180,7 @@ archon-observability = { path = "crates/archon-observability" }
 archon-world-model = { path = "crates/archon-world-model" }
 archon-reasoning-quality = { path = "crates/archon-reasoning-quality" }
 archon-workflow = { path = "crates/archon-workflow" }
+archon-topology = { path = "crates/archon-topology" }
 archon-lanham = { path = "crates/archon-lanham" }
 archon-draft = { path = "crates/archon-draft" }
 reqwest.workspace = true
@@ -210,11 +214,27 @@ globset.workspace = true
 strsim.workspace = true
 thiserror.workspace = true
 cozo.workspace = true
+# `archon workflow lint` extracts PRD requirement IDs (`REQ-<AREA>-<NNN>` at a
+# bullet's line start) for the requirement-coverage section. Already a
+# dev-dependency and already in the build graph; promoted so the non-test path
+# can use it too.
+regex.workspace = true
 libc = "0.2"
 # TASK #246: panic_save terminal restore (Show + LeaveAlternateScreen + disable_raw_mode)
 crossterm.workspace = true
 
 [dev-dependencies]
+# Arms `archon_cozo::poison_guarded_scripts` for the "no hot-path database
+# access" test. Declared here rather than in `[dependencies]` so the check and
+# its atomic are compiled out of every non-test build: cargo applies dev
+# dependencies only to test targets.
+archon-cozo = { path = "crates/archon-cozo", features = ["test-support"] }
+# Holds the workflow-live JSON fixture corpus (`archon_test_support::fixtures`).
+# The corpus lives there rather than beside the tests because `include_str!`
+# resolves relative to the source file: a fixture read by a phase-2 cluster that
+# moves into archon-workflow *and* by one that stays here cannot follow either.
+# One home, named by `const`, so a cluster can move without touching fixtures.
+archon-test-support = { path = "crates/archon-test-support" }
 tempfile.workspace = true
 async-trait.workspace = true
 regex.workspace = true

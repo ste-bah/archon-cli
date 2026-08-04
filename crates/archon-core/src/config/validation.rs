@@ -76,6 +76,23 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             config.workflow.generated.host_call_timeout_secs
         )));
     }
+    // Zero is the one value that is not merely unusual but broken: a wave that
+    // dispatches nothing completes nothing, and the lifecycle then runs to
+    // `max_dependency_waves` and terminates at `blocked-loop-exhaustion` —
+    // reporting the shape of a stuck plan for a run that was never stuck.
+    // Unset is the normal state and means "the configured subagent cap".
+    if config
+        .workflow
+        .generated
+        .implementation_wave_max_parallelism
+        == Some(0)
+    {
+        return Err(ConfigError::ValidationError(
+            "workflow.generated.implementation_wave_max_parallelism must be >= 1 when set; \
+             remove the key to use the configured subagent concurrency"
+                .to_string(),
+        ));
+    }
 
     config
         .sandbox

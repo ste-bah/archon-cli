@@ -132,17 +132,21 @@ async fn sandbox_denied_risky_tool_is_admitted_and_records_one_outcome() {
 }
 
 #[tokio::test]
-async fn dispatch_safe_tool_bypasses_admission() {
+async fn dispatch_safe_tool_bypasses_admission_but_still_reports_its_outcome() {
+    // The admission *policy* still exempts `Safe` tools. The outcome callback
+    // no longer inherits that exemption — ambient topology tracing needs every
+    // attempt, and `Safe` is the great majority of them. `admission_evaluated`
+    // is how a consumer that cares about the distinction recovers it.
     let executions = Arc::new(AtomicUsize::new(0));
     let admissions = Arc::new(AtomicUsize::new(0));
-    let outcomes = Arc::new(AtomicUsize::new(0));
+    let outcomes = Arc::new(Mutex::new(Vec::new()));
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(AdmissionTestTool {
         permission: PermissionLevel::Safe,
         executions: Arc::clone(&executions),
     }));
     let admission_count = Arc::clone(&admissions);
-    let outcome_count = Arc::clone(&outcomes);
+    let outcome_log = Arc::clone(&outcomes);
     let ctx = ToolContext {
         tool_run_admission: Some(Arc::new(move |_| {
             admission_count.fetch_add(1, Ordering::SeqCst);
@@ -150,8 +154,8 @@ async fn dispatch_safe_tool_bypasses_admission() {
                 reason: "must not run".into(),
             }
         })),
-        tool_run_outcome: Some(Arc::new(move |_| {
-            outcome_count.fetch_add(1, Ordering::SeqCst);
+        tool_run_outcome: Some(Arc::new(move |outcome: ToolRunAttemptOutcome| {
+            outcome_log.lock().unwrap().push(outcome);
         })),
         ..ToolContext::default()
     };
@@ -162,6 +166,82 @@ async fn dispatch_safe_tool_bypasses_admission() {
 
     assert!(!result.is_error);
     assert_eq!(executions.load(Ordering::SeqCst), 1);
-    assert_eq!(admissions.load(Ordering::SeqCst), 0);
-    assert_eq!(outcomes.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        admissions.load(Ordering::SeqCst),
+        0,
+        "a Safe tool must never reach the admission callback"
+    );
+    let outcomes = outcomes.lock().unwrap();
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "a Safe tool must still report an outcome"
+    );
+    assert_eq!(outcomes[0].permission_level, PermissionLevel::Safe);
+    assert!(!outcomes[0].blocked);
+    assert!(!outcomes[0].is_error);
+    assert!(
+        !outcomes[0].admission_evaluated,
+        "no admission ran, so the outcome must say so"
+    );
+}
+
+#[tokio::test]
+async fn outcome_is_reported_when_no_admission_callback_is_installed() {
+    // The other half of the old filter: `permission_level != Safe` *and* a
+    // callback installed. A risky tool with no admission callback used to
+    // report nothing at all.
+    let executions = Arc::new(AtomicUsize::new(0));
+    let outcomes = Arc::new(Mutex::new(Vec::new()));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(AdmissionTestTool {
+        permission: PermissionLevel::Risky,
+        executions: Arc::clone(&executions),
+    }));
+    let outcome_log = Arc::clone(&outcomes);
+    let ctx = ToolContext {
+        tool_run_admission: None,
+        tool_run_outcome: Some(Arc::new(move |outcome: ToolRunAttemptOutcome| {
+            outcome_log.lock().unwrap().push(outcome);
+        })),
+        ..ToolContext::default()
+    };
+
+    let result = registry
+        .dispatch("AdmissionTest", serde_json::json!({}), &ctx)
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    let outcomes = outcomes.lock().unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].permission_level, PermissionLevel::Risky);
+    assert!(!outcomes[0].admission_evaluated);
+}
+
+#[tokio::test]
+async fn an_admitted_attempt_reports_admission_evaluated() {
+    let executions = Arc::new(AtomicUsize::new(0));
+    let outcomes = Arc::new(Mutex::new(Vec::new()));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(AdmissionTestTool {
+        permission: PermissionLevel::Risky,
+        executions: Arc::clone(&executions),
+    }));
+    let outcome_log = Arc::clone(&outcomes);
+    let ctx = ToolContext {
+        tool_run_admission: Some(Arc::new(|_| ToolRunAdmission::Allowed)),
+        tool_run_outcome: Some(Arc::new(move |outcome: ToolRunAttemptOutcome| {
+            outcome_log.lock().unwrap().push(outcome);
+        })),
+        ..ToolContext::default()
+    };
+
+    let _ = registry
+        .dispatch("AdmissionTest", serde_json::json!({}), &ctx)
+        .await;
+
+    let outcomes = outcomes.lock().unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert!(outcomes[0].admission_evaluated);
 }

@@ -1,4 +1,11 @@
-async fn run_read_only_v2_fanout(
+use super::*;
+
+use archon_workflow::v2::branch_stamping::{
+    declared_contracts_by_item, stamp_declared_contracts_from_universe,
+    stamp_required_tools_from_universe,
+};
+
+pub(super) async fn run_read_only_v2_fanout(
     task: &str,
     runtime: &WorkflowV2ScriptRuntime,
     execution: WorkflowV2CallExecution,
@@ -7,16 +14,14 @@ async fn run_read_only_v2_fanout(
     v2_store: &WorkflowV2ResultStore,
     store_for_control: &WorkflowStore,
     run_id: &str,
-    task_universe: Option<
-        &crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse,
-    >,
+    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let items = fanout_items_for_call(&execution, v2_store)?;
     // Read-only branches (verification waves) need the project artifact root
     // too: without it verifiers fall back to repo-relative paths and cannot
     // resolve declared artifacts, which the reference tells them to check
     // absolutely. Write branches already get this stamp.
-    let items = workflow_live_v2_write::stamp_project_artifact_policy(items, v2_store);
+    let items = archon_workflow::v2::write::stamp_project_artifact_policy(items, v2_store);
     // Bind each branch to the contracts its task declared. The v3 authored
     // prelude builds its own verification items and never attaches one, so
     // without this the host verifier below has nothing to enforce.
@@ -132,7 +137,7 @@ async fn run_read_only_v2_fanout(
                             input: branch.input.clone(),
                             depends_on: vec![parent_call_id],
                         };
-                        let result = match workflow_live_v2_manifest_scope::
+                        let result = match archon_workflow::v2::manifest_scope::
                             manifest_scope_verification_result(&branch_execution.input)
                         {
                             Some(result) => result,
@@ -160,8 +165,11 @@ async fn run_read_only_v2_fanout(
     // Host-executed contract enforcement runs BEFORE aggregation so a demoted
     // branch also lowers the call's aggregate status; demoting afterwards would
     // leave an already-computed "accepted" result standing.
-    workflow_live_v2_verification::enforce_declared_contracts(&mut outcomes, &declared_contracts)
-        .await;
+    archon_workflow::v2::verification::enforce_declared_contracts(
+        &mut outcomes,
+        &declared_contracts,
+    )
+    .await;
     let report = WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: run_report.max_parallelism,
@@ -227,147 +235,4 @@ fn emit_v2_branch_event(
         return;
     };
     let _ = WorkflowEventLog::new(store.clone()).emit(run_id, seq, kind, detail);
-}
-
-#[cfg(test)]
-mod declared_contract_stamping_tests {
-    use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverse;
-
-    fn universe() -> WorkflowV2TaskUniverse {
-        serde_json::from_value(serde_json::json!({
-            "schema_version": "v1",
-            "source_roots": ["tasks"],
-            "tasks": [{
-                "canonical_task_id": "TASK-EX-001",
-                "source_path": "tasks/TASK-EX-001.md",
-                "required_tools": ["read_tool", "probe_tool"],
-                "deliverable_contracts": [{
-                    "kind": "record_series",
-                    "artifact_path": ".archon/demo/coverage.json"
-                }]
-            }, {
-                "canonical_task_id": "TASK-EX-002",
-                "source_path": "tasks/TASK-EX-002.md"
-            }]
-        }))
-        .expect("task universe")
-    }
-
-    fn item(id: &str, task_ids: serde_json::Value) -> archon_workflow::WorkflowV2FanoutItem {
-        archon_workflow::WorkflowV2FanoutItem::read_only(
-            id,
-            "verifier",
-            archon_workflow::WorkflowV2HostCall {
-                id: "verification-wave".to_string(),
-                method: archon_workflow::WorkflowV2HostMethod::Parallel,
-                write_mode: None,
-                options: archon_workflow::WorkflowV2HostOptions::default(),
-            },
-            serde_json::json!({
-                "item": {"item_id": id, "canonical_task_ids": task_ids},
-                "_workflow_project_artifact_policy": {"project_root": "/proj"}
-            }),
-        )
-    }
-
-    /// The v3 authored prelude builds its own verification item and never
-    /// attaches a contract, so the host verifier had nothing to enforce and
-    /// silently passed every branch. The universe is the authority.
-    #[test]
-    fn a_v3_verification_item_is_bound_to_its_tasks_declared_contracts() {
-        let items = super::stamp_declared_contracts_from_universe(
-            vec![item(
-                "verify-task-ex-001",
-                serde_json::json!(["TASK-EX-001"]),
-            )],
-            Some(&universe()),
-        );
-        let declared = super::declared_contracts_by_item(&items);
-        let (root, contracts) = declared
-            .get("verify-task-ex-001")
-            .expect("contract must be bound");
-        assert_eq!(root, "/proj");
-        assert_eq!(contracts.len(), 1);
-        assert_eq!(contracts[0]["artifact_path"], ".archon/demo/coverage.json");
-    }
-
-    /// A verifier asked to prove live tool invocations must be able to make
-    /// them. Write branches and the decomposed path bound declared tools; the
-    /// v3 authored path did not, so tasks whose acceptance requires tool calls
-    /// were unverifiable by construction.
-    #[test]
-    fn a_v3_verification_item_is_granted_its_tasks_declared_tools() {
-        let items = super::stamp_required_tools_from_universe(
-            vec![item(
-                "verify-task-ex-001",
-                serde_json::json!(["TASK-EX-001"]),
-            )],
-            Some(&universe()),
-        );
-        let tools = items[0].input["item"]["required_tools"]
-            .as_array()
-            .expect("tools must be stamped");
-        let names: Vec<&str> = tools.iter().filter_map(|t| t.as_str()).collect();
-        assert_eq!(names, vec!["probe_tool", "read_tool"]);
-    }
-
-    /// Universe-sourced: a branch claiming a task that declares no tools gets
-    /// none, so this cannot become a backdoor grant.
-    #[test]
-    fn a_task_declaring_no_tools_grants_none() {
-        let items = super::stamp_required_tools_from_universe(
-            vec![item(
-                "verify-task-ex-002",
-                serde_json::json!(["TASK-EX-002"]),
-            )],
-            Some(&universe()),
-        );
-        assert!(items[0].input["item"].get("required_tools").is_none());
-    }
-
-    #[test]
-    fn a_branch_claiming_no_task_is_left_alone() {
-        let items = super::stamp_declared_contracts_from_universe(
-            vec![item("adversarial-review-map-0", serde_json::json!([]))],
-            Some(&universe()),
-        );
-        assert!(items[0].input.get("deliverable_contracts").is_none());
-        assert!(super::declared_contracts_by_item(&items).is_empty());
-    }
-
-    /// The decomposed path stamps a singular `deliverable_contract` per item;
-    /// re-stamping would overwrite the contract that path deliberately chose.
-    #[test]
-    fn a_contract_already_stamped_by_the_decomposed_path_is_preserved() {
-        let mut existing = item(
-            "verify-TASK-EX-001-kind",
-            serde_json::json!(["TASK-EX-001"]),
-        );
-        existing.input.as_object_mut().expect("object").insert(
-            "deliverable_contract".to_string(),
-            serde_json::json!({"kind": "chosen", "artifact_path": ".archon/chosen.json"}),
-        );
-        let items =
-            super::stamp_declared_contracts_from_universe(vec![existing], Some(&universe()));
-        assert!(items[0].input.get("deliverable_contracts").is_none());
-        let declared = super::declared_contracts_by_item(&items);
-        let (_, contracts) = declared.get("verify-TASK-EX-001-kind").expect("bound");
-        assert_eq!(contracts.len(), 1);
-        assert_eq!(contracts[0]["kind"], "chosen");
-    }
-
-    /// Without an artifact root the contract's relative paths cannot resolve,
-    /// so there is nothing meaningful to verify against.
-    #[test]
-    fn a_branch_without_an_artifact_root_is_not_enforced() {
-        let mut orphan = item("verify-task-ex-001", serde_json::json!(["TASK-EX-001"]));
-        orphan
-            .input
-            .as_object_mut()
-            .expect("object")
-            .remove("_workflow_project_artifact_policy");
-        let items = super::stamp_declared_contracts_from_universe(vec![orphan], Some(&universe()));
-        assert!(items[0].input.get("deliverable_contracts").is_some());
-        assert!(super::declared_contracts_by_item(&items).is_empty());
-    }
 }

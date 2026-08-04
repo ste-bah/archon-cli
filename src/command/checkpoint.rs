@@ -158,9 +158,7 @@ impl CommandHandler for CheckpointHandler {
         let arg = joined.trim();
 
         // R4: path reproduced byte-identically from shipped slash.rs:455-458.
-        let ckpt_path = archon_session::background::archon_data_dir()
-            .join("archon")
-            .join("checkpoints.db");
+        let ckpt_path = archon_session::background::archon_data_dir().join("checkpoints.db");
 
         if arg == "list" || arg.is_empty() {
             match archon_session::checkpoint::CheckpointStore::open(&ckpt_path) {
@@ -405,9 +403,7 @@ mod tests {
 
             // Seed the real store at the same path the handler will open.
             // Mirror the handler's ckpt_path construction.
-            let ckpt_path = archon_session::background::archon_data_dir()
-                .join("archon")
-                .join("checkpoints.db");
+            let ckpt_path = archon_session::background::archon_data_dir().join("checkpoints.db");
             seed_file = tmp.path().join("seed.txt");
             std::fs::write(&seed_file, b"hello").expect("seed file write");
             {

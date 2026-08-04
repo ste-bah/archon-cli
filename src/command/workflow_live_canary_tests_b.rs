@@ -1,5 +1,7 @@
+use super::*;
+
 impl CanaryAgentClient {
-    fn new(project_root: PathBuf) -> Self {
+    pub(super) fn new(project_root: PathBuf) -> Self {
         Self {
             project_root,
             prompts: CanaryMutex::new(Vec::new()),
@@ -10,7 +12,7 @@ impl CanaryAgentClient {
         self.project_root.join(CANARY_ARTIFACT_REL)
     }
 
-    fn artifact_exists(&self) -> bool {
+    pub(super) fn artifact_exists(&self) -> bool {
         self.artifact_path().is_file()
     }
 
@@ -80,7 +82,7 @@ impl CanaryAgentClient {
         })
     }
 
-    fn respond(&self, prompt: &str) -> String {
+    pub(super) fn respond(&self, prompt: &str) -> String {
         // Inventory-shaped reducers: return the canonical single-task inventory.
         if prompt.contains("produce dependency-owned inventory items")
             || prompt.contains("Repair inventory shape")
@@ -300,14 +302,14 @@ impl CanaryAgentClient {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for CanaryAgentClient {
+impl WorkflowLlmClient for CanaryAgentClient {
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
         system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> CanaryResult<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let mut prompt = String::new();
         for value in system.iter().chain(messages.iter()) {
             collect_text(value, &mut prompt);
@@ -317,7 +319,7 @@ impl LlmClient for CanaryAgentClient {
             .lock()
             .expect("prompt log lock")
             .push(prompt.chars().take(2000).collect());
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -325,4 +327,3 @@ impl LlmClient for CanaryAgentClient {
         })
     }
 }
-

@@ -291,6 +291,12 @@ pub fn register_builtins() -> SkillRegistry {
     registry.register(Box::new(super::to_prd::ToPrdSkill));
     registry.register(Box::new(super::prd_to_spec::PrdToSpecSkill));
 
+    // Workflow PRD pipeline — the second route from a PRD to running code.
+    // Separate from the skills chain above: it writes the flat TASK-*.md
+    // directory the workflow engine walks, not tasks/phase<N>/task<M>.md.
+    registry.register(Box::new(super::workflow_prd::WorkflowPrdSkill));
+    registry.register(Box::new(super::workflow_prd_spec::WorkflowPrdSpecSkill));
+
     // Phase 2 engineering pack
     registry.register(Box::new(super::engineering_pack::GrillMeSkill));
     registry.register(Box::new(super::engineering_pack::GrillWithDocsSkill));

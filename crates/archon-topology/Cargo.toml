@@ -1,0 +1,64 @@
+[package]
+name = "archon-topology"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Topology IR (TaskGraph) and pure graph analyses shared by workflow, team, and session surfaces"
+
+[features]
+# There is deliberately no `archon-*` dependency that is not itself a leaf.
+# `archon-core` takes this crate with `default-features = false` because it
+# needs only the IR plus the analyses, and the features below are what it is
+# opting out of.
+#
+# The `workflow` feature is gone. It existed to pull in `archon-workflow` for
+# the `WorkflowSpec` lowering, which now lives in `archon-workflow` itself —
+# that edge closed `archon-core -> archon-workflow -> archon-topology ->
+# archon-core`, and Cargo rejects a cyclic package graph outright. Do not
+# reintroduce it: a feature does not break a cycle, because Cargo features are
+# additive and a feature-gated dependency is still an edge in the package graph.
+default = ["trace", "live"]
+# Milestone 2's ambient trace: jsonl append/read plus post-hoc graph
+# reconstruction. Feature-gated because it needs serde_json, and archon-core
+# takes this crate with `default-features = false` to keep its own build graph
+# at petgraph + serde. Note what is *not* here:
+# no cozo, no archon-core, no learning crate. The trace format lives beside the
+# IR, but every database write lives above this crate in `src/command/`, which
+# makes "no Cozo on the hot path" a property of the dependency graph rather
+# than a rule someone has to remember.
+trace = ["dep:serde_json"]
+# Milestone 3's guardrail admission: the per-session executed prefix and the
+# three invariants evaluated against it.
+#
+# It needs `archon-write-plan`, whose `ResourceKey` overlap table is the
+# single-writer decision procedure this milestone is required to *extend* rather
+# than reimplement (including its deliberate "a malformed glob is conflicting"
+# fail-safe). Duplicating that table here would mean two answers to one
+# question, and the topology crate's exact-string `write_conflicts` already
+# documents itself as the conservative floor that exists only because the
+# milestone 1 dependency budget excluded `globset`. Admission is not bound by
+# that budget: it is the consumer the coordinator was written for.
+#
+# That table used to be reached through `archon-workflow`, which is why this
+# feature used to imply `workflow`. `archon-write-plan` is a leaf with no
+# `archon-*` dependencies, so sharing the table now costs a dependency on the
+# table and nothing else.
+#
+# `dashmap` is the only new external crate, and it is already a workspace
+# dependency. Still no cozo, no archon-core, no learning crate — the property
+# that keeps "no database on the hot path" a fact about the build graph.
+live = ["dep:archon-write-plan", "dep:dashmap"]
+
+[dependencies]
+# Hard isolation requirement (docs/architecture/topology-engineering.md,
+# "Milestone 1"): petgraph + serde and nothing else on the unconditional path.
+# No cozo, no archon-core, no learning crate — milestone 2 puts the store behind
+# a separate module boundary so these analyses stay usable with no database.
+petgraph.workspace = true
+serde.workspace = true
+archon-write-plan = { path = "../archon-write-plan", optional = true }
+serde_json = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

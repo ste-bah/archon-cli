@@ -46,10 +46,54 @@ pub(crate) fn configure_tool_run_context(
 ) {
     let admission_config = config.clone();
     context.tool_run_parent_action_id = Some(context.session_id.clone());
+    crate::command::topology_admission::install(config, &context.session_id);
     context.tool_run_admission = Some(std::sync::Arc::new(move |request| {
-        admit_tool_run_attempt(&admission_config, request)
+        admit_tool_run_attempt_composed(&admission_config, request)
     }));
-    context.tool_run_outcome = Some(std::sync::Arc::new(record_tool_run_attempt_outcome));
+    context.tool_run_outcome = Some(std::sync::Arc::new(tool_run_outcome_taps));
+}
+
+/// Both admission consumers, in order.
+///
+/// `ToolRunAdmissionCallback` is a single `Arc<dyn Fn>` with no registry behind
+/// it, so a second consumer means composing by hand. **Topology runs first**:
+/// it is in-memory and answers in microseconds, while the world-model guardrail
+/// persists a candidate trace row and a revision record before it answers.
+/// Blocking early skips those writes entirely.
+pub(crate) fn admit_tool_run_composed(
+    config: &archon_core::config::ArchonConfig,
+    request: archon_tools::tool::ToolRunAdmissionRequest,
+) -> archon_tools::tool::ToolRunAdmission {
+    admit_tool_run_attempt_composed(config, request)
+}
+
+fn admit_tool_run_attempt_composed(
+    config: &archon_core::config::ArchonConfig,
+    request: archon_tools::tool::ToolRunAdmissionRequest,
+) -> archon_tools::tool::ToolRunAdmission {
+    if let archon_tools::tool::ToolRunAdmission::Blocked { reason } =
+        crate::command::topology_admission::admit(&request)
+    {
+        return archon_tools::tool::ToolRunAdmission::Blocked { reason };
+    }
+    admit_tool_run_attempt(config, request)
+}
+
+/// Fan the tool-run outcome out to all consumers.
+///
+/// The callback is a single `Arc<dyn Fn>` with no registry behind it, so a
+/// second consumer means composing here. Order matters only in that the
+/// ambient trace must not be starved by a slow guardrail write; all three are
+/// best-effort and none propagates an error.
+///
+/// The topology release runs before the guardrail write for the same reason
+/// admission runs first: it is in-memory, and a spawn's live-agent slot or a
+/// write's path claim held any longer than necessary shows up as a false
+/// single-writer conflict.
+pub(crate) fn tool_run_outcome_taps(outcome: archon_tools::tool::ToolRunAttemptOutcome) {
+    crate::command::topology_trace::on_tool_run_outcome(&outcome);
+    crate::command::topology_admission::on_tool_run_outcome(&outcome);
+    record_tool_run_attempt_outcome(outcome);
 }
 
 include!("world_model/root/00_dispatch.rs");

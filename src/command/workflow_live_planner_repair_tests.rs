@@ -1,9 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::Result;
-use archon_pipeline::runner::{LlmClient, LlmResponse};
-use archon_workflow::WorkflowStore;
+use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient, WorkflowStore};
 
 use super::plan_live;
 
@@ -12,16 +10,16 @@ struct TwoStepRepairPlanner {
 }
 
 #[async_trait::async_trait]
-impl LlmClient for TwoStepRepairPlanner {
+impl WorkflowLlmClient for TwoStepRepairPlanner {
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
         _system: Vec<serde_json::Value>,
         _tools: Vec<serde_json::Value>,
         _model: &str,
-    ) -> Result<LlmResponse> {
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(LlmResponse {
+        Ok(WorkflowAgentOutcome {
             content: response_for_call(call).to_string(),
             tool_uses: Vec::new(),
             tokens_in: 1,
@@ -58,7 +56,7 @@ export default async function workflow(w) {
 
 #[tokio::test]
 async fn live_planner_uses_bounded_iterative_harness_repair() {
-    let (tui_tx, _rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(16);
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let planner = Arc::new(TwoStepRepairPlanner {
@@ -70,8 +68,9 @@ async fn live_planner_uses_bounded_iterative_harness_repair() {
         &store,
         "inspect the repository",
         planner.clone(),
-        tui_tx,
+        ui_sink,
         &generated_config,
+        &archon_core::config::LearningConfig::default(),
     )
     .await
     .expect("second repaired harness should validate");

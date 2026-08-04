@@ -55,7 +55,10 @@ where
 }
 
 pub(super) fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
-    if !env.iter().any(|(existing, _)| existing == key) {
+    if !env
+        .iter()
+        .any(|(existing, _)| existing.eq_ignore_ascii_case(key))
+    {
         env.push((key.to_string(), value.to_string()));
     }
 }
@@ -78,16 +81,27 @@ mod tests {
     }
 
     #[test]
+    fn env_defaults_do_not_duplicate_windows_case_variants() {
+        let mut env = vec![("Path".to_string(), r"C:\\Windows".to_string())];
+        super::ensure_env_default(&mut env, "PATH", "unexpected");
+        assert_eq!(env, vec![("Path".to_string(), r"C:\\Windows".to_string())]);
+    }
+
+    #[test]
     fn strict_allowlist_preserves_required_unix_and_windows_process_vars() {
         let env = sanitize_env([
+            ("Path", r"C:\\Windows"),
             ("HOME", "/home/test"),
             ("LANG", "en_US.UTF-8"),
             ("SYSTEMROOT", r"C:\\Windows"),
             ("COMSPEC", r"C:\\Windows\\System32\\cmd.exe"),
+            ("PATHEXT", ".COM;.EXE"),
+            ("USERPROFILE", r"C:\\Users\\test"),
         ]);
 
-        assert_eq!(env.len(), 4);
-        assert!(env.iter().any(|(key, _)| key == "HOME"));
-        assert!(env.iter().any(|(key, _)| key == "SYSTEMROOT"));
+        assert_eq!(env.len(), 7);
+        for required in ["Path", "SYSTEMROOT", "COMSPEC", "PATHEXT", "USERPROFILE"] {
+            assert!(env.iter().any(|(key, _)| key == required));
+        }
     }
 }

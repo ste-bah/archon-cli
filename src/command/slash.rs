@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn stream_child_to_tui_streams_stdout_stderr_and_completion() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
-        let child = tokio::process::Command::new(crate::command::posix_shell::posix_shell())
+        let child = tokio::process::Command::new(archon_shell::resolve_posix_shell())
             .arg("-c")
             .arg("echo out-line; echo err-line 1>&2")
             .stdout(Stdio::piped())
@@ -339,7 +339,7 @@ mod tests {
     #[tokio::test]
     async fn stream_child_to_tui_emits_error_on_nonzero_exit() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
-        let child = tokio::process::Command::new(crate::command::posix_shell::posix_shell())
+        let child = tokio::process::Command::new(archon_shell::resolve_posix_shell())
             .arg("-c")
             .arg("exit 3")
             .stdout(Stdio::piped())

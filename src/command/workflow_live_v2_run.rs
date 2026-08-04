@@ -1,14 +1,21 @@
-pub(super) async fn run_generated_v2_workflow(
+use super::*;
+
+#[path = "workflow_live_v2_run_fold.rs"]
+mod workflow_live_v2_run_fold;
+use workflow_live_v2_run_fold::fold_run_topology;
+
+pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
     task: String,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     script_lifecycle: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -16,26 +23,28 @@ pub(super) async fn run_generated_v2_workflow(
         plan,
         task,
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         approval_mode,
         workspace_boundary_supported,
         WorkflowBundleOrigin::GeneratedHarness,
         script_lifecycle,
+        learning,
     )
     .await
 }
 
-pub(super) async fn run_saved_v2_workflow(
+pub(crate) async fn run_saved_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
     task: String,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -43,61 +52,68 @@ pub(super) async fn run_saved_v2_workflow(
         plan,
         task,
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         approval_mode,
         workspace_boundary_supported,
         WorkflowBundleOrigin::SavedCommand,
         script_lifecycle_from_env(),
+        learning,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_v2_workflow_with_origin(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
     task: String,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     origin: WorkflowBundleOrigin,
     script_lifecycle: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => *run,
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {
             return Ok(message);
         }
     };
-    execute_generated_v2_run(
+    let run_id = run.id.clone();
+    let result = execute_generated_v2_run(
         store,
         run,
         plan,
-        task,
+        task.clone(),
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         workspace_boundary_supported,
         false,
     )
-    .await
+    .await;
+    fold_run_topology(cwd, store, &run_id, &task, learning).await;
+    result
 }
 
-pub(super) async fn resume_generated_v2_workflow(
+pub(crate) async fn resume_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,
     run_id: &str,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
+    learning: &archon_core::config::LearningConfig,
 ) -> Result<Option<String>> {
     let run = store.load_state(run_id)?;
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
@@ -113,7 +129,7 @@ pub(super) async fn resume_generated_v2_workflow(
             run.id
         )));
     }
-    let run = match gate_live_approval(cwd, store, run, approval_mode, &tui_tx).await? {
+    let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => {
             if matches!(run.status, RunStatus::Paused | RunStatus::Cancelled) {
                 LifecycleController::new(store.clone()).apply(&run.id, LifecycleAction::Resume)?
@@ -126,19 +142,21 @@ pub(super) async fn resume_generated_v2_workflow(
         }
     };
     let task = run.spec.task.clone();
-    execute_generated_v2_run(
+    let run_id = run.id.clone();
+    let result = execute_generated_v2_run(
         store,
         run,
         plan,
-        task,
+        task.clone(),
         llm,
-        tui_tx,
+        ui_sink,
         agent_names,
         workspace_boundary_supported,
         true,
     )
-    .await
-    .map(Some)
+    .await;
+    fold_run_topology(cwd, store, &run_id, &task, learning).await;
+    result.map(Some)
 }
 
 async fn live_plan_from_generated_bundle(
@@ -211,7 +229,7 @@ async fn live_plan_from_generated_bundle(
     Ok(Some(script_plan))
 }
 
-fn save_generated_v2_metadata(
+pub(super) fn save_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
     plan: &WorkflowScriptPlan,
@@ -230,6 +248,8 @@ fn save_generated_v2_metadata(
             .task_universe
             .as_ref()
             .map(|_| plan.generated_config.clone()),
+        tuning_decisions: plan.tuning_decisions.clone(),
+        shape_decisions: plan.shape_decisions.clone(),
         // Only task-universe runs can enter the authored-script lifecycle.
         script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
     };
@@ -238,7 +258,7 @@ fn save_generated_v2_metadata(
 
 /// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
 /// fallback on continue agree.
-pub(super) fn script_lifecycle_from_env() -> bool {
+pub(crate) fn script_lifecycle_from_env() -> bool {
     // v3 authored-script lifecycle is the DEFAULT. The decomposed (v1) engine is
     // opt-in only via ARCHON_SCRIPT_LIFECYCLE=0/false — otherwise a run silently
     // fell back to decomposed (old monolithic review) whenever the flag wasn't
@@ -248,7 +268,7 @@ pub(super) fn script_lifecycle_from_env() -> bool {
         .unwrap_or(true)
 }
 
-fn load_generated_v2_metadata(
+pub(super) fn load_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
 ) -> archon_workflow::WorkflowResult<Option<GeneratedV2Metadata>> {
@@ -268,8 +288,8 @@ async fn execute_generated_v2_run(
     run: WorkflowRun,
     plan: WorkflowScriptPlan,
     task: String,
-    llm: Arc<dyn LlmClient>,
-    tui_tx: TuiEventSender,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
     agent_names: Vec<String>,
     workspace_boundary_supported: bool,
     adopt_accepted_cache: bool,
@@ -286,7 +306,7 @@ async fn execute_generated_v2_run(
         .await;
     let client = LiveV2AgentClient::new(
         llm,
-        tui_tx.clone(),
+        ui_sink.clone(),
         agent_names,
         run.id.clone(),
         runtime.target_repository_root.clone(),
@@ -298,9 +318,7 @@ async fn execute_generated_v2_run(
         plan.task_universe
             .as_ref()
             .map(|universe| {
-                super::workflow_live_v2_completion_credit::prepare_resume_credit(
-                    &v2_store, universe,
-                )
+                archon_workflow::v2::completion_credit::prepare_resume_credit(&v2_store, universe)
             })
             .transpose()?
             .unwrap_or_default()
@@ -399,9 +417,7 @@ async fn execute_generated_v2_run(
         Err(err) => {
             // Best-effort: the original error is what the caller must see, so a
             // failure to persist here is logged rather than masking it.
-            if let Err(state_err) =
-                persist_terminal_run_status(store, &run.id, RunStatus::Failed)
-            {
+            if let Err(state_err) = persist_terminal_run_status(store, &run.id, RunStatus::Failed) {
                 tracing::warn!(
                     run_id = %run.id,
                     error = %state_err,

@@ -3,11 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::spec_deser::{
-    deserialize_learning_hooks, deserialize_permissions, deserialize_provider_tiers,
-    deserialize_quality_gates,
-};
-pub use crate::spec_policy::{ArtifactPolicy, RetryPolicy};
+pub use crate::spec_policy::RetryPolicy;
 
 pub const WORKFLOW_SCHEMA: &str = "archon.workflow.v1";
 
@@ -24,13 +20,12 @@ pub enum ProviderTier {
     Reducer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StageKind {
     Agent,
     Fanout,
     Reduce,
-    Condition,
     Tool,
     Checkpoint,
     QualityGate,
@@ -38,6 +33,20 @@ pub enum StageKind {
     Implementation,
 }
 
+/// How a `reduce` stage is *described* in a spec.
+///
+/// **Declarative only — nothing dispatches on it.** The deterministic
+/// `ReducerRegistry` that once backed these seven names was deleted (W1): it
+/// had no call site anywhere, its only input producer (`context::reducer_inputs`)
+/// was equally unreachable, and its contract — N text blobs in, one markdown
+/// document out — does not match the live reduce contract, which is a typed
+/// `WorkflowV2Result` envelope carrying routing data the scheduler consumes.
+/// Reduction is performed by an agent (`workflow_agent_select.rs`), except for
+/// `w.finalReport()`, which is deterministic in `WorkflowV2FinalReportBuilder`.
+///
+/// The variants stay because they are part of the `archon.workflow.v1` schema
+/// and specs are authored against them; changing that surface is an explicit
+/// non-goal. They document intent for the reducing agent, and nothing more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReducerKind {
@@ -65,8 +74,6 @@ pub struct StageSpec {
     #[serde(default)]
     pub tool: Option<String>,
     #[serde(default)]
-    pub condition: Option<String>,
-    #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
     pub provider_tier: Option<ProviderTier>,
@@ -92,8 +99,7 @@ pub struct StageSpec {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WorkflowSpec {
     pub schema: String,
     pub name: String,
@@ -105,24 +111,18 @@ pub struct WorkflowSpec {
     pub max_parallelism: u32,
     #[serde(default = "default_max_agents")]
     pub max_agents: u32,
-    #[serde(default, deserialize_with = "deserialize_provider_tiers")]
-    pub provider_tiers: BTreeMap<ProviderTier, String>,
     pub stages: Vec<StageSpec>,
-    #[serde(default)]
-    pub artifact_policy: ArtifactPolicy,
     #[serde(default, deserialize_with = "deserialize_permissions")]
     pub permissions: BTreeMap<String, serde_json::Value>,
-    #[serde(default, deserialize_with = "deserialize_quality_gates")]
-    pub quality_gates: BTreeMap<String, serde_json::Value>,
     #[serde(default, deserialize_with = "deserialize_learning_hooks")]
     pub learning_hooks: Vec<String>,
 }
 
-fn default_max_parallelism() -> u32 {
+pub(crate) fn default_max_parallelism() -> u32 {
     8
 }
 
-fn default_max_agents() -> u32 {
+pub(crate) fn default_max_agents() -> u32 {
     200
 }
 
@@ -238,13 +238,6 @@ impl WorkflowSpec {
                 "at least one stage is required".into(),
             ));
         }
-        for (tier, value) in &self.provider_tiers {
-            if !is_neutral_tier_hint(value) {
-                return Err(WorkflowError::HardcodedModel(format!(
-                    "provider_tiers.{tier:?}"
-                )));
-            }
-        }
         Ok(())
     }
 
@@ -301,7 +294,6 @@ impl WorkflowSpec {
                     crate::spec_work_units::validate_inline_implementation_work_units(stage)?;
                 }
                 StageKind::Reduce => {}
-                StageKind::Condition => require(stage, stage.condition.as_deref(), "condition")?,
                 StageKind::Tool => require(stage, stage.tool.as_deref(), "tool")?,
                 StageKind::Implementation => {
                     if stage.expected_target_files.iter().all(|f| !has_text(f)) {
@@ -403,13 +395,6 @@ pub(crate) fn parse_foreach_accessor(foreach: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((stage, accessor))
-}
-
-pub(crate) fn is_neutral_tier_hint(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "" | "auto" | "default" | "inherit" | "active"
-    )
 }
 
 fn require(stage: &StageSpec, value: Option<&str>, field: &'static str) -> WorkflowResult<()> {

@@ -1,15 +1,18 @@
 // WorkflowScriptHost: metadata review, summary and event emission.
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
+
+use super::*;
+
 impl WorkflowScriptHost {
-    fn generated_decomposed_prd_run(&self) -> bool {
+    pub(super) fn generated_decomposed_prd_run(&self) -> bool {
         self.runner.task_universe.is_some()
     }
 
-    async fn persist_source_metadata_review(
+    pub(super) async fn persist_source_metadata_review(
         &self,
         execution: WorkflowV2CallExecution,
-        source_metadata: super::workflow_live_v2_source_graph::DynamicWaveSourceMetadata,
+        source_metadata: archon_workflow::v2::source_graph::DynamicWaveSourceMetadata,
         input_hash: String,
         attempt: u32,
     ) -> archon_workflow::WorkflowResult<String> {
@@ -67,7 +70,7 @@ impl WorkflowScriptHost {
         result_view_json(&record.result)
     }
 
-    async fn summary(&self) -> WorkflowV2ScriptSummary {
+    pub(crate) async fn summary(&self) -> WorkflowV2ScriptSummary {
         let acc = self.accumulator.lock().await;
         WorkflowV2ScriptSummary {
             status: acc.status,
@@ -82,7 +85,7 @@ impl WorkflowScriptHost {
         }
     }
 
-    fn emit_call_finished_event(&self, record: &WorkflowV2CallRecord) {
+    pub(super) fn emit_call_finished_event(&self, record: &WorkflowV2CallRecord) {
         self.emit_v2_event(
             match record.status {
                 WorkflowV2Status::Failed | WorkflowV2Status::Cancelled => {
@@ -107,7 +110,7 @@ impl WorkflowScriptHost {
         );
     }
 
-    fn emit_v2_event(&self, kind: WorkflowEventKind, detail: serde_json::Value) {
+    pub(super) fn emit_v2_event(&self, kind: WorkflowEventKind, detail: serde_json::Value) {
         let Ok(seq) = self
             .runner
             .workflow_store
@@ -123,7 +126,7 @@ impl WorkflowScriptHost {
         );
     }
 
-    fn emit_terminal_status(&self, status: WorkflowV2Status) {
+    pub(crate) fn emit_terminal_status(&self, status: WorkflowV2Status) {
         self.emit_v2_event(
             match status {
                 WorkflowV2Status::Accepted | WorkflowV2Status::Noop => {

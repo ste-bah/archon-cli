@@ -1,4 +1,6 @@
-fn noop_proof_result(call_id: &str) -> serde_json::Value {
+use super::*;
+
+pub(super) fn noop_proof_result(call_id: &str) -> serde_json::Value {
     if call_id.ends_with("noop-legit") {
         serde_json::json!({
             "status": "noop",
@@ -81,8 +83,8 @@ fn noop_proof_result(call_id: &str) -> serde_json::Value {
     }
 }
 
-fn implementation_result(
-    request: &AgentExecutionRequest,
+pub(super) fn implementation_result(
+    request: &WorkflowAgentCall,
     input: &serde_json::Value,
     call_id: &str,
 ) -> Result<serde_json::Value> {
@@ -153,8 +155,8 @@ fn implementation_result(
     Ok(result)
 }
 
-fn verification_result(
-    request: &AgentExecutionRequest,
+pub(super) fn verification_result(
+    request: &WorkflowAgentCall,
     input: &serde_json::Value,
     call_id: &str,
     deliverable_contract_executed: &AtomicBool,
@@ -242,7 +244,7 @@ fn verification_result(
 fn run_shell_script(cwd: &std::path::Path, script: &str) -> Result<std::process::Output> {
     use std::io::Write;
 
-    let mut child = Command::new(crate::command::posix_shell::posix_shell())
+    let mut child = Command::new(archon_shell::resolve_posix_shell())
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -254,7 +256,7 @@ fn run_shell_script(cwd: &std::path::Path, script: &str) -> Result<std::process:
     Ok(child.wait_with_output()?)
 }
 
-fn accepted_result(
+pub(super) fn accepted_result(
     summary: &str,
     data: serde_json::Value,
     task_coverage: Vec<serde_json::Value>,
@@ -274,7 +276,7 @@ fn accepted_result(
     })
 }
 
-fn needs_review_result(summary: &str, data: serde_json::Value) -> serde_json::Value {
+pub(super) fn needs_review_result(summary: &str, data: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "status": "needs_review",
         "summary": summary,
@@ -322,7 +324,7 @@ fn coverage(task_id: &str, status: &str) -> serde_json::Value {
     })
 }
 
-fn all_task_coverage() -> Vec<serde_json::Value> {
+pub(super) fn all_task_coverage() -> Vec<serde_json::Value> {
     vec![
         coverage("TASK-EX-001", "noop"),
         coverage("TASK-EX-002", "accepted"),
@@ -333,7 +335,7 @@ fn all_task_coverage() -> Vec<serde_json::Value> {
     ]
 }
 
-fn test_command(command: &str, succeeded: bool, summary: &str) -> serde_json::Value {
+pub(super) fn test_command(command: &str, succeeded: bool, summary: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": "test",
         "command": command,
@@ -343,7 +345,7 @@ fn test_command(command: &str, succeeded: bool, summary: &str) -> serde_json::Va
     })
 }
 
-fn prompt_line(prompt: &str, prefix: &str) -> Option<String> {
+pub(super) fn prompt_line(prompt: &str, prefix: &str) -> Option<String> {
     prompt
         .lines()
         .find_map(|line| line.trim().strip_prefix(prefix).map(str::trim))
@@ -351,7 +353,7 @@ fn prompt_line(prompt: &str, prefix: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn prompt_input(prompt: &str) -> serde_json::Value {
+pub(super) fn prompt_input(prompt: &str) -> serde_json::Value {
     let Some(after) = prompt.split("## Input\n```json\n").nth(1) else {
         return serde_json::Value::Null;
     };
@@ -403,7 +405,7 @@ fn find_string_key(value: &serde_json::Value, target: &str) -> Option<String> {
     }
 }
 
-fn init_git_repo(repo: &std::path::Path) {
+pub(super) fn init_git_repo(repo: &std::path::Path) {
     run_git(repo, &["init"]);
     // Line endings pinned: Git for Windows defaults to core.autocrlf=true, so a
     // file committed with LF is checked back out with CRLF, the lifecycle sees

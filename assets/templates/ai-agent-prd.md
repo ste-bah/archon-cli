@@ -337,6 +337,50 @@ Modern LLMs are surprisingly good at parsing structured text, but patterns matte
 - These IDs are the "foreign keys" that link PRD → Functional Spec → Technical Spec → Tasks
 - Once assigned, IDs do not change (even if the requirement text is refined)
 
+**Number the Sections, and Group Requirements Under Them**
+
+Section numbering in an AI-executable PRD is load-bearing, not cosmetic. Tasks
+decomposed from this PRD cite the sections they were derived from — literally,
+as `source_sections: ['8.4', '22', '25.1']` — and requirement IDs are extracted
+per section so that "which requirements does §8.4 impose?" is a lookup rather
+than a re-read.
+
+Three rules follow, and a PRD that breaks any of them breaks the
+section → requirement mapping that every task's `implements:` list is checked
+against:
+
+1. **Every section is numbered, and numbered consistently.** Top-level sections
+   are `## 8. Data Lake Requirements`; subsections are `### 8.4 Provider
+   Adapters`. Do not mix numbered and unnumbered sections at the same level, and
+   do not renumber a section once tasks cite it — an existing `source_sections`
+   entry then points somewhere else.
+2. **Every normative requirement is a bullet on its own line, prefixed `- `,
+   opening with an ID matching `REQ-<AREA>-<NNN>`.** One requirement, one line
+   start. Continuation lines of a long requirement are fine; a second ID on the
+   same line, or an ID buried mid-paragraph, is not.
+3. **Every requirement bullet sits under the numbered section it belongs to.**
+   Requirements scattered through prose, or collected in an appendix away from
+   the section that motivates them, cannot be attributed to a section.
+
+```markdown
+## 8. Data Lake Requirements
+
+### 8.3 Native Interval Enforcement
+
+- REQ-DL-020: Production datasets must set `native_interval=true`.
+- REQ-DL-021: Any derived/resampled dataset must set
+  `production_eligible=false`.
+- REQ-DL-022: Backtests and StrategySpec promotion gates must reject production
+  use of `native_interval=false`.
+```
+
+The payoff is that the complete set of requirement IDs is extractable with a
+regex and no LLM. That is what turns "every requirement is claimed by some task"
+into a check that runs in milliseconds — `archon workflow lint --tasks <DIR>`
+reports it, advisory, alongside the topology lints. An ID the regex cannot see
+is an ID that check can never report as unclaimed: it passes by being invisible,
+which is the worst outcome available.
+
 **Separate Intent from Implementation**
 - If the PRD mentions implementation details, clearly label them as "suggested approach" or move them to the technical spec
 - Example: Not "implement in PostgreSQL", but "system requires ACID compliance for transaction safety; team recommends PostgreSQL but alternative is acceptable"
@@ -380,6 +424,102 @@ Before a PRD is decomposed into functional and technical specs, it should pass a
 - [ ] All escalation rules specified
 - [ ] All failure modes and recovery procedures specified
 
+**Decomposition Completeness Gate** (see §3.5 and the task acceptance checklist
+in §10.1)
+- [ ] Every requirement is claimed by at least one task's `implements:` list
+- [ ] No task cites a requirement ID this PRD does not define
+- [ ] No templated artifact path lacks an instance binding
+
+### 3.5 Artifact Contract Rules
+
+A PRD that names artifacts — files the implementation must leave on disk — is
+making promises that tooling will later try to verify. The tasks decomposed from
+it declare those artifacts as **deliverable contracts**, and a gate opens each
+declared path and checks it. Three rules govern how you can write an artifact
+path in a PRD so that the gate derived from it is capable of failing. A gate
+that cannot fail is not a gate.
+
+**Rule 1 — A concrete path is a promise about one file.**
+
+State the exact path, and state what makes it valid, not merely present:
+
+```markdown
+- REQ-DL-004: Registry entries must be content-addressed by dataset id and
+  version, written to `.archon/trading-lab/data/registry.json`.
+```
+
+Existence is the weakest possible check. Where the artifact's *content* decides
+whether a requirement is met, say so in the requirement, so the task can declare
+a typed verifier against it rather than an existence test.
+
+**Rule 2 — A templated path must say where its instances come from.**
+
+Any path containing `<...>` placeholders —
+`.archon/trading-lab/data/datasets/<dataset-id>/<version>/validation.json` —
+cannot be checked as written. There is no file named `<dataset-id>`. Whenever
+the PRD specifies a per-instance artifact, it must also specify the **source of
+truth that enumerates the instances**: which file lists them, which field in
+that file holds the records, and which field of each record holds the artifact
+path. Without that, the requirement is unverifiable by construction.
+
+```markdown
+- REQ-DL-056: Produce a dataset quality report per dataset version at
+  `datasets/<dataset-id>/<version>/validation.json`. The registry at
+  `data/registry.json` is the enumeration of record instances: its `datasets`
+  array lists every dataset version, and each record's `validation_path` names
+  its report. A registry record whose `validation_path` names a missing or
+  unreadable report is a failure, not an absence.
+```
+
+A task implementing that requirement can then bind its contract to the
+enumeration — `instance_source_path` / `instance_source_records_field` /
+`instance_artifact_field` — or declare `min_instances: 1` or more so the
+expansion is at least a claim that can fail. A templated path with **no**
+binding fails closed at plan time: the verification step becomes a command that
+prints the unexpanded token and exits non-zero, so the task cannot pass.
+
+Two specific traps, both worth naming in the PRD where the artifact is
+specified:
+
+- **A minimum instance count of zero makes the gate vacuous.** Zero matches
+  satisfy a floor of zero, so the gate reports success having verified nothing.
+  This is not hypothetical — it shipped, and it was caught by an adversarial
+  reviewer rather than by any test. If the PRD says "per dataset version", say
+  what the minimum is: "at least one dataset version must exist and carry a
+  passing report" is checkable; "a report per version" alone is satisfied by
+  zero versions.
+- **A typed verifier expects exactly one concrete path**, so it cannot be
+  combined with a templated one. If a requirement demands a bespoke check of a
+  per-instance artifact, specify the check against the enumeration file (which
+  has a concrete path), not against the template.
+
+**Rule 3 — A file two tasks write concurrently must be declared as shared, and
+the PRD must state the atomicity requirement separately.**
+
+Where the PRD specifies one file that multiple work items append to — a
+registry, a coverage index, a manifest — say so explicitly, and write the
+atomicity requirement as its own normative requirement:
+
+```markdown
+- REQ-DL-005: Dataset writes must be atomic enough that interrupted ingests do
+  not leave a healthy registry entry pointing at missing artifacts.
+- REQ-DL-006: `data/registry.json` is appended to by every ingest task.
+  Appends must be serialized under a lock or performed write-and-rename; a
+  read-modify-write that loses a concurrent append is a defect, not a race to
+  be tolerated.
+```
+
+Tasks declare such a path in `shared_append_target_files`, which tells the write
+coordinator not to schedule around it. Be precise about what that buys: **the
+declaration asserts the write is coordinated and atomic; it does not make it
+so.** The implementing task owns the atomicity, which is why the PRD has to
+state it as a requirement someone is answerable for.
+
+The dangerous case is the undeclared one. Nothing can coordinate a write nobody
+declared, so a shared file that no task lists is written unprotected in the only
+way that matters. If the PRD knows a file has more than one writer, it must say
+which requirement covers the coordination.
+
 ---
 
 ## 4. From PRD to Decomposed Requirements for Agents
@@ -419,6 +559,29 @@ Enforce traceability links:
 - Every acceptance criterion should link to the requirement it validates: `AC-AUTH-001a ← REQ-AUTH-001`
 
 These links form a graph. Use automated tools (or manual review) to check for gaps: "Which requirements have no acceptance criteria? Which user stories have no requirements? Which NFRs are not tested?"
+
+The last link in that graph is the one that closes it. Every task decomposed
+from this PRD declares `implements:` — the list of requirement IDs it is
+answerable for — in its YAML block, and declares it even when the list is empty:
+an audit or a review task writes `implements: []` rather than omitting the
+field, so that "claims nothing" and "says nothing" are distinguishable inputs.
+
+That one field makes two checks possible that inference cannot supply:
+
+- **Every ID cited by a task exists in this PRD.** A task citing a requirement
+  that was renumbered or deleted is stale, and is caught by intersection rather
+  than by someone remembering.
+- **Every requirement in this PRD is claimed by at least one task.** A
+  requirement no task claims is a decomposition gap. Record it as an explicit
+  residual gap with a fail-closed behavior. Unclaimed and unrecorded is the one
+  state that looks exactly like success.
+
+Both checks are pure set operations over the requirement IDs extracted from this
+PRD (§3.3) and the `implements:` lists read from the task files. No LLM is
+involved and no judgement is exercised, which is why
+`archon workflow lint --tasks <DIR>` runs them on every change rather than at
+review time. It reports both directions and blocks nothing — an unclaimed
+requirement is a question for the author, not a verdict on the run.
 
 ### 4.3 Capturing Non-Functional Requirements with Metrics
 
@@ -692,6 +855,13 @@ A traceability matrix connects PRD → Functional Spec → Technical Spec → Ta
 ```
 
 Create this matrix in a spreadsheet or markdown table. Use automated tools to check coverage: "Which PRD requirements have no functional spec? Which functional specs have no technical spec? Which technical specs have no corresponding tasks?"
+
+Do not maintain the **Task** column by hand. It is the inverse of the
+`implements:` lists in the task files: a requirement's tasks are exactly the
+tasks that name it. Derive the column from the task directory and the hand-kept
+copy stops being a second, quietly diverging source of truth. A requirement with
+an empty Task column after that derivation is a decomposition gap, not a
+transcription slip.
 
 ---
 
@@ -1335,6 +1505,20 @@ Checklist:
 - [ ] Constraints explicitly listed
 - [ ] Estimated complexity and SLA defined
 
+Mechanical checks, run before a human reads anything (see §3.5 and §10.1 §15):
+- [ ] Every requirement in the PRD is claimed by at least one task's
+      `implements:` list, or recorded as a residual gap with a fail-closed
+      behavior
+- [ ] No task cites a requirement ID the PRD does not define
+- [ ] No templated `<...>` artifact path lacks an instance binding, and no
+      templated path declares a minimum instance count of zero
+- [ ] Ordering is declared from either end (`depends_on` or `blocks`) with no
+      self-block, no mutual block, and no pair declared in both directions
+- [ ] Every file with more than one writer is declared shared by all of its
+      writers, and the PRD states the atomicity requirement
+- [ ] No `deliverable_contracts` entry was invented to silence an ordering-only
+      dependency; an ordering-only edge is not a defect and needs no contract
+
 **CODE_REVIEW Gate** (after agent execution)
 
 Purpose: Ensure code matches spec and constitution.
@@ -1467,7 +1651,26 @@ After agents execute tasks and code is deployed, collect telemetry to improve fu
 
 ### 10.1 AI-Ready PRD Top-Level Template
 
-Below is a complete, opinionated PRD template structured for AI agent implementation:
+Below is a complete, opinionated PRD template structured for AI agent implementation.
+
+**Where it lives.** A PRD that will be decomposed for automated execution is a
+single markdown file with a directory of task files beside it, named for the
+same PRD id:
+
+```
+PRD-TRADING-DATA-LAKE-AHDM-001.md          # this document
+PRD-TRADING-DATA-LAKE-AHDM-001/            # sibling directory, same name
+├── TASK-TDL-001-data-lake-gap-audit.md
+├── TASK-TDL-010-registry-schema-v1.md
+└── TASK-TDL-140-adversarial-review-and-readiness.md
+```
+
+One task per file, named `TASK-<DOMAIN>-<NNN>-<slug>.md`, with the task id
+readable from the filename. Task discovery is a single non-recursive read of
+that directory, so a task file nested one level deeper is not found at all —
+not warned about, not found. The task file format itself is specified in the
+companion specification guide; it is a fenced YAML block plus named markdown
+sections, and it is parsed rather than read.
 
 ```markdown
 # Product Requirements Document: [Feature Name]
@@ -1528,10 +1731,29 @@ So that [benefit]
 
 ## 5. Functional Requirements
 
-| ID | Description | Priority | Related Story | Rationale |
-|----|-------------|----------|---------------|-----------|
-| REQ-[DOMAIN]-001 | [Description] | MUST | US-[DOMAIN]-001 | [Why needed] |
-| REQ-[DOMAIN]-002 | [Description] | SHOULD | US-[DOMAIN]-002 | [Why needed] |
+Group requirements under numbered subsections. One requirement per line,
+prefixed `- `, opening with its ID. Tasks cite these subsection numbers in
+`source_sections:` and these IDs in `implements:`, so both are part of the
+contract and neither is renumbered once a task cites it.
+
+### 5.1 [Area Name]
+
+- REQ-[DOMAIN]-001: [Normative statement. Use MUST/MUST NOT. State the failing
+  behavior, not only the happy path.]
+- REQ-[DOMAIN]-002: [Normative statement.]
+
+### 5.2 [Area Name]
+
+- REQ-[DOMAIN]-010: [Normative statement.]
+
+Optional companion table for attributes that do not belong in the requirement
+text. It supplements the bullets above; it does not replace them, and IDs that
+appear only here are not extracted:
+
+| ID | Priority | Related Story | Rationale |
+|----|----------|---------------|-----------|
+| REQ-[DOMAIN]-001 | MUST | US-[DOMAIN]-001 | [Why needed] |
+| REQ-[DOMAIN]-002 | SHOULD | US-[DOMAIN]-002 | [Why needed] |
 
 ---
 
@@ -1625,6 +1847,83 @@ So that [benefit]
 - [ ] Security review completed
 - [ ] Documentation updated
 - [ ] Monitoring and alerts configured
+
+---
+
+## 15. Task Acceptance Checklist
+
+Every implementation task produced from this PRD must include:
+
+- implements (the normative requirement IDs the task satisfies)
+- scope
+- files expected to change
+- files forbidden to change
+- acceptance criteria
+- focused tests
+- line-count check
+- complexity check where applicable
+- adversarial review notes
+
+`implements` is declared in the task's YAML block as a list of requirement IDs,
+for example `implements: [REQ-[DOMAIN]-001]`. It binds a requirement to the
+focused tests meant to prove it, which is what allows a requirement to be marked
+satisfied by executed evidence rather than by assertion. Two checks follow from
+it, and neither is possible without it: every cited ID must exist in this PRD,
+and every normative requirement must be claimed by at least one task. An
+unclaimed requirement is a decomposition gap and must be recorded as a residual
+gap rather than left silent.
+
+A task that implements no requirement — an audit or a review task — declares
+`implements: []` rather than omitting the field.
+
+**Completeness gate.** A decomposition is complete only when: every requirement
+is claimed by at least one task, no task cites an ID absent from this PRD, and
+no templated artifact path lacks an instance binding.
+
+All three clauses are mechanically checkable without an LLM. The first two are
+set operations over the requirement IDs extracted from this PRD's numbered
+sections and the `implements:` lists read from the task directory — run them as
+a decomposition lint over the tasks before the first one is scheduled:
+`archon workflow lint --tasks <DIR>` reports both, advisory. The third
+fails closed at plan time on its own: a templated `<...>` artifact path with no
+instance binding produces a verification step that prints the unexpanded token
+and exits non-zero, so the task cannot pass.
+
+No task may say "investigate later" without creating an explicit residual gap
+record and a fail-closed behavior.
+
+---
+
+## 16. Explicit Residual-Gap Policy
+
+Residual gaps are allowed only if they are explicit, scoped, and fail closed.
+
+Residual-gap record:
+
+```json
+{
+  "id": "GAP-[DOMAIN]-001",
+  "area": "[subsystem]",
+  "description": "exact missing capability",
+  "impact": "what cannot be trusted",
+  "fail_closed_behavior": "what the system refuses to do",
+  "owner": "[owner]",
+  "created_at": "RFC3339"
+}
+```
+
+Forbidden vague phrases:
+
+- "should work"
+- "probably available"
+- "later"
+- "TBD"
+- "some provider"
+- "best effort" without fail-closed behavior
+
+State this policy in the PRD rather than assuming it. A gap that is written down
+with a fail-closed behavior costs a refused operation; a gap that is not written
+down costs a wrong answer that nobody knows to distrust.
 
 ---
 

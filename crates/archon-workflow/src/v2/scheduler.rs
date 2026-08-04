@@ -454,7 +454,22 @@ fn classify_branch_error(error: &str) -> BranchFailureKind {
     BranchFailureKind::Contract
 }
 
-fn stable_value_hash(value: &serde_json::Value) -> String {
+/// The one content hash for workflow JSON payloads.
+///
+/// Serialization alone is already canonical here: `serde_json`'s
+/// `preserve_order` feature is NOT enabled in this workspace, so `Map` is a
+/// `BTreeMap` and object keys always serialize in sorted order. Arrays are
+/// serialized in their given order — deliberately. Array position is
+/// semantically load-bearing in the payloads this hashes (fan-out branch
+/// identity falls back to the item index, reducer arguments are a positional
+/// tuple, declared verifier commands run in array order fail-fast), so a hash
+/// that sorted array elements would give `[a, b]` and `[b, a]` the same key and
+/// let a reordered run replay the wrong cached result.
+pub fn stable_value_hash(value: &serde_json::Value) -> String {
     let bytes = serde_json::to_vec(value).unwrap_or_default();
     blake3::hash(&bytes).to_hex().to_string()
 }
+
+#[cfg(test)]
+#[path = "scheduler_stable_value_hash_tests.rs"]
+mod stable_value_hash_tests;

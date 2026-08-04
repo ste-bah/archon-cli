@@ -11,6 +11,24 @@ use super::{
     acquire_for_path, acquire_for_path_with, acquire_for_path_with_async, clear_for_tests,
 };
 
+/// How long a test waits for a thread it has already unblocked.
+///
+/// Every use is a hang guard, not an assertion about speed: the thing being
+/// waited for has already been signalled, and the bound exists only so a
+/// genuine deadlock fails the suite instead of hanging it forever.
+///
+/// It was 2 seconds, which is a claim about scheduler latency rather than about
+/// correctness, and the claim was false. Under the full binary suite these
+/// threads contend with ~1,570 other tests, and
+/// `panicking_open_releases_waiters_and_allows_a_retry` failed 2 runs in 3 —
+/// on the slower runs (55s and 52s) and not on the faster one (38s), which is
+/// the signature of a load-sensitive deadline rather than a logic error.
+///
+/// The `Duration::from_millis` waits elsewhere in this file are deliberately
+/// NOT this constant: those are negative assertions that something has *not*
+/// happened yet, so their shortness is the point.
+const THREAD_HANDOFF_DEADLINE: Duration = Duration::from_secs(60);
+
 fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]
@@ -102,7 +120,7 @@ fn concurrent_waiters_are_released_after_failed_open_and_retry_once() -> Result<
         })
     });
     started_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(THREAD_HANDOFF_DEADLINE)
         .expect("first open begins");
 
     let waiter_attempts = Arc::clone(&attempts);
@@ -155,7 +173,7 @@ fn panicking_open_releases_waiters_and_allows_a_retry() -> Result<()> {
         })
     });
     opening_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(THREAD_HANDOFF_DEADLINE)
         .expect("opener creates the opening cache entry");
 
     let waiter_path = path.clone();
@@ -169,7 +187,7 @@ fn panicking_open_releases_waiters_and_allows_a_retry() -> Result<()> {
     panic_tx.send(())?;
     assert!(opener.join().is_err(), "opener panic must propagate");
     let db = waiter_result_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(THREAD_HANDOFF_DEADLINE)
         .expect("waiter is released after opener panic")?;
     waiter.join().expect("waiter thread completes");
 
@@ -195,11 +213,11 @@ fn distinct_paths_open_independently_without_waiting_for_each_other() -> Result<
         Arc::clone(&release_rx),
     );
     started_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(THREAD_HANDOFF_DEADLINE)
         .expect("first distinct path begins opening");
     let second = spawn_overlapping_acquire(second_path.clone(), started_tx, release_rx);
     started_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(THREAD_HANDOFF_DEADLINE)
         .expect("second distinct path begins before either open completes");
 
     release_tx.send(())?;
@@ -293,7 +311,7 @@ fn pipeline_schema_initialization_uses_registered_final_file_alias_lock() -> Res
             Ok(())
         })
     });
-    locked_rx.recv_timeout(Duration::from_secs(2))?;
+    locked_rx.recv_timeout(THREAD_HANDOFF_DEADLINE)?;
 
     let (result_tx, result_rx) = mpsc::channel();
     let writer = std::thread::spawn(move || {
@@ -308,7 +326,7 @@ fn pipeline_schema_initialization_uses_registered_final_file_alias_lock() -> Res
     );
     release_tx.send(())?;
     holder.join().expect("lock holder thread")?;
-    result_rx.recv_timeout(Duration::from_secs(2))??;
+    result_rx.recv_timeout(THREAD_HANDOFF_DEADLINE)??;
     writer.join().expect("schema writer thread");
     clear_for_tests(&path);
     Ok(())
@@ -326,7 +344,7 @@ async fn async_acquisition_does_not_block_the_runtime_worker() -> Result<()> {
     let release_rx = Arc::new(Mutex::new(release_rx));
 
     let coordinator = std::thread::spawn(move || {
-        opening_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        opening_rx.recv_timeout(THREAD_HANDOFF_DEADLINE).unwrap();
         let progressed = progress_rx.recv_timeout(Duration::from_millis(250)).is_ok();
         release_tx.send(()).unwrap();
         result_tx.send(progressed).unwrap();

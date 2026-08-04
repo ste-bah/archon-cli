@@ -28,6 +28,10 @@ impl Ingester {
     /// Create a new ingester backed by the given CozoDB instance.
     ///
     /// Assumes `ensure_kb_schema()` has already been called.
+    ///
+    /// Chunk reservation can only be serialised across handles when the
+    /// database's location is known; prefer [`Ingester::for_db_path`] for any
+    /// persisted store that another handle or process might also ingest into.
     pub fn new(db: DbInstance) -> Result<Self> {
         Ok(Self {
             storage: ChunkStorage::new(db),
@@ -35,9 +39,37 @@ impl Ingester {
         })
     }
 
+    /// Ingester for a persisted database at a known path.
+    ///
+    /// Reservations serialise on that database's write lock, so two handles on
+    /// one file cannot both claim the same content hash.
+    pub fn for_db_path(db: DbInstance, db_path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            storage: ChunkStorage::for_db_path(db, db_path),
+            embedder: None,
+        })
+    }
+
     pub fn with_embedder(
         db: DbInstance,
         embedder: Arc<dyn LocalEmbeddingProvider>,
+    ) -> Result<Self> {
+        Self::with_embedder_inner(db, embedder, None)
+    }
+
+    /// [`Ingester::with_embedder`] for a persisted database at a known path.
+    pub fn with_embedder_for_db_path(
+        db: DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+        db_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Self::with_embedder_inner(db, embedder, Some(db_path.as_ref()))
+    }
+
+    fn with_embedder_inner(
+        db: DbInstance,
+        embedder: Arc<dyn LocalEmbeddingProvider>,
+        db_path: Option<&Path>,
     ) -> Result<Self> {
         let _guard = super::schema::lock_embedding_state()?;
         let existing = read_node_content(&db)?;
@@ -64,7 +96,10 @@ impl Ingester {
             embedder.dimension(),
             Some(&embeddings),
         )?;
-        let storage = ChunkStorage::new(db.clone());
+        let storage = match db_path {
+            Some(db_path) => ChunkStorage::for_db_path(db.clone(), db_path),
+            None => ChunkStorage::new(db.clone()),
+        };
         super::schema::assert_embedding_space(
             &db,
             &embedder.embedding_space_id(),

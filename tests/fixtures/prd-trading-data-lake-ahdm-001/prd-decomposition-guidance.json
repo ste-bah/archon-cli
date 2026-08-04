@@ -1,0 +1,93 @@
+{
+  "_provenance": {
+    "source_document": "PRD-TRADING-DATA-LAKE-AHDM-001.md",
+    "sections": {
+      "decomposition_order": "§15 Decomposition Guidance, lines 351-369 — transcribed verbatim, in order.",
+      "phases": "§14 Implementation Phases, lines 335-347 — 'phase', 'scope' and 'exit_gate' are the PRD table verbatim.",
+      "phase_tasks": "NOT declared by the PRD. §14 names no task ids. 'tasks' is a hand mapping from each phase's scope text to the shipped task files, recorded here so the check is data a reader can audit rather than logic buried in a test. Treat a failure against it as a question about the mapping, not proof the plan is wrong."
+    },
+    "known_divergence": "§15 recommends 15 tasks. The shipped decomposition has 17: TASK-TDL-041 and TASK-TDL-042 have no §15 entry. They are recorded in 'tasks_absent_from_section_15' rather than silently added to the §15 list."
+  },
+  "decomposition_order": [
+    "TASK-TDL-001",
+    "TASK-TDL-010",
+    "TASK-TDL-020",
+    "TASK-TDL-030",
+    "TASK-TDL-040",
+    "TASK-TDL-050",
+    "TASK-TDL-060",
+    "TASK-TDL-070",
+    "TASK-TDL-080",
+    "TASK-TDL-090",
+    "TASK-TDL-100",
+    "TASK-TDL-110",
+    "TASK-TDL-120",
+    "TASK-TDL-130",
+    "TASK-TDL-140"
+  ],
+  "tasks_absent_from_section_15": ["TASK-TDL-041", "TASK-TDL-042"],
+  "phases": [
+    {
+      "phase": 0,
+      "scope": "Inspect existing store, docs, commands, providers, and tests.",
+      "exit_gate": "Gap report produced.",
+      "tasks": ["TASK-TDL-001"]
+    },
+    {
+      "phase": 1,
+      "scope": "Upgrade schema/storage and migration behavior.",
+      "exit_gate": "Registry can read old and new entries.",
+      "tasks": ["TASK-TDL-010"]
+    },
+    {
+      "phase": 2,
+      "scope": "Add validation reports and native interval gates.",
+      "exit_gate": "Invalid fixtures fail focused tests.",
+      "tasks": ["TASK-TDL-020"]
+    },
+    {
+      "phase": 3,
+      "scope": "Add provider capability and native fetch adapters.",
+      "exit_gate": "Each provider reports support/unavailable honestly.",
+      "tasks": [
+        "TASK-TDL-030",
+        "TASK-TDL-040",
+        "TASK-TDL-041",
+        "TASK-TDL-042",
+        "TASK-TDL-050",
+        "TASK-TDL-060",
+        "TASK-TDL-070"
+      ]
+    },
+    {
+      "phase": 4,
+      "scope": "Add coverage matrix and project commands.",
+      "exit_gate": "Matrix works for required universe.",
+      "tasks": ["TASK-TDL-080"]
+    },
+    {
+      "phase": 5,
+      "scope": "Wire backtest refusal gates.",
+      "exit_gate": "Backtests reject bad/non-native datasets.",
+      "tasks": ["TASK-TDL-090"]
+    },
+    {
+      "phase": 6,
+      "scope": "Extract KB evidence and build AHDM-v1 StrategySpec.",
+      "exit_gate": "Cited rule inventory exists.",
+      "tasks": ["TASK-TDL-100", "TASK-TDL-110"]
+    },
+    {
+      "phase": 7,
+      "scope": "Generate Pine v6 indicator/strategy.",
+      "exit_gate": "Pine artifacts pass local structural checks.",
+      "tasks": ["TASK-TDL-120"]
+    },
+    {
+      "phase": 8,
+      "scope": "Run sample backtests and adversarial review.",
+      "exit_gate": "Readiness report lists pass/fail and gaps.",
+      "tasks": ["TASK-TDL-130", "TASK-TDL-140"]
+    }
+  ]
+}

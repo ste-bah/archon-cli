@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
     let started = Instant::now();
@@ -32,17 +34,14 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         target_repository_root: Some(repo.display().to_string()),
         max_parallelism: 4,
         max_agents: 16,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let llm = Arc::new(CannedLifecycleLlm {
         scenario: CannedLifecycleScenario::FullLifecycle,
         calls: Mutex::new(Vec::new()),
@@ -53,7 +52,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
     });
     let client = LiveV2AgentClient::new(
         llm.clone(),
-        tui_tx,
+        ui_sink,
         Vec::new(),
         run.id.clone(),
         Some(repo.display().to_string()),
@@ -66,6 +65,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
             max_investigation_iterations: 1,
             verification_branch_timeout_secs: 30,
             host_call_timeout_secs: 30,
+            implementation_wave_max_parallelism: None,
         },
     };
     let runner = WorkflowV2ScriptRunner::new(
@@ -216,11 +216,8 @@ async fn failed_final_report_emits_host_built_fallback() {
         target_repository_root: None,
         max_parallelism: 1,
         max_agents: 1,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let universe = WorkflowV2TaskUniverse {
@@ -236,7 +233,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (tui_tx, _tui_rx) = bounded_tui_event_channel();
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let llm = Arc::new(CannedLifecycleLlm {
         scenario: CannedLifecycleScenario::FullLifecycle,
         calls: Mutex::new(Vec::new()),
@@ -245,12 +242,13 @@ async fn failed_final_report_emits_host_built_fallback() {
         inventory_calls: AtomicUsize::new(0),
         verification_failure_emitted: AtomicBool::new(false),
     });
-    let client = LiveV2AgentClient::new(llm, tui_tx, Vec::new(), run.id.clone(), None, Some(30));
+    let client = LiveV2AgentClient::new(llm, ui_sink, Vec::new(), run.id.clone(), None, Some(30));
     let generated_config = archon_core::config::GeneratedWorkflowConfig {
         max_repair_iterations: 1,
         max_investigation_iterations: 1,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
+        implementation_wave_max_parallelism: None,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
@@ -279,7 +277,12 @@ async fn failed_final_report_emits_host_built_fallback() {
         Some(temp.path().display().to_string()),
         serde_json::json!([]),
         Default::default(),
-        &generated_config,
+        LifecycleLimits {
+            max_repair_iterations: generated_config.max_repair_iterations,
+            max_investigation_iterations: generated_config.max_investigation_iterations,
+            implementation_wave_max_parallelism: generated_config
+                .implementation_wave_max_parallelism,
+        },
     );
 
     let result = driver
@@ -358,7 +361,7 @@ async fn triage_shape_repair_cannot_trade_predicate_identity_for_better_accounti
         .await
         .expect("triage repair");
 
-    let routes = workflow_live_v2_lifecycle_verify_routing::triage_routes(&retained);
+    let routes = lifecycle_policy::verify_routing::triage_routes(&retained);
     assert_eq!(routes.implementation_failures.len(), 1);
     assert!(routes.retry_items.is_empty());
     assert_eq!(
@@ -404,4 +407,3 @@ fn persisted_semantic_rejection_record(root: &std::path::Path, repair_id: &str) 
     }
     walk(root, &format!("{repair_id}-semantic-preservation-rejected"))
 }
-

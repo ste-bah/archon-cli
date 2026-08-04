@@ -274,46 +274,78 @@ mod tests {
     // Fork guard tests (AGT-023)
     // -----------------------------------------------------------------------
 
+    /// Serialises the four `ARCHON_FORK_SUBAGENT` tests against each other.
+    ///
+    /// They set and clear one process-wide variable, and the test harness runs
+    /// them on parallel threads — so `defaults_to_false` could clear the
+    /// variable between another test's `set_var` and its assertion. Observed as
+    /// roughly one failure in ten full-suite runs, on whichever of the four lost
+    /// the race.
+    ///
+    /// Poisoning is recovered from rather than propagated: the guard protects no
+    /// data, and [`ForkEnvGuard`] restores the variable in `Drop`, which runs
+    /// during the panic that poisoned the lock. Propagating would turn one real
+    /// failure into three more that only report "mutex poisoned".
+    static FORK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets `ARCHON_FORK_SUBAGENT` for one test and restores it afterwards.
+    ///
+    /// Restoring the previous value rather than clearing it means these tests do
+    /// not change what the rest of the suite sees, even if the variable was set
+    /// in the environment the run inherited.
+    struct ForkEnvGuard {
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ForkEnvGuard {
+        fn set(value: Option<&str>) -> Self {
+            let lock = FORK_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("ARCHON_FORK_SUBAGENT");
+            match value {
+                Some(value) => unsafe { std::env::set_var("ARCHON_FORK_SUBAGENT", value) },
+                None => unsafe { std::env::remove_var("ARCHON_FORK_SUBAGENT") },
+            }
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for ForkEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => unsafe { std::env::set_var("ARCHON_FORK_SUBAGENT", value) },
+                None => unsafe { std::env::remove_var("ARCHON_FORK_SUBAGENT") },
+            }
+        }
+    }
+
     #[test]
     fn is_fork_enabled_defaults_to_false() {
-        // Clean env state
-        unsafe {
-            std::env::remove_var("ARCHON_FORK_SUBAGENT");
-        }
+        let _guard = ForkEnvGuard::set(None);
         assert!(!is_fork_enabled());
     }
 
     #[test]
     fn is_fork_enabled_true_when_set() {
-        unsafe {
-            std::env::set_var("ARCHON_FORK_SUBAGENT", "1");
-        }
+        let _guard = ForkEnvGuard::set(Some("1"));
         assert!(is_fork_enabled());
-        unsafe {
-            std::env::remove_var("ARCHON_FORK_SUBAGENT");
-        }
     }
 
     #[test]
     fn is_fork_enabled_true_when_set_to_true() {
-        unsafe {
-            std::env::set_var("ARCHON_FORK_SUBAGENT", "true");
-        }
+        let _guard = ForkEnvGuard::set(Some("true"));
         assert!(is_fork_enabled());
-        unsafe {
-            std::env::remove_var("ARCHON_FORK_SUBAGENT");
-        }
     }
 
     #[test]
     fn is_fork_enabled_false_for_zero() {
-        unsafe {
-            std::env::set_var("ARCHON_FORK_SUBAGENT", "0");
-        }
+        let _guard = ForkEnvGuard::set(Some("0"));
         assert!(!is_fork_enabled());
-        unsafe {
-            std::env::remove_var("ARCHON_FORK_SUBAGENT");
-        }
     }
 
     #[test]

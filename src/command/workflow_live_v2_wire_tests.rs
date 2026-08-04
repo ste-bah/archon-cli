@@ -13,10 +13,7 @@ use archon_llm::identity::{IdentityMode, IdentityProvider};
 use archon_llm::provider::LlmProvider;
 use archon_llm::providers::AnthropicProvider;
 use archon_llm::types::Secret;
-use archon_pipeline::llm_adapter::ProviderLlmAdapter;
-use archon_pipeline::subagent_adapter::SubagentPipelineClient;
 use archon_tools::subagent_executor::install_subagent_executor;
-use archon_tools::tool::ToolContext;
 use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -195,20 +192,16 @@ async fn wire_harness() -> WireHarness {
     )
     .await;
     install_wire_executor(Arc::clone(&provider), &root);
-    let raw: Arc<dyn LlmClient> =
-        Arc::new(ProviderLlmAdapter::new(Arc::clone(&provider)).with_origin("workflow-wire-test"));
-    let llm = SubagentPipelineClient::with_provider(
-        raw,
-        ToolContext {
-            working_dir: root.clone(),
-            ..ToolContext::default()
-        },
+    let llm = crate::command::pipeline_workflow_llm::subagent_workflow_client_for_test(
         provider,
+        "workflow-wire-test",
+        root.clone(),
+        crate::command::pipeline_workflow_llm::TestClientFallback::Provider,
     );
-    let (tui_tx, tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
-        Arc::new(llm),
-        tui_tx,
+        llm,
+        ui_sink,
         Vec::new(),
         "workflow-wire-test".into(),
         Some(root.display().to_string()),

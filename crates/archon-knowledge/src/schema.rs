@@ -144,8 +144,18 @@ pub fn ensure_knowledge_schema(db: &DbInstance) -> Result<()> {
     Ok(())
 }
 
-fn run_create(db: &DbInstance, script: &str) -> Result<()> {
-    match db.run_script(script, Default::default(), ScriptMutability::Mutable) {
+/// Run one `:create` idempotently.
+///
+/// `pub(crate)` so sibling schema owners (the traceability side relation) reuse
+/// the same already-exists tolerance rather than re-deriving it.
+pub(crate) fn run_create(db: &DbInstance, script: &str) -> Result<()> {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        script,
+        Default::default(),
+        ScriptMutability::Mutable,
+        "knowledge schema: create relation",
+    ) {
         Ok(_) => Ok(()),
         Err(e) => {
             let msg = e.to_string();

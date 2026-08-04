@@ -1,31 +1,38 @@
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use archon_tui::app::TuiEvent;
 use archon_workflow::{
-    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowV2AgentAdapter,
-    WorkflowV2ArtifactRequirement, WorkflowV2CallExecution, WorkflowV2CallRecord,
-    WorkflowV2Checkpoint, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2ResidualGap, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2TaskCompletionEvidence,
-    WorkflowV2TaskCoverageStatus, WorkflowV2WriteMode, workflow_scaffold_hash,
+    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowUiEvent,
+    WorkflowV2AgentAdapter, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Checkpoint,
+    WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
+    workflow_scaffold_hash,
+};
+// Only this subsystem's tests build the call/coverage shapes by hand; the host
+// itself now receives them already parsed from `archon_workflow::v2::script`.
+#[cfg(test)]
+use archon_workflow::{
+    WorkflowV2HostOptions, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCoverageStatus,
+    WorkflowV2WriteMode,
 };
 use rquickjs::function::{Async, Func};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
 use tokio::sync::Mutex;
 
-use super::super::workflow_live_task_universe::WorkflowV2TaskUniverse;
 use super::WorkflowV2ScriptRuntime;
 use super::execute_v2_live_call;
 use super::workflow_live_v2_client::LiveV2AgentClient;
-use super::workflow_live_v2_contracts::failed_v2_result;
-use super::workflow_live_v2_source_graph::{
+use archon_workflow::poll_v2_run_control;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
+use archon_workflow::v2::run_state_sync::mark_v2_call_running;
+use archon_workflow::v2::source_graph::{
     complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
 };
-use super::workflow_live_v2_stable_json::stable_hash;
-use super::workflow_live_v2_state::{mark_v2_call_running, poll_v2_run_control};
 
-const TERMINAL_HOST_CALL_MARKER: &str = "workflow terminal host call:";
+// The terminal-call marker is part of the lifecycle host port's contract: the
+// host writes it, the driver routes on it. One definition, in the crate that
+// owns the port.
+use archon_workflow::TERMINAL_HOST_CALL_MARKER;
 #[cfg(not(test))]
 const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_secs(60);
 #[cfg(test)]
@@ -60,6 +67,22 @@ pub(super) struct WorkflowV2ScriptRunner {
     script_args: Option<serde_json::Value>,
     adopt_accepted_cache: bool,
     resume_completed_ids: std::collections::BTreeSet<String>,
+    /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
+    /// the task universe's dependency edges.
+    ///
+    /// The store's invalidation routines only ever fire from the operator's
+    /// `workflow restart` command; nothing marks a downstream record stale when
+    /// an upstream call re-executes mid-run and produces different output. The
+    /// content-keyed reuse paths do not need that — a changed input changes the
+    /// input hash and they re-execute on their own. The two reuse paths that
+    /// legitimately cannot key on the input hash do, so they consult this set
+    /// instead: reuse is refused for any record covering a task that is
+    /// downstream of work this run has already redone.
+    ///
+    /// Shared by `Arc` across runner clones on purpose: the v3 authoring
+    /// bootstrap and the authored run it hands off to are one logical run, and
+    /// taint must not be laundered by the clone.
+    reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -88,6 +111,7 @@ impl WorkflowV2ScriptRunner {
             script_args,
             adopt_accepted_cache: false,
             resume_completed_ids: Default::default(),
+            reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
         }
     }
 
@@ -319,97 +343,66 @@ impl Default for WorkflowScriptAccumulator {
     }
 }
 
-include!("workflow_live_v2_script_host.rs");
+#[path = "workflow_live_v2_script_host.rs"]
+mod workflow_live_v2_script_host;
+use workflow_live_v2_script_host::*;
 
-include!("workflow_live_v2_script_helpers.rs");
+// The workflow.js script bridge — payload parsing, source composition, the
+// result/reuse reduction, the dry-run recorder and the v3 dialect — is
+// `archon_workflow::v2::script`. What is left here is the composition root that
+// executes against it. Named once, explicitly: this module used to glob six
+// siblings into one namespace every child inherited through `use super::*`.
+#[cfg(test)]
+use archon_workflow::v2::script::normalize_workflow_export;
+use archon_workflow::v2::script::{
+    ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, V3_PRIMITIVE_REFERENCE,
+    completion_evidence_from_result, compose_author_brief, evidence_snapshot_hash,
+    failed_v2_result, frontier_resume_record_reusable, is_reusable_status,
+    mark_unresolved_dependency_metadata, merge_v2_status, next_action_for_terminal_call,
+    normalize_result_for_call, parse_script_options, record_tasks_all_completed, result_view_json,
+    reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
+    sanitize_v2_gap_id, script_source, terminal_stop_for_call, v3_call_family,
+    validate_authored_plan, validate_authored_task_accounting, validate_authored_workflow_source,
+    validate_map_reduce_review_calls, validate_review_accounting_from_reducers,
+};
 
-include!("workflow_live_v3_prelude.rs");
+// Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
+// inside this subsystem because that is the only scope from which the planner,
+// the task universe, the scheduler primitives and the per-task review item
+// builder are all reachable at once — which is exactly the property that made
+// "nobody has run the whole thing end to end" possible.
+#[cfg(test)]
+#[path = "workflow_live_v2_prd_pipeline_tests.rs"]
+mod workflow_live_v2_prd_pipeline_tests;
 
-include!("workflow_live_v2_script_verification.rs");
+use archon_workflow::v2::script::dry_run_workflow_plan_full_details;
+#[cfg(test)]
+use archon_workflow::v2::script::{dry_run_workflow_plan, dry_run_workflow_plan_details};
 
-#[path = "workflow_live_v2_deliverable_contract.rs"]
-pub(super) mod workflow_live_v2_deliverable_contract;
-#[path = "workflow_live_v2_lifecycle_boundary_repair.rs"]
-mod workflow_live_v2_lifecycle_boundary_repair;
-#[path = "workflow_live_v2_lifecycle_noop_routing.rs"]
-mod workflow_live_v2_lifecycle_noop_routing;
-#[path = "workflow_live_v2_lifecycle_prompts.rs"]
-mod workflow_live_v2_lifecycle_prompts;
-#[path = "workflow_live_v2_lifecycle_review_remediation.rs"]
-mod workflow_live_v2_lifecycle_review_remediation;
-#[path = "workflow_live_v2_lifecycle_review_verification.rs"]
-mod workflow_live_v2_lifecycle_review_verification;
-#[path = "workflow_live_v2_lifecycle_terminal_gate.rs"]
-mod workflow_live_v2_lifecycle_terminal_gate;
-#[path = "workflow_live_v2_lifecycle_verify_invariants.rs"]
-mod workflow_live_v2_lifecycle_verify_invariants;
-#[path = "workflow_live_v2_lifecycle_verify_merge.rs"]
-mod workflow_live_v2_lifecycle_verify_merge;
-#[path = "workflow_live_v2_lifecycle_verify_options.rs"]
-mod workflow_live_v2_lifecycle_verify_options;
-#[path = "workflow_live_v2_lifecycle_verify_outcome_repair.rs"]
-mod workflow_live_v2_lifecycle_verify_outcome_repair;
-#[path = "workflow_live_v2_lifecycle_verify_overreach.rs"]
-mod workflow_live_v2_lifecycle_verify_overreach;
-#[path = "workflow_live_v2_lifecycle_verify_retriage.rs"]
-mod workflow_live_v2_lifecycle_verify_retriage;
-#[path = "workflow_live_v2_lifecycle_verify_routing.rs"]
-mod workflow_live_v2_lifecycle_verify_routing;
-#[path = "workflow_live_v2_lifecycle_verify_scope.rs"]
-mod workflow_live_v2_lifecycle_verify_scope;
-#[path = "workflow_live_v2_lifecycle_verify_supersede.rs"]
-mod workflow_live_v2_lifecycle_verify_supersede;
+// Composition root for `archon_workflow::v2::lifecycle_driver`: the only code
+// left here that touches the concrete script host.
+#[path = "workflow_live_v2_lifecycle.rs"]
+mod workflow_live_v2_lifecycle;
 
-include!("workflow_live_v2_script_dry_run.rs");
+// Host side of `archon_workflow::lifecycle_host_port`. Outside the `workflow_*`
+// prefix on purpose — see the file's module doc.
+#[path = "lifecycle_script_host.rs"]
+mod lifecycle_script_host;
 
-include!("workflow_live_v2_lifecycle.rs");
-
-include!("workflow_live_v3_orchestrated.rs");
-
-include!("workflow_live_v3_author.rs");
-
-include!("workflow_live_v3_author_checks.rs");
-
-include!("workflow_live_v2_lifecycle_waves.rs");
-
-include!("workflow_live_v2_lifecycle_impl.rs");
-
-include!("workflow_live_v2_lifecycle_boundary_repair_driver.rs");
-
-include!("workflow_live_v2_lifecycle_verify.rs");
-
-include!("workflow_live_v2_lifecycle_verify_triage.rs");
-
-include!("workflow_live_v2_lifecycle_verify_remediation.rs");
-
-include!("workflow_live_v2_lifecycle_verify_outcome_repair_driver.rs");
-
-include!("workflow_live_v2_lifecycle_review.rs");
+// Composition root for the v3 authored-script lifecycle: the only code left
+// here that runs the concrete script host over the authoring bootstrap.
+#[path = "workflow_live_v3_author.rs"]
+mod workflow_live_v3_author;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+// End-to-end lifecycle coverage stays here: it drives the real
+// `LiveV2AgentClient`/`WorkflowScriptHost` stack through the driver's public
+// surface, which is exactly what cannot be built from inside archon-workflow.
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_e2e_tests.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_review_remediation_tests.rs"]
-mod workflow_live_v2_lifecycle_review_remediation_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_review_verification_tests.rs"]
-mod workflow_live_v2_lifecycle_review_verification_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_options_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_options_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_outcome_repair_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_outcome_repair_tests;
-#[cfg(test)]
-#[path = "workflow_live_v2_lifecycle_verify_remediation_tests.rs"]
-mod workflow_live_v2_lifecycle_verify_remediation_tests;
-#[cfg(test)]
-#[path = "workflow_live_v3_boundary_tests.rs"]
-mod workflow_live_v3_boundary_tests;
 #[cfg(test)]
 #[path = "workflow_live_v3_compaction_tests.rs"]
 mod workflow_live_v3_compaction_tests;

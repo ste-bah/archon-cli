@@ -1,79 +1,21 @@
-const CANARY_TEST: &str = "command::workflow_live::workflow_live_canary_tests::usage_tests::canary_wf_afae6bee_provider_ledger";
-const CANARY_CHILD_ENV: &str = "ARCHON_CANARY_USAGE_CHILD";
-const CANARY_USAGE_SCOPE: &str = "wf-afae6bee-measurement";
+use super::*;
 
-#[derive(Clone)]
-struct ScopedCanaryClient {
-    inner: Arc<dyn LlmClient>,
-}
+pub(super) const CANARY_TEST: &str = "command::workflow_live::workflow_live_canary_tests::usage_tests::canary_wf_afae6bee_provider_ledger";
+pub(super) const CANARY_CHILD_ENV: &str = "ARCHON_CANARY_USAGE_CHILD";
+/// Every provider call this fixture makes is attributed here, so the ledger
+/// assertion counts exactly its own traffic. The client that enforces it lives
+/// with the pipeline adapter it wraps
+/// ([`crate::command::pipeline_workflow_llm::TestClientFallback::ProviderScopedTo`]),
+/// because wrapping an `archon_pipeline` client is host work.
+pub(super) const CANARY_USAGE_SCOPE: &str = "wf-afae6bee-measurement";
 
-impl ScopedCanaryClient {
-    fn new(inner: Arc<dyn LlmClient>) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl LlmClient for ScopedCanaryClient {
-    fn provider_id(&self) -> Option<String> {
-        self.inner.provider_id()
-    }
-
-    fn resolve_model_alias(&self, model: &str) -> String {
-        self.inner.resolve_model_alias(model)
-    }
-
-    async fn send_message(
-        &self,
-        messages: Vec<serde_json::Value>,
-        system: Vec<serde_json::Value>,
-        tools: Vec<serde_json::Value>,
-        model: &str,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        let request = archon_pipeline::runner::AgentExecutionRequest {
-            pipeline_type: archon_pipeline::runner::PipelineType::Workflow,
-            session_id: CANARY_USAGE_SCOPE.into(),
-            cwd: None,
-            task: "controlled canary planner call".into(),
-            ordinal: 0,
-            attempt: 1,
-            agent: archon_pipeline::runner::AgentInfo {
-                key: "planner".into(),
-                display_name: "Planner".into(),
-                model: model.into(),
-                phase: 0,
-                critical: true,
-                parallelizable: false,
-                quality_threshold: 0.0,
-                tool_access_level: archon_pipeline::runner::ToolAccessLevel::ReadOnly,
-            },
-            messages,
-            system,
-            tools,
-            allowed_tools: Vec::new(),
-            timeout_secs: None,
-            disable_auto_background: true,
-            provider_env_resolution: None,
-        };
-        self.inner.run_agent(request).await
-    }
-
-    async fn run_agent(
-        &self,
-        mut request: archon_pipeline::runner::AgentExecutionRequest,
-    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
-        request.session_id = CANARY_USAGE_SCOPE.into();
-        self.inner.run_agent(request).await
-    }
-}
-
-struct CanaryProvider {
+pub(super) struct CanaryProvider {
     script: Arc<CanaryAgentClient>,
     request_bytes: Arc<Mutex<Vec<u64>>>,
 }
 
 impl CanaryProvider {
-    fn new(script: Arc<CanaryAgentClient>, request_bytes: Arc<Mutex<Vec<u64>>>) -> Self {
+    pub(super) fn new(script: Arc<CanaryAgentClient>, request_bytes: Arc<Mutex<Vec<u64>>>) -> Self {
         Self {
             script,
             request_bytes,
@@ -204,7 +146,7 @@ fn collect_text(value: &serde_json::Value, into: &mut String) {
     }
 }
 
-fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
+pub(super) fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
     let agent_config = AgentConfig {
         session_id: CANARY_USAGE_SCOPE.into(),
         working_dir: root.to_path_buf(),
@@ -234,7 +176,11 @@ fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Pat
     install_subagent_executor(Arc::new(executor));
 }
 
-fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, request_bytes: &[u64]) {
+pub(super) fn assert_canary_usage(
+    path: &std::path::Path,
+    expected_rows: usize,
+    request_bytes: &[u64],
+) {
     let db = archon_learning::cozo_guard::open_sqlite_guarded(
         path.to_str().expect("UTF-8 learning path"),
         "reopen canary learning db",
@@ -269,4 +215,3 @@ fn assert_canary_usage(path: &std::path::Path, expected_rows: usize, request_byt
     );
     print_canary_evidence(&rows, request_bytes);
 }
-

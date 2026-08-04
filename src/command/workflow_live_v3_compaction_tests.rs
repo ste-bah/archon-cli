@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::command::workflow_live::workflow_live_task_universe::WorkflowV2TaskUniverseTask;
 use archon_core::agent::AgentConfig;
 use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
@@ -14,10 +13,13 @@ use archon_llm::provider::{
 };
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::ContentBlockType;
-use archon_pipeline::runner::{LlmClient, LlmResponse as PipelineLlmResponse};
-use archon_pipeline::subagent_adapter::SubagentPipelineClient;
 use archon_tools::subagent_executor::install_subagent_executor;
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
+use archon_workflow::v2::lifecycle_driver::{
+    LifecycleDriver, LifecycleLimits, OrchestrationLedger,
+};
+use archon_workflow::v2::orchestrator_actions::OrchestratorAction;
 use archon_workflow::{WorkflowSpec, WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2ResultStore};
 use tokio::sync::mpsc;
 
@@ -160,21 +162,6 @@ impl Tool for FixtureDocumentTool {
     }
 }
 
-struct NoopFallback;
-
-#[async_trait::async_trait]
-impl LlmClient for NoopFallback {
-    async fn send_message(
-        &self,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: &str,
-    ) -> anyhow::Result<PipelineLlmResponse> {
-        anyhow::bail!("real subagent path must not use fallback")
-    }
-}
-
 #[test]
 fn workflow_v3_document_ingestion_uses_real_subagent_recovery() {
     run_isolated_fixture(TEST_NAME, FixtureScenario::ToolField);
@@ -259,19 +246,17 @@ async fn run_fixture(scenario: FixtureScenario) {
     );
     install_subagent_executor(Arc::new(executor));
 
-    let llm = SubagentPipelineClient::with_provider(
-        Arc::new(NoopFallback),
-        ToolContext {
-            working_dir: temp.path().to_path_buf(),
-            ..Default::default()
-        },
+    let llm = crate::command::pipeline_workflow_llm::subagent_workflow_client_for_test(
         provider.clone(),
+        "v3-compaction",
+        temp.path().to_path_buf(),
+        crate::command::pipeline_workflow_llm::TestClientFallback::Forbidden,
     );
-    let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let (ui_sink, mut tui_rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let client = LiveV2AgentClient::new(
-        Arc::new(llm),
-        tui_tx,
+        llm,
+        ui_sink,
         Vec::new(),
         "v3-compaction".into(),
         Some(temp.path().display().to_string()),
@@ -285,11 +270,8 @@ async fn run_fixture(scenario: FixtureScenario) {
         target_repository_root: None,
         max_parallelism: 1,
         max_agents: 1,
-        provider_tiers: BTreeMap::new(),
         stages: Vec::new(),
-        artifact_policy: Default::default(),
         permissions: BTreeMap::new(),
-        quality_gates: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
     let store = WorkflowStore::new(temp.path().join(".archon/workflows"));
@@ -323,7 +305,11 @@ async fn run_fixture(scenario: FixtureScenario) {
         Some(temp.path().display().to_string()),
         serde_json::json!([]),
         Default::default(),
-        &generated,
+        LifecycleLimits {
+            max_repair_iterations: generated.max_repair_iterations,
+            max_investigation_iterations: generated.max_investigation_iterations,
+            implementation_wave_max_parallelism: generated.implementation_wave_max_parallelism,
+        },
     );
     let mut ledger = OrchestrationLedger::for_universe(&driver.universe);
     let outcome = driver

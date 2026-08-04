@@ -13,18 +13,20 @@ use archon_llm::provider::{
 };
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
-use archon_pipeline::llm_adapter::ProviderLlmAdapter;
-use archon_pipeline::runner::LlmClient;
-use archon_pipeline::subagent_adapter::SubagentPipelineClient;
 use archon_tools::subagent_executor::install_subagent_executor;
-use archon_tools::tool::ToolContext;
 use archon_workflow::CommandAction;
 use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 
 use super::{CANARY_ARTIFACT_REL, CanaryAgentClient};
+use crate::command::pipeline_workflow_llm::{
+    TestClientFallback, subagent_workflow_client_for_test,
+};
 use crate::command::workflow_live::{LiveApprovalMode, run_live_action};
 
-
-include!("workflow_live_canary_usage_tests_a.rs");
-include!("workflow_live_canary_usage_tests_b.rs");
+#[path = "workflow_live_canary_usage_tests_a.rs"]
+mod workflow_live_canary_usage_tests_a;
+use workflow_live_canary_usage_tests_a::*;
+#[path = "workflow_live_canary_usage_tests_b.rs"]
+mod workflow_live_canary_usage_tests_b;
+use workflow_live_canary_usage_tests_b::*;

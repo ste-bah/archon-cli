@@ -28,11 +28,11 @@ impl SessionStore {
         );
         params.insert("content".to_string(), DataValue::from(content));
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, message_index, content] <- [[$session_id, $message_index, $content]]
                  :put messages {session_id, message_index => content}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: put session message",
             )
             .map_err(db_err)?;
         self.set_message_count(
@@ -219,11 +219,11 @@ impl SessionStore {
             DataValue::from(clamp_u64_to_i64(start)),
         );
         self.db
-            .run_script(
+            .run_mutable(
                 "?[session_id, message_index] := *messages{session_id, message_index}, session_id = $sid, message_index >= $start
                  :rm messages {session_id, message_index}",
                 params,
-                ScriptMutability::Mutable,
+                "session store: delete messages from index",
             )
             .map_err(db_err)?;
         Ok(())
