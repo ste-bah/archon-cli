@@ -11,7 +11,7 @@ Contract (matched by `crates/archon-docs/src/marker_source.rs::fetch_json`):
     POST /convert   {"pdf_path": "<absolute path>", "device": "cuda", "page_range": "S-E"?}
         → 200, the exact normalized block-tree JSON the sidecar prints to stdout
           (same shared core in archon_marker_core.py, same json.dumps(ensure_ascii=False))
-        → 400 on a missing/unreadable pdf_path, 500 with the error text on conversion failure
+        → 400 on an invalid/out-of-root pdf_path, 500 with a fixed error on conversion failure
     GET /health     → 200 {"status": "ok", "device": "<startup device>", "models_loaded": true}
 
 The request's `device` is ADVISORY: the models live on the device resolved at startup; a
@@ -21,12 +21,14 @@ filesystem, so no PDF bytes cross the wire.
 
 Usage:
     /home/dalton/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
-        --device cuda --host 127.0.0.1 --port 8010
+        --device cuda --host 127.0.0.1 --port 8010 --pdf-root /path/to/pdfs
 """
 
 import argparse
+import ipaddress
 import json
 import os
+from pathlib import Path
 import sys
 import threading
 import time
@@ -38,6 +40,44 @@ from archon_marker_core import resolve_device, run_marker  # noqa: E402
 def log(msg: str) -> None:
     sys.stderr.write(f"[archon-marker-server] {time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n")
     sys.stderr.flush()
+
+
+def canonical_pdf_root(path: str) -> Path:
+    """Resolve and validate the directory containing PDFs this server may access."""
+    try:
+        root = Path(path).expanduser().resolve(strict=True)
+    except OSError:
+        raise ValueError("pdf root must be an existing directory") from None
+    if not root.is_dir():
+        raise ValueError("pdf root must be an existing directory")
+    return root
+
+
+def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
+    """Require explicit opt-in before exposing this unauthenticated server externally."""
+    if host.lower() == "localhost":
+        return
+    try:
+        is_loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = False
+    if not is_loopback and not allow_non_loopback:
+        raise ValueError("non-loopback --host requires --allow-non-loopback")
+
+
+def resolve_pdf_path(pdf_root: Path, requested: str) -> Path:
+    """Return an existing PDF only when its canonical path is within ``pdf_root``."""
+    candidate = Path(requested).expanduser()
+    if candidate.suffix.lower() != ".pdf":
+        raise ValueError("invalid pdf_path")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(pdf_root)
+    except (OSError, ValueError):
+        raise ValueError("invalid pdf_path") from None
+    if not resolved.is_file():
+        raise ValueError("invalid pdf_path")
+    return resolved
 
 
 def parse_page_range(spec: "str | None") -> "list[int] | None":
@@ -82,7 +122,21 @@ def main(argv: "list[str]") -> int:
     parser.add_argument("--device", help="cuda|mps|cpu|auto (default/auto: cuda→mps→cpu)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8010)
+    parser.add_argument(
+        "--pdf-root", required=True, help="directory containing PDFs the server may read"
+    )
+    parser.add_argument(
+        "--allow-non-loopback",
+        action="store_true",
+        help="allow an explicit non-loopback --host; does not add authentication",
+    )
     args = parser.parse_args(argv)
+
+    try:
+        pdf_root = canonical_pdf_root(args.pdf_root)
+        validate_bind_host(args.host, args.allow_non_loopback)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     device = resolve_device(args.device)
     os.environ["TORCH_DEVICE"] = device  # set BEFORE importing marker so models land right
@@ -93,7 +147,7 @@ def main(argv: "list[str]") -> int:
     models = create_model_dict()
     log(f"models loaded in {time.time() - t0:.1f}s; resident for the process lifetime")
 
-    app = build_app(device, models)
+    app = build_app(device, models, pdf_root)
 
     import uvicorn
 
@@ -101,9 +155,11 @@ def main(argv: "list[str]") -> int:
     return 0
 
 
-def build_app(device: str, models: "dict"):
-    """Build the FastAPI app around a startup device + resident models. Extracted from `main`
-    so the OOM ladder / endpoints are testable (TestClient + a fake `models`) without a real GPU.
+def build_app(device: str, models: "dict", pdf_root: Path):
+    """Build the FastAPI app around a startup device, resident models, and PDF root.
+
+    Extracted from `main` so the OOM ladder and endpoints are testable (TestClient + fake
+    `models`) without a real GPU.
     """
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse, Response
@@ -127,19 +183,15 @@ def build_app(device: str, models: "dict"):
     def convert(req: ConvertRequest):
         if req.device and req.device not in ("auto", device):
             log(f"request device={req.device!r} ignored; models resident on {device!r}")
-        if not os.path.isfile(req.pdf_path):
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"pdf_path not found: {req.pdf_path}"},
-            )
+        try:
+            pdf_path = resolve_pdf_path(pdf_root, req.pdf_path)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"error": "invalid pdf_path"})
         try:
             page_range = parse_page_range(req.page_range)
         except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"page_range must be 'START-END', got {req.page_range!r}"},
-            )
-        log(f"convert pdf={req.pdf_path} page_range={req.page_range or 'all'}")
+            return JSONResponse(status_code=400, content={"error": "invalid page_range"})
+        log(f"convert pdf={pdf_path} page_range={req.page_range or 'all'}")
         t = time.time()
         # OOM ladder mirroring the subprocess path (marker_source.rs run_chunk): try the resident
         # GPU device first; on a CUDA OOM, clear the cache and RETRY the whole-doc conversion on
@@ -148,29 +200,33 @@ def build_app(device: str, models: "dict"):
         # from cascading across the 126-doc run. All of it stays under the single convert_lock.
         with convert_lock:
             try:
-                tree = run_marker(req.pdf_path, device, page_range, artifact_dict=models)
-            except Exception as exc:  # noqa: BLE001 — classify OOM, otherwise surface
+                tree = run_marker(str(pdf_path), device, page_range, artifact_dict=models)
+            except Exception as exc:  # noqa: BLE001 — classify OOM; log details locally
                 if device != "cpu" and is_cuda_oom(exc):
-                    log(f"CUDA OOM on {req.pdf_path}; clearing cache and retrying on CPU: {exc}")
+                    log(f"CUDA OOM on {pdf_path}; clearing cache and retrying on CPU: {exc}")
                     empty_cuda_cache()
                     try:
                         # artifact_dict=None → load a FRESH CPU model dict (the resident dict is
                         # GPU-bound); the shared core still yields byte-identical normalized JSON.
-                        tree = run_marker(req.pdf_path, "cpu", page_range, artifact_dict=None)
+                        tree = run_marker(str(pdf_path), "cpu", page_range, artifact_dict=None)
                     except Exception as cpu_exc:  # noqa: BLE001 — CPU also failed → hard error
                         empty_cuda_cache()
-                        log(f"convert FAILED (GPU OOM + CPU) for {req.pdf_path}: {cpu_exc}")
-                        return JSONResponse(status_code=500, content={"error": str(cpu_exc)})
+                        log(f"convert FAILED (GPU OOM + CPU) for {pdf_path}: {cpu_exc}")
+                        return JSONResponse(
+                            status_code=500, content={"error": "conversion failed"}
+                        )
                     finally:
                         # Restore device on the resident models after the CPU fallback.
                         os.environ["TORCH_DEVICE"] = device
                 else:
                     empty_cuda_cache()
-                    log(f"convert FAILED for {req.pdf_path}: {exc}")
-                    return JSONResponse(status_code=500, content={"error": str(exc)})
+                    log(f"convert FAILED for {pdf_path}: {exc}")
+                    return JSONResponse(
+                        status_code=500, content={"error": "conversion failed"}
+                    )
             finally:
                 empty_cuda_cache()
-        log(f"convert done in {time.time() - t:.1f}s pdf={req.pdf_path}")
+        log(f"convert done in {time.time() - t:.1f}s pdf={pdf_path}")
         # Same serialization call as the sidecar's stdout — byte-identical payloads.
         return Response(
             content=json.dumps(tree, ensure_ascii=False),
