@@ -230,6 +230,48 @@ fn test_is_excluded() {
     assert!(!is_excluded(Path::new("project/lib/util.py"), &patterns));
 }
 
+/// A glob-shaped exclusion must still exclude.
+///
+/// `is_excluded` compares path components, so `**/target/**` can never equal a
+/// component and previously excluded nothing — silently, with no error and no
+/// log line. `LeannIntegration::init_repository_blocking_with_cancel` passed
+/// exactly these three, so the indexer walked `target/`, `node_modules/` and
+/// `.git/` in full and looked like a hang.
+#[test]
+fn glob_shaped_exclude_patterns_still_exclude() {
+    use archon_leann::language::is_excluded;
+
+    let globs = vec![
+        "**/target/**".to_string(),
+        "**/node_modules/**".to_string(),
+        "**/.git/**".to_string(),
+    ];
+
+    assert!(is_excluded(
+        Path::new("project/target/debug/main.rs"),
+        &globs
+    ));
+    assert!(is_excluded(
+        Path::new("project/node_modules/pkg/index.js"),
+        &globs
+    ));
+    assert!(is_excluded(Path::new("project/.git/config"), &globs));
+    assert!(!is_excluded(Path::new("project/src/main.rs"), &globs));
+}
+
+/// An interior glob is left unmatched rather than guessed at.
+#[test]
+fn exclude_pattern_normalization_leaves_interior_globs_alone() {
+    use archon_leann::language::normalize_exclude_pattern;
+
+    assert_eq!(normalize_exclude_pattern("**/target/**"), "target");
+    assert_eq!(normalize_exclude_pattern("target/**"), "target");
+    assert_eq!(normalize_exclude_pattern("**/target"), "target");
+    assert_eq!(normalize_exclude_pattern("target"), "target");
+    // Not expressible as a component match; left as-is so it matches nothing.
+    assert_eq!(normalize_exclude_pattern("src/**/gen"), "src/**/gen");
+}
+
 #[test]
 fn test_default_exclude_patterns() {
     use archon_leann::language::default_exclude_patterns;

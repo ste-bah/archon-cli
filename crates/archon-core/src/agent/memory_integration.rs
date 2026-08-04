@@ -74,12 +74,28 @@ impl Agent {
                 created_at: chrono::Utc::now().to_rfc3339(),
             });
 
-        match self.memory_injector.inject(graph.as_ref(), &context, 500) {
+        // Timed, and reported on EVERY outcome including the empty one.
+        //
+        // This runs on every turn, before the provider is contacted, and scans
+        // whatever the memory store has accumulated -- which grows without
+        // bound. Previously it logged only on error, so a turn that spent
+        // minutes here was indistinguishable from a turn waiting on the model:
+        // no duration, no size, and the success path silent. The elapsed time
+        // is the diagnostic, so it is emitted whether or not anything surfaced.
+        let injection_started = std::time::Instant::now();
+        let injection = self.memory_injector.inject(graph.as_ref(), &context, 500);
+        let injection_ms = injection_started.elapsed().as_millis();
+        match injection {
             Ok(memories_text) if !memories_text.is_empty() => {
                 let surfaced = memories_text
                     .lines()
                     .filter(|line| line.trim_start().starts_with("- "))
                     .count();
+                tracing::info!(
+                    elapsed_ms = injection_ms,
+                    surfaced,
+                    "memory injection complete"
+                );
                 self.emit_activity(
                     AgentActivityKind::MemorySurfaced,
                     AgentActivityStatus::Completed,
@@ -90,16 +106,33 @@ impl Agent {
                     "text": memories_text,
                 }));
             }
-            Ok(_) => {} // empty — no relevant memories
+            Ok(_) => {
+                // Empty is the case that most looks like a hang: the work still
+                // happened, it just produced nothing to show for it.
+                tracing::info!(
+                    elapsed_ms = injection_ms,
+                    surfaced = 0,
+                    "memory injection complete (no relevant memories)"
+                );
+            }
             Err(e) => {
-                tracing::warn!("memory injection failed: {e}");
+                tracing::warn!(elapsed_ms = injection_ms, "memory injection failed: {e}");
             }
         }
 
         // Inject recalled corrections relevant to the current context.
         let ctx_joined = context.join(" ");
         let tracker = CorrectionTracker::new(graph.as_ref());
-        match tracker.recall_corrections(&ctx_joined, 5) {
+        // Second scan of the same store on the same turn; timed for the same
+        // reason as the injection above.
+        let recall_started = std::time::Instant::now();
+        let recalled = tracker.recall_corrections(&ctx_joined, 5);
+        tracing::info!(
+            elapsed_ms = recall_started.elapsed().as_millis(),
+            recalled = recalled.as_ref().map(Vec::len).unwrap_or(0),
+            "correction recall complete"
+        );
+        match recalled {
             Ok(corrections) if !corrections.is_empty() => {
                 let mut block = String::from(
                     "<past_corrections>\nPrevious user corrections relevant to this context:\n",
