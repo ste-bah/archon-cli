@@ -202,7 +202,55 @@ _REDOS_SHAPES = [
     re.compile(r"\([^()]*[+*][^()]*\)[+*?]"),  # nested quantifier: (a+)*  (a*b)*
     re.compile(r"\(\.\*[^()]*\)[+*]"),         # wildcard group: (.*)*
 ]
-_ALT_UNDER_REP = re.compile(r"\(([^()]*)\|([^()|]*)(?:\|[^()]*)*\)[+*]")
+
+
+def _split_unescaped_alternation(group: str) -> List[str]:
+    """Split a flat group on unescaped alternation separators."""
+    branches: List[str] = []
+    start = 0
+    escaped = False
+    for index, char in enumerate(group):
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            branches.append(group[start:index])
+            start = index + 1
+    branches.append(group[start:])
+    return branches
+
+
+def _repeated_flat_groups(regex: str):
+    """Yield flat alternation groups directly repeated by ``+`` or ``*``."""
+    stack: List[Tuple[int, bool, bool]] = []
+    escaped = False
+    for index, char in enumerate(regex):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "(":
+            if stack:
+                start, _, has_alternation = stack[-1]
+                stack[-1] = (start, True, has_alternation)
+            stack.append((index + 1, False, False))
+            continue
+        if char == "|" and stack:
+            start, nested, _ = stack[-1]
+            stack[-1] = (start, nested, True)
+            continue
+        if char == ")" and stack:
+            start, nested, has_alternation = stack.pop()
+            if (
+                not nested
+                and has_alternation
+                and index + 1 < len(regex)
+                and regex[index + 1] in "+*"
+            ):
+                yield regex[start:index]
 
 
 def _has_redos_structure(regex: str) -> bool:
@@ -214,12 +262,13 @@ def _has_redos_structure(regex: str) -> bool:
     Does NOT flag non-overlapping alternation ((a|b)*) which is safe."""
     if any(p.search(regex) for p in _REDOS_SHAPES):
         return True
-    for m in _ALT_UNDER_REP.finditer(regex):
-        branches = [b for b in m.group(0).strip("()*+").split("|") if b]
-        for i, a in enumerate(branches):
-            for b in branches[i + 1:]:
-                # If one branch is a literal prefix of another, the alternation
-                # overlaps and the engine backtracks combinatorially.
-                if a.startswith(b) or b.startswith(a):
-                    return True
+    for group in _repeated_flat_groups(regex):
+        if group.startswith("?:"):
+            group = group[2:]
+        branches = _split_unescaped_alternation(group)
+        if any(not branch for branch in branches):
+            return True
+        branches.sort()
+        if any(right.startswith(left) for left, right in zip(branches, branches[1:])):
+            return True
     return False

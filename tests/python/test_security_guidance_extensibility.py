@@ -11,7 +11,17 @@ import extensibility  # noqa: E402
 
 class SecurityGuidanceExtensibilityTests(unittest.TestCase):
     def test_detects_documented_redos_categories(self):
-        dangerous = (r"(a+)*", r"(a*b)+", r"(.*)*", r"(a|aa)*", r"(ab|a)+")
+        dangerous = (
+            r"(a+)*",
+            r"(a*b)+",
+            r"(.*)*",
+            r"(a|aa)*",
+            r"(ab|a)+",
+            r"(?:cat|catalog)*",
+            r"(a|)*",
+            r"(?:|a)+",
+            r"(a\|b|a\|bc)*",
+        )
         safe = (r"(a|b)*", r"(?:cat|dog)+", r"^hello+$", r"foo\\|bar")
 
         for pattern in dangerous:
