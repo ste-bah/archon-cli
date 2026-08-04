@@ -1,12 +1,27 @@
-use archon_workflow::{
+//! The activity update a running stage owes its user interface.
+//!
+//! Every field of the emitted [`WorkflowActivityUpdate`] is derived from the
+//! [`StageRunRequest`] this crate owns, and it goes out through
+//! [`crate::ui_sink_port`], so nothing here needs a terminal or a host. It sits
+//! beside [`crate::stage_command_policy`] because the two read the same request
+//! for the same reason: the tool mode named in the detail line has to be the
+//! mode the stage actually runs under, and sharing the predicate is what keeps
+//! them from drifting.
+//!
+//! `required_activity` is required, not best-effort: a sink that cannot take
+//! the update fails the stage with [`WorkflowError::NotificationDelivery`]
+//! rather than dropping it, because a run whose progress silently stopped
+//! reporting is indistinguishable from a run that stopped.
+
+use std::path::PathBuf;
+
+use crate::stage_command_policy::command_execution_stage;
+use crate::{
     SharedWorkflowUiSink, StageKind, StageRunRequest, WorkflowActivityStatus,
     WorkflowActivityUpdate, WorkflowError, WorkflowResult, WorkflowUiEvent,
 };
 
-use super::workflow_live_runner::request_target_repository_root;
-use archon_workflow::stage_command_policy::command_execution_stage;
-
-pub(super) async fn required_activity(
+pub async fn required_activity(
     ui_sink: &SharedWorkflowUiSink,
     request: &StageRunRequest,
     agent_name: &str,
@@ -58,7 +73,7 @@ fn delivery_error(
     ))
 }
 
-pub(super) fn activity_detail(request: &StageRunRequest, detail: &str) -> String {
+pub fn activity_detail(request: &StageRunRequest, detail: &str) -> String {
     let cwd = request_target_repository_root(request)
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "default".to_string());
@@ -77,4 +92,17 @@ fn workflow_tool_mode(request: &StageRunRequest) -> &'static str {
     } else {
         "read_only"
     }
+}
+
+/// The repository a stage runs against, when the request declares one.
+///
+/// It travelled here with `activity_detail`, its only caller inside this crate.
+/// The binary's dispatch and its tests reach it through this path.
+pub fn request_target_repository_root(request: &StageRunRequest) -> Option<PathBuf> {
+    request
+        .input
+        .get("target_repository_root")
+        .and_then(|value| value.as_str())
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
 }

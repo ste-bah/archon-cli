@@ -131,3 +131,28 @@ pub fn sanitize_v2_gap_id(raw: &str) -> String {
         })
         .collect()
 }
+
+/// The typed result a host call fails with when the host itself could not
+/// produce one — a transport error, an unparseable payload, a rejected script
+/// request. It sits beside [`sanitize_v2_gap_id`] because it is the only
+/// caller that has to agree with the gap ids `helpers_a` already mints for the
+/// same call; the binary carried a byte-identical private copy of the
+/// sanitizer until this moved.
+pub fn failed_v2_result(call_id: &str, err: impl std::fmt::Display) -> WorkflowV2Result {
+    let error = err.to_string();
+    WorkflowV2Result {
+        status: WorkflowV2Status::Failed,
+        summary: format!("workflow v2 call '{call_id}' failed: {error}"),
+        evidence: vec![WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Blocker,
+            error.clone(),
+        )],
+        residual_gaps: vec![WorkflowV2ResidualGap {
+            id: format!("v2_call_failed_{}", sanitize_v2_gap_id(call_id)),
+            description: error.clone(),
+            severity: Some("blocking".to_string()),
+        }],
+        data: serde_json::json!({ "error": error }),
+        ..WorkflowV2Result::default()
+    }
+}

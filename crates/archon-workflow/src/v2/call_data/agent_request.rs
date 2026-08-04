@@ -1,10 +1,10 @@
 use super::*;
 
-pub(in super::super) fn v2_agent_request(
+pub fn v2_agent_request(
     task: &str,
     target_repository_root: Option<String>,
     execution: &WorkflowV2CallExecution,
-    task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> WorkflowV2AgentRequest {
     let mut constraints = vec![
         "Return exactly one typed WorkflowV2Result JSON object.".to_string(),

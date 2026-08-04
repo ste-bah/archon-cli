@@ -44,6 +44,7 @@ mod spec_inference;
 mod spec_policy;
 mod spec_work_units;
 pub mod stage;
+pub mod stage_activity;
 pub mod stage_command_policy;
 pub mod stage_item_output;
 pub mod stage_prompt;

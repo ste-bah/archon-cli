@@ -12,6 +12,7 @@ pub mod artifact_refs;
 pub mod branch_cache;
 pub mod branch_evidence;
 pub mod branch_stamping;
+pub mod call_data;
 pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;

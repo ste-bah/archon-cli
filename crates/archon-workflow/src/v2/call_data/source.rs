@@ -1,9 +1,9 @@
 use super::*;
 
-pub(in super::super) fn fanout_items_for_call(
+pub fn fanout_items_for_call(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<Vec<WorkflowV2FanoutItem>> {
+) -> crate::WorkflowResult<Vec<WorkflowV2FanoutItem>> {
     let (source, values) = fanout_source_values(execution, v2_store)?;
     let role = execution
         .call
@@ -21,7 +21,7 @@ pub(in super::super) fn fanout_items_for_call(
             // at the single builder both write and read-only branches share,
             // so a nested forgery cannot reach allowed_mcp_tools or the no-op
             // guard (both scan the whole input recursively).
-            archon_workflow::tool_declarations::strip_tool_declarations(&mut value);
+            crate::tool_declarations::strip_tool_declarations(&mut value);
             let item_id = fanout_item_id(&value, idx);
             let mut branch_call = execution.call.clone();
             branch_call.id = format!("{}-{item_id}", execution.call.id);
@@ -57,7 +57,7 @@ pub(in super::super) fn fanout_items_for_call(
 pub(super) fn fanout_source_values(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<(String, Vec<serde_json::Value>)> {
+) -> crate::WorkflowResult<(String, Vec<serde_json::Value>)> {
     if let Some(source_data) = execution.input.get("source_data") {
         return Ok((
             execution
@@ -81,7 +81,7 @@ pub(super) fn fanout_source_values(
 
 pub(super) fn array_from_source_data(
     source_data: &serde_json::Value,
-) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+) -> crate::WorkflowResult<Vec<serde_json::Value>> {
     if let Some(values) = source_data.as_array() {
         return Ok(values.clone());
     }
@@ -99,7 +99,7 @@ pub(super) fn array_from_source_data(
 pub(super) fn resolve_fanout_source(
     source: &str,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<Vec<serde_json::Value>> {
+) -> crate::WorkflowResult<Vec<serde_json::Value>> {
     let cursor = resolve_source_value(source, v2_store)?;
     cursor.as_array().cloned().ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
@@ -111,7 +111,7 @@ pub(super) fn resolve_fanout_source(
 pub(super) fn resolve_source_value(
     source: &str,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<serde_json::Value> {
+) -> crate::WorkflowResult<serde_json::Value> {
     let trimmed = source.trim();
     if let Some(list) = trimmed
         .strip_prefix('[')
@@ -132,7 +132,7 @@ pub(super) fn resolve_source_value(
 pub(super) fn resolve_single_source_value(
     source: &str,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<serde_json::Value> {
+) -> crate::WorkflowResult<serde_json::Value> {
     if let Some((call_id, path)) = source.split_once('.') {
         return source_value_from_call_path(call_id, Some(path), source, v2_store);
     }
@@ -152,7 +152,7 @@ pub(super) fn source_value_from_call_path(
     path: Option<&str>,
     source: &str,
     v2_store: &WorkflowV2ResultStore,
-) -> archon_workflow::WorkflowResult<serde_json::Value> {
+) -> crate::WorkflowResult<serde_json::Value> {
     let record = v2_store.load_call_record(call_id)?.ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
             "source '{source}' references missing prior call '{call_id}'"

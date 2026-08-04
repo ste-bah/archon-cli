@@ -26,16 +26,11 @@ use archon_workflow::{
 mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
 mod workflow_live_provider_env;
-#[path = "workflow_live_v2_data.rs"]
-mod workflow_live_v2_data;
-#[cfg(test)]
-#[path = "workflow_live_v2_data_tests.rs"]
-mod workflow_live_v2_data_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_frontier_resume_tests.rs"]
 mod workflow_live_v2_frontier_resume_tests;
 
-use workflow_live_v2_data::{
+use archon_workflow::v2::call_data::{
     execution_with_resolved_source, fanout_items_for_call, result_from_fanout_report,
     v2_agent_request,
 };
@@ -43,8 +38,6 @@ use workflow_live_v2_data::{
 mod workflow_live_v2_client;
 
 use workflow_live_v2_client::LiveV2AgentClient;
-#[path = "workflow_live_v2_contracts.rs"]
-mod workflow_live_v2_contracts;
 
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
 
@@ -133,9 +126,6 @@ pub(super) use workflow_live_v2_host_dispatch_repair::*;
 #[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
 mod rejected_output_tests;
 
-#[path = "workflow_live_v2_read_only.rs"]
-mod workflow_live_v2_read_only;
-use workflow_live_v2_read_only::*;
 #[path = "workflow_live_v2_read_only_b.rs"]
 mod workflow_live_v2_read_only_b;
 pub(super) use workflow_live_v2_read_only_b::*;

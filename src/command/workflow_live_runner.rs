@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use archon_workflow::{
@@ -7,9 +6,9 @@ use archon_workflow::{
     WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
 };
 
-use super::workflow_live_runner_activity::required_activity;
 use archon_workflow::agent_select::select_workflow_agent_key;
 use archon_workflow::llm_retry::run_agent_with_transient_retry;
+use archon_workflow::stage_activity::{request_target_repository_root, required_activity};
 use archon_workflow::stage_command_policy::command_execution_stage;
 use archon_workflow::stage_item_output::{item_output_needs_schema_repair, repair_item_output};
 use archon_workflow::stage_prompt::{workflow_prompt, workflow_stage_system_context};
@@ -242,15 +241,6 @@ fn sanitize_agent_session_component(value: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-pub(crate) fn request_target_repository_root(request: &StageRunRequest) -> Option<PathBuf> {
-    request
-        .input
-        .get("target_repository_root")
-        .and_then(|value| value.as_str())
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
 }
 
 pub(crate) fn workflow_agent(

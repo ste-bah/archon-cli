@@ -70,24 +70,20 @@ fn focused_verification_zero_matched_tests_stays_needs_review() {
         summary: "focused command exited 0 but no target test matched".to_string(),
         ..WorkflowV2Result::default()
     };
-    result
-        .commands_run
-        .push(archon_workflow::WorkflowV2CommandRecord {
-            kind: archon_workflow::WorkflowV2CommandKind::Test,
-            command: "cargo test missing_target -- --exact".to_string(),
-            status: archon_workflow::WorkflowV2CommandStatus::Succeeded,
-            exit_code: Some(0),
-            output_summary:
-                "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1163 filtered out"
-                    .to_string(),
-        });
-    result
-        .residual_gaps
-        .push(archon_workflow::WorkflowV2ResidualGap {
-            id: "zero-tests".to_string(),
-            description: "exactly one targeted test expected but zero matched".to_string(),
-            severity: Some("medium".to_string()),
-        });
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test missing_target -- --exact".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary:
+            "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1163 filtered out"
+                .to_string(),
+    });
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "zero-tests".to_string(),
+        description: "exactly one targeted test expected but zero matched".to_string(),
+        severity: Some("medium".to_string()),
+    });
     result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-010"] });
 
     let result = result_from_fanout_report(
@@ -107,26 +103,22 @@ fn focused_verification_zero_matched_tests_stays_needs_review() {
 #[test]
 fn accepted_verification_skipped_command_is_not_completion_command_proof() {
     let mut result = WorkflowV2Result::accepted("verification evidence recorded");
-    result
-        .commands_run
-        .push(archon_workflow::WorkflowV2CommandRecord {
-            kind: archon_workflow::WorkflowV2CommandKind::Test,
-            command: "cargo test focused_check".to_string(),
-            status: archon_workflow::WorkflowV2CommandStatus::Skipped,
-            exit_code: Some(0),
-            output_summary: "not executed in this stage".to_string(),
-        });
-    result
-        .task_coverage
-        .push(archon_workflow::WorkflowV2TaskCoverage {
-            task_id: "TASK-TDL-010".to_string(),
-            status: archon_workflow::WorkflowV2TaskCoverageStatus::Accepted,
-            summary: "verification accepted from other concrete evidence".to_string(),
-            evidence: vec![WorkflowV2Evidence::new(
-                WorkflowV2EvidenceKind::Test,
-                "focused verification evidence",
-            )],
-        });
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test focused_check".to_string(),
+        status: crate::WorkflowV2CommandStatus::Skipped,
+        exit_code: Some(0),
+        output_summary: "not executed in this stage".to_string(),
+    });
+    result.task_coverage.push(crate::WorkflowV2TaskCoverage {
+        task_id: "TASK-TDL-010".to_string(),
+        status: crate::WorkflowV2TaskCoverageStatus::Accepted,
+        summary: "verification accepted from other concrete evidence".to_string(),
+        evidence: vec![WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Test,
+            "focused verification evidence",
+        )],
+    });
 
     let result = result_from_fanout_report(
         &fanout_call("verification-wave-1"),
@@ -156,23 +148,19 @@ fn focused_verification_nonzero_exit_stays_failed() {
         summary: "targeted test failed".to_string(),
         ..WorkflowV2Result::default()
     };
-    result
-        .commands_run
-        .push(archon_workflow::WorkflowV2CommandRecord {
-            kind: archon_workflow::WorkflowV2CommandKind::Test,
-            command: "cargo test failing_target -- --exact".to_string(),
-            status: archon_workflow::WorkflowV2CommandStatus::Failed,
-            exit_code: Some(101),
-            output_summary: "test result: failed. 0 passed; 1 failed".to_string(),
-        });
-    result
-        .residual_gaps
-        .push(archon_workflow::WorkflowV2ResidualGap {
-            id: "target-failed".to_string(),
-            description: "duplicate targeted test output was not the issue; the command failed"
-                .to_string(),
-            severity: Some("blocking".to_string()),
-        });
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test failing_target -- --exact".to_string(),
+        status: crate::WorkflowV2CommandStatus::Failed,
+        exit_code: Some(101),
+        output_summary: "test result: failed. 0 passed; 1 failed".to_string(),
+    });
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "target-failed".to_string(),
+        description: "duplicate targeted test output was not the issue; the command failed"
+            .to_string(),
+        severity: Some("blocking".to_string()),
+    });
     result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-010"] });
 
     let result = result_from_fanout_report(
@@ -252,13 +240,11 @@ pub(super) fn blocked_outcome(id: &str) -> WorkflowV2BranchOutcome {
         WorkflowV2EvidenceKind::Blocker,
         "branch found a concrete blocker",
     ));
-    result
-        .residual_gaps
-        .push(archon_workflow::WorkflowV2ResidualGap {
-            id: format!("{id}-gap"),
-            description: "missing concrete artifact".to_string(),
-            severity: Some("blocking".to_string()),
-        });
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: format!("{id}-gap"),
+        description: "missing concrete artifact".to_string(),
+        severity: Some("blocking".to_string()),
+    });
     outcome(id, WorkflowV2Status::Blocked, Some(result), None)
 }
 
