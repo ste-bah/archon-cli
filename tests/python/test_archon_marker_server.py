@@ -38,6 +38,65 @@ class MarkerServerSecurityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.canonical_pdf_root(str(self.pdf))
 
+    def test_resolve_pdf_path_normalizes_before_path_construction(self):
+        (self.root / "nested").mkdir()
+        requested = str(self.root / "nested" / ".." / self.pdf.name)
+        root = str(self.root.resolve())
+        candidate = str(self.pdf.resolve())
+        pdf_root = self.root.resolve()
+        events = []
+        original_path = server.Path
+
+        def guarded_path(value, *args, **kwargs):
+            events.append(("Path", value))
+            if value == requested:
+                raise AssertionError("raw requested path passed to Path")
+            return original_path(value, *args, **kwargs)
+
+        def record_realpath(value, *args, **kwargs):
+            events.append(("realpath", value))
+            return original_realpath(value, *args, **kwargs)
+
+        def record_commonpath(values):
+            events.append(("commonpath", values))
+            return original_commonpath(values)
+
+        original_realpath = server.os.path.realpath
+        original_commonpath = server.os.path.commonpath
+        with (
+            mock.patch.object(server.os.path, "realpath", side_effect=record_realpath),
+            mock.patch.object(server.os.path, "commonpath", side_effect=record_commonpath),
+            mock.patch.object(server, "Path", side_effect=guarded_path),
+        ):
+            resolved = server.resolve_pdf_path(pdf_root, requested)
+
+        self.assertEqual(resolved, self.pdf.resolve())
+        self.assertEqual(events[:3], [
+            ("realpath", root),
+            ("realpath", requested),
+            ("commonpath", (root, candidate)),
+        ])
+        self.assertEqual(events[3], ("Path", candidate))
+
+    def test_resolve_pdf_path_accepts_in_root_symlink_to_pdf_target(self):
+        target = self.root / "target.pdf"
+        target.write_bytes(b"%PDF-1.4\\n")
+        alias = self.root / "alias.pdf"
+        try:
+            alias.symlink_to(target)
+        except OSError:
+            self.skipTest("symlinks are unavailable on this platform")
+
+        self.assertEqual(
+            server.resolve_pdf_path(self.root.resolve(), str(alias)),
+            target.resolve(),
+        )
+
+    def test_resolve_pdf_path_maps_commonpath_value_error_to_invalid_path(self):
+        with mock.patch.object(server.os.path, "commonpath", side_effect=ValueError):
+            with self.assertRaisesRegex(ValueError, r"^invalid pdf_path$"):
+                server.resolve_pdf_path(self.root.resolve(), str(self.pdf))
+
     def test_resolve_pdf_path_accepts_existing_pdf_inside_root(self):
         self.assertEqual(
             server.resolve_pdf_path(self.root.resolve(), str(self.pdf)),
