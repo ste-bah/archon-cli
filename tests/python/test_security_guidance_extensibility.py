@@ -21,6 +21,11 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             r"(a|)*",
             r"(?:|a)+",
             r"(a\|b|a\|bc)*",
+            r"(?P<name>a|aa)*",
+            r"(?i:a|aa)*",
+            r"(?=a|aa)*",
+            r"([)]a|[)]aa)*",
+            "(" + ("+" * 20000) + ")*",
         )
         safe = (r"(a|b)*", r"(?:cat|dog)+", r"^hello+$", r"foo\\|bar")
 
@@ -48,7 +53,7 @@ print(extensibility._has_redos_structure(pattern))
             text=True,
         )
 
-        self.assertIn(completed.stdout.strip(), ("True", "False"))
+        self.assertEqual(completed.stdout.strip(), "True")
 
     def test_detector_does_not_use_alternation_regex_on_untrusted_input(self):
         source = (PLUGIN_SCRIPTS / "extensibility.py").read_text(encoding="utf-8")

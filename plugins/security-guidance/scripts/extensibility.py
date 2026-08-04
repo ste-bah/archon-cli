@@ -198,10 +198,6 @@ def _glob_match(path: str, include: Tuple[str, ...], exclude: Tuple[str, ...]) -
 # Catastrophic backtracking: nested quantifiers, overlapping alternations
 # under repetition, and wildcard groups under repetition. Static check, not a
 # proof — catches the common shapes that hang the hook on every edit.
-_REDOS_SHAPES = [
-    re.compile(r"\([^()]*[+*][^()]*\)[+*?]"),  # nested quantifier: (a+)*  (a*b)*
-    re.compile(r"\(\.\*[^()]*\)[+*]"),         # wildcard group: (.*)*
-]
 
 
 def _split_unescaped_alternation(group: str) -> List[str]:
@@ -209,11 +205,17 @@ def _split_unescaped_alternation(group: str) -> List[str]:
     branches: List[str] = []
     start = 0
     escaped = False
+    in_class = False
     for index, char in enumerate(group):
         if escaped:
             escaped = False
         elif char == "\\":
             escaped = True
+        elif in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
         elif char == "|":
             branches.append(group[start:index])
             start = index + 1
@@ -221,16 +223,24 @@ def _split_unescaped_alternation(group: str) -> List[str]:
     return branches
 
 
-def _repeated_flat_groups(regex: str):
-    """Yield flat alternation groups directly repeated by ``+`` or ``*``."""
+def _repeated_groups(regex: str):
+    """Yield repeated groups as ``(contents, quantifier, is_flat)`` tuples."""
     stack: List[Tuple[int, bool, bool]] = []
     escaped = False
+    in_class = False
     for index, char in enumerate(regex):
         if escaped:
             escaped = False
             continue
         if char == "\\":
             escaped = True
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+            continue
+        if char == "[":
+            in_class = True
             continue
         if char == "(":
             if stack:
@@ -244,27 +254,60 @@ def _repeated_flat_groups(regex: str):
             continue
         if char == ")" and stack:
             start, nested, has_alternation = stack.pop()
-            if (
-                not nested
-                and has_alternation
-                and index + 1 < len(regex)
-                and regex[index + 1] in "+*"
-            ):
-                yield regex[start:index]
+            if index + 1 < len(regex) and regex[index + 1] in "+*?":
+                yield regex[start:index], regex[index + 1], not nested and has_alternation
+
+
+def _group_has_nested_quantifier(group: str) -> bool:
+    """Return whether a group's contents contain a nested ``+`` or ``*``."""
+    escaped = False
+    in_class = False
+    for char in group:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+            continue
+        if char == "[":
+            in_class = True
+            continue
+        if char in "+*":
+            return True
+    return False
+
+
+def _strip_group_prefix(group: str) -> Optional[str]:
+    """Remove supported Python group prefixes, or reject an unknown prefix."""
+    if not group.startswith("?"):
+        return group
+    if group.startswith("?:"):
+        return group[2:]
+    if group.startswith("?P<"):
+        end = group.find(">", 3)
+        return group[end + 1:] if end != -1 else None
+    index = 1
+    while index < len(group) and group[index] in "aiLmsux-":
+        index += 1
+    if index > 1 and index < len(group) and group[index] == ":":
+        return group[index + 1:]
+    return None
 
 
 def _has_redos_structure(regex: str) -> bool:
-    """Heuristic catastrophic-backtracking check. Not a proof. Catches:
-      - nested quantifiers ((a+)*, (a*b)+)
-      - wildcard groups under repetition ((.*)*)
-      - alternation under repetition where one branch is a prefix of another
-        ((a|aa)*, (ab|a)*) — these overlap and explode on non-matching input.
-    Does NOT flag non-overlapping alternation ((a|b)*) which is safe."""
-    if any(p.search(regex) for p in _REDOS_SHAPES):
-        return True
-    for group in _repeated_flat_groups(regex):
-        if group.startswith("?:"):
-            group = group[2:]
+    """Heuristic catastrophic-backtracking check using deterministic scanning."""
+    for group, quantifier, is_flat_alternation in _repeated_groups(regex):
+        if _group_has_nested_quantifier(group):
+            return True
+        if quantifier not in "+*" or not is_flat_alternation:
+            continue
+        group = _strip_group_prefix(group)
+        if group is None:
+            return True
         branches = _split_unescaped_alternation(group)
         if any(not branch for branch in branches):
             return True
