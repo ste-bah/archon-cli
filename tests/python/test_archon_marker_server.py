@@ -54,7 +54,7 @@ class MarkerServerSecurityTests(unittest.TestCase):
             return original_path(value, *args, **kwargs)
 
         def record_realpath(value, *args, **kwargs):
-            events.append(("realpath", value))
+            events.append(("realpath", value, args, kwargs))
             return original_realpath(value, *args, **kwargs)
 
         def record_commonpath(values):
@@ -72,8 +72,8 @@ class MarkerServerSecurityTests(unittest.TestCase):
 
         self.assertEqual(resolved, self.pdf.resolve())
         self.assertEqual(events[:3], [
-            ("realpath", root),
-            ("realpath", requested),
+            ("realpath", root, (), {"strict": True}),
+            ("realpath", requested, (), {"strict": True}),
             ("commonpath", (root, candidate)),
         ])
         self.assertEqual(events[3], ("Path", candidate))
@@ -91,6 +91,31 @@ class MarkerServerSecurityTests(unittest.TestCase):
             server.resolve_pdf_path(self.root.resolve(), str(alias)),
             target.resolve(),
         )
+
+    def test_resolve_pdf_path_rejects_missing_candidate_during_canonicalization(self):
+        missing_pdf = self.root / "missing.pdf"
+        pdf_root = self.root.resolve()
+        realpath = server.os.path.realpath
+        with (
+            mock.patch.object(server.os.path, "realpath", wraps=realpath) as mocked_realpath,
+            mock.patch.object(server.os.path, "commonpath", wraps=server.os.path.commonpath) as commonpath,
+            mock.patch.object(server, "Path", wraps=server.Path) as path,
+        ):
+            with self.assertRaisesRegex(ValueError, r"^invalid pdf_path$"):
+                server.resolve_pdf_path(pdf_root, str(missing_pdf))
+
+        mocked_realpath.assert_any_call(str(missing_pdf), strict=True)
+        commonpath.assert_not_called()
+        path.assert_not_called()
+
+    def test_resolve_pdf_path_accepts_case_varied_common_root(self):
+        root = str(self.root.resolve())
+        with mock.patch.object(server.os.path, "commonpath", return_value=root.swapcase()):
+            with mock.patch.object(server.os.path, "normcase", side_effect=str.lower):
+                self.assertEqual(
+                    server.resolve_pdf_path(self.root.resolve(), str(self.pdf)),
+                    self.pdf.resolve(),
+                )
 
     def test_resolve_pdf_path_maps_commonpath_value_error_to_invalid_path(self):
         with mock.patch.object(server.os.path, "commonpath", side_effect=ValueError):

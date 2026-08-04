@@ -75,9 +75,10 @@ def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
 def resolve_pdf_path(pdf_root: Path, requested: str) -> Path:
     """Return an existing PDF only when its canonical path is within ``pdf_root``."""
     try:
-        root = os.path.realpath(os.fspath(pdf_root))
-        candidate = os.path.realpath(os.path.expanduser(requested))
-        if os.path.commonpath((root, candidate)) != root:
+        root = os.path.realpath(os.fspath(pdf_root), strict=True)
+        candidate = os.path.realpath(os.path.expanduser(requested), strict=True)
+        common = os.path.commonpath((root, candidate))
+        if os.path.normcase(common) != os.path.normcase(root):
             raise ValueError
         resolved = Path(candidate)
         if resolved.suffix.lower() != ".pdf" or not resolved.is_file():
