@@ -42,6 +42,7 @@ mod lifecycle;
 #[cfg(test)]
 mod memory_attribution_tests;
 mod memory_integration;
+mod memory_integration_corrections;
 mod message_delivery;
 mod payloads;
 mod permission_gate;
