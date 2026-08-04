@@ -31,6 +31,16 @@ sidecar's torch-free `--selftest`) pins the parser contract.
 Transport is orthogonal to device: subprocess vs HTTP vs pre-extracted JSON is
 chosen on the Rust side (`MarkerSource`) independently of which device Marker uses.
 
+### HTTP security boundary
+
+The persistent server requires `--pdf-root`; every requested absolute PDF path is
+canonicalized, must end in `.pdf`, and must remain beneath that root. It binds to
+loopback by default and has no authentication. A non-loopback `--host` requires
+explicit `--allow-non-loopback` risk acceptance, which never weakens root
+containment. The server returns fixed safe 400/500 messages while retaining detailed
+conversion failures in local logs only. These transport controls do not change the
+shared conversion output or device placement described above.
+
 ---
 
 ## 2. `archon-accel` — uniform detection + placement across CUDA / Metal / CPU

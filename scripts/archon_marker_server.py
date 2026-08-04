@@ -11,8 +11,15 @@ Contract (matched by `crates/archon-docs/src/marker_source.rs::fetch_json`):
     POST /convert   {"pdf_path": "<absolute path>", "device": "cuda", "page_range": "S-E"?}
         → 200, the exact normalized block-tree JSON the sidecar prints to stdout
           (same shared core in archon_marker_core.py, same json.dumps(ensure_ascii=False))
-        → 400 on an invalid/out-of-root pdf_path, 500 with a fixed error on conversion failure
+        → 400 for an invalid/out-of-root/non-PDF `pdf_path` or invalid page range,
+          and 500 with fixed safe messages on conversion failure; detailed failures
+          are written only to local server logs
     GET /health     → 200 {"status": "ok", "device": "<startup device>", "models_loaded": true}
+
+`--pdf-root` is required. Requested PDF paths must canonicalize beneath that root and have a
+`.pdf` suffix. The server binds to loopback by default; it has no authentication. Supplying
+`--allow-non-loopback` explicitly accepts exposure for a non-loopback host, but never weakens
+`--pdf-root` containment.
 
 The request's `device` is ADVISORY: the models live on the device resolved at startup; a
 mismatching request device is logged and ignored (restart the server to change device).
@@ -20,8 +27,8 @@ Server and archon run on the same host — the server reads `pdf_path` from the 
 filesystem, so no PDF bytes cross the wire.
 
 Usage:
-    /home/dalton/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
-        --device cuda --host 127.0.0.1 --port 8010 --pdf-root /path/to/pdfs
+    /home/you/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
+        --device cuda --pdf-root /home/you/corpus --host 127.0.0.1 --port 8010
 """
 
 import argparse

@@ -87,12 +87,16 @@ python3.11 -m venv ~/.venv-marker
 
 **Persistent server (recommended for bulk corpora — no per-doc model reload):**
 ```bash
-~/.venv-marker/bin/python3.11 scripts/archon_marker_server.py --device cuda --host 127.0.0.1 --port 8010
+~/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
+  --device cuda --pdf-root /ABS/PATH/corpus --host 127.0.0.1 --port 8010
 curl -s http://127.0.0.1:8010/health   # {"status":"ok","device":"cuda","models_loaded":true}
 ```
 Select it by setting `marker_url` in policy (it overrides `marker_sidecar`). The
 server reads the PDF from its own filesystem (only the path is sent, never
 bytes), so it must share Archon's filesystem / identical absolute paths.
+`/ABS/PATH/corpus` must be the same directory supplied to `archon docs ingest`.
+
+> Do not use a non-loopback host unless remote access is deliberate. The server has no authentication. `--allow-non-loopback` acknowledges exposure but never weakens `--pdf-root` containment.
 
 ---
 
@@ -221,8 +225,9 @@ ln -s ~/.venv-marker ~/.archon-marker-venv              # or export ARCHON_RAPID
 # (6) Write .archon/policy.toml (see §6)
 cp .archon/policy.example.toml .archon/policy.toml      # then edit paths
 
-# (6b) Optional: start the warm Marker server (matches marker_url)
-~/.venv-marker/bin/python3.11 scripts/archon_marker_server.py --device cuda --port 8010
+# (6b) Optional: start the warm Marker server (matches marker_url and the ingest corpus)
+~/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
+  --device cuda --pdf-root /ABS/PATH/corpus --host 127.0.0.1 --port 8010
 
 # (7) Ingest (--jobs auto derives workers from FREE VRAM; --yes skips prompts)
 archon docs ingest <dir> --jobs auto --yes
@@ -273,5 +278,5 @@ archon --output-style mystyle "...prompt..."
   Use a login shell (`bash -lc`) or absolute paths. A signed binary copied to an
   external volume may need `codesign --force --sign - <archon>`.
 - **Apple MPS:** unified-memory pressure is soft (no catchable OOM); if surya/MPS
-  is flaky, run the Marker server with `--device cpu`. `--jobs auto` caps
-  unified-memory hosts to ≤2 workers.
+  is flaky, run the Marker server with `--device cpu --pdf-root /ABS/PATH/corpus`.
+  `--jobs auto` caps unified-memory hosts to ≤2 workers.

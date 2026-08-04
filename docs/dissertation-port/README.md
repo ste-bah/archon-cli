@@ -67,9 +67,11 @@ PDF
   **free VRAM, not card size**, models Marker's page-scaled VRAM footprint,
   page-range-chunks big documents to fit a small card, and carries a per-document
   GPU→CPU OOM fallback. See [platform-agnostic-design.md](platform-agnostic-design.md).
-- **Persistent Marker throughput**: a FastAPI server
+- **Persistent Marker throughput**: a root-contained FastAPI server
   (`scripts/archon_marker_server.py`, `MarkerSource::Http`) loads the ~6 GB surya
   models **once** instead of the per-document reload the subprocess sidecar pays.
+  It binds to loopback by default; it has no authentication, and an explicit
+  `--allow-non-loopback` accepts exposure without weakening `--pdf-root` containment.
 - **Integrity sealing**: a `chunks_root` tamper-evidence hash on *all* ingest,
   `docs verify-integrity` to prove no post-ingest tampering, an end-of-run
   `COORD_MARKER` vs `COORD_NONE` tally, and a **strict-fail** rule on the HTTP

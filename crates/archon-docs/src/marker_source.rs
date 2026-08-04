@@ -12,9 +12,12 @@
 //! `archon_ingest_ext::marker::parse_marker_str`.
 //!
 //! NOTE on the HTTP transport: the server reads the PDF from ITS OWN local filesystem (it is sent
-//! only a `pdf_path`, never the bytes). So `marker_url` must point at a server that shares
-//! archon's filesystem — same host, or a mount where the identical absolute path resolves. It is
-//! NOT a general remote-upload service.
+//! only a `pdf_path`, never the bytes). The server operator must start it with `--pdf-root` that
+//! contains every PDF Archon sends. `marker_url` must therefore point at a server that shares
+//! archon's filesystem — same host, or a mount where the identical absolute path resolves beneath
+//! the server's same canonical root. It is NOT a general remote-upload service. Server failures
+//! use fixed safe messages; Rust treats non-success bodies as opaque error text and receives no
+//! conversion exception details.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -52,10 +55,13 @@ pub enum MarkerSource {
     },
     /// POST `{"pdf_path", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
     /// (`scripts/archon_marker_server.py`) and get the same normalized block-tree JSON back. The
-    /// server loads the surya models ONCE at startup and keeps them resident, so bulk ingest pays
-    /// no per-document model reload (the subprocess sidecar reloads ~6 GB per PDF). Server and
-    /// archon run on the same host: the absolute `pdf_path` is read locally by the server, so no
-    /// bytes are uploaded. `device` is advisory — the server's models live on its startup device.
+    /// operator must supply `--pdf-root` containing all PDFs Archon sends; the canonical absolute
+    /// path in each request must resolve beneath that same server root. The server loads the surya
+    /// models ONCE at startup and keeps them resident, so bulk ingest pays no per-document model
+    /// reload (the subprocess sidecar reloads ~6 GB per PDF). Server and archon run on the same
+    /// host: the absolute `pdf_path` is read locally by the server, so no bytes are uploaded.
+    /// `device` is advisory — the server's models live on its startup device. Server failures use
+    /// fixed messages, and this transport treats every non-success body as opaque error text.
     Http { url: String, device: Option<String> },
     /// Read a pre-extracted Marker JSON file (decoupled — you run Marker however/whenever).
     PreExtracted { json_path: PathBuf },
@@ -248,8 +254,10 @@ impl MarkerSource {
     /// or a pre-extracted file — both already carry the full document, so neither chunks).
     ///
     /// HTTP contract (matched by `scripts/archon_marker_server.py`):
-    /// `POST {url}/convert` with JSON body `{"pdf_path": "<absolute path>", "device": "<dev>"}` →
+    /// `POST {url}/convert` with JSON body `{"pdf_path": "<canonical absolute path>", "device": "<dev>"}` →
     /// 200 with the same normalized block-tree JSON the subprocess sidecar prints to stdout.
+    /// The request body remains unchanged; non-success response bodies remain opaque error text to
+    /// Rust.
     async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
         match self {
             MarkerSource::Http { url, device } => {
