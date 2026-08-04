@@ -253,9 +253,21 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
     return "{}" if int(bounds[1]) > 1 else ""
 
 
+def _has_ambiguous_alternation(group: str) -> bool:
+    """Return whether a flat group has an unsafe or overlapping alternation."""
+    stripped_group = _strip_group_prefix(group)
+    if stripped_group is None:
+        return True
+    branches = _split_unescaped_alternation(stripped_group)
+    if any(not branch for branch in branches):
+        return True
+    branches.sort()
+    return any(right.startswith(left) for left, right in zip(branches, branches[1:]))
+
+
 def _repeated_groups(regex: str):
-    """Yield flat repeated alternations and detect nested quantifiers in one pass."""
-    stack: List[Tuple[int, bool, bool, bool]] = []
+    """Yield repeated groups and propagate ambiguous child groups in one pass."""
+    stack: List[Tuple[int, bool, bool, bool, bool]] = []
     escaped = False
     in_class = False
     for index, char in enumerate(regex):
@@ -274,25 +286,36 @@ def _repeated_groups(regex: str):
             continue
         if char == "(":
             if stack:
-                start, _, has_alternation, has_quantifier = stack[-1]
-                stack[-1] = (start, True, has_alternation, has_quantifier)
-            stack.append((index + 1, False, False, False))
+                start, _, has_alternation, has_quantifier, has_ambiguity = stack[-1]
+                stack[-1] = (start, True, has_alternation, has_quantifier, has_ambiguity)
+            stack.append((index + 1, False, False, False, False))
             continue
         if char in "+*" and stack:
-            start, nested, has_alternation, _ = stack[-1]
-            stack[-1] = (start, nested, has_alternation, True)
+            start, nested, has_alternation, _, has_ambiguity = stack[-1]
+            stack[-1] = (start, nested, has_alternation, True, has_ambiguity)
             continue
         if char == "|" and stack:
-            start, nested, _, has_quantifier = stack[-1]
-            stack[-1] = (start, nested, True, has_quantifier)
+            start, nested, _, has_quantifier, has_ambiguity = stack[-1]
+            stack[-1] = (start, nested, True, has_quantifier, has_ambiguity)
             continue
         if char == ")" and stack:
-            start, nested, has_alternation, has_quantifier = stack.pop()
+            start, nested, has_alternation, has_quantifier, has_ambiguity = stack.pop()
             quantifier = _group_quantifier(regex, index)
-            if stack and quantifier in ("+", "*", "{}"):
-                parent_start, parent_nested, parent_alternation, _ = stack[-1]
-                stack[-1] = (parent_start, parent_nested, parent_alternation, True)
-            if quantifier in ("+", "*", "?", "{}") and has_quantifier:
+            group_has_ambiguity = has_ambiguity or (
+                has_alternation and not nested and _has_ambiguous_alternation(regex[start:index])
+            )
+            if stack:
+                parent_start, parent_nested, parent_alternation, parent_quantifier, parent_ambiguity = stack[-1]
+                stack[-1] = (
+                    parent_start,
+                    parent_nested,
+                    parent_alternation,
+                    parent_quantifier or quantifier in ("+", "*", "{}"),
+                    parent_ambiguity or group_has_ambiguity,
+                )
+            if quantifier in ("+", "*", "{}") and (has_quantifier or group_has_ambiguity):
+                yield None, quantifier, False, True
+            elif quantifier == "?" and has_quantifier:
                 yield None, quantifier, False, True
             elif quantifier in ("+", "*", "{}") and not nested and has_alternation:
                 yield regex[start:index], quantifier, True, False
@@ -324,13 +347,6 @@ def _has_redos_structure(regex: str) -> bool:
             continue
         if group is None:
             return True
-        stripped_group = _strip_group_prefix(group)
-        if stripped_group is None:
-            return True
-        branches = _split_unescaped_alternation(stripped_group)
-        if any(not branch for branch in branches):
-            return True
-        branches.sort()
-        if any(right.startswith(left) for left, right in zip(branches, branches[1:])):
+        if _has_ambiguous_alternation(group):
             return True
     return False
