@@ -287,15 +287,17 @@ def _strip_group_prefix(group: str) -> Optional[str]:
 
 def _has_redos_structure(regex: str) -> bool:
     """Heuristic catastrophic-backtracking check using deterministic scanning."""
-    for group, quantifier, is_flat_alternation, has_nested_quantifier in _repeated_groups(regex):
+    for group, _quantifier, is_flat_alternation, has_nested_quantifier in _repeated_groups(regex):
         if has_nested_quantifier:
             return True
         if not is_flat_alternation:
             continue
-        group = _strip_group_prefix(group)
         if group is None:
             return True
-        branches = _split_unescaped_alternation(group)
+        stripped_group = _strip_group_prefix(group)
+        if stripped_group is None:
+            return True
+        branches = _split_unescaped_alternation(stripped_group)
         if any(not branch for branch in branches):
             return True
         branches.sort()
