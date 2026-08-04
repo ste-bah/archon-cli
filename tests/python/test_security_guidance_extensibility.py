@@ -19,6 +19,7 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             r"(ab|a)+",
             r"(?:cat|catalog)*",
             r"(?:a|aa){1000000000}$",
+            r"(?:(?:a)|a){1000000000}$",
             r"(?:(?:a|aa)){1000000000}$",
             r"((?:a|aa)){1000000000}$",
             r"(?:(?:(?:a|aa))){2,1000000000}$",
@@ -87,6 +88,25 @@ print(extensibility._has_redos_structure(pattern))
         )
 
         self.assertEqual(completed.stdout.strip(), "False")
+
+    def test_nested_group_analysis_is_linear_within_regex_cap(self):
+        code = f"""
+import sys
+sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
+import extensibility
+pattern = '(a|' * 1000 + 'a' + ')' * 1000 + '{{2}}'
+print(extensibility._has_redos_structure(pattern))
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            timeout=1,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "True")
 
     def test_detector_does_not_use_alternation_regex_on_untrusted_input(self):
         source = (PLUGIN_SCRIPTS / "extensibility.py").read_text(encoding="utf-8")

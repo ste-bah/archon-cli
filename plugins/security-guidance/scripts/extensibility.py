@@ -206,31 +206,8 @@ def _glob_match(path: str, include: Tuple[str, ...], exclude: Tuple[str, ...]) -
 # proof — catches the common shapes that hang the hook on every edit.
 
 
-def _split_unescaped_alternation(group: str) -> List[str]:
-    """Split a flat group on unescaped alternation separators."""
-    branches: List[str] = []
-    start = 0
-    escaped = False
-    in_class = False
-    for index, char in enumerate(group):
-        if escaped:
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif in_class:
-            if char == "]":
-                in_class = False
-        elif char == "[":
-            in_class = True
-        elif char == "|":
-            branches.append(group[start:index])
-            start = index + 1
-    branches.append(group[start:])
-    return branches
-
-
 def _group_quantifier(regex: str, closing_index: int) -> str:
-    """Return the quantifier beginning after a closed group, if supported."""
+    """Return a supported quantifier after a group with a fixed lookahead bound."""
     if closing_index + 1 >= len(regex):
         return ""
     quantifier = regex[closing_index + 1]
@@ -238,7 +215,9 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
         return quantifier
     if quantifier != "{":
         return ""
-    end = regex.find("}", closing_index + 2)
+    # A repeat bound longer than 30 digits is invalid for practical Python regex
+    # use; limiting this lookahead keeps the full scanner linear.
+    end = regex.find("}", closing_index + 2, closing_index + 34)
     if end == -1:
         return ""
     bounds = regex[closing_index + 2:end].split(",", 1)
@@ -253,28 +232,85 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
     return "{}" if int(bounds[1]) > 1 else ""
 
 
-def _has_ambiguous_alternation(group: str) -> bool:
-    """Return whether a flat group has an unsafe or overlapping alternation."""
-    stripped_group = _strip_group_prefix(group)
-    if stripped_group is None:
+def _new_group() -> Dict[str, Any]:
+    """Build bounded state for one group while scanning an untrusted pattern."""
+    return {
+        "branches": [],
+        "current": None,
+        "direct_alternation": False,
+        "nested": False,
+        "child_alternation": False,
+        "has_quantifier": False,
+        "prefix": "start",
+    }
+
+
+def _record_atom(group: Dict[str, Any], token: Optional[str]) -> None:
+    """Record only the first atom of a branch; distinct literals prove separation."""
+    if group["current"] is None:
+        group["current"] = token
+
+
+def _finish_branch(group: Dict[str, Any]) -> None:
+    group["branches"].append(group["current"])
+    group["current"] = None
+
+
+def _direct_alternation_is_ambiguous(group: Dict[str, Any]) -> bool:
+    """Require distinct literal branch prefixes before accepting a repeated alternation."""
+    _finish_branch(group)
+    branches = group["branches"]
+    return any(branch is None for branch in branches) or len(set(branches)) != len(branches)
+
+
+def _consume_group_prefix(group: Dict[str, Any], char: str) -> bool:
+    """Consume a Python group prefix without treating it as a branch atom."""
+    state = group["prefix"]
+    if state == "start":
+        if char == "?":
+            group["prefix"] = "question"
+            return True
+        group["prefix"] = "body"
+        return False
+    if state == "question":
+        if char == "P":
+            group["prefix"] = "named"
+            return True
+        if char in ":=!":
+            group["prefix"] = "body"
+            return True
+        if char == "<":
+            group["prefix"] = "lookbehind"
+            return True
+        if char in "aiLmsux-":
+            return True
+        group["prefix"] = "body"
+        return False
+    if state == "named":
+        if char == ">":
+            group["prefix"] = "body"
         return True
-    branches = _split_unescaped_alternation(stripped_group)
-    if any(not branch for branch in branches):
+    if state == "lookbehind":
+        if char in "=!":
+            group["prefix"] = "body"
         return True
-    branches.sort()
-    return any(right.startswith(left) for left, right in zip(branches, branches[1:]))
+    return False
 
 
 def _repeated_groups(regex: str):
-    """Yield repeated groups and propagate ambiguous child groups in one pass."""
-    stack: List[Tuple[int, bool, bool, bool, bool]] = []
+    """Yield unsafe repeated groups using one bounded pass and stack summaries."""
+    stack: List[Dict[str, Any]] = []
     escaped = False
     in_class = False
     for index, char in enumerate(regex):
         if escaped:
+            if stack:
+                _record_atom(stack[-1], None)
             escaped = False
             continue
         if char == "\\":
+            if stack:
+                _record_atom(stack[-1], None)
             escaped = True
             continue
         if in_class:
@@ -282,71 +318,55 @@ def _repeated_groups(regex: str):
                 in_class = False
             continue
         if char == "[":
+            if stack:
+                _record_atom(stack[-1], None)
             in_class = True
             continue
         if char == "(":
             if stack:
-                start, _, has_alternation, has_quantifier, has_ambiguity = stack[-1]
-                stack[-1] = (start, True, has_alternation, has_quantifier, has_ambiguity)
-            stack.append((index + 1, False, False, False, False))
+                stack[-1]["nested"] = True
+            stack.append(_new_group())
             continue
-        if char in "+*" and stack:
-            start, nested, has_alternation, _, has_ambiguity = stack[-1]
-            stack[-1] = (start, nested, has_alternation, True, has_ambiguity)
+        if not stack:
             continue
-        if char == "|" and stack:
-            start, nested, _, has_quantifier, has_ambiguity = stack[-1]
-            stack[-1] = (start, nested, True, has_quantifier, has_ambiguity)
+        group = stack[-1]
+        if _consume_group_prefix(group, char):
             continue
-        if char == ")" and stack:
-            start, nested, has_alternation, has_quantifier, has_ambiguity = stack.pop()
+        if char == "|":
+            group["direct_alternation"] = True
+            _finish_branch(group)
+            continue
+        if char == ")":
+            stack.pop()
             quantifier = _group_quantifier(regex, index)
-            group_has_ambiguity = has_ambiguity or (
-                has_alternation and not nested and _has_ambiguous_alternation(regex[start:index])
+            direct_ambiguous = (
+                _direct_alternation_is_ambiguous(group) if group["direct_alternation"] else False
             )
+            has_alternation = group["direct_alternation"] or group["child_alternation"]
+            unsafe = quantifier in ("+", "*", "{}") and (
+                group["has_quantifier"]
+                or direct_ambiguous
+                or (group["nested"] and has_alternation)
+            )
+            if unsafe:
+                yield None, quantifier, False, True
             if stack:
-                parent_start, parent_nested, parent_alternation, parent_quantifier, parent_ambiguity = stack[-1]
-                stack[-1] = (
-                    parent_start,
-                    parent_nested,
-                    parent_alternation,
-                    parent_quantifier or quantifier in ("+", "*", "{}"),
-                    parent_ambiguity or group_has_ambiguity,
+                parent = stack[-1]
+                parent["has_quantifier"] |= (
+                    quantifier in ("+", "*", "{}") or group["has_quantifier"]
                 )
-            if quantifier in ("+", "*", "{}") and (has_quantifier or group_has_ambiguity):
-                yield None, quantifier, False, True
-            elif quantifier == "?" and has_quantifier:
-                yield None, quantifier, False, True
-            elif quantifier in ("+", "*", "{}") and not nested and has_alternation:
-                yield regex[start:index], quantifier, True, False
-
-
-def _strip_group_prefix(group: str) -> Optional[str]:
-    """Remove supported Python group prefixes, or reject an unknown prefix."""
-    if not group.startswith("?"):
-        return group
-    if group.startswith("?:"):
-        return group[2:]
-    if group.startswith("?P<"):
-        end = group.find(">", 3)
-        return group[end + 1:] if end != -1 else None
-    index = 1
-    while index < len(group) and group[index] in "aiLmsux-":
-        index += 1
-    if index > 1 and index < len(group) and group[index] == ":":
-        return group[index + 1:]
-    return None
+                parent["child_alternation"] |= has_alternation
+                _record_atom(parent, group["current"] if not has_alternation else None)
+            continue
+        if char in "+*{":
+            group["has_quantifier"] = True
+            continue
+        if char in ".^$?":
+            _record_atom(group, None)
+            continue
+        _record_atom(group, char)
 
 
 def _has_redos_structure(regex: str) -> bool:
-    """Heuristic catastrophic-backtracking check using deterministic scanning."""
-    for group, _quantifier, is_flat_alternation, has_nested_quantifier in _repeated_groups(regex):
-        if has_nested_quantifier:
-            return True
-        if not is_flat_alternation:
-            continue
-        if group is None:
-            return True
-        if _has_ambiguous_alternation(group):
-            return True
-    return False
+    """Heuristic catastrophic-backtracking check using a single stack scan."""
+    return any(has_nested_quantifier for _, _, _, has_nested_quantifier in _repeated_groups(regex))
