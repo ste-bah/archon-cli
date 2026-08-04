@@ -65,6 +65,29 @@ pub(crate) fn end_session(session_id: &str) {
     }
 }
 
+/// Drop everything a cancelled turn was holding, and keep tracking the session.
+///
+/// Claims are held from admission until [`on_tool_run_outcome`] releases them.
+/// A cancelled turn never reaches that callback, so a spawn's live-agent slot
+/// and a write's path claims leak — and `admit` then refuses every later write
+/// in the session as a conflict with a claim nothing still holds. The symptom
+/// is that cancelling one command breaks the session permanently, which is far
+/// worse than the guardrail simply being absent.
+///
+/// End-then-begin rather than releasing individual nodes: after a cancel the
+/// executed prefix describes work that did not finish, so there is nothing in
+/// it worth preserving, and enumerating what was in flight from the cancel path
+/// would be guesswork. Tracking continues, so the guardrail stays live for the
+/// rest of the session.
+///
+/// [`on_tool_run_outcome`]: super::on_tool_run_outcome
+pub(crate) fn reset_session(session_id: &str) {
+    if let Some(live) = active() {
+        live.end_session(session_id);
+        live.begin_session(session_id);
+    }
+}
+
 /// Attach a declared graph to a tracked session.
 ///
 /// Called from the milestone 2 taps, which already lower a team decomposition

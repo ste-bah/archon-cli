@@ -33,6 +33,62 @@ fn a_blocked_write_names_the_holder_the_path_and_the_invariant() {
     });
 }
 
+/// A cancelled turn must not leave its claims behind.
+///
+/// Claims are taken at admission and released by `on_tool_run_outcome`, which a
+/// cancelled attempt never reaches. Before `reset_session` existed, the claim
+/// below survived the turn that took it and every later write in the session
+/// was refused as conflicting with a holder that no longer existed — so one
+/// Ctrl+C or double-Esc broke the session until the process restarted.
+///
+/// Cancelling is normal operation. This asserts both halves: that the claim
+/// really does block while held, so the test cannot pass vacuously, and that
+/// the reset frees it.
+#[test]
+fn cancelling_a_turn_releases_the_claims_it_was_holding() {
+    let _guard = store_lock();
+    let config = config_with(archon_core::config::TopologyConfig::default());
+
+    with_tracker(&config, || {
+        on_node_started(SESSION, "holder");
+        active().expect("installed").on_write_intent(
+            SESSION,
+            &archon_topology::live::WriteIntent {
+                node_id: "holder".into(),
+                paths: vec!["src/lib.rs".into()],
+                shared_append: Vec::new(),
+            },
+        );
+
+        // Precondition: the claim is genuinely held, so a pass below means the
+        // reset did something rather than there being nothing to release.
+        assert!(
+            matches!(
+                admit(&write_request("tu-1", "src/lib.rs")),
+                ToolRunAdmission::Blocked { .. }
+            ),
+            "a held claim must block before the reset, or this test proves nothing"
+        );
+
+        reset_session(SESSION);
+
+        assert!(
+            matches!(
+                admit(&write_request("tu-2", "src/lib.rs")),
+                ToolRunAdmission::Allowed
+            ),
+            "a cancelled turn's claims must not outlive it"
+        );
+
+        // And the session is still tracked afterwards: the guardrail stays live
+        // for the rest of the session rather than silently switching itself off.
+        assert!(
+            active().expect("installed").tracks(SESSION),
+            "reset must keep tracking the session, not end it"
+        );
+    });
+}
+
 #[test]
 fn a_read_is_not_treated_as_a_write() {
     // `Read` also carries `file_path`. Treating that as a write would

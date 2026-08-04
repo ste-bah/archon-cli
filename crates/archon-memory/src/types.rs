@@ -154,6 +154,29 @@ pub struct SearchFilter {
     pub text: Option<String>,
     pub date_from: Option<DateTime<Utc>>,
     pub date_to: Option<DateTime<Utc>>,
+    /// Maximum rows the caller wants back.
+    ///
+    /// `None` means "unbounded" and is what every pre-existing caller gets,
+    /// because the field is `#[serde(default)]` and `Default::default()` is
+    /// `None`. The query path translates `None` into `usize::MAX`, which is the
+    /// value it used to hardcode, so no existing caller is silently truncated.
+    ///
+    /// `Some(n)` is a real bound: it is pushed into the candidate query (`k` on
+    /// the FTS index) rather than applied after the whole matching set has been
+    /// materialised. On a large store that is the difference between reading a
+    /// handful of rows and reading all of them.
+    pub limit: Option<usize>,
+}
+
+impl SearchFilter {
+    /// The candidate count to request from the underlying query.
+    ///
+    /// `usize::MAX` preserves the historical "unbounded" contract for callers
+    /// that do not set a limit.
+    #[must_use]
+    pub fn candidate_limit(&self) -> usize {
+        self.limit.unwrap_or(usize::MAX)
+    }
 }
 
 /// Errors produced by the memory subsystem.
@@ -200,6 +223,38 @@ mod tests {
             let parsed = MemoryType::from_str_opt(&s).expect("should parse");
             assert_eq!(parsed, mt);
         }
+    }
+
+    #[test]
+    fn default_search_filter_is_unbounded() {
+        let filter = SearchFilter::default();
+        assert_eq!(filter.limit, None);
+        assert_eq!(
+            filter.candidate_limit(),
+            usize::MAX,
+            "an unset limit must keep meaning `unbounded`, or existing callers \
+             get silently truncated"
+        );
+    }
+
+    #[test]
+    fn search_filter_limit_round_trips_and_older_payloads_stay_unbounded() {
+        // A peer on the other side of the memory TCP protocol may be running a
+        // build without the field; `#[serde(default)]` must leave it unbounded.
+        let legacy: SearchFilter =
+            serde_json::from_str(r#"{"text":"alpha"}"#).expect("legacy payload");
+        assert_eq!(legacy.limit, None);
+
+        let bounded = SearchFilter {
+            text: Some("alpha".into()),
+            limit: Some(7),
+            ..Default::default()
+        };
+        let round_tripped: SearchFilter =
+            serde_json::from_str(&serde_json::to_string(&bounded).expect("serialize"))
+                .expect("deserialize");
+        assert_eq!(round_tripped.limit, Some(7));
+        assert_eq!(round_tripped.candidate_limit(), 7);
     }
 
     #[test]

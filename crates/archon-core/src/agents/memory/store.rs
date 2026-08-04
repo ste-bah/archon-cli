@@ -35,6 +35,10 @@ pub fn load_agent_memory(
             text: Some(query.clone()),
             date_from: None,
             date_to: None,
+            // Deliberately unbounded, exactly as before `SearchFilter` grew a
+            // limit: this path relies on seeing every tagged match. Bounding it
+            // is a separate decision with its own ranking question.
+            limit: None,
         };
 
         match memory.search_memories(&filter) {

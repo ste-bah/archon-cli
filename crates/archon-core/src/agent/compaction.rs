@@ -48,7 +48,7 @@ impl Agent {
         self.state.total_output_tokens = 0;
         self.state.last_known_context_tokens = 0;
         self.turn_number = 0;
-        self.memory_injector.invalidate_cache();
+        self.invalidate_memory_injector_cache();
         // Reset shared session stats so /status and /cost reflect the cleared state
         {
             let mut stats = self.session_stats.lock().await;
@@ -75,7 +75,7 @@ impl Agent {
         self.state.total_output_tokens = 0;
         self.state.last_known_context_tokens = 0;
         self.turn_number = 0;
-        self.memory_injector.invalidate_cache();
+        self.invalidate_memory_injector_cache();
         let stats = self.session_stats.clone();
         async move {
             let mut guard = stats.lock().await;
@@ -302,7 +302,7 @@ impl Agent {
         // The next API response will repopulate last_known_context_tokens authoritatively.
         self.state.last_known_context_tokens = 0;
         // Invalidate memory cache since context changed
-        self.memory_injector.invalidate_cache();
+        self.invalidate_memory_injector_cache();
 
         // CRIT-15 (ITEM 5): Snapshot inner voice state on compaction and persist to memory graph.
         if let Some(ref iv) = self.inner_voice {

@@ -7,7 +7,56 @@ use crate::graph::{raw_to_memory, read_all_memories, row_values_to_memory};
 use crate::types::{Memory, MemoryError, SearchFilter};
 
 pub(crate) const FULL_SCAN_WARNING_THRESHOLD: usize = 10_000;
-const INITIAL_FTS_LIMIT: i64 = 256;
+
+/// Maximum terms OR'd into one FTS query.
+///
+/// Callers hand us whole prompts. A slash-command turn arrives carrying its
+/// entire skill template -- 21 KB, ~3,200 words, ~1,500 distinct terms after
+/// stop-word removal -- and every one of those became an `OR` branch. Cozo
+/// evaluates every branch of an `Or` in full before merging, and with an
+/// `NGram` tokenizer each branch expands further into character n-grams whose
+/// posting lists are close to the whole relation. The result was minutes of
+/// single-threaded CPU per turn.
+///
+/// A recall query does not get more precise past a few dozen terms; it just
+/// gets slower, because each additional term can only widen an `OR`. Longest
+/// terms are kept as a cheap proxy for selectivity -- absent term frequencies
+/// here, length is the best available signal, and short common words are
+/// exactly what a bounded query should shed first.
+const MAX_FTS_TERMS: usize = 32;
+
+/// Shortest term worth querying. One- and two-character tokens match nearly
+/// everything and contribute noise rather than recall.
+const MIN_FTS_TERM_LEN: usize = 3;
+
+/// Hard ceiling on candidates requested from one FTS index.
+///
+/// Cozo pre-allocates for `k`, so an unbounded value is not merely slow -- it
+/// aborts on a capacity overflow inside `raw_vec`. `structured_search_candidates`
+/// genuinely passes `usize::MAX` (there is no limit field on `SearchFilter` to
+/// pass instead), which the previous doubling loop masked by starting at 256
+/// and growing. Requesting the caller's limit directly exposed it.
+///
+/// Well above any real recall window, so it changes no result a caller could
+/// observe; it exists so an unbounded request degrades to "a lot" instead of a
+/// crash.
+const MAX_FTS_CANDIDATES: usize = 4_096;
+
+/// Candidates fetched per index before re-ranking, independent of the caller's
+/// result limit.
+///
+/// Candidates are not results. `recall_memories` re-ranks FTS hits by access
+/// boost and vector similarity, so a memory that TF-IDF ranks poorly can still
+/// win — `recall_ranks_access_boost_winner_beyond_fts_window` pins exactly
+/// that, with one frequently-accessed memory behind 300 higher-frequency
+/// decoys. Fetching only `limit` candidates means such a memory is never in the
+/// set to be re-ranked, and the boost can never apply.
+///
+/// The old code got this right by accident: it doubled `k` until the index was
+/// exhausted, so everything was always a candidate. That was correct and
+/// ruinously expensive. A fixed window keeps the re-rank honest at a bounded
+/// cost, in one query rather than log2(N) of them.
+const RECALL_CANDIDATE_WINDOW: usize = 1_024;
 const MEMORY_COLUMNS: &str = "id, content, title, memory_type, importance, tags, source_type, project_path, created_at, updated_at, access_count, last_accessed";
 
 pub(crate) struct KeywordCandidates {
@@ -29,7 +78,7 @@ pub(crate) fn keyword_candidates(
         });
     }
 
-    match fts_keyword_candidates(db, query) {
+    match fts_keyword_candidates(db, query, limit) {
         Ok(memories) => Ok(KeywordCandidates {
             memories,
             #[cfg(test)]
@@ -51,28 +100,37 @@ pub(crate) fn keyword_candidates(
     }
 }
 
-fn fts_keyword_candidates(db: &DbInstance, query: &str) -> Result<Vec<Memory>, MemoryError> {
+/// Ask each index once, for the number of candidates the caller actually wants.
+///
+/// This previously started at 256 and DOUBLED the limit, re-running the whole
+/// query, until a page came back short -- which only happens once the limit
+/// exceeds the total number of matching rows. So it deliberately retrieved
+/// every match, and because Cozo recomputes the full result set on each call
+/// (its `k` truncates the finished set rather than pruning the search), the
+/// same exhaustive scan ran ~log2(N/256) times over, per index, three indexes
+/// deep. The caller's `limit` was ignored entirely on this path.
+///
+/// One query per index, `k = limit`. A hybrid search re-ranks these candidates
+/// against vector scores and keeps the top handful regardless, so fetching
+/// beyond the caller's limit could never change the final answer.
+fn fts_keyword_candidates(
+    db: &DbInstance,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Memory>, MemoryError> {
     let mut memories = Vec::new();
     let mut seen = BTreeSet::new();
+    let window = limit.clamp(RECALL_CANDIDATE_WINDOW, MAX_FTS_CANDIDATES);
+    let limit = i64::try_from(window).unwrap_or(i64::MAX);
 
     for index in ["content_fts", "title_fts", "tags_fts"] {
-        let mut limit = INITIAL_FTS_LIMIT;
-        loop {
-            let result = fts_candidate_query(db, query, index, limit)?;
-            let exhausted = result.rows.len() < limit as usize;
-            for row in result.rows {
-                if let Some(id) = row.get(1).and_then(DataValue::get_str)
-                    && seen.insert(id.to_string())
-                {
-                    memories.push(row_values_to_memory(&row[1..])?);
-                }
+        let result = fts_candidate_query(db, query, index, limit)?;
+        for row in result.rows {
+            if let Some(id) = row.get(1).and_then(DataValue::get_str)
+                && seen.insert(id.to_string())
+            {
+                memories.push(row_values_to_memory(&row[1..])?);
             }
-            if exhausted {
-                break;
-            }
-            limit = limit.checked_mul(2).ok_or_else(|| {
-                MemoryError::Database("keyword candidate limit exceeds i64".into())
-            })?;
         }
     }
     Ok(memories)
@@ -94,9 +152,41 @@ fn fts_candidate_query(
         .map_err(|error| MemoryError::Database(error.to_string()))
 }
 
+/// Build a bounded `OR` query from the caller's text.
+///
+/// Deduplicates case-insensitively, drops tokens below [`MIN_FTS_TERM_LEN`],
+/// and keeps at most [`MAX_FTS_TERMS`] of the longest remaining terms. Original
+/// spelling and relative order are preserved for the terms that survive, so the
+/// query still reads as a subset of what the caller asked for.
 fn fts_query(query: &str) -> String {
-    query
+    let mut seen = BTreeSet::new();
+    let mut terms: Vec<&str> = query
         .split_whitespace()
+        .filter(|term| seen.insert(term.to_lowercase()))
+        .collect();
+
+    // Short tokens are dropped only from an OVERSIZED query, never from a small
+    // one. `keyword_candidates_support_single_character_terms` pins that a
+    // deliberate one-character search still works, and it should: the cost of a
+    // low-selectivity term is a problem of volume, not of length. Filtering
+    // unconditionally would have silently broken a supported query shape while
+    // "fixing" performance.
+    if terms.len() > MAX_FTS_TERMS {
+        terms.retain(|term| term.chars().count() >= MIN_FTS_TERM_LEN);
+    }
+
+    if terms.len() > MAX_FTS_TERMS {
+        // Longest-first as a selectivity proxy, then restore input order so the
+        // query is stable and readable in a log.
+        let mut ranked: Vec<(usize, &str)> = terms.iter().copied().enumerate().collect();
+        ranked.sort_by_key(|(_, term)| std::cmp::Reverse(term.chars().count()));
+        ranked.truncate(MAX_FTS_TERMS);
+        ranked.sort_by_key(|(index, _)| *index);
+        terms = ranked.into_iter().map(|(_, term)| term).collect();
+    }
+
+    terms
+        .into_iter()
         .map(|term| format!("{:?}", term))
         .collect::<Vec<_>>()
         .join(" OR ")
@@ -207,14 +297,24 @@ fn structured_search_candidates(
     db: &DbInstance,
     filter: &SearchFilter,
 ) -> Result<KeywordCandidates, MemoryError> {
+    // Push the caller's bound into the query rather than reading everything and
+    // trimming afterwards. `SearchFilter::candidate_limit()` still yields
+    // `usize::MAX` for `None`, so a caller that never sets a limit keeps its
+    // historical unbounded contract -- and `fts_keyword_candidates` clamps that
+    // to `MAX_FTS_CANDIDATES` so it can no longer overflow Cozo's `k`
+    // pre-allocation.
     if let Some(text) = filter.text.as_deref() {
-        return keyword_candidates(db, text, usize::MAX);
+        return keyword_candidates(db, text, filter.candidate_limit());
     }
     if !filter.tags.is_empty() {
-        return keyword_candidates(db, &filter.tags.join(" "), usize::MAX);
+        return keyword_candidates(db, &filter.tags.join(" "), filter.candidate_limit());
     }
+    // No text and no tags: there is no FTS query to bound, so this still reads
+    // the relation in full. The limit is reported in the warning rather than
+    // applied, because trimming here would cut the set before the caller's own
+    // filtering and ordering run.
     let all_rows = read_all_memories(db)?;
-    warn_full_scan("memory.search.filter", all_rows.len(), None);
+    warn_full_scan("memory.search.filter", all_rows.len(), filter.limit);
     Ok(KeywordCandidates {
         memories: all_rows
             .into_iter()
