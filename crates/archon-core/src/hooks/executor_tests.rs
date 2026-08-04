@@ -165,13 +165,22 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
 async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = write_windows_output_fixture(dir.path());
+    // Hang guard, not a speed assertion. What this test proves is capture
+    // semantics: exit code, the shared 64 KiB bound, and exactly one truncation
+    // marker across both pipes. Process-tree cleanup under a *short* timeout has
+    // its own dedicated tests, so nothing here depends on this number being
+    // tight. It only has to be larger than a cold PowerShell start plus 256 KiB
+    // pushed through two drained pipes. That was 2s, then 15s, and 15s still
+    // lost on a loaded GitHub Windows runner — the failure is startup latency,
+    // not a stall: stdin is closed by `write_payload`, and `drain_pipe` keeps
+    // reading past budget exhaustion, so the child can never block on a pipe.
     let output = super::executor_process::run_command(
         &windows_file_command(&fixture),
         b"{}",
         dir.path(),
         "issue92-session",
         "PreToolUse",
-        15,
+        60,
     )
     .await
     .expect("Windows hook fixture should run");
