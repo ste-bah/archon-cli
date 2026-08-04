@@ -160,3 +160,39 @@ fn query_chunk_count(database: &DbInstance) -> usize {
         .get_int()
         .unwrap() as usize
 }
+
+/// Caller exclusions extend the defaults rather than replacing them.
+///
+/// `LeannIntegration` names three directories it cares about. Under the old
+/// replace-semantics that silently dropped the other nine the defaults cover,
+/// so a caller asking to skip `target` also started indexing `.venv`, `dist`,
+/// `build`, `__pycache__` and `site-packages`. Nothing reported the loss.
+#[test]
+fn caller_excludes_extend_the_defaults_rather_than_replacing_them() {
+    let config = super::IndexConfig {
+        root_path: std::path::PathBuf::from("."),
+        include_patterns: Vec::new(),
+        exclude_patterns: vec!["**/target/**".to_string(), "my-generated".to_string()],
+    };
+
+    let excludes = super::configured_excludes(&config);
+
+    for default in archon_leann_default_excludes() {
+        assert!(
+            excludes.contains(&default),
+            "default exclusion {default:?} was dropped by a caller-supplied list"
+        );
+    }
+    assert!(excludes.contains(&"my-generated".to_string()));
+    // The glob spelling is normalised, and `target` is already a default, so it
+    // must appear exactly once rather than twice.
+    assert_eq!(
+        excludes.iter().filter(|value| *value == "target").count(),
+        1,
+        "normalised caller pattern duplicated a default"
+    );
+}
+
+fn archon_leann_default_excludes() -> Vec<String> {
+    crate::language::default_exclude_patterns()
+}

@@ -227,11 +227,12 @@ impl LeannIntegration {
         let config = archon_leann::IndexConfig {
             root_path: working_dir.to_path_buf(),
             include_patterns: vec!["**/*.rs".into(), "**/*.py".into(), "**/*.ts".into()],
-            exclude_patterns: vec![
-                "**/target/**".into(),
-                "**/node_modules/**".into(),
-                "**/.git/**".into(),
-            ],
+            // Directory NAMES, not globs. `is_excluded` compares path
+            // components, so `**/target/**` matched nothing and this indexed
+            // `target/`, `node_modules/` and `.git/` in full. These three are
+            // already in `default_exclude_patterns`, which now always applies,
+            // so this list is belt-and-braces rather than the only guard.
+            exclude_patterns: vec!["target".into(), "node_modules".into(), ".git".into()],
         };
         match self
             .code_index
