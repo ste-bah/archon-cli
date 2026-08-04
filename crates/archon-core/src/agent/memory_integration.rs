@@ -1,5 +1,20 @@
 use super::*;
 
+/// Token budget handed to [`MemoryInjector::inject`] each turn.
+const MEMORY_INJECTION_BUDGET_TOKENS: usize = 500;
+
+/// How many past corrections are surfaced into the system prompt.
+const RECALLED_CORRECTION_LIMIT: usize = 5;
+
+/// What the blocking memory queries produced, carried back to the async side.
+struct RecalledMemories {
+    injected: Result<String, archon_memory::MemoryError>,
+    corrections: Result<
+        Vec<archon_consciousness::corrections::Correction>,
+        archon_consciousness::corrections::CorrectionError,
+    >,
+}
+
 impl Agent {
     /// Append the inner voice `<inner_voice>` block to the system prompt
     /// for this turn, if the feature is enabled.
@@ -42,11 +57,19 @@ impl Agent {
     }
 
     /// GAP 7: Inject recalled memories into the system prompt for this turn.
-    pub(super) fn inject_memories(&mut self) -> Vec<serde_json::Value> {
+    ///
+    /// The memory work is synchronous, can be slow on a large store, and
+    /// contains no `.await` points. Called inline from an async fn it pinned a
+    /// tokio worker thread for the whole scan and the task never yielded, so
+    /// the cancellation token set by the caller was never polled and Ctrl+C
+    /// could not interrupt the stall. It now runs on the blocking pool: the
+    /// executor stays free, and awaiting the join handle is the yield point at
+    /// which cancellation finally becomes observable.
+    pub(super) async fn inject_memories(&mut self) -> Vec<serde_json::Value> {
         let mut system = self.config.system_prompt.clone();
 
         let graph = match self.memory {
-            Some(ref g) => g,
+            Some(ref g) => Arc::clone(g),
             None => return system,
         };
 
@@ -74,28 +97,19 @@ impl Agent {
                 created_at: chrono::Utc::now().to_rfc3339(),
             });
 
-        // Timed, and reported on EVERY outcome including the empty one.
-        //
-        // This runs on every turn, before the provider is contacted, and scans
-        // whatever the memory store has accumulated -- which grows without
-        // bound. Previously it logged only on error, so a turn that spent
-        // minutes here was indistinguishable from a turn waiting on the model:
-        // no duration, no size, and the success path silent. The elapsed time
-        // is the diagnostic, so it is emitted whether or not anything surfaced.
-        let injection_started = std::time::Instant::now();
-        let injection = self.memory_injector.inject(graph.as_ref(), &context, 500);
-        let injection_ms = injection_started.elapsed().as_millis();
-        match injection {
+        let recalled = match self.recall_off_executor(graph, context).await {
+            Some(recalled) => recalled,
+            // Cancelled, or the blocking task died. Either way there is nothing
+            // to inject and the caller is about to unwind anyway.
+            None => return system,
+        };
+
+        match recalled.injected {
             Ok(memories_text) if !memories_text.is_empty() => {
                 let surfaced = memories_text
                     .lines()
                     .filter(|line| line.trim_start().starts_with("- "))
                     .count();
-                tracing::info!(
-                    elapsed_ms = injection_ms,
-                    surfaced,
-                    "memory injection complete"
-                );
                 self.emit_activity(
                     AgentActivityKind::MemorySurfaced,
                     AgentActivityStatus::Completed,
@@ -106,33 +120,14 @@ impl Agent {
                     "text": memories_text,
                 }));
             }
-            Ok(_) => {
-                // Empty is the case that most looks like a hang: the work still
-                // happened, it just produced nothing to show for it.
-                tracing::info!(
-                    elapsed_ms = injection_ms,
-                    surfaced = 0,
-                    "memory injection complete (no relevant memories)"
-                );
-            }
+            Ok(_) => {} // empty — no relevant memories
             Err(e) => {
-                tracing::warn!(elapsed_ms = injection_ms, "memory injection failed: {e}");
+                tracing::warn!("memory injection failed: {e}");
             }
         }
 
         // Inject recalled corrections relevant to the current context.
-        let ctx_joined = context.join(" ");
-        let tracker = CorrectionTracker::new(graph.as_ref());
-        // Second scan of the same store on the same turn; timed for the same
-        // reason as the injection above.
-        let recall_started = std::time::Instant::now();
-        let recalled = tracker.recall_corrections(&ctx_joined, 5);
-        tracing::info!(
-            elapsed_ms = recall_started.elapsed().as_millis(),
-            recalled = recalled.as_ref().map(Vec::len).unwrap_or(0),
-            "correction recall complete"
-        );
-        match recalled {
+        match recalled.corrections {
             Ok(corrections) if !corrections.is_empty() => {
                 let mut block = String::from(
                     "<past_corrections>\nPrevious user corrections relevant to this context:\n",
@@ -185,6 +180,117 @@ impl Agent {
         }
 
         system
+    }
+
+    /// Drop the memory injector's cached block.
+    ///
+    /// Uses `try_lock` rather than `lock` because the only thing that can hold
+    /// this mutex is an abandoned injection still running on the blocking pool,
+    /// and blocking the async executor waiting for it is precisely the failure
+    /// being fixed. Losing the race is not a reason to skip the invalidation:
+    /// the in-flight task is about to publish a cache entry for a context this
+    /// call is invalidating, so the whole injector is replaced instead. The old
+    /// one stays alive until that task finishes writing into it and is then
+    /// dropped, cache and all.
+    pub(super) fn invalidate_memory_injector_cache(&mut self) {
+        let invalidated_in_place = match self.memory_injector.try_lock() {
+            Ok(mut injector) => {
+                injector.invalidate_cache();
+                true
+            }
+            Err(_) => false,
+        };
+        if !invalidated_in_place {
+            self.memory_injector = Arc::new(std::sync::Mutex::new(MemoryInjector::new()));
+        }
+    }
+
+    /// Run the two blocking memory queries off the async executor.
+    ///
+    /// Returns `None` when the caller's cancellation token fired first, or when
+    /// the blocking task itself failed.
+    ///
+    /// The injector is reached through a shared handle rather than moved in.
+    /// `spawn_blocking` work cannot be cancelled, so anything moved into the
+    /// closure is lost for good the moment the caller stops awaiting it —
+    /// including, if it were moved, the injector and its cache.
+    async fn recall_off_executor(
+        &mut self,
+        graph: Arc<dyn MemoryTrait>,
+        context: Vec<String>,
+    ) -> Option<RecalledMemories> {
+        let cancel = self.config.cancel_token.clone();
+        if cancel.as_ref().is_some_and(|token| token.is_cancelled()) {
+            tracing::debug!("memory injection skipped: turn already cancelled");
+            return None;
+        }
+
+        let injector = Arc::clone(&self.memory_injector);
+        let handle = tokio::task::spawn_blocking(move || {
+            // Timed and reported on EVERY outcome, including the empty one.
+            //
+            // This runs on every turn before the provider is contacted and
+            // scans a store that grows without bound. When it previously logged
+            // only on error, a turn that spent 38 minutes here was
+            // indistinguishable from a turn waiting on the model -- no
+            // duration, no counts, and the success path silent. The elapsed
+            // time IS the diagnostic, so it is emitted whether or not anything
+            // surfaced; an empty result that took minutes is the case that most
+            // looks like a hang.
+            let started = std::time::Instant::now();
+            let injected = match injector.lock() {
+                Ok(mut injector) => {
+                    injector.inject(graph.as_ref(), &context, MEMORY_INJECTION_BUDGET_TOKENS)
+                }
+                // A poisoned injector means a previous injection panicked. The
+                // cache is only a memoisation, so recover rather than escalate.
+                Err(poisoned) => poisoned.into_inner().inject(
+                    graph.as_ref(),
+                    &context,
+                    MEMORY_INJECTION_BUDGET_TOKENS,
+                ),
+            };
+            let injection_ms = started.elapsed().as_millis();
+            let tracker = CorrectionTracker::new(graph.as_ref());
+            let recall_started = std::time::Instant::now();
+            let corrections =
+                tracker.recall_corrections(&context.join(" "), RECALLED_CORRECTION_LIMIT);
+            tracing::info!(
+                injection_ms,
+                injection_bytes = injected.as_ref().map(String::len).unwrap_or(0),
+                recall_ms = recall_started.elapsed().as_millis(),
+                recalled = corrections.as_ref().map(Vec::len).unwrap_or(0),
+                "memory recall complete"
+            );
+            RecalledMemories {
+                injected,
+                corrections,
+            }
+        });
+
+        let joined = match cancel {
+            Some(token) => tokio::select! {
+                biased;
+                () = token.cancelled() => {
+                    // The blocking thread cannot be pre-empted: the scan keeps
+                    // running and keeps a blocking-pool thread busy until it
+                    // finishes. What this buys is that the *turn* stops waiting
+                    // for it, and that the executor was never blocked at all.
+                    tracing::debug!("memory injection abandoned: turn cancelled");
+                    return None;
+                }
+                joined = handle => joined,
+            },
+            None => handle.await,
+        };
+
+        match joined {
+            Ok(recalled) => Some(recalled),
+            Err(error) => {
+                tracing::warn!("memory injection task failed: {error}");
+                None
+            }
+        }
     }
 
     /// Detect correction patterns in user input and record via CorrectionTracker.

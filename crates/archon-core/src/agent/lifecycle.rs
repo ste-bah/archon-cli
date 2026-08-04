@@ -34,7 +34,7 @@ impl Agent {
             plan_store: None,
             turn_number: 0,
             memory: None,
-            memory_injector: MemoryInjector::new(),
+            memory_injector: Arc::new(std::sync::Mutex::new(MemoryInjector::new())),
             extraction_config: ExtractionConfig::default(),
             extraction_state: ExtractionState::default(),
             auto_extractor: None,

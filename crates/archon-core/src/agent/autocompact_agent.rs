@@ -122,7 +122,7 @@ impl Agent {
             )) => {
                 self.state.messages = compacted;
                 self.state.last_known_context_tokens = 0;
-                self.memory_injector.invalidate_cache();
+                self.invalidate_memory_injector_cache();
                 self.state.auto_compact.on_success(after_estimated_tokens);
                 self.send_event(AgentEvent::CompactionTriggered).await;
                 Ok(())

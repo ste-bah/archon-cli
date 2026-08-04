@@ -86,6 +86,7 @@ async fn auto_extraction_prune_keeps_only_unfinished_tasks() {
 }
 
 include!("tests/correction_matching.rs");
+include!("tests/memory_injection_blocking.rs");
 include!("segment_compaction_runtime_tests.rs");
 
 #[tokio::test]

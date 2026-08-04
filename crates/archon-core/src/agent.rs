@@ -120,7 +120,11 @@ pub struct Agent {
     turn_number: u64,
     // GAP 5/7: Memory graph + injector for per-turn injection and auto-extraction
     memory: Option<Arc<dyn MemoryTrait>>,
-    memory_injector: MemoryInjector,
+    /// Shared so the per-turn recall can run on the blocking pool without
+    /// taking ownership of it. A `spawn_blocking` task cannot be cancelled, so
+    /// anything moved into one is unrecoverable if the caller stops waiting —
+    /// a handle keeps the injector, and its cache, owned by the agent.
+    memory_injector: Arc<std::sync::Mutex<MemoryInjector>>,
     extraction_config: ExtractionConfig,
     extraction_state: ExtractionState,
     // v0.1.23: AutoExtraction (LLM-based) learning system.

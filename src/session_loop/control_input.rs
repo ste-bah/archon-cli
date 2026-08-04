@@ -40,7 +40,7 @@ pub(super) async fn handle_control_input(input: &str, ctx: ControlInputContext<'
         return true;
     }
     if input == "__cancel__" {
-        cancel_inflight_turn(ctx.adapter, ctx.dispatcher);
+        cancel_inflight_turn(ctx.adapter, ctx.dispatcher, ctx.session_id);
         return true;
     }
     if let Some(rest) = input.strip_prefix("__mcp_action__ ") {
@@ -59,14 +59,29 @@ pub(super) async fn handle_control_input(input: &str, ctx: ControlInputContext<'
 fn cancel_inflight_turn(
     adapter: &Arc<crate::agent_handle::AgentHandle>,
     dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
+    session_id: &str,
 ) {
     adapter.fire_cancel();
+    // Release whatever the aborted turn was holding in topology admission.
+    //
+    // Claims are taken at admission and released by `on_tool_run_outcome`,
+    // which a cancelled attempt never reaches. Without this, a spawn's
+    // live-agent slot and a write's path claims survive the turn that took
+    // them, and every later write in the session is refused as conflicting
+    // with a claim nothing holds -- so one Ctrl+C breaks the session until
+    // restart. Cancelling is normal operation, not an edge case, so this runs
+    // unconditionally and is a no-op when admission is disabled or the session
+    // is untracked.
+    crate::command::topology_admission::reset_session(session_id);
     match dispatcher.lock().unwrap().cancel_current() {
         archon_tui::CancelOutcome::NoInflight => {
             tracing::debug!("Ctrl+C: no in-flight turn to cancel");
         }
         archon_tui::CancelOutcome::Aborted { elapsed_ms } => {
-            tracing::info!("Ctrl+C: aborted in-flight turn (elapsed_ms={elapsed_ms})");
+            tracing::info!(
+                elapsed_ms,
+                "Ctrl+C: aborted in-flight turn; released topology admission claims"
+            );
         }
     }
 }
