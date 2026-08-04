@@ -347,16 +347,66 @@ archon workflow lint --tasks tasks/PRD-<NAME>/
 archon requirements trace --prd prds/PRD-<NAME>/PRD-<NAME>.md --tasks tasks/PRD-<NAME>/
 ```
 
-The lint's `## requirement coverage` section looks for the PRD as a **sibling
-of the task directory**. Because PRDs live under `prds/`, that section reports
-`no PRD found beside tasks/PRD-<NAME>/; skipped` and names the paths it tried.
-That is expected. `archon requirements trace` takes both paths explicitly and
-is the authoritative coverage and traceability check — use its output.
+The lint's `## requirement coverage` section resolves the PRD from the task
+directory. It tries the §3.1 adjacent layout first (`<parent>/<id>.md`), then
+the `prds/` root this pipeline writes to — `prds/<id>/<id>.md`, `prds/<id>.md`,
+and `prds/<id>/PRD.md`. If none exists it names every path it tried and skips
+rather than guessing, because a coverage report computed against the wrong
+document is worse than none.
+
+`archon requirements trace` takes both paths explicitly, and is the
+authoritative traceability check — the lint's coverage section is a convenience.
 
 A requirement is reported satisfied only when a declared verifier command
 actually ran and passed **and** the trace shows that run read the anchored
 file. Both halves come from the task file: the command from `## Focused
 Tests`, the anchor from `## Files Expected to Change`.
+
+## Step 4 — run the workflow
+
+```bash
+archon workflow run --decomposed --live --yes \
+  "implement the decomposed PRD in /abs/path/to/repo/tasks/PRD-TRADING-DATA-LAKE-AHDM-001"
+```
+
+The task text is not decoration — it is how the run finds its work. Two things
+must both be true of it, and if either is missing the run refuses rather than
+proceeding with an empty task graph.
+
+**1. It must look like a decomposed-PRD run.** The planner only loads a task
+universe when the text contains one of three markers, matched
+case-insensitively: `decomposed prd`, `task-*.md`, or `/tasks/prd-`. Because
+this pipeline writes to `tasks/PRD-<NAME>/`, naming the directory satisfies the
+third by construction — but only if you spell the path with forward slashes.
+
+**2. The path must be absolute.** Path tokens are scraped from the text and
+only absolute ones are considered — `/…` on Unix, `C:\…` or `C:/…` on Windows.
+A relative `tasks/PRD-<NAME>/` yields no roots, and the run fails with
+*"generated decomposed PRD workflow requires local TASK-\*.md evidence before
+planning"*. That refusal is deliberate: silently planning nothing looks
+identical to planning correctly right up until the run reports success having
+done nothing.
+
+Nothing relates the task directory to the PRD's location, so `prds/` and
+`tasks/` being separate roots costs nothing here.
+
+The flags:
+
+| Flag | Effect |
+|------|--------|
+| `--decomposed` | Use the decomposed-PRD lifecycle. **Required** — the default is the v3 authored-script lifecycle, which is a different engine and will not read your task files. |
+| `--live` | Use the configured provider. Without it the run is a deterministic smoke run that executes no agents. |
+| `--yes` | Approve a non-interactive live run. Omit it inside the TUI, where you approve at the prompt. |
+| `--resume-from <RUN_ID>` | Resume a prior run, reusing its accepted and no-op calls. |
+
+Use `archon workflow plan --decomposed <task text>` first to see the generated
+plan without executing it. To watch a run that is already going, or to pick one
+up afterwards:
+
+```bash
+archon workflow status <run-id>
+archon workflow continue <run-id>
+```
 
 ## Ordering-only dependencies
 
