@@ -55,6 +55,25 @@ print(extensibility._has_redos_structure(pattern))
 
         self.assertEqual(completed.stdout.strip(), "True")
 
+    def test_nested_optional_groups_scan_within_deadline(self):
+        code = f"""
+import sys
+sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
+import extensibility
+pattern = ('(' * 20000) + 'a' + (')?' * 20000)
+print(extensibility._has_redos_structure(pattern))
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            timeout=1,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "False")
+
     def test_detector_does_not_use_alternation_regex_on_untrusted_input(self):
         source = (PLUGIN_SCRIPTS / "extensibility.py").read_text(encoding="utf-8")
 

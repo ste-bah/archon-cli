@@ -224,8 +224,8 @@ def _split_unescaped_alternation(group: str) -> List[str]:
 
 
 def _repeated_groups(regex: str):
-    """Yield repeated groups as ``(contents, quantifier, is_flat)`` tuples."""
-    stack: List[Tuple[int, bool, bool]] = []
+    """Yield flat repeated alternations and detect nested quantifiers in one pass."""
+    stack: List[Tuple[int, bool, bool, bool]] = []
     escaped = False
     in_class = False
     for index, char in enumerate(regex):
@@ -244,41 +244,28 @@ def _repeated_groups(regex: str):
             continue
         if char == "(":
             if stack:
-                start, _, has_alternation = stack[-1]
-                stack[-1] = (start, True, has_alternation)
-            stack.append((index + 1, False, False))
+                start, _, has_alternation, has_quantifier = stack[-1]
+                stack[-1] = (start, True, has_alternation, has_quantifier)
+            stack.append((index + 1, False, False, False))
+            continue
+        if char in "+*" and stack:
+            start, nested, has_alternation, _ = stack[-1]
+            stack[-1] = (start, nested, has_alternation, True)
             continue
         if char == "|" and stack:
-            start, nested, _ = stack[-1]
-            stack[-1] = (start, nested, True)
+            start, nested, _, has_quantifier = stack[-1]
+            stack[-1] = (start, nested, True, has_quantifier)
             continue
         if char == ")" and stack:
-            start, nested, has_alternation = stack.pop()
-            if index + 1 < len(regex) and regex[index + 1] in "+*?":
-                yield regex[start:index], regex[index + 1], not nested and has_alternation
-
-
-def _group_has_nested_quantifier(group: str) -> bool:
-    """Return whether a group's contents contain a nested ``+`` or ``*``."""
-    escaped = False
-    in_class = False
-    for char in group:
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\":
-            escaped = True
-            continue
-        if in_class:
-            if char == "]":
-                in_class = False
-            continue
-        if char == "[":
-            in_class = True
-            continue
-        if char in "+*":
-            return True
-    return False
+            start, nested, has_alternation, has_quantifier = stack.pop()
+            quantifier = regex[index + 1] if index + 1 < len(regex) else ""
+            if stack and quantifier in "+*":
+                parent_start, parent_nested, parent_alternation, _ = stack[-1]
+                stack[-1] = (parent_start, parent_nested, parent_alternation, True)
+            if quantifier in "+*?" and has_quantifier:
+                yield None, quantifier, False, True
+            elif quantifier in "+*" and not nested and has_alternation:
+                yield regex[start:index], quantifier, True, False
 
 
 def _strip_group_prefix(group: str) -> Optional[str]:
@@ -300,10 +287,10 @@ def _strip_group_prefix(group: str) -> Optional[str]:
 
 def _has_redos_structure(regex: str) -> bool:
     """Heuristic catastrophic-backtracking check using deterministic scanning."""
-    for group, quantifier, is_flat_alternation in _repeated_groups(regex):
-        if _group_has_nested_quantifier(group):
+    for group, quantifier, is_flat_alternation, has_nested_quantifier in _repeated_groups(regex):
+        if has_nested_quantifier:
             return True
-        if quantifier not in "+*" or not is_flat_alternation:
+        if not is_flat_alternation:
             continue
         group = _strip_group_prefix(group)
         if group is None:
