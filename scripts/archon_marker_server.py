@@ -72,13 +72,27 @@ def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
         raise ValueError("non-loopback --host requires --allow-non-loopback")
 
 
+def is_within_pdf_root(root: str, candidate: str) -> bool:
+    """Confirm a candidate parent is the same filesystem object as the PDF root."""
+    ancestor = os.path.dirname(candidate)
+    while True:
+        if os.path.samefile(ancestor, root):
+            return True
+        parent = os.path.dirname(ancestor)
+        if parent == ancestor:
+            return False
+        ancestor = parent
+
+
 def resolve_pdf_path(pdf_root: Path, requested: str) -> Path:
     """Return an existing PDF only when its canonical path is within ``pdf_root``."""
     try:
         root = os.path.realpath(os.fspath(pdf_root), strict=True)
         candidate = os.path.realpath(os.path.expanduser(requested), strict=True)
         common = os.path.commonpath((root, candidate))
-        if os.path.normcase(common) != os.path.normcase(root):
+        if common != root:
+            raise ValueError
+        if not is_within_pdf_root(root, candidate):
             raise ValueError
         resolved = Path(candidate)
         if resolved.suffix.lower() != ".pdf" or not resolved.is_file():

@@ -108,14 +108,27 @@ class MarkerServerSecurityTests(unittest.TestCase):
         commonpath.assert_not_called()
         path.assert_not_called()
 
-    def test_resolve_pdf_path_accepts_case_varied_common_root(self):
+    def test_resolve_pdf_path_rejects_commonpath_match_without_ancestor_identity(self):
         root = str(self.root.resolve())
-        with mock.patch.object(server.os.path, "commonpath", return_value=root.swapcase()):
-            with mock.patch.object(server.os.path, "normcase", side_effect=str.lower):
+        with (
+            mock.patch.object(server.os.path, "commonpath", return_value=root),
+            mock.patch.object(server.os.path, "samefile", return_value=False) as samefile,
+        ):
+            with self.assertRaisesRegex(ValueError, r"^invalid pdf_path$"):
+                server.resolve_pdf_path(self.root.resolve(), str(self.pdf))
+
+        self.assertGreater(samefile.call_count, 0)
+
+    def test_resolve_pdf_path_accepts_commonpath_root_casing_with_ancestor_identity(self):
+        root = str(self.root.resolve())
+        with mock.patch.object(server.os.path, "commonpath", return_value=root):
+            with mock.patch.object(server.os.path, "samefile", wraps=server.os.path.samefile) as samefile:
                 self.assertEqual(
                     server.resolve_pdf_path(self.root.resolve(), str(self.pdf)),
                     self.pdf.resolve(),
                 )
+
+        samefile.assert_any_call(root, root)
 
     def test_resolve_pdf_path_maps_commonpath_value_error_to_invalid_path(self):
         with mock.patch.object(server.os.path, "commonpath", side_effect=ValueError):
