@@ -65,7 +65,7 @@ impl Agent {
         agentic_iterations: u32,
     ) -> Result<PreparedTurnRequest, AgentLoopError> {
         self.fire_before_prompt_build_hook(agentic_iterations).await;
-        let mut system = self.inject_memories();
+        let mut system = self.inject_memories().await;
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
         self.inject_turn_requirements(&mut system);

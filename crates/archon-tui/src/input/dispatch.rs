@@ -8,7 +8,7 @@
 
 use crate::app::App;
 use crate::keybindings::{Action, KeyMap};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, KeyModifiers};
 
 /// Result of handling a key event. `session_loop` handles async I/O.
 pub enum KeyResult {
@@ -23,9 +23,35 @@ pub enum KeyResult {
 /// Overlay-modal keys (session picker, MCP manager, etc.) stay in
 /// `event_loop::input`.
 pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
-    let Some(action) = keymap.resolve(key) else {
-        return KeyResult::Nothing;
+    let resolved = keymap.resolve(key).cloned();
+    let action = match resolved {
+        Some(action) => action,
+        // Any printable character the keymap does not enumerate still types.
+        //
+        // The keymap is an explicit ASCII list, so a UK keyboard's `£` and `¬`
+        // -- which crossterm delivers verbatim as `Char('£')` / `Char('¬')` --
+        // resolved to nothing and the key silently did nothing. Extending the
+        // list would only move the boundary: it cannot enumerate every layout's
+        // characters, and each omission fails the same silent way.
+        //
+        // CONTROL and ALT are excluded so an unbound chord (Ctrl+A, Alt+F4)
+        // keeps doing nothing rather than typing a stray letter; SHIFT alone is
+        // just a shifted character. Control characters are excluded because
+        // Enter, Tab and Backspace arrive as their own `KeyCode`s, not as
+        // `Char`, so anything reaching here as a control char is not text.
+        None => match key.code {
+            crossterm::event::KeyCode::Char(c)
+                if !c.is_control()
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                Action::CharInput(c)
+            }
+            _ => return KeyResult::Nothing,
+        },
     };
+    let action = &action;
 
     if app.activity_stream.is_foreground() {
         return handle_activity_key(app, action);

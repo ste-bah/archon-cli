@@ -209,11 +209,36 @@ impl Default for KeyMap {
                 Action::CharInput(c),
             );
         }
-        for pair in SHIFT_PAIRS {
-            let (base, shifted) = *pair;
+
+        // Insert the character the terminal reports, whatever layout produced
+        // it. The OS has already resolved the keypress; our job is to accept
+        // the answer, not re-derive it.
+        //
+        // This replaces a hardcoded US table (`('2', '@')`, `('\'', '"')`, …)
+        // that mapped the *unshifted* key to a US symbol. On a UK keyboard that
+        // table is wrong in both directions: `?` is Shift+/ and was absent
+        // entirely, `@` is Shift+' and `~` is Shift+#, so those keys silently
+        // did nothing — the event arrived as `Char('?')` WITH shift, and only
+        // `Char('?')` with NONE was bound. Confirmed against a real UK terminal:
+        // Shift+2 emits `Char('"')` + SHIFT, so the base-key mapping the table
+        // assumed never fires there at all.
+        //
+        // A layout setting in config would be the wrong fix: it needs a table
+        // per layout, and breaks for anyone who switches layout mid-session.
+        // Letters are deliberately excluded. crossterm normalises `Char('A')`
+        // + NONE and `Char('a')` + SHIFT to the SAME hash key, so a blanket
+        // identity binding inserted after the NONE loop above silently
+        // overwrites `CharInput('A')` with `CharInput('a')` and breaks every
+        // capital letter. `char_input_uppercase` catches it; the symbols below
+        // have no such collision because their shifted form is a different
+        // character entirely, not a case variant.
+        for &c in ASCII_PRINTABLE {
+            if c.is_ascii_alphabetic() {
+                continue;
+            }
             bindings.insert(
-                KeyEvent::new(KeyCode::Char(base), KeyModifiers::SHIFT),
-                Action::CharInput(shifted),
+                KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT),
+                Action::CharInput(c),
             );
         }
 
@@ -240,30 +265,6 @@ const ASCII_PRINTABLE: &[char] = &[
     'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
     'Z', '[', '\\', ']', '^', '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
     'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~',
-];
-
-/// (unshifted, shifted) pairs for symbol keys where Shift changes the output.
-const SHIFT_PAIRS: &[(char, char)] = &[
-    ('1', '!'),
-    ('2', '@'),
-    ('3', '#'),
-    ('4', '$'),
-    ('5', '%'),
-    ('6', '^'),
-    ('7', '&'),
-    ('8', '*'),
-    ('9', '('),
-    ('0', ')'),
-    ('-', '_'),
-    ('=', '+'),
-    ('[', '{'),
-    (']', '}'),
-    ('\\', '|'),
-    (';', ':'),
-    ('\'', '"'),
-    (',', '<'),
-    ('.', '>'),
-    ('`', '~'),
 ];
 
 #[cfg(test)]
@@ -492,5 +493,25 @@ mod tests {
         assert!(Action::CharInput('x').is_char_input());
         assert!(!Action::Quit.is_char_input());
         assert!(!Action::Submit.is_char_input());
+    }
+
+    /// Non-US layouts must be able to type their symbols.
+    ///
+    /// This replaced a hardcoded US pair table under which `?` (Shift+/ on a UK
+    /// keyboard) was absent entirely and `@` / `~` sat on different keys than
+    /// it assumed, so those keys silently did nothing. Terminals resolve the
+    /// layout and report the resulting character with SHIFT set, so each
+    /// printable character is bound to itself under SHIFT.
+    #[test]
+    fn shifted_symbols_resolve_on_non_us_layouts() {
+        let km = KeyMap::default();
+        for c in ['?', '@', '~', '"', ':', '_', '+'] {
+            let shifted = KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT);
+            assert_eq!(
+                km.resolve(shifted),
+                Some(&Action::CharInput(c)),
+                "shifted {c:?} must insert {c:?}"
+            );
+        }
     }
 }

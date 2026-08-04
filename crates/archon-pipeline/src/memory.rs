@@ -182,6 +182,10 @@ pub async fn search_for_prompt(
             text: Some(query.to_string()),
             date_from: filters.time_range.map(|(from, _)| from),
             date_to: filters.time_range.map(|(_, to)| to),
+            // Unbounded, as this path has always been: the tag and date filters
+            // below run over the full result set. Bounding it is a separate
+            // decision with its own ranking question.
+            limit: None,
         };
         memories = graph.search_memories(&search_filter)?;
     }

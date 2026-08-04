@@ -272,6 +272,17 @@ impl<'g> CorrectionTracker<'g> {
     }
 
     /// Recall corrections similar to the given context string.
+    ///
+    /// The query is bounded. It used to be issued with no limit at all: the
+    /// whole matching set was materialised and `truncate(limit)` threw away
+    /// everything but the first few rows. That is called once per iteration of
+    /// the agent loop, before the LLM is contacted, so on a large store it was
+    /// the dominant cost of a turn.
+    ///
+    /// The bound handed to the query is [`recall_candidate_window`], not
+    /// `limit`, because the results are re-ranked by severity afterwards -- a
+    /// maximum-severity correction can sit far below the query's own ordering,
+    /// and bounding at `limit` would silently drop it.
     pub fn recall_corrections(
         &self,
         context: &str,
@@ -280,6 +291,7 @@ impl<'g> CorrectionTracker<'g> {
         let filter = SearchFilter {
             memory_type: Some(MemoryType::Correction),
             text: Some(context.to_string()),
+            limit: Some(recall_candidate_window(limit)),
             ..Default::default()
         };
         let memories = self.graph.search_memories(&filter)?;
@@ -400,6 +412,32 @@ fn is_known_severity(severity: f64) -> bool {
     ]
     .into_iter()
     .any(|correction_type| severity == correction_type.severity_multiplier())
+}
+
+/// Candidates fetched per correction the caller asked for.
+///
+/// `recall_corrections` re-ranks by severity after the query returns, so the
+/// query must hand back a pool that is wider than the caller's limit. Bounding
+/// the query at `limit` would mean the top-severity correction is only found
+/// when it also happens to rank in the query's own top `limit`.
+const RECALL_CANDIDATE_FACTOR: usize = 20;
+
+/// Lower bound on that pool, so a small `limit` still ranks over a real set.
+const RECALL_CANDIDATE_FLOOR: usize = 200;
+
+/// How many rows the recall query is allowed to return.
+///
+/// Returns `0` for `limit == 0` (the caller wants nothing; do not query), and
+/// otherwise a value comfortably above `limit` but bounded -- the point of the
+/// change is that this is a number at all, rather than "every matching row in
+/// the store".
+fn recall_candidate_window(limit: usize) -> usize {
+    if limit == 0 {
+        return 0;
+    }
+    limit
+        .saturating_mul(RECALL_CANDIDATE_FACTOR)
+        .max(RECALL_CANDIDATE_FLOOR)
 }
 
 fn sort_corrections(corrections: &mut [Correction]) {

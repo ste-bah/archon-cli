@@ -32,8 +32,21 @@ impl MemoryGraph {
     }
 
     /// Structured search with filters.
+    ///
+    /// Honours [`SearchFilter::limit`]. `None` keeps the historical unbounded
+    /// contract; `Some(n)` returns at most `n` rows, newest first.
+    ///
+    /// The bound is enforced here as well as inside the candidate query so the
+    /// public contract holds for every backend: the FTS `k` bound prunes what
+    /// the database reads, and this truncation pins what the caller can observe
+    /// even on the full-scan fallback path (no FTS index) where there is no `k`
+    /// to push down.
     pub fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-        search::search(&self.db, filter)
+        let mut results = search::search(&self.db, filter)?;
+        if let Some(limit) = filter.limit {
+            results.truncate(limit);
+        }
+        Ok(results)
     }
 
     /// List the most recently created memories (up to `limit`).
