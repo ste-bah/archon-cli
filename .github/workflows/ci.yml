@@ -330,6 +330,20 @@ jobs:
           CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --doc -- --test-threads=1
 
+  python-security-tests:
+    name: Python security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install HTTP test dependencies
+        run: python3 -m pip install fastapi httpx uvicorn
+      - name: Run Issue 115 security tests
+        run: |
+          python3 -m unittest -v \
+            tests/python/test_archon_marker_server.py \
+            tests/python/test_security_guidance_extensibility.py
+
   arch-lint:
     name: arch-lint (D10 spawn-everything)
     runs-on: ubuntu-latest
