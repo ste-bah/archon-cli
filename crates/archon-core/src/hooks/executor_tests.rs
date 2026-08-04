@@ -225,7 +225,12 @@ async fn windows_hook_timeout_kills_descendant_process() {
     let working_dir = dir.path().to_path_buf();
     let invocation = tokio::spawn(async move {
         execute_hook(
-            &config(&command, 3),
+            // 15s, not 3s: the test must observe the descendant ALIVE before the
+            // timeout fires, and the pid-file wait above can take seconds under
+            // load. Three seconds left a one-second probe window and this test
+            // failed 4 runs in 6. The test still proves the descendant is killed
+            // at the timeout; it just no longer races the machine.
+            &config(&command, 15),
             &serde_json::json!({}),
             &working_dir,
             "issue92-session",
@@ -243,9 +248,11 @@ async fn windows_hook_timeout_kills_descendant_process() {
         !invocation.is_finished(),
         "hook invocation ended before timeout probe"
     );
-    let output = tokio::time::timeout(std::time::Duration::from_secs(5), invocation)
+    // Outer bound is a hang guard: the hook's own timeout has already fired by
+    // now, and this exists only so a hang fails rather than blocks the suite.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), invocation)
         .await
-        .expect("hook invocation exceeded its strict outer deadline")
+        .expect("hook invocation exceeded its outer deadline")
         .expect("hook invocation task panicked");
 
     assert_eq!(output.outcome, HookOutcome::Blocking);
@@ -312,7 +319,13 @@ fn windows_file_command(fixture: &std::path::Path) -> String {
 
 #[cfg(windows)]
 async fn wait_for_windows_pid_file(pid_file: &std::path::Path) -> String {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    // Hang guard, not a speed assertion. It must stay comfortably UNDER the
+    // hook timeout in `windows_hook_timeout_kills_descendant_process`: that test
+    // probes `!invocation.is_finished()` after this returns, so the gap between
+    // this bound and the hook timeout IS the probe window. At 2s against a 3s
+    // timeout the window was one second, and under full-suite load the wait
+    // routinely outlasted the timeout it was supposed to precede.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         if let Ok(pid) = std::fs::read_to_string(pid_file) {
             let pid = pid.trim();
@@ -331,7 +344,9 @@ async fn wait_for_windows_pid_file(pid_file: &std::path::Path) -> String {
 
 #[cfg(windows)]
 async fn wait_until_process_is_absent(pid: &str) {
-    for _ in 0..40 {
+    // 20s, not 2s. Killing a process tree and having Windows reap it is not
+    // bounded by anything this test controls, and this is a hang guard.
+    for _ in 0..400 {
         if !windows_process_exists(pid) {
             return;
         }
