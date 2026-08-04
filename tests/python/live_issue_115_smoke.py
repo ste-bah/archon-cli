@@ -33,6 +33,7 @@ class Issue115LiveSmoke(unittest.TestCase):
         self.fail_pdf.write_bytes(b"%PDF-1.4\n")
         self.port = self._preallocate_port()
         self.server = None
+        self.server_exception = None
         self.thread = None
 
     def tearDown(self):
@@ -42,6 +43,7 @@ class Issue115LiveSmoke(unittest.TestCase):
             if self.thread is not None:
                 self.thread.join(timeout=5)
                 self.assertFalse(self.thread.is_alive(), "Uvicorn did not stop")
+                self._raise_server_exception()
         finally:
             self.temp_dir.cleanup()
 
@@ -90,8 +92,18 @@ class Issue115LiveSmoke(unittest.TestCase):
         app = server.build_app("cpu", {}, self.corpus.resolve())
         config = uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="error")
         self.server = uvicorn.Server(config)
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=self._run_server, daemon=True)
         self.thread.start()
+
+    def _run_server(self):
+        try:
+            self.server.run()
+        except BaseException as exception:
+            self.server_exception = exception
+
+    def _raise_server_exception(self):
+        if self.server_exception is not None:
+            raise AssertionError("Uvicorn server thread failed") from self.server_exception
 
     def _wait_for_health(self):
         deadline = time.monotonic() + 5
@@ -108,8 +120,10 @@ class Issue115LiveSmoke(unittest.TestCase):
                     return
             except (OSError, urllib.error.URLError):
                 if self.thread is not None and not self.thread.is_alive():
+                    self._raise_server_exception()
                     self.fail("Uvicorn stopped before becoming healthy")
                 time.sleep(0.05)
+        self._raise_server_exception()
         self.fail("Timed out waiting for Uvicorn /health")
 
     def _request(self, path, payload):
