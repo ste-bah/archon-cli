@@ -46,7 +46,7 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon pipeline cancel <ID>` | Cancel a running declarative pipeline |
 | `archon workflow plan [--live] <TASK>` | Create a provider-neutral dynamic workflow spec without executing it; `--live` uses the configured provider planner |
 | `archon workflow plan --spec-file <PATH>` | Validate and print an existing workflow spec, including provider-neutrality checks |
-| `archon workflow run [--live] <TASK>` | Create and execute a durable dynamic workflow under `.archon/workflows/<run-id>`; without `--live` this is deterministic smoke mode |
+| `archon workflow run --live <TASK>` | Create and execute a durable dynamic workflow under `.archon/workflows/<run-id>`. `--live` is **required** — the deterministic smoke mode was removed and the run refuses without it |
 | `archon workflow run --spec-file <PATH> [--live]` | Execute an existing workflow spec file |
 | `archon workflow run --from-template <NAME> [--live]` | Execute a sanitized saved workflow template |
 | `archon workflow status <RUN_ID>` | Show dynamic workflow status and stage counts |

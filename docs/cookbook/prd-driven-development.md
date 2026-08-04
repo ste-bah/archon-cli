@@ -394,14 +394,46 @@ The flags:
 
 | Flag | Effect |
 |------|--------|
-| `--decomposed` | Use the decomposed-PRD lifecycle. **Required** — the default is the v3 authored-script lifecycle, which is a different engine and will not read your task files. |
-| `--live` | Use the configured provider. Without it the run is a deterministic smoke run that executes no agents. |
+| `--decomposed` | Select the decomposed-PRD lifecycle, which plans directly from the declared task graph. Without it you get the v3 authored-script lifecycle, which has a model author a `workflow.js` and executes that. Both read the task universe — see below. |
+| `--live` | **Required.** Use the configured provider. |
 | `--yes` | Approve a non-interactive live run. Omit it inside the TUI, where you approve at the prompt. |
 | `--resume-from <RUN_ID>` | Resume a prior run, reusing its accepted and no-op calls. |
 
-Use `archon workflow plan --decomposed <task text>` first to see the generated
-plan without executing it. To watch a run that is already going, or to pick one
-up afterwards:
+### Previewing a run
+
+**`--live` is not optional on `run`.** Omitting it does not give you a
+deterministic smoke run — that path was removed. The binary refuses with
+*"legacy deterministic workflow execution was removed by the workflow runtime
+rescue; workflows run through the live V2 runtime."*
+
+**`archon workflow plan` behaves differently with and without `--live`, and
+only one of the two is a preview:**
+
+- **Without `--live`** it emits a fixed four-stage heuristic scaffold —
+  `discover` → `review` → `synthesize` → `quality`. That output is
+  byte-identical for any task text and with or without `--decomposed`; only
+  `name:` and `task:` echo what you passed. It does not read your task files.
+  Use it to see the generic stage shape, not to judge what a run will do.
+- **With `--live`** it goes through the provider planner and produces a
+  task-specific spec. This is the real preview, and it costs one planner call
+  rather than a whole run.
+
+So preview with `archon workflow plan --live <task text>` before committing to
+a run.
+
+### What `--decomposed` does and does not change
+
+It selects the lifecycle. It does **not** control whether your task files are
+read: `extract_task_universe_for_generated_run` is gated on the *task text*
+markers below, not on the flag, so a task text naming a decomposed PRD
+directory loads the task universe either way. The v3 lifecycle then receives
+the task ids, paths and per-file content fingerprints in its authoring brief
+and validates its output against them.
+
+The difference is how the work is planned — straight from the declared graph,
+versus a model-authored script informed by that graph.
+
+To watch a run that is already going, or to pick one up afterwards:
 
 ```bash
 archon workflow status <run-id>

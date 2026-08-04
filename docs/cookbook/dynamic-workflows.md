@@ -53,8 +53,10 @@ Inside the TUI:
 The run is written to `.archon/workflows/<run-id>/`. The parent transcript gets
 compact progress instead of raw agent dumps. TUI runs use the active provider
 configured for the session and emit workflow-scoped rows in Agent Activity.
-Shell runs without `--live` use deterministic smoke execution for cheap
-orchestration tests; pass `--live` when you want real LLM-backed stage agents.
+`--live` is required. Shell runs once fell back to deterministic smoke
+execution for cheap orchestration tests; that path was removed and the binary
+now refuses without it — *"legacy deterministic workflow execution was removed
+by the workflow runtime rescue; workflows run through the live V2 runtime."*
 
 ## Real-world example: repository audit
 
@@ -72,8 +74,12 @@ What to expect:
 - `quality` checks whether the report is usable
 - artifacts land under `.archon/workflows/<run-id>/artifacts/`
 
-If the workflow plan looks too broad, run `plan` first, inspect the YAML, then
-run with a tighter task.
+To preview, use `plan --live` — it goes through the provider planner and
+returns a task-specific spec for one planner call.
+
+Plain `plan`, without `--live`, is not a preview: it emits the fixed four-stage
+heuristic scaffold above, the same YAML for any task text and byte-identical
+with or without `--decomposed`. Only `name:` and `task:` echo what you passed.
 
 ## Real-world example: research scout
 
