@@ -13,10 +13,10 @@ use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths
 use archon_workflow::llm_retry::run_agent_with_transient_retry;
 
 use super::super::workflow_live_runner::{
-    allowed_tools, request_target_repository_root, tier_model_alias, workflow_agent,
-    workflow_agent_ordinal, workflow_agent_session_id,
+    allowed_tools, tier_model_alias, workflow_agent, workflow_agent_ordinal,
+    workflow_agent_session_id,
 };
-use super::super::workflow_live_runner_activity::activity_detail;
+use archon_workflow::stage_activity::{activity_detail, request_target_repository_root};
 
 #[derive(Clone)]
 pub(super) struct LiveV2AgentClient {

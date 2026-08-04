@@ -42,8 +42,6 @@ mod workflow_live_planner;
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
 mod workflow_live_runner;
-#[path = "workflow_live_runner_activity.rs"]
-mod workflow_live_runner_activity;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;

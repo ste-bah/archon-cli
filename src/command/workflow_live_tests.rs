@@ -13,11 +13,11 @@ use archon_workflow::stage_prompt::{
 };
 
 use super::workflow_live_runner::{
-    allowed_tools, request_target_repository_root, workflow_agent_ordinal,
-    workflow_agent_session_id,
+    allowed_tools, workflow_agent_ordinal, workflow_agent_session_id,
 };
 use super::workflow_live_test_support::{InvalidPlanner, boundary_runner, request};
 use super::{spawn_live_workflow, terminal_resume_message};
+use archon_workflow::stage_activity::request_target_repository_root;
 
 #[path = "workflow_live_delivery_lint_tests.rs"]
 mod delivery_lint;
