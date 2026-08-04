@@ -113,7 +113,15 @@ async fn write_payload(
     if let Err(error) = stdin.write_all(payload).await {
         return Some(error);
     }
-    stdin.shutdown().await.err()
+    // Flush and drop rather than `shutdown()`. The hook's child blocks on
+    // stdin reaching EOF -- a PowerShell fixture calling `[Console]::In
+    // .ReadToEnd()` never returns without it -- and dropping the handle is
+    // what closes the pipe. `shutdown()` is the async-write half only.
+    if let Err(error) = stdin.flush().await {
+        return Some(error);
+    }
+    drop(stdin);
+    None
 }
 
 async fn wait_or_terminate(

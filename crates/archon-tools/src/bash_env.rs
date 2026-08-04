@@ -31,6 +31,13 @@ const PASSTHROUGH_VARS: &[&str] = &[
     "WINDIR",
     "COMSPEC",
     "PATHEXT",
+    // Without this, `env_clear()` leaves PowerShell unable to locate its
+    // modules, so cmdlets a hook relies on -- Start-Process, Wait-Process,
+    // Get-Process -- degrade or fail outright. On the GitHub Windows runner
+    // that made hook fixtures never reach their first statement: pid files
+    // were never written and output fixtures hit the process-wait timeout,
+    // symptoms that look like a slow machine and are immune to raising it.
+    "PSMODULEPATH",
     "CARGO_HOME",
     "RUSTUP_HOME",
 ];
@@ -78,6 +85,25 @@ mod tests {
         ]);
 
         assert_eq!(env, vec![("PATH".to_string(), "/usr/bin".to_string())]);
+    }
+
+    #[test]
+    fn strict_allowlist_preserves_windows_powershell_module_path() {
+        let env = sanitize_env([
+            (
+                "PSModulePath",
+                r"C:\Program Files\WindowsPowerShell\Modules",
+            ),
+            ("UNRECOGNIZED_CREDENTIAL", "secret"),
+        ]);
+
+        assert_eq!(
+            env,
+            vec![(
+                "PSModulePath".to_string(),
+                r"C:\Program Files\WindowsPowerShell\Modules".to_string(),
+            )]
+        );
     }
 
     #[test]
