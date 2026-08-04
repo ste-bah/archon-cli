@@ -205,7 +205,7 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.5.0** ([release notes](docs/release-notes/v1.5.0.md))
+- Current version: **v1.5.1** ([release notes](docs/release-notes/v1.5.1.md))
 - Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
 - v1.5.0 gives every run one graph representation: the `TaskGraph` IR, an ambient trace, and synchronous guardrail admission. On top of it, `archon requirements trace` reports a four-level proof ladder (with `--falsify` to check a verifier actually depends on the code it claims to prove) and `archon workflow lint` runs four advisory analyses that can never fail a run. Adds the `/workflow-prd` and `/workflow-prd-spec` skills, and lets SONA tune the four generated-workflow limits plus the implementation-wave fan-out width, all fail-closed below five observations. **Two behaviour changes:** hooks now resolve a POSIX shell on Windows, and `ARCHON_DATA_DIR` means one directory.
 - v1.4.0 makes the JEPA world model actually learn: trainable encoders with stop-gradient and a live collapse gate, dense embedding input in place of hashed excerpt text, a pre-turn advisory hook in the live agent path, and an automatic candidate evaluate/shadow/promote/rollback lifecycle. Also adds the `archon draft` FCDP pipeline with provenance import.
