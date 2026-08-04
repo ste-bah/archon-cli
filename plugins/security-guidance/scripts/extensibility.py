@@ -232,7 +232,7 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
     return "{}" if int(bounds[1]) > 1 else ""
 
 
-def _new_group() -> Dict[str, Any]:
+def _new_group(flag_unsafe: bool) -> Dict[str, Any]:
     """Build bounded state for one group while scanning an untrusted pattern."""
     return {
         "branches": [],
@@ -241,6 +241,7 @@ def _new_group() -> Dict[str, Any]:
         "nested": False,
         "child_alternation": False,
         "has_quantifier": False,
+        "flag_unsafe": flag_unsafe,
         "prefix": "start",
     }
 
@@ -282,7 +283,10 @@ def _consume_group_prefix(group: Dict[str, Any], char: str) -> bool:
         if char == "<":
             group["prefix"] = "lookbehind"
             return True
-        if char in "aiLmsux-":
+        if char in "iLx":
+            group["flag_unsafe"] = True
+            return True
+        if char in "aums-":
             return True
         group["prefix"] = "body"
         return False
@@ -300,6 +304,7 @@ def _consume_group_prefix(group: Dict[str, Any], char: str) -> bool:
 def _repeated_groups(regex: str):
     """Yield unsafe repeated groups using one bounded pass and stack summaries."""
     stack: List[Dict[str, Any]] = []
+    global_flag_unsafe = False
     escaped = False
     in_class = False
     for index, char in enumerate(regex):
@@ -323,9 +328,17 @@ def _repeated_groups(regex: str):
             in_class = True
             continue
         if char == "(":
+            if index + 2 < len(regex) and regex[index + 1] == "?":
+                flags_end = index + 2
+                while flags_end < len(regex) and regex[flags_end] in "aiLmsux-":
+                    flags_end += 1
+                if flags_end < len(regex) and regex[flags_end] == ")":
+                    global_flag_unsafe |= any(flag in "iLx" for flag in regex[index + 2:flags_end])
+                    continue
+            inherited_flag_unsafe = global_flag_unsafe or (stack and stack[-1]["flag_unsafe"])
             if stack:
                 stack[-1]["nested"] = True
-            stack.append(_new_group())
+            stack.append(_new_group(bool(inherited_flag_unsafe)))
             continue
         if not stack:
             continue
@@ -346,6 +359,7 @@ def _repeated_groups(regex: str):
             unsafe = quantifier in ("+", "*", "{}") and (
                 group["has_quantifier"]
                 or direct_ambiguous
+                or (group["direct_alternation"] and group["flag_unsafe"])
                 or (group["nested"] and has_alternation)
             )
             if unsafe:
