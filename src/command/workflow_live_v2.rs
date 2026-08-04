@@ -26,16 +26,11 @@ use archon_workflow::{
 mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
 mod workflow_live_provider_env;
-#[path = "workflow_live_v2_data.rs"]
-mod workflow_live_v2_data;
-#[cfg(test)]
-#[path = "workflow_live_v2_data_tests.rs"]
-mod workflow_live_v2_data_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_frontier_resume_tests.rs"]
 mod workflow_live_v2_frontier_resume_tests;
 
-use workflow_live_v2_data::{
+use archon_workflow::v2::call_data::{
     execution_with_resolved_source, fanout_items_for_call, result_from_fanout_report,
     v2_agent_request,
 };

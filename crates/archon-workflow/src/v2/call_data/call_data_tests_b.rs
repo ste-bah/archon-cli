@@ -286,7 +286,7 @@ fn fanout_branch_inherits_target_files_from_inventory_item() {
         vec!["src/lib.rs", "tests/lib.rs"]
     );
     let spec = WorkflowSpec {
-        schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+        schema: crate::spec::WORKFLOW_SCHEMA.to_string(),
         name: "test".to_string(),
         task: "Implement".to_string(),
         target_repository_root: Some("/repo".to_string()),
@@ -362,7 +362,7 @@ fn fanout_branch_item_targets_override_static_fallback_targets() {
         vec!["crates/archon-trading/src/data_lake.rs"]
     );
     let spec = WorkflowSpec {
-        schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+        schema: crate::spec::WORKFLOW_SCHEMA.to_string(),
         name: "test".to_string(),
         task: "Implement".to_string(),
         target_repository_root: Some("/repo".to_string()),

@@ -1,9 +1,9 @@
 use super::*;
 
 #[derive(Debug)]
-pub(in super::super) struct WorkflowV2NormalizedFanout {
-    pub(in super::super) result: WorkflowV2Result,
-    pub(in super::super) outcomes: Vec<WorkflowV2BranchOutcome>,
+pub struct WorkflowV2NormalizedFanout {
+    pub result: WorkflowV2Result,
+    pub outcomes: Vec<WorkflowV2BranchOutcome>,
 }
 
 impl std::ops::Deref for WorkflowV2NormalizedFanout {
@@ -14,9 +14,9 @@ impl std::ops::Deref for WorkflowV2NormalizedFanout {
     }
 }
 
-pub(in super::super) fn result_from_fanout_report(
+pub fn result_from_fanout_report(
     call: &WorkflowV2HostCall,
-    report: archon_workflow::WorkflowV2FanoutReport,
+    report: crate::WorkflowV2FanoutReport,
 ) -> WorkflowV2NormalizedFanout {
     let peak_parallelism = report.peak_parallelism;
     let max_parallelism = report.max_parallelism;

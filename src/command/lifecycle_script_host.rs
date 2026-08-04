@@ -36,6 +36,6 @@ impl LifecycleHost for WorkflowScriptHost {
     }
 
     fn pack_reduce_source(&self, source: &serde_json::Value) -> serde_json::Value {
-        super::super::workflow_live_v2_data::source_pack_value(source)
+        archon_workflow::v2::source_pack::source_pack_value(source)
     }
 }
