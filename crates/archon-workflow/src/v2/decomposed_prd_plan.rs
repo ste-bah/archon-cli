@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::error::WorkflowResult;
@@ -68,6 +69,52 @@ pub fn decomposed_prd_scaffold(
     descriptor.push_str(&learning_json);
     descriptor.push('\n');
     Ok(descriptor)
+}
+
+/// What each stage family of the deterministic decomposed-PRD lifecycle is for,
+/// keyed by prompt slot.
+///
+/// Recorded with the generated scaffold so a run directory explains its own
+/// shape without the reader having to reconstruct it from the host-call
+/// manifest. It describes the plan [`decomposed_prd_plan_calls`] declares, so
+/// it belongs beside it: a slot table maintained in a different crate from the
+/// plan it describes is a table that drifts from it.
+pub fn decomposed_prd_prompt_slots() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "read_only_discovery".to_string(),
+            "Parallel read-only PRD/task/repository/acceptance audits.".to_string(),
+        ),
+        (
+            "implementation_inventory".to_string(),
+            "Reducer turns taskUniverse plus discovery into dependency-aware implementation items."
+                .to_string(),
+        ),
+        (
+            "implementation_wave".to_string(),
+            "Coder fanout receives only dependency-ready readyImplementationItems with coordinated/worktree write mode."
+                .to_string(),
+        ),
+        (
+            "remediation".to_string(),
+            "Reducer and coder fanout process only non-accepted/non-noop wave outcomes.".to_string(),
+        ),
+        (
+            "verification".to_string(),
+            "Focused read-only verification must pass before completedIds unblock dependents."
+                .to_string(),
+        ),
+        (
+            "adversarial_review".to_string(),
+            "Read-only reducer review and remediation loop check PRD/TASK evidence before final acceptance."
+                .to_string(),
+        ),
+        (
+            "final_acceptance".to_string(),
+            "Final audit/report receive taskUniverse plus implementation, verification, review, and artifact evidence."
+                .to_string(),
+        ),
+    ])
 }
 
 /// The approval-time plan for the deterministic decomposed-PRD lifecycle:

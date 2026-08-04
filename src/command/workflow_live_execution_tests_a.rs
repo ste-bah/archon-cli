@@ -82,7 +82,11 @@ async fn transient_planner_retry_aborts_when_notification_is_rejected() {
         Vec::new(),
         Vec::new(),
         "sonnet",
-        |_| async { anyhow::bail!("retry notification rejected") },
+        |_| async {
+            Err(archon_workflow::WorkflowError::NotificationDelivery(
+                "retry notification rejected".to_string(),
+            ))
+        },
     )
     .await
     .expect_err("rejected notification must prevent transient planner retry");

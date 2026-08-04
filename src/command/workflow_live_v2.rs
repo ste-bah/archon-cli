@@ -34,8 +34,6 @@ mod workflow_live_v2_data_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_frontier_resume_tests.rs"]
 mod workflow_live_v2_frontier_resume_tests;
-#[path = "workflow_live_v2_stable_json.rs"]
-mod workflow_live_v2_stable_json;
 
 use workflow_live_v2_data::{
     execution_with_resolved_source, fanout_items_for_call, result_from_fanout_report,

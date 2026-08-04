@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use crate::llm_retry::run_agent_with_transient_retry;
 use crate::stage_prompt::workflow_stage_system_context;
-use crate::stage_retry::run_agent_with_transient_retry;
 use crate::{
     StageKind, StageRunRequest, WorkflowAgentCall, WorkflowAgentOutcome, WorkflowError,
     WorkflowLlmClient,

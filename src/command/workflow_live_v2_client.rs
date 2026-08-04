@@ -10,7 +10,7 @@ use archon_workflow::{
 
 use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths;
 
-use archon_workflow::stage_retry::run_agent_with_transient_retry;
+use archon_workflow::llm_retry::run_agent_with_transient_retry;
 
 use super::super::workflow_live_runner::{
     allowed_tools, request_target_repository_root, tier_model_alias, workflow_agent,

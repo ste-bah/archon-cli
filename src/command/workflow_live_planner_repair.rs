@@ -32,14 +32,18 @@ impl PlannerFailure {
     }
 }
 
+/// Returns the crate's own error rather than `anyhow`: it is handed to
+/// [`archon_workflow::llm_retry`] as the required retry notification, and that
+/// port speaks `WorkflowResult`. Callers that want `anyhow` still get it — the
+/// `?` conversion is unchanged, and so is the rendered message.
 async fn send_planner_notification(
     ui_sink: &SharedWorkflowUiSink,
     phase: &str,
     event: WorkflowUiEvent,
-) -> Result<()> {
+) -> archon_workflow::WorkflowResult<()> {
     ui_sink.emit(event).await.map_err(|error| {
-        anyhow::Error::from(archon_workflow::WorkflowError::NotificationDelivery(
-            format!("workflow planner notification delivery failed: phase={phase}: {error}"),
+        archon_workflow::WorkflowError::NotificationDelivery(format!(
+            "workflow planner notification delivery failed: phase={phase}: {error}"
         ))
     })
 }
