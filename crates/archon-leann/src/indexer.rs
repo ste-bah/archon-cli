@@ -65,6 +65,14 @@ impl EmbeddingProvider for MockEmbeddingProvider {
 /// Maximum chunks per embedding batch.
 const EMBED_BATCH_SIZE: usize = 64;
 
+/// Files embedded and persisted per group before the next group starts.
+///
+/// This is the resume granularity: a cancel loses at most this many files'
+/// embeddings, and everything before it is already in the store. Small enough
+/// that a Ctrl+C never costs much, large enough that the embedder still sees
+/// full `EMBED_BATCH_SIZE` batches within a group rather than short ones.
+const PERSIST_GROUP_FILES: usize = 32;
+
 struct PendingFile {
     language_name: String,
     file_path: String,
@@ -208,30 +216,75 @@ impl Indexer {
             });
         }
 
-        let Some(prepared) = self.prepare_repository_files(&pending, cancel)? else {
+        let total_pending = pending.len();
+        if total_pending == 0 {
+            tracing::info!("LEANN index up to date; no changed files to embed");
             return Ok(stats);
-        };
-        for (file, chunks) in pending.iter().zip(prepared) {
+        }
+        tracing::info!(
+            files = total_pending,
+            group = PERSIST_GROUP_FILES,
+            "LEANN indexing started"
+        );
+
+        // Embed and persist in groups rather than embedding the whole
+        // repository and only then writing any of it.
+        //
+        // The previous shape embedded every file first, so a cancel during the
+        // embedding pass returned having written nothing -- the entire pass was
+        // discarded and the next run started from zero. On a large corpus that
+        // is an unbounded amount of work you can never bank, and because
+        // `file_hash_matches` skips already-stored files at the top of the
+        // walk, persisting as we go is exactly what makes a re-run resume.
+        //
+        // Groups rather than single files so the embedder keeps a batch worth
+        // of work per call; `EMBED_BATCH_SIZE` still governs the model batch.
+        for (group_index, group) in pending.chunks(PERSIST_GROUP_FILES).enumerate() {
             if is_cancelled(cancel) {
+                tracing::info!(
+                    files_indexed = stats.total_files,
+                    chunks_indexed = stats.total_chunks,
+                    "LEANN indexing cancelled; progress so far is persisted"
+                );
                 return Ok(stats);
             }
-            let outcome = self.file_store().replace_file_with_cancel(
-                &file.file_path,
-                &file.file_hash,
-                &chunks,
-                || is_cancelled(cancel),
-            )?;
-            if matches!(outcome, ReplaceFileOutcome::Cancelled) {
+            let Some(prepared) = self.prepare_repository_files(group, cancel)? else {
+                tracing::info!(
+                    files_indexed = stats.total_files,
+                    chunks_indexed = stats.total_chunks,
+                    "LEANN indexing cancelled during embedding; progress so far is persisted"
+                );
                 return Ok(stats);
+            };
+            for (file, chunks) in group.iter().zip(prepared) {
+                if is_cancelled(cancel) {
+                    return Ok(stats);
+                }
+                let outcome = self.file_store().replace_file_with_cancel(
+                    &file.file_path,
+                    &file.file_hash,
+                    &chunks,
+                    || is_cancelled(cancel),
+                )?;
+                if matches!(outcome, ReplaceFileOutcome::Cancelled) {
+                    return Ok(stats);
+                }
+                if !chunks.is_empty() {
+                    stats.total_files += 1;
+                    stats.total_chunks += chunks.len();
+                    *stats
+                        .languages
+                        .entry(file.language_name.clone())
+                        .or_insert(0) += 1;
+                }
             }
-            if !chunks.is_empty() {
-                stats.total_files += 1;
-                stats.total_chunks += chunks.len();
-                *stats
-                    .languages
-                    .entry(file.language_name.clone())
-                    .or_insert(0) += 1;
-            }
+            let done = ((group_index + 1) * PERSIST_GROUP_FILES).min(total_pending);
+            tracing::info!(
+                done,
+                total = total_pending,
+                chunks = stats.total_chunks,
+                "LEANN indexing progress"
+            );
         }
         Ok(stats)
     }
@@ -440,12 +493,26 @@ fn create_embedder(config: &EmbeddingConfig) -> Result<Arc<dyn EmbeddingProvider
     }
 }
 
+/// Caller patterns EXTEND the defaults; they do not replace them.
+///
+/// Replacing was a footgun with no upside: a caller naming three directories it
+/// cared about silently lost the other nine the defaults cover -- `.venv`,
+/// `dist`, `build`, `__pycache__`, `site-packages`, `.archon` and friends --
+/// and nothing reported the loss. Nobody passing `target` means "and please
+/// start indexing my virtualenv".
+///
+/// A caller that genuinely wants to index a defaulted directory can still do
+/// so, but it has to be a deliberate change here rather than a side effect of
+/// naming something unrelated.
 fn configured_excludes(config: &IndexConfig) -> Vec<String> {
-    if config.exclude_patterns.is_empty() {
-        language::default_exclude_patterns()
-    } else {
-        config.exclude_patterns.clone()
+    let mut excludes = language::default_exclude_patterns();
+    for pattern in &config.exclude_patterns {
+        let normalized = language::normalize_exclude_pattern(pattern).to_string();
+        if !normalized.is_empty() && !excludes.contains(&normalized) {
+            excludes.push(normalized);
+        }
     }
+    excludes
 }
 
 /// Compute SHA-256 hash of content as hex string.
