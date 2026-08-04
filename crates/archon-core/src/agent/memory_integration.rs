@@ -227,6 +227,17 @@ impl Agent {
 
         let injector = Arc::clone(&self.memory_injector);
         let handle = tokio::task::spawn_blocking(move || {
+            // Timed and reported on EVERY outcome, including the empty one.
+            //
+            // This runs on every turn before the provider is contacted and
+            // scans a store that grows without bound. When it previously logged
+            // only on error, a turn that spent 38 minutes here was
+            // indistinguishable from a turn waiting on the model -- no
+            // duration, no counts, and the success path silent. The elapsed
+            // time IS the diagnostic, so it is emitted whether or not anything
+            // surfaced; an empty result that took minutes is the case that most
+            // looks like a hang.
+            let started = std::time::Instant::now();
             let injected = match injector.lock() {
                 Ok(mut injector) => {
                     injector.inject(graph.as_ref(), &context, MEMORY_INJECTION_BUDGET_TOKENS)
@@ -239,9 +250,18 @@ impl Agent {
                     MEMORY_INJECTION_BUDGET_TOKENS,
                 ),
             };
+            let injection_ms = started.elapsed().as_millis();
             let tracker = CorrectionTracker::new(graph.as_ref());
+            let recall_started = std::time::Instant::now();
             let corrections =
                 tracker.recall_corrections(&context.join(" "), RECALLED_CORRECTION_LIMIT);
+            tracing::info!(
+                injection_ms,
+                injection_bytes = injected.as_ref().map(String::len).unwrap_or(0),
+                recall_ms = recall_started.elapsed().as_millis(),
+                recalled = corrections.as_ref().map(Vec::len).unwrap_or(0),
+                "memory recall complete"
+            );
             RecalledMemories {
                 injected,
                 corrections,
