@@ -74,17 +74,19 @@ def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
 
 def resolve_pdf_path(pdf_root: Path, requested: str) -> Path:
     """Return an existing PDF only when its canonical path is within ``pdf_root``."""
-    candidate = Path(requested).expanduser()
-    if candidate.suffix.lower() != ".pdf":
-        raise ValueError("invalid pdf_path")
     try:
-        resolved = candidate.resolve(strict=True)
+        resolved = Path(requested).expanduser().resolve(strict=True)
         resolved.relative_to(pdf_root)
     except (OSError, ValueError):
         raise ValueError("invalid pdf_path") from None
-    if not resolved.is_file():
+    if resolved.suffix.lower() != ".pdf" or not resolved.is_file():
         raise ValueError("invalid pdf_path")
     return resolved
+
+
+# Marker pages are rendered into memory; accepting more than 1,000 pages in one
+# request defeats the server's bounded, document-oriented conversion contract.
+PAGE_RANGE_MAX_PAGES = 1000
 
 
 def parse_page_range(spec: "str | None") -> "list[int] | None":
@@ -95,9 +97,15 @@ def parse_page_range(spec: "str | None") -> "list[int] | None":
     """
     if not spec:
         return None
-    start, end = (int(x) for x in spec.split("-", 1))
-    if end < start:
-        raise ValueError(f"reversed/empty page_range: start {start} > end {end}")
+    try:
+        start_text, end_text = spec.split("-", 1)
+        if not start_text.isdecimal() or not end_text.isdecimal():
+            raise ValueError
+        start, end = int(start_text), int(end_text)
+    except (AttributeError, ValueError):
+        raise ValueError("invalid page_range") from None
+    if end < start or end - start + 1 > PAGE_RANGE_MAX_PAGES:
+        raise ValueError("invalid page_range")
     return list(range(start, end + 1))
 
 
@@ -168,11 +176,17 @@ def build_app(device: str, models: "dict", pdf_root: Path):
     Extracted from `main` so the OOM ladder and endpoints are testable (TestClient + fake
     `models`) without a real GPU.
     """
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Request
+    from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, Response
     from pydantic import BaseModel
 
     app = FastAPI(title="archon-marker-server")
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_request: Request, _exc: RequestValidationError):
+        return JSONResponse(status_code=400, content={"error": "invalid request"})
+
     # Marker conversion is not assumed thread-safe on shared models; archon ingests
     # sequentially anyway, so serialize conversions.
     convert_lock = threading.Lock()

@@ -343,6 +343,8 @@ jobs:
           python3 -m unittest -v \
             tests/python/test_archon_marker_server.py \
             tests/python/test_security_guidance_extensibility.py
+      - name: Run Issue 115 live smoke
+        run: python3 tests/python/live_issue_115_smoke.py
 
   arch-lint:
     name: arch-lint (D10 spawn-everything)

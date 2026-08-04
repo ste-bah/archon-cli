@@ -18,6 +18,7 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             r"(a|aa)*",
             r"(ab|a)+",
             r"(?:cat|catalog)*",
+            r"(?:a|aa){1000000000}$",
             r"(a|)*",
             r"(?:|a)+",
             r"(a\|b|a\|bc)*",
@@ -27,7 +28,7 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             r"([)]a|[)]aa)*",
             "(" + ("+" * 20000) + ")*",
         )
-        safe = (r"(a|b)*", r"(?:cat|dog)+", r"^hello+$", r"foo\\|bar")
+        safe = (r"(a|b)*", r"(?:cat|dog)+", r"(?:a|aa){1}", r"^hello+$", r"foo\\|bar")
 
         for pattern in dangerous:
             with self.subTest(pattern=pattern):
@@ -35,6 +36,16 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
         for pattern in safe:
             with self.subTest(pattern=pattern):
                 self.assertFalse(extensibility._has_redos_structure(pattern))
+
+    def test_rejects_custom_regexes_over_explicit_length_cap(self):
+        pattern = "a" * (extensibility.CUSTOM_REGEX_MAX_CHARS + 1)
+
+        self.assertIsNone(
+            extensibility._validate_pattern(
+                {"rule_name": "too-long", "reminder": "test", "regex": pattern},
+                source="test",
+            )
+        )
 
     def test_pathological_alternation_scan_completes_within_deadline(self):
         code = f"""

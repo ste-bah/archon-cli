@@ -36,6 +36,9 @@ from _base import debug_log
 
 PATTERN_MAX_RULES = 50
 PATTERN_REMINDER_MAX_BYTES = 1024
+# Custom patterns run in the PostToolUse hook. 4 KiB bounds config validation
+# and the regex text handed to the matcher without constraining normal rules.
+CUSTOM_REGEX_MAX_CHARS = 4096
 
 PATTERNS_BASENAMES = ("security-patterns.yaml", "security-patterns.yml", "security-patterns.json")
 
@@ -156,6 +159,9 @@ def _validate_pattern(entry: Any, source: str) -> Optional[Dict[str, Any]]:
     if substrings:
         rule["substrings"] = substrings
     if regex:
+        if len(regex) > CUSTOM_REGEX_MAX_CHARS:
+            debug_log(f"extensibility: skipping {name}: regex exceeds {CUSTOM_REGEX_MAX_CHARS} characters")
+            return None
         if _has_redos_structure(regex):
             debug_log(f"extensibility: skipping {name}: regex looks ReDoS-prone: {regex!r:.60}")
             return None
@@ -223,6 +229,30 @@ def _split_unescaped_alternation(group: str) -> List[str]:
     return branches
 
 
+def _group_quantifier(regex: str, closing_index: int) -> str:
+    """Return the quantifier beginning after a closed group, if supported."""
+    if closing_index + 1 >= len(regex):
+        return ""
+    quantifier = regex[closing_index + 1]
+    if quantifier in "+*?":
+        return quantifier
+    if quantifier != "{":
+        return ""
+    end = regex.find("}", closing_index + 2)
+    if end == -1:
+        return ""
+    bounds = regex[closing_index + 2:end].split(",", 1)
+    if not bounds[0].isdecimal():
+        return ""
+    if len(bounds) == 1:
+        return "{}" if int(bounds[0]) > 1 else ""
+    if bounds[1] and not bounds[1].isdecimal():
+        return ""
+    if not bounds[1]:
+        return "{}"
+    return "{}" if int(bounds[1]) > 1 else ""
+
+
 def _repeated_groups(regex: str):
     """Yield flat repeated alternations and detect nested quantifiers in one pass."""
     stack: List[Tuple[int, bool, bool, bool]] = []
@@ -258,13 +288,13 @@ def _repeated_groups(regex: str):
             continue
         if char == ")" and stack:
             start, nested, has_alternation, has_quantifier = stack.pop()
-            quantifier = regex[index + 1] if index + 1 < len(regex) else ""
-            if stack and quantifier in "+*":
+            quantifier = _group_quantifier(regex, index)
+            if stack and quantifier in ("+", "*", "{}"):
                 parent_start, parent_nested, parent_alternation, _ = stack[-1]
                 stack[-1] = (parent_start, parent_nested, parent_alternation, True)
-            if quantifier in "+*?" and has_quantifier:
+            if quantifier in ("+", "*", "?", "{}") and has_quantifier:
                 yield None, quantifier, False, True
-            elif quantifier in "+*" and not nested and has_alternation:
+            elif quantifier in ("+", "*", "{}") and not nested and has_alternation:
                 yield regex[start:index], quantifier, True, False
 
 

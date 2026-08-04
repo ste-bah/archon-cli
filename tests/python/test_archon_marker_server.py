@@ -69,6 +69,14 @@ class MarkerServerSecurityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r"^invalid pdf_path$"):
                     server.resolve_pdf_path(self.root.resolve(), str(requested))
 
+        alias_to_non_pdf = self.root / "alias.pdf"
+        try:
+            alias_to_non_pdf.symlink_to(notes)
+        except OSError:
+            self.skipTest("symlinks are unavailable on this platform")
+        with self.assertRaisesRegex(ValueError, r"^invalid pdf_path$"):
+            server.resolve_pdf_path(self.root.resolve(), str(alias_to_non_pdf))
+
     def test_validate_bind_host_allows_loopback_hosts_without_opt_in(self):
         for host in ("127.0.0.1", "127.0.0.42", "::1", "localhost"):
             with self.subTest(host=host):
@@ -115,7 +123,7 @@ class MarkerServerSecurityTests(unittest.TestCase):
                 run_marker.assert_not_called()
 
     def test_convert_rejects_malformed_and_reversed_page_ranges(self):
-        for page_range in ("not-a-range", "3-1"):
+        for page_range in ("not-a-range", "3-1", "0-1000000000"):
             with self.subTest(page_range=page_range):
                 with mock.patch.object(server, "run_marker") as run_marker:
                     response = self.build_client().post(
@@ -126,6 +134,17 @@ class MarkerServerSecurityTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.json(), {"error": "invalid page_range"})
                 run_marker.assert_not_called()
+
+    def test_convert_hides_request_validation_details(self):
+        sensitive_path = "/private/customer-records.pdf"
+        response = self.build_client().post(
+            "/convert", json={"pdf_path": str(self.pdf), "page_range": {"path": sensitive_path}}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "invalid request"})
+        self.assertNotIn(sensitive_path, response.text)
+        self.assertNotIn("page_range", response.text)
 
     def test_convert_hides_non_oom_conversion_error_details(self):
         with mock.patch.object(

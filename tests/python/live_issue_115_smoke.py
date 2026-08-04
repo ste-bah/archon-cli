@@ -75,6 +75,21 @@ class Issue115LiveSmoke(unittest.TestCase):
             self.assertEqual(body, {"error": "invalid pdf_path"})
             self.assertNotIn(str(self.outside_pdf), json.dumps(body))
 
+            status, body = self._request(
+                "/convert", {"pdf_path": str(self.inside_pdf), "page_range": "0-1000000000"}
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(body, {"error": "invalid page_range"})
+
+            sensitive_path = "/private/customer-records.pdf"
+            status, body = self._request(
+                "/convert",
+                {"pdf_path": str(self.inside_pdf), "page_range": {"path": sensitive_path}},
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(body, {"error": "invalid request"})
+            self.assertNotIn(sensitive_path, json.dumps(body))
+
             status, body = self._request("/convert", {"pdf_path": str(self.fail_pdf)})
             self.assertEqual(status, 500)
             self.assertEqual(body, {"error": "conversion failed"})
@@ -146,4 +161,4 @@ if __name__ == "__main__":
     )
     if not result.wasSuccessful():
         raise SystemExit(1)
-    print("ISSUE115_LIVE_SMOKE_PASS conversions=3 containment=blocked disclosure=blocked bind=blocked")
+    print("ISSUE115_LIVE_SMOKE_PASS conversions=3 containment=blocked validation=blocked disclosure=blocked bind=blocked")
