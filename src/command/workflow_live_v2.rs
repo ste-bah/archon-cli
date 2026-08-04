@@ -126,9 +126,6 @@ pub(super) use workflow_live_v2_host_dispatch_repair::*;
 #[path = "workflow_live_v2_host_dispatch_rejected_output_tests.rs"]
 mod rejected_output_tests;
 
-#[path = "workflow_live_v2_read_only.rs"]
-mod workflow_live_v2_read_only;
-use workflow_live_v2_read_only::*;
 #[path = "workflow_live_v2_read_only_b.rs"]
 mod workflow_live_v2_read_only_b;
 pub(super) use workflow_live_v2_read_only_b::*;
