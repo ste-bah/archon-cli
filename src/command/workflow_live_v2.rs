@@ -38,8 +38,6 @@ use archon_workflow::v2::call_data::{
 mod workflow_live_v2_client;
 
 use workflow_live_v2_client::LiveV2AgentClient;
-#[path = "workflow_live_v2_contracts.rs"]
-mod workflow_live_v2_contracts;
 
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
 
