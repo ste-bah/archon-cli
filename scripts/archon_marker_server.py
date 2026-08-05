@@ -196,34 +196,91 @@ def main(argv: "list[str]") -> int:
     return 0
 
 
-def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
-    """Build the FastAPI app around resident models and a frozen PDF catalogue.
-
-    Extracted from `main` so the OOM ladder and endpoints are testable (TestClient + fake
-    `models`) without a real GPU.
-    """
-    from fastapi import FastAPI, Request
-    from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import JSONResponse, Response
+def _convert_request_model():
+    """Create the strict request model lazily for the server-only dependency."""
     from pydantic import BaseModel
-
-    app = FastAPI(title="archon-marker-server")
-
-    @app.exception_handler(RequestValidationError)
-    async def invalid_request(_request: Request, _exc: RequestValidationError):
-        return JSONResponse(status_code=400, content={"error": "invalid request"})
-
-    # Marker conversion is not assumed thread-safe on shared models; archon ingests
-    # sequentially anyway, so serialize conversions.
-    convert_lock = threading.Lock()
 
     class ConvertRequest(BaseModel):
         pdf_id: str
         device: "str | None" = None
-        page_range: "str | None" = None  # 'S-E', 0-indexed inclusive (sidecar --page-range)
+        page_range: "str | None" = None
 
         class Config:
             extra = "forbid"
+
+    return ConvertRequest
+
+
+def _register_invalid_request_handler(app, request_validation_error, json_response) -> None:
+    """Return a fixed response without exposing Pydantic validation detail."""
+    @app.exception_handler(request_validation_error)
+    async def invalid_request(_request, _exc):
+        return json_response(status_code=400, content={"error": "invalid request"})
+
+
+def _convert_with_oom_ladder(pdf_path, context, page_range):
+    """Run Marker, preserving the shared GPU-to-CPU fallback and safe failures."""
+    device = context["device"]
+    try:
+        return run_marker(str(pdf_path), device, page_range, artifact_dict=context["models"])
+    except Exception as exc:  # noqa: BLE001 — classify OOM; log details locally
+        if device == "cpu" or not is_cuda_oom(exc):
+            empty_cuda_cache()
+            log(f"convert FAILED for {pdf_path}: {exc}")
+            return context["json_response"](status_code=500, content={"error": "conversion failed"})
+        log(f"CUDA OOM on {pdf_path}; clearing cache and retrying on CPU: {exc}")
+        empty_cuda_cache()
+        try:
+            return run_marker(str(pdf_path), "cpu", page_range, artifact_dict=None)
+        except Exception as cpu_exc:  # noqa: BLE001 — CPU also failed → hard error
+            empty_cuda_cache()
+            log(f"convert FAILED (GPU OOM + CPU) for {pdf_path}: {cpu_exc}")
+            return context["json_response"](status_code=500, content={"error": "conversion failed"})
+        finally:
+            os.environ["TORCH_DEVICE"] = device
+
+
+def _convert_response(req, context):
+    """Validate one catalogue-backed request and serialize its conversion result."""
+    device = context["device"]
+    if req.device and req.device not in ("auto", device):
+        log(f"request device={req.device!r} ignored; models resident on {device!r}")
+    pdf_path = context["pdf_catalogue"].get(req.pdf_id)
+    if pdf_path is None:
+        return context["json_response"](status_code=400, content={"error": "invalid pdf_id"})
+    try:
+        page_range = parse_page_range(req.page_range)
+    except ValueError:
+        return context["json_response"](status_code=400, content={"error": "invalid page_range"})
+    log(f"convert pdf={pdf_path} page_range={req.page_range or 'all'}")
+    started = time.time()
+    with context["convert_lock"]:
+        tree = _convert_with_oom_ladder(pdf_path, context, page_range)
+        empty_cuda_cache()
+    if not isinstance(tree, dict):
+        return tree
+    log(f"convert done in {time.time() - started:.1f}s pdf={pdf_path}")
+    return context["response"](content=json.dumps(tree, ensure_ascii=False), media_type="application/json")
+
+
+def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
+    """Build the FastAPI app around resident models and a frozen PDF catalogue."""
+    from fastapi import FastAPI
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse, Response
+
+    app = FastAPI(title="archon-marker-server")
+    _register_invalid_request_handler(app, RequestValidationError, JSONResponse)
+    convert_lock = threading.Lock()
+    context = {
+        "device": device,
+        "models": models,
+        "pdf_catalogue": pdf_catalogue,
+        "convert_lock": convert_lock,
+        "json_response": JSONResponse,
+        "response": Response,
+    }
+    ConvertRequest = _convert_request_model()
 
     @app.get("/health")
     def health():
@@ -231,56 +288,7 @@ def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
 
     @app.post("/convert")
     def convert(req: ConvertRequest):
-        if req.device and req.device not in ("auto", device):
-            log(f"request device={req.device!r} ignored; models resident on {device!r}")
-        pdf_path = pdf_catalogue.get(req.pdf_id)
-        if pdf_path is None:
-            return JSONResponse(status_code=400, content={"error": "invalid pdf_id"})
-        try:
-            page_range = parse_page_range(req.page_range)
-        except ValueError:
-            return JSONResponse(status_code=400, content={"error": "invalid page_range"})
-        log(f"convert pdf={pdf_path} page_range={req.page_range or 'all'}")
-        t = time.time()
-        # OOM ladder mirroring the subprocess path (marker_source.rs run_chunk): try the resident
-        # GPU device first; on a CUDA OOM, clear the cache and RETRY the whole-doc conversion on
-        # CPU with the SAME shared core (byte-identical normalized JSON, just slower). Only a CPU
-        # failure returns 500. empty_cache() runs after every attempt to prevent fragmentation
-        # from cascading across the 126-doc run. All of it stays under the single convert_lock.
-        with convert_lock:
-            try:
-                tree = run_marker(str(pdf_path), device, page_range, artifact_dict=models)
-            except Exception as exc:  # noqa: BLE001 — classify OOM; log details locally
-                if device != "cpu" and is_cuda_oom(exc):
-                    log(f"CUDA OOM on {pdf_path}; clearing cache and retrying on CPU: {exc}")
-                    empty_cuda_cache()
-                    try:
-                        # artifact_dict=None → load a FRESH CPU model dict (the resident dict is
-                        # GPU-bound); the shared core still yields byte-identical normalized JSON.
-                        tree = run_marker(str(pdf_path), "cpu", page_range, artifact_dict=None)
-                    except Exception as cpu_exc:  # noqa: BLE001 — CPU also failed → hard error
-                        empty_cuda_cache()
-                        log(f"convert FAILED (GPU OOM + CPU) for {pdf_path}: {cpu_exc}")
-                        return JSONResponse(
-                            status_code=500, content={"error": "conversion failed"}
-                        )
-                    finally:
-                        # Restore device on the resident models after the CPU fallback.
-                        os.environ["TORCH_DEVICE"] = device
-                else:
-                    empty_cuda_cache()
-                    log(f"convert FAILED for {pdf_path}: {exc}")
-                    return JSONResponse(
-                        status_code=500, content={"error": "conversion failed"}
-                    )
-            finally:
-                empty_cuda_cache()
-        log(f"convert done in {time.time() - t:.1f}s pdf={pdf_path}")
-        # Same serialization call as the sidecar's stdout — byte-identical payloads.
-        return Response(
-            content=json.dumps(tree, ensure_ascii=False),
-            media_type="application/json",
-        )
+        return _convert_response(req, context)
 
     return app
 

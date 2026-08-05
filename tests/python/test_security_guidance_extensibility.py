@@ -46,7 +46,48 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self.assertFalse(extensibility._has_redos_structure(pattern))
 
-    def test_rejects_custom_regexes_over_explicit_length_cap(self):
+    def test_rejects_adjacent_overlapping_variable_quantifiers(self):
+        patterns = (
+            r"a*a*a*a*a*a*a*a!",
+            r"(?:a*a*)!",
+            r"[ab]*[ab]*!",
+            r"[a-c]*[b-d]*!",
+            r"\w*\d*!",
+            r"\d*1*!",
+            r"\w*a*!",
+            r"\s* *!",
+            r"(?:a)*(?:a)*!",
+            r"a*(?:a)*!",
+            r"(?i:a)*(?:A)*!",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "overlap", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
+    def test_allows_disjoint_quantifiers_and_invalid_syntax_fails_closed(self):
+        for pattern in (r"a*b*!", r"[a-c]*[d-f]*!", r"\d*\D*!", r"\d*\s*!", r"(?m)(a|b)*"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "safe", "reminder": "test", "regex": pattern}, source="test"
+                    )
+                )
+
+        self.assertFalse(extensibility._has_redos_structure(r"a*)"))
+        self.assertIsNone(
+            extensibility._validate_pattern(
+                {"rule_name": "invalid", "reminder": "test", "regex": r"a*)"}, source="test"
+            )
+        )
+
         pattern = "a" * (extensibility.CUSTOM_REGEX_MAX_CHARS + 1)
 
         self.assertIsNone(
@@ -100,6 +141,26 @@ import sys
 sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
 import extensibility
 pattern = '(a|' * 1000 + 'a' + ')' * 1000 + '{{2}}'
+print(extensibility._has_redos_structure(pattern))
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            timeout=1,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "True")
+
+    def test_character_class_overlap_scan_completes_within_deadline(self):
+        code = f"""
+import sys
+sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
+import extensibility
+chars = ''.join(chr(point) for point in range(2000, 0, -1) if chr(point) not in '\\\\]')
+pattern = '[' + chars + ']*[' + chars + ']*!'
 print(extensibility._has_redos_structure(pattern))
 """
 
