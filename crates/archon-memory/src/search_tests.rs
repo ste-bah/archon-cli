@@ -144,15 +144,40 @@ fn keyword_candidates_match_any_query_term() {
     );
 }
 
+/// Single-character terms match on the short fields, not on prose content.
+///
+/// DELIBERATE behaviour change. `content_fts` moved to `NGram(2, 2)`, so a
+/// one-character query produces no bigram and cannot match content. It matched
+/// before only because unigram postings spanned nearly the whole relation --
+/// i.e. the "support" was a full scan wearing a search's clothes, and it cost
+/// 12.4 seconds to return nothing on a 1.7 GB store.
+///
+/// `title_fts` and `tags_fts` keep unigrams, because a one-character tag or
+/// title is a real thing to search for and those fields are tiny. So the
+/// capability survives exactly where it is meaningful and affordable.
 #[test]
-fn keyword_candidates_support_single_character_terms() {
+fn single_character_terms_match_short_fields_not_prose_content() {
     let g = MemoryGraph::in_memory().expect("graph creation failed");
-    let id = g
+    let tagged = g
+        .store_memory("alpha", "", MemoryType::Fact, 0.5, &["x".into()], "m", "")
+        .expect("store failed");
+    let content_only = g
         .store_memory("x", "", MemoryType::Fact, 0.5, &[], "m", "")
         .expect("store failed");
 
     let candidates = keyword_candidates(g.db(), "x", 16).expect("FTS query failed");
-    assert!(candidates.memories.iter().any(|memory| memory.id == id));
+
+    assert!(
+        candidates.memories.iter().any(|memory| memory.id == tagged),
+        "a single-character TAG must still be findable"
+    );
+    assert!(
+        !candidates
+            .memories
+            .iter()
+            .any(|memory| memory.id == content_only),
+        "a single character must no longer scan prose content"
+    );
 }
 
 #[test]
