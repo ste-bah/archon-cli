@@ -527,6 +527,64 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self._assert_rejected_before_compile(pattern, "zero-alternation")
 
+    def test_rejects_nullable_alternations_with_variable_consuming_branches(self):
+        zero = "0" * 31
+        unsafe = (
+            r"(?:|a*)a*!",
+            r"(?:a*|)a*!",
+            r"(?:||a*||)a*!",
+            r"x(?:|a*)a*!",
+            r"(?:(?:|a*))a*!",
+            f"(?:|a{{{zero}1,}})a+!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "nullable-variable")
+
+    def test_rejects_nullable_atomic_and_conditional_group_separators(self):
+        unsafe = (
+            r"a*(?>|b)a*!",
+            r"a*(?>b|)a*!",
+            r"a*(?>||b||)a*!",
+            r"a*(?>(?=a)|)a*!",
+            r"(a)a*(?(1)|b)a*!",
+            r"(a)a*(?(1)b|)a*!",
+            r"(a)a*(?(1)(?=a)|)a*!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "nullable-prefixed")
+
+    def test_nullable_group_quantifiers_preserve_variable_adjacency(self):
+        unsafe = (
+            r"a*(?:|b){2}a*!",
+            r"a*(?:|b)?a*!",
+            r"a*(?:|b){1,2}a*!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "nullable-quantified")
+
+    def test_allows_nullable_alternations_without_variable_consuming_branches(self):
+        safe = (
+            r"(?:|a)a*!",
+            r"(?:a|)a*!",
+            r"(?:||)a*!",
+            r"(?:(?=a)|)a*!",
+            r"(?:(?=a)|b)a*!",
+            r"(?:(?:|a))a*!",
+            r"(?>|a)a*!",
+            r"(a)(?(1)a|)a*!",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("nullable-safe", pattern))
+
     def test_allows_semantically_fixed_long_zero_padded_bounds(self):
         zero = "0" * 31
         safe = (

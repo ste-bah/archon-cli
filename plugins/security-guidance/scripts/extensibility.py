@@ -558,8 +558,11 @@ def _group_body_start(regex: str, index: int) -> int:
     """Skip a group introducer without scanning any source character twice."""
     if index + 1 >= len(regex) or regex[index + 1] != "?":
         return index + 1
-    if index + 2 < len(regex) and regex[index + 2] in ":=!":
+    if index + 2 < len(regex) and regex[index + 2] in ":=!>":
         return index + 3
+    if regex[index + 2:index + 3] == "(":
+        condition_end = regex.find(")", index + 3)
+        return len(regex) if condition_end == -1 else condition_end + 1
     if regex[index + 2:index + 4] in ("<=", "<!"):
         return index + 4
     if regex[index + 2:index + 4] == "P<":
@@ -646,7 +649,7 @@ def _close_adjacent_group(
 ) -> Tuple[int, bool, bool]:
     """Fold one completed group into its parent adjacency state."""
     child_content, child_zero = content.pop(), zero_width.pop()
-    child_zero |= not child_content[1]
+    child_nullable = child_content[2] or not child_content[1]
     previous.pop()
     terminal_variable.pop()
     child_variable = group_variable.pop()
@@ -654,9 +657,12 @@ def _close_adjacent_group(
     width, quantified_variable, can_consume = _quantifier_at(regex, quantifier_start)
     variable = quantified_variable or (child_variable and can_consume)
     significant = child_content[0] and not child_zero and can_consume
+    prior_variable = previous[-1]
     unsafe = _record_adjacent_atom(previous, variable, significant)
+    if child_nullable:
+        previous[-1] |= prior_variable
     content[-1][0] |= significant
-    content[-1][1] |= significant
+    content[-1][1] |= significant and not child_nullable
     return quantifier_start - index + width, unsafe, variable if significant else False
 
 
@@ -683,7 +689,7 @@ def _consume_adjacent_group(
         zero_width.append(child_zero)
         entry_previous.append(False if child_zero else previous[-1])
         previous.append(entry_previous[-1])
-        content.append([False, False])
+        content.append([False, False, False])
         terminal_variable.append(False)
         group_variable.append(False)
         verbose.append(_scoped_verbose_mode(regex, index, verbose[-1]))
@@ -744,7 +750,7 @@ def _consume_adjacent_atom(
 
 def _adjacent_quantifier_overlap(regex: str) -> bool:
     """Statically reject structurally adjacent variable quantified atoms."""
-    previous, content, zero_width, verbose = [False], [[False, False]], [False], [False]
+    previous, content, zero_width, verbose = [False], [[False, False, False]], [False], [False]
     entry_previous, terminal_variable, group_variable = [False], [False], [False]
     index = 0
     while index < len(regex):
@@ -765,7 +771,7 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
                 group_variable[-1] = True
             continue
         if char == "|":
-            zero_width[-1] |= not content[-1][1]
+            content[-1][2] |= not content[-1][1]
             content[-1][1] = False
             previous[-1], terminal_variable[-1] = entry_previous[-1], False
             index += 1
