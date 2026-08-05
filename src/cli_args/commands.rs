@@ -2,10 +2,11 @@ use clap::Subcommand;
 
 use super::{
     AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CognitiveAction,
-    CompletionAction, ConstellationAction, CorpusIndexAction, DocsAction, GametheoryAction, KbAction, LearningAction,
-    MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
-    ProvidersAction, ReasoningAction, RemoteAction, RequirementsAction, SandboxAction, SelfAction,
-    StyleAction, TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
+    CompletionAction, ConstellationAction, CorpusIndexAction, DocsAction, GametheoryAction,
+    KbAction, LearningAction, MeaningAction, MemoryAction, PermissionsAction, PipelineAction,
+    PluginAction, ProvAction, ProvidersAction, ReasoningAction, RemoteAction, RequirementsAction,
+    SandboxAction, SelfAction, StyleAction, TeamAction, TradingCliAction, VideoAction,
+    WorkflowAction, WorldAction,
 };
 
 #[derive(Subcommand, Debug)]

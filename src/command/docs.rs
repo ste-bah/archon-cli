@@ -1003,4 +1003,3 @@ fn print_citation_chain(db: &DbInstance, chunk_id: &str) -> Result<()> {
     }
     Ok(())
 }
-

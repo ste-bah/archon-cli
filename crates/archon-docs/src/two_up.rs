@@ -586,9 +586,8 @@ mod tests {
     #[test]
     #[ignore = "needs the O'Gorman marker fixture at .tmp/ogorman-marker.json"]
     fn ogorman_fixture_remaps_to_book_pages_16_41() {
-        let path = std::env::var("ARCHON_OGORMAN_MARKER_JSON").unwrap_or_else(|_| {
-            ".tmp/ogorman-marker.json".to_string()
-        });
+        let path = std::env::var("ARCHON_OGORMAN_MARKER_JSON")
+            .unwrap_or_else(|_| ".tmp/ogorman-marker.json".to_string());
         let json = std::fs::read_to_string(&path).expect("read O'Gorman marker fixture");
         let blocks = archon_ingest_ext::marker::parse_marker_str(&json).expect("parse marker json");
         assert!(!blocks.is_empty(), "fixture yields blocks");
@@ -633,9 +632,8 @@ mod tests {
         use crate::block_chunking::{COORD_MARKER, persist_block_chunks};
         use crate::quote_verify::find_fragment_bboxes;
 
-        let path = std::env::var("ARCHON_OGORMAN_MARKER_JSON").unwrap_or_else(|_| {
-            ".tmp/ogorman-marker.json".to_string()
-        });
+        let path = std::env::var("ARCHON_OGORMAN_MARKER_JSON")
+            .unwrap_or_else(|_| ".tmp/ogorman-marker.json".to_string());
         let json = std::fs::read_to_string(&path).expect("read fixture");
         let blocks = archon_ingest_ext::marker::parse_marker_str(&json).expect("parse marker json");
         let (out, _diag) = remap_two_up(blocks, 16);

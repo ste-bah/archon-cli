@@ -98,7 +98,13 @@ pub async fn handle_corpus_index_command(action: CorpusIndexAction) -> Result<()
             quarantine,
             dry_run,
             verify_quotes,
-        } => import_file(&kind, &file, quarantine.as_deref(), dry_run, verify_quotes).await,
+            no_verify_quotes,
+        } => {
+            // Tier-2 gate is DEFAULT for clauses: explicit --verify-quotes on a non-clauses
+            // kind is rejected below; --no-verify-quotes opts out for clauses.
+            let gate = (kind == "clauses" && !no_verify_quotes) || verify_quotes;
+            import_file(&kind, &file, quarantine.as_deref(), dry_run, gate).await
+        }
         CorpusIndexAction::Probes => {
             // E0 (index-overhaul Phase E): archon's ingestion was never covered by a
             // verified audit workflow — every archive figure was a spot measurement.

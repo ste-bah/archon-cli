@@ -368,12 +368,17 @@ pub enum CorpusIndexAction {
         /// Validate and report only; write nothing
         #[arg(long)]
         dry_run: bool,
-        /// Clauses only: verify each anchored row's quote against its pinned document
-        /// (verify-quote; exact or similarity >= 0.90). Rows that fail are quarantined,
-        /// never written — entries are born verified. Unanchored rows (no archon
-        /// text_layer_id) skip the gate. Combines with --dry-run for a no-write audit.
-        #[arg(long)]
+        /// Clauses only (DEFAULT — flag retained for explicitness): verify each anchored
+        /// row's quote against its pinned document (verify-quote; exact or similarity
+        /// >= 0.90). Rows that fail are quarantined, never written — entries are born
+        /// verified. Unanchored rows (no archon text_layer_id) skip the gate. Combines
+        /// with --dry-run for a no-write audit.
+        #[arg(long, conflicts_with = "no_verify_quotes")]
         verify_quotes: bool,
+        /// Clauses only: SKIP the quote-verification gate (NOT recommended — anchored
+        /// entries enter the store unverified).
+        #[arg(long)]
+        no_verify_quotes: bool,
     },
     /// Remove records by id (verifies existence; requires --yes)
     Remove {

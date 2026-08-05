@@ -532,11 +532,11 @@ mod multimodal_tests;
 #[path = "ingest_pdf_ingest_tests.rs"]
 mod pdf_ingest_tests;
 #[cfg(test)]
-#[path = "ingest_spreadsheet_tests.rs"]
-mod spreadsheet_tests;
-#[cfg(test)]
 #[path = "ingest_pdf_native_tests.rs"]
 mod pdf_native_ingest_tests;
+#[cfg(test)]
+#[path = "ingest_spreadsheet_tests.rs"]
+mod spreadsheet_tests;
 #[cfg(test)]
 #[path = "ingest_test_support.rs"]
 mod test_support;
