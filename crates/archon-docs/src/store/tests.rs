@@ -312,3 +312,41 @@ fn test_count_failed_chunks_roundtrip() {
     insert_chunk(&db, &chunk2).unwrap();
     assert_eq!(count_failed_chunks(&db).unwrap(), 2);
 }
+
+#[test]
+fn unindexed_ingested_chunk_audit_counts_only_ingested_docs() {
+    // Tier-1b completion audit: pending/failed chunks count ONLY when their document
+    // is Ingested — a Failed document's chunks must not trip the post-index gate.
+    let db = test_db();
+    crate::schema::ensure_doc_schema(&db).unwrap();
+    let mut doc_a = test_doc("audit-ingested");
+    doc_a.status = DocumentStatus::Ingested;
+    insert_doc_source(&db, &doc_a).unwrap();
+    let mut doc_b = test_doc("audit-failed");
+    doc_b.status = DocumentStatus::Failed;
+    insert_doc_source(&db, &doc_b).unwrap();
+
+    let chunk = |cid: &str, did: &str, status: &str| ChunkArtifact {
+        chunk_id: cid.into(),
+        document_id: did.into(),
+        artifact_id: format!("ocr-{did}"),
+        chunk_index: 0,
+        page_start: 1,
+        page_end: 1,
+        content: "body".into(),
+        content_hash: "h".into(),
+        embedding_status: status.into(),
+    };
+    insert_chunk(&db, &chunk("c-a-0", "audit-ingested", "pending")).unwrap();
+    insert_chunk(&db, &chunk("c-a-1", "audit-ingested", "indexed")).unwrap();
+    insert_chunk(&db, &chunk("c-b-0", "audit-failed", "pending")).unwrap();
+
+    assert_eq!(
+        count_unindexed_ingested_chunks(&db).unwrap(),
+        1,
+        "one pending chunk on the Ingested doc; the Failed doc's chunk is exempt"
+    );
+    let a0 = chunk("c-a-0", "audit-ingested", "pending");
+    update_chunk_embedding_statuses(&db, &[&a0], "indexed").unwrap();
+    assert_eq!(count_unindexed_ingested_chunks(&db).unwrap(), 0);
+}

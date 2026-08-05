@@ -54,6 +54,7 @@ pub async fn extract_image_with_rapidocr(path: &Path) -> Result<OcrExtractResult
         }],
         full_text: parsed.text,
         processing_duration_ms: started.elapsed().as_millis() as u64,
+        quality: None,
     })
 }
 

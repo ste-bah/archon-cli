@@ -139,11 +139,43 @@ pub struct ChunkHashes {
     pub commit_hash: String,
 }
 
+/// Per-chunk layout block (P2): one row per Marker/parser block within a chunk, carrying
+/// its BYTE range in `doc_chunks.content` and its bounding box. Feeds sentence-tight bbox
+/// derivation and per-block locator offsets. Stored in `doc_chunk_blocks`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChunkBlock {
+    pub chunk_id: String,
+    pub block_idx: u32,
+    pub char_start: usize,
+    pub char_end: usize,
+    pub page: u32,
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+    pub block_type: String,
+    pub text_hash: String,
+}
+
+/// A page-boundary transition inside a chunk (P2): logical `page` begins at BYTE
+/// `offset_in_chunk` of `doc_chunks.content`. One row per transition (the first row is
+/// `offset_in_chunk = 0`). Stored in `doc_chunk_page_breaks`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PageBreak {
+    pub chunk_id: String,
+    pub offset_in_chunk: usize,
+    pub page: u32,
+}
+
 /// What kind of running-head locator was captured (ingestion-ports spec §4b).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LocatorKind {
     PageNumber,
     Bekker,
+    /// A side-margin Bekker line-number (the every-5-lines marginalia) — NOT a
+    /// page number. Kept distinct so the ~2000 misclassified rows in the audited
+    /// corpus can be de-noised at ingest (P2 Bekker/locator fix).
+    LineNumber,
 }
 
 impl LocatorKind {
@@ -151,12 +183,14 @@ impl LocatorKind {
         match self {
             Self::PageNumber => "PageNumber",
             Self::Bekker => "Bekker",
+            Self::LineNumber => "LineNumber",
         }
     }
 
     pub fn parse(value: &str) -> Self {
         match value {
             "Bekker" => Self::Bekker,
+            "LineNumber" => Self::LineNumber,
             _ => Self::PageNumber,
         }
     }

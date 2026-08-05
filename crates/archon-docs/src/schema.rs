@@ -18,8 +18,14 @@ pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     ensure_doc_chunk_exact_fts(db)?;
     ensure_doc_chunk_spatial(db)?;
     ensure_doc_chunk_hashes(db)?;
+    ensure_doc_chunk_blocks(db)?;
+    ensure_doc_chunk_page_breaks(db)?;
+    // Sentence schema is owned by sentence_index (Phase 2); called here so the
+    // full core schema is established in one ensure_doc_schema() call.
+    crate::sentence_index::ensure_sentence_schema(db).map_err(|e| anyhow::anyhow!("{e}"))?;
     ensure_doc_locators(db)?;
     ensure_doc_image_descriptions(db)?;
+    ensure_doc_image_ocr_status(db)?;
     ensure_doc_pdf_metrics(db)?;
     ensure_doc_provenance_edges(db)?;
     ensure_doc_processing_jobs(db)?;
@@ -193,6 +199,60 @@ fn ensure_doc_chunk_hashes(db: &DbInstance) -> Result<()> {
             raw_sha256: String,
             cleaning_version: String,
             commit_hash: String,
+        }"#,
+    )
+}
+
+/// Per-chunk layout blocks (P2): each block's BYTE range within `doc_chunks.content` plus its
+/// logical page and bounding box, keyed by `(chunk_id, block_idx)`. Drives sentence-tight bbox
+/// and per-block locator offsets. Additive satellite — joined to `doc_chunks` at query time;
+/// never re-keys the vec store. Bbox is 4 typed `Float` columns (Marker pts, top-left origin).
+fn ensure_doc_chunk_blocks(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_chunk_blocks {
+            chunk_id: String,
+            block_idx: Int =>
+            char_start: Int,
+            char_end: Int,
+            page: Int,
+            x0: Float,
+            y0: Float,
+            x1: Float,
+            y1: Float,
+            block_type: String default "Text",
+            text_hash: String default "",
+        }"#,
+    )
+}
+
+/// Per-chunk page-break map (P2): the BYTE offset within `doc_chunks.content` at which each
+/// logical `page` begins (one row per transition; the first row is `offset_in_chunk = 0`),
+/// keyed by `(chunk_id, offset_in_chunk)`. Drives page-exact sub-span cites. Additive satellite.
+fn ensure_doc_chunk_page_breaks(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_chunk_page_breaks {
+            chunk_id: String,
+            offset_in_chunk: Int =>
+            page: Int,
+        }"#,
+    )
+}
+
+/// S5 (index-overhaul): durable per-image OCR outcome. An image whose OCR failed or produced
+/// no text is a RECORDED, queryable degradation ("image text missing"), never just a progress
+/// log line. Keyed by `<document_id>-p<page>-i<index>`.
+fn ensure_doc_image_ocr_status(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create doc_image_ocr_status {
+            status_id: String =>
+            document_id: String,
+            page_number: Int,
+            status: String,
+            detail: String,
+            created_at: String,
         }"#,
     )
 }

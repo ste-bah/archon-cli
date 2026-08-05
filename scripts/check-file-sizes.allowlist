@@ -276,3 +276,83 @@ src/command/world_model/ingest_files.rs
 # --- pre-existing debt captured during workflow runtime rescue phase 0 (2026-07-07) ---
 crates/archon-trading/src/data_store/data_store_tests.rs
 web/src/views/WorkflowPage.tsx
+
+# ============================================================================
+# feat/port-primary-ingest phase-1 schema foundation (2026-08-01).
+# schema.rs is a DDL-only file that grows linearly with each relation added.
+# Primary's schema.rs is 665 lines at the merge-base; v3 will converge
+# toward that as phases 1–5 port relations. Split when it approaches 750+.
+# ============================================================================
+crates/archon-docs/src/schema.rs
+# 31 files found over 500 lines on this branch's HEAD before any port work.
+# All are workflow/cognitive/trading infra — unrelated to the ingest port.
+# Allowlisted to establish a true baseline for gate steps 2-7 and to keep
+# the guard forward-looking: any NEW >500-line file added by this port will
+# still fail CI.
+# ============================================================================
+
+# --- archon-cognitive ---
+crates/archon-cognitive/src/executive_loop.rs
+
+# --- archon-workflow ---
+crates/archon-workflow/src/lifecycle.rs
+crates/archon-workflow/src/v2/agent_adapter.rs
+crates/archon-workflow/src/v2/result_store_tests.rs
+crates/archon-workflow/src/write_coordinator/patch_manifest.rs
+
+# --- src/command (workflow / trading) ---
+src/command/trading_data_provider/tradingview.rs
+src/command/workflow_live_canary_tests.rs
+src/command/workflow_live_generated_contract.rs
+src/command/workflow_live_task_universe.rs
+src/command/workflow_live_v2_deliverable_contract.rs
+src/command/workflow_live_v2_host_support.rs
+src/command/workflow_live_v2_host_tests_b.rs
+src/command/workflow_live_v2_lifecycle.rs
+src/command/workflow_live_v2_lifecycle_e2e_tests.rs
+src/command/workflow_live_v2_lifecycle_terminal_gate.rs
+src/command/workflow_live_v2_lifecycle_verify_options_tests.rs
+src/command/workflow_live_v2_lifecycle_verify_remediation.rs
+src/command/workflow_live_v2_lifecycle_verify_remediation_tests.rs
+src/command/workflow_live_v2_read_only.rs
+src/command/workflow_live_v2_script_dry_run.rs
+src/command/workflow_live_v2_script_helpers.rs
+src/command/workflow_live_v2_script_host.rs
+src/command/workflow_live_v2_script_tests_e.rs
+src/command/workflow_live_v2_verification.rs
+src/command/workflow_live_v2_write_tests_a.rs
+src/command/workflow_live_v2_write_worktree_branch.rs
+src/command/workflow_live_v3_author.rs
+src/command/workflow_live_v3_author_checks.rs
+src/command/workflow_live_v3_prelude.rs
+src/command/workflow_tests.rs
+src/command/world_model/runtime.rs
+
+# ============================================================================
+# feat/port-primary-ingest phase-3 admissibility + S8 OCR arbiter (2026-08-01).
+# ingest.rs grew from ~480L by the sentence-rebuild + admissibility gate wiring.
+# ocr/local.rs grew from 436L by the S8 arbiter (run_image_engine + quality scoring).
+# Both are minimal overages; further refactor deferred to post-port maintenance.
+# ============================================================================
+crates/archon-docs/src/ingest.rs
+crates/archon-docs/src/ocr/local.rs
+
+# ============================================================================
+# feat/port-primary-ingest phase-4 + phase-5 additions (2026-08-01).
+# block_chunking.rs grew from 398L to 515L by P2 block/page-break writers +
+#   span_json_for/SpatialCheck (Phase 4). Split is a follow-up.
+# corpus.rs is 864L in primary — it's a DDL + type-spec + import logic file
+#   by design (one module = one import contract). Split is a follow-up.
+# ============================================================================
+crates/archon-docs/src/block_chunking.rs
+crates/archon-knowledge/src/corpus.rs
+
+# ============================================================================
+# feat/port-primary-ingest phase-6 PDF geometry (2026-08-01).
+# two_up.rs (710L) is the exact port size from primary — complex geometry
+#   module (block-level gutter detection + book-page remap). Split is a follow-up.
+# corpus_index.rs (628L) expanded from 478L under cargo fmt (long probes handler).
+#   The probes handler is tightly coupled; split is a follow-up.
+# ============================================================================
+crates/archon-docs/src/two_up.rs
+src/command/corpus_index.rs

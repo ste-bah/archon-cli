@@ -79,6 +79,20 @@ pub fn ingest_text_source(
         &content_hash,
         content,
     )?;
+    // S2 inline wiring: Ingested ⇒ sentence layer exists (same invariant as the PDF path).
+    crate::sentence_index::rebuild_document(db, &document_id)?;
+    // Admissibility runs warn-only for text sources: probe hits describe the UPSTREAM text,
+    // not our extraction — surface them but don't refuse the document.
+    match crate::admissibility::check_document(db, &document_id, true, false) {
+        Ok(report) => {
+            for note in report.failures.iter().chain(report.warnings.iter()) {
+                tracing::warn!(document_id = %document_id, "text-source admissibility: {note}");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(document_id = %document_id, %error, "text-source admissibility check failed");
+        }
+    }
     store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(storage)?;
     store::insert_processing_job(
         db,

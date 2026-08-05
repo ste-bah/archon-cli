@@ -33,15 +33,16 @@ fn dims(pairs: &[(u32, f64, f64)]) -> BTreeMap<u32, (f64, f64)> {
 // ---- retained_images gate (matches the pipeline's embedded-image filter) ------------------
 
 #[test]
-fn retained_images_drops_page_shaped_but_tiny_bytes() {
-    // The reviewer scenario: a large page-shaped image compressed to 40 bytes (JBIG2/CCITT).
-    // The pipeline filters it by min_image_bytes; so must the classifier, or the report would
-    // claim SCANNED BOOK while the pipeline enriches the survivors.
+fn retained_images_keeps_page_shaped_bi_level_by_decoded_floor() {
+    // The decoded-floor change (ported from primary): a page-shaped image compressed to 40
+    // bytes of stream now passes the byte gate because max(stream=40, bitmap=1500·2400/8=450KB)
+    // ≥ 4096. The pipeline measures the EXTRACTED file, not the stream — classifier must agree.
     let policy = PdfPolicy::default(); // min_image_dimension 200, min_image_bytes 4096
     let kept = retained_images(vec![entry_bytes(1, 1500, 2400, Some(0), Some(40))], &policy);
-    assert!(
-        kept.is_empty(),
-        "40-byte image must be filtered like the pipeline"
+    assert_eq!(
+        kept.len(),
+        1,
+        "decoded-floor keeps page-scale bi-level scans visible"
     );
 }
 
@@ -359,4 +360,38 @@ fn media_box_zero_area_is_none() {
     let mut doc = Document::with_version("1.5");
     let id = doc.add_object(page_with(Some(int_box(0, 0, 0, 792)), None));
     assert_eq!(get_media_box(&doc, id), None);
+}
+
+// ---- retained_images gate (decoded-size floor, ported from primary 2026-08-01) -----------
+
+#[test]
+fn retained_images_keeps_page_shaped_tiny_stream_bilevel() {
+    // A page-shaped JBIG2/CCITT compressed to 40 bytes of stream. The pipeline measures
+    // the EXTRACTED file (≥ decoded bitmap, 1500·2400/8 = 450 KB) and keeps it.
+    let policy = PdfPolicy::default();
+    let kept = retained_images(vec![entry_bytes(1, 1500, 2400, Some(0), Some(40))], &policy);
+    assert_eq!(
+        kept.len(),
+        1,
+        "bi-level page scan must stay visible (decoded-size floor)"
+    );
+}
+
+// ---- union: singleton margin-cropped scan arm (ported from primary 2026-08-01) ----------
+
+#[test]
+fn union_catches_kassel_shape_cropped_singleton_scans() {
+    // Kassel Rhetorica shape: one image per page at ~0.65 coverage — under the 0.80 coverage
+    // bar and sub-1000px so the aspect floor misses them. The singleton-half-page arm fires.
+    // 700x950px @ 150ppi on a 394x591pt page → ~0.66 coverage.
+    let page_dims = dims(&(1..=20).map(|p| (p, 394.0, 591.0)).collect::<Vec<_>>());
+    let entries: Vec<_> = (1..=19).map(|p| entry(p, 700, 950, Some(150))).collect();
+    let cov = classify_by_coverage(&entries, &page_dims, 20);
+    assert!(!cov.scanned, "0.66 coverage is under the 0.80 bar");
+    let uni = classify_by_union(&entries, &page_dims, 20);
+    assert!(
+        uni.scanned,
+        "singleton half-page arm must catch the cropped scan"
+    );
+    assert_eq!(uni.page_scans, 19);
 }

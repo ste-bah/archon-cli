@@ -53,6 +53,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::AgentInfo { .. }) => handle_task_command(command, working_dir_for_config).await,
         command @ (Commands::Kb { .. }
         | Commands::Docs { .. }
+        | Commands::CorpusIndex { .. }
         | Commands::Video { .. }
         | Commands::Trading { .. }
         | Commands::Prov { .. }
@@ -275,6 +276,9 @@ async fn handle_data_command(command: Commands, config: &ArchonConfig) -> Result
     match command {
         Commands::Kb { action } => crate::command::kb::handle_kb_command(action).await,
         Commands::Docs { action } => crate::command::docs::handle_docs_command(action).await,
+        Commands::CorpusIndex { action } => {
+            crate::command::corpus_index::handle_corpus_index_command(action).await
+        }
         Commands::Video { action } => crate::command::video::handle_video_command(action).await,
         Commands::Trading { action } => crate::command::trading::handle_trading_command(&action),
         Commands::Prov { action } => crate::command::prov::handle_prov_command(action).await,

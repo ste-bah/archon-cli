@@ -597,10 +597,11 @@ async fn handle_ingest_inner(path_str: &str, yes: bool, jobs: Option<&str>) -> R
         print_vlm_init_warning_if_needed(&vlm_report);
         // COORD integrity summary: for the re-ingest we must see at a glance that no PDF silently
         // fell back to bbox-less text. Printed whenever any PDF carried a coordinate verdict.
-        if result.pdf_coord_marker > 0 || result.pdf_coord_none > 0 {
+        if result.pdf_coord_marker > 0 || result.pdf_coord_native > 0 || result.pdf_coord_none > 0 {
             println!(
-                "Marker coord: {} doc(s) COORD_MARKER (real bboxes), {} COORD_NONE (text fallback)",
-                result.pdf_coord_marker, result.pdf_coord_none
+                "PDF coord: {} doc(s) COORD_MARKER, {} COORD_PDF_NATIVE (real bboxes), \
+                 {} COORD_NONE (text fallback)",
+                result.pdf_coord_marker, result.pdf_coord_native, result.pdf_coord_none
             );
             if result.pdf_coord_none > 0 {
                 println!(
@@ -1002,3 +1003,4 @@ fn print_citation_chain(db: &DbInstance, chunk_id: &str) -> Result<()> {
     }
     Ok(())
 }
+

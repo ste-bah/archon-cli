@@ -52,13 +52,27 @@ pub struct PageBoxes {
     pub blocks: Vec<[f32; 4]>,
 }
 
-/// One emitted chunk. Maps to Archon `PageChunk`; `bboxes` → `doc_chunk_spatial`.
+/// One block's placement inside the emitted chunk (P2): its BYTE range within `ChunkOut.text`
+/// (`&text[char_start..char_end]` is byte-exact), plus its page, bbox and type. Drives
+/// sentence-tight bbox + per-block locator offsets. Offsets are recomputed on merge.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockSpan {
+    pub char_start: usize,
+    pub char_end: usize,
+    pub page: u32,
+    pub bbox: [f32; 4],
+    pub block_type: BlockType,
+}
+
+/// One emitted chunk. Maps to Archon `PageChunk`; `bboxes` → `doc_chunk_spatial`, and
+/// `blocks` → `doc_chunk_blocks` + `doc_chunk_page_breaks` (P2).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChunkOut {
     pub text: String,
     pub page_start: u32,
     pub page_end: u32,
     pub bboxes: Vec<PageBoxes>,
+    pub blocks: Vec<BlockSpan>,
 }
 
 /// Token estimate: code-points / 4 (CHARS_PER_TOKEN=4). Counts Unicode CODE POINTS to match
@@ -89,6 +103,8 @@ struct Accum {
     page_end: u32,
     /// Insertion-ordered page → boxes.
     pages: Vec<(u32, Vec<[f32; 4]>)>,
+    /// Per-block placement (P2): byte range within `text`, page, bbox, type.
+    blocks: Vec<BlockSpan>,
 }
 
 impl Accum {
@@ -97,13 +113,25 @@ impl Accum {
     }
 
     fn add(&mut self, b: &Block) {
-        if self.text.is_empty() {
-            self.text.push_str(&b.text);
+        // Capture the block's BYTE range within the accumulating chunk text (P2). The "\n\n"
+        // separator is inserted BEFORE the block, so `char_start` is the byte offset just after it
+        // and `&text[char_start..char_end]` is byte-exact for the block.
+        let char_start = if self.text.is_empty() {
             self.page_start = Some(b.page);
+            0
         } else {
             self.text.push_str("\n\n");
-            self.text.push_str(&b.text);
-        }
+            self.text.len()
+        };
+        self.text.push_str(&b.text);
+        let char_end = self.text.len();
+        self.blocks.push(BlockSpan {
+            char_start,
+            char_end,
+            page: b.page,
+            bbox: b.bbox,
+            block_type: b.block_type,
+        });
         self.page_end = b.page;
         if let Some(entry) = self.pages.iter_mut().find(|(p, _)| *p == b.page) {
             entry.1.push(b.bbox);
@@ -127,6 +155,7 @@ impl Accum {
             page_start: self.page_start.take().unwrap_or(0),
             page_end: self.page_end,
             bboxes,
+            blocks: std::mem::take(&mut self.blocks),
         };
         self.pages.clear();
         self.page_end = 0;
@@ -168,9 +197,17 @@ pub fn chunk_blocks_default(blocks: &[Block]) -> Vec<ChunkOut> {
 
 /// Union two adjacent chunks: text joined with "\n\n", page span widened, boxes merged per page.
 fn merge_two(a: ChunkOut, b: ChunkOut) -> ChunkOut {
+    // b's block byte-offsets shift by a.text + the "\n\n" joiner (P2: keep spans byte-exact).
+    let shift = a.text.len() + 2;
     let text = format!("{}\n\n{}", a.text, b.text);
     let page_start = a.page_start.min(b.page_start);
     let page_end = a.page_end.max(b.page_end);
+    let mut blocks = a.blocks;
+    blocks.extend(b.blocks.into_iter().map(|mut bl| {
+        bl.char_start += shift;
+        bl.char_end += shift;
+        bl
+    }));
     let mut pages: Vec<(u32, Vec<[f32; 4]>)> = Vec::new();
     for pb in a.bboxes.into_iter().chain(b.bboxes) {
         if let Some(e) = pages.iter_mut().find(|(p, _)| *p == pb.page_num) {
@@ -192,6 +229,7 @@ fn merge_two(a: ChunkOut, b: ChunkOut) -> ChunkOut {
         page_start,
         page_end,
         bboxes,
+        blocks,
     }
 }
 
@@ -255,6 +293,7 @@ mod tests {
             page_start: p,
             page_end: p,
             bboxes: vec![],
+            blocks: vec![],
         };
         // Three adjacent undersized chunks → pairwise [A+B, C], never chained [A+B+C].
         let out = merge_undersized(vec![mk("a", 1), mk("b", 2), mk("c", 3)], TARGET_MIN);
@@ -361,5 +400,48 @@ mod tests {
             "tail under max joins rather than splitting"
         );
         assert_eq!(chunks[0].page_end, 2);
+    }
+
+    #[test]
+    fn block_spans_are_byte_exact_including_after_merge() {
+        // Force a pairwise merge: big1(p1) | MID(p2) | big3(p3) → MID folds into the p3 chunk, so
+        // its byte offsets are SHIFTED. Every span must still slice its exact block text.
+        let big1 = "A".repeat(5000);
+        let big3 = "C".repeat(5000);
+        let blocks = vec![
+            blk(BlockType::Text, &big1, 1),
+            blk(BlockType::Text, "MID-BLOCK", 2),
+            blk(BlockType::Text, &big3, 3),
+        ];
+        let chunks = chunk_blocks_default(&blocks);
+        for c in &chunks {
+            for s in &c.blocks {
+                assert!(
+                    s.char_start <= s.char_end && s.char_end <= c.text.len(),
+                    "span in bounds"
+                );
+                assert!(
+                    c.text.is_char_boundary(s.char_start) && c.text.is_char_boundary(s.char_end),
+                    "span on char boundaries"
+                );
+            }
+            let joined = c
+                .blocks
+                .iter()
+                .map(|s| &c.text[s.char_start..s.char_end])
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            assert_eq!(joined, c.text, "block spans tile the chunk text exactly");
+        }
+        let merged = chunks
+            .iter()
+            .find(|c| c.text.contains("MID-BLOCK"))
+            .expect("mid present");
+        let mid = merged
+            .blocks
+            .iter()
+            .find(|s| &merged.text[s.char_start..s.char_end] == "MID-BLOCK")
+            .expect("mid span byte-exact after shift");
+        assert_eq!(mid.page, 2, "shifted span keeps its page");
     }
 }

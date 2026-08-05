@@ -88,6 +88,26 @@ pub(crate) async fn run_pdf_ingest_pipeline(
     let marker_available = marker_src.is_some();
     let has_page_images =
         !extract_result.embedded_images.is_empty() || !extract_result.rendered_pages.is_empty();
+    // Active scanned-book detector, resolved ONCE from the path (cheap: pdfimages + lopdf,
+    // milliseconds) and shared by BOTH the born-digital routing decision below and the
+    // image-enrichment skip decision later — the pre-ingest report shows the same selected
+    // verdict, so report and pipeline never disagree. Opt-in "aspect" → None (enrichment
+    // uses its in-memory heuristic; born-digital routing stays conservative).
+    let scanned_override = {
+        let detector = crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector);
+        match detector {
+            crate::pdf_scan::ScanDetector::Aspect => None,
+            _ => Some(
+                crate::pdf_scan::classify_scan(Path::new(file_path), detector, &policy.docs.pdf)
+                    .active_scanned,
+            ),
+        }
+    };
+    // Born-digital = a real embedded text layer AND an affirmative not-a-scan verdict.
+    // (Verdict `None` — the opt-in aspect detector — deliberately does NOT qualify: native
+    // extraction only fires when the scan detector positively cleared the document.)
+    let is_born_digital =
+        !extract_result.full_text.trim().is_empty() && scanned_override == Some(false);
     // Marker's figure regions (page + bbox), captured from the same Marker run below; consumed by
     // the opt-in figure-region VLM path (C4) after image enrichment.
     let mut figure_regions: Vec<archon_ingest_ext::chunk::FigureRegion> = Vec::new();
@@ -104,57 +124,136 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                     &extract_result.page_offsets,
                 )
             };
-            let (blocks, coord) = match &marker_src {
-                Some(src) => {
-                    // The persistent HTTP server has no per-doc OOM ladder and no page-range
-                    // chunking, and a set `marker_url` is an explicit "I want real bboxes"
-                    // request. So for the Http transport a Marker failure/empty result is a HARD
-                    // error (propagates → document Failed → sources_failed) rather than a silent
-                    // degradation to bbox-less COORD_NONE that would still be counted "Ingested".
-                    // The subprocess transport keeps its original warn-and-fall-back behavior.
-                    let http = matches!(src, crate::marker_source::MarkerSource::Http { .. });
-                    match src.blocks_and_figures_for(Path::new(file_path)).await {
-                        Ok((b, figs)) if !b.is_empty() => {
-                            figure_regions = figs;
-                            (b, crate::block_chunking::COORD_MARKER)
-                        }
-                        Ok(_) if http => {
-                            return Err(DocsError::Storage {
-                                message: format!(
-                                    "marker HTTP server returned no blocks for {file_path}; \
+            // Born-digital docs try the NATIVE extractor first — the PDF's own glyph
+            // positions beat both Marker (pixel approximation, GPU, minutes) and the flat
+            // path (no bboxes). Native failure is never fatal: it falls through to the
+            // Marker/flat routing below, which keeps its exact pre-native semantics
+            // (including the HTTP hard-fail guarantee). `prefer_marker_for_born_digital`
+            // restores the old Marker-first routing.
+            let mut native_blocks: Option<Vec<archon_ingest_ext::chunk::Block>> = None;
+            if is_born_digital
+                && !policy.docs.pdf.prefer_marker_for_born_digital
+                && let Some(native) =
+                    crate::pdf_native_source::PdfNativeSource::from_policy(&policy.docs.pdf)
+            {
+                match native.blocks_for(Path::new(file_path)).await {
+                    Ok(Some(b)) => native_blocks = Some(b),
+                    Ok(None) => outcome
+                        .warnings
+                        .push("pdf-native extractor returned no blocks; falling back".to_string()),
+                    Err(e) => outcome
+                        .warnings
+                        .push(format!("pdf-native extractor failed ({e}); falling back")),
+                }
+            }
+            let (blocks, coord) = if let Some(b) = native_blocks {
+                (b, crate::block_chunking::COORD_PDF_NATIVE)
+            } else {
+                match &marker_src {
+                    Some(src) => {
+                        // The persistent HTTP server has no per-doc OOM ladder and no page-range
+                        // chunking, and a set `marker_url` is an explicit "I want real bboxes"
+                        // request. So for the Http transport a Marker failure/empty result is a HARD
+                        // error (propagates → document Failed → sources_failed) rather than a silent
+                        // degradation to bbox-less COORD_NONE that would still be counted "Ingested".
+                        // The subprocess transport keeps its original warn-and-fall-back behavior.
+                        let http = matches!(src, crate::marker_source::MarkerSource::Http { .. });
+                        match src.blocks_and_figures_for(Path::new(file_path)).await {
+                            Ok((b, figs)) if !b.is_empty() => {
+                                figure_regions = figs;
+                                (b, crate::block_chunking::COORD_MARKER)
+                            }
+                            Ok(_) if http => {
+                                return Err(DocsError::Storage {
+                                    message: format!(
+                                        "marker HTTP server returned no blocks for {file_path}; \
                                      refusing silent bbox-less fallback because marker_url is set"
-                                ),
-                            });
-                        }
-                        Ok(_) => {
-                            outcome.warnings.push(
-                                "marker returned no blocks; falling back to text chunking"
-                                    .to_string(),
-                            );
-                            (text_blocks(), crate::block_chunking::COORD_NONE)
-                        }
-                        Err(e) if http => {
-                            return Err(DocsError::Storage {
-                                message: format!(
-                                    "marker HTTP request failed for {file_path} ({e}); \
+                                    ),
+                                });
+                            }
+                            Ok(_) => {
+                                outcome.warnings.push(
+                                    "marker returned no blocks; falling back to text chunking"
+                                        .to_string(),
+                                );
+                                outcome.pdf_marker_fallback = true;
+                                (text_blocks(), crate::block_chunking::COORD_NONE)
+                            }
+                            Err(e) if http => {
+                                return Err(DocsError::Storage {
+                                    message: format!(
+                                        "marker HTTP request failed for {file_path} ({e}); \
                                      refusing silent bbox-less fallback because marker_url is set"
-                                ),
-                            });
-                        }
-                        Err(e) => {
-                            outcome.warnings.push(format!(
-                                "marker sidecar failed ({e}); falling back to text chunking"
-                            ));
-                            (text_blocks(), crate::block_chunking::COORD_NONE)
+                                    ),
+                                });
+                            }
+                            Err(e) => {
+                                outcome.warnings.push(format!(
+                                    "marker sidecar failed ({e}); falling back to text chunking"
+                                ));
+                                outcome.pdf_marker_fallback = true;
+                                (text_blocks(), crate::block_chunking::COORD_NONE)
+                            }
                         }
                     }
+                    None => (text_blocks(), crate::block_chunking::COORD_NONE),
                 }
-                None => (text_blocks(), crate::block_chunking::COORD_NONE),
             };
             // Record the coordinate space for the end-of-run COORD integrity summary.
             outcome.pdf_coord = Some(coord);
+            // P2: 2-up landscape → book-page remap (Marker path only — needs real per-column
+            // bboxes). Seeded per-doc from .archon/two-up-first-pages.json; unseeded docs keep
+            // physical sheet numbers (a likely-2-up doc without a seed is warned, not guessed).
+            let blocks = if coord == crate::block_chunking::COORD_MARKER {
+                let seed_map = crate::two_up::load_seed_map(&crate::two_up::seed_map_path());
+                match crate::two_up::first_page_for(&seed_map, file_path) {
+                    // CR-4: gate the remap on a doc-wide genuine-2-up check.
+                    // ARCHON_FORCE_TWO_UP overrides for the rare case detection is wrong.
+                    Some(first_page)
+                        if crate::two_up::should_remap_two_up(
+                            &blocks,
+                            std::env::var_os("ARCHON_FORCE_TWO_UP").is_some(),
+                        ) =>
+                    {
+                        let (remapped, diag) = crate::two_up::remap_two_up(blocks, first_page);
+                        tracing::info!(
+                            sheets = diag.sheets,
+                            two_up_sheets = diag.two_up_sheets,
+                            unresolved_sheets = diag.unresolved_sheets,
+                            unresolved_blocks = diag.unresolved_blocks,
+                            min_page = diag.min_page,
+                            max_page = diag.max_page,
+                            front_matter_blocks = diag.front_matter_blocks,
+                            first_page,
+                            "2-up remap applied for {file_path}"
+                        );
+                        remapped
+                    }
+                    Some(_) => {
+                        tracing::warn!(
+                            two_up_sheet_fraction = crate::two_up::two_up_sheet_fraction(&blocks),
+                            "{file_path} has a two-up seed but does NOT look 2-up; \
+                             SKIPPING remap. Set ARCHON_FORCE_TWO_UP=1 to force."
+                        );
+                        blocks
+                    }
+                    None => {
+                        if crate::two_up::looks_two_up(&blocks) {
+                            tracing::warn!(
+                                "{file_path} looks 2-up but has no first-page seed in \
+                                 .archon/two-up-first-pages.json; ingesting with PHYSICAL sheets"
+                            );
+                        }
+                        blocks
+                    }
+                }
+            } else {
+                blocks
+            };
             let ocr_engine = if coord == crate::block_chunking::COORD_MARKER {
                 "marker"
+            } else if coord == crate::block_chunking::COORD_PDF_NATIVE {
+                "pdf-native"
             } else {
                 "poppler"
             };
@@ -165,6 +264,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                 "ocr_text",
                 &blocks,
                 coord,
+                false, // is_aristotle: filename-gated; false for all non-Aristotle docs
             )?;
             (chunks, spatials, ocr_engine)
         } else {
@@ -179,6 +279,15 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             )?;
             (chunks, Vec::new(), "poppler")
         };
+        // S8: automatic page-level OCR quality scan — every PDF ingest, both chunkers.
+        // Low-scoring pages get durable `suspect` rows so damaged OCR is queryable.
+        crate::ocr::quality::scan_document_pages(
+            db,
+            document_id,
+            &chunks,
+            ocr_engine,
+            &mut outcome.warnings,
+        );
         let edges = build_doc_lineage_edges(document_id, &ocr_artifact_id, &chunks, &page_ids);
         for edge in &edges {
             store::insert_provenance_edge(db, edge).map_err(|e| DocsError::Storage {
@@ -236,21 +345,9 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             "PDF ingest will trigger VLM calls for extracted page images"
         );
     }
-    // Active scanned-book detector governs whether page-scan images are enriched. For the default
-    // "union" detector (and "coverage") we resolve the verdict from the path here (cheap: pdfimages
-    // + lopdf, milliseconds) and pass the SAME selected verdict the pre-ingest report shows —
-    // including its aspect fallback when page dims are unreadable — so report and pipeline never
-    // disagree. Opt-in "aspect" → None, so enrich_pdf_images uses its in-memory heuristic instead.
-    let scanned_override = {
-        let detector = crate::pdf_scan::ScanDetector::parse(&policy.docs.pdf.scan_detector);
-        match detector {
-            crate::pdf_scan::ScanDetector::Aspect => None,
-            _ => Some(
-                crate::pdf_scan::classify_scan(Path::new(file_path), detector, &policy.docs.pdf)
-                    .active_scanned,
-            ),
-        }
-    };
+    // The scanned-book verdict was resolved once at the top of the pipeline (it also drives
+    // the born-digital native-extraction routing); the SAME selected verdict governs whether
+    // page-scan images are enriched here, so report and pipeline never disagree.
     let mut image_chunks = enrich_pdf_images(
         db,
         document_id,

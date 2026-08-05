@@ -29,6 +29,19 @@ pub struct OcrExtractResult {
     pub page_count: u32,
     pub page_offsets: Vec<PageOffset>,
     pub processing_duration_ms: u64,
+    /// S8: which engine produced this text and how it scored. `None` when the
+    /// producing path predates scoring (custom providers, native pdftotext).
+    pub quality: Option<OcrQualityMeta>,
+}
+
+/// S8 provenance for one OCR result: the engine that won, its quality score,
+/// and whether the low-quality arbiter escalated to a second engine.
+#[derive(Clone, Debug)]
+pub struct OcrQualityMeta {
+    pub engine: String,
+    pub score: f32,
+    pub escalated: bool,
+    pub note: Option<String>,
 }
 
 #[async_trait]

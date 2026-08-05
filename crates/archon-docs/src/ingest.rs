@@ -66,6 +66,10 @@ pub(crate) struct PipelineOutcome {
     /// Coordinate space the PDF's chunks landed in (`COORD_MARKER`/`COORD_NONE`); see
     /// `IngestFileResult::pdf_coord`.
     pub(crate) pdf_coord: Option<&'static str>,
+    /// True when the Marker pipeline fell back to text-only chunking (no bboxes).
+    /// Drives the admissibility spatial gate: a PDF in this state has chunks but
+    /// zero spatial rows and must not be admitted silently as Ingested.
+    pub(crate) pdf_marker_fallback: bool,
 }
 
 #[path = "ingest_media_type.rs"]
@@ -196,11 +200,53 @@ pub async fn ingest_file_with_policy(
         {
             Ok(pipeline_outcome) => {
                 outcome = pipeline_outcome;
-                store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(
-                    |e| DocsError::Storage {
-                        message: e.to_string(),
-                    },
+                // S2 inline wiring (port from primary): the sentence layer is built as
+                // part of the ingest itself, BEFORE the Ingested status — the invariant
+                // is structural: Ingested ⇒ sentence layer exists and matches the text.
+                // A segmentation failure fails the ingest loudly (deterministic pure
+                // function over the text this pipeline just produced — failure is a bug,
+                // never a warn-and-continue).
+                let s = crate::sentence_index::rebuild_document(db, &document_id)?;
+                outcome.warnings.push(format!(
+                    "sentence layer: {} sentences ({} bbox, {} page) across {} chunks",
+                    s.sentences, s.with_bbox, s.with_page, s.chunks
+                ));
+                // Inline admissibility gate (port from primary): the E0 probe checks run
+                // as ingest preconditions — a damaged extraction (ligature dropout,
+                // degenerate chunking, missing sentence layer, bbox-less Marker fallback)
+                // is marked Failed, never silently Ingested.
+                let adm = crate::admissibility::check_document(
+                    db,
+                    &document_id,
+                    !is_image_media_type(media_type),
+                    // spatial gate only for PDFs where Marker fell back to text-only
+                    // chunking — a legit bbox-less source (plain text, no-Marker policy)
+                    // must not be penalised.
+                    outcome.pdf_marker_fallback,
                 )?;
+                outcome.warnings.extend(adm.warnings.iter().cloned());
+                if adm.failures.is_empty() {
+                    store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(
+                        |e| DocsError::Storage {
+                            message: e.to_string(),
+                        },
+                    )?;
+                } else {
+                    pipeline_failed = true;
+                    for failure in &adm.failures {
+                        outcome.warnings.push(format!("ADMISSIBILITY: {failure}"));
+                    }
+                    store::update_doc_status(db, &document_id, &DocumentStatus::Failed).map_err(
+                        |e| DocsError::Storage {
+                            message: e.to_string(),
+                        },
+                    )?;
+                    info!(
+                        document_id = %document_id,
+                        failures = adm.failures.len(),
+                        "admissibility gate failed; document set to Failed"
+                    );
+                }
             }
             Err(e) => {
                 pipeline_failed = true;
@@ -349,6 +395,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
                             char_end: 0,
                         }],
                         processing_duration_ms: 0,
+                        quality: None,
                     }
                 } else {
                     return Err(e);
@@ -487,6 +534,9 @@ mod pdf_ingest_tests;
 #[cfg(test)]
 #[path = "ingest_spreadsheet_tests.rs"]
 mod spreadsheet_tests;
+#[cfg(test)]
+#[path = "ingest_pdf_native_tests.rs"]
+mod pdf_native_ingest_tests;
 #[cfg(test)]
 #[path = "ingest_test_support.rs"]
 mod test_support;

@@ -237,6 +237,22 @@ figure_region_vlm = false
 #   marker_device  = "auto"           # auto = free-VRAM CUDA -> MPS -> CPU (default)
 #   marker_memory_budget_mb = 6000    # optional VRAM cap; also forces page-range chunking
 
+# --- Native PDF coordinate extraction (born-digital docs, ON by default) -----
+# Born-digital PDFs (embedded text layer, not scans) carry mathematically exact
+# glyph positions; the native sidecar reads them via `pdftotext -tsv` — no OCR,
+# no GPU, seconds per document — and every chunk/sentence gets a real bbox
+# (coord_space = "pdf-native"). Scanned docs are unaffected (Marker path).
+use_pdf_native_extractor = true
+# Sidecar script; default resolves ARCHON_PDF_NATIVE_SCRIPT, then scripts/ next
+# to the archon binary, then ./scripts under the current directory.
+#   pdf_native_script = "/ABSOLUTE/PATH/TO/archon-cli/scripts/archon_pdf_native_sidecar.py"
+# Interpreter for the sidecar; default "python3" on PATH. Pin the absolute path
+# in deployed configs (headless contexts may lack pyenv shims on PATH).
+#   pdf_native_python = "/ABSOLUTE/PATH/TO/python3"
+# Set true to restore pre-native routing (a configured Marker wins even for
+# born-digital docs). Default false: native wins, Marker is the fallback.
+#   prefer_marker_for_born_digital = false
+
 # ----------------------------------------------------------------------------
 # [policy.docs.retrieval] — Hybrid search weighting
 # ----------------------------------------------------------------------------

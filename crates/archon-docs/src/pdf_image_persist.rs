@@ -5,6 +5,49 @@
 
 use super::*;
 
+/// S5 (index-overhaul): write the durable per-image OCR outcome to `doc_image_ocr_status`.
+/// A write failure is surfaced as a warning — the enrichment must not die on a
+/// bookkeeping row — but the row itself turns "image text missing" from a log line
+/// into a queryable degradation state.
+fn persist_ocr_status(
+    db: &DbInstance,
+    document_id: &str,
+    work: &ImageWork,
+    status: &str,
+    detail: &str,
+    outcome: &mut PipelineOutcome,
+) {
+    let status_id = format!(
+        "{document_id}-p{}-i{}",
+        work.image.source_page, work.current
+    );
+    let mut params = std::collections::BTreeMap::new();
+    params.insert(
+        "rows".to_string(),
+        cozo::DataValue::List(vec![cozo::DataValue::List(vec![
+            cozo::DataValue::from(status_id.as_str()),
+            cozo::DataValue::from(document_id),
+            cozo::DataValue::from(work.image.source_page as i64),
+            cozo::DataValue::from(status),
+            cozo::DataValue::from(&detail[..detail.len().min(400)]),
+            cozo::DataValue::from(chrono::Utc::now().to_rfc3339().as_str()),
+        ])]),
+    );
+    if let Err(e) = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[status_id, document_id, page_number, status, detail, created_at] <- $rows \
+         :put doc_image_ocr_status { status_id => document_id, page_number, status, \
+         detail, created_at }",
+        params,
+        cozo::ScriptMutability::Mutable,
+        "put doc_image_ocr_status",
+    ) {
+        outcome.warnings.push(format!(
+            "image OCR status row write failed ({status_id}): {e}"
+        ));
+    }
+}
+
 pub(super) fn persist_image_result(
     db: &DbInstance,
     document_id: &str,
@@ -42,7 +85,28 @@ fn persist_ocr_result(
 ) -> Result<(), DocsError> {
     let work = &result.work;
     match &result.ocr {
-        OcrImageResult::Text(text) => {
+        OcrImageResult::Text { text, quality } => {
+            // S8: the status row records which engine won and how the text scored;
+            // a successful-but-low-quality result is `suspect`, not `ok`.
+            let (status, detail) = match quality {
+                Some(meta) => {
+                    let status = if meta.score < crate::ocr::quality::quality_floor() {
+                        "suspect"
+                    } else {
+                        "ok"
+                    };
+                    let mut detail = format!("engine={} score={:.2}", meta.engine, meta.score);
+                    if meta.escalated {
+                        detail.push_str(" escalated");
+                    }
+                    if let Some(note) = &meta.note {
+                        detail.push_str(&format!(" ({note})"));
+                    }
+                    (status, detail)
+                }
+                None => ("ok", String::new()),
+            };
+            persist_ocr_status(db, document_id, work, status, &detail, outcome);
             outcome.pdf_image_ocr_runs += 1;
             emit_pdf_image_progress(
                 document_id,
@@ -50,7 +114,7 @@ fn persist_ocr_result(
                 work.total,
                 &work.image,
                 "ocr",
-                "ok",
+                status,
                 &format!("bytes={}", text.len()),
             );
             outcome.warnings.push(format!(
@@ -66,16 +130,20 @@ fn persist_ocr_result(
                 text,
             )?);
         }
-        OcrImageResult::NoText => emit_pdf_image_progress(
-            document_id,
-            work.current,
-            work.total,
-            &work.image,
-            "ocr",
-            "no-text",
-            "",
-        ),
+        OcrImageResult::NoText => {
+            persist_ocr_status(db, document_id, work, "no-text", "", outcome);
+            emit_pdf_image_progress(
+                document_id,
+                work.current,
+                work.total,
+                &work.image,
+                "ocr",
+                "no-text",
+                "",
+            );
+        }
         OcrImageResult::Failed(error) => {
+            persist_ocr_status(db, document_id, work, "failed", error, outcome);
             outcome.pdf_image_ocr_failures += 1;
             emit_pdf_image_progress(
                 document_id,

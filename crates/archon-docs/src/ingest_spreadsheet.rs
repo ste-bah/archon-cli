@@ -40,6 +40,7 @@ pub(crate) fn extract_spreadsheet(
         page_offsets,
         full_text,
         processing_duration_ms: started.elapsed().as_millis() as u64,
+        quality: None,
     })
 }
 

@@ -10,15 +10,17 @@
 
 use cozo::DbInstance;
 
-use archon_ingest_ext::chunk::{Block, BlockType, ChunkOut, PageBoxes, chunk_blocks_default};
+use archon_ingest_ext::chunk::{
+    Block, BlockSpan, BlockType, ChunkOut, PageBoxes, chunk_blocks_default,
+};
 use archon_ingest_ext::layout;
 
 use crate::chunking::page_for_offset;
 use crate::errors::DocsError;
 use crate::hash::sha256_str;
 use crate::models::{
-    ArtifactRecord, ChunkArtifact, ChunkSpatial, Locator, LocatorKind, PageOffset,
-    ProvenanceEdgeType,
+    ArtifactRecord, ChunkArtifact, ChunkBlock, ChunkSpatial, Locator, LocatorKind, PageBreak,
+    PageOffset, ProvenanceEdgeType,
 };
 use crate::provenance::make_edge;
 use crate::store;
@@ -27,6 +29,34 @@ use crate::store;
 pub const COORD_NONE: &str = "none";
 /// Coordinate space for Marker-derived bboxes.
 pub const COORD_MARKER: &str = "marker";
+/// Coordinate space for blocks read from a born-digital PDF's native glyph positions
+/// (`archon_pdf_native_sidecar.py` — pdftotext -tsv). Same point space as COORD_MARKER
+/// (PDF points, top-left origin); kept distinct so the extraction method stays queryable
+/// from `doc_chunk_spatial.coord_space`. Spatial persistence treats it exactly like Marker.
+pub const COORD_PDF_NATIVE: &str = "pdf-native";
+
+/// On-disk tamper-evidence hash version stamped on FRESH ingests (H-5). v2 folds the
+/// per-block bbox into the spatial hash so tampering a `doc_chunk_blocks` row is detectable.
+pub(crate) const HASH_VERSION_CURRENT: u32 = 2;
+
+/// The per-block span component of the spatial hash, version-aware (H-5).
+/// - v1: `[[char_start, char_end, page], …]`
+/// - v2: `[[char_start, char_end, page, x0, y0, x1, y1], …]`
+pub(crate) fn span_json_for(
+    version: u32,
+    blocks: impl Iterator<Item = (usize, usize, u32, [f32; 4])>,
+) -> String {
+    let arr: Vec<serde_json::Value> = blocks
+        .map(|(cs, ce, page, b)| {
+            if version >= 2 {
+                serde_json::json!([cs, ce, page, b[0], b[1], b[2], b[3]])
+            } else {
+                serde_json::json!([cs, ce, page])
+            }
+        })
+        .collect();
+    serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
+}
 
 /// Synthesize a `Block` stream from flat extracted text + page offsets (no Marker).
 /// Splits on blank lines (paragraphs), assigns each paragraph the page that owns its
@@ -91,14 +121,38 @@ fn map_locator_kind(k: layout::LocatorKind) -> LocatorKind {
     match k {
         layout::LocatorKind::Bekker => LocatorKind::Bekker,
         layout::LocatorKind::PageNumber => LocatorKind::PageNumber,
+        layout::LocatorKind::LineNumber => LocatorKind::LineNumber,
     }
+}
+
+fn block_type_str(t: BlockType) -> &'static str {
+    match t {
+        BlockType::Text => "Text",
+        BlockType::SectionHeader => "SectionHeader",
+        BlockType::Table => "Table",
+        BlockType::ListItem => "ListItem",
+        BlockType::Caption => "Caption",
+    }
+}
+
+/// Chunk-local page-break map (P2): one `(offset_in_chunk, page)` row per page transition.
+fn page_breaks_from_blocks(blocks: &[BlockSpan]) -> Vec<(usize, u32)> {
+    let mut out: Vec<(usize, u32)> = Vec::new();
+    let mut cur: Option<u32> = None;
+    for b in blocks {
+        if cur != Some(b.page) {
+            out.push((b.char_start, b.page));
+            cur = Some(b.page);
+        }
+    }
+    out
 }
 
 /// Build the per-chunk spatial row, or `None` on the no-spatial (flat-text) path or when
 /// the chunk carries no boxes. `blocks` holds the FULL per-page structure (lossless,
 /// page-sorted): `[{"page_num", "super_box", "blocks":[[x0,y0,x1,y1],…]}, …]`. `page_num`
 /// and `super_box` are the primary (page_start) page's, for indexing/overlay convenience.
-/// `spatial_hash = sha256(coord_space ∥ canonical(blocks_json))` — covered by the chain.
+/// `spatial_hash = sha256(coord_space ∥ blocks_json ∥ span_json_for(v2, blocks))` — P2/H-5.
 pub(crate) fn chunkout_spatial(
     chunk_id: &str,
     out: &ChunkOut,
@@ -129,7 +183,18 @@ pub(crate) fn chunkout_spatial(
     let super_box = primary.map(|p| p.super_box).unwrap_or([0.0; 4]);
     let super_json =
         serde_json::to_string(&bbox_json(&super_box)).unwrap_or_else(|_| "[]".to_string());
-    let spatial_hash = sha256_str(&format!("{}\u{0}{}", coord_space, blocks_json));
+    // P2/H-5: fold per-block char ranges + pages + bbox into the spatial hash so
+    // doc_chunk_blocks rows are covered by the provenance chain.
+    let span_json = span_json_for(
+        HASH_VERSION_CURRENT,
+        out.blocks
+            .iter()
+            .map(|b| (b.char_start, b.char_end, b.page, b.bbox)),
+    );
+    let spatial_hash = sha256_str(&format!(
+        "{}\u{0}{}\u{0}{}",
+        coord_space, blocks_json, span_json
+    ));
     Some(ChunkSpatial {
         chunk_id: chunk_id.to_string(),
         page_num: out.page_start,
@@ -153,10 +218,11 @@ pub(crate) fn persist_block_chunks(
     artifact_type: &str,
     blocks: &[Block],
     coord_space: &str,
+    is_aristotle: bool,
 ) -> Result<(Vec<ChunkArtifact>, Vec<ChunkSpatial>), DocsError> {
     // S-3: strip + capture standalone Bekker / page-number blocks as citation locators
     // before chunking, so they leave the embed text but become resolvable anchors.
-    let (clean_blocks, locator_hits) = layout::extract_locators(blocks);
+    let (clean_blocks, locator_hits) = layout::extract_locators(blocks, is_aristotle);
     // Guard: if EVERY block was a standalone number, don't strip the document down to
     // nothing (which would yield zero chunks) — keep the content, capture no locators.
     let (clean_blocks, locator_hits) = if clean_blocks.is_empty() && !blocks.is_empty() {
@@ -214,6 +280,47 @@ pub(crate) fn persist_block_chunks(
                 message: e.to_string(),
             })?;
             spatials.push(spatial);
+        }
+        // P2: page-break map (page-exact cites) — derived from the blocks; written on BOTH
+        // paths (page precision needs no bbox). Per-block map (sentence-tight bbox) — Marker only.
+        let breaks = page_breaks_from_blocks(&out.blocks);
+        if !breaks.is_empty() {
+            let rows: Vec<PageBreak> = breaks
+                .iter()
+                .map(|(off, page)| PageBreak {
+                    chunk_id: chunk.chunk_id.clone(),
+                    offset_in_chunk: *off,
+                    page: *page,
+                })
+                .collect();
+            store::insert_page_breaks(db, &rows).map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
+        }
+        // Any bbox-carrying coord space (marker, pdf-native) persists per-block rows —
+        // doc_chunk_blocks is what the sentence layer derives tight bboxes from.
+        if coord_space != COORD_NONE && !out.blocks.is_empty() {
+            let rows: Vec<ChunkBlock> = out
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(bi, bl)| ChunkBlock {
+                    chunk_id: chunk.chunk_id.clone(),
+                    block_idx: bi as u32,
+                    char_start: bl.char_start,
+                    char_end: bl.char_end,
+                    page: bl.page,
+                    x0: bl.bbox[0],
+                    y0: bl.bbox[1],
+                    x1: bl.bbox[2],
+                    y1: bl.bbox[3],
+                    block_type: block_type_str(bl.block_type).to_string(),
+                    text_hash: String::new(),
+                })
+                .collect();
+            store::insert_chunk_blocks(db, &rows).map_err(|e| DocsError::Storage {
+                message: e.to_string(),
+            })?;
         }
         chunks.push(chunk);
     }
@@ -281,6 +388,7 @@ mod tests {
                 super_box: [1.0, 2.0, 3.0, 4.0],
                 blocks: vec![[1.0, 2.0, 3.0, 4.0]],
             }],
+            blocks: vec![],
         };
         assert!(chunkout_spatial("chunk-d-0", &out, COORD_NONE).is_none());
         let s = chunkout_spatial("chunk-d-0", &out, COORD_MARKER).expect("marker → spatial");
@@ -311,9 +419,16 @@ mod tests {
                 page: 2,
             },
         ];
-        let (chunks, spatials) =
-            persist_block_chunks(&db, "docA", "ocr-docA", "ocr_text", &blocks, COORD_MARKER)
-                .unwrap();
+        let (chunks, spatials) = persist_block_chunks(
+            &db,
+            "docA",
+            "ocr-docA",
+            "ocr_text",
+            &blocks,
+            COORD_MARKER,
+            false,
+        )
+        .unwrap();
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_id, "chunk-docA-0");
         assert_eq!(chunks[1].chunk_id, "chunk-docA-1");
@@ -334,6 +449,43 @@ mod tests {
     }
 
     #[test]
+    fn pdf_native_coord_is_not_treated_as_none() {
+        // COORD_PDF_NATIVE must behave exactly like COORD_MARKER: spatial row written,
+        // per-block doc_chunk_blocks rows written (the sentence layer's bbox source).
+        let db = test_db();
+        crate::schema::ensure_doc_schema(&db).unwrap();
+        let blocks = vec![Block {
+            block_type: BlockType::Text,
+            text: "Native-coordinate paragraph with a real bbox.".into(),
+            bbox: [70.65, 113.47, 496.58, 215.62],
+            page: 1,
+        }];
+        let (chunks, spatials) = persist_block_chunks(
+            &db,
+            "docN",
+            "ocr-docN",
+            "ocr_text",
+            &blocks,
+            COORD_PDF_NATIVE,
+            false,
+        )
+        .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(spatials.len(), 1, "pdf-native writes a spatial row");
+        assert_eq!(spatials[0].coord_space, "pdf-native");
+        let got = store::get_chunk_spatial(&db, "chunk-docN-0")
+            .unwrap()
+            .expect("spatial row persisted");
+        assert_eq!(got.coord_space, "pdf-native");
+        let block_rows = store::list_chunk_blocks_for_doc(&db, "docN").unwrap();
+        let rows = block_rows
+            .get("chunk-docN-0")
+            .expect("pdf-native writes doc_chunk_blocks (sentence bbox source)");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].x0, 70.65);
+    }
+
+    #[test]
     fn persist_flat_text_path_writes_no_spatial() {
         let db = test_db();
         crate::schema::ensure_doc_schema(&db).unwrap();
@@ -344,8 +496,10 @@ mod tests {
             char_end: text.len(),
         }];
         let blocks = blocks_from_text(text, &offsets);
-        let (chunks, spatials) =
-            persist_block_chunks(&db, "docB", "ocr-docB", "ocr_text", &blocks, COORD_NONE).unwrap();
+        let (chunks, spatials) = persist_block_chunks(
+            &db, "docB", "ocr-docB", "ocr_text", &blocks, COORD_NONE, false,
+        )
+        .unwrap();
         assert_eq!(chunks.len(), 1, "small text → one merged chunk");
         assert!(spatials.is_empty(), "flat-text path writes no spatial rows");
         assert!(
@@ -379,9 +533,16 @@ mod tests {
                 page: 2,
             },
         ];
-        let (chunks, _spatials) =
-            persist_block_chunks(&db, "docL", "ocr-docL", "ocr_text", &blocks, COORD_MARKER)
-                .unwrap();
+        let (chunks, _spatials) = persist_block_chunks(
+            &db,
+            "docL",
+            "ocr-docL",
+            "ocr_text",
+            &blocks,
+            COORD_MARKER,
+            false,
+        )
+        .unwrap();
         // The Bekker block left the body text...
         assert!(
             !chunks.iter().any(|c| c.content.contains("1147a")),

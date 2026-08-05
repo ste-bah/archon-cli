@@ -19,6 +19,33 @@ pub struct ClearedEvidence {
     pub image_descriptions: usize,
 }
 
+/// Permanently delete a document and all its derived data (chunks, pages, vectors,
+/// sentences, spatial rows, etc.). The content-hash dedup entry is released so the
+/// same file can be re-ingested at a new path. Irreversible.
+pub fn delete_document(db: &DbInstance, document_id: &str) -> Result<ClearedEvidence, DocsError> {
+    crate::schema::ensure_doc_schema(db).map_err(storage)?;
+    if crate::store::get_doc_source(db, document_id)
+        .map_err(storage)?
+        .is_none()
+    {
+        return Err(DocsError::Validation {
+            message: format!("document not found: {document_id}"),
+        });
+    }
+    let cleared = clear_generated_evidence(db, document_id)?;
+    // Remove KB memberships and the source row itself.
+    let p = params(document_id);
+    run_rm_optional(
+        db,
+        "?[kb_id, document_id] := *doc_kb_memberships{kb_id, document_id}, document_id = $did
+         :rm doc_kb_memberships { kb_id, document_id }",
+        p.clone(),
+        "doc_kb_memberships",
+    )?;
+    remove_doc_rows(db, "doc_sources", "document_id", p)?;
+    Ok(cleared)
+}
+
 #[derive(Clone, Debug)]
 pub struct ReprocessDocumentResult {
     pub ingest: IngestFileResult,
@@ -73,12 +100,7 @@ pub async fn reprocess_document_with_policy(
     )
     .await
     {
-        Ok(outcome) => {
-            store::update_doc_status(db, document_id, &DocumentStatus::Ingested)
-                .map_err(storage)?;
-            update_reprocess_job(db, &job_id, document_id, "completed", None)?;
-            outcome
-        }
+        Ok(outcome) => outcome,
         Err(err) => {
             pipeline_failed = true;
             store::update_doc_status(db, document_id, &DocumentStatus::Failed).map_err(storage)?;
@@ -88,13 +110,44 @@ pub async fn reprocess_document_with_policy(
             outcome
         }
     };
-    let chunks_registered = store::list_chunks_for_doc(db, document_id)
-        .map_err(storage)?
-        .len();
-    if chunks_registered == 0 && !pipeline_failed {
-        outcome
-            .warnings
-            .push("reprocess completed but produced no chunks".into());
+    // GATE PARITY WITH FRESH INGEST (order matters, mirrors ingest.rs): the pipeline
+    // succeeding is not the same as the document being sound. Sentence layer is rebuilt
+    // BEFORE any status flip (S2 invariant: Ingested ⇒ sentence layer matches the text;
+    // clear_generated_evidence dropped the old rows), then the same admissibility gate
+    // that guards fresh ingest decides Ingested vs Failed — a zero-chunk or otherwise
+    // degenerate reprocess must land Failed, never a warn-and-Ingested (the Goharinejad
+    // class: "Ingested" with no chunks, invisible to coverage probes).
+    if !pipeline_failed {
+        let s = crate::sentence_index::rebuild_document(db, document_id)?;
+        outcome.warnings.push(format!(
+            "sentence layer: {} sentences ({} bbox, {} page) across {} chunks",
+            s.sentences, s.with_bbox, s.with_page, s.chunks
+        ));
+        let adm = crate::admissibility::check_document(
+            db,
+            document_id,
+            !crate::ingest::is_image_media_type(&doc.media_type),
+            outcome.pdf_marker_fallback,
+        )?;
+        outcome.warnings.extend(adm.warnings.iter().cloned());
+        if adm.failures.is_empty() {
+            store::update_doc_status(db, document_id, &DocumentStatus::Ingested)
+                .map_err(storage)?;
+            update_reprocess_job(db, &job_id, document_id, "completed", None)?;
+        } else {
+            pipeline_failed = true;
+            for failure in &adm.failures {
+                outcome.warnings.push(format!("ADMISSIBILITY: {failure}"));
+            }
+            store::update_doc_status(db, document_id, &DocumentStatus::Failed).map_err(storage)?;
+            update_reprocess_job(
+                db,
+                &job_id,
+                document_id,
+                "failed",
+                Some(&adm.failures.join("; ")),
+            )?;
+        }
     }
 
     Ok(ReprocessDocumentResult {
@@ -364,71 +417,5 @@ fn storage(error: impl std::fmt::Display) -> DocsError {
 }
 
 #[cfg(test)]
-mod tests {
-    use cozo::DbInstance;
-
-    use super::*;
-    use crate::ingest::ingest_file_with_policy;
-
-    fn test_db() -> DbInstance {
-        let db = DbInstance::new("mem", "", "").unwrap();
-        ensure_doc_schema(&db).unwrap();
-        db
-    }
-
-    // Serial with the docs_global_state group: ingest touches the process-global OCR/VLM/embedding
-    // provider registries (and cozo's shared in-memory engine), so running concurrently with the
-    // serial PDF tests let a mock provider's output leak into this doc's chunks — a flaky content
-    // assertion. Serializing removes the race.
-    #[tokio::test]
-    #[serial_test::serial(docs_global_state)]
-    async fn reprocess_preserves_source_and_kb_membership() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("elliott-notes.md");
-        fs::write(&path, "Wave one starts the impulse.\nWave two retraces.\n").unwrap();
-        let policy = archon_policy::EffectivePolicy::default();
-
-        let original = ingest_file_with_policy(&db, &path, &policy).await.unwrap();
-        store::assign_document_to_kb(&db, "trading-elliott-wave", &original.document_id).unwrap();
-        let old_chunks = store::list_chunks_for_doc(&db, &original.document_id).unwrap();
-        assert!(!old_chunks.is_empty());
-
-        let result = reprocess_document_with_policy(&db, &original.document_id, &policy)
-            .await
-            .unwrap();
-
-        assert_eq!(result.ingest.document_id, original.document_id);
-        assert!(!result.ingest.was_new);
-        assert_eq!(result.cleared.chunks, old_chunks.len());
-        let doc = store::get_doc_source(&db, &original.document_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(doc.status, DocumentStatus::Ingested);
-        let kb_docs = store::list_kb_document_ids(&db, "trading-elliott-wave").unwrap();
-        assert_eq!(kb_docs, vec![original.document_id.clone()]);
-        let new_chunks = store::list_chunks_for_doc(&db, &original.document_id).unwrap();
-        assert!(!new_chunks.is_empty());
-        assert_eq!(old_chunks[0].content, new_chunks[0].content);
-    }
-
-    #[tokio::test]
-    #[serial_test::serial(docs_global_state)]
-    async fn reprocess_rejects_changed_source_content() {
-        let db = test_db();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("source.md");
-        fs::write(&path, "original").unwrap();
-        let policy = archon_policy::EffectivePolicy::default();
-        let original = ingest_file_with_policy(&db, &path, &policy).await.unwrap();
-
-        fs::write(&path, "changed").unwrap();
-        let err = reprocess_document_with_policy(&db, &original.document_id, &policy)
-            .await
-            .unwrap_err();
-
-        assert!(err.to_string().contains("source file content changed"));
-        let chunks = store::list_chunks_for_doc(&db, &original.document_id).unwrap();
-        assert_eq!(chunks.len(), 1);
-    }
-}
+#[path = "reprocess_tests.rs"]
+mod tests;

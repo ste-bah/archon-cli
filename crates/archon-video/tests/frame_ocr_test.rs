@@ -31,6 +31,7 @@ impl OcrProvider for MockOcr {
             page_count: 1,
             page_offsets: Vec::new(),
             processing_duration_ms: 1,
+            quality: None,
         })
     }
 

@@ -6,8 +6,10 @@ pub mod store;
 
 mod docs_db_cache;
 
+pub mod admissibility;
 pub mod block_chunking;
 pub mod chunking;
+pub mod column_crop;
 mod cozo_retry;
 pub mod delete;
 pub mod indexing;
@@ -42,13 +44,16 @@ mod pdf_image_enrichment;
 pub use pdf_image_enrichment::{VLM_HEADROOM_MB, VLM_SLOT_MB, auto_image_workers};
 mod pdf_image_progress;
 mod pdf_image_vlm;
+pub mod pdf_native_source;
 pub mod pdf_scan;
 pub mod provenance;
 pub mod provenance_chunks;
 pub mod quote_verify;
 pub mod reprocess;
+pub mod sentence_index;
 pub mod status;
 mod tool_path;
+pub mod two_up;
 pub mod vector_migration;
 pub mod vector_store;
 

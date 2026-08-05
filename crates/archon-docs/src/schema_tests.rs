@@ -4,6 +4,69 @@ fn test_db() -> DbInstance {
     DbInstance::new("mem", "", Default::default()).unwrap()
 }
 
+/// Helper: collect relation names from `::relations` output.
+fn relation_names(db: &DbInstance) -> Vec<String> {
+    let result = db
+        .run_script(
+            "::relations",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .expect("::relations must succeed");
+    result
+        .rows
+        .iter()
+        .filter_map(|row| row.first().and_then(|v| v.get_str()).map(str::to_string))
+        .collect()
+}
+
+/// Phase 1 gate: all four ported relations exist after `ensure_doc_schema()`.
+#[test]
+fn test_phase1_relations_created() {
+    let db = test_db();
+    ensure_doc_schema(&db).unwrap();
+    let names = relation_names(&db);
+    for rel in [
+        "doc_chunk_sentences",
+        "doc_chunk_blocks",
+        "doc_chunk_page_breaks",
+        "doc_image_ocr_status",
+    ] {
+        assert!(
+            names.contains(&rel.to_string()),
+            "ensure_doc_schema must create relation '{rel}'"
+        );
+    }
+}
+
+/// Phase 1 gate: the dual FTS indices are preserved after the new relations are added.
+#[test]
+fn test_dual_fts_still_present_after_phase1() {
+    let db = test_db();
+    ensure_doc_schema(&db).unwrap();
+    // Query each FTS index — if the index is missing, the query will error.
+    let fts_check = |index: &str| {
+        db.run_script(
+            &format!("?[chunk_id, content] := *doc_chunks{{chunk_id, content}}, ~doc_chunks:{index}{{chunk_id | query: \"\", k: 1}}"),
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+    };
+    // An empty query is always valid even on an empty table; what matters is no "index not found" error.
+    // We specifically check that the error (if any) is NOT "index not found".
+    for index in ["chunk_content_fts", "chunk_exact_fts"] {
+        let result = fts_check(index);
+        if let Err(ref e) = result {
+            let msg = e.to_string();
+            assert!(
+                !msg.to_lowercase().contains("not found")
+                    && !msg.to_lowercase().contains("no such"),
+                "FTS index '{index}' missing after ensure_doc_schema: {msg}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_ensure_schema_idempotent() {
     let db = test_db();

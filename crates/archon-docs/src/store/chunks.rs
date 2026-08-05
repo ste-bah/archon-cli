@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
-use crate::models::{ChunkArtifact, ChunkHashes, ChunkSpatial};
+use crate::models::{ChunkArtifact, ChunkBlock, ChunkHashes, ChunkSpatial, PageBreak};
 
 pub fn insert_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<()> {
     let mut params = BTreeMap::new();
@@ -32,6 +32,22 @@ pub fn insert_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("insert doc_chunks failed: {e}"))?;
     crate::index_queue::enqueue_pending_chunk(db, chunk, 0)?;
     Ok(())
+}
+
+/// Tier-1b completion audit: chunks belonging to INGESTED documents whose
+/// embedding_status is not "indexed". After a full (non-scoped) index pass this
+/// must be zero — a non-zero count means retrieval silently misses content.
+pub fn count_unindexed_ingested_chunks(db: &DbInstance) -> Result<usize> {
+    let result = db
+        .run_script(
+            "?[chunk_id] := *doc_chunks{chunk_id, document_id, embedding_status}, \
+             *doc_sources{document_id, status}, \
+             status = 'ingested', embedding_status != 'indexed'",
+            BTreeMap::new(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|e| anyhow::anyhow!("unindexed-chunk audit failed: {e}"))?;
+    Ok(result.rows.len())
 }
 
 pub fn list_chunks_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<ChunkArtifact>> {
@@ -225,4 +241,179 @@ pub fn get_doc_commit_hashes(db: &DbInstance, document_id: &str) -> Result<Vec<S
         .iter()
         .map(|row| row[0].get_str().unwrap_or("").to_string())
         .collect())
+}
+
+/// All `doc_chunk_blocks` rows for a document (join through `doc_chunks`), grouped by
+/// `chunk_id`. Reads the full block table in one query — avoids N per-chunk round trips.
+pub fn list_chunk_blocks_for_doc(
+    db: &DbInstance,
+    document_id: &str,
+) -> Result<BTreeMap<String, Vec<ChunkBlock>>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, block_idx, char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash] := \
+         *doc_chunks{chunk_id, document_id}, document_id = $did, \
+         *doc_chunk_blocks{chunk_id, block_idx, char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash}",
+        params,
+        ScriptMutability::Immutable,
+        "list doc_chunk_blocks (doc)",
+    )
+    .map_err(|e| anyhow::anyhow!("list doc_chunk_blocks (doc) failed: {e}"))?;
+    let mut by_chunk: BTreeMap<String, Vec<ChunkBlock>> = BTreeMap::new();
+    for row in &result.rows {
+        let block = ChunkBlock {
+            chunk_id: row[0].get_str().unwrap_or("").to_string(),
+            block_idx: row[1].get_int().unwrap_or(0) as u32,
+            char_start: row[2].get_int().unwrap_or(0).max(0) as usize,
+            char_end: row[3].get_int().unwrap_or(0).max(0) as usize,
+            page: row[4].get_int().unwrap_or(0) as u32,
+            x0: row[5].get_float().unwrap_or(0.0) as f32,
+            y0: row[6].get_float().unwrap_or(0.0) as f32,
+            x1: row[7].get_float().unwrap_or(0.0) as f32,
+            y1: row[8].get_float().unwrap_or(0.0) as f32,
+            block_type: row[9].get_str().unwrap_or("").to_string(),
+            text_hash: row[10].get_str().unwrap_or("").to_string(),
+        };
+        by_chunk
+            .entry(block.chunk_id.clone())
+            .or_default()
+            .push(block);
+    }
+    Ok(by_chunk)
+}
+
+/// All `doc_chunk_page_breaks` rows for a document (join through `doc_chunks`), grouped by
+/// `chunk_id` and ordered by `offset_in_chunk`. One query for the whole document.
+pub fn list_page_breaks_for_doc(
+    db: &DbInstance,
+    document_id: &str,
+) -> Result<BTreeMap<String, Vec<PageBreak>>> {
+    let mut params = BTreeMap::new();
+    params.insert("did".into(), DataValue::from(document_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, offset_in_chunk, page] := \
+         *doc_chunks{chunk_id, document_id}, document_id = $did, \
+         *doc_chunk_page_breaks{chunk_id, offset_in_chunk, page}",
+        params,
+        ScriptMutability::Immutable,
+        "list doc_chunk_page_breaks (doc)",
+    )
+    .map_err(|e| anyhow::anyhow!("list doc_chunk_page_breaks (doc) failed: {e}"))?;
+    let mut by_chunk: BTreeMap<String, Vec<PageBreak>> = BTreeMap::new();
+    for row in &result.rows {
+        let brk = PageBreak {
+            chunk_id: row[0].get_str().unwrap_or("").to_string(),
+            offset_in_chunk: row[1].get_int().unwrap_or(0).max(0) as usize,
+            page: row[2].get_int().unwrap_or(0) as u32,
+        };
+        by_chunk.entry(brk.chunk_id.clone()).or_default().push(brk);
+    }
+    for breaks in by_chunk.values_mut() {
+        breaks.sort_by_key(|b| b.offset_in_chunk);
+    }
+    Ok(by_chunk)
+}
+
+/// Insert (upsert) a batch of `doc_chunk_blocks` rows.
+pub fn insert_chunk_blocks(db: &DbInstance, blocks: &[ChunkBlock]) -> Result<()> {
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    let rows: Vec<cozo::DataValue> = blocks
+        .iter()
+        .map(|b| {
+            cozo::DataValue::List(vec![
+                cozo::DataValue::from(b.chunk_id.as_str()),
+                cozo::DataValue::from(b.block_idx as i64),
+                cozo::DataValue::from(b.char_start as i64),
+                cozo::DataValue::from(b.char_end as i64),
+                cozo::DataValue::from(b.page as i64),
+                cozo::DataValue::from(b.x0 as f64),
+                cozo::DataValue::from(b.y0 as f64),
+                cozo::DataValue::from(b.x1 as f64),
+                cozo::DataValue::from(b.y1 as f64),
+                cozo::DataValue::from(b.block_type.as_str()),
+                cozo::DataValue::from(b.text_hash.as_str()),
+            ])
+        })
+        .collect();
+    let mut params = BTreeMap::new();
+    params.insert("rows".into(), cozo::DataValue::List(rows));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, block_idx, char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash] \
+         <- $rows \
+         :put doc_chunk_blocks { chunk_id, block_idx => char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash }",
+        params,
+        ScriptMutability::Mutable,
+        "insert doc_chunk_blocks",
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_chunk_blocks failed: {e}"))?;
+    Ok(())
+}
+
+/// All `doc_chunk_blocks` rows for a single chunk, ordered by `block_idx`.
+pub fn list_chunk_blocks_for_chunk(db: &DbInstance, chunk_id: &str) -> Result<Vec<ChunkBlock>> {
+    let mut params = BTreeMap::new();
+    params.insert("cid".into(), DataValue::from(chunk_id));
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, block_idx, char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash] := \
+         *doc_chunk_blocks{chunk_id, block_idx, char_start, char_end, page, x0, y0, x1, y1, block_type, text_hash}, \
+         chunk_id = $cid \
+         :order block_idx",
+        params,
+        ScriptMutability::Immutable,
+        "list doc_chunk_blocks (chunk)",
+    )
+    .map_err(|e| anyhow::anyhow!("list doc_chunk_blocks (chunk) failed: {e}"))?;
+    let mut out = Vec::with_capacity(result.rows.len());
+    for row in &result.rows {
+        out.push(ChunkBlock {
+            chunk_id: row[0].get_str().unwrap_or("").to_string(),
+            block_idx: row[1].get_int().unwrap_or(0) as u32,
+            char_start: row[2].get_int().unwrap_or(0).max(0) as usize,
+            char_end: row[3].get_int().unwrap_or(0).max(0) as usize,
+            page: row[4].get_int().unwrap_or(0) as u32,
+            x0: row[5].get_float().unwrap_or(0.0) as f32,
+            y0: row[6].get_float().unwrap_or(0.0) as f32,
+            x1: row[7].get_float().unwrap_or(0.0) as f32,
+            y1: row[8].get_float().unwrap_or(0.0) as f32,
+            block_type: row[9].get_str().unwrap_or("").to_string(),
+            text_hash: row[10].get_str().unwrap_or("").to_string(),
+        });
+    }
+    Ok(out)
+}
+
+/// Insert (upsert) a batch of `doc_chunk_page_breaks` rows.
+pub fn insert_page_breaks(db: &DbInstance, breaks: &[PageBreak]) -> Result<()> {
+    if breaks.is_empty() {
+        return Ok(());
+    }
+    let rows: Vec<cozo::DataValue> = breaks
+        .iter()
+        .map(|b| {
+            cozo::DataValue::List(vec![
+                cozo::DataValue::from(b.chunk_id.as_str()),
+                cozo::DataValue::from(b.offset_in_chunk as i64),
+                cozo::DataValue::from(b.page as i64),
+            ])
+        })
+        .collect();
+    let mut params = BTreeMap::new();
+    params.insert("rows".into(), cozo::DataValue::List(rows));
+    crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, offset_in_chunk, page] <- $rows \
+         :put doc_chunk_page_breaks { chunk_id, offset_in_chunk => page }",
+        params,
+        ScriptMutability::Mutable,
+        "insert doc_chunk_page_breaks",
+    )
+    .map_err(|e| anyhow::anyhow!("insert doc_chunk_page_breaks failed: {e}"))?;
+    Ok(())
 }

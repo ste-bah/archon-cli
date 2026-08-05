@@ -267,6 +267,34 @@ pub struct PdfPolicy {
     /// per figure). Requires a Marker sidecar + an enabled VLM.
     #[serde(default)]
     pub figure_region_vlm: bool,
+    /// Native-coordinate extraction for BORN-DIGITAL PDFs (embedded text layer, not a scan):
+    /// reads the PDF's own glyph positions via `pdftotext -tsv` (no OCR, no GPU) and yields
+    /// real per-block bboxes — same coordinate space as Marker, recorded as
+    /// `coord_space = "pdf-native"`. Default true; requires poppler's pdftotext (already a
+    /// hard ingest dependency). Set false to restore the flat bbox-less path for born-digital
+    /// docs. Scanned documents are unaffected either way (they keep the Marker path).
+    #[serde(default = "default_true")]
+    pub use_pdf_native_extractor: bool,
+    /// Path to the native-extraction sidecar (`scripts/archon_pdf_native_sidecar.py`). None →
+    /// resolved from ARCHON_PDF_NATIVE_SCRIPT, then `scripts/` next to the archon binary, then
+    /// `scripts/` under the current directory.
+    #[serde(default)]
+    pub pdf_native_script: Option<String>,
+    /// Python interpreter for the native sidecar (parallel to `marker_python`). None → "python3"
+    /// on PATH. Pin an absolute path in deployed configs so headless/service contexts (no pyenv
+    /// shims on PATH) resolve the same interpreter.
+    #[serde(default)]
+    pub pdf_native_python: Option<String>,
+    /// When true, a configured Marker source keeps precedence over the native extractor even for
+    /// born-digital documents (pre-native routing). Default false: native wins for born-digital
+    /// docs — exact glyph coordinates beat Marker's pixel approximation, with Marker as the
+    /// fallback when the native sidecar fails.
+    #[serde(default)]
+    pub prefer_marker_for_born_digital: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_chunker() -> String {
@@ -302,6 +330,10 @@ impl Default for PdfPolicy {
             marker_url: None,
             scan_detector: default_scan_detector(),
             figure_region_vlm: false,
+            use_pdf_native_extractor: true,
+            pdf_native_script: None,
+            pdf_native_python: None,
+            prefer_marker_for_born_digital: false,
         }
     }
 }

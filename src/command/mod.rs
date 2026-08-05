@@ -51,6 +51,8 @@ pub(crate) mod connect;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
 pub(crate) mod copy;
+pub(crate) mod corpus_index;
+pub(crate) mod corpus_index_verify;
 pub(crate) mod cost;
 pub(crate) mod denials;
 pub(crate) mod diff;

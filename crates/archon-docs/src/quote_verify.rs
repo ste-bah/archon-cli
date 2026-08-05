@@ -234,7 +234,10 @@ fn fragment_for(db: &DbInstance, chunk: &ChunkArtifact) -> QuoteFragment {
     let (page, bbox, coord_space) = match spatial {
         Some(s) => (
             s.page_num,
-            parse_bbox(&s.super_box).filter(|_| s.coord_space == "marker"),
+            // Both bbox-carrying coord spaces are trustworthy (PDF points, top-left origin);
+            // "pdf-native" comes from the born-digital glyph-position extractor.
+            parse_bbox(&s.super_box)
+                .filter(|_| s.coord_space == "marker" || s.coord_space == "pdf-native"),
             s.coord_space,
         ),
         None => (chunk.page_start, None, "none".to_string()),

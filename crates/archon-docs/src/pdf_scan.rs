@@ -31,6 +31,13 @@ const MIN_USABLE_PPI: u32 = 10;
 /// Fraction of pages that must be full-page scans for the doc to be a "scanned book". Matches the
 /// aspect heuristic's threshold so the two detectors are compared on equal footing.
 const SCANNED_BOOK_FRACTION: f64 = 0.70;
+/// Union third arm: a page whose ONLY image covers at least half the page is a margin-cropped
+/// scan. The Kassel Rhetorica measured 275/279 pages as exactly-one-image at 0.5–0.8 coverage
+/// (text block scanned without margins) — under both the 0.80 coverage bar and the aspect pixel
+/// floor, so the union read 61% < 70% and called a scanned book BORN-DIGITAL. Requiring the
+/// singleton keeps born-digital immunity: papers hit occasional full-page figures, but not one
+/// per page across ≥70% of the document.
+const CROPPED_SCAN_COVERAGE: f64 = 0.50;
 
 /// Which scan detector governs the active enrichment decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,9 +213,15 @@ fn resolve(
 
 /// Apply the pipeline's embedded-image gate to `pdfimages -list` entries so the pre-ingest verdict
 /// counts the same images enrichment will: honor `extract_embedded_images` (false → the pipeline
-/// extracts nothing), then filter by `min_image_dimension` (max side) and `min_image_bytes` (the
-/// size-column proxy for the extracted-PNG size — a close, never-exact approximation). An entry with
-/// an unparsable size passes the byte gate (lenient: never drop an image by guessing it away).
+/// extracts nothing), then filter by `min_image_dimension` (max side) and `min_image_bytes`,
+/// measured the way the PIPELINE measures it: against the extracted-file size, which for a
+/// bi-level codec is bounded below by the decoded bitmap (`w·h/8`), never the compressed stream.
+/// JBIG2/CCITT compress a full page scan to ~1–3 KB of stream — the White 1985 scan's 23 page
+/// images all sat under the 4096-byte gate by stream size, so the classifier saw "no embedded
+/// images" while the pipeline extracted and enriched all 23 (the two stages disagreed about
+/// which images exist). `max(stream, w·h/8)` keeps genuinely tiny decorative images filtered
+/// while making page-scale bi-level scans visible to scan detection. An entry with an
+/// unparsable size passes the byte gate (lenient: never drop an image by guessing it away).
 ///
 /// NOTE: unlike the pipeline this does NOT dedupe by object/hash — `pdfimages` already lists a shared
 /// XObject once per page it is drawn on, which is exactly the per-page granularity the coverage
@@ -225,8 +238,10 @@ fn retained_images(
     entries
         .into_iter()
         .filter(|e| {
+            let decoded_floor = (e.width as u64 * e.height as u64) / 8;
             e.width.max(e.height) >= pdf_policy.min_image_dimension
-                && e.bytes.is_none_or(|b| b >= pdf_policy.min_image_bytes)
+                && e.bytes
+                    .is_none_or(|b| b.max(decoded_floor) >= pdf_policy.min_image_bytes)
         })
         .collect()
 }
@@ -296,8 +311,16 @@ pub fn classify_by_union(
 ) -> UnionVerdict {
     let (per_page_cov, deferred) = coverage_per_page(entries, page_dims);
     let mut scan_pages = aspect_scan_page_set(entries);
+    let mut per_page_count: BTreeMap<u32, usize> = BTreeMap::new();
+    for e in entries {
+        *per_page_count.entry(e.source_page).or_insert(0) += 1;
+    }
     for (page, cov) in &per_page_cov {
         if *cov >= PAGE_SCAN_COVERAGE {
+            scan_pages.insert(*page);
+        }
+        // Third arm: margin-cropped scan — the page's ONLY image covering ≥ half the page.
+        if *cov >= CROPPED_SCAN_COVERAGE && per_page_count.get(page) == Some(&1) {
             scan_pages.insert(*page);
         }
     }

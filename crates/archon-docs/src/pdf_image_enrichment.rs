@@ -217,7 +217,10 @@ struct ImageResult {
 }
 
 enum OcrImageResult {
-    Text(String),
+    Text {
+        text: String,
+        quality: Option<crate::ocr::provider::OcrQualityMeta>,
+    },
     NoText,
     Failed(String),
 }
@@ -237,7 +240,7 @@ async fn process_image(
         "",
     );
     let ocr = match extract_image_ocr_text(&work.image).await {
-        Ok(Some(text)) => OcrImageResult::Text(text),
+        Ok(Some((text, quality))) => OcrImageResult::Text { text, quality },
         Ok(None) => OcrImageResult::NoText,
         Err(error) => OcrImageResult::Failed(error.to_string()),
     };
@@ -264,7 +267,9 @@ async fn process_image(
 mod persist;
 use persist::{emit_vlm_skip, persist_image_result};
 
-async fn extract_image_ocr_text(image: &PdfImage) -> Result<Option<String>, DocsError> {
+async fn extract_image_ocr_text(
+    image: &PdfImage,
+) -> Result<Option<(String, Option<crate::ocr::provider::OcrQualityMeta>)>, DocsError> {
     let ext = match image.mime {
         "image/jpeg" => "jpg",
         _ => "png",
@@ -290,7 +295,7 @@ async fn extract_image_ocr_text(image: &PdfImage) -> Result<Option<String>, Docs
         if ocr.full_text.trim().is_empty() {
             None
         } else {
-            Some(ocr.full_text)
+            Some((ocr.full_text, ocr.quality))
         }
     })
 }

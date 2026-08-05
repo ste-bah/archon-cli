@@ -324,3 +324,68 @@ pub enum ProvAction {
 #[path = "data_actions_agent.rs"]
 mod agent;
 pub use agent::*;
+
+/// Actions for `archon corpus-index` — the claim/clause-level corpus index (C1 port).
+#[derive(clap::Subcommand, Debug, Clone, PartialEq)]
+pub enum CorpusIndexAction {
+    /// Create the corpus_* relations (idempotent)
+    EnsureSchema,
+    /// Row counts per relation + import audit trail
+    Status,
+    /// Dry-run validate a JSONL/JSON-array intermediate against the relation contract
+    Validate {
+        /// Record kind: sources|clauses|claims|edges|tensions|terms|groups
+        kind: String,
+        /// Path to the intermediate file
+        file: std::path::PathBuf,
+    },
+    /// E0 ingestion-measurement pass: per-document bbox/spatial/locator coverage + probes
+    Probes,
+    /// Dump all records of a kind as JSONL (optionally filtered by entry_id)
+    Dump {
+        /// Record kind: sources|clauses|claims|edges|tensions|terms|groups
+        kind: String,
+        /// Restrict to one entry_id (kinds that carry it)
+        #[arg(long)]
+        entry: Option<String>,
+    },
+    /// Show one record by id (JSON)
+    Show {
+        /// Record kind: sources|clauses|claims|edges|tensions|terms|groups
+        kind: String,
+        /// The record's key value
+        id: String,
+    },
+    /// Validate + batch-import an intermediate; rejected records are quarantined, never dropped
+    Import {
+        /// Record kind: sources|clauses|claims|edges|tensions|terms|groups
+        kind: String,
+        /// Path to the intermediate file
+        file: std::path::PathBuf,
+        /// Quarantine sidecar path (default: <file>.quarantine.jsonl)
+        #[arg(long)]
+        quarantine: Option<std::path::PathBuf>,
+        /// Validate and report only; write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Clauses only: verify each anchored row's quote against its pinned document
+        /// (verify-quote; exact or similarity >= 0.90). Rows that fail are quarantined,
+        /// never written — entries are born verified. Unanchored rows (no archon
+        /// text_layer_id) skip the gate. Combines with --dry-run for a no-write audit.
+        #[arg(long)]
+        verify_quotes: bool,
+    },
+    /// Remove records by id (verifies existence; requires --yes)
+    Remove {
+        /// Record kind: sources|clauses|claims|edges|tensions|terms|groups
+        kind: String,
+        /// The record's key value
+        id: Option<String>,
+        /// File with one key value per line (batch removal)
+        #[arg(long)]
+        ids_file: Option<std::path::PathBuf>,
+        /// Actually remove (without this flag: report only and exit non-zero)
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+}

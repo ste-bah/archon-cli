@@ -43,37 +43,107 @@ impl OcrProvider for LocalOcrProvider {
     }
 }
 
+async fn run_image_engine(
+    engine: &str,
+    path: &Path,
+    language_hint: Option<&str>,
+) -> Result<OcrExtractResult, DocsError> {
+    match engine {
+        "rapidocr" => rapid::extract_image_with_rapidocr(path).await,
+        _ => extract_image_with_tesseract(path, language_hint).await,
+    }
+}
+
+/// S8 arbiter: the second engine fires not only when the first FAILS but also
+/// when it succeeds with low-quality text; the higher-scoring result wins and
+/// every success carries engine + score provenance.
 async fn extract_image_local(
     path: &Path,
     language_hint: Option<&str>,
 ) -> Result<OcrExtractResult, DocsError> {
-    if rapid::prefer_rapidocr() {
-        let rapid_error = match rapid::extract_image_with_rapidocr(path).await {
-            Ok(result) => return Ok(result),
-            Err(error) => error.to_string(),
-        };
-        return extract_image_with_tesseract(path, language_hint)
-            .await
-            .map_err(|tesseract_error| DocsError::OcrApi {
-                message: format!(
-                    "{rapid_error}; tesseract fallback also failed: {tesseract_error}"
-                ),
-                status_code: None,
-            });
-    }
+    use super::provider::OcrQualityMeta;
+    use super::quality;
 
-    match extract_image_with_tesseract(path, language_hint).await {
-        Ok(result) => Ok(result),
-        Err(tesseract_error) if rapid::allow_rapidocr_fallback() => {
-            let tesseract_error = tesseract_error.to_string();
-            rapid::extract_image_with_rapidocr(path)
-                .await
-                .map_err(|rapid_error| DocsError::OcrApi {
+    let (primary, secondary) = if rapid::prefer_rapidocr() {
+        ("rapidocr", "tesseract")
+    } else {
+        ("tesseract", "rapidocr")
+    };
+    // tesseract is always a valid fallback for rapidocr; the reverse is policy-gated.
+    let secondary_allowed = secondary != "rapidocr" || rapid::allow_rapidocr_fallback();
+
+    match run_image_engine(primary, path, language_hint).await {
+        Ok(mut result) => {
+            let q = quality::score_text(&result.full_text);
+            let floor = quality::quality_floor();
+            if q.score >= floor || !secondary_allowed || !quality::arbiter_enabled() {
+                result.quality = Some(OcrQualityMeta {
+                    engine: primary.to_string(),
+                    score: q.score,
+                    escalated: false,
+                    note: (!q.reasons.is_empty()).then(|| q.reasons.join(", ")),
+                });
+                return Ok(result);
+            }
+            match run_image_engine(secondary, path, language_hint).await {
+                Ok(mut alt) => {
+                    let q2 = quality::score_text(&alt.full_text);
+                    let note = Some(format!(
+                        "arbiter {primary}={:.2} {secondary}={:.2}",
+                        q.score, q2.score
+                    ));
+                    if q2.score > q.score {
+                        alt.quality = Some(OcrQualityMeta {
+                            engine: secondary.to_string(),
+                            score: q2.score,
+                            escalated: true,
+                            note,
+                        });
+                        Ok(alt)
+                    } else {
+                        result.quality = Some(OcrQualityMeta {
+                            engine: primary.to_string(),
+                            score: q.score,
+                            escalated: true,
+                            note,
+                        });
+                        Ok(result)
+                    }
+                }
+                Err(second_error) => {
+                    result.quality = Some(OcrQualityMeta {
+                        engine: primary.to_string(),
+                        score: q.score,
+                        escalated: true,
+                        note: Some(format!(
+                            "low quality ({:.2} < {floor:.2}) but {secondary} failed: {second_error}",
+                            q.score
+                        )),
+                    });
+                    Ok(result)
+                }
+            }
+        }
+        Err(primary_error) if secondary_allowed => {
+            let primary_error = primary_error.to_string();
+            match run_image_engine(secondary, path, language_hint).await {
+                Ok(mut alt) => {
+                    let q2 = quality::score_text(&alt.full_text);
+                    alt.quality = Some(OcrQualityMeta {
+                        engine: secondary.to_string(),
+                        score: q2.score,
+                        escalated: true,
+                        note: Some(format!("{primary} failed: {primary_error}")),
+                    });
+                    Ok(alt)
+                }
+                Err(second_error) => Err(DocsError::OcrApi {
                     message: format!(
-                        "{tesseract_error}; RapidOCR fallback also failed: {rapid_error}"
+                        "{primary_error}; {secondary} fallback also failed: {second_error}"
                     ),
                     status_code: None,
-                })
+                }),
+            }
         }
         Err(error) => Err(error),
     }
@@ -133,6 +203,7 @@ async fn extract_image_with_tesseract(
         }],
         full_text: text,
         processing_duration_ms: started.elapsed().as_millis() as u64,
+        quality: None,
     })
 }
 
@@ -145,6 +216,7 @@ fn extract_text_file(path: &Path) -> Result<OcrExtractResult, DocsError> {
         page_offsets: offsets,
         full_text: content,
         processing_duration_ms: 0,
+        quality: None,
     })
 }
 
@@ -186,6 +258,7 @@ async fn extract_pdf_native(path: &Path) -> Result<OcrExtractResult, DocsError> 
                 page_count,
                 page_offsets: offsets,
                 processing_duration_ms: 0,
+                quality: None,
             })
         }
         Ok(out) => {
@@ -251,6 +324,7 @@ async fn extract_scanned_pdf(
         page_offsets: offsets,
         full_text,
         processing_duration_ms: started.elapsed().as_millis() as u64,
+        quality: None,
     })
 }
 

@@ -82,6 +82,7 @@ impl OcrProvider for MockOcrProvider {
                 char_end: self.text.len(),
             }],
             processing_duration_ms: 7,
+            quality: None,
         })
     }
 

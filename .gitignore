@@ -115,3 +115,6 @@ __pycache__/
 # (data stays off the remote); transferred to other dev boxes out-of-band (scp/bundle).
 # The dependent tests skip when these are absent; synthetic fixtures ship in-repo.
 /crates/archon-draft/tests/fixtures/m6/
+# corpus PDFs are data, not code — they live outside version control
+/corpus/
+scripts/__pycache__/

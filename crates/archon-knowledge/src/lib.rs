@@ -5,6 +5,7 @@
 
 pub mod claim_extractor;
 pub mod contradiction_scanner;
+pub mod corpus;
 pub mod entity_extractor;
 pub mod errors;
 pub mod hybrid_retriever;

@@ -2,7 +2,7 @@ use clap::Subcommand;
 
 use super::{
     AgentAction, AuthArgs, BehaviourAction, BriefingAction, ChatArgs, CognitiveAction,
-    CompletionAction, ConstellationAction, DocsAction, GametheoryAction, KbAction, LearningAction,
+    CompletionAction, ConstellationAction, CorpusIndexAction, DocsAction, GametheoryAction, KbAction, LearningAction,
     MeaningAction, MemoryAction, PermissionsAction, PipelineAction, PluginAction, ProvAction,
     ProvidersAction, ReasoningAction, RemoteAction, RequirementsAction, SandboxAction, SelfAction,
     StyleAction, TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
@@ -248,6 +248,12 @@ pub enum Commands {
     Docs {
         #[command(subcommand)]
         action: DocsAction,
+    },
+    /// Manage the claim/clause-level corpus index (C1 port from primary)
+    #[command(name = "corpus-index")]
+    CorpusIndex {
+        #[command(subcommand)]
+        action: CorpusIndexAction,
     },
     /// Ingest and inspect video evidence
     Video {

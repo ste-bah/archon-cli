@@ -29,6 +29,17 @@ pub(crate) async fn handle_index(
     let candidates = prepare_candidates(&db, &options)?;
     if candidates == 0 {
         println!("No chunks need indexing.");
+        // Tier-1b completion audit still runs on the empty-queue path — "nothing to
+        // do" plus "nothing unindexed" together are the attestation callers want.
+        let unindexed = archon_docs::store::count_unindexed_ingested_chunks(&db)?;
+        if unindexed == 0 {
+            println!("Completion audit: all Ingested-document chunks indexed.");
+        } else {
+            anyhow::bail!(
+                "completion audit FAILED: {unindexed} chunk(s) of Ingested documents are \
+                 unindexed yet not in the queue — run 'archon docs index --all' to requeue."
+            );
+        }
         return Ok(());
     }
 
@@ -76,6 +87,26 @@ pub(crate) async fn handle_index(
     }
     if result.cache_hits > 0 {
         println!("Cache hits: {} chunks", result.cache_hits);
+    }
+    // Tier-1b completion audit (mandatory verification, 2026-08-05): after an
+    // unscoped pass, every chunk of every Ingested document must be indexed —
+    // otherwise retrieval silently misses content. Scoped/limited runs only
+    // report the number; a full pass leaving stragglers is a hard error.
+    let unindexed = archon_docs::store::count_unindexed_ingested_chunks(&db)?;
+    let scoped = options.document_id.is_some() || options.limit.is_some();
+    if unindexed == 0 {
+        println!("Completion audit: all Ingested-document chunks indexed.");
+    } else if scoped {
+        println!(
+            "Completion audit: {unindexed} chunk(s) still unindexed corpus-wide \
+             (scoped run — run 'archon docs index' unscoped to drain)."
+        );
+    } else {
+        anyhow::bail!(
+            "completion audit FAILED: {unindexed} chunk(s) of Ingested documents remain \
+             unindexed after a full pass. Run 'archon docs index-status' and \
+             'archon docs index-retry-failed'."
+        );
     }
     Ok(())
 }
