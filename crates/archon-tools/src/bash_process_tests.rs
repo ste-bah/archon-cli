@@ -82,10 +82,19 @@ async fn timeout_returns_after_descendant_cleanup() {
 
     assert!(result.is_error, "{}", result.content);
     let pid = std::fs::read_to_string(pid_file).unwrap();
-    assert!(
-        !process_exists(pid.trim()),
-        "descendant survived timeout return"
-    );
+    // Bounded poll rather than an immediate check.
+    //
+    // `terminate_child` SIGKILLs the process GROUP and then waits for the direct
+    // child. The descendant is signalled but reaped asynchronously by the
+    // kernel, so it can still be visible for a few milliseconds after `execute`
+    // returns. That window is invisible on an idle machine and reliably lost
+    // under CI load, which is what made this test flaky on ubuntu.
+    //
+    // The guarantee worth asserting is that the descendant does not SURVIVE --
+    // SIGKILL cannot be trapped, so anything still present is mid-teardown, not
+    // leaked. This still fails if cleanup never happens, which is the regression
+    // the test exists to catch; it only tolerates teardown latency.
+    wait_until_process_is_absent(&pid).await;
 }
 
 #[tokio::test]
