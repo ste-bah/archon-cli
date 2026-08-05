@@ -43,6 +43,32 @@ fn with_garden_summary(
     activity
 }
 
+fn recent_activity(
+    working_dir: &Path,
+    session_store: &archon_session::storage::SessionStore,
+    session_id: &str,
+) -> Vec<archon_tui::splash::ActivityEntry> {
+    let cwd = working_dir.display().to_string();
+    session_store
+        .list_sessions(10)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.working_directory == cwd)
+        .filter(|s| s.id != session_id)
+        .take(3)
+        .map(|s| {
+            let when = archon_tui::splash::format_relative_time(&s.last_active);
+            let msgs = s.message_count;
+            let description = if msgs == 0 {
+                "Empty session".to_string()
+            } else {
+                format!("{msgs} messages, {}", s.model)
+            };
+            archon_tui::splash::ActivityEntry { when, description }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use archon_tui::splash::ActivityEntry;
@@ -82,30 +108,4 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].description, "Memory garden: 1 stale pruned");
     }
-}
-
-fn recent_activity(
-    working_dir: &Path,
-    session_store: &archon_session::storage::SessionStore,
-    session_id: &str,
-) -> Vec<archon_tui::splash::ActivityEntry> {
-    let cwd = working_dir.display().to_string();
-    session_store
-        .list_sessions(10)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|s| s.working_directory == cwd)
-        .filter(|s| s.id != session_id)
-        .take(3)
-        .map(|s| {
-            let when = archon_tui::splash::format_relative_time(&s.last_active);
-            let msgs = s.message_count;
-            let description = if msgs == 0 {
-                "Empty session".to_string()
-            } else {
-                format!("{msgs} messages, {}", s.model)
-            };
-            archon_tui::splash::ActivityEntry { when, description }
-        })
-        .collect()
 }

@@ -197,6 +197,22 @@ fn garden_dedup_merges_near_duplicates() {
             || survivor.tags.contains(&"borrow".to_string()),
         "survivor should have merged tags from victim"
     );
+
+    // The dedup phase leaves a `Supersedes` edge behind, and the fragment
+    // phase that runs after it reads relationships. Without a guard it folds
+    // the losing half straight back into the survivor, whose content then
+    // reads as its own text twice -- in the prompt, on every recall. Undoing
+    // the merge in the same run that made it.
+    assert!(
+        !survivor.content.contains(" | "),
+        "the survivor must not have the superseded duplicate concatenated \
+         back into it, got: {}",
+        survivor.content
+    );
+    assert_eq!(
+        survivor.content, "Rust uses borrow checker for memory safety in systems programming",
+        "the survivor keeps its own content unchanged"
+    );
 }
 
 // ── 5. garden_dedup_preserves_distinct ───────────────────────

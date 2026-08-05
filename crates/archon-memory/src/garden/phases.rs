@@ -352,6 +352,16 @@ pub(super) fn phase_fragment_merge(graph: &dyn MemoryTrait) -> Result<usize, Mem
                 if deleted_ids.contains(&rel.id) {
                     continue;
                 }
+                // A superseded relative is the losing half of a merge that
+                // already happened, and the `Supersedes` edge that records it is
+                // a relationship like any other to `get_related_memories`.
+                // Without this, every duplicate the dedup phase folds away comes
+                // straight back in the same run -- concatenated onto the
+                // survivor, whose content then reads as its own text twice, in
+                // the prompt, on every recall.
+                if rel.tags.iter().any(|t| t == SUPERSEDED_TAG) {
+                    continue;
+                }
                 if rel.memory_type != mem.memory_type {
                     continue;
                 }

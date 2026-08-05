@@ -114,7 +114,7 @@ impl CommandHandler for HelpHandler {
                     /cost                - Show session cost breakdown\n\
                     /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
                     /config [key] [val]  - List, get, or set runtime config values\n\
-                    /memory [subcmd]     - List, search, or clear memories\n\
+                    /memory [subcmd]     - Store, list, search, or clear memories\n\
                     /doctor              - Run diagnostics on all subsystems\n\
                     /export              - Export conversation as JSON\n\
                     /diff                - Show git diff --stat for the working directory\n\
@@ -411,7 +411,7 @@ mod tests {
             /cost                - Show session cost breakdown\n\
             /permissions [mode]  - Show/set permission mode (6 modes + aliases)\n\
             /config [key] [val]  - List, get, or set runtime config values\n\
-            /memory [subcmd]     - List, search, or clear memories\n\
+            /memory [subcmd]     - Store, list, search, or clear memories\n\
             /doctor              - Run diagnostics on all subsystems\n\
             /export              - Export conversation as JSON\n\
             /diff                - Show git diff --stat for the working directory\n\

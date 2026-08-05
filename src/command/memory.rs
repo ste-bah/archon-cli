@@ -101,6 +101,7 @@
 use archon_tui::app::TuiEvent;
 
 use archon_memory::MemoryTrait;
+use archon_memory::types::MemoryType;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
@@ -119,6 +120,20 @@ fn truncate_str(s: &str, max: usize) -> String {
             end -= 1;
         }
         format!("{}...", &trimmed[..end])
+    }
+}
+
+/// Drop one matching pair of surrounding quotes, if present.
+///
+/// A lone quote, or mismatched quotes, are left alone — they are more
+/// likely part of what the user meant to store than a quoting mistake.
+fn unquote(s: &str) -> &str {
+    let mut chars = s.chars();
+    match (chars.next(), chars.next_back()) {
+        (Some(open @ ('"' | '\'')), Some(close)) if open == close => {
+            s[open.len_utf8()..s.len() - close.len_utf8()].trim()
+        }
+        _ => s,
     }
 }
 
@@ -189,6 +204,57 @@ impl CommandHandler for MemoryHandler {
                     ctx.emit(TuiEvent::Error(format!("Memory graph error: {e}")));
                 }
             },
+            // Documented in the memory cookbook since before it existed. Until
+            // now `/memory store ...` fell through to the unknown-subcommand
+            // branch, so the one instruction the docs gave for putting
+            // something in memory by hand did nothing.
+            "store" => {
+                // The cookbook has always shown the quoted form, and quoting a
+                // sentence is the natural thing to do. The parser does not strip
+                // them, so without this the quotes end up inside the memory and
+                // then inside the prompt on every recall.
+                let arg = unquote(arg);
+                if arg.is_empty() {
+                    ctx.emit(TuiEvent::Error("Usage: /memory store <text>".into()));
+                    return Ok(());
+                }
+                // Bounded like every other write path. A deliberate note is not
+                // a document, and an oversized one is recalled and injected for
+                // as long as it exists.
+                let limit = archon_memory::extraction::content_limit(MemoryType::Fact);
+                let length = arg.chars().count();
+                if length > limit {
+                    ctx.emit(TuiEvent::Error(format!(
+                        "Memory is {length} characters, over the {limit}-character limit. \
+                         Store a summary rather than the full text."
+                    )));
+                    return Ok(());
+                }
+                // `/memory list` prints the title, not the content. Stored with
+                // an empty one, a hand-written memory shows up as a bare id and
+                // a date -- unidentifiable in the one view meant to show you
+                // what you have.
+                let title = truncate_str(arg, 60);
+                match memory.store_memory(
+                    arg,
+                    &title,
+                    MemoryType::Fact,
+                    0.5,
+                    &["manual".to_string()],
+                    "user",
+                    "",
+                ) {
+                    Ok(id) => {
+                        ctx.emit(TuiEvent::TextDelta(format!(
+                            "\nStored [{}] {arg}\n",
+                            &id[..8.min(id.len())]
+                        )));
+                    }
+                    Err(e) => {
+                        ctx.emit(TuiEvent::Error(format!("Failed to store memory: {e}")));
+                    }
+                }
+            }
             "search" => {
                 if arg.is_empty() {
                     ctx.emit(TuiEvent::Error("Usage: /memory search <query>".into()));
@@ -260,7 +326,7 @@ impl CommandHandler for MemoryHandler {
             other => {
                 ctx.emit(TuiEvent::Error(format!(
                     "Unknown memory subcommand: {other}. Use list, \
-                     search, prune, or clear."
+                     store, search, prune, or clear."
                 )));
             }
         }

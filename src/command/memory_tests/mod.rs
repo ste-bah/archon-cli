@@ -19,6 +19,10 @@ struct TestMemory {
     recall_result: Mutex<Result<Vec<Memory>, MemoryError>>,
     clear_result: Mutex<Result<usize, MemoryError>>,
     recall_captured_query: Mutex<Option<String>>,
+    /// (content, title, memory_type, importance, tags) of the last
+    /// `store_memory`.
+    store_captured: Mutex<Option<(String, String, MemoryType, f64, Vec<String>)>>,
+    store_result: Mutex<Result<String, MemoryError>>,
 }
 
 impl TestMemory {
@@ -28,6 +32,8 @@ impl TestMemory {
             recall_result: Mutex::new(Ok(Vec::new())),
             clear_result: Mutex::new(Ok(0)),
             recall_captured_query: Mutex::new(None),
+            store_captured: Mutex::new(None),
+            store_result: Mutex::new(Ok("aabbccdd-1111-2222".to_string())),
         }
     }
 
@@ -44,6 +50,16 @@ impl TestMemory {
     fn with_clear(self, r: Result<usize, MemoryError>) -> Self {
         *self.clear_result.lock().unwrap() = r;
         self
+    }
+
+    fn with_store(self, r: Result<String, MemoryError>) -> Self {
+        *self.store_result.lock().unwrap() = r;
+        self
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn captured_store(&self) -> Option<(String, String, MemoryType, f64, Vec<String>)> {
+        self.store_captured.lock().unwrap().clone()
     }
 
     fn captured_recall_query(&self) -> Option<String> {
@@ -67,15 +83,22 @@ fn clone_result<T: Clone>(r: &Result<T, MemoryError>) -> Result<T, MemoryError> 
 impl MemoryTrait for TestMemory {
     fn store_memory(
         &self,
-        _content: &str,
-        _title: &str,
-        _memory_type: MemoryType,
-        _importance: f64,
-        _tags: &[String],
+        content: &str,
+        title: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: &[String],
         _source_type: &str,
         _project_path: &str,
     ) -> Result<String, MemoryError> {
-        unimplemented!("TestMemory: store_memory not used by AGS-817 tests")
+        *self.store_captured.lock().unwrap() = Some((
+            content.to_string(),
+            title.to_string(),
+            memory_type,
+            importance,
+            tags.to_vec(),
+        ));
+        clone_result(&self.store_result.lock().unwrap())
     }
 
     fn store_memory_with_id_outcome(

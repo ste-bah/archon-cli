@@ -16,7 +16,9 @@ Memory-driven coding works without any setup, but you can seed it for faster con
 /memory store "config sections must round-trip through serde — use #[serde(default)]"
 ```
 
-Each `memory store` writes a Fact / Decision / Rule into the memory graph. AutoCapture handles the rest organically.
+Each `/memory store` writes a Fact into the memory graph, tagged `manual` so hand-written memories stay distinguishable from extracted ones. Surrounding quotes are stripped, and the text is capped at 2,000 characters — store a summary, not a document, because everything stored here is a candidate for injection into the prompt on every turn. AutoCapture handles the rest organically.
+
+Rules — the entries injected into the `<rules>` block on every turn — are not written this way. They are learned from corrections you give in conversation, and `/rules` lists, edits, and removes them after the fact.
 
 ## Routine workflow
 

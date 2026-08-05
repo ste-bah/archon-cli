@@ -166,10 +166,19 @@ mod tests {
 
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use futures_util::stream;
+    use serial_test::serial;
     use tokio::sync::mpsc;
 
     use super::*;
 
+    // These build real TUI channels and queue events on them, and the pending
+    // queue metric they move is a PROCESS-WIDE counter. The metric's own tests
+    // assert exact values under `serial(tui_drain_metrics)`; without joining
+    // that group these run alongside and perturb what those tests measure --
+    // an intermittent failure whose trigger is unrelated test scheduling, and
+    // which surfaces whenever anything shifts the order.
+
+    #[serial(tui_drain_metrics)]
     #[tokio::test(start_paused = true)]
     async fn overdue_tick_does_not_starve_terminal_input() {
         let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -186,6 +195,7 @@ mod tests {
         assert!(matches!(event, LoopEvent::Terminal(Event::Key(_))));
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn queued_tui_event_wins_while_terminal_stream_is_pending() {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -214,6 +224,7 @@ mod tests {
         );
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn terminal_key_reaches_existing_handler_while_tui_receive_is_pending() {
         let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -241,6 +252,7 @@ mod tests {
         assert_eq!(input_rx.try_recv().unwrap(), "typed");
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn queued_tui_event_gets_bounded_service_under_continuous_terminal_input() {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -265,6 +277,7 @@ mod tests {
         ));
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn terminal_stream_error_is_returned_to_the_live_loop() {
         let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -278,6 +291,7 @@ mod tests {
         );
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn closed_terminal_stream_is_returned_to_the_live_loop() {
         let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -289,6 +303,7 @@ mod tests {
         assert!(matches!(event, LoopEvent::TerminalStreamClosed));
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn live_loop_selector_returns_terminal_input() {
         let (_event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -307,6 +322,7 @@ mod tests {
         ));
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn tui_drain_budget_leaves_backlog_for_next_select() {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -338,6 +354,7 @@ mod tests {
         );
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn coalesced_text_reaches_app_without_byte_loss() {
         let (event_tx, mut event_rx) =
@@ -363,6 +380,7 @@ mod tests {
         assert_eq!(app.output.all_lines().join("\n"), "hello 世界\nfinal");
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test(start_paused = true)]
     async fn persistent_tick_scheduler_selects_tick_despite_continuous_tui_events() {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();
@@ -394,6 +412,7 @@ mod tests {
         ));
     }
 
+    #[serial(tui_drain_metrics)]
     #[tokio::test]
     async fn closed_tui_channel_is_returned_to_the_live_loop() {
         let (event_tx, mut event_rx) = crate::event_channel::bounded_tui_event_channel();

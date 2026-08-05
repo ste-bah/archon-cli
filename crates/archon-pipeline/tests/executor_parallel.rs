@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -238,15 +238,17 @@ async fn three_independent_parallel() {
     let mock = Arc::new(MockTaskService::new(responses));
     let executor = PipelineExecutor::new(store.clone(), mock.clone());
 
-    let start = Instant::now();
     let id = executor.run(spec).await.expect("pipeline should succeed");
-    let elapsed = start.elapsed();
 
-    // All 3 ran in parallel, so wall time should be roughly 200ms, well under 500ms.
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "expected wall time < 500ms for 3 parallel steps, got {:?}",
-        elapsed
+    // Asserted on the in-flight high-water mark rather than wall time. The
+    // property under test is that all 3 steps were dispatched together; a
+    // deadline says so only indirectly, and says it wrongly on a loaded CI
+    // runner, where these two tests took 1.7s and 1.1s against 500ms and
+    // 1200ms budgets and failed for being on a slow machine.
+    assert_eq!(
+        mock.max_concurrent(),
+        3,
+        "all 3 independent steps must be in flight at once"
     );
 
     // Verify pipeline state.
@@ -276,20 +278,14 @@ async fn five_steps_parallelism_two() {
     let mock = Arc::new(MockTaskService::new(responses));
     let executor = PipelineExecutor::new(store.clone(), mock.clone());
 
-    let start = Instant::now();
     let id = executor.run(spec).await.expect("pipeline should succeed");
-    let elapsed = start.elapsed();
 
-    // 3 waves of 200ms each = ~600ms, but with overhead allow 400..1200ms.
-    assert!(
-        elapsed >= Duration::from_millis(400),
-        "expected wall time >= 400ms (3 waves * 200ms minus jitter), got {:?}",
-        elapsed
-    );
-    assert!(
-        elapsed < Duration::from_millis(1200),
-        "expected wall time < 1200ms, got {:?}",
-        elapsed
+    // Both halves of the property, without a clock: the cap is respected, and
+    // it is actually used rather than the steps running one at a time.
+    assert_eq!(
+        mock.max_concurrent(),
+        2,
+        "5 steps under max_parallelism = 2 must run exactly 2 at a time"
     );
 
     let run = store.load_state(id).expect("state should load");
@@ -333,15 +329,12 @@ async fn parallelism_one_is_sequential() {
     let mock = Arc::new(MockTaskService::new(responses));
     let executor = PipelineExecutor::new(store.clone(), mock.clone());
 
-    let start = Instant::now();
     let id = executor.run(spec).await.expect("pipeline should succeed");
-    let elapsed = start.elapsed();
 
-    // Sequential: 3 * 200ms = 600ms minimum.
-    assert!(
-        elapsed >= Duration::from_millis(500),
-        "expected wall time >= 500ms for sequential execution, got {:?}",
-        elapsed
+    assert_eq!(
+        mock.max_concurrent(),
+        1,
+        "max_parallelism = 1 must never have two steps in flight"
     );
 
     let run = store.load_state(id).expect("state should load");

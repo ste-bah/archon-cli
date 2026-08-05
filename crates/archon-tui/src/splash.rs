@@ -399,14 +399,35 @@ pub fn draw_splash(
 
 pub fn logo_activity_line<'a>(t: &Theme, width: usize, logo: &str, activity: &str) -> Line<'a> {
     let half = width / 2;
-    let left_padded = format!("{:<w$}", logo, w = half.saturating_sub(1));
-    let right_padded = format!("{:<w$}", activity, w = half.saturating_sub(1));
+    let col = half.saturating_sub(1);
+    // Padded but not truncated, an over-long activity description ran past the
+    // column, overwrote the closing border, and was cut off by the frame edge
+    // mid-word with nothing to say it had been. `fit` makes the cut visible.
+    // The logo is fixed art the layout is sized around, so it is left alone.
+    let left_padded = format!("{:<w$}", logo, w = col);
+    let right_padded = format!("{:<w$}", fit(activity, col), w = col);
     Line::from(vec![
         Span::styled("│", Style::default().fg(t.border_active)),
         Span::styled(left_padded, Style::default().fg(t.header)),
         Span::styled(right_padded, Style::default().fg(t.muted)),
         Span::styled("│", Style::default().fg(t.border_active)),
     ])
+}
+
+/// Shorten `s` to `max` display columns, ending in "..." when it had to cut.
+///
+/// Char-boundary safe. Below four columns there is no room for the marker, so
+/// it degrades to a hard cut rather than returning something wider than asked
+/// for -- a splash column is a hard limit, not a preference.
+fn fit(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    if max <= 3 {
+        return s.chars().take(max).collect();
+    }
+    let kept: String = s.chars().take(max - 3).collect();
+    format!("{kept}...")
 }
 
 pub fn truncate_path(path: &str, max_len: usize) -> String {
@@ -440,3 +461,7 @@ fn bordered_paragraph_line<'a>(line: &Line<'a>, t: &Theme, width: u16) -> Paragr
         Span::styled("│", Style::default().fg(t.border_active)),
     ]))
 }
+
+#[cfg(test)]
+#[path = "splash_tests.rs"]
+mod tests;
