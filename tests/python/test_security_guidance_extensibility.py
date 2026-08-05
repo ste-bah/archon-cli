@@ -192,6 +192,92 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                     compile_mock.assert_not_called()
 
+    def _assert_rejected_before_compile(self, pattern, rule_name):
+        with mock.patch.object(extensibility.re, "compile") as compile_mock:
+            result = extensibility._validate_pattern(
+                {"rule_name": rule_name, "reminder": "test", "regex": pattern},
+                source="test",
+            )
+        compile_mock.assert_not_called()
+        self.assertTrue(extensibility._has_redos_structure(pattern))
+        self.assertIsNone(result)
+
+    def test_rejects_adjacent_optional_quantifier_forms(self):
+        unsafe = (
+            r"a?a?", r"a??b??", r"a?+b?+", r"a{0,1}b{1,2}",
+            r"a{0,1}?b{1,2}+", "(?x:a ? # gap\n b ??)",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "optional")
+
+    def test_character_classes_with_leading_closing_brackets(self):
+        unsafe = (
+            r"[]a]*[]a]*!", r"[^]a]*[^]a]*!", r"[]a]*[\]b]*!",
+            r"[]\\]*[]\\]*!", "(?x:[]a] * # gap\n [^]b] *)",
+        )
+        safe = (r"[]a]*b", r"[^]a]{2}b*", r"[\]]*b")
+
+        for pattern in unsafe:
+            with self.subTest(kind="unsafe", pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "leading-bracket")
+        for pattern in safe:
+            with self.subTest(kind="safe", pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("leading-bracket-safe", pattern))
+
+    def test_groups_preserve_variable_interiors_before_fixed_atoms(self):
+        unsafe = (
+            r"(a*a)a*!", r"(?:a*a|b)a*!", r"((a*)a)a*!",
+            r"(?:a|b*b)c*!", "(?x:(a* a) # gap\n a*)!",
+        )
+        safe = (r"(aa)a*!", r"(?:aa|b)a*!", r"(?=a*a)a*!")
+
+        for pattern in unsafe:
+            with self.subTest(kind="unsafe", pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "group-interior")
+        for pattern in safe:
+            with self.subTest(kind="safe", pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("group-interior-safe", pattern))
+
+    def test_zero_width_escape_assertions_preserve_adjacency(self):
+        unsafe = (
+            r"a*\ba*!", r"a*\Ba*!", r"a*\Aa*!", r"a*\Za*!",
+            "(?x:a* \\b # gap\n a*)!", r"(a)a*\1*!", r"a*\d*!",
+        )
+        safe = (r"a*\bb", r"a*\Bd", r"a*\dc", r"(a)a*\1b")
+
+        for pattern in unsafe:
+            with self.subTest(kind="unsafe", pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "escaped-assertion")
+        for pattern in safe:
+            with self.subTest(kind="safe", pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("escaped-assertion-safe", pattern))
+
+    def test_repeated_groups_include_optional_quantifiers_and_leading_bracket_classes(self):
+        unsafe = (
+            r"(a?){30}a{30}$", r"(a??)+X", r"(a?+){2,}X",
+            r"([])]*)+X", r"([^])]*)+X", r"([]\\]*)+X",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "repeated-edge")
+
+    def test_repeated_group_summary_respects_fixed_and_zero_width_interiors(self):
+        safe = (
+            r"(?:ab{2}){3}", r"(a{1}){2}", r"(?:a{2}?b){3}",
+            r"(?:a{2}+b){3}", r"(?:(?=a*)b){2}", r"(?:(?<=a{2})b){2}",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("fixed-interior", pattern))
+
     def test_comment_groups_do_not_reset_adjacent_variable_atom_state(self):
         patterns = (
             r"a*(?#comment)a*$",
