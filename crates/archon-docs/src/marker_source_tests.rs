@@ -5,6 +5,30 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
+fn marker_http_normalizes_windows_verbatim_drive_path_text() {
+    assert_eq!(
+        normalized_canonical_path_text(r"\\?\C:\pdfs\report.pdf"),
+        r"C:\pdfs\report.pdf"
+    );
+}
+
+#[test]
+fn marker_http_normalizes_windows_verbatim_unc_path_text() {
+    assert_eq!(
+        normalized_canonical_path_text(r"\\?\UNC\server\share\report.pdf"),
+        r"\\server\share\report.pdf"
+    );
+}
+
+#[test]
+fn marker_http_leaves_non_windows_path_text_unchanged() {
+    assert_eq!(
+        normalized_canonical_path_text("/pdfs/report.pdf"),
+        "/pdfs/report.pdf"
+    );
+}
+
+#[test]
 fn marker_http_pdf_id_is_lowercase_sha256_of_exact_canonical_utf8_path() {
     let dir = tempfile::tempdir().unwrap();
     let nested = dir.path().join("nested");
@@ -50,19 +74,37 @@ async fn marker_http_request_sends_pdf_id_without_pdf_path() {
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
-    let pdf = dir.path().join("report.pdf");
+    let report_dir = dir.path().join("reports");
+    std::fs::create_dir(&report_dir).unwrap();
+    let pdf = report_dir.join("report.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
+    let caller_path = report_dir
+        .join(".")
+        .join("..")
+        .join("reports")
+        .join("report.pdf");
     let canonical = std::fs::canonicalize(&pdf).unwrap();
-    let expected_id = format!(
+    let canonical_text = canonical.to_str().unwrap();
+    let normalized_target = if let Some(unc_path) = canonical_text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc_path}")
+    } else {
+        canonical_text
+            .strip_prefix(r"\\?\")
+            .unwrap_or(canonical_text)
+            .to_string()
+    };
+    let expected_id = format!("{:x}", Sha256::digest(normalized_target.as_bytes()));
+    let caller_path_id = format!(
         "{:x}",
-        Sha256::digest(canonical.to_str().unwrap().as_bytes())
+        Sha256::digest(caller_path.to_str().unwrap().as_bytes())
     );
+    assert_ne!(expected_id, caller_path_id);
     let source = MarkerSource::Http {
         url: server.uri(),
         device: Some("cpu".to_string()),
     };
 
-    let blocks = source.blocks_for(&pdf).await.unwrap();
+    let blocks = source.blocks_for(&caller_path).await.unwrap();
 
     assert!(blocks.is_empty());
     let requests = server.received_requests().await.unwrap();

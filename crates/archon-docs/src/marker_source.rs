@@ -42,12 +42,33 @@ pub const HTTP_CONVERT_TIMEOUT_SECS: u64 = 900;
 pub const HEALTH_MAX_WAIT_SECS: u64 = 120;
 pub const HEALTH_POLL_INTERVAL_SECS: u64 = 2;
 
+/// Match Python's `Path.resolve()` Windows path text before hashing.
+///
+/// Windows `std::fs::canonicalize` can retain the `\\?\` verbatim prefix while Python's
+/// `Path.resolve()` returns ordinary drive/UNC text. Other path forms stay untouched.
+fn normalized_canonical_path_text(path_text: &str) -> String {
+    if let Some(unc_path) = path_text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc_path}");
+    }
+
+    let Some(drive_path) = path_text.strip_prefix(r"\\?\") else {
+        return path_text.to_string();
+    };
+    let bytes = drive_path.as_bytes();
+    if matches!(bytes, [drive, b':', ..] if drive.is_ascii_alphabetic()) {
+        drive_path.to_string()
+    } else {
+        path_text.to_string()
+    }
+}
+
 /// Return the opaque ID shared with the Marker server for a canonical PDF path.
 fn pdf_id_for_canonical_path(canonical_path: &Path) -> Result<String, DocsError> {
     let path_text = canonical_path.to_str().ok_or_else(|| DocsError::Storage {
         message: "canonical pdf path for marker http is not valid UTF-8".to_string(),
     })?;
-    Ok(hex::encode(Sha256::digest(path_text.as_bytes())))
+    let normalized_path_text = normalized_canonical_path_text(path_text);
+    Ok(hex::encode(Sha256::digest(normalized_path_text.as_bytes())))
 }
 
 /// Where/how to obtain a PDF's Marker block tree.
