@@ -31,6 +31,8 @@ class Issue115LiveSmoke(unittest.TestCase):
         self.outside_pdf.write_bytes(b"%PDF-1.4\n")
         self.fail_pdf = self.corpus / "fail.pdf"
         self.fail_pdf.write_bytes(b"%PDF-1.4\n")
+        self.inside_pdf_id = server.pdf_id_for_path(self.inside_pdf.resolve())
+        self.fail_pdf_id = server.pdf_id_for_path(self.fail_pdf.resolve())
         self.port = self._preallocate_port()
         self.server = None
         self.server_exception = None
@@ -66,31 +68,39 @@ class Issue115LiveSmoke(unittest.TestCase):
             self._start_server()
             self._wait_for_health()
 
-            status, body = self._request("/convert", {"pdf_path": str(self.inside_pdf)})
+            status, body = self._request("/convert", {"pdf_id": self.inside_pdf_id})
             self.assertEqual(status, 200)
             self.assertEqual(body, expected_tree)
 
-            status, body = self._request("/convert", {"pdf_path": str(self.outside_pdf)})
+            unknown_id = "0" * 64
+            status, body = self._request("/convert", {"pdf_id": unknown_id})
             self.assertEqual(status, 400)
-            self.assertEqual(body, {"error": "invalid pdf_path"})
+            self.assertEqual(body, {"error": "invalid pdf_id"})
+            self.assertNotIn(unknown_id, json.dumps(body))
             self.assertNotIn(str(self.outside_pdf), json.dumps(body))
 
             status, body = self._request(
-                "/convert", {"pdf_path": str(self.inside_pdf), "page_range": "0-1000000000"}
+                "/convert", {"pdf_id": self.inside_pdf_id, "pdf_path": str(self.outside_pdf)}
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(body, {"error": "invalid request"})
+            self.assertNotIn(str(self.outside_pdf), json.dumps(body))
+
+            status, body = self._request(
+                "/convert", {"pdf_id": self.inside_pdf_id, "page_range": "0-1000000000"}
             )
             self.assertEqual(status, 400)
             self.assertEqual(body, {"error": "invalid page_range"})
 
             sensitive_path = "/private/customer-records.pdf"
             status, body = self._request(
-                "/convert",
-                {"pdf_path": str(self.inside_pdf), "page_range": {"path": sensitive_path}},
+                "/convert", {"pdf_id": self.inside_pdf_id, "page_range": {"path": sensitive_path}}
             )
             self.assertEqual(status, 400)
             self.assertEqual(body, {"error": "invalid request"})
             self.assertNotIn(sensitive_path, json.dumps(body))
 
-            status, body = self._request("/convert", {"pdf_path": str(self.fail_pdf)})
+            status, body = self._request("/convert", {"pdf_id": self.fail_pdf_id})
             self.assertEqual(status, 500)
             self.assertEqual(body, {"error": "conversion failed"})
             self.assertNotIn("secret-live-error", json.dumps(body))
@@ -104,7 +114,7 @@ class Issue115LiveSmoke(unittest.TestCase):
             return listener.getsockname()[1]
 
     def _start_server(self):
-        app = server.build_app("cpu", {}, self.corpus.resolve())
+        app = server.build_app("cpu", {}, server.build_pdf_catalogue(self.corpus.resolve()))
         config = uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="error")
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self._run_server, daemon=True)
@@ -161,4 +171,8 @@ if __name__ == "__main__":
     )
     if not result.wasSuccessful():
         raise SystemExit(1)
-    print("ISSUE115_LIVE_SMOKE_PASS conversions=3 containment=blocked validation=blocked disclosure=blocked bind=blocked")
+    print(
+        "ISSUE115_LIVE_SMOKE_PASS "
+        "catalogue_id=accepted unknown_id=blocked request_schema=blocked "
+        "page_validation=blocked conversion_disclosure=blocked bind=blocked"
+    )

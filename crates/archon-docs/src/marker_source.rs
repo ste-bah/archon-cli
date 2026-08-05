@@ -11,13 +11,16 @@
 //! pre-extracted JSON file. All three yield the same block-tree JSON, parsed by
 //! `archon_ingest_ext::marker::parse_marker_str`.
 //!
-//! NOTE on the HTTP transport: the server reads the PDF from ITS OWN local filesystem (it is sent
-//! only an opaque ID derived from its canonical local path, never the bytes). The server operator
-//! must start it with `--pdf-root` that contains every PDF Archon sends. `marker_url` must therefore
-//! point at a server that shares archon's filesystem — same host, or a mount where the identical
-//! absolute path resolves beneath the server's same canonical root. It is NOT a general
-//! remote-upload service. Server failures use fixed safe messages; Rust treats non-success bodies
-//! as opaque error text and receives no conversion exception details.
+//! NOTE on the HTTP transport: the request carries only an opaque ID derived from Archon's
+//! canonical local PDF path (never a path field or PDF bytes). The server operator must start it
+//! with `--pdf-root`; at startup it recursively freezes canonical regular PDFs into an ID→path
+//! catalogue. Archon and the server must resolve a document to identical canonical path text (same
+//! host, or identically mounted filesystems) for their IDs to match. Nested PDFs and duplicate
+//! basenames are supported because the full canonical path is hashed. The catalogue is static for
+//! the process lifetime, so restart after local corpus changes; those changes are outside remote
+//! request control. It is NOT a general remote-upload service. Server failures use fixed safe
+//! messages; Rust treats non-success bodies as opaque error text and receives no conversion
+//! exception details.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

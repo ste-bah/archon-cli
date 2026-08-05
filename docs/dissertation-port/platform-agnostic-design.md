@@ -33,13 +33,21 @@ chosen on the Rust side (`MarkerSource`) independently of which device Marker us
 
 ### HTTP security boundary
 
-The persistent server requires `--pdf-root`; every requested absolute PDF path is
-canonicalized, must end in `.pdf`, and must remain beneath that root. It binds to
-loopback by default and has no authentication. A non-loopback `--host` requires
-explicit `--allow-non-loopback` risk acceptance, which never weakens root
-containment. The server returns fixed safe 400/500 messages while retaining detailed
-conversion failures in local logs only. These transport controls do not change the
-shared conversion output or device placement described above.
+The persistent server requires `--pdf-root`; at startup it recursively resolves and freezes
+regular PDFs beneath that root into an immutable `pdf_id`→canonical-path catalogue. An HTTP
+request carries only that deterministic SHA-256 ID (plus optional `device` and `page_range`),
+never an absolute path or PDF bytes; path-bearing or other extra fields are invalid requests.
+The full canonical UTF-8 pathname makes nested PDFs and duplicate basenames distinct. Rust
+canonicalizes its local input and normalizes Windows verbatim `\\?\`/`\\?\UNC\` text before
+hashing; Python hashes `str(Path.resolve()).encode("utf-8")`. Therefore both sides must observe
+the same canonical path text (same host or identically mounted filesystem). The catalogue is not
+revalidated during conversion: restart after local additions, moves, deletes, or replacements;
+post-start corpus mutation is outside remote request control. The server binds to loopback by
+default and has no authentication; `localhost` and literal loopback IPs are accepted, while any
+other host needs explicit `--allow-non-loopback`. Public errors are fixed: `400 invalid request`,
+`400 invalid pdf_id`, `400 invalid page_range`, or `500 conversion failed`; details stay in local
+logs. These transport controls do not change the shared conversion output or device placement
+described above.
 
 ---
 

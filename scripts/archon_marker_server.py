@@ -17,9 +17,13 @@ Contract (matched by `crates/archon-docs/src/marker_source.rs`):
     GET /health     → 200 {"status": "ok", "device": "<startup device>", "models_loaded": true}
 
 `--pdf-root` is required. The server recursively freezes canonical regular PDFs beneath it at
-startup, indexed by deterministic opaque IDs. The server binds to loopback by default; it has no
-authentication. Supplying `--allow-non-loopback` explicitly accepts exposure for a non-loopback
-host, but never weakens catalogue containment.
+startup, indexed by `sha256(str(canonical_path).encode("utf-8")).hexdigest()`. `/convert` accepts
+only those opaque IDs, never a path or PDF bytes. Catalogue entries support nested files and
+duplicate basenames because the canonical full pathname is hashed. The catalogue is static for the
+process lifetime: restart after corpus additions, moves, deletions, or replacements; post-start
+local corpus mutation is outside remote request control. The server binds to loopback by default;
+it has no authentication. Supplying `--allow-non-loopback` explicitly accepts exposure for a
+non-loopback host, but does not change startup catalogue construction.
 
 The request's `device` is ADVISORY: the models live on the device resolved at startup; a
 mismatching request device is logged and ignored (restart the server to change device).

@@ -92,11 +92,18 @@ python3.11 -m venv ~/.venv-marker
 curl -s http://127.0.0.1:8010/health   # {"status":"ok","device":"cuda","models_loaded":true}
 ```
 Select it by setting `marker_url` in policy (it overrides `marker_sidecar`). The
-server reads the PDF from its own filesystem (only the path is sent, never
-bytes), so it must share Archon's filesystem / identical absolute paths.
-`/ABS/PATH/corpus` must be the same directory supplied to `archon docs ingest`.
+request sends only an opaque SHA-256 ID derived from Archon's canonical UTF-8 PDF
+pathname—never a path field or PDF bytes. At startup, `--pdf-root` is recursively
+catalogued into immutable canonical-PDF ID→path entries, so nested PDFs and duplicate
+basenames are supported. The server catalogue must include a PDF whose canonical path
+text produces the same ID as Archon's input (same host or identically mounted filesystems).
+The request schema accepts `pdf_id`, optional `device`, and optional `page_range`; unknown
+IDs, malformed/path-bearing requests, and invalid page ranges return fixed 400 errors, and
+conversion failures return a fixed 500 error. Restart the server after adding, moving,
+deleting, or replacing corpus files: the startup catalogue does not observe later local
+corpus mutation, including replacement at an approved pathname.
 
-> Do not use a non-loopback host unless remote access is deliberate. The server has no authentication. `--allow-non-loopback` acknowledges exposure but never weakens `--pdf-root` containment.
+> The server binds to `127.0.0.1` by default and has no authentication. `localhost` and literal loopback IPs are accepted; another host requires `--allow-non-loopback`. That flag accepts network exposure but does not alter catalogue construction.
 
 ---
 

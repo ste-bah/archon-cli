@@ -67,11 +67,19 @@ PDF
   **free VRAM, not card size**, models Marker's page-scaled VRAM footprint,
   page-range-chunks big documents to fit a small card, and carries a per-document
   GPU→CPU OOM fallback. See [platform-agnostic-design.md](platform-agnostic-design.md).
-- **Persistent Marker throughput**: a root-contained FastAPI server
+- **Persistent Marker throughput**: a FastAPI server
   (`scripts/archon_marker_server.py`, `MarkerSource::Http`) loads the ~6 GB surya
   models **once** instead of the per-document reload the subprocess sidecar pays.
+  It requires `--pdf-root` and recursively freezes canonical regular PDFs into an
+  immutable startup catalogue. Requests contain only a deterministic SHA-256 ID of
+  the canonical UTF-8 pathname, not a path field or PDF bytes; nested PDFs and
+  duplicate basenames remain distinct. Archon and server must resolve the same
+  canonical pathname (same host or identically mounted filesystem). Unknown IDs,
+  malformed requests, invalid page ranges, and conversion failures return fixed
+  safe errors. Restart after corpus mutations: the catalogue chooses the
+  startup-approved pathname and does not detect local replacement at that path.
   It binds to loopback by default; it has no authentication, and an explicit
-  `--allow-non-loopback` accepts exposure without weakening `--pdf-root` containment.
+  `--allow-non-loopback` accepts exposure without changing catalogue construction.
 - **Integrity sealing**: a `chunks_root` tamper-evidence hash on *all* ingest,
   `docs verify-integrity` to prove no post-ingest tampering, an end-of-run
   `COORD_MARKER` vs `COORD_NONE` tally, and a **strict-fail** rule on the HTTP
