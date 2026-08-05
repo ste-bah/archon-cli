@@ -46,19 +46,24 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self.assertFalse(extensibility._has_redos_structure(pattern))
 
-    def test_rejects_adjacent_overlapping_variable_quantifiers(self):
+    def test_rejects_adjacent_variable_quantifiers_fail_closed(self):
         patterns = (
             r"a*a*a*a*a*a*a*a!",
             r"(?:a*a*)!",
-            r"[ab]*[ab]*!",
-            r"[a-c]*[b-d]*!",
-            r"\w*\d*!",
-            r"\d*1*!",
-            r"\w*a*!",
-            r"\s* *!",
-            r"(?:a)*(?:a)*!",
+            r"[ab]*[cd]*!",
+            r"[a-c]*[d-f]*!",
+            r"\d*\s*!",
+            r"a*b*!",
+            r"(?:a)*(?:b)*!",
             r"a*(?:a)*!",
-            r"(?i:a)*(?:A)*!",
+            r"(?i)a*(?:A)*!",
+            r"a*?a*!",
+            r"a{1,999999}a{1,999999}!",
+            r"a*+b*",
+            r"a++b++",
+            r"a{1,9}+b{2,}+",
+            r"[\d]*1*!",
+            r"(?:a|b)*a*!",
         )
 
         for pattern in patterns:
@@ -66,18 +71,18 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                 self.assertTrue(extensibility._has_redos_structure(pattern))
                 self.assertIsNone(
                     extensibility._validate_pattern(
-                        {"rule_name": "overlap", "reminder": "test", "regex": pattern},
+                        {"rule_name": "adjacent", "reminder": "test", "regex": pattern},
                         source="test",
                     )
                 )
 
-    def test_allows_disjoint_quantifiers_and_invalid_syntax_fails_closed(self):
-        for pattern in (r"a*b*!", r"[a-c]*[d-f]*!", r"\d*\D*!", r"\d*\s*!", r"(?m)(a|b)*"):
+    def test_allows_single_variable_quantifiers_and_invalid_syntax_fails_closed(self):
+        for pattern in (r"a*", r"a+?", r"a{1,1}", r"^hello+$", r"(?:cat|dog)+", r"(?m)(a|b)*"):
             with self.subTest(pattern=pattern):
                 self.assertFalse(extensibility._has_redos_structure(pattern))
                 self.assertIsNotNone(
                     extensibility._validate_pattern(
-                        {"rule_name": "safe", "reminder": "test", "regex": pattern}, source="test"
+                        {"rule_name": "single", "reminder": "test", "regex": pattern}, source="test"
                     )
                 )
 
@@ -154,13 +159,12 @@ print(extensibility._has_redos_structure(pattern))
 
         self.assertEqual(completed.stdout.strip(), "True")
 
-    def test_character_class_overlap_scan_completes_within_deadline(self):
+    def test_adjacent_quantifier_scan_completes_within_deadline(self):
         code = f"""
 import sys
 sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
 import extensibility
-chars = ''.join(chr(point) for point in range(2000, 0, -1) if chr(point) not in '\\\\]')
-pattern = '[' + chars + ']*[' + chars + ']*!'
+pattern = ('[ab]*' * 2000) + '!'
 print(extensibility._has_redos_structure(pattern))
 """
 
@@ -173,6 +177,13 @@ print(extensibility._has_redos_structure(pattern))
         )
 
         self.assertEqual(completed.stdout.strip(), "True")
+
+    def test_detector_uses_no_semantic_overlap_machinery(self):
+        source = (PLUGIN_SCRIPTS / "extensibility.py").read_text(encoding="utf-8")
+
+        for symbol in ("_radix_sort_ranges", "_class_ranges", "_atoms_overlap", "_category_overlap"):
+            with self.subTest(symbol=symbol):
+                self.assertNotIn(symbol, source)
 
     def test_detector_does_not_use_alternation_regex_on_untrusted_input(self):
         source = (PLUGIN_SCRIPTS / "extensibility.py").read_text(encoding="utf-8")

@@ -210,9 +210,9 @@ def _glob_match(path: str, include: Tuple[str, ...], exclude: Tuple[str, ...]) -
     return True
 
 
-# Catastrophic backtracking: nested quantifiers, overlapping alternations
-# under repetition, and wildcard groups under repetition. Static check, not a
-# proof — catches the common shapes that hang the hook on every edit.
+# Catastrophic backtracking: nested quantifiers, ambiguous alternations under
+# repetition, wildcard groups, and any structurally adjacent variable quantified
+# atoms. The last rule intentionally fails closed instead of interpreting sets.
 
 
 def _group_quantifier(regex: str, closing_index: int) -> str:
@@ -409,210 +409,49 @@ def _repeated_groups(regex: str):
 
 
 def _variable_quantifier_at(regex: str, index: int) -> int:
-    """Return the width of an unbounded quantifier beginning at ``index``."""
+    """Return the width of a variable quantifier, including an optional lazy suffix."""
     if index >= len(regex):
         return 0
     if regex[index] in "*+":
-        return 1
+        return 2 if index + 1 < len(regex) and regex[index + 1] in "?+" else 1
     if regex[index] != "{":
         return 0
     end = regex.find("}", index + 1, index + 33)
     if end == -1 or "," not in regex[index + 1:end]:
         return 0
     lower, upper = regex[index + 1:end].split(",", 1)
-    return end - index + 1 if lower.isdecimal() and not upper else 0
+    if not lower.isdecimal() or (upper and not upper.isdecimal()):
+        return 0
+    if upper and int(upper) <= int(lower):
+        return 0
+    width = end - index + 1
+    return width + 1 if width + index < len(regex) and regex[index + width] in "?+" else width
 
 
-def _radix_sort_ranges(ranges: List[Tuple[int, int]]) -> Tuple[Tuple[int, int], ...]:
-    """Sort Unicode codepoint ranges by start in linear fixed-width radix passes."""
-    ordered: List[Tuple[int, int]] = ranges
-    for shift in (0, 8, 16):
-        counts = [0] * 256
-        for start, _ in ordered:
-            counts[(start >> shift) & 255] += 1
-        offsets = []
-        total = 0
-        for count in counts:
-            offsets.append(total)
-            total += count
-        output: List[Tuple[int, int]] = [(0, 0)] * len(ordered)
-        for item in ordered:
-            bucket = (item[0] >> shift) & 255
-            output[offsets[bucket]] = item
-            offsets[bucket] += 1
-        ordered = output
-    return tuple(ordered)
-
-
-def _class_ranges(body: str) -> Tuple[bool, Tuple[Tuple[int, int], ...]]:
-    """Return negation and linear-time normalized literal/range codepoint spans."""
-    negated = body.startswith("^")
-    index = int(negated)
-    ranges = []
-    while index < len(body):
-        start = body[index]
-        if start == "\\" and index + 1 < len(body):
-            start, index = body[index + 1], index + 2
-        else:
-            index += 1
-        end = start
-        if index + 1 < len(body) and body[index] == "-":
-            end, index = body[index + 1], index + 2
-        start_point, end_point = ord(start), ord(end)
-        ranges.append((min(start_point, end_point), max(start_point, end_point)))
-    return negated, _radix_sort_ranges(ranges)
-
-
-def _escaped_atom(regex: str, index: int) -> Tuple[Tuple[str, Any], int]:
-    """Describe an escaped atom without compiling or matching the pattern."""
-    if index + 1 >= len(regex):
-        return ("literal", "\\"), 1
-    escaped = regex[index + 1]
-    if escaped in "wdsWDsS":
-        return ("category", escaped), 2
-    return ("literal", escaped), 2
-
-
-def _class_atom(regex: str, index: int) -> Tuple[Tuple[str, Any], int]:
-    """Describe one class, consuming an unterminated class exactly once."""
-    cursor = index + 1
-    escaped = False
+def _class_end(regex: str, index: int) -> int:
+    """Consume one character class once, respecting escaped closing brackets."""
+    cursor, escaped = index + 1, False
     while cursor < len(regex):
         char = regex[cursor]
         if char == "]" and not escaped:
-            return ("class", _class_ranges(regex[index + 1:cursor])), cursor - index + 1
+            return cursor + 1
         escaped = char == "\\" and not escaped
         if char != "\\":
             escaped = False
         cursor += 1
-    return ("invalid", None), cursor - index
+    return cursor
 
 
-def _atom_at(regex: str, index: int) -> Tuple[Tuple[str, Any], int]:
-    """Describe one simple atom and its source width for overlap checks."""
-    char = regex[index]
-    if char == "\\":
-        return _escaped_atom(regex, index)
-    if char == "[":
-        return _class_atom(regex, index)
-    if char == ".":
-        return ("any", None), 1
-    return ("literal", char), 1
-
-
-def _range_sets_overlap(
-    left: Tuple[Tuple[int, int], ...], right: Tuple[Tuple[int, int], ...]
-) -> bool:
-    """Return whether sorted codepoint ranges intersect in one linear merge."""
-    left_index = right_index = 0
-    while left_index < len(left) and right_index < len(right):
-        left_range, right_range = left[left_index], right[right_index]
-        if left_range[1] < right_range[0]:
-            left_index += 1
-        elif right_range[1] < left_range[0]:
-            right_index += 1
-        else:
-            return True
-    return False
-
-
-_CATEGORY_SUBSETS = {"d": {"d", "w"}, "s": {"s"}, "w": {"w"}}
-
-
-def _category_overlap(left: str, right: str) -> bool:
-    """Compare Python shorthand categories without evaluating untrusted text."""
-    left_name, right_name = left.lower(), right.lower()
-    left_positive, right_positive = left.islower(), right.islower()
-    if left_positive and right_positive:
-        return {left_name, right_name} not in ({"d", "s"}, {"s", "w"})
-    if not left_positive and not right_positive:
-        return True
-    positive, negative = (left_name, right_name) if left_positive else (right_name, left_name)
-    return negative not in _CATEGORY_SUBSETS[positive]
-
-
-def _atom_matches_range(atom: Tuple[str, Any], ranges: Tuple[Tuple[int, int], ...]) -> bool:
-    """Compare a simple atom with one non-negated character class."""
-    if atom[0] == "literal":
-        point = ord(atom[1])
-        return any(start <= point <= end for start, end in ranges)
-    return atom[0] in ("any", "category")
-
-
-def _category_matches_literal(category: str, literal: str) -> bool:
-    """Return whether a shorthand category can consume one literal codepoint."""
-    name = category.lower()
-    if name == "d":
-        matches = literal.isdecimal()
-    elif name == "s":
-        matches = literal.isspace()
-    else:
-        matches = literal == "_" or literal.isalnum()
-    return matches if category.islower() else not matches
-
-
-def _atoms_overlap(left: Tuple[str, Any], right: Tuple[str, Any]) -> bool:
-    """Conservatively compare simple atom descriptors without compiling a regex."""
-    if "any" in (left[0], right[0]):
-        return True
-    if left[0] == right[0] == "literal":
-        return left[1] == right[1]
-    if left[0] == right[0] == "folded_literal":
-        return left[1] == right[1]
-    if left[0] == "folded_literal" and right[0] == "literal":
-        return left[1] == right[1].casefold()
-    if right[0] == "folded_literal" and left[0] == "literal":
-        return right[1] == left[1].casefold()
-    if left[0] == right[0] == "category":
-        return _category_overlap(left[1], right[1])
-    if left[0] == "category" and right[0] == "literal":
-        return _category_matches_literal(left[1], right[1])
-    if right[0] == "category" and left[0] == "literal":
-        return _category_matches_literal(right[1], left[1])
-    if left[0] == right[0] == "class":
-        left_negated, left_ranges = left[1]
-        right_negated, right_ranges = right[1]
-        return left_negated or right_negated or _range_sets_overlap(left_ranges, right_ranges)
-    if left[0] == "class":
-        negated, ranges = left[1]
-        return negated or _atom_matches_range(right, ranges)
-    if right[0] == "class":
-        negated, ranges = right[1]
-        return negated or _atom_matches_range(left, ranges)
-    return False
-
-
-def _record_quantified_atom(
-    previous: List[Optional[Tuple[str, Any]]], atom: Optional[Tuple[str, Any]], quantifier_width: int
-) -> bool:
-    """Record one atom or report overlap with the previous unbounded atom."""
-    if not quantifier_width or atom is None:
-        previous[-1] = None
-        return False
-    if previous[-1] is not None and _atoms_overlap(previous[-1], atom):
-        return True
-    previous[-1] = atom
-    return False
-
-
-def _append_group_atom(
-    atoms: List[Optional[Tuple[str, Any]]], counts: List[int], atom: Optional[Tuple[str, Any]]
-) -> None:
-    """Keep a group descriptor only while it contains exactly one simple atom."""
-    counts[-1] += 1
-    atoms[-1] = atom if counts[-1] == 1 else None
-
-
-def _scoped_flags(regex: str, index: int) -> str:
-    """Return scoped group flags, limited to its short introducer."""
+def _global_flags_end(regex: str, index: int) -> int:
+    """Return the end of a global inline-flag group, or zero when it opens a group."""
     cursor = index + 2
     while cursor < len(regex) and regex[cursor] in "aiLmsux-":
         cursor += 1
-    return regex[index + 2:cursor] if cursor > index + 2 and cursor < len(regex) and regex[cursor] == ":" else ""
+    return cursor + 1 if cursor > index + 2 and cursor < len(regex) and regex[cursor] == ")" else 0
 
 
 def _group_body_start(regex: str, index: int) -> int:
-    """Skip group introducers, including scoped flags, before body atom scanning."""
+    """Skip a group introducer without scanning any source character twice."""
     if index + 1 >= len(regex) or regex[index + 1] != "?":
         return index + 1
     if index + 2 < len(regex) and regex[index + 2] in ":=!":
@@ -620,58 +459,93 @@ def _group_body_start(regex: str, index: int) -> int:
     if regex[index + 2:index + 4] in ("<=", "<!"):
         return index + 4
     if regex[index + 2:index + 4] == "P<":
-        end = regex.find(">", index + 4, index + 35)
-        return end + 1 if end != -1 else index + 1
-    flags = _scoped_flags(regex, index)
-    return index + 3 + len(flags) if flags else index + 1
+        cursor = index + 4
+        while cursor < len(regex) and cursor < index + 35 and regex[cursor] != ">":
+            cursor += 1
+        return cursor + 1 if cursor < len(regex) and regex[cursor] == ">" else index + 1
+    cursor = index + 2
+    while cursor < len(regex) and regex[cursor] in "aiLmsux-":
+        cursor += 1
+    return cursor + 1 if cursor > index + 2 and cursor < len(regex) and regex[cursor] == ":" else index + 1
 
 
-def _apply_scoped_flags(atom: Optional[Tuple[str, Any]], flags: str) -> Optional[Tuple[str, Any]]:
-    """Preserve case-insensitive literal equivalence for a completed scoped group."""
-    if atom is not None and atom[0] == "literal" and "i" in flags:
-        return "folded_literal", atom[1].casefold()
-    return atom
+def _record_adjacent_atom(previous: List[bool], variable: bool, significant: bool) -> bool:
+    """Fail closed when consecutive variable atoms can backtrack against each other."""
+    if not significant:
+        return False
+    if variable and previous[-1]:
+        return True
+    previous[-1] = variable
+    return False
+
+
+def _close_adjacent_group(
+    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool]
+) -> Tuple[int, bool]:
+    """Fold one completed group into its parent adjacency state."""
+    child_content, child_zero = content.pop(), zero_width.pop()
+    previous.pop()
+    width = _variable_quantifier_at(regex, index + 1)
+    return 1 + width, _record_adjacent_atom(previous, bool(width), child_content and not child_zero)
+
+
+def _consume_adjacent_group(
+    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool]
+) -> Tuple[int, bool]:
+    """Open or close a group and return its next position plus rejection state."""
+    if regex[index] == "(":
+        flags_end = _global_flags_end(regex, index)
+        if flags_end:
+            return flags_end, False
+        zero_width.append(regex[index + 1:index + 3] in ("?=", "?!", "?<"))
+        previous.append(False)
+        content.append(False)
+        return _group_body_start(regex, index), False
+    if len(content) == 1:
+        previous[-1] = False
+        return index + 1, False
+    width, unsafe = _close_adjacent_group(regex, index, previous, content, zero_width)
+    return index + width, unsafe
 
 
 def _adjacent_quantifier_overlap(regex: str) -> bool:
-    """Detect adjacent overlapping variable-length atoms at every group nesting level."""
-    previous: List[Optional[Tuple[str, Any]]] = [None]
-    group_atoms: List[Optional[Tuple[str, Any]]] = [None]
-    group_counts = [0]
-    group_flags = [""]
+    """Statically reject any structurally adjacent variable quantified atoms.
+
+    This intentionally ignores character-set semantics: disjoint-looking atoms are
+    rejected fail closed, avoiding complex or incomplete regex interpretation.
+    """
+    previous, content, zero_width = [False], [False], [False]
     index = 0
     while index < len(regex):
         char = regex[index]
-        if char == "(":
-            previous.append(None)
-            group_atoms.append(None)
-            group_counts.append(0)
-            group_flags.append(_scoped_flags(regex, index))
-            index = _group_body_start(regex, index)
-            continue
-        if char == ")":
-            atom = _apply_scoped_flags(group_atoms.pop(), group_flags.pop()) if len(group_atoms) > 1 else None
-            if len(group_counts) > 1:
-                group_counts.pop()
-                previous.pop()
-            quantifier_width = _variable_quantifier_at(regex, index + 1)
-            if _record_quantified_atom(previous, atom, quantifier_width):
+        if char in "()":
+            index, unsafe = _consume_adjacent_group(regex, index, previous, content, zero_width)
+            if unsafe:
                 return True
-            _append_group_atom(group_atoms, group_counts, atom)
-            index += 1 + quantifier_width
             continue
-        if char in "|^$?+*{":
-            previous[-1] = None
-            group_atoms[-1] = None
-            group_counts[-1] += 1
+        if char == "|":
+            previous[-1] = False
+            content[-1] = True
             index += 1
             continue
-        atom, width = _atom_at(regex, index)
-        quantifier_width = _variable_quantifier_at(regex, index + width)
-        if _record_quantified_atom(previous, atom, quantifier_width):
+        if char in "^$":
+            index += 1
+            continue
+        if char == "\\":
+            end = min(index + 2, len(regex))
+        elif char == "[":
+            end = _class_end(regex, index)
+        elif char in "?+*{":
+            previous[-1] = False
+            index += 1
+            continue
+        else:
+            end = index + 1
+        content[-1] = True
+        width = _variable_quantifier_at(regex, end)
+        if _record_adjacent_atom(previous, bool(width), True):
             return True
-        _append_group_atom(group_atoms, group_counts, atom)
-        index += width + quantifier_width
+        index = end + width
     return False
 
 
