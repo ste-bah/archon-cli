@@ -447,6 +447,9 @@ def _scan_active_group(
 def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) -> bool:
     """Consume one character for repeated-group analysis with bounded stack state."""
     stack = state["stack"]
+    if state["named_backreference"]:
+        state["named_backreference"] = char != ")"
+        return False
     if index < state["escape_end"] or index < state["ignored_end"]:
         return False
     elif state["verbose"][-1] and char in " \t\n\r\f\v":
@@ -464,6 +467,11 @@ def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) 
             _record_atom(stack[-1], None)
         state["ignored_end"] = _class_end(regex, index)
     elif char == "(":
+        if regex[index + 1:index + 4] == "?P=":
+            if stack:
+                _record_atom(stack[-1], None)
+            state["named_backreference"] = True
+            return False
         if regex[index + 1:index + 3] == "?#":
             state["ignored_end"] = _comment_group_end(regex, index)
             return False
@@ -489,7 +497,7 @@ def _repeated_groups(regex: str):
     """Yield unsafe repeated groups using a one-pass bounded stack summary."""
     state: Dict[str, Any] = {
         "stack": [], "global_flag_unsafe": False, "escape_end": 0, "ignored_end": 0,
-        "quantifier_end": 0, "verbose": [False],
+        "quantifier_end": 0, "verbose": [False], "named_backreference": False,
     }
     for index, char in enumerate(regex):
         if _scan_group_token(regex, index, char, state):
@@ -554,6 +562,16 @@ def _global_flags_end(regex: str, index: int) -> int:
     return cursor + 1 if cursor > index + 2 and cursor < len(regex) and regex[cursor] == ")" else 0
 
 
+def _named_backreference_end(regex: str, index: int) -> int:
+    """Return a named backreference's exclusive end, or zero for another group."""
+    if regex[index + 1:index + 4] != "?P=":
+        return 0
+    cursor = index + 4
+    while cursor < len(regex) and regex[cursor] != ")":
+        cursor += 1
+    return min(cursor + 1, len(regex))
+
+
 def _group_body_start(regex: str, index: int) -> int:
     """Skip a group introducer without scanning any source character twice."""
     if index + 1 >= len(regex) or regex[index + 1] != "?":
@@ -567,9 +585,9 @@ def _group_body_start(regex: str, index: int) -> int:
         return index + 4
     if regex[index + 2:index + 4] == "P<":
         cursor = index + 4
-        while cursor < len(regex) and cursor < index + 35 and regex[cursor] != ">":
+        while cursor < len(regex) and regex[cursor] != ">":
             cursor += 1
-        return cursor + 1 if cursor < len(regex) and regex[cursor] == ">" else index + 1
+        return cursor + 1 if cursor < len(regex) else index + 1
     cursor = index + 2
     while cursor < len(regex) and regex[cursor] in "aiLmsux-":
         cursor += 1
@@ -721,6 +739,7 @@ def _consume_adjacent_atom(
     terminal_variable: List[bool],
     group_variable: List[bool],
     verbose: bool,
+    atom_end: Optional[int] = None,
 ) -> Tuple[int, bool]:
     """Record one non-group atom and return its next position and rejection state."""
     if char in "^$":
@@ -728,7 +747,9 @@ def _consume_adjacent_atom(
     if char in "?+*{":
         previous[-1] = terminal_variable[-1] = False
         return index + 1, False
-    if char == "\\":
+    if atom_end is not None:
+        end = atom_end
+    elif char == "\\":
         end = _escaped_atom_end(regex, index)
         if index + 1 < len(regex) and regex[index + 1] in "AZbB":
             return end, False
@@ -760,6 +781,15 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
             index = ignored_end
             continue
         if char in "()":
+            named_backreference_end = _named_backreference_end(regex, index)
+            if named_backreference_end:
+                index, unsafe = _consume_adjacent_atom(
+                    regex, index, "x", previous, content, terminal_variable,
+                    group_variable, verbose[-1], named_backreference_end,
+                )
+                if unsafe:
+                    return True
+                continue
             index, unsafe, variable = _consume_adjacent_group(
                 regex, index, previous, content, zero_width, verbose, entry_previous,
                 terminal_variable, group_variable,

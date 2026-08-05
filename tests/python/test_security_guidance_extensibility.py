@@ -568,6 +568,82 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self._assert_rejected_before_compile(pattern, "nullable-quantified")
 
+    def test_named_group_headers_preserve_nullable_adjacency_at_boundary_lengths(self):
+        for length in (31, 32, 64, 512):
+            name = "n" * length
+            for body in ("|b", "b|"):
+                pattern = f"a*(?P<{name}>{body})a*!"
+                with self.subTest(length=length, body=body):
+                    self._assert_rejected_before_compile(pattern, "named-boundary")
+
+    def test_long_named_groups_preserve_adjacency_across_placements(self):
+        name = "n" * 64
+        unsafe = (
+            f"(?P<{name}>|a*)a*!",
+            f"a*(?P<{name}>|b)a*!",
+            f"a*(?:(?P<{name}>|b))a*!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "named-placement")
+
+    def test_long_named_groups_preserve_variable_branch_adjacency(self):
+        name = "n" * 512
+        zero = "0" * 31
+        unsafe = (
+            f"a*(?P<{name}>|a{{{zero}1,}})a+!",
+            f"a*(?P<{name}>a{{{zero}1,}}|)a+!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "named-variable")
+
+    def test_named_backreferences_remain_distinct_from_named_group_headers(self):
+        for length in (32, 64, 512):
+            name = "n" * length
+            unsafe = f"(?P<{name}>a)(?P={name})*b*!"
+            safe = f"(?P<{name}>a)(?P={name})b*"
+            with self.subTest(length=length, kind="unsafe"):
+                self._assert_rejected_before_compile(unsafe, "named-backref")
+            with self.subTest(length=length, kind="safe"):
+                self.assertFalse(extensibility._has_redos_structure(safe))
+                self.assertIsNotNone(extensibility._validated_regex("named-backref-safe", safe))
+
+    def test_long_named_groups_with_fixed_or_zero_width_content_remain_safe(self):
+        name = "n" * 512
+        safe = (
+            f"a*(?P<{name}>fixed)b*",
+            f"(?P<{name}>(?=a))a*",
+            f"a*(?P<{name}>(?=b))b",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("named-safe", pattern))
+
+    def test_malformed_named_group_and_backreference_headers_reach_compiler_validation(self):
+        malformed = (
+            r"(?P<>)",
+            r"(?P<name",
+            f"(?P<{'n' * 512}",
+            r"(?P<not-valid>a)",
+            r"(?P=)",
+            r"(?P=missing",
+            f"(?P={'n' * 512}",
+        )
+
+        for pattern in malformed:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(
+                    extensibility.re, "compile", wraps=extensibility.re.compile
+                ) as compile_mock:
+                    self.assertIsNone(extensibility._validated_regex("named-invalid", pattern))
+                    compile_mock.assert_called_once_with(pattern)
+
     def test_allows_nullable_alternations_without_variable_consuming_branches(self):
         safe = (
             r"(?:|a)a*!",
