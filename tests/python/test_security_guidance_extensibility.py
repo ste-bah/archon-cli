@@ -98,6 +98,67 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                     compile_mock.assert_not_called()
 
+    def test_rejects_verbose_group_quantifiers_after_insignificant_syntax(self):
+        patterns = (
+            "(?x:(?:a) * # q1\n (?:a) *)$",
+            "(?x:(?:a) # q1\n * (?:a) *)$",
+            "(?x:(?:a)\r\n * (?:a) *)$",
+            "(?x:(?:a)# note\n*(?:b)*)$",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "verbose-group", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+
+    def test_rejects_adjacent_variable_atoms_across_unquantified_groups(self):
+        patterns = (
+            r"(a*)a*$",
+            r"a*(?:a*)$",
+            r"(?:a*)(?:b*)$",
+            "(?x:a*(?:a* # inner\n ))$",
+            "(?x:(?:a*) # outer\n a*)$",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "group-boundary", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+
+    def test_comment_groups_do_not_reset_adjacent_variable_atom_state(self):
+        patterns = (
+            r"a*(?#comment)a*$",
+            r"a*(?# separator)b*$",
+            r"(?x:a*(?#comment)a*)$",
+            r"(?x:a*(?#escaped \#)a*)$",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "comment-group", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+
     def test_verbose_mode_respects_scopes_classes_and_escaped_literals(self):
         safe = (
             "(?x:a*(?-x: )a*)$",
@@ -106,6 +167,12 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             r"(?x:\ *)$",
             r"(?x:\#*)$",
             "(?x:a* # one variable quantifier\n )$",
+            r"(?=a*)b*$",
+            r"(?:a*|b)$",
+            r"(?:ab){2}c*$",
+            r"a*(?#comment)b$",
+            "(?x:(?:a) # fixed repeat\n {2})$",
+            "(?x:(?:a) # CRLF fixed repeat\r\n {2})$",
         )
 
         for pattern in safe:
@@ -114,6 +181,22 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                 self.assertIsNotNone(
                     extensibility._validate_pattern(
                         {"rule_name": "verbose-safe", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
+    def test_verbose_comments_do_not_trigger_repeated_group_detection(self):
+        patterns = (
+            "(?x:a # +\n)*",
+            "(?x:(?# +)a)*",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "verbose-repeat-safe", "reminder": "test", "regex": pattern},
                         source="test",
                     )
                 )
@@ -298,6 +381,19 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                 source="test",
             )
         )
+
+    def test_rejects_three_way_repeated_alternation_without_branch_storage(self):
+        pattern = r"(?:a|b|c)*"
+
+        self.assertTrue(extensibility._has_redos_structure(pattern))
+        with mock.patch.object(extensibility.re, "compile") as compile_mock:
+            self.assertIsNone(
+                extensibility._validate_pattern(
+                    {"rule_name": "alternation", "reminder": "test", "regex": pattern},
+                    source="test",
+                )
+            )
+            compile_mock.assert_not_called()
 
     def test_pathological_alternation_scan_completes_within_deadline(self):
         code = f"""

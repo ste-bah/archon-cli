@@ -215,21 +215,22 @@ def _glob_match(path: str, include: Tuple[str, ...], exclude: Tuple[str, ...]) -
 # atoms. The last rule intentionally fails closed instead of interpreting sets.
 
 
-def _group_quantifier(regex: str, closing_index: int) -> str:
+def _group_quantifier(regex: str, closing_index: int, verbose: bool = False) -> str:
     """Return a supported quantifier after a group with a fixed lookahead bound."""
-    if closing_index + 1 >= len(regex):
+    quantifier_index = _verbose_ignored_end(regex, closing_index + 1, verbose)
+    if quantifier_index >= len(regex):
         return ""
-    quantifier = regex[closing_index + 1]
+    quantifier = regex[quantifier_index]
     if quantifier in "+*?":
         return quantifier
     if quantifier != "{":
         return ""
     # A repeat bound longer than 30 digits is invalid for practical Python regex
     # use; limiting this lookahead keeps the full scanner linear.
-    end = regex.find("}", closing_index + 2, closing_index + 34)
+    end = regex.find("}", quantifier_index + 1, quantifier_index + 33)
     if end == -1:
         return ""
-    bounds = regex[closing_index + 2:end].split(",", 1)
+    bounds = regex[quantifier_index + 1:end].split(",", 1)
     if (bounds[0] and not bounds[0].isdecimal()) or (len(bounds) > 1 and bounds[1] and not bounds[1].isdecimal()):
         return ""
     if len(bounds) == 1:
@@ -242,9 +243,11 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
 def _new_group(flag_unsafe: bool) -> Dict[str, Any]:
     """Build bounded state for one group while scanning an untrusted pattern."""
     return {
-        "branches": [],
+        "first_branch": None,
+        "branch_count": 0,
         "current": None,
         "direct_alternation": False,
+        "ambiguous_branches": False,
         "nested": False,
         "child_alternation": False,
         "has_quantifier": False,
@@ -260,15 +263,23 @@ def _record_atom(group: Dict[str, Any], token: Optional[str]) -> None:
 
 
 def _finish_branch(group: Dict[str, Any]) -> None:
-    group["branches"].append(group["current"])
+    """Fold one branch into a constant-size ambiguity summary."""
+    if group["current"] is None:
+        group["ambiguous_branches"] = True
+    elif group["branch_count"] == 1 and group["first_branch"] == group["current"]:
+        group["ambiguous_branches"] = True
+    elif group["branch_count"] >= 2:
+        group["ambiguous_branches"] = True
+    if group["branch_count"] == 0:
+        group["first_branch"] = group["current"]
+    group["branch_count"] += 1
     group["current"] = None
 
 
 def _direct_alternation_is_ambiguous(group: Dict[str, Any]) -> bool:
-    """Require distinct literal branch prefixes before accepting a repeated alternation."""
+    """Reject repeated alternations unless their first two prefixes differ."""
     _finish_branch(group)
-    branches = group["branches"]
-    return any(branch is None for branch in branches) or len(set(branches)) != len(branches)
+    return group["ambiguous_branches"]
 
 
 def _consume_group_prefix(group: Dict[str, Any], char: str) -> bool:
@@ -333,10 +344,10 @@ def _open_group(regex: str, index: int, state: Dict[str, Any]) -> None:
     stack.append(_new_group(bool(inherited)))
 
 
-def _close_group(regex: str, index: int, stack: List[Dict[str, Any]]) -> bool:
+def _close_group(regex: str, index: int, stack: List[Dict[str, Any]], verbose: bool) -> bool:
     """Fold a completed group into its parent and report unsafe repetition."""
     group = stack.pop()
-    quantifier = _group_quantifier(regex, index)
+    quantifier = _group_quantifier(regex, index, verbose)
     direct_ambiguous = (
         _direct_alternation_is_ambiguous(group) if group["direct_alternation"] else False
     )
@@ -364,7 +375,7 @@ def _scan_active_group(regex: str, index: int, char: str, stack: List[Dict[str, 
         group["direct_alternation"] = True
         _finish_branch(group)
     elif char == ")":
-        return _close_group(regex, index, stack)
+        return _close_group(regex, index, stack, False)
     elif char in "+*{":
         group["has_quantifier"] = True
     else:
@@ -382,7 +393,13 @@ def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) 
             state["class_escaped"] = True
         else:
             state["in_class"] = char != "]"
-    elif index < state["escape_end"]:
+    elif index < state["escape_end"] or index < state["ignored_end"]:
+        return False
+    elif state["verbose"][-1] and char in " \t\n\r\f\v":
+        return False
+    elif state["verbose"][-1] and char == "#":
+        newline = regex.find("\n", index + 1)
+        state["ignored_end"] = len(regex) if newline == -1 else newline + 1
         return False
     elif char == "\\":
         if stack:
@@ -393,7 +410,22 @@ def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) 
             _record_atom(stack[-1], None)
         state["in_class"] = True
     elif char == "(":
+        if regex[index + 1:index + 3] == "?#":
+            state["ignored_end"] = _comment_group_end(regex, index)
+            return False
+        stack_depth = len(stack)
+        flags_end = _global_flags_end(regex, index)
         _open_group(regex, index, state)
+        if flags_end:
+            state["verbose"][-1] = _verbose_mode(regex[index + 2:flags_end - 1], state["verbose"][-1])
+        elif len(stack) > stack_depth:
+            state["verbose"].append(_scoped_verbose_mode(regex, index, state["verbose"][-1]))
+    elif char == ")" and stack:
+        verbose = state["verbose"][-2] if len(state["verbose"]) > 1 else False
+        unsafe = _close_group(regex, index, stack, verbose)
+        if len(state["verbose"]) > 1:
+            state["verbose"].pop()
+        return unsafe
     elif stack:
         return _scan_active_group(regex, index, char, stack)
     return False
@@ -402,8 +434,8 @@ def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) 
 def _repeated_groups(regex: str):
     """Yield unsafe repeated groups using a one-pass bounded stack summary."""
     state: Dict[str, Any] = {
-        "stack": [], "global_flag_unsafe": False, "escape_end": 0, "in_class": False,
-        "class_escaped": False,
+        "stack": [], "global_flag_unsafe": False, "escape_end": 0, "ignored_end": 0,
+        "in_class": False, "class_escaped": False, "verbose": [False],
     }
     for index, char in enumerate(regex):
         if _scan_group_token(regex, index, char, state):
@@ -519,6 +551,27 @@ def _scoped_verbose_mode(regex: str, index: int, inherited: bool) -> bool:
     return _verbose_mode(regex[index + 2:cursor], inherited)
 
 
+def _verbose_ignored_end(regex: str, index: int, verbose: bool) -> int:
+    """Skip whitespace and comments that Python ignores in verbose mode."""
+    if not verbose:
+        return index
+    while index < len(regex):
+        if regex[index] in " \t\n\r\f\v":
+            index += 1
+        elif regex[index] == "#":
+            newline = regex.find("\n", index + 1)
+            index = len(regex) if newline == -1 else newline + 1
+        else:
+            break
+    return index
+
+
+def _comment_group_end(regex: str, index: int) -> int:
+    """Skip a Python comment group without changing adjacency state."""
+    end = regex.find(")", index + 3)
+    return len(regex) if end == -1 else end + 1
+
+
 def _record_adjacent_atom(previous: List[bool], variable: bool, significant: bool) -> bool:
     """Fail closed when consecutive variable atoms can backtrack against each other."""
     if not significant:
@@ -530,36 +583,72 @@ def _record_adjacent_atom(previous: List[bool], variable: bool, significant: boo
 
 
 def _close_adjacent_group(
-    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool]
-) -> Tuple[int, bool]:
+    regex: str,
+    index: int,
+    previous: List[bool],
+    content: List[bool],
+    zero_width: List[bool],
+    verbose: List[bool],
+    terminal_variable: List[bool],
+    branch_variable: List[bool],
+) -> Tuple[int, bool, bool]:
     """Fold one completed group into its parent adjacency state."""
     child_content, child_zero = content.pop(), zero_width.pop()
     previous.pop()
-    width = _variable_quantifier_at(regex, index + 1)
-    return 1 + width, _record_adjacent_atom(previous, bool(width), child_content and not child_zero)
+    child_terminal = terminal_variable.pop()
+    child_variable = branch_variable.pop() or child_terminal
+    quantifier_start = _verbose_ignored_end(regex, index + 1, verbose[-1])
+    width = _variable_quantifier_at(regex, quantifier_start)
+    variable = bool(width) or child_variable
+    significant = child_content and not child_zero
+    unsafe = _record_adjacent_atom(previous, variable, significant)
+    return quantifier_start - index + width, unsafe, variable if significant else False
 
 
 def _consume_adjacent_group(
-    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool],
+    regex: str,
+    index: int,
+    previous: List[bool],
+    content: List[bool],
+    zero_width: List[bool],
     verbose: List[bool],
-) -> Tuple[int, bool]:
+    entry_previous: List[bool],
+    terminal_variable: List[bool],
+    branch_variable: List[bool],
+) -> Tuple[int, bool, bool]:
     """Open or close a group and return its next position plus rejection state."""
     if regex[index] == "(":
+        if regex[index + 1:index + 3] == "?#":
+            return _comment_group_end(regex, index), False, False
         flags_end = _global_flags_end(regex, index)
         if flags_end:
             verbose[-1] = _verbose_mode(regex[index + 2:flags_end - 1], verbose[-1])
-            return flags_end, False
-        zero_width.append(regex[index + 1:index + 3] in ("?=", "?!", "?<"))
-        previous.append(False)
+            return flags_end, False, False
+        child_zero = regex[index + 1:index + 3] in ("?=", "?!", "?<")
+        zero_width.append(child_zero)
+        entry_previous.append(False if child_zero else previous[-1])
+        previous.append(entry_previous[-1])
         content.append(False)
+        terminal_variable.append(False)
+        branch_variable.append(False)
         verbose.append(_scoped_verbose_mode(regex, index, verbose[-1]))
-        return _group_body_start(regex, index), False
+        return _group_body_start(regex, index), False, False
     if len(content) == 1:
         previous[-1] = False
-        return index + 1, False
+        return index + 1, False, False
     verbose.pop()
-    width, unsafe = _close_adjacent_group(regex, index, previous, content, zero_width)
-    return index + width, unsafe
+    width, unsafe, variable = _close_adjacent_group(
+        regex,
+        index,
+        previous,
+        content,
+        zero_width,
+        verbose,
+        terminal_variable,
+        branch_variable,
+    )
+    entry_previous.pop()
+    return index + width, unsafe, variable
 
 
 def _adjacent_quantifier_overlap(regex: str) -> bool:
@@ -569,23 +658,35 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
     rejected fail closed, avoiding complex or incomplete regex interpretation.
     """
     previous, content, zero_width, verbose = [False], [False], [False], [False]
+    entry_previous, terminal_variable, branch_variable = [False], [False], [False]
     index = 0
     while index < len(regex):
         char = regex[index]
-        if verbose[-1] and char in " \t\n\r\f\v":
-            index += 1
-            continue
-        if verbose[-1] and char == "#":
-            newline = regex.find("\n", index + 1)
-            index = len(regex) if newline == -1 else newline + 1
+        ignored_end = _verbose_ignored_end(regex, index, verbose[-1])
+        if ignored_end != index:
+            index = ignored_end
             continue
         if char in "()":
-            index, unsafe = _consume_adjacent_group(regex, index, previous, content, zero_width, verbose)
+            index, unsafe, variable = _consume_adjacent_group(
+                regex,
+                index,
+                previous,
+                content,
+                zero_width,
+                verbose,
+                entry_previous,
+                terminal_variable,
+                branch_variable,
+            )
             if unsafe:
                 return True
+            if variable:
+                terminal_variable[-1] = variable
             continue
         if char == "|":
-            previous[-1] = False
+            branch_variable[-1] = branch_variable[-1] or terminal_variable[-1]
+            previous[-1] = entry_previous[-1]
+            terminal_variable[-1] = False
             content[-1] = True
             index += 1
             continue
@@ -598,14 +699,17 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
             end = _class_end(regex, index)
         elif char in "?+*{":
             previous[-1] = False
+            terminal_variable[-1] = False
             index += 1
             continue
         else:
             end = index + 1
         content[-1] = True
         width = _variable_quantifier_at(regex, end)
-        if _record_adjacent_atom(previous, bool(width), True):
+        variable = bool(width)
+        if _record_adjacent_atom(previous, variable, True):
             return True
+        terminal_variable[-1] = variable
         index = end + width
     return False
 
