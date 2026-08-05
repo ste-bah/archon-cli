@@ -36,10 +36,21 @@ fn marker_http_pdf_id_is_lowercase_sha256_of_exact_canonical_utf8_path() {
     let pdf = nested.join("résumé.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
     let canonical = std::fs::canonicalize(&pdf).unwrap();
-    let expected = format!(
-        "{:x}",
-        Sha256::digest(canonical.to_str().unwrap().as_bytes())
-    );
+    let canonical_text = canonical.to_str().unwrap();
+    let normalized_canonical_text = if let Some(unc_path) = canonical_text.strip_prefix(r"\\?\UNC\")
+    {
+        format!(r"\\{unc_path}")
+    } else if let Some(drive_path) = canonical_text.strip_prefix(r"\\?\") {
+        let bytes = drive_path.as_bytes();
+        if matches!(bytes, [drive, b':', ..] if drive.is_ascii_alphabetic()) {
+            drive_path.to_string()
+        } else {
+            canonical_text.to_string()
+        }
+    } else {
+        canonical_text.to_string()
+    };
+    let expected = format!("{:x}", Sha256::digest(normalized_canonical_text.as_bytes()));
 
     assert_eq!(pdf_id_for_canonical_path(&canonical).unwrap(), expected);
     assert_eq!(expected.len(), 64);
