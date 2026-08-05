@@ -56,6 +56,23 @@ contract. On large memory graphs Archon logs a latency warning unless an
 embedding provider is attached so hybrid retrieval can narrow candidates with
 the vector index first.
 
+## Keeping the graph clean
+
+```
+/memory prune                      # report what is over the ingest cap or duplicated
+/memory prune apply                # remove it
+```
+
+What a memory may contain is capped, so a pasted document can no longer be
+stored as a "memory" — see [ingest limits](../architecture/learning-systems.md#ingest-limits).
+Those limits apply on write, so anything stored by an earlier version is still
+there: a 25,000-character document held as a single memory, or twenty near-copies
+of the same one. `/memory prune` finds both.
+
+It reports before it removes, and nothing is deleted until you run `apply`.
+Duplicate clusters keep one copy — the most-accessed, tie-broken by oldest —
+since access count reflects what recall actually surfaced.
+
 In agent context, the model can call `memory_recall` directly:
 ```jsonc
 { "query": "how do we handle config validation", "max_results": 5 }

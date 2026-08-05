@@ -101,10 +101,58 @@ fn parse_skips_unknown_types_and_empty_content() {
 #[test]
 fn build_prompt_includes_messages() {
     let msgs = vec!["Hello".to_string(), "How are you?".to_string()];
-    let prompt = build_extraction_prompt(&msgs);
+    let prompt = build_extraction_prompt(&msgs, &[]);
     assert!(prompt.contains("Hello"));
     assert!(prompt.contains("How are you?"));
     assert!(prompt.contains("JSON"));
+}
+
+/// The prompt must state whose behaviour a rule constrains.
+///
+/// Not decoration: a `rule` goes into every later system prompt unreviewed,
+/// and the version of this prompt that omitted this produced
+/// `Avoid: <the thing the user asked for>` from correction turns -- inverting
+/// the user's intent. The ingest caps cannot catch that, because an inverted
+/// rule is short.
+#[test]
+fn prompt_directs_rules_at_the_assistant_not_the_user() {
+    let prompt = build_extraction_prompt(&["anything".to_string()], &[]);
+
+    assert!(
+        prompt.contains("ASSISTANT"),
+        "the prompt must say whose behaviour a rule describes"
+    );
+    assert!(
+        prompt.contains("never what\nthe user should do"),
+        "the prompt must rule out writing the user's instructions back as rules"
+    );
+    assert!(
+        prompt.contains("never \"Avoid running the tests before pushing\""),
+        "the prompt must show the inversion it is guarding against"
+    );
+}
+
+/// The stated limits must be the enforced limits.
+///
+/// If they drift apart the model is asked for content that `parse_extraction_response`
+/// then silently discards -- a wasted call and a lost memory, with nothing in
+/// the output to explain it.
+#[test]
+fn prompt_states_the_limits_that_are_actually_enforced() {
+    let prompt = build_extraction_prompt(&["anything".to_string()], &[]);
+
+    assert!(
+        prompt.contains(&MAX_EXTRACTED_CONTENT_CHARS.to_string()),
+        "the general cap must be stated to the model"
+    );
+    assert!(
+        prompt.contains(&MAX_RULE_CONTENT_CHARS.to_string()),
+        "the rule cap must be stated to the model"
+    );
+    assert!(
+        prompt.contains("Never copy a\ndocument"),
+        "the prompt must tell the model not to paste documents back"
+    );
 }
 
 // -- store_extracted ------------------------------------------------

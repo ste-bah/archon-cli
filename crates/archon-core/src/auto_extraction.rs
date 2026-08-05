@@ -61,6 +61,21 @@ impl AutoExtractor {
             if fact.is_empty() || fact.len() < 5 {
                 continue;
             }
+            // Upper bound as well as lower. This is a separate writer from
+            // `store_extracted`, so the ingest cap there does not cover it --
+            // found by watching both extractors run and noticing this one had
+            // only a minimum length. Dropped rather than truncated, matching the
+            // other path: half a pasted document is still a pasted document.
+            let limit =
+                archon_memory::extraction::content_limit(archon_memory::types::MemoryType::Fact);
+            if fact.chars().count() > limit {
+                tracing::warn!(
+                    length = fact.chars().count(),
+                    limit,
+                    "discarding over-long auto-extracted fact"
+                );
+                continue;
+            }
             // Dedup: skip if a similar memory already exists.
             if self.is_duplicate(&fact).await {
                 continue;

@@ -150,6 +150,62 @@ when `[policy.learning].autonomous_apply = true`, but the same policy gates
 still enforce risk ceilings, evidence floors, recent-incident limits, and the
 hard rule that `PolicyOverride` proposals never self-apply.
 
+### Correction capture: one writer, two detectors
+
+Corrections are detected twice and written once.
+
+The **keyword detector** runs at every turn end and matches known phrasings
+("no,", "should have", "I said", "didn't ask"). It is immediate and free, which
+is what matters: a correction exists to stop the *next* turn repeating the
+mistake, so a record that arrives several turns later has already missed its
+purpose. It is also incomplete by construction — "that's not what I meant" does
+not match, and there is always another phrasing.
+
+The **semantic pass** inside periodic extraction covers that gap. It examines
+every message since the previous extraction, and any correction it finds is
+recorded through `CorrectionTracker` — the same writer as the fast path, not a
+parallel one. Corrections the keyword detector already captured are listed in
+its prompt so it reports only what was missed; without that, both passes would
+record the same correction in different words.
+
+Two properties keep this from degrading the record:
+
+- **Content is bounded before storage.** The detector matches a phrase anywhere
+  in the turn, so a message that merely contains "should have" counts —
+  including one that pastes an entire document. Corrections over the cap are
+  truncated with a visible marker rather than dropped, because a correction is
+  the user's stated intent and its opening is where the correction usually is.
+- **An over-long correction is restated.** A background call rewrites it as an
+  instruction addressed to the assistant, and replaces the stored content. The
+  correction is recorded *before* that call, so a failure leaves the bounded raw
+  text in place: the call can only improve the record, never lose it.
+
+### Ingest limits
+
+Everything an LLM can write into the memory graph is bounded. Without this a
+pasted document is stored verbatim, and anything typed `rule` is rendered into
+the system prompt on every subsequent request — so one document becomes a
+permanent per-request cost.
+
+| Path | Bound |
+|---|---|
+| `store_extracted` (periodic extraction) | 240 chars for `Rule`, 2000 otherwise; over-long items dropped |
+| `AutoExtractor` | 2000 chars; over-long facts dropped |
+| `CorrectionTracker` (both detectors) | 2000 chars, truncated with a marker |
+| `AutoCapture` | 500 chars, excerpted |
+| Agent `memory` tool | 2000 chars; returns an error so the agent can summarise and retry |
+
+Extraction also deduplicates on a content fingerprint (FNV-1a over
+case- and whitespace-normalised content, stored as a tag) before its existing
+substring-containment check. The fingerprint catches restatements that differ
+only in spacing or case, which containment cannot see because neither string
+contains the other.
+
+Memories stored before these limits existed are not affected by them. Use
+`/memory prune` to see what is over the cap or duplicated, and
+`/memory prune apply` to remove it. It is two steps deliberately: deleting
+memories is irreversible and the selection rules are heuristics.
+
 ## System details
 
 ### SONA (Self-Organizing Network Architecture)

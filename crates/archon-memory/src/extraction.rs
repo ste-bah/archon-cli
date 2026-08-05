@@ -160,18 +160,66 @@ pub fn should_extract(
 
 /// Build the prompt that asks an LLM to extract memories from the
 /// given conversation messages.
-pub fn build_extraction_prompt(messages: &[String]) -> String {
+///
+/// The instructions carry more weight than they look like they should, because
+/// a `rule` written here is injected into every later system prompt without
+/// review. Two failures came directly from the earlier version saying only
+/// "a concise statement of the fact/decision/preference":
+///
+/// 1. WHOSE BEHAVIOUR. It never said a rule constrains the ASSISTANT. Given a
+///    turn where the user corrects the assistant, the model wrote the user's
+///    instruction back out as a prohibition -- `Avoid: <the thing the user
+///    asked for>` -- inverting the intent of the correction. The caps do not
+///    help here: an inverted rule is short and passes them cleanly.
+/// 2. WHAT A MEMORY IS. Nothing said the content had to be a statement rather
+///    than an excerpt, so pasted documents came back verbatim as memories.
+///    [`MAX_EXTRACTED_CONTENT_CHARS`] now rejects those, but a rejected
+///    extraction is still a wasted call and a lost memory -- better not to ask
+///    for one.
+/// `already_recorded` lists corrections the fast keyword detector already
+/// captured for these turns. They are shown to the model so it reports only the
+/// ones that pass missed: both detectors write to the same place, so a
+/// re-reported correction is a duplicate rather than a second opinion.
+pub fn build_extraction_prompt(messages: &[String], already_recorded: &[String]) -> String {
     let conversation = messages.join("\n---\n");
+    let already = if already_recorded.is_empty() {
+        String::new()
+    } else {
+        let list = already_recorded
+            .iter()
+            .map(|c| format!("- {}", c.chars().take(200).collect::<String>()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nThese corrections from this conversation have ALREADY been recorded. Do not report \
+             them again, even in different words. Report a \"correction\" only if the user \
+             corrected the assistant in a way NOT covered below:\n{list}\n"
+        )
+    };
     format!(
         r#"Analyse the following conversation and extract any important memories.
 
+You are writing notes for an AI assistant to read in future conversations.
+Write each memory as a short statement in your own words. Never copy a
+document, file, code block, or long passage out of the conversation: if
+something cannot be summarised in a sentence or two, it does not belong here.
+
 For each memory, return a JSON object with:
-- "content": a concise statement of the fact/decision/preference
+- "content": one or two sentences, at most {MAX_EXTRACTED_CONTENT_CHARS} characters
 - "memory_type": one of "fact", "decision", "correction", "pattern", "preference", "rule"
 - "tags": a list of short keyword tags
 
-Return a JSON array of these objects. If there is nothing worth remembering, return an empty array `[]`.
+"rule" and "correction" describe how the ASSISTANT should behave, never what
+the user should do. Write them as an instruction addressed to the assistant,
+and keep them under {MAX_RULE_CONTENT_CHARS} characters.
 
+When the user corrects the assistant, the rule is the corrected behaviour the
+assistant should adopt -- not a prohibition on what the user asked for. If the
+user says "always run the tests before pushing", the rule is "Run the tests
+before pushing", never "Avoid running the tests before pushing".
+
+Return a JSON array of these objects. If there is nothing worth remembering, return an empty array `[]`.
+{already}
 Conversation:
 {conversation}
 "#

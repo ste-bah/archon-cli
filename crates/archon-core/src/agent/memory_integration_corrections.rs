@@ -9,44 +9,17 @@ use super::*;
 impl Agent {
     /// Detect correction patterns in user input and record via CorrectionTracker.
     pub(super) async fn detect_and_record_correction(
-        &self,
+        &mut self,
         user_input: &str,
         graph: &Arc<dyn MemoryTrait>,
     ) {
-        let lower = user_input.to_lowercase();
-        let correction_type = if lower.starts_with("no,")
-            || lower.starts_with("no ")
-            || lower.starts_with("wrong")
-            || lower.starts_with("that's wrong")
-            || lower.starts_with("that is wrong")
-        {
-            CorrectionType::FactualError
-        } else if lower.contains("i said")
-            || lower.contains("i already told you")
-            || lower.contains("i already asked")
-            || lower.contains("as i mentioned")
-        {
-            CorrectionType::RepeatedInstruction
-        } else if lower.starts_with("don't ")
-            || lower.starts_with("do not ")
-            || lower.starts_with("stop ")
-            || lower.contains("never do that")
-        {
-            CorrectionType::DidForbiddenAction
-        } else if lower.contains("didn't ask")
-            || lower.contains("did not ask")
-            || lower.contains("without permission")
-            || lower.contains("without asking")
-        {
-            CorrectionType::ActedWithoutPermission
-        } else if lower.contains("instead,")
-            || lower.contains("should have")
-            || lower.contains("better approach")
-            || lower.contains("use this instead")
-        {
-            CorrectionType::ApproachCorrection
-        } else {
-            return; // No correction pattern detected.
+        let Some(correction_type) = super::correction_intake::classify_correction(user_input)
+        else {
+            // No keyword match. NOT the end of it: the periodic extractor runs a
+            // semantic pass over the same turns and routes anything this missed
+            // back through `record_extracted_corrections`, so a correction
+            // phrased outside these patterns is caught late rather than lost.
+            return;
         };
 
         let tracker = CorrectionTracker::new(graph.as_ref());
@@ -60,9 +33,17 @@ impl Agent {
             }
         };
         let linked_rule_id = select_relevant_rule(user_input, &rules).map(|rule| rule.id.clone());
+        // Bounded before storage: the detector matches a phrase anywhere in the
+        // turn, so a pasted document that happens to contain one is recorded in
+        // full otherwise. See `stored_correction_content`.
+        let stored_content = stored_correction_content(user_input);
+        // A correction that fitted is already in the user's own words, which
+        // beats any paraphrase and costs nothing. Only a truncated one is worth
+        // spending a call to restate.
+        let was_truncated = stored_content != user_input;
         let correction = match tracker.record_correction(
             correction_type,
-            user_input,
+            &stored_content,
             &context,
             linked_rule_id.as_deref(),
         ) {
@@ -79,6 +60,24 @@ impl Agent {
                 None
             }
         };
+
+        // Remember what the fast path caught, so the extractor's semantic pass
+        // reports only what it missed instead of a rival copy of this.
+        if correction.is_some() {
+            self.corrections_since_extraction
+                .push(stored_content.clone());
+        }
+
+        // Improve the record after the fact, never before it. The correction is
+        // already stored above, so a failed or empty summary leaves the bounded
+        // raw text in place rather than losing what the user said.
+        if was_truncated && let Some(ref correction) = correction {
+            self.spawn_correction_summary(
+                correction.id.clone(),
+                user_input.to_string(),
+                Arc::clone(graph),
+            );
+        }
 
         // CRIT-15 (ITEM 5): Notify inner voice of user correction.
         if let Some(ref iv) = self.inner_voice
@@ -107,6 +106,25 @@ impl Agent {
         }
     }
 
+    /// The conversation slice this extraction should examine.
+    ///
+    /// Everything since the last extraction, so a correction the keyword pass
+    /// declined cannot roll out of view before the semantic pass sees it. The
+    /// previous fixed "last 10 messages" only covered the 5-turn interval when
+    /// every turn was a bare exchange; one tool-using turn produces more than
+    /// ten messages on its own, and anything older was silently dropped. A
+    /// correction lost that way is lost for good -- the keyword pass already
+    /// declined it and nothing looks again.
+    ///
+    /// Bounded three ways, because "everything since last time" is unbounded and
+    /// extraction must not cost more than the work it observes:
+    /// message count, per-message length, and a total character budget. When the
+    /// window overflows, the OLDEST messages are dropped: the newest are the
+    /// ones the next turn will act on.
+    fn extraction_window(&self) -> Vec<String> {
+        extraction_window_from(&self.state.messages, self.messages_at_last_extraction)
+    }
+
     /// GAP 5: Trigger memory extraction in the background.
     pub(super) fn trigger_memory_extraction(&mut self) {
         let graph = match self.memory {
@@ -114,23 +132,7 @@ impl Agent {
             None => return,
         };
 
-        // Collect last N messages for extraction
-        let messages: Vec<String> = self
-            .state
-            .messages
-            .iter()
-            .rev()
-            .take(10)
-            .filter_map(|m| {
-                let role = m["role"].as_str().unwrap_or("unknown");
-                let content = m["content"].as_str().unwrap_or("");
-                if content.is_empty() {
-                    return None;
-                }
-                Some(format!("{role}: {content}"))
-            })
-            .collect();
-
+        let messages = self.extraction_window();
         if messages.is_empty() {
             return;
         }
@@ -151,10 +153,18 @@ impl Agent {
 
         // Record extraction so we don't fire again immediately
         self.extraction_state.record_extraction(turn);
+        // Advance the window. Everything up to here has now been examined, so
+        // the next extraction starts where this one stopped and nothing between
+        // the two is skipped.
+        self.messages_at_last_extraction = self.state.messages.len();
+        // Hand the window's already-captured corrections to the semantic pass and
+        // reset: the next window covers different turns, so holding these longer
+        // would suppress genuinely new corrections that merely resemble them.
+        let already_recorded = std::mem::take(&mut self.corrections_since_extraction);
 
         // Run extraction in background via a real LLM call
         tokio::spawn(async move {
-            let prompt = build_extraction_prompt(&messages);
+            let prompt = build_extraction_prompt(&messages, &already_recorded);
 
             let request = LlmRequest {
                 model,
@@ -186,6 +196,29 @@ impl Agent {
                     }
 
                     let extracted = parse_extraction_response(&response_text).unwrap_or_default();
+
+                    // Corrections go to the CorrectionTracker, not to
+                    // `store_extracted`. One writer owns correction content, so
+                    // these inherit the same bounding and scoring as the fast
+                    // path instead of becoming a parallel record of it.
+                    let (corrections, other): (Vec<_>, Vec<_>) =
+                        extracted.into_iter().partition(|m| {
+                            m.memory_type == archon_memory::types::MemoryType::Correction
+                        });
+                    if !corrections.is_empty() {
+                        let recorded =
+                            crate::agent::correction_intake::record_extracted_corrections(
+                                &graph,
+                                &corrections,
+                                &format!("turn:{turn} (semantic pass)"),
+                            );
+                        tracing::info!(
+                            recorded,
+                            "recorded corrections the keyword detector missed"
+                        );
+                    }
+
+                    let extracted = other;
                     if !extracted.is_empty() {
                         match store_extracted(graph.as_ref(), &extracted, &session_id) {
                             Ok(count) => {
@@ -209,6 +242,66 @@ impl Agent {
             }
         });
     }
+}
+
+/// Most messages one extraction will examine.
+///
+/// The window is "everything since the last extraction", which is unbounded --
+/// a stretch of tool-heavy turns produces hundreds of messages. Forty covers a
+/// normal five-turn interval several times over while keeping the call small.
+const MAX_EXTRACTION_MESSAGES: usize = 40;
+
+/// Per-message excerpt fed to extraction.
+///
+/// A pasted document previously entered this prompt whole, so a single message
+/// could dominate the call. Extraction is looking for what was decided and
+/// corrected, which survives an excerpt.
+const MAX_EXTRACTION_MESSAGE_CHARS: usize = 1_000;
+
+/// Total character budget across the window.
+///
+/// Roughly six thousand tokens: enough to see a real interval of conversation,
+/// small enough that extraction never rivals the turn that triggered it.
+const MAX_EXTRACTION_PROMPT_CHARS: usize = 24_000;
+
+/// Build the extraction window from `messages`, starting at `start`.
+///
+/// Free-standing so the bounding and ordering can be tested without an `Agent`.
+pub(super) fn extraction_window_from(messages: &[serde_json::Value], start: usize) -> Vec<String> {
+    let start = start.min(messages.len());
+    let window = &messages[start..];
+    let window = if window.len() > MAX_EXTRACTION_MESSAGES {
+        &window[window.len() - MAX_EXTRACTION_MESSAGES..]
+    } else {
+        window
+    };
+
+    let mut budget = MAX_EXTRACTION_PROMPT_CHARS;
+    let mut collected: Vec<String> = Vec::new();
+    // Walked newest-first so the budget is spent on the most recent messages,
+    // then reversed: the model must read the conversation in the order it
+    // happened. The previous implementation collected reversed and never
+    // restored the order, so every extraction saw the conversation backwards.
+    for message in window.iter().rev() {
+        let role = message["role"].as_str().unwrap_or("unknown");
+        let content = message["content"].as_str().unwrap_or("");
+        if content.is_empty() {
+            continue;
+        }
+        // Excerpt per message: extraction wants the shape of the conversation,
+        // not its attachments, and one pasted document used to enter the prompt
+        // whole.
+        let excerpt: String = content.chars().take(MAX_EXTRACTION_MESSAGE_CHARS).collect();
+        let line = format!("{role}: {excerpt}");
+        let cost = line.chars().count();
+        if cost > budget {
+            break;
+        }
+        budget -= cost;
+        collected.push(line);
+    }
+    collected.reverse();
+    collected
 }
 
 const MATCH_THRESHOLD: f64 = 0.25;
@@ -255,3 +348,7 @@ fn correction_tokens(text: &str) -> std::collections::BTreeSet<String> {
         .filter(|token| token.len() > 1 && !COMMON_CORRECTION_TOKENS.contains(&token.as_str()))
         .collect()
 }
+
+#[cfg(test)]
+#[path = "extraction_window_tests.rs"]
+mod extraction_window_tests;

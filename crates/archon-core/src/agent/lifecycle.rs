@@ -34,6 +34,8 @@ impl Agent {
             plan_store: None,
             turn_number: 0,
             recalled_corrections: None,
+            corrections_since_extraction: Vec::new(),
+            messages_at_last_extraction: 0,
             memory: None,
             memory_injector: Arc::new(std::sync::Mutex::new(MemoryInjector::new())),
             extraction_config: ExtractionConfig::default(),

@@ -61,8 +61,10 @@ impl Agent {
         }
 
         // Detect user corrections and record them in the memory graph.
-        if let Some(ref graph) = self.memory {
-            self.detect_and_record_correction(user_input, graph).await;
+        // The handle is cloned rather than borrowed because recording now also
+        // buffers what it captured, so the call needs `&mut self`.
+        if let Some(graph) = self.memory.clone() {
+            self.detect_and_record_correction(user_input, &graph).await;
         }
 
         // GAP 5: Auto-memory extraction check

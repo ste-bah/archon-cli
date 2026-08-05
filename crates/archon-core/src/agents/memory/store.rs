@@ -78,6 +78,23 @@ pub fn save_agent_memory(
         None => return Ok("skipped-no-scope".to_string()),
     };
 
+    // The last path by which a model writes freely into the graph. Every other
+    // writer -- the extractors, the correction detector, auto-capture -- is
+    // bounded, and leaving this one open would just move the problem.
+    //
+    // An ERROR rather than a silent drop, unlike the extraction paths: this is a
+    // deliberate tool call, so the caller is present to be told. An agent that
+    // learns its memory was too long can summarise and retry, where a silent
+    // success would have it believe something was remembered that was not.
+    let limit = archon_memory::extraction::content_limit(MemoryType::Fact);
+    let length = content.chars().count();
+    if length > limit {
+        return Err(MemoryError::Database(format!(
+            "memory content is {length} characters, over the {limit}-character limit; \
+             store a summary rather than the full text"
+        )));
+    }
+
     let mut tags = vec![agent_tag(agent_type), scope_tag(scope)];
     tags.extend(extra_tags.iter().cloned());
 

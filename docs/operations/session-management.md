@@ -41,6 +41,25 @@ archon --continue-session                # or -c
 archon -c                                # shorthand
 ```
 
+## What resuming writes to
+
+Resuming **continues** the session you selected. New messages, cost, and token
+usage are all written back to that session, whether you resumed with
+`archon --resume <id>`, `--continue-session`, or the `/resume` picker inside the
+TUI.
+
+This is worth stating because it did not always hold. Before v1.5.2 the session
+id was minted at startup and never reassigned, so a resumed conversation was
+replayed into the transcript but every subsequent write went to a new row. One
+conversation ended up split across two sessions — history in the row you
+resumed, cost and name on the row the launch created — and the resumed session
+stayed frozen at whatever it last held. If you have sessions from an earlier
+version that show a cost but zero turns, that is what happened to them.
+
+Note that a session row is still created for every launch, used or not, so
+`/resume` lists sessions with no messages alongside real ones. The turn count in
+the picker is the reliable signal.
+
 ## Forking
 
 Fork a session to branch off a new line of work without modifying the parent:

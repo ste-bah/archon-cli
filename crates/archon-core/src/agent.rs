@@ -37,11 +37,13 @@ mod cognitive_gate;
 mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
+pub(crate) mod correction_intake;
 pub(crate) mod events;
 mod lifecycle;
 #[cfg(test)]
 mod memory_attribution_tests;
 mod memory_integration;
+mod memory_integration_correction_summary;
 mod memory_integration_corrections;
 mod message_delivery;
 mod payloads;
@@ -80,7 +82,9 @@ pub use payloads::{
 };
 pub use runtime_attribution::RuntimeAttribution;
 pub use support::AgentLoopError;
-use support::{message_text_content, parse_plan_from_text, user_correction_excerpt};
+use support::{
+    message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
+};
 pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
@@ -135,6 +139,23 @@ pub struct Agent {
     /// `turn_completion`), so no new correction can appear mid-turn for this
     /// cache to miss.
     recalled_corrections: Option<(u64, Vec<archon_consciousness::corrections::Correction>)>,
+    /// Corrections the keyword detector captured since the last extraction.
+    ///
+    /// Shown to the extractor so its semantic pass reports only what the fast
+    /// path missed. Both write to the same relation, so a re-reported
+    /// correction would be a duplicate rather than a second opinion -- which is
+    /// how the same correction previously landed twice in different words.
+    ///
+    /// Cleared when extraction fires, because its window is the same set of
+    /// turns; anything older is not a duplicate risk for the next window.
+    corrections_since_extraction: Vec<String>,
+    /// Index into `state.messages` marking where the last extraction stopped.
+    ///
+    /// The extraction window starts here rather than a fixed number of messages
+    /// back, so nothing between two extractions is skipped. A correction the
+    /// keyword detector declined is only ever looked at once more, by the
+    /// semantic pass; if it falls outside that window it is lost for good.
+    messages_at_last_extraction: usize,
     // GAP 5/7: Memory graph + injector for per-turn injection and auto-extraction
     memory: Option<Arc<dyn MemoryTrait>>,
     /// Shared so the per-turn recall can run on the blocking pool without
