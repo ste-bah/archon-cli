@@ -395,52 +395,76 @@ fn concurrent_receiver_close_rejects_in_flight_send() {
     assert!(matches!(error.0, TuiEvent::TextDelta(text) if text == "lost"));
 }
 
+// Depth is read from THIS channel, not from the process-wide
+// `TUI_EVENT_PENDING` gauge. The gauge answers the same question for the render
+// loop, which has exactly one channel -- but a test process has many,
+// concurrently, all moving the same counter, so an exact assertion through it
+// was an assertion about every other test's traffic too, and failed whenever
+// anything unrelated shifted the schedule.
+//
+// These stay in the serial group for a DIFFERENT and real reason: sending on a
+// channel also moves the process-wide send-failure and oversized-rejection
+// totals, which `event_channel_payload_tests` asserts exact values on. Every
+// test that sends needs the group; only tests that ASSERT DEPTH needed the
+// global, and no longer do.
 #[test]
 #[serial(tui_drain_metrics)]
-fn pending_metric_tracks_coalescing_and_dequeue() {
-    reset_pending_metric();
+fn queue_depth_tracks_coalescing_and_dequeue() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(2);
 
     tx.send(TuiEvent::TextDelta("hello ".into())).unwrap();
     tx.send(TuiEvent::TextDelta("世界".into())).unwrap();
-    assert_eq!(crate::observability::tui_event_pending_count(), 1);
+    assert_eq!(
+        tx.queued_len(),
+        1,
+        "the second delta coalesces into the first"
+    );
 
     rx.try_recv().unwrap();
-    assert_eq!(crate::observability::tui_event_pending_count(), 0);
+    assert_eq!(tx.queued_len(), 0);
 }
 
 #[tokio::test]
 #[serial(tui_drain_metrics)]
-async fn pending_metric_stays_bounded_under_backpressure() {
-    reset_pending_metric();
+async fn queue_depth_stays_bounded_under_backpressure() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(2);
 
     tx.send(progress("old")).unwrap();
     tx.send(progress("new")).unwrap();
-    let waiting = tokio::spawn(async move { tx.send_async(TuiEvent::Done).await });
+    let waiting = tokio::spawn({
+        let tx = tx.clone();
+        async move { tx.send_async(TuiEvent::Done).await }
+    });
     tokio::task::yield_now().await;
 
-    assert_eq!(crate::observability::tui_event_pending_count(), 2);
+    assert_eq!(
+        tx.queued_len(),
+        2,
+        "a blocked sender must not exceed capacity"
+    );
     rx.recv().await.expect("first event");
     waiting.await.expect("sender task").expect("waiting send");
-    assert_eq!(crate::observability::tui_event_pending_count(), 2);
+    assert_eq!(tx.queued_len(), 2, "the waiting send takes the freed slot");
     rx.recv().await.expect("second event");
     rx.recv().await.expect("third event");
-    assert_eq!(crate::observability::tui_event_pending_count(), 0);
+    assert_eq!(tx.queued_len(), 0);
 }
 
 #[test]
 #[serial(tui_drain_metrics)]
-fn receiver_close_clears_pending_metric() {
-    reset_pending_metric();
+fn receiver_close_clears_the_queue() {
     let (tx, rx) = bounded_tui_event_channel_with_capacity(2);
 
     tx.send(TuiEvent::GenerationStarted).unwrap();
     tx.send(TuiEvent::Done).unwrap();
-    assert_eq!(crate::observability::tui_event_pending_count(), 2);
+    assert_eq!(tx.queued_len(), 2);
 
     drop(rx);
-    assert_eq!(crate::observability::tui_event_pending_count(), 0);
+    assert_eq!(
+        tx.queued_len(),
+        0,
+        "closing the receiver discards the queue"
+    );
 }
 
 #[test]

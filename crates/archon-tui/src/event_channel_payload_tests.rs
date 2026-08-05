@@ -14,7 +14,10 @@ fn pending_bytes_and_high_water_track_enqueue_coalesce_and_dequeue() {
     tx.send(TuiEvent::TextDelta("hello ".into())).unwrap();
     tx.send(TuiEvent::TextDelta("世界".into())).unwrap();
 
-    let pending = crate::observability::tui_event_pending_bytes();
+    // Bytes come from this channel's own queue; the high-water mark is a
+    // process-wide historical maximum by definition, so it stays on the global
+    // and this test stays in the serial group for that reason alone.
+    let pending = tx.queued_bytes();
     assert!(pending >= "hello 世界".len());
     assert_eq!(
         crate::observability::tui_event_pending_byte_high_water(),
@@ -22,7 +25,7 @@ fn pending_bytes_and_high_water_track_enqueue_coalesce_and_dequeue() {
     );
 
     rx.try_recv().unwrap();
-    assert_eq!(crate::observability::tui_event_pending_bytes(), 0);
+    assert_eq!(tx.queued_bytes(), 0);
     assert_eq!(
         crate::observability::tui_event_pending_byte_high_water(),
         pending

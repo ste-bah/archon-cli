@@ -38,10 +38,47 @@ struct Inner {
     recv_reached_wait: AtomicBool,
 }
 
+impl Inner {
+    /// Events queued in THIS channel, read from the queue itself.
+    ///
+    /// The process-wide `TUI_EVENT_PENDING` gauge answers the same question for
+    /// the render loop, which has exactly one channel -- but a test process has
+    /// many, concurrently, all moving the same counter. Tests that asserted an
+    /// exact depth through the global were therefore asserting on every other
+    /// test's traffic too, and failed whenever anything unrelated shifted the
+    /// schedule (measured: 2 failures in 5 runs after three new tests were
+    /// added elsewhere in the crate). Reading the queue is exact, needs no
+    /// counter, and cannot be perturbed by another channel.
+    fn queued_len(&self) -> usize {
+        self.queue.lock().expect("tui event queue lock").len()
+    }
+
+    fn queued_bytes(&self) -> usize {
+        self.queue
+            .lock()
+            .expect("tui event queue lock")
+            .iter()
+            .map(crate::event_payload_size::heap_bytes)
+            .sum()
+    }
+}
+
 /// Producer side of the bounded TUI event channel.
 #[derive(Debug)]
 pub struct TuiEventSender {
     inner: Arc<Inner>,
+}
+
+impl TuiEventSender {
+    /// Events queued in this channel. See [`Inner::queued_len`].
+    pub fn queued_len(&self) -> usize {
+        self.inner.queued_len()
+    }
+
+    /// Heap bytes retained by events queued in this channel.
+    pub fn queued_bytes(&self) -> usize {
+        self.inner.queued_bytes()
+    }
 }
 
 impl Clone for TuiEventSender {
@@ -241,6 +278,13 @@ impl TuiEventSender {
 #[derive(Debug)]
 pub struct TuiEventReceiver {
     inner: Arc<Inner>,
+}
+
+impl TuiEventReceiver {
+    /// Events queued in this channel. See [`Inner::queued_len`].
+    pub fn queued_len(&self) -> usize {
+        self.inner.queued_len()
+    }
 }
 
 impl Drop for TuiEventReceiver {

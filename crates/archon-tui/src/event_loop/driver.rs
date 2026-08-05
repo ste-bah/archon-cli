@@ -171,12 +171,11 @@ mod tests {
 
     use super::*;
 
-    // These build real TUI channels and queue events on them, and the pending
-    // queue metric they move is a PROCESS-WIDE counter. The metric's own tests
-    // assert exact values under `serial(tui_drain_metrics)`; without joining
-    // that group these run alongside and perturb what those tests measure --
-    // an intermittent failure whose trigger is unrelated test scheduling, and
-    // which surfaces whenever anything shifts the order.
+    // These queue events on real TUI channels, which increments the PROCESS-WIDE
+    // send-failure and oversized-rejection totals. Those are genuine process
+    // counters -- unlike queue depth, which is now read from the channel itself
+    // -- and `event_channel_payload_tests` asserts exact values on them. Running
+    // outside the group made those tests fail on unrelated scheduling.
 
     #[serial(tui_drain_metrics)]
     #[tokio::test(start_paused = true)]
