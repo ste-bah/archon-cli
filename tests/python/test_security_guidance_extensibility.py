@@ -77,6 +77,47 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
+    def test_rejects_adjacent_variable_quantifiers_in_verbose_mode(self):
+        unsafe = (
+            "(?x:a* a*)$",
+            "(?x:a* # comment\n a*)$",
+            "(?x)a* # comment\n a*$",
+            "(?x:[a]* # comment\n [b]*)$",
+            "(?-x:(?x:a* # nested comment\n a*))$",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "verbose", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+
+    def test_verbose_mode_respects_scopes_classes_and_escaped_literals(self):
+        safe = (
+            "(?x:a*(?-x: )a*)$",
+            "(?-x:a*(?x: # nested comment\n b))$",
+            "(?x:[ #]*)$",
+            r"(?x:\ *)$",
+            r"(?x:\#*)$",
+            "(?x:a* # one variable quantifier\n )$",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "verbose-safe", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
     def test_escaped_atom_end_consumes_python_multi_character_escapes(self):
         for escaped in (
             r"\N{LATIN CAPITAL LETTER A}",

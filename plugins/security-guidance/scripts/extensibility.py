@@ -496,6 +496,29 @@ def _group_body_start(regex: str, index: int) -> int:
     return cursor + 1 if cursor > index + 2 and cursor < len(regex) and regex[cursor] == ":" else index + 1
 
 
+def _verbose_mode(flags: str, inherited: bool) -> bool:
+    """Apply an inline flag list's ``x`` setting to one scanner scope."""
+    verbose, disabling = inherited, False
+    for flag in flags:
+        if flag == "-":
+            disabling = True
+        elif flag == "x":
+            verbose = not disabling
+    return verbose
+
+
+def _scoped_verbose_mode(regex: str, index: int, inherited: bool) -> bool:
+    """Return one scoped group's verbose mode without parsing its body."""
+    if regex[index + 1:index + 2] != "?":
+        return inherited
+    cursor = index + 2
+    while cursor < len(regex) and regex[cursor] in "aiLmsux-":
+        cursor += 1
+    if cursor >= len(regex) or regex[cursor] != ":":
+        return inherited
+    return _verbose_mode(regex[index + 2:cursor], inherited)
+
+
 def _record_adjacent_atom(previous: List[bool], variable: bool, significant: bool) -> bool:
     """Fail closed when consecutive variable atoms can backtrack against each other."""
     if not significant:
@@ -517,20 +540,24 @@ def _close_adjacent_group(
 
 
 def _consume_adjacent_group(
-    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool]
+    regex: str, index: int, previous: List[bool], content: List[bool], zero_width: List[bool],
+    verbose: List[bool],
 ) -> Tuple[int, bool]:
     """Open or close a group and return its next position plus rejection state."""
     if regex[index] == "(":
         flags_end = _global_flags_end(regex, index)
         if flags_end:
+            verbose[-1] = _verbose_mode(regex[index + 2:flags_end - 1], verbose[-1])
             return flags_end, False
         zero_width.append(regex[index + 1:index + 3] in ("?=", "?!", "?<"))
         previous.append(False)
         content.append(False)
+        verbose.append(_scoped_verbose_mode(regex, index, verbose[-1]))
         return _group_body_start(regex, index), False
     if len(content) == 1:
         previous[-1] = False
         return index + 1, False
+    verbose.pop()
     width, unsafe = _close_adjacent_group(regex, index, previous, content, zero_width)
     return index + width, unsafe
 
@@ -541,12 +568,19 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
     This intentionally ignores character-set semantics: disjoint-looking atoms are
     rejected fail closed, avoiding complex or incomplete regex interpretation.
     """
-    previous, content, zero_width = [False], [False], [False]
+    previous, content, zero_width, verbose = [False], [False], [False], [False]
     index = 0
     while index < len(regex):
         char = regex[index]
+        if verbose[-1] and char in " \t\n\r\f\v":
+            index += 1
+            continue
+        if verbose[-1] and char == "#":
+            newline = regex.find("\n", index + 1)
+            index = len(regex) if newline == -1 else newline + 1
+            continue
         if char in "()":
-            index, unsafe = _consume_adjacent_group(regex, index, previous, content, zero_width)
+            index, unsafe = _consume_adjacent_group(regex, index, previous, content, zero_width, verbose)
             if unsafe:
                 return True
             continue
