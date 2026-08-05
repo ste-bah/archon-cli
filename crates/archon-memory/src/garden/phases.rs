@@ -7,10 +7,29 @@ use super::{PRUNEABLE_TYPES, get_memories_by_type};
 use crate::access::MemoryTrait;
 use crate::types::{Memory, MemoryError, MemoryType, RelType, SUPERSEDED_TAG, SearchFilter};
 
+/// Reduce importance for memories that have gone untouched.
+///
+/// CHARGED PER RUN, NOT PER AGE. The obvious version bills the whole span since
+/// `last_accessed` on every run, and since `last_accessed` only moves when a
+/// memory is actually recalled, every run bills that same span again. Decay then
+/// compounds: measured at 1.0/day on a 2-day-old memory, three consecutive
+/// sessions took importance 50 -> 48 -> 46 -> 44 rather than stopping at 48.
+///
+/// The real-world effect at the shipped `0.01/day` is that a memory stored at
+/// importance 0.5 and never recalled reaches zero in about ten days instead of
+/// fifty, crosses the 0.3 staleness floor in about a week, and is deleted at
+/// `staleness_days`. Anything written by hand is hit hardest, because it is
+/// stored at a fixed 0.5 and is not re-accessed unless recall happens to pick it.
+///
+/// So the bill is the shorter of "since last accessed" and "since the previous
+/// consolidation" -- the increment this run is actually responsible for. With no
+/// previous run recorded, the first run catches up from creation, which is the
+/// intent.
 pub(super) fn phase_importance_decay(
     graph: &dyn MemoryTrait,
     decay_per_day: f64,
     run_id: &str,
+    previous_run: Option<chrono::DateTime<Utc>>,
 ) -> Result<usize, MemoryError> {
     let now = Utc::now();
     let mut count = 0;
@@ -18,7 +37,11 @@ pub(super) fn phase_importance_decay(
         let memories = get_memories_by_type(graph, *mt)?;
         for mem in memories {
             let accessed = mem.last_accessed.unwrap_or(mem.created_at);
-            let days = (now - accessed).num_days();
+            let since_accessed = (now - accessed).num_days();
+            let days = match previous_run {
+                Some(previous) => since_accessed.min((now - previous).num_days()),
+                None => since_accessed,
+            };
             if days < 1 {
                 continue;
             }
@@ -430,6 +453,23 @@ pub(super) fn phase_overflow_prune(
         }
     }
     Ok(count)
+}
+
+/// When consolidation last ran, or `None` if it never has (or the stored value
+/// is unreadable, which is treated the same as never — see
+/// [`phase_importance_decay`], where that means catching up from creation).
+pub(super) fn read_last_run(
+    graph: &dyn MemoryTrait,
+) -> Result<Option<chrono::DateTime<Utc>>, MemoryError> {
+    let filter = SearchFilter {
+        tags: vec!["garden:last_run".into()],
+        require_all_tags: true,
+        ..SearchFilter::default()
+    };
+    Ok(graph
+        .search_memories(&filter)?
+        .first()
+        .and_then(|m| m.content.parse::<chrono::DateTime<Utc>>().ok()))
 }
 
 pub(super) fn phase_record_timestamp(graph: &dyn MemoryTrait) -> Result<(), MemoryError> {

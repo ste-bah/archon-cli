@@ -16,9 +16,23 @@ Memory-driven coding works without any setup, but you can seed it for faster con
 /memory store "config sections must round-trip through serde — use #[serde(default)]"
 ```
 
-Each `/memory store` writes a Fact into the memory graph, tagged `manual` so hand-written memories stay distinguishable from extracted ones. Surrounding quotes are stripped, and the text is capped at 2,000 characters — store a summary, not a document, because everything stored here is a candidate for injection into the prompt on every turn. AutoCapture handles the rest organically.
+Each `/memory store` writes into the memory graph tagged `manual`, so hand-written memories stay distinguishable from extracted ones. Surrounding quotes are stripped, and the text is capped at 2,000 characters — store a summary, not a document, because everything stored here is a candidate for injection into the prompt on every turn. AutoCapture handles the rest organically.
 
-Rules — the entries injected into the `<rules>` block on every turn — are not written this way. They are learned from corrections you give in conversation, and `/rules` lists, edits, and removes them after the fact.
+### Type and importance
+
+```
+/memory store --type decision "we chose Cozo over SQLite for the graph queries"
+/memory store --type preference --importance 0.9 "two-space indent in TypeScript"
+```
+
+Both default to `fact` and `0.5`. Neither is decoration:
+
+- **Type** becomes the label on the memory when it is injected into the prompt — `[fact]`, `[decision]`, `[preference]`. A preference stored as a fact arrives as a claim about the world rather than a standing instruction. Accepted: `fact`, `decision`, `correction`, `pattern`, `preference`.
+- **Importance** (0.0–1.0) decides how long the memory survives. The garden decays importance daily and deletes anything below `staleness_importance_floor` once it passes `staleness_days`. A note stored at the default 0.5 and never recalled is eligible for pruning after roughly a month; store what you want kept at a higher importance.
+
+Only leading flags are read, so a `--type` inside the sentence is stored as text.
+
+Rules — the entries injected into the `<rules>` block on every turn — are not written this way, and `--type rule` is refused. They are learned from corrections you give in conversation, and `/rules` lists, edits, and removes them after the fact.
 
 ## Routine workflow
 

@@ -137,6 +137,105 @@ fn unquote(s: &str) -> &str {
     }
 }
 
+pub(crate) const STORE_USAGE: &str = "Usage: /memory store [--type fact|decision|correction|pattern|preference] \
+     [--importance 0.0-1.0] <text>";
+
+/// What `/memory store` was asked to write.
+///
+/// Type and importance are OPTIONS, not fixtures. They are not decoration:
+/// `injection.rs` labels every recalled memory with its type, so a preference
+/// stored as a fact is injected as a claim about the world rather than a
+/// standing preference; and importance decides how long a memory survives the
+/// garden's decay and staleness floor. Fixed at Fact/0.5, everything typed by
+/// hand was indistinguishable from an extractor guess and expired on the same
+/// schedule.
+pub(crate) struct StoreOptions {
+    pub(crate) text: String,
+    pub(crate) memory_type: MemoryType,
+    pub(crate) importance: f64,
+}
+
+impl StoreOptions {
+    /// Parse leading `--type` / `--importance` flags off the front of the text.
+    ///
+    /// Only leading flags are consumed, so a `--type` that appears inside the
+    /// memory itself is stored rather than interpreted.
+    pub(crate) fn parse(input: &str) -> Result<Self, String> {
+        let mut memory_type = MemoryType::Fact;
+        let mut importance = 0.5;
+        let mut rest = input.trim();
+
+        loop {
+            let Some(after_flag) = rest.strip_prefix("--") else {
+                break;
+            };
+            let (flag, tail) = split_word(after_flag);
+            let value_tail = tail.trim_start();
+            match flag {
+                "type" => {
+                    let (value, tail) = split_word(value_tail);
+                    memory_type = parse_memory_type(value)?;
+                    rest = tail.trim_start();
+                }
+                "importance" => {
+                    let (value, tail) = split_word(value_tail);
+                    importance = parse_importance(value)?;
+                    rest = tail.trim_start();
+                }
+                other => {
+                    return Err(format!("Unknown option --{other}. {STORE_USAGE}"));
+                }
+            }
+        }
+
+        Ok(Self {
+            // Stripped AFTER the flags, so `--type fact "quoted text"` works.
+            text: unquote(rest).to_string(),
+            memory_type,
+            importance,
+        })
+    }
+}
+
+/// Split off the first whitespace-delimited word, returning it and the rest.
+fn split_word(s: &str) -> (&str, &str) {
+    match s.find(char::is_whitespace) {
+        Some(i) => (&s[..i], &s[i..]),
+        None => (s, ""),
+    }
+}
+
+/// `Rule` and `PersonalitySnapshot` are deliberately absent. Rules are learned
+/// from corrections and injected into `<rules>` on every turn; snapshots are
+/// serialised state the agent writes for itself. Neither is a note to jot down,
+/// and hand-writing one puts it somewhere nothing expects to find it.
+fn parse_memory_type(value: &str) -> Result<MemoryType, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "fact" => Ok(MemoryType::Fact),
+        "decision" => Ok(MemoryType::Decision),
+        "correction" => Ok(MemoryType::Correction),
+        "pattern" => Ok(MemoryType::Pattern),
+        "preference" => Ok(MemoryType::Preference),
+        "" => Err(format!("--type needs a value. {STORE_USAGE}")),
+        other => Err(format!(
+            "Unknown memory type '{other}'. Use fact, decision, correction, \
+             pattern, or preference."
+        )),
+    }
+}
+
+fn parse_importance(value: &str) -> Result<f64, String> {
+    let parsed: f64 = value
+        .parse()
+        .map_err(|_| format!("--importance must be a number between 0.0 and 1.0, got '{value}'"))?;
+    if !(0.0..=1.0).contains(&parsed) {
+        return Err(format!(
+            "--importance must be between 0.0 and 1.0, got {parsed}"
+        ));
+    }
+    Ok(parsed)
+}
+
 /// Zero-sized handler registered as the primary `/memory` command.
 ///
 /// Aliases: `["mem"]` — PRESERVED from the shipped declare_handler! stub
@@ -209,20 +308,22 @@ impl CommandHandler for MemoryHandler {
             // branch, so the one instruction the docs gave for putting
             // something in memory by hand did nothing.
             "store" => {
-                // The cookbook has always shown the quoted form, and quoting a
-                // sentence is the natural thing to do. The parser does not strip
-                // them, so without this the quotes end up inside the memory and
-                // then inside the prompt on every recall.
-                let arg = unquote(arg);
-                if arg.is_empty() {
-                    ctx.emit(TuiEvent::Error("Usage: /memory store <text>".into()));
+                let opts = match StoreOptions::parse(arg) {
+                    Ok(opts) => opts,
+                    Err(message) => {
+                        ctx.emit(TuiEvent::Error(message));
+                        return Ok(());
+                    }
+                };
+                if opts.text.is_empty() {
+                    ctx.emit(TuiEvent::Error(STORE_USAGE.into()));
                     return Ok(());
                 }
                 // Bounded like every other write path. A deliberate note is not
                 // a document, and an oversized one is recalled and injected for
                 // as long as it exists.
-                let limit = archon_memory::extraction::content_limit(MemoryType::Fact);
-                let length = arg.chars().count();
+                let limit = archon_memory::extraction::content_limit(opts.memory_type);
+                let length = opts.text.chars().count();
                 if length > limit {
                     ctx.emit(TuiEvent::Error(format!(
                         "Memory is {length} characters, over the {limit}-character limit. \
@@ -234,20 +335,23 @@ impl CommandHandler for MemoryHandler {
                 // an empty one, a hand-written memory shows up as a bare id and
                 // a date -- unidentifiable in the one view meant to show you
                 // what you have.
-                let title = truncate_str(arg, 60);
+                let title = truncate_str(&opts.text, 60);
                 match memory.store_memory(
-                    arg,
+                    &opts.text,
                     &title,
-                    MemoryType::Fact,
-                    0.5,
+                    opts.memory_type,
+                    opts.importance,
                     &["manual".to_string()],
                     "user",
                     "",
                 ) {
                     Ok(id) => {
                         ctx.emit(TuiEvent::TextDelta(format!(
-                            "\nStored [{}] {arg}\n",
-                            &id[..8.min(id.len())]
+                            "\nStored [{}] ({}, importance {}) {}\n",
+                            &id[..8.min(id.len())],
+                            opts.memory_type,
+                            opts.importance,
+                            opts.text
                         )));
                     }
                     Err(e) => {

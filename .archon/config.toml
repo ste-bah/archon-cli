@@ -354,8 +354,20 @@ hybrid_alpha = 0.3
 [memory.garden]
 auto_consolidate = true
 min_hours_between_runs = 24
-# Cosine similarity above which two memories are treated as duplicates
+# Word-set (Jaccard) overlap above which two memories are treated as duplicates.
+# NOT cosine similarity -- this pass never touches an embedding. It cannot match
+# "deploy" to "deploys", so restatements of one instruction score around 0.31
+# here and survive it; the semantic pass below is what catches those.
 dedup_similarity_threshold = 0.92
+# Cosine DISTANCE bands for the embedding pass (0.0 = identical). Banded rather
+# than thresholded because the ranges overlap: measured on a real store,
+# restatements of one instruction span 0.09-0.35 while genuinely distinct claims
+# start at 0.32, so no single cut separates them.
+#   <= semantic_dedup_max_distance   -> merged, loser marked superseded
+#   <= semantic_review_max_distance  -> counted and left alone, for `/garden` to
+#                                       adjudicate; nothing is written
+semantic_dedup_max_distance = 0.15
+semantic_review_max_distance = 0.35
 # Days after which low-importance memories are pruned
 staleness_days = 30
 staleness_importance_floor = 0.3

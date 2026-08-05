@@ -123,7 +123,7 @@ fn memory_handler_execute_store_empty_text_emits_usage_error() {
     let mut saw_usage = false;
     while let Ok(ev) = rx.try_recv() {
         if let TuiEvent::Error(text) = ev
-            && text == "Usage: /memory store <text>"
+            && text == STORE_USAGE
         {
             saw_usage = true;
         }
@@ -283,6 +283,119 @@ fn memory_handler_execute_unknown_subcommand_emits_error() {
          'Unknown memory subcommand: nope. Use list, store, search, \
          prune, or clear.' TuiEvent::Error"
     );
+}
+
+/// Type is not decoration: `injection.rs` labels every recalled memory with
+/// it, so a preference stored as a fact is injected as a claim about the
+/// world. Importance decides how long it survives the garden.
+#[test]
+fn memory_handler_execute_store_honours_type_and_importance() {
+    let tm = Arc::new(TestMemory::new());
+    let mem: Arc<dyn MemoryTrait> = tm.clone();
+    let (mut ctx, _rx) = make_ctx(Some(mem));
+    let h = MemoryHandler;
+    let res = h.execute(
+        &mut ctx,
+        &[
+            "store".to_string(),
+            "--type".to_string(),
+            "preference".to_string(),
+            "--importance".to_string(),
+            "0.9".to_string(),
+            "two-space".to_string(),
+            "indent".to_string(),
+        ],
+    );
+    assert!(res.is_ok(), "store(--type) must return Ok, got: {res:?}");
+
+    let (content, _title, mtype, importance, _tags) =
+        tm.captured_store().expect("store must reach the graph");
+    assert_eq!(content, "two-space indent", "flags must not reach the text");
+    assert_eq!(mtype, MemoryType::Preference);
+    assert!((importance - 0.9).abs() < f64::EPSILON);
+}
+
+/// Rules are learned from corrections and injected into `<rules>` on every
+/// turn; snapshots are serialised state. Neither is a note to jot down.
+#[test]
+fn memory_handler_execute_store_rejects_types_it_does_not_own() {
+    for bad in ["rule", "personality_snapshot", "nonsense"] {
+        let tm = Arc::new(TestMemory::new());
+        let mem: Arc<dyn MemoryTrait> = tm.clone();
+        let (mut ctx, mut rx) = make_ctx(Some(mem));
+        let h = MemoryHandler;
+        let res = h.execute(
+            &mut ctx,
+            &[
+                "store".to_string(),
+                "--type".to_string(),
+                bad.to_string(),
+                "text".to_string(),
+            ],
+        );
+        assert!(res.is_ok(), "store(--type {bad}) must return Ok");
+        assert!(
+            tm.captured_store().is_none(),
+            "--type {bad} must not reach the graph"
+        );
+        let mut saw_error = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let TuiEvent::Error(text) = ev
+                && text.contains("Unknown memory type")
+            {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "--type {bad} must say what is allowed");
+    }
+}
+
+#[test]
+fn memory_handler_execute_store_rejects_out_of_range_importance() {
+    for bad in ["1.5", "-0.1", "high"] {
+        let tm = Arc::new(TestMemory::new());
+        let mem: Arc<dyn MemoryTrait> = tm.clone();
+        let (mut ctx, mut rx) = make_ctx(Some(mem));
+        let h = MemoryHandler;
+        let res = h.execute(
+            &mut ctx,
+            &[
+                "store".to_string(),
+                "--importance".to_string(),
+                bad.to_string(),
+                "text".to_string(),
+            ],
+        );
+        assert!(res.is_ok(), "store(--importance {bad}) must return Ok");
+        assert!(
+            tm.captured_store().is_none(),
+            "--importance {bad} must not reach the graph"
+        );
+        let mut saw_error = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let TuiEvent::Error(text) = ev
+                && text.contains("--importance")
+            {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "--importance {bad} must be reported");
+    }
+}
+
+/// A `--type` in the middle of a sentence is part of the sentence.
+#[test]
+fn store_options_only_consume_leading_flags() {
+    let opts = StoreOptions::parse("the flag is --type fact by default").expect("parse");
+    assert_eq!(opts.text, "the flag is --type fact by default");
+    assert_eq!(opts.memory_type, MemoryType::Fact);
+}
+
+#[test]
+fn store_options_strip_quotes_after_the_flags() {
+    let opts = StoreOptions::parse("--type decision \"we chose Cozo\"").expect("parse");
+    assert_eq!(opts.text, "we chose Cozo");
+    assert_eq!(opts.memory_type, MemoryType::Decision);
 }
 
 /// The cookbook's documented form is quoted. Quotes that survive into

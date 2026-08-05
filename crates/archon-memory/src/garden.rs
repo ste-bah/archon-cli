@@ -20,6 +20,7 @@ pub use adjudication::{Adjudication, ReviewPair, apply_adjudicated_merges};
 use phases::{
     DEDUP_MERGE_BUDGET, phase_dedup, phase_fragment_merge, phase_importance_decay,
     phase_overflow_prune, phase_record_timestamp, phase_semantic_dedup, phase_staleness_prune,
+    read_last_run,
 };
 
 /// Memory types that are safe to prune, decay, merge, and deduplicate.
@@ -293,8 +294,11 @@ pub fn consolidate_with_run_id(
     let start = Instant::now();
     let total_before = graph.memory_count()?;
 
+    // Read BEFORE `phase_record_timestamp` overwrites it at the end of this run.
+    let previous_run = read_last_run(graph)?;
+
     let importance_decayed =
-        phase_importance_decay(graph, config.importance_decay_per_day, run_id)?;
+        phase_importance_decay(graph, config.importance_decay_per_day, run_id, previous_run)?;
     info!(importance_decayed, "phase 1: importance decay complete");
 
     let stale_pruned = phase_staleness_prune(
