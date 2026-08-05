@@ -182,14 +182,26 @@ async fn windows_timeout_kills_background_descendant() {
     let fixture = write_windows_descendant_fixture(&pid_file);
     let working_dir = dir.path().to_path_buf();
     let tool = BashTool {
-        timeout_secs: 3,
+        // 15s, not 3s. This test probes `!invocation.is_finished()` AFTER
+        // waiting for the descendant's pid file, so the gap between that wait
+        // and this timeout IS the probe window. At a 2s wait against a 3s
+        // timeout the window was one second, and on a loaded runner the wait
+        // routinely outlasted the timeout it was meant to precede: the
+        // invocation had already ended, and the test failed claiming the
+        // descendant machinery was broken when it had simply been raced.
+        //
+        // The identical defect in `archon-core`'s hook version was fixed after
+        // it failed 4 runs in 6; the numbers here now match it. What the test
+        // proves is unchanged -- the descendant is live before the timeout and
+        // dead after it.
+        timeout_secs: 15,
         max_output_bytes: 1024,
         ..Default::default()
     };
     let command = windows_powershell_file_command(&fixture);
     let invocation = tokio::spawn(async move {
         tool.execute(
-            json!({"command": command, "timeout": 3_000}),
+            json!({"command": command, "timeout": 15_000}),
             &ToolContext {
                 working_dir,
                 ..ToolContext::default()
@@ -207,7 +219,8 @@ async fn windows_timeout_kills_background_descendant() {
         !invocation.is_finished(),
         "invocation ended before timeout probe"
     );
-    let result = tokio::time::timeout(Duration::from_secs(5), invocation)
+    // Outer deadline must clear the 15s tool timeout with room for teardown.
+    let result = tokio::time::timeout(Duration::from_secs(30), invocation)
         .await
         .expect("Bash invocation exceeded outer deadline")
         .expect("Bash invocation task panicked");
@@ -225,12 +238,15 @@ fn write_windows_detached_descendant_fixture(
     completion_file: &std::path::Path,
 ) -> std::path::PathBuf {
     let fixture = completion_file.with_extension("ps1");
+    let shell = powershell_exe();
     std::fs::write(
         &fixture,
-        "\
+        format!(
+            "\
 $command = \"Start-Sleep -Milliseconds 3000; [IO.File]::WriteAllText((Join-Path '$PSScriptRoot' 'detached-child.complete'), 'complete')\"
-Start-Process powershell -ArgumentList @('-NoProfile', '-Command', $command) -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
-",
+Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', $command) -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
+"
+        ),
     )
     .unwrap();
     fixture
@@ -239,13 +255,16 @@ Start-Process powershell -ArgumentList @('-NoProfile', '-Command', $command) -Re
 #[cfg(windows)]
 fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::PathBuf {
     let fixture = pid_file.with_extension("ps1");
+    let shell = powershell_exe();
     std::fs::write(
         &fixture,
-        "\
-$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+        format!(
+            "\
+$child = Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'child.pid'), [string]$child.Id)
 Wait-Process -Id $child.Id
-",
+"
+        ),
     )
     .unwrap();
     fixture
@@ -254,12 +273,16 @@ Wait-Process -Id $child.Id
 #[cfg(windows)]
 fn windows_powershell_file_command(fixture: &std::path::Path) -> String {
     let path = fixture.display().to_string().replace('\'', "'\\''");
-    format!("powershell -NoProfile -File '{path}'")
+    let shell = powershell_exe().replace('\'', "'\\''");
+    format!("'{shell}' -NoProfile -File '{path}'")
 }
 
 #[cfg(windows)]
 async fn wait_for_windows_pid_file(pid_file: &std::path::Path) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    // Hang guard, not a speed assertion, and it must stay comfortably UNDER the
+    // timeout of the test it precedes -- see
+    // `windows_timeout_kills_background_descendant`.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(pid) = std::fs::read_to_string(pid_file) {
             let pid = pid.trim();
@@ -288,11 +311,29 @@ async fn wait_until_windows_process_is_absent(pid: &str) {
 }
 
 #[cfg(windows)]
+/// Absolute path to Windows PowerShell, or the bare name if it cannot be found.
+///
+/// Spawning `powershell` by name resolves in a normal Windows shell but not in
+/// every environment this suite runs in: a Git Bash session carrying
+/// System32 on PATH without the WindowsPowerShell subdirectory fails to resolve
+/// it, `Command::status()` returns `Err`, and the poll below then reports a
+/// process as gone that was never actually queried.
+fn powershell_exe() -> String {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let absolute = std::path::Path::new(&system_root)
+        .join("System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    if absolute.is_file() {
+        return absolute.display().to_string();
+    }
+    "powershell".to_string()
+}
+
+#[cfg(windows)]
 fn windows_process_exists(pid: &str) -> bool {
     let script = format!(
         "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
     );
-    std::process::Command::new("powershell")
+    std::process::Command::new(powershell_exe())
         .args(["-NoProfile", "-Command", &script])
         .status()
         .is_ok_and(|status| status.success())

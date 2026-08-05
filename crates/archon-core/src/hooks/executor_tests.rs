@@ -318,12 +318,15 @@ fn write_windows_detached_descendant_fixture(
     completion_file: &std::path::Path,
 ) -> std::path::PathBuf {
     let fixture = completion_file.with_extension("ps1");
+    let shell = powershell_exe();
     std::fs::write(
         &fixture,
-        "\
+        format!(
+            "\
 $command = \"Start-Sleep -Milliseconds 3000; [IO.File]::WriteAllText((Join-Path '$PSScriptRoot' 'detached-descendant.complete'), 'complete')\"
-Start-Process powershell -ArgumentList @('-NoProfile', '-Command', $command) -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
-",
+Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', $command) -RedirectStandardOutput (Join-Path $PSScriptRoot 'detached.stdout') -RedirectStandardError (Join-Path $PSScriptRoot 'detached.stderr')
+"
+        ),
     )
     .unwrap();
     fixture
@@ -332,13 +335,16 @@ Start-Process powershell -ArgumentList @('-NoProfile', '-Command', $command) -Re
 #[cfg(windows)]
 fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::PathBuf {
     let fixture = pid_file.with_extension("ps1");
+    let shell = powershell_exe();
     std::fs::write(
         &fixture,
-        "\
-$child = Start-Process powershell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+        format!(
+            "\
+$child = Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'descendant.pid'), [string]$child.Id)
 Wait-Process -Id $child.Id
-",
+"
+        ),
     )
     .unwrap();
     fixture
@@ -375,13 +381,15 @@ exit 2
 #[cfg(windows)]
 fn windows_file_command(fixture: &std::path::Path) -> String {
     let path = fixture.display().to_string();
+    let shell = powershell_exe();
     if archon_shell::resolve_shell().command_arg == "-c" {
         return format!(
-            "powershell -NoProfile -File '{}'",
+            "'{}' -NoProfile -File '{}'",
+            shell.replace('\'', "'\\''"),
             path.replace('\'', "'\\''")
         );
     }
-    format!("powershell -NoProfile -File \"{path}\"")
+    format!("\"{shell}\" -NoProfile -File \"{path}\"")
 }
 
 #[cfg(windows)]
@@ -423,11 +431,32 @@ async fn wait_until_process_is_absent(pid: &str) {
 }
 
 #[cfg(windows)]
+/// Absolute path to Windows PowerShell, or the bare name if it cannot be found.
+///
+/// These tests used to spawn `powershell` by name. That resolves in a normal
+/// Windows shell, but not in every environment the suite runs in -- a Git Bash
+/// session carrying `C:\Windows\System32` without
+/// `System32\WindowsPowerShell\v1.0` fails to resolve it, `Command::status()`
+/// returns `Err`, and four tests fail claiming the process machinery is broken
+/// when nothing was ever launched. An absolute path removes PATH from the
+/// question; the bare-name fallback keeps the tests honest anywhere PowerShell
+/// really is missing.
+fn powershell_exe() -> String {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let absolute = std::path::Path::new(&system_root)
+        .join("System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    if absolute.is_file() {
+        return absolute.display().to_string();
+    }
+    "powershell".to_string()
+}
+
+#[cfg(windows)]
 fn windows_process_exists(pid: &str) -> bool {
     let script = format!(
         "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
     );
-    std::process::Command::new("powershell")
+    std::process::Command::new(powershell_exe())
         .args(["-NoProfile", "-Command", &script])
         .status()
         .is_ok_and(|status| status.success())
