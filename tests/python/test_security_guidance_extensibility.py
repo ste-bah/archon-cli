@@ -98,6 +98,59 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                     compile_mock.assert_not_called()
 
+    def test_rejects_verbose_gaps_between_atoms_and_quantifiers(self):
+        unsafe = (
+            "(?x)a * b *$",
+            "(?x:a * b *)$",
+            "(?-x:(?x:a * b *))$",
+            "(?x:a\t*\tb\t*)$",
+            "(?x:a\n*\nb\n*)$",
+            "(?x:a\r\n*\r\nb\r\n*)$",
+            "(?x:a # first\n * b # second\n *)$",
+            "(?x:\\d * \\s *)$",
+            "(?x:\\x61 * \\N{LATIN SMALL LETTER B} *)$",
+            "(?x:[ab] * [cd] *)$",
+            "(?x:a + b +)$",
+            "(?x:a *? b *?)$",
+            "(?x:a *+ b *+)$",
+            "(?x:a {1,9} b {2,})$",
+            "(?x:a {1,9}? b {2,}+)$",
+            "(?x:(?=a * b *))$",
+            "(?x:(?!a * b *))$",
+            "(?x:(?>a * b *))$",
+            "(?x)(a)?(?(1)a * b *|c * d *)$",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "verbose-gap", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+
+    def test_verbose_atom_quantifier_gaps_respect_significant_literals(self):
+        safe = (
+            r"(?x:a\ *b\ *)$",
+            r"(?x:a\#*b\#*)$",
+            "(?x:(?-x:a * b *))$",
+            "(?x:(?-x:a#*b#*))$",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "verbose-gap-safe", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
     def test_rejects_verbose_group_quantifiers_after_insignificant_syntax(self):
         patterns = (
             "(?x:(?:a) * # q1\n (?:a) *)$",

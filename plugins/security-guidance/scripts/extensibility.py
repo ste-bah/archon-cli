@@ -665,6 +665,7 @@ def _consume_adjacent_atom(
     previous: List[bool],
     content: List[bool],
     terminal_variable: List[bool],
+    verbose: bool,
 ) -> Tuple[int, bool]:
     """Record one non-group atom and return its next position and rejection state."""
     if char in "^$":
@@ -679,11 +680,12 @@ def _consume_adjacent_atom(
     else:
         end = index + 1
     content[-1] = True
-    width = _variable_quantifier_at(regex, end)
+    quantifier_start = _verbose_ignored_end(regex, end, verbose)
+    width = _variable_quantifier_at(regex, quantifier_start)
     variable = bool(width)
     unsafe = _record_adjacent_atom(previous, variable, True)
     terminal_variable[-1] = variable
-    return end + width, unsafe
+    return quantifier_start + width, unsafe
 
 
 def _adjacent_quantifier_overlap(regex: str) -> bool:
@@ -713,7 +715,7 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
             index += 1
             continue
         index, unsafe = _consume_adjacent_atom(
-            regex, index, char, previous, content, terminal_variable
+            regex, index, char, previous, content, terminal_variable, verbose[-1]
         )
         if unsafe:
             return True
