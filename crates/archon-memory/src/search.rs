@@ -42,21 +42,25 @@ const MIN_FTS_TERM_LEN: usize = 3;
 /// crash.
 const MAX_FTS_CANDIDATES: usize = 4_096;
 
-/// Candidates fetched per index before re-ranking, independent of the caller's
-/// result limit.
+/// Minimum candidates fetched per index before re-ranking.
 ///
 /// Candidates are not results. `recall_memories` re-ranks FTS hits by access
 /// boost and vector similarity, so a memory that TF-IDF ranks poorly can still
 /// win — `recall_ranks_access_boost_winner_beyond_fts_window` pins exactly
 /// that, with one frequently-accessed memory behind 300 higher-frequency
-/// decoys. Fetching only `limit` candidates means such a memory is never in the
-/// set to be re-ranked, and the boost can never apply.
+/// decoys and a caller limit of 1. Fetch only `limit` candidates and such a
+/// memory is never in the set to be re-ranked, so the boost can never apply.
+/// A floor is therefore required, not optional.
 ///
-/// The old code got this right by accident: it doubled `k` until the index was
-/// exhausted, so everything was always a candidate. That was correct and
-/// ruinously expensive. A fixed window keeps the re-rank honest at a bounded
-/// cost, in one query rather than log2(N) of them.
-const RECALL_CANDIDATE_WINDOW: usize = 1_024;
+/// SIZED, not rounded. The previous value was 1,024 — chosen because it was the
+/// next round number above the 301 rows that test needs. Every fetched row is
+/// deserialised by `row_values_to_memory`, three indexes deep, so that figure
+/// cost ~3,000 row decodes on a request for 16 candidates. 384 clears the
+/// pinning case with headroom and cuts the decode work to under a third.
+///
+/// If a future test needs a wider window, raise this and say why here rather
+/// than picking another round number.
+const RECALL_CANDIDATE_WINDOW: usize = 384;
 const MEMORY_COLUMNS: &str = "id, content, title, memory_type, importance, tags, source_type, project_path, created_at, updated_at, access_count, last_accessed";
 
 pub(crate) struct KeywordCandidates {
@@ -110,9 +114,15 @@ pub(crate) fn keyword_candidates(
 /// same exhaustive scan ran ~log2(N/256) times over, per index, three indexes
 /// deep. The caller's `limit` was ignored entirely on this path.
 ///
-/// One query per index, `k = limit`. A hybrid search re-ranks these candidates
-/// against vector scores and keeps the top handful regardless, so fetching
-/// beyond the caller's limit could never change the final answer.
+/// One query per index. `k` is a candidate WINDOW, not the caller's limit:
+/// `recall_memories` re-ranks what comes back, so a memory the FTS scores
+/// poorly can still win on access boost and must be in the set to do so. See
+/// [`RECALL_CANDIDATE_WINDOW`] for why a floor is required and how it is sized.
+///
+/// The window is deliberately bounded at both ends. `clamp` here reads as a
+/// floor as much as a ceiling, and that is intended -- a caller asking for 16
+/// still fetches [`RECALL_CANDIDATE_WINDOW`] candidates, because 16 is a result
+/// count and this is a candidate count.
 fn fts_keyword_candidates(
     db: &DbInstance,
     query: &str,

@@ -6,6 +6,23 @@ const MEMORY_INJECTION_BUDGET_TOKENS: usize = 500;
 /// How many past corrections are surfaced into the system prompt.
 const RECALLED_CORRECTION_LIMIT: usize = 5;
 
+/// Characters of a user message used to build the memory recall query.
+///
+/// Recall wants a topical signal, not a transcript. 600 characters is roughly
+/// 90 words -- comfortably enough to characterise a request, and far below the
+/// point where an FTS `OR` over the distinct terms stops being cheap. It also
+/// matches the excerpt length already used for reasoning evidence below, so a
+/// reader sees one bound rather than two arbitrary ones.
+const RECALL_QUERY_EXCERPT_CHARS: usize = 600;
+
+/// Take the leading, character-safe excerpt of `text` for the recall query.
+///
+/// Splits on a `char` boundary rather than a byte index, so a multi-byte
+/// character straddling the cut cannot panic.
+fn recall_query_excerpt(text: &str) -> String {
+    text.chars().take(RECALL_QUERY_EXCERPT_CHARS).collect()
+}
+
 /// What the blocking memory queries produced, carried back to the async side.
 struct RecalledMemories {
     injected: Result<String, archon_memory::MemoryError>,
@@ -73,7 +90,19 @@ impl Agent {
             None => return system,
         };
 
-        // Collect recent user messages as context for recall
+        // Collect recent user messages as context for recall, bounded.
+        //
+        // A slash command's user message is its whole injected skill template:
+        // 21 KB, ~3,200 words, ~1,500 distinct terms once deduplicated. Every
+        // one of those became a branch of an FTS `OR`, and Cozo evaluates every
+        // branch in full. Measured on a 1.7 GB store: 12.4 seconds to return
+        // ZERO corrections -- pure cost, and the zero is the point. Boilerplate
+        // is not what anyone wants memories recalled against, so a query built
+        // from it is both ruinous and meaningless.
+        //
+        // Truncating per message rather than dropping long ones keeps a genuine
+        // long prompt working: the head of a request carries its intent, and
+        // recall only ever needed a topical signal, not the full text.
         let context: Vec<String> = self
             .state
             .messages
@@ -81,7 +110,8 @@ impl Agent {
             .rev()
             .filter(|m| m["role"].as_str() == Some("user"))
             .take(3)
-            .filter_map(|m| m["content"].as_str().map(|s| s.to_string()))
+            .filter_map(|m| m["content"].as_str().map(recall_query_excerpt))
+            .filter(|excerpt| !excerpt.trim().is_empty())
             .collect();
 
         if context.is_empty() {
