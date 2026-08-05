@@ -76,6 +76,69 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
+    def test_escaped_atom_end_consumes_python_multi_character_escapes(self):
+        for escaped in (
+            r"\N{LATIN CAPITAL LETTER A}",
+            "\\" + "u0041",
+            r"\U00000041",
+            r"\x41",
+            r"\101",
+            r"\1",
+        ):
+            with self.subTest(escaped=escaped):
+                self.assertEqual(extensibility._escaped_atom_end(escaped, 0), len(escaped))
+
+    def test_rejects_adjacent_variable_quantifiers_for_escaped_atoms(self):
+        patterns = (
+            r"\N{LATIN CAPITAL LETTER A}*\d*",
+            "\\" + "u0041*\\d*",
+            r"\U00000041*\d*",
+            r"\x41*\d*",
+            r"\101*\d*",
+            r"(a)\1*\d*",
+            r"a{,3}a*",
+            r"a{,}a*",
+            r"(a+){,}",
+            r"([\])]+)*",
+            r"^(a)?((?(1)b+|b))*$",
+            "(?x:(a+ # )\n)*",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "escaped", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
+    def test_repeated_group_scanner_respects_conditional_groups_and_verbose_comments(self):
+        for pattern in (r"^(a)?((?(1)b+|b))*$", "(?x:(a+ # )\n)*"):
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+
+    def test_allows_single_variable_quantifiers_for_escaped_atoms(self):
+        patterns = (
+            r"\N{LATIN CAPITAL LETTER A}*",
+            "\\" + "u0041*",
+            r"\U00000041*",
+            r"\x41*",
+            r"\101*",
+            r"(a)\1*",
+        )
+
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "escaped", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
     def test_allows_single_variable_quantifiers_and_invalid_syntax_fails_closed(self):
         for pattern in (r"a*", r"a+?", r"a{1,1}", r"^hello+$", r"(?:cat|dog)+", r"(?m)(a|b)*"):
             with self.subTest(pattern=pattern):

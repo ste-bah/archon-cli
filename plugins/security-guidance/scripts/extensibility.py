@@ -230,15 +230,13 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
     if end == -1:
         return ""
     bounds = regex[closing_index + 2:end].split(",", 1)
-    if not bounds[0].isdecimal():
+    if (bounds[0] and not bounds[0].isdecimal()) or (len(bounds) > 1 and bounds[1] and not bounds[1].isdecimal()):
         return ""
     if len(bounds) == 1:
-        return "{}" if int(bounds[0]) > 1 else ""
-    if bounds[1] and not bounds[1].isdecimal():
-        return ""
-    if not bounds[1]:
+        return "{}" if int(bounds[0] or "0") > 1 else ""
+    if not bounds[1] or int(bounds[1]) > int(bounds[0] or "0"):
         return "{}"
-    return "{}" if int(bounds[1]) > 1 else ""
+    return ""
 
 
 def _new_group(flag_unsafe: bool) -> Dict[str, Any]:
@@ -377,16 +375,19 @@ def _scan_active_group(regex: str, index: int, char: str, stack: List[Dict[str, 
 def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) -> bool:
     """Consume one character for repeated-group analysis with bounded stack state."""
     stack = state["stack"]
-    if state["escaped"]:
-        if stack:
-            _record_atom(stack[-1], None)
-        state["escaped"] = False
+    if state["in_class"]:
+        if state["class_escaped"]:
+            state["class_escaped"] = False
+        elif char == "\\":
+            state["class_escaped"] = True
+        else:
+            state["in_class"] = char != "]"
+    elif index < state["escape_end"]:
+        return False
     elif char == "\\":
         if stack:
             _record_atom(stack[-1], None)
-        state["escaped"] = True
-    elif state["in_class"]:
-        state["in_class"] = char != "]"
+        state["escape_end"] = _escaped_atom_end(regex, index)
     elif char == "[":
         if stack:
             _record_atom(stack[-1], None)
@@ -401,7 +402,8 @@ def _scan_group_token(regex: str, index: int, char: str, state: Dict[str, Any]) 
 def _repeated_groups(regex: str):
     """Yield unsafe repeated groups using a one-pass bounded stack summary."""
     state: Dict[str, Any] = {
-        "stack": [], "global_flag_unsafe": False, "escaped": False, "in_class": False
+        "stack": [], "global_flag_unsafe": False, "escape_end": 0, "in_class": False,
+        "class_escaped": False,
     }
     for index, char in enumerate(regex):
         if _scan_group_token(regex, index, char, state):
@@ -420,12 +422,37 @@ def _variable_quantifier_at(regex: str, index: int) -> int:
     if end == -1 or "," not in regex[index + 1:end]:
         return 0
     lower, upper = regex[index + 1:end].split(",", 1)
-    if not lower.isdecimal() or (upper and not upper.isdecimal()):
+    if (lower and not lower.isdecimal()) or (upper and not upper.isdecimal()):
         return 0
-    if upper and int(upper) <= int(lower):
+    if upper and int(upper) <= int(lower or "0"):
         return 0
     width = end - index + 1
     return width + 1 if width + index < len(regex) and regex[index + width] in "?+" else width
+
+
+def _escaped_atom_end(regex: str, index: int) -> int:
+    """Return the end of one escaped atom using bounded Python-regex syntax."""
+    cursor = min(index + 2, len(regex))
+    if cursor == len(regex):
+        return cursor
+    escaped = regex[index + 1]
+    if escaped == "N" and regex[cursor] == "{":
+        end = regex.find("}", cursor + 1, min(cursor + 129, len(regex)))
+        return end + 1 if end != -1 else cursor
+    widths = {"x": 2, "u": 4, "U": 8}
+    if escaped in widths:
+        return min(cursor + widths[escaped], len(regex))
+    if not escaped.isdecimal():
+        return cursor
+    octal_end = cursor
+    while octal_end < min(index + 4, len(regex)) and regex[octal_end] in "01234567":
+        octal_end += 1
+    if escaped == "0" or octal_end == index + 4:
+        return octal_end
+    decimal_end = cursor
+    while decimal_end < min(index + 3, len(regex)) and regex[decimal_end].isdecimal():
+        decimal_end += 1
+    return decimal_end
 
 
 def _class_end(regex: str, index: int) -> int:
@@ -532,7 +559,7 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
             index += 1
             continue
         if char == "\\":
-            end = min(index + 2, len(regex))
+            end = _escaped_atom_end(regex, index)
         elif char == "[":
             end = _class_end(regex, index)
         elif char in "?+*{":
