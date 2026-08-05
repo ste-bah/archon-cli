@@ -191,6 +191,35 @@ pub fn store_embedding(
     Ok(())
 }
 
+/// Read back the stored embedding for `memory_id`, if one exists.
+///
+/// Deduplication needs a query vector for a memory that is already stored, and
+/// re-embedding its content to get one would mean an provider call per
+/// comparison. The vector is already on disk; this reads it.
+pub fn fetch_embedding(db: &DbInstance, memory_id: &str) -> Result<Option<Vec<f32>>, MemoryError> {
+    let mut params = BTreeMap::new();
+    params.insert("id".to_string(), DataValue::from(memory_id));
+
+    let result = db
+        .run_script(
+            "?[embedding] := *memory_embeddings{memory_id: $id, embedding}",
+            params,
+            ScriptMutability::Immutable,
+        )
+        .map_err(db_err)?;
+
+    let Some(row) = result.rows.first() else {
+        return Ok(None);
+    };
+    match row.first() {
+        Some(DataValue::Vec(Vector::F32(arr))) => Ok(Some(arr.to_vec())),
+        // A different vector width means the relation was built for another
+        // provider. Reporting "absent" rather than erroring keeps the caller on
+        // its non-vector fallback instead of failing the whole pass.
+        _ => Ok(None),
+    }
+}
+
 /// Delete the embedding for a memory (no-op if it doesn't exist).
 pub fn delete_embedding(db: &DbInstance, memory_id: &str) -> Result<(), MemoryError> {
     let mut params = BTreeMap::new();

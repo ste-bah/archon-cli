@@ -15,8 +15,8 @@ use crate::types::{Memory, MemoryError, MemoryType, SearchFilter};
 mod phases;
 
 use phases::{
-    phase_dedup, phase_fragment_merge, phase_importance_decay, phase_overflow_prune,
-    phase_record_timestamp, phase_staleness_prune,
+    DEDUP_MERGE_BUDGET, phase_dedup, phase_fragment_merge, phase_importance_decay,
+    phase_overflow_prune, phase_record_timestamp, phase_semantic_dedup, phase_staleness_prune,
 };
 
 /// Memory types that are safe to prune, decay, merge, and deduplicate.
@@ -28,12 +28,58 @@ const PRUNEABLE_TYPES: [MemoryType; 5] = [
     MemoryType::Preference,
 ];
 
+/// Cosine distance below which two memories are merged automatically.
+///
+/// MEASURED, not chosen. `tests/semantic_distance_calibration.rs` embeds real
+/// restatements from a real store and reports the distributions:
+///
+/// * restatements of one instruction: 0.09 - 0.35
+/// * genuinely distinct claims:       0.32 and up
+///
+/// Those ranges OVERLAP, so no single threshold separates them -- an earlier
+/// attempt at 0.08 merged nothing on a real store, and anything loose enough to
+/// catch the restatements would also merge "deploy to eu-west-2" with "never
+/// deploy to us-east-1". 0.15 sits clear of the 0.32 floor with margin, and
+/// takes the unambiguous cases only.
+fn default_semantic_dedup_max_distance() -> f64 {
+    0.15
+}
+
+/// Upper bound of the review band.
+///
+/// Between the merge distance and this, two memories are probably about the
+/// same thing but not provably the same claim. They are linked with a
+/// `RelatedTo` edge and left intact, so the pairing is visible without a
+/// judgement being made for you. This is the band an LLM adjudicator would
+/// eventually decide, and the band where a naive threshold does its damage.
+fn default_semantic_review_max_distance() -> f64 {
+    0.35
+}
+
 /// Configuration for the memory garden consolidation pass.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GardenConfig {
     pub auto_consolidate: bool,
     pub min_hours_between_runs: u32,
     pub dedup_similarity_threshold: f32,
+    /// Maximum cosine DISTANCE at which two memories are treated as saying the
+    /// same thing. Smaller is more similar; 0.0 is identical.
+    ///
+    /// Separate from `dedup_similarity_threshold`, which is Jaccard word
+    /// overlap and only ever catches near-verbatim copies. This one catches
+    /// restatements, which is where the real duplication comes from: one
+    /// instruction can accumulate a dozen differently-worded memories across
+    /// turns and writers.
+    ///
+    /// Tight by default, because merging deletes. Two memories about the same
+    /// subject are not necessarily the same claim.
+    #[serde(default = "default_semantic_dedup_max_distance")]
+    pub semantic_dedup_max_distance: f64,
+    /// Upper bound of the review band; pairs between the merge distance and
+    /// this are linked, never merged. Set equal to the merge distance to turn
+    /// review linking off.
+    #[serde(default = "default_semantic_review_max_distance")]
+    pub semantic_review_max_distance: f64,
     pub staleness_days: u32,
     pub staleness_importance_floor: f64,
     pub importance_decay_per_day: f64,
@@ -47,6 +93,8 @@ impl Default for GardenConfig {
             auto_consolidate: true,
             min_hours_between_runs: 24,
             dedup_similarity_threshold: 0.92,
+            semantic_dedup_max_distance: default_semantic_dedup_max_distance(),
+            semantic_review_max_distance: default_semantic_review_max_distance(),
             staleness_days: 30,
             staleness_importance_floor: 0.3,
             importance_decay_per_day: 0.01,
@@ -247,8 +295,22 @@ pub fn consolidate_with_run_id(
     )?;
     info!(stale_pruned, "phase 2: staleness prune complete");
 
-    let duplicates_merged = phase_dedup(graph, config.dedup_similarity_threshold)?;
-    info!(duplicates_merged, "phase 3: deduplication complete");
+    let lexical_merged = phase_dedup(graph, config.dedup_similarity_threshold)?;
+    // Semantic pass second, and with the remaining budget: the lexical pass is
+    // free and exact, so let it take the easy cases before spending vector
+    // lookups. A store with no embeddings returns no neighbours and this is a
+    // no-op.
+    let (semantic_merged, review_linked) = phase_semantic_dedup(
+        graph,
+        config.semantic_dedup_max_distance,
+        config.semantic_review_max_distance,
+        DEDUP_MERGE_BUDGET.saturating_sub(lexical_merged),
+    )?;
+    let duplicates_merged = lexical_merged + semantic_merged;
+    info!(
+        lexical_merged,
+        semantic_merged, review_linked, "phase 3: deduplication complete"
+    );
 
     let fragments_merged = phase_fragment_merge(graph)?;
     info!(fragments_merged, "phase 4: fragment merge complete");
@@ -296,52 +358,6 @@ pub fn should_auto_consolidate(
     };
     let hours_elapsed = (Utc::now() - last_run).num_hours();
     Ok(hours_elapsed >= i64::from(min_hours))
-}
-
-#[cfg(test)]
-mod retry_tests {
-    use super::*;
-    use cozo::{DataValue, ScriptMutability};
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn consolidation_retry_with_same_run_id_decays_once() {
-        let graph = crate::MemoryGraph::in_memory().expect("create graph");
-        let id = graph
-            .store_memory("old fact", "", MemoryType::Fact, 50.0, &[], "test", "")
-            .expect("store fact");
-        let created_at = (Utc::now() - chrono::Duration::days(2)).to_rfc3339();
-        graph
-            .db
-            .run_script(
-                "?[id, content, title, memory_type, importance, tags, source_type,
-                    project_path, created_at, updated_at, access_count, last_accessed] :=
-                    *memories{id, content, title, memory_type, importance, tags, source_type,
-                        project_path, updated_at, access_count, last_accessed},
-                    id = $id, created_at = $created_at
-                 :put memories { id => content, title, memory_type, importance, tags, source_type,
-                    project_path, created_at, updated_at, access_count, last_accessed }",
-                BTreeMap::from([
-                    ("id".to_string(), DataValue::from(id.as_str())),
-                    (
-                        "created_at".to_string(),
-                        DataValue::from(created_at.as_str()),
-                    ),
-                ]),
-                ScriptMutability::Mutable,
-            )
-            .expect("age fact");
-        let config = GardenConfig {
-            staleness_days: 365,
-            importance_decay_per_day: 1.0,
-            ..GardenConfig::default()
-        };
-
-        consolidate_with_run_id(&graph, &config, "session:test").expect("first run");
-        consolidate_with_run_id(&graph, &config, "session:test").expect("retry run");
-
-        assert_eq!(graph.read_memory(&id).expect("read fact").importance, 48.0);
-    }
 }
 
 /// Generate a human-readable session briefing from the memory graph.
@@ -453,28 +469,13 @@ fn get_memories_by_type(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "garden/semantic_dedup_tests.rs"]
+mod semantic_dedup_tests;
 
-    #[test]
-    fn truncate_content_caps_long_memory_body() {
-        let content = "x".repeat(BRIEFING_MEMORY_MAX_CHARS + 100);
-        let truncated = truncate_content(&content, BRIEFING_MEMORY_MAX_CHARS);
+#[cfg(test)]
+#[path = "garden/retry_tests.rs"]
+mod retry_tests;
 
-        assert!(truncated.len() <= BRIEFING_MEMORY_MAX_CHARS + 3);
-        assert!(truncated.ends_with("..."));
-    }
-
-    #[test]
-    fn cap_briefing_preserves_closing_tag() {
-        let body = format!(
-            "<memory_briefing>\n{}\n</memory_briefing>",
-            "x".repeat(BRIEFING_TOTAL_MAX_CHARS * 2)
-        );
-        let capped = cap_briefing(body);
-
-        assert!(capped.len() <= BRIEFING_TOTAL_MAX_CHARS);
-        assert!(capped.contains("[briefing truncated]"));
-        assert!(capped.ends_with("</memory_briefing>"));
-    }
-}
+#[cfg(test)]
+#[path = "garden/consolidate_tests.rs"]
+mod consolidate_tests;

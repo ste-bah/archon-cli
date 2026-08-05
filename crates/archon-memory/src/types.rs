@@ -2,6 +2,23 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Marks a memory that has been folded into another and should no longer be
+/// recalled, without destroying it.
+///
+/// Consolidation used to delete the losing memory outright while writing a
+/// `Supersedes` edge pointing at it -- so the edge referenced a row that no
+/// longer existed, and a wrong merge was unrecoverable. That made the merge
+/// threshold a one-way door and forced it so tight it caught almost nothing.
+///
+/// Carried as a tag rather than a column because the `memories` relation has a
+/// fixed schema in CozoDB, and a tag needs no migration of existing stores.
+pub const SUPERSEDED_TAG: &str = "superseded";
+
+/// Whether `tags` mark a memory as superseded.
+pub fn is_superseded(tags: &[String]) -> bool {
+    tags.iter().any(|tag| tag == SUPERSEDED_TAG)
+}
+
 /// A single memory node in the graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {

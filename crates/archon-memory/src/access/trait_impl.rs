@@ -158,6 +158,43 @@ impl MemoryTrait for MemoryGraph {
     fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError> {
         MemoryGraph::get_related_memories(self, id, depth)
     }
+
+    fn embedding_neighbours(
+        &self,
+        memory_id: &str,
+        top_k: usize,
+    ) -> Result<Vec<(String, f64)>, MemoryError> {
+        // A graph that never initialised the embedding schema has no
+        // `memory_embeddings` relation at all, and querying it errors. That is
+        // the same "no vector search here" condition as a missing row, so it
+        // degrades rather than propagating -- otherwise one unindexed store
+        // fails the entire consolidation pass.
+        let vector = match crate::vector_search::fetch_embedding(self.db(), memory_id) {
+            Ok(Some(vector)) => vector,
+            Ok(None) => return Ok(Vec::new()),
+            Err(error) => {
+                tracing::debug!(%error, "no embedding index; skipping neighbour search");
+                return Ok(Vec::new());
+            }
+        };
+        // `top_k + 1` because the query vector is this memory's own, so it
+        // always returns itself as the nearest hit.
+        let hits = match crate::vector_search::search_similar(self.db(), &vector, top_k + 1) {
+            Ok(hits) => hits,
+            Err(error) => {
+                // No HNSW index, or one built for a different dimension. The
+                // contract is that empty means "unavailable", so the caller
+                // falls back rather than the whole pass failing.
+                tracing::debug!(%error, "embedding neighbour search unavailable");
+                return Ok(Vec::new());
+            }
+        };
+        Ok(hits
+            .into_iter()
+            .filter(|(id, _)| id != memory_id)
+            .take(top_k)
+            .collect())
+    }
 }
 
 // ── MemoryAccess impl ───────────────────────────────────────────
@@ -402,6 +439,20 @@ impl MemoryTrait for MemoryAccess {
         match self {
             Self::Direct { graph, .. } => graph.get_related_memories(id, depth),
             Self::Remote(client) => client.get_related_memories(id, depth),
+        }
+    }
+
+    fn embedding_neighbours(
+        &self,
+        memory_id: &str,
+        top_k: usize,
+    ) -> Result<Vec<(String, f64)>, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.embedding_neighbours(memory_id, top_k),
+            // The memory-server protocol has no vector-neighbour request, so a
+            // remote store falls back to the lexical pass. Adding one is a
+            // protocol change and belongs with its own round-trip tests.
+            Self::Remote(_) => Ok(Vec::new()),
         }
     }
 }

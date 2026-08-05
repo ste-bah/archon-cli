@@ -154,6 +154,26 @@ pub trait MemoryTrait: Send + Sync {
     fn clear_all(&self) -> Result<usize, MemoryError>;
 
     fn get_related_memories(&self, id: &str, depth: u32) -> Result<Vec<Memory>, MemoryError>;
+
+    /// Memories whose embeddings are nearest to `memory_id`'s, as
+    /// `(id, cosine_distance)` with the closest first.
+    ///
+    /// Exists so deduplication can find memories that say the same thing in
+    /// different words. Lexical measures cannot: eight stored restatements of
+    /// one instruction scored around 0.31 Jaccard against a 0.92 threshold,
+    /// because "deploy" and "deploys" are already different words.
+    ///
+    /// Defaulted to empty rather than required. A store with no vector index --
+    /// a remote store, or one running without an embedding provider -- should
+    /// fall back to the lexical pass, not fail. Callers must therefore treat an
+    /// empty result as "no vector search available", never as "no neighbours".
+    fn embedding_neighbours(
+        &self,
+        _memory_id: &str,
+        _top_k: usize,
+    ) -> Result<Vec<(String, f64)>, MemoryError> {
+        Ok(Vec::new())
+    }
 }
 
 // ── factory ────────────────────────────────────────────────────

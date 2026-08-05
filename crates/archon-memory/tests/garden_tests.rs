@@ -12,6 +12,10 @@ fn make_config() -> GardenConfig {
         auto_consolidate: true,
         min_hours_between_runs: 0, // always run in tests
         dedup_similarity_threshold: 0.85,
+        // In-memory test graphs carry no embeddings, so the semantic pass finds
+        // no neighbours regardless; the value only has to be present.
+        semantic_dedup_max_distance: 0.15,
+        semantic_review_max_distance: 0.35,
         staleness_days: 30,
         staleness_importance_floor: 0.3,
         importance_decay_per_day: 0.01,

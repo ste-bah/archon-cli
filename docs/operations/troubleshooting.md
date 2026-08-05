@@ -192,6 +192,34 @@ If `min_hours_between_runs` is too high, manually trigger:
 /garden
 ```
 
+### Memory garden runs but merges nothing
+
+Two separate causes, and the report does not distinguish them.
+
+**No embeddings.** Semantic consolidation compares stored vectors, and a store
+with none is a silent no-op — only the Jaccard pass runs, and that catches
+near-verbatim copies only. Embeddings are also dropped wholesale whenever the
+provider's dimension changes, because the vector relation is rebuilt from
+scratch. Rebuild them:
+
+```bash
+archon memory reindex --all
+```
+
+**Restatements are not near-verbatim.** One instruction recorded eight ways is
+the normal failure, and those pairs sit in the review band (0.15–0.35 cosine
+distance) rather than the merge band. They are linked with `RelatedTo`, not
+merged, because nothing at that distance can be distinguished from two genuinely
+different claims about the same subject. That is deliberate; see
+[consolidation bands](../architecture/learning-systems.md#consolidation-bands-not-a-threshold).
+
+### A memory disappeared from recall but still exists
+
+Consolidation marks superseded memories rather than deleting them. They are
+excluded from recall, search, and `/memory list`, but `get_memory` by id still
+returns them and a `Supersedes` edge points from the survivor. To undo an
+unwanted merge, remove the `superseded` tag from the memory.
+
 ## TUI
 
 ### Theme looks wrong colours

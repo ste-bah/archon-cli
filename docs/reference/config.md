@@ -569,6 +569,8 @@ Background memory consolidation. Runs at session start when throttle elapses.
 auto_consolidate = true
 min_hours_between_runs = 24
 dedup_similarity_threshold = 0.92
+semantic_dedup_max_distance = 0.15
+semantic_review_max_distance = 0.35
 staleness_days = 30
 staleness_importance_floor = 0.3
 importance_decay_per_day = 0.01
@@ -580,7 +582,9 @@ briefing_limit = 15
 |---|---|---|
 | `auto_consolidate` | `true` | Run garden on session start if throttle elapsed. Disable to control consolidation manually via `/garden`. |
 | `min_hours_between_runs` | `24` | Throttle. Won't auto-run twice within this window. Prevents consolidation churn on rapid session starts. |
-| `dedup_similarity_threshold` | `0.92` | Cosine similarity above which two memories are treated as duplicates and merged. Raise to keep more variations; lower to dedupe more aggressively. |
+| `dedup_similarity_threshold` | `0.92` | **Jaccard word-set overlap** (not cosine) above which two memories are merged. Only ever catches near-verbatim copies: two restatements of one instruction typically score ~0.31, because set-of-words similarity does not even match "deploy" to "deploys". Semantic duplicates are handled by the two fields below. |
+| `semantic_dedup_max_distance` | `0.15` | Cosine **distance** (0 = identical) below which two memories are merged and the loser marked superseded. Measured, not chosen — see [consolidation bands](../architecture/learning-systems.md#consolidation-bands-not-a-threshold). Requires an embedding provider; without one this is a no-op and only the Jaccard pass runs. |
+| `semantic_review_max_distance` | `0.35` | Upper bound of the review band. Pairs between the merge distance and this are linked with a `RelatedTo` edge and left intact — probably the same subject, not provably the same claim. Set equal to `semantic_dedup_max_distance` to disable review linking. |
 | `staleness_days` | `30` | Days a memory can sit unaccessed before counting as stale. |
 | `staleness_importance_floor` | `0.3` | Stale memories with importance below this floor get pruned. Raise to retain more borderline memories; lower to clean up aggressively. |
 | `importance_decay_per_day` | `0.01` | Daily importance reduction for unaccessed memories. Memories regain importance when retrieved. Keeps the graph weighted toward live knowledge. |

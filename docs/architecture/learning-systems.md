@@ -206,6 +206,61 @@ Memories stored before these limits existed are not affected by them. Use
 `/memory prune apply` to remove it. It is two steps deliberately: deleting
 memories is irreversible and the selection rules are heuristics.
 
+### Consolidation: bands, not a threshold
+
+The garden's `phase_dedup` compares word sets (Jaccard) and only ever catches
+near-verbatim copies. The duplication that actually accumulates is
+*restatement*: one instruction recorded eight times in eight wordings by
+different writers across turns. Lexical overlap for those is around 0.31
+against a 0.92 threshold, so they were never candidates.
+
+Semantic consolidation compares embeddings instead — but a single cutoff cannot
+work, and this is measured rather than assumed.
+`tests/semantic_distance_calibration.rs` embeds real restatements from a real
+store and reports:
+
+| | cosine distance |
+|---|---|
+| restatements of one instruction | 0.09 – 0.35 |
+| genuinely distinct claims | 0.32 and up |
+
+The ranges **overlap**. Any threshold loose enough to merge the restatements
+also merges `deploy to eu-west-2` with `never deploy to us-east-1` — same
+subject, opposite instruction. So distance is banded:
+
+| Band | Action |
+|---|---|
+| `< semantic_dedup_max_distance` (0.15) | merge; loser marked superseded |
+| up to `semantic_review_max_distance` (0.35) | linked with `RelatedTo`, nothing merged |
+| beyond | ignored |
+
+The middle band records that two memories are probably about the same thing
+without deciding whether they are the same claim. Run the calibration test
+before changing either value:
+
+```bash
+cargo test -p archon-memory --test semantic_distance_calibration -- --ignored --nocapture
+```
+
+### Superseded, not deleted
+
+Consolidation marks the losing memory with a `superseded` tag and writes a
+`Supersedes` edge from the survivor. It does not delete it.
+
+Previously it did both — the edge pointed at a row the same function had just
+destroyed, so the provenance was unreadable and a wrong merge was permanent.
+That is why the merge distance can now be set from measurement rather than from
+caution: being wrong is recoverable.
+
+Superseded memories are excluded from recall, search, and listing, so they cost
+nothing at read time. `get_memory` by id deliberately still returns them — that
+is what makes the `Supersedes` edge followable, and what allows an unwanted
+merge to be undone by removing the tag.
+
+One consequence worth knowing: the marker is a *status*, not a label, so it is
+stripped when tags are merged. Without that, folding a superseded memory into a
+live one propagates the marker and both disappear.
+
 ## System details
 
 ### SONA (Self-Organizing Network Architecture)
