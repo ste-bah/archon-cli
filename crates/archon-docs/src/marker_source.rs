@@ -12,15 +12,17 @@
 //! `archon_ingest_ext::marker::parse_marker_str`.
 //!
 //! NOTE on the HTTP transport: the server reads the PDF from ITS OWN local filesystem (it is sent
-//! only a `pdf_path`, never the bytes). The server operator must start it with `--pdf-root` that
-//! contains every PDF Archon sends. `marker_url` must therefore point at a server that shares
-//! archon's filesystem — same host, or a mount where the identical absolute path resolves beneath
-//! the server's same canonical root. It is NOT a general remote-upload service. Server failures
-//! use fixed safe messages; Rust treats non-success bodies as opaque error text and receives no
-//! conversion exception details.
+//! only an opaque ID derived from its canonical local path, never the bytes). The server operator
+//! must start it with `--pdf-root` that contains every PDF Archon sends. `marker_url` must therefore
+//! point at a server that shares archon's filesystem — same host, or a mount where the identical
+//! absolute path resolves beneath the server's same canonical root. It is NOT a general
+//! remote-upload service. Server failures use fixed safe messages; Rust treats non-success bodies
+//! as opaque error text and receives no conversion exception details.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 
 use archon_accel::{AccelKind, DeviceOverrides, MarkerChunk, marker_ingest_plan};
 use archon_ingest_ext::chunk::{Block, FigureRegion};
@@ -40,6 +42,14 @@ pub const HTTP_CONVERT_TIMEOUT_SECS: u64 = 900;
 pub const HEALTH_MAX_WAIT_SECS: u64 = 120;
 pub const HEALTH_POLL_INTERVAL_SECS: u64 = 2;
 
+/// Return the opaque ID shared with the Marker server for a canonical PDF path.
+fn pdf_id_for_canonical_path(canonical_path: &Path) -> Result<String, DocsError> {
+    let path_text = canonical_path.to_str().ok_or_else(|| DocsError::Storage {
+        message: "canonical pdf path for marker http is not valid UTF-8".to_string(),
+    })?;
+    Ok(hex::encode(Sha256::digest(path_text.as_bytes())))
+}
+
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
@@ -53,15 +63,15 @@ pub enum MarkerSource {
         script: PathBuf,
         chunks: Vec<MarkerChunk>,
     },
-    /// POST `{"pdf_path", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
+    /// POST `{"pdf_id", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
     /// (`scripts/archon_marker_server.py`) and get the same normalized block-tree JSON back. The
-    /// operator must supply `--pdf-root` containing all PDFs Archon sends; the canonical absolute
-    /// path in each request must resolve beneath that same server root. The server loads the surya
-    /// models ONCE at startup and keeps them resident, so bulk ingest pays no per-document model
-    /// reload (the subprocess sidecar reloads ~6 GB per PDF). Server and archon run on the same
-    /// host: the absolute `pdf_path` is read locally by the server, so no bytes are uploaded.
-    /// `device` is advisory — the server's models live on its startup device. Server failures use
-    /// fixed messages, and this transport treats every non-success body as opaque error text.
+    /// operator must supply `--pdf-root` containing all PDFs Archon sends; each request uses a
+    /// deterministic ID from the canonical absolute local path. The server loads the surya models
+    /// ONCE at startup and keeps them resident, so bulk ingest pays no per-document model reload
+    /// (the subprocess sidecar reloads ~6 GB per PDF). Server and archon run on the same host: no
+    /// PDF bytes are uploaded. `device` is advisory — the server's models live on its startup
+    /// device. Server failures use fixed messages, and this transport treats every non-success
+    /// body as opaque error text.
     Http { url: String, device: Option<String> },
     /// Read a pre-extracted Marker JSON file (decoupled — you run Marker however/whenever).
     PreExtracted { json_path: PathBuf },
@@ -254,7 +264,7 @@ impl MarkerSource {
     /// or a pre-extracted file — both already carry the full document, so neither chunks).
     ///
     /// HTTP contract (matched by `scripts/archon_marker_server.py`):
-    /// `POST {url}/convert` with JSON body `{"pdf_path": "<canonical absolute path>", "device": "<dev>"}` →
+    /// `POST {url}/convert` with JSON body `{"pdf_id": "<canonical path SHA-256>", "device": "<dev>"}` →
     /// 200 with the same normalized block-tree JSON the subprocess sidecar prints to stdout.
     /// The request body remains unchanged; non-success response bodies remain opaque error text to
     /// Rust.
@@ -272,8 +282,9 @@ impl MarkerSource {
                                 pdf_path.display()
                             ),
                         })?;
+                let pdf_id = pdf_id_for_canonical_path(&abs)?;
                 let body = serde_json::json!({
-                    "pdf_path": abs.to_string_lossy(),
+                    "pdf_id": pdf_id,
                     "device": device.as_deref().unwrap_or("auto"),
                 });
                 let endpoint = format!("{}/convert", url.trim_end_matches('/'));

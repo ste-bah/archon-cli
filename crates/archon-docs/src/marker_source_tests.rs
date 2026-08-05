@@ -12,11 +12,30 @@ fn marker_http_pdf_id_is_lowercase_sha256_of_exact_canonical_utf8_path() {
     let pdf = nested.join("résumé.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
     let canonical = std::fs::canonicalize(&pdf).unwrap();
-    let expected = format!("{:x}", Sha256::digest(canonical.to_str().unwrap().as_bytes()));
+    let expected = format!(
+        "{:x}",
+        Sha256::digest(canonical.to_str().unwrap().as_bytes())
+    );
 
     assert_eq!(pdf_id_for_canonical_path(&canonical).unwrap(), expected);
     assert_eq!(expected.len(), 64);
     assert_eq!(expected, expected.to_lowercase());
+}
+
+#[cfg(unix)]
+#[test]
+fn marker_http_rejects_non_utf8_canonical_path() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join(OsStr::from_bytes(b"invalid-\xff.pdf"));
+    std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
+    let canonical = std::fs::canonicalize(&pdf).unwrap();
+
+    let err = pdf_id_for_canonical_path(&canonical).unwrap_err();
+
+    assert!(err.to_string().contains("not valid UTF-8"));
 }
 
 #[tokio::test]
@@ -24,16 +43,20 @@ async fn marker_http_request_sends_pdf_id_without_pdf_path() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/convert"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(
-            r#"{"block_type":"Document","children":[]}"#,
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(r#"{"block_type":"Document","children":[]}"#),
+        )
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
     let pdf = dir.path().join("report.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
     let canonical = std::fs::canonicalize(&pdf).unwrap();
-    let expected_id = format!("{:x}", Sha256::digest(canonical.to_str().unwrap().as_bytes()));
+    let expected_id = format!(
+        "{:x}",
+        Sha256::digest(canonical.to_str().unwrap().as_bytes())
+    );
     let source = MarkerSource::Http {
         url: server.uri(),
         device: Some("cpu".to_string()),
@@ -45,9 +68,13 @@ async fn marker_http_request_sends_pdf_id_without_pdf_path() {
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert_eq!(body["pdf_id"], expected_id);
-    assert_eq!(body["device"], "cpu");
-    assert!(body.get("pdf_path").is_none());
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "pdf_id": expected_id,
+            "device": "cpu",
+        })
+    );
 }
 
 #[tokio::test]
