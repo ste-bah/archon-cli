@@ -3,6 +3,7 @@
 
 import json
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -48,6 +49,30 @@ class Issue115LiveSmoke(unittest.TestCase):
                 self._raise_server_exception()
         finally:
             self.temp_dir.cleanup()
+
+    def test_cli_rejects_non_loopback_before_model_load(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "archon_marker_server.py"),
+                "--pdf-root",
+                str(self.corpus),
+                "--host",
+                "0.0.0.0",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertRegex(
+            result.stderr,
+            r"error: non-loopback --host requires --allow-non-loopback\n$",
+        )
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("loading surya models", result.stderr)
 
     def test_live_tcp_security_boundaries(self):
         expected_tree = {"children": [], "source": "live-smoke"}
@@ -104,9 +129,6 @@ class Issue115LiveSmoke(unittest.TestCase):
             self.assertEqual(status, 500)
             self.assertEqual(body, {"error": "conversion failed"})
             self.assertNotIn("secret-live-error", json.dumps(body))
-
-            with self.assertRaises(ValueError):
-                server.validate_bind_host("0.0.0.0", False)
 
     def _preallocate_port(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:

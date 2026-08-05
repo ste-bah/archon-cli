@@ -12,15 +12,19 @@
 //! `archon_ingest_ext::marker::parse_marker_str`.
 //!
 //! NOTE on the HTTP transport: the request carries only an opaque ID derived from Archon's
-//! canonical local PDF path (never a path field or PDF bytes). The server operator must start it
-//! with `--pdf-root`; at startup it recursively freezes canonical regular PDFs into an ID→path
-//! catalogue. Archon and the server must resolve a document to identical canonical path text (same
-//! host, or identically mounted filesystems) for their IDs to match. Nested PDFs and duplicate
-//! basenames are supported because the full canonical path is hashed. The catalogue is static for
-//! the process lifetime, so restart after local corpus changes; those changes are outside remote
-//! request control. It is NOT a general remote-upload service. Server failures use fixed safe
-//! messages; Rust treats non-success bodies as opaque error text and receives no conversion
-//! exception details.
+//! canonical local PDF path (never a path field or PDF bytes). Rust removes Windows verbatim
+//! drive (`\\?\C:\...`) and UNC (`\\?\UNC\server\share\...`) prefixes before hashing, matching
+//! Python's `str(Path.resolve())` text. The server operator must start it with `--pdf-root`; at
+//! startup it recursively freezes canonical regular PDFs into an ID→path catalogue. Archon and
+//! the server must resolve a document to identical canonical path text (same host, or identically
+//! mounted filesystems) for their IDs to match. Nested PDFs and duplicate basenames are supported
+//! because the full canonical path is hashed. The catalogue is static for the process lifetime, so
+//! restart after local corpus changes; those changes are outside remote request control. It is NOT
+//! a general remote-upload service. Server failures use fixed safe messages; Rust treats
+//! non-success bodies as opaque error text and receives no conversion exception details. The server
+//! defaults to loopback and has no authentication. A non-loopback host requires explicit
+//! `--allow-non-loopback`; that opt-in permits exposure but does not weaken or change the frozen
+//! startup catalogue.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

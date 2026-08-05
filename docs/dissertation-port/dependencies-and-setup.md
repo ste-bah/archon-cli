@@ -93,17 +93,20 @@ curl -s http://127.0.0.1:8010/health   # {"status":"ok","device":"cuda","models_
 ```
 Select it by setting `marker_url` in policy (it overrides `marker_sidecar`). The
 request sends only an opaque SHA-256 ID derived from Archon's canonical UTF-8 PDF
-pathname—never a path field or PDF bytes. At startup, `--pdf-root` is recursively
-catalogued into immutable canonical-PDF ID→path entries, so nested PDFs and duplicate
-basenames are supported. The server catalogue must include a PDF whose canonical path
-text produces the same ID as Archon's input (same host or identically mounted filesystems).
+pathname—never a path field or PDF bytes. On Windows, Rust strips verbatim drive
+(`\\?\C:\...`) and verbatim UNC (`\\?\UNC\server\share\...`) prefixes before SHA-256
+hashing, matching Python's `str(Path.resolve()).encode("utf-8")` pathname text. At startup,
+`--pdf-root` is recursively catalogued into immutable canonical-PDF ID→path entries, so nested
+PDFs and duplicate basenames are supported. The server catalogue must include a PDF whose
+canonical path text produces the same ID as Archon's input (same host or identically mounted
+filesystems).
 The request schema accepts `pdf_id`, optional `device`, and optional `page_range`; unknown
 IDs, malformed/path-bearing requests, and invalid page ranges return fixed 400 errors, and
 conversion failures return a fixed 500 error. Restart the server after adding, moving,
 deleting, or replacing corpus files: the startup catalogue does not observe later local
 corpus mutation, including replacement at an approved pathname.
 
-> The server binds to `127.0.0.1` by default and has no authentication. `localhost` and literal loopback IPs are accepted; another host requires `--allow-non-loopback`. That flag accepts network exposure but does not alter catalogue construction.
+> The server binds to `127.0.0.1` by default and has no authentication. `localhost` and literal loopback IPs are accepted; a non-loopback `--host` requires `--allow-non-loopback`. This opt-in permits exposure but does not weaken or change the frozen startup catalogue.
 
 ---
 
