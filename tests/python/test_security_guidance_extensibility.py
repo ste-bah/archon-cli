@@ -159,6 +159,51 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                     compile_mock.assert_not_called()
 
+    def test_comment_groups_preserve_adjacency_through_escaped_parentheses(self):
+        unsafe = (
+            r"a*(?#foo\)bar)b*$",
+            r"a*(?#foo\\\)bar)b*$",
+            r"(?x:a*(?#foo\)bar)b*)$",
+            r"a*(?#one\)two\)three)b*$",
+        )
+        safe = (
+            r"a*(?#foo\\)b$",
+            r"a*(?#foo\\\\)b$",
+            r"a*(?#one\)two)b$",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(kind="unsafe", pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                with mock.patch.object(extensibility.re, "compile") as compile_mock:
+                    self.assertIsNone(
+                        extensibility._validate_pattern(
+                            {"rule_name": "comment-escape", "reminder": "test", "regex": pattern},
+                            source="test",
+                        )
+                    )
+                    compile_mock.assert_not_called()
+        for pattern in safe:
+            with self.subTest(kind="safe", pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "comment-escape-safe", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
+    def test_unclosed_comment_groups_reach_compiler_rejection(self):
+        for pattern in (r"a*(?#unterminated", r"a*(?#unterminated\)"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "comment-invalid", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
     def test_verbose_mode_respects_scopes_classes_and_escaped_literals(self):
         safe = (
             "(?x:a*(?-x: )a*)$",

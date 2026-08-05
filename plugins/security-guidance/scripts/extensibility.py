@@ -567,9 +567,16 @@ def _verbose_ignored_end(regex: str, index: int, verbose: bool) -> int:
 
 
 def _comment_group_end(regex: str, index: int) -> int:
-    """Skip a Python comment group without changing adjacency state."""
-    end = regex.find(")", index + 3)
-    return len(regex) if end == -1 else end + 1
+    """Skip an escape-aware Python comment group without changing scanner state."""
+    escaped = False
+    for cursor in range(index + 3, len(regex)):
+        char = regex[cursor]
+        if char == ")" and not escaped:
+            return cursor + 1
+        escaped = char == "\\" and not escaped
+        if char != "\\":
+            escaped = False
+    return len(regex)
 
 
 def _record_adjacent_atom(previous: List[bool], variable: bool, significant: bool) -> bool:
@@ -651,12 +658,36 @@ def _consume_adjacent_group(
     return index + width, unsafe, variable
 
 
-def _adjacent_quantifier_overlap(regex: str) -> bool:
-    """Statically reject any structurally adjacent variable quantified atoms.
+def _consume_adjacent_atom(
+    regex: str,
+    index: int,
+    char: str,
+    previous: List[bool],
+    content: List[bool],
+    terminal_variable: List[bool],
+) -> Tuple[int, bool]:
+    """Record one non-group atom and return its next position and rejection state."""
+    if char in "^$":
+        return index + 1, False
+    if char in "?+*{":
+        previous[-1] = terminal_variable[-1] = False
+        return index + 1, False
+    if char == "\\":
+        end = _escaped_atom_end(regex, index)
+    elif char == "[":
+        end = _class_end(regex, index)
+    else:
+        end = index + 1
+    content[-1] = True
+    width = _variable_quantifier_at(regex, end)
+    variable = bool(width)
+    unsafe = _record_adjacent_atom(previous, variable, True)
+    terminal_variable[-1] = variable
+    return end + width, unsafe
 
-    This intentionally ignores character-set semantics: disjoint-looking atoms are
-    rejected fail closed, avoiding complex or incomplete regex interpretation.
-    """
+
+def _adjacent_quantifier_overlap(regex: str) -> bool:
+    """Statically reject structurally adjacent variable quantified atoms."""
     previous, content, zero_width, verbose = [False], [False], [False], [False]
     entry_previous, terminal_variable, branch_variable = [False], [False], [False]
     index = 0
@@ -668,15 +699,8 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
             continue
         if char in "()":
             index, unsafe, variable = _consume_adjacent_group(
-                regex,
-                index,
-                previous,
-                content,
-                zero_width,
-                verbose,
-                entry_previous,
-                terminal_variable,
-                branch_variable,
+                regex, index, previous, content, zero_width, verbose, entry_previous,
+                terminal_variable, branch_variable,
             )
             if unsafe:
                 return True
@@ -684,33 +708,15 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
                 terminal_variable[-1] = variable
             continue
         if char == "|":
-            branch_variable[-1] = branch_variable[-1] or terminal_variable[-1]
-            previous[-1] = entry_previous[-1]
-            terminal_variable[-1] = False
-            content[-1] = True
+            branch_variable[-1] |= terminal_variable[-1]
+            previous[-1], terminal_variable[-1], content[-1] = entry_previous[-1], False, True
             index += 1
             continue
-        if char in "^$":
-            index += 1
-            continue
-        if char == "\\":
-            end = _escaped_atom_end(regex, index)
-        elif char == "[":
-            end = _class_end(regex, index)
-        elif char in "?+*{":
-            previous[-1] = False
-            terminal_variable[-1] = False
-            index += 1
-            continue
-        else:
-            end = index + 1
-        content[-1] = True
-        width = _variable_quantifier_at(regex, end)
-        variable = bool(width)
-        if _record_adjacent_atom(previous, variable, True):
+        index, unsafe = _consume_adjacent_atom(
+            regex, index, char, previous, content, terminal_variable
+        )
+        if unsafe:
             return True
-        terminal_variable[-1] = variable
-        index = end + width
     return False
 
 
