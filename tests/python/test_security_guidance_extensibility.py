@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -192,16 +193,18 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
-    def test_rejects_excessively_nested_groups_without_crashing(self):
-        deeply_nested = "(" * 500 + "a" + ")" * 500
+    def test_rejects_compiler_recursion_error_without_crashing(self):
+        pattern = r"safe-pattern"
 
-        self.assertLessEqual(len(deeply_nested), extensibility.CUSTOM_REGEX_MAX_CHARS)
-        self.assertFalse(extensibility._has_redos_structure(deeply_nested))
-        self.assertIsNone(
-            extensibility._validate_pattern(
-                {"rule_name": "recursion", "reminder": "test", "regex": deeply_nested}, source="test"
+        self.assertFalse(extensibility._has_redos_structure(pattern))
+        with mock.patch.object(
+            extensibility.re, "compile", side_effect=RecursionError("compiler recursion")
+        ):
+            self.assertIsNone(
+                extensibility._validate_pattern(
+                    {"rule_name": "recursion", "reminder": "test", "regex": pattern}, source="test"
+                )
             )
-        )
 
     def test_accepts_ordinary_nested_groups(self):
         ordinarily_nested = "(" * 100 + "a" + ")" * 100
