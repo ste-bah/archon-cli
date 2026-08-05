@@ -1,7 +1,9 @@
+import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import MappingProxyType
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -25,6 +27,88 @@ class MarkerServerSecurityTests(unittest.TestCase):
 
     def build_client(self):
         return TestClient(server.build_app("cpu", {}, self.root.resolve()))
+
+    def test_pdf_catalogue_uses_lowercase_sha256_of_exact_canonical_utf8_path(self):
+        nested = self.root / "nested"
+        nested.mkdir()
+        pdf = nested / "résumé.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        canonical = pdf.resolve()
+        expected_id = hashlib.sha256(str(canonical).encode("utf-8")).hexdigest()
+
+        self.assertEqual(server.pdf_id_for_path(canonical), expected_id)
+        self.assertEqual(expected_id, expected_id.lower())
+        self.assertEqual(len(expected_id), 64)
+
+    def test_pdf_catalogue_recurses_freezes_paths_and_preserves_duplicate_basenames(self):
+        nested = self.root / "nested"
+        duplicate = self.root / "other"
+        nested.mkdir()
+        duplicate.mkdir()
+        nested_pdf = nested / "report.pdf"
+        duplicate_pdf = duplicate / "report.pdf"
+        nested_pdf.write_bytes(b"%PDF-1.4\n")
+        duplicate_pdf.write_bytes(b"%PDF-1.4\n")
+        (self.root / "notes.txt").write_text("not a PDF")
+
+        catalogue = server.build_pdf_catalogue(self.root.resolve())
+        expected_paths = {self.pdf.resolve(), nested_pdf.resolve(), duplicate_pdf.resolve()}
+        expected_ids = {
+            hashlib.sha256(str(path).encode("utf-8")).hexdigest(): path
+            for path in expected_paths
+        }
+
+        self.assertIsInstance(catalogue, MappingProxyType)
+        self.assertEqual(dict(catalogue), expected_ids)
+        self.assertNotEqual(
+            server.pdf_id_for_path(nested_pdf.resolve()),
+            server.pdf_id_for_path(duplicate_pdf.resolve()),
+        )
+        with self.assertRaises(TypeError):
+            catalogue["new-id"] = self.pdf.resolve()
+
+    def test_pdf_catalogue_excludes_non_pdfs_and_symlinks_escaping_root(self):
+        (self.root / "notes.txt").write_text("not a PDF")
+        outside = self.root.parent / "outside.pdf"
+        outside.write_bytes(b"%PDF-1.4\n")
+        escape = self.root / "escape.pdf"
+        try:
+            escape.symlink_to(outside)
+        except OSError:
+            self.skipTest("symlinks are unavailable on this platform")
+
+        catalogue = server.build_pdf_catalogue(self.root.resolve())
+
+        self.assertEqual(set(catalogue.values()), {self.pdf.resolve()})
+        self.assertNotIn(server.pdf_id_for_path(outside.resolve()), catalogue)
+
+    def test_convert_accepts_only_catalogue_pdf_id_and_hides_unknown_id(self):
+        pdf_id = hashlib.sha256(str(self.pdf.resolve()).encode("utf-8")).hexdigest()
+        app = server.build_app("cpu", {}, server.build_pdf_catalogue(self.root.resolve()))
+
+        with mock.patch.object(server, "run_marker") as run_marker:
+            response = TestClient(app).post("/convert", json={"pdf_id": "not-a-real-id"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "invalid pdf_id"})
+        self.assertNotIn("not-a-real-id", response.text)
+        self.assertNotIn(pdf_id, response.text)
+        run_marker.assert_not_called()
+
+    def test_convert_uses_trusted_catalogue_path_and_rejects_pdf_path_schema(self):
+        pdf_id = hashlib.sha256(str(self.pdf.resolve()).encode("utf-8")).hexdigest()
+        trusted_path = self.pdf.resolve()
+        app = server.build_app("cpu", {}, MappingProxyType({pdf_id: trusted_path}))
+
+        with mock.patch.object(server, "run_marker", return_value={"children": []}) as run_marker:
+            client = TestClient(app)
+            success = client.post("/convert", json={"pdf_id": pdf_id})
+            legacy = client.post("/convert", json={"pdf_path": str(trusted_path)})
+
+        self.assertEqual(success.status_code, 200)
+        run_marker.assert_called_once_with(str(trusted_path), "cpu", None, artifact_dict={})
+        self.assertEqual(legacy.status_code, 400)
+        self.assertEqual(legacy.json(), {"error": "invalid request"})
 
     def test_canonical_pdf_root_returns_resolved_directory(self):
         self.assertEqual(
