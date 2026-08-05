@@ -192,6 +192,27 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
+    def test_rejects_excessively_nested_groups_without_crashing(self):
+        deeply_nested = "(" * 500 + "a" + ")" * 500
+
+        self.assertLessEqual(len(deeply_nested), extensibility.CUSTOM_REGEX_MAX_CHARS)
+        self.assertFalse(extensibility._has_redos_structure(deeply_nested))
+        self.assertIsNone(
+            extensibility._validate_pattern(
+                {"rule_name": "recursion", "reminder": "test", "regex": deeply_nested}, source="test"
+            )
+        )
+
+    def test_accepts_ordinary_nested_groups(self):
+        ordinarily_nested = "(" * 100 + "a" + ")" * 100
+
+        self.assertFalse(extensibility._has_redos_structure(ordinarily_nested))
+        self.assertIsNotNone(
+            extensibility._validate_pattern(
+                {"rule_name": "nested", "reminder": "test", "regex": ordinarily_nested}, source="test"
+            )
+        )
+
     def test_invalid_and_fixed_repeat_bounds_remain_compiler_validated(self):
         self.assertIsNone(
             extensibility._validate_pattern(
