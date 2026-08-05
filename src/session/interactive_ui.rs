@@ -69,6 +69,7 @@ pub(super) async fn run(
     auto_capture: Option<Arc<archon_pipeline::capture::AutoCapture>>,
     sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
     active_session: super::active_session::ActiveSessionId,
+    garden_summary: Option<String>,
 ) -> Result<()> {
     let auth_label = match resolve_auth_with_keys(
         env_vars.anthropic_api_key.as_deref(),
@@ -221,6 +222,7 @@ pub(super) async fn run(
         &working_dir,
         &session_store,
         session_id,
+        garden_summary,
     );
 
     let (btw_tx, btw_rx) = tokio::sync::mpsc::channel::<String>(8);

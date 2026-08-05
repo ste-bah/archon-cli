@@ -363,6 +363,7 @@ pub(crate) async fn run_interactive_session(
         session_stats_shared,
         last_assistant_response_shared,
         active_session,
+        garden_summary,
     } = interactive_finish::finish(
         &mut agent,
         config,
@@ -439,6 +440,7 @@ pub(crate) async fn run_interactive_session(
         auto_capture,
         sandbox_audit_drain,
         active_session,
+        garden_summary,
     )
     .await
 }

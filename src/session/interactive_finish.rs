@@ -19,6 +19,44 @@ async fn display_initial_resume_history(
     crate::session_loop::session_history::send_history(tui_event_tx, &banner, messages).await
 }
 
+/// What the automatic consolidation pass changed, or `None` when it changed
+/// nothing.
+///
+/// Returned rather than printed. An emission from here lands in the output
+/// buffer, which the splash screen is drawn INSTEAD of at startup -- so the
+/// message is real, queued, and invisible until the splash clears. It goes into
+/// the splash's own activity panel instead, which is on screen immediately.
+///
+/// Silent on a no-op run. The pass fires on every session start once the
+/// throttle elapses, and a line on every launch saying "nothing happened" is
+/// noise people learn to skip — which would defeat the point of showing it at
+/// all.
+fn auto_consolidation_summary(report: &archon_memory::garden::GardenReport) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if report.duplicates_merged > 0 {
+        parts.push(format!("{} duplicate(s) merged", report.duplicates_merged));
+    }
+    if report.fragments_merged > 0 {
+        parts.push(format!("{} fragment(s) merged", report.fragments_merged));
+    }
+    if report.stale_pruned > 0 {
+        parts.push(format!("{} stale pruned", report.stale_pruned));
+    }
+    if report.overflow_pruned > 0 {
+        parts.push(format!("{} pruned for overflow", report.overflow_pruned));
+    }
+    if !report.review_pairs.is_empty() {
+        parts.push(format!(
+            "{} pair(s) awaiting review",
+            report.review_pairs.len()
+        ));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(", "))
+}
+
 /// The most recent inner-voice snapshot, newest first.
 ///
 /// Fetched by explicit type rather than `recall_memories("inner_voice_snapshot")`.
@@ -79,6 +117,8 @@ pub(super) struct FinishState {
     /// and with the session loop by the caller, so a resume can move both at
     /// once instead of leaving cost and history in different rows.
     pub active_session: super::active_session::ActiveSessionId,
+    /// What automatic consolidation changed at startup, for the splash panel.
+    pub garden_summary: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,6 +204,7 @@ pub(super) async fn finish(
         }
     }
 
+    let mut garden_summary: Option<String> = None;
     if config.memory.enabled && config.memory.garden.auto_consolidate {
         match archon_memory::garden::should_auto_consolidate(
             memory.as_ref(),
@@ -186,8 +227,15 @@ pub(super) async fn finish(
                             before = report.total_memories_before,
                             after = report.total_memories_after,
                             ms = report.duration_ms,
+                            review_pairs = report.review_pairs.len(),
                             "garden: consolidation complete"
                         );
+                        // Handed to the splash panel by the caller. This pass
+                        // merges and prunes memories on every session start and
+                        // its only record was a log line nobody reads -- a
+                        // process that quietly reshapes your memory is one whose
+                        // mistakes are indistinguishable from it working.
+                        garden_summary = auto_consolidation_summary(&report);
                     }
                     Err(e) => tracing::warn!("garden: consolidation failed: {e}"),
                 }
@@ -342,47 +390,10 @@ pub(super) async fn finish(
         session_stats_shared,
         last_assistant_response_shared,
         active_session,
+        garden_summary,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use archon_tui::app::TuiEvent;
-
-    #[tokio::test]
-    async fn explicit_resume_rejects_history_atomically_when_capacity_is_insufficient() {
-        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);
-        let messages = vec![serde_json::json!({
-            "role": "assistant",
-            "content": "x".repeat(archon_tui::event_channel::MAX_COALESCED_CONTENT_BYTES + 1)
-        })];
-
-        let result = super::replay_resumed_conversation(&tx, messages).await;
-
-        assert!(result.is_none());
-        assert!(rx.try_recv().is_err(), "partial history must not be queued");
-    }
-
-    #[tokio::test]
-    async fn explicit_resume_replays_history_into_tui() {
-        let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel();
-        let messages = vec![serde_json::json!({
-            "role": "assistant",
-            "content": "TAIL-SENTINEL-界🙂e\u{301}"
-        })];
-
-        super::display_initial_resume_history(&tx, &messages)
-            .await
-            .expect("queue history");
-
-        let mut text = String::new();
-        while let Ok(event) = rx.try_recv() {
-            if let TuiEvent::TextDelta(delta) = event {
-                text.push_str(&delta);
-            }
-        }
-        assert!(text.contains("Resumed session history (1 messages)"));
-        assert!(text.contains("TAIL-SENTINEL-界🙂e\u{301}"));
-        assert!(text.contains("End of history"));
-    }
-}
+#[path = "interactive_finish_tests.rs"]
+mod tests;

@@ -278,6 +278,8 @@ pub(crate) async fn spawn_web_session(
         session_stats_shared,
         last_assistant_response_shared,
         active_session,
+        // The web runtime has no splash to surface it in.
+        garden_summary: _,
     } = super::interactive_finish::finish(
         &mut agent,
         config,
