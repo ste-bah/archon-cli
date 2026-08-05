@@ -143,7 +143,7 @@ fn memory_handler_execute_unknown_subcommand_emits_error() {
         if let TuiEvent::Error(text) = ev
             && text
                 == "Unknown memory subcommand: nope. Use list, \
-                    search, or clear."
+                    search, prune, or clear."
         {
             saw_unknown = true;
         }
@@ -151,7 +151,7 @@ fn memory_handler_execute_unknown_subcommand_emits_error() {
     assert!(
         saw_unknown,
         "MemoryHandler::execute(unknown) must emit the byte-for-byte \
-         'Unknown memory subcommand: nope. Use list, search, or \
+         'Unknown memory subcommand: nope. Use list, search, prune, or \
          clear.' TuiEvent::Error"
     );
 }

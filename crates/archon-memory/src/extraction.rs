@@ -58,6 +58,77 @@ impl ExtractionState {
     }
 }
 
+// ── ingest limits ────────────────────────────────────────────
+
+/// Longest content accepted for a general extracted memory.
+///
+/// Extraction hands an LLM the whole conversation and stores whatever comes
+/// back. With no ceiling, a pasted document becomes a "memory" verbatim --
+/// observed as five copies of one PRD and roughly twenty of another. Anything
+/// this long is a transcript, not something learned from it.
+pub const MAX_EXTRACTED_CONTENT_CHARS: usize = 2_000;
+
+/// Longest content accepted for a [`MemoryType::Rule`].
+///
+/// Far tighter than the general cap because rules are unconditionally rendered
+/// into the system prompt by `RulesEngine::format_for_prompt`, so an oversized
+/// one is paid for on every request forever, not just when recalled. A stored
+/// operating manual reached the prompt this way and read as a malformed rule.
+/// A behavioural rule that does not fit in a couple of sentences is not a rule.
+pub const MAX_RULE_CONTENT_CHARS: usize = 240;
+
+/// Tag prefix carrying the content fingerprint used for exact dedupe.
+const CONTENT_HASH_TAG_PREFIX: &str = "contenthash:";
+
+/// The longest content accepted for `memory_type`.
+pub fn content_limit(memory_type: MemoryType) -> usize {
+    match memory_type {
+        MemoryType::Rule => MAX_RULE_CONTENT_CHARS,
+        _ => MAX_EXTRACTED_CONTENT_CHARS,
+    }
+}
+
+/// Stable 64-bit FNV-1a over normalised content.
+///
+/// Deliberately not `DefaultHasher`: that is seeded and explicitly not stable
+/// across builds, so fingerprints written by one binary would not match those
+/// written by the next and dedupe would silently stop working after an upgrade.
+/// FNV-1a is fixed by its constants, so a hash written today still matches
+/// tomorrow.
+fn content_fingerprint(content: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut last_was_space = false;
+    for ch in content.trim().chars() {
+        // Normalise so that whitespace and case differences -- which the LLM
+        // reintroduces freely when re-describing the same fact -- do not defeat
+        // the fingerprint.
+        let ch = if ch.is_whitespace() {
+            if last_was_space {
+                continue;
+            }
+            last_was_space = true;
+            ' '
+        } else {
+            last_was_space = false;
+            ch.to_ascii_lowercase()
+        };
+        let mut buffer = [0u8; 4];
+        for byte in ch.encode_utf8(&mut buffer).as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    hash
+}
+
+/// The dedupe tag for `content`.
+pub fn content_hash_tag(content: &str) -> String {
+    format!(
+        "{CONTENT_HASH_TAG_PREFIX}{:016x}",
+        content_fingerprint(content)
+    )
+}
+
 // ── extracted memory ─────────────────────────────────────────
 
 /// A single memory extracted from conversation text, ready to be
@@ -141,6 +212,21 @@ pub fn parse_extraction_response(json_str: &str) -> Result<Vec<ExtractedMemory>,
         if raw.content.trim().is_empty() {
             continue;
         }
+        // Dropped, not truncated. A cut-off document is still a document, and
+        // storing half of one keeps every downstream cost -- prompt bytes,
+        // recall scan, duplicate storms -- while destroying whatever meaning
+        // the text had.
+        let limit = content_limit(memory_type);
+        let length = raw.content.chars().count();
+        if length > limit {
+            tracing::warn!(
+                memory_type = %memory_type,
+                length,
+                limit,
+                "discarding over-long extracted memory; content looks like a pasted document rather than a learned memory"
+            );
+            continue;
+        }
         out.push(ExtractedMemory {
             content: raw.content,
             memory_type,
@@ -165,7 +251,29 @@ pub fn store_extracted(
     let mut stored = 0usize;
 
     for mem in memories {
-        // Dedup: check for similar content already in the graph.
+        // Exact fingerprint first: one tag lookup, and it is the check that
+        // actually catches a re-pasted document. The containment check below
+        // cannot, because it finds candidates by full-text searching the whole
+        // content -- fuzzy, unbounded, and weakest on exactly the large inputs
+        // that produced the duplicate storms. It is also now bounded by a term
+        // cap in `keyword_candidates`, so it can miss outright.
+        let hash_tag = content_hash_tag(&mem.content);
+        let by_hash = SearchFilter {
+            tags: vec![hash_tag.clone()],
+            ..Default::default()
+        };
+        // Re-check the tag on each hit: the tag index is tokenised, so a search
+        // returns candidates rather than exact matches.
+        if graph
+            .search_memories(&by_hash)?
+            .iter()
+            .any(|existing| existing.tags.iter().any(|tag| *tag == hash_tag))
+        {
+            continue;
+        }
+
+        // Retained for near-duplicates the fingerprint cannot see: a restatement
+        // that adds a clause is not byte-identical but is still redundant.
         let filter = SearchFilter {
             text: Some(mem.content.clone()),
             ..Default::default()
@@ -183,6 +291,7 @@ pub fn store_extracted(
         let mut tags = mem.tags.clone();
         tags.push("auto-extract".into());
         tags.push(format!("session:{session_id}"));
+        tags.push(hash_tag);
 
         graph.store_memory(
             &mem.content,
@@ -213,181 +322,5 @@ struct RawExtracted {
 // ── tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graph::MemoryGraph;
-
-    // -- should_extract -------------------------------------------------
-
-    #[test]
-    fn should_extract_fires_at_interval() {
-        let config = ExtractionConfig {
-            interval: 5,
-            enabled: true,
-            min_turns_between: 1,
-        };
-        let mut state = ExtractionState::default();
-        // Simulate 4 turns — not yet.
-        for _ in 0..4 {
-            state.record_turn();
-        }
-        assert!(!should_extract(&config, &state, 4));
-
-        // 5th turn — should fire.
-        state.record_turn();
-        assert!(should_extract(&config, &state, 5));
-    }
-
-    #[test]
-    fn should_extract_respects_min_turns_between() {
-        let config = ExtractionConfig {
-            interval: 1,
-            enabled: true,
-            min_turns_between: 3,
-        };
-        let mut state = ExtractionState::default();
-        state.record_turn();
-        // Last extraction was at turn 0, current turn is 1 — only 1 elapsed.
-        assert!(!should_extract(&config, &state, 1));
-
-        // current_turn = 3 — 3 turns since last_extraction_turn 0
-        assert!(should_extract(&config, &state, 3));
-    }
-
-    #[test]
-    fn should_extract_disabled() {
-        let config = ExtractionConfig {
-            interval: 1,
-            enabled: false,
-            min_turns_between: 0,
-        };
-        let mut state = ExtractionState::default();
-        for _ in 0..10 {
-            state.record_turn();
-        }
-        assert!(!should_extract(&config, &state, 10));
-    }
-
-    // -- parse_extraction_response --------------------------------------
-
-    #[test]
-    fn parse_valid_json() {
-        let json = r#"[
-            {"content": "User prefers dark mode", "memory_type": "preference", "tags": ["ui"]},
-            {"content": "Project uses Rust 2024 edition", "memory_type": "fact", "tags": ["rust", "config"]}
-        ]"#;
-        let mems = parse_extraction_response(json).expect("should parse");
-        assert_eq!(mems.len(), 2);
-        assert_eq!(mems[0].memory_type, MemoryType::Preference);
-        assert_eq!(mems[0].tags, vec!["ui"]);
-        assert_eq!(mems[1].memory_type, MemoryType::Fact);
-    }
-
-    #[test]
-    fn parse_invalid_json_no_crash() {
-        let bad = "this is not json at all {{{}}}";
-        let mems = parse_extraction_response(bad).expect("should not error");
-        assert!(mems.is_empty());
-    }
-
-    #[test]
-    fn parse_markdown_fenced_json() {
-        let fenced = r#"```json
-[{"content":"a rule","memory_type":"rule","tags":[]}]
-```"#;
-        let mems = parse_extraction_response(fenced).expect("should parse");
-        assert_eq!(mems.len(), 1);
-        assert_eq!(mems[0].memory_type, MemoryType::Rule);
-    }
-
-    #[test]
-    fn parse_skips_unknown_types_and_empty_content() {
-        let json = r#"[
-            {"content":"good","memory_type":"fact","tags":[]},
-            {"content":"","memory_type":"fact","tags":[]},
-            {"content":"alien","memory_type":"unknown_type","tags":[]}
-        ]"#;
-        let mems = parse_extraction_response(json).expect("should parse");
-        assert_eq!(mems.len(), 1);
-        assert_eq!(mems[0].content, "good");
-    }
-
-    // -- build_extraction_prompt ----------------------------------------
-
-    #[test]
-    fn build_prompt_includes_messages() {
-        let msgs = vec!["Hello".to_string(), "How are you?".to_string()];
-        let prompt = build_extraction_prompt(&msgs);
-        assert!(prompt.contains("Hello"));
-        assert!(prompt.contains("How are you?"));
-        assert!(prompt.contains("JSON"));
-    }
-
-    // -- store_extracted ------------------------------------------------
-
-    #[test]
-    fn store_with_tags() {
-        let graph = MemoryGraph::in_memory().expect("in-memory graph");
-        let mems = vec![ExtractedMemory {
-            content: "Rust edition is 2024".into(),
-            memory_type: MemoryType::Fact,
-            tags: vec!["rust".into()],
-        }];
-        let stored = store_extracted(&graph, &mems, "sess-001").expect("store");
-        assert_eq!(stored, 1);
-
-        let results = graph.recall_memories("Rust edition", 10).expect("recall");
-        assert_eq!(results.len(), 1);
-        assert!(results[0].tags.contains(&"auto-extract".to_string()));
-        assert!(results[0].tags.contains(&"session:sess-001".to_string()));
-        assert!(results[0].tags.contains(&"rust".to_string()));
-        assert_eq!(results[0].source_type, "auto-extract");
-    }
-
-    #[test]
-    fn dedup_skips_substring_match() {
-        let graph = MemoryGraph::in_memory().expect("in-memory graph");
-
-        // Pre-populate with an existing memory.
-        graph
-            .store_memory(
-                "User prefers dark mode in all editors",
-                "",
-                MemoryType::Preference,
-                0.5,
-                &[],
-                "manual",
-                "",
-            )
-            .expect("seed");
-
-        // Try to store a substring of the existing memory.
-        let mems = vec![ExtractedMemory {
-            content: "dark mode in all editors".into(),
-            memory_type: MemoryType::Preference,
-            tags: vec![],
-        }];
-        let stored = store_extracted(&graph, &mems, "s1").expect("store");
-        assert_eq!(stored, 0, "duplicate should be skipped");
-    }
-
-    // -- extraction state tracking --------------------------------------
-
-    #[test]
-    fn extraction_state_tracking() {
-        let mut state = ExtractionState::default();
-        assert_eq!(state.turns_since_last_extraction, 0);
-        assert_eq!(state.last_extraction_turn, 0);
-
-        state.record_turn();
-        state.record_turn();
-        assert_eq!(state.turns_since_last_extraction, 2);
-
-        state.record_extraction(7);
-        assert_eq!(state.turns_since_last_extraction, 0);
-        assert_eq!(state.last_extraction_turn, 7);
-
-        state.record_turn();
-        assert_eq!(state.turns_since_last_extraction, 1);
-    }
-}
+#[path = "extraction_tests.rs"]
+mod tests;

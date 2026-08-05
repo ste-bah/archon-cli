@@ -5,6 +5,7 @@ pub mod extraction;
 pub mod garden;
 pub mod graph;
 pub mod hybrid_search;
+pub mod hygiene;
 pub mod injection;
 pub mod protocol;
 pub mod search;

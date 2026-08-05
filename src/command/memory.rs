@@ -228,10 +228,39 @@ impl CommandHandler for MemoryHandler {
                     ctx.emit(TuiEvent::Error(format!("Failed to clear memories: {e}")));
                 }
             },
+            // Two-step on purpose. Deleting memories is irreversible and the
+            // selection rules are heuristics, so the plan is shown first and
+            // nothing is removed without `apply`.
+            "prune" => {
+                let apply = arg == "apply";
+                if !arg.is_empty() && !apply {
+                    ctx.emit(TuiEvent::Error("Usage: /memory prune [apply]".to_string()));
+                    return Ok(());
+                }
+                match archon_memory::hygiene::plan_prune(memory) {
+                    Ok(mut plan) => {
+                        if apply && !plan.is_empty() {
+                            match archon_memory::hygiene::apply_prune(memory, &plan) {
+                                Ok(_) => plan.applied = true,
+                                Err(e) => {
+                                    ctx.emit(TuiEvent::Error(format!("Prune failed: {e}")));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        ctx.emit(TuiEvent::TextDelta(
+                            archon_memory::hygiene::format_prune_report(&plan),
+                        ));
+                    }
+                    Err(e) => {
+                        ctx.emit(TuiEvent::Error(format!("Prune planning failed: {e}")));
+                    }
+                }
+            }
             other => {
                 ctx.emit(TuiEvent::Error(format!(
                     "Unknown memory subcommand: {other}. Use list, \
-                     search, or clear."
+                     search, prune, or clear."
                 )));
             }
         }
