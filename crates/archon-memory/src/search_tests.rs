@@ -405,3 +405,38 @@ fn search_with_date_range() {
     let results = g.search_memories(&filter).expect("search failed");
     assert!(results.is_empty());
 }
+
+/// The FTS tokenizer migration must actually fire on an existing store.
+///
+/// `init_memory_fts` only rebuilds when `::fts create` reports the index
+/// already exists. If Cozo returns `Ok` for a duplicate create, or words the
+/// error differently from `already_exists()`, the rebuild is silently skipped
+/// and every existing database keeps the old tokenizer forever -- which is
+/// exactly the failure this asserts against.
+#[test]
+fn reopening_a_store_records_the_fts_tokenizer_marker() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("marker.db");
+
+    // First open creates the indexes.
+    {
+        let _g = MemoryGraph::open(&path).expect("first open");
+    }
+    // Second open must take the already-exists path and leave a marker behind.
+    let g = MemoryGraph::open(&path).expect("second open");
+
+    let rows = archon_cozo::run_bound_script_guarded(
+        g.db(),
+        "?[index, tokenizer] := *memory_fts_state{index, tokenizer}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+        "test: read memory_fts_state",
+    )
+    .expect("marker relation must exist after a reopen");
+
+    assert!(
+        !rows.rows.is_empty(),
+        "no tokenizer marker was written: the migration path never ran, so an \
+         existing store would silently keep the old tokenizer"
+    );
+}

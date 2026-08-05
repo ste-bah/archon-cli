@@ -23,6 +23,10 @@ struct BlockingMemory {
     /// Fired once the correction search runs, which is strictly after the
     /// injector's mutex guard has been dropped.
     finished: Arc<tokio::sync::Notify>,
+    /// Number of correction searches that reached the backend. Corrections are
+    /// recalled through `search_memories`, so this counts the work the per-turn
+    /// cache is supposed to eliminate.
+    searches: AtomicUsize,
 }
 
 impl BlockingMemory {
@@ -32,6 +36,7 @@ impl BlockingMemory {
             recall_delay,
             first_recall_gate: None,
             finished: Arc::new(tokio::sync::Notify::new()),
+            searches: AtomicUsize::new(0),
         }
     }
 
@@ -41,11 +46,16 @@ impl BlockingMemory {
             recall_delay: std::time::Duration::ZERO,
             first_recall_gate: Some(std::sync::Mutex::new(gate)),
             finished: Arc::new(tokio::sync::Notify::new()),
+            searches: AtomicUsize::new(0),
         }
     }
 
     fn recall_count(&self) -> usize {
         self.recalls.load(AtomicOrdering::SeqCst)
+    }
+
+    fn search_count(&self) -> usize {
+        self.searches.load(AtomicOrdering::SeqCst)
     }
 }
 
@@ -167,6 +177,7 @@ impl MemoryTrait for BlockingMemory {
     }
 
     fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
+        self.searches.fetch_add(1, AtomicOrdering::SeqCst);
         self.finished.notify_one();
         Ok(Vec::new())
     }
@@ -300,5 +311,38 @@ async fn cancelled_injection_leaves_the_injector_usable() {
         1,
         "the injector's cache must survive cancellation; a second backend \
          recall means it was reset to a fresh injector"
+    );
+}
+
+/// Corrections are recalled once per TURN, not once per agent-loop iteration.
+///
+/// `inject_memories` runs on every iteration. Injection memoises by context
+/// hash, but `recall_corrections` had no cache at all -- measured at 8.8s per
+/// call returning zero rows on a 1.7 GB store, so a twenty-round turn re-paid
+/// ~176 seconds answering the same question. Against that shape this fails with
+/// `left: 3`.
+///
+/// A NEW turn must still recall: the cache is keyed on `turn_number` precisely
+/// so a correction recorded at the end of one turn is visible in the next.
+#[tokio::test(flavor = "current_thread")]
+async fn corrections_are_recalled_once_per_turn_not_once_per_round() {
+    let memory = Arc::new(BlockingMemory::slow(std::time::Duration::ZERO));
+    let mut agent = agent_with_memory(Arc::clone(&memory));
+
+    for _ in 0..3 {
+        let _ = agent.inject_memories().await;
+    }
+    assert_eq!(
+        memory.search_count(),
+        1,
+        "three rounds of one turn must recall corrections once"
+    );
+
+    agent.turn_number += 1; // what `begin_process_turn` does at the top of a turn
+    let _ = agent.inject_memories().await;
+    assert_eq!(
+        memory.search_count(),
+        2,
+        "a new turn must recall again, or a correction recorded at the end of          the previous turn would never be seen"
     );
 }

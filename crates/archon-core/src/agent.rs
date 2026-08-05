@@ -119,6 +119,22 @@ pub struct Agent {
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     turn_number: u64,
+    /// Corrections recalled for the current turn, and the turn they belong to.
+    ///
+    /// `inject_memories` runs on EVERY iteration of the agent loop, and
+    /// `recall_corrections` has no cache of its own -- measured at 8.8s per
+    /// call returning zero rows on a 1.7 GB store, so a twenty-round turn spent
+    /// ~176 seconds re-answering the same question. Injection already memoises
+    /// by context hash; this gives corrections the equivalent.
+    ///
+    /// Keyed on the TURN, not on the context. A context-hash cache is unsound
+    /// here: four identical consecutive messages produce the same hash, and the
+    /// message most likely to be repeated verbatim is a correction. Keying on
+    /// the turn avoids that entirely, because corrections are only ever
+    /// recorded at turn END (`detect_and_record_correction`, called from
+    /// `turn_completion`), so no new correction can appear mid-turn for this
+    /// cache to miss.
+    recalled_corrections: Option<(u64, Vec<archon_consciousness::corrections::Correction>)>,
     // GAP 5/7: Memory graph + injector for per-turn injection and auto-extraction
     memory: Option<Arc<dyn MemoryTrait>>,
     /// Shared so the per-turn recall can run on the blocking pool without

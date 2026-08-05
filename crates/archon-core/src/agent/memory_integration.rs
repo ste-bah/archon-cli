@@ -128,7 +128,15 @@ impl Agent {
             });
 
         let recalled = match self.recall_off_executor(graph, context).await {
-            Some(recalled) => recalled,
+            Some(recalled) => {
+                // Bank a successful recall for the rest of this turn. Only Ok
+                // is cached: an error is a transient failure worth retrying on
+                // the next round, not an answer.
+                if let Ok(corrections) = &recalled.corrections {
+                    self.recalled_corrections = Some((self.turn_number, corrections.clone()));
+                }
+                recalled
+            }
             // Cancelled, or the blocking task died. Either way there is nothing
             // to inject and the caller is about to unwind anyway.
             None => return system,
@@ -255,6 +263,17 @@ impl Agent {
             return None;
         }
 
+        // Corrections are recalled ONCE per turn, not once per agent-loop
+        // iteration. Measured at 8.8s per call returning zero rows, so a
+        // twenty-round turn re-paid ~176 seconds answering the same question.
+        // Safe because corrections are only recorded at turn END, so none can
+        // appear mid-turn for this to miss -- see `recalled_corrections`.
+        let turn = self.turn_number;
+        let cached_corrections = match &self.recalled_corrections {
+            Some((cached_turn, corrections)) if *cached_turn == turn => Some(corrections.clone()),
+            _ => None,
+        };
+
         let injector = Arc::clone(&self.memory_injector);
         let handle = tokio::task::spawn_blocking(move || {
             // Timed and reported on EVERY outcome, including the empty one.
@@ -281,14 +300,21 @@ impl Agent {
                 ),
             };
             let injection_ms = started.elapsed().as_millis();
-            let tracker = CorrectionTracker::new(graph.as_ref());
             let recall_started = std::time::Instant::now();
-            let corrections =
-                tracker.recall_corrections(&context.join(" "), RECALLED_CORRECTION_LIMIT);
+            let (corrections, recall_cached) = match cached_corrections {
+                Some(cached) => (Ok(cached), true),
+                None => {
+                    let tracker = CorrectionTracker::new(graph.as_ref());
+                    let recalled =
+                        tracker.recall_corrections(&context.join(" "), RECALLED_CORRECTION_LIMIT);
+                    (recalled, false)
+                }
+            };
             tracing::info!(
                 injection_ms,
                 injection_bytes = injected.as_ref().map(String::len).unwrap_or(0),
                 recall_ms = recall_started.elapsed().as_millis(),
+                recall_cached,
                 recalled = corrections.as_ref().map(Vec::len).unwrap_or(0),
                 "memory recall complete"
             );

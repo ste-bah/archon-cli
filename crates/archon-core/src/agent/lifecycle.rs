@@ -33,6 +33,7 @@ impl Agent {
             checkpoint_store: None,
             plan_store: None,
             turn_number: 0,
+            recalled_corrections: None,
             memory: None,
             memory_injector: Arc::new(std::sync::Mutex::new(MemoryInjector::new())),
             extraction_config: ExtractionConfig::default(),
