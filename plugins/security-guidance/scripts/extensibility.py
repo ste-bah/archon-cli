@@ -234,9 +234,9 @@ def _group_quantifier(regex: str, closing_index: int) -> str:
         return ""
     if len(bounds) == 1:
         return "{}" if int(bounds[0] or "0") > 1 else ""
-    if not bounds[1] or int(bounds[1]) > int(bounds[0] or "0"):
+    if not bounds[1]:
         return "{}"
-    return ""
+    return "{}" if int(bounds[1]) > 1 else ""
 
 
 def _new_group(flag_unsafe: bool) -> Dict[str, Any]:

@@ -119,6 +119,37 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self.assertTrue(extensibility._has_redos_structure(pattern))
 
+    def test_allows_nested_repetition_with_outer_maximum_one(self):
+        pattern = r"(a+){,1}"
+
+        self.assertFalse(extensibility._has_redos_structure(pattern))
+        self.assertIsNotNone(
+            extensibility._validate_pattern(
+                {"rule_name": "bounded", "reminder": "test", "regex": pattern}, source="test"
+            )
+        )
+
+    def test_nested_repetition_respects_bounded_outer_maximum(self):
+        safe = (r"(a+){,0}", r"(a+){,1}", r"(a+){0,1}", r"(a+){1,1}")
+        unsafe = (r"(a+){,2}", r"(a+){1,2}", r"(a+){,}", r"(a+){2,}")
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "bounded", "reminder": "test", "regex": pattern}, source="test"
+                    )
+                )
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(extensibility._has_redos_structure(pattern))
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "bounded", "reminder": "test", "regex": pattern}, source="test"
+                    )
+                )
+
     def test_allows_single_variable_quantifiers_for_escaped_atoms(self):
         patterns = (
             r"\N{LATIN CAPITAL LETTER A}*",
@@ -136,6 +167,15 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     extensibility._validate_pattern(
                         {"rule_name": "escaped", "reminder": "test", "regex": pattern},
                         source="test",
+                    )
+                )
+
+    def test_rejects_malformed_multi_character_escapes_without_scanner_errors(self):
+        for pattern in (r"\N{unterminated", r"\x4", r"\u041", r"\U0000004"):
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "invalid", "reminder": "test", "regex": pattern}, source="test"
                     )
                 )
 
