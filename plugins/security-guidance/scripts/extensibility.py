@@ -144,7 +144,7 @@ def _validated_regex(name: str, regex: str) -> Optional[str]:
         return None
     try:
         re.compile(regex)
-    except re.error as exc:
+    except (re.error, OverflowError) as exc:
         debug_log(f"extensibility: skipping {name}: invalid regex: {exc}")
         return None
     return regex

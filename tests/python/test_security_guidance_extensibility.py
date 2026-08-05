@@ -179,6 +179,35 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
+    def test_rejects_unrepresentable_repeat_bounds_without_crashing(self):
+        enormous_bound = "9" * 30
+
+        for pattern in (f"a{{{enormous_bound}}}", f"a{{0,{enormous_bound}}}"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "overflow", "reminder": "test", "regex": pattern},
+                        source="test",
+                    )
+                )
+
+    def test_invalid_and_fixed_repeat_bounds_remain_compiler_validated(self):
+        self.assertIsNone(
+            extensibility._validate_pattern(
+                {"rule_name": "reversed", "reminder": "test", "regex": r"a{2,1}"}, source="test"
+            )
+        )
+
+        for pattern in (r"a{2}b{2}", r"(?:ab){2}c{2}"):
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(
+                    extensibility._validate_pattern(
+                        {"rule_name": "fixed", "reminder": "test", "regex": pattern}, source="test"
+                    )
+                )
+
     def test_allows_single_variable_quantifiers_and_invalid_syntax_fails_closed(self):
         for pattern in (r"a*", r"a+?", r"a{1,1}", r"^hello+$", r"(?:cat|dog)+", r"(?m)(a|b)*"):
             with self.subTest(pattern=pattern):
