@@ -2,17 +2,22 @@ import hashlib
 import os
 import sys
 import tempfile
+import types
 import unittest
+
 from pathlib import Path
 from types import MappingProxyType
 from unittest import mock
 
+import pydantic as installed_pydantic
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import archon_marker_server as server  # noqa: E402
+
+PydanticV1Shim = types.SimpleNamespace(BaseModel=installed_pydantic.BaseModel)
 
 
 class MarkerServerSecurityTests(unittest.TestCase):
@@ -83,6 +88,31 @@ class MarkerServerSecurityTests(unittest.TestCase):
         self.assertEqual(set(catalogue.values()), {self.pdf.resolve()})
         self.assertNotIn(server.pdf_id_for_path(outside.resolve()), catalogue)
 
+    def test_pdf_catalogue_deduplicates_in_root_pdf_symlink_by_canonical_target(self):
+        alias = self.root / "paper-alias.pdf"
+        try:
+            alias.symlink_to(self.pdf)
+        except OSError:
+            self.skipTest("symlinks are unavailable on this platform")
+
+        catalogue = server.build_pdf_catalogue(self.root.resolve())
+        canonical_id = server.pdf_id_for_path(self.pdf.resolve())
+
+        self.assertEqual(dict(catalogue), {canonical_id: self.pdf.resolve()})
+
+    def test_pdf_catalogue_excludes_pdf_symlink_to_in_root_non_pdf_target(self):
+        notes = self.root / "notes.txt"
+        notes.write_text("not a PDF")
+        alias = self.root / "notes-alias.pdf"
+        try:
+            alias.symlink_to(notes)
+        except OSError:
+            self.skipTest("symlinks are unavailable on this platform")
+
+        catalogue = server.build_pdf_catalogue(self.root.resolve())
+
+        self.assertEqual(set(catalogue.values()), {self.pdf.resolve()})
+
     def test_pdf_catalogue_skips_non_utf8_canonical_paths(self):
         invalid_path = os.fsencode(self.root) + b"/invalid-\xff.pdf"
         fd = os.open(invalid_path, os.O_WRONLY | os.O_CREAT, 0o600)
@@ -137,6 +167,22 @@ class MarkerServerSecurityTests(unittest.TestCase):
                 "/convert",
                 json={"pdf_id": pdf_id, "pdf_path": str(self.pdf.resolve())},
             )
+
+        self.assertEqual(
+            (response.status_code, response.json(), run_marker.call_count),
+            (400, {"error": "invalid request"}, 0),
+        )
+
+    def test_convert_rejects_extra_fields_with_pydantic_v1_config(self):
+        pdf_id = server.pdf_id_for_path(self.pdf.resolve())
+
+        with mock.patch.dict(sys.modules, {"pydantic": PydanticV1Shim}):
+            app = server.build_app("cpu", {}, MappingProxyType({pdf_id: self.pdf.resolve()}))
+            with mock.patch.object(server, "run_marker") as run_marker:
+                response = TestClient(app).post(
+                    "/convert",
+                    json={"pdf_id": pdf_id, "unexpected": "forbidden"},
+                )
 
         self.assertEqual(
             (response.status_code, response.json(), run_marker.call_count),

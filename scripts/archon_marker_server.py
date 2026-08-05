@@ -201,7 +201,7 @@ def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
     from fastapi import FastAPI, Request
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, Response
-    from pydantic import BaseModel, ConfigDict
+    from pydantic import BaseModel
 
     app = FastAPI(title="archon-marker-server")
 
@@ -214,11 +214,12 @@ def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
     convert_lock = threading.Lock()
 
     class ConvertRequest(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
         pdf_id: str
         device: "str | None" = None
         page_range: "str | None" = None  # 'S-E', 0-indexed inclusive (sidecar --page-range)
+
+        class Config:
+            extra = "forbid"
 
     @app.get("/health")
     def health():
