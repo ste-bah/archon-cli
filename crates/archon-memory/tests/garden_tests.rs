@@ -583,6 +583,7 @@ fn garden_report_format() {
         total_memories_before: 892,
         total_memories_after: 875,
         duration_ms: 342,
+        review_pairs: Vec::new(),
     };
     let formatted = report.format();
     assert!(

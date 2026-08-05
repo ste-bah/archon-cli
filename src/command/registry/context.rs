@@ -127,6 +127,14 @@ pub struct CommandContext {
     /// required — `/memory clear` performs the `clear_all()` mutation
     /// via a direct sync call inside `execute`, not an async write-back.
     pub(crate) memory: Option<Arc<dyn archon_memory::MemoryTrait>>,
+    /// Model used for command-initiated LLM work.
+    ///
+    /// Added for `/garden`, which adjudicates the consolidation review band in
+    /// the background and needs a model name for `LlmClient::send_message`.
+    /// Populated unconditionally, like `memory`: it is one `String` clone per
+    /// dispatch, and gating it per-command would cost more in branching than it
+    /// saves.
+    pub(crate) default_model: Option<String>,
     /// TASK-AGS-POST-6-BODIES-B13-GARDEN DIRECT-pattern field (/garden).
     ///
     /// Clone of `SlashCommandContext::garden_config` populated

@@ -1,7 +1,7 @@
 use cozo::ScriptMutability;
 
 use crate::search;
-use crate::types::{Memory, MemoryError, SearchFilter, is_superseded};
+use crate::types::{Memory, MemoryError, MemoryType, SearchFilter, is_superseded};
 
 /// Remove memories folded into another by consolidation.
 ///
@@ -15,6 +15,23 @@ fn drop_superseded(memories: Vec<Memory>) -> Vec<Memory> {
     memories
         .into_iter()
         .filter(|memory| !is_superseded(&memory.tags))
+        .collect()
+}
+
+/// Remove serialised agent state from results meant to be read as memories.
+///
+/// Personality and inner-voice snapshots are stored in the memory graph but are
+/// not knowledge -- they are JSON blobs of runtime state. Left in, they surface
+/// in ordinary recall as raw JSON and compete with real memories for the
+/// injection budget.
+///
+/// Only untyped reads are filtered. A caller that asks for
+/// `MemoryType::PersonalitySnapshot` explicitly -- which is exactly how
+/// `archon_consciousness::persistence` loads them back -- still receives them.
+fn drop_state_snapshots(memories: Vec<Memory>) -> Vec<Memory> {
+    memories
+        .into_iter()
+        .filter(|memory| memory.memory_type != MemoryType::PersonalitySnapshot)
         .collect()
 }
 
@@ -44,7 +61,7 @@ impl MemoryGraph {
         } else {
             search::recall(&self.db, query, limit)
         };
-        Ok(drop_superseded(results?))
+        Ok(drop_state_snapshots(drop_superseded(results?)))
     }
 
     /// Structured search with filters.
@@ -61,6 +78,12 @@ impl MemoryGraph {
         // Superseded rows are dropped before the limit is applied, so a page of
         // results is never silently shortened by memories the caller cannot see.
         let mut results = drop_superseded(search::search(&self.db, filter)?);
+        // Snapshots are withheld unless asked for by type. `search_snapshots` in
+        // `archon-consciousness` sets exactly that filter, so persistence keeps
+        // working while ordinary searches stop returning JSON blobs.
+        if filter.memory_type != Some(MemoryType::PersonalitySnapshot) {
+            results = drop_state_snapshots(results);
+        }
         if let Some(limit) = filter.limit {
             results.truncate(limit);
         }
@@ -70,11 +93,11 @@ impl MemoryGraph {
     /// List the most recently created memories (up to `limit`).
     pub fn list_recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
         let all = read_all_memories(&self.db)?;
-        let mut memories: Vec<Memory> = drop_superseded(
+        let mut memories: Vec<Memory> = drop_state_snapshots(drop_superseded(
             all.into_iter()
                 .filter_map(|raw| raw_to_memory(raw).ok())
                 .collect(),
-        );
+        ));
         // Sort descending by created_at (newest first)
         memories.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         memories.truncate(limit);

@@ -13,6 +13,7 @@ fn make_emit_test_ctx(tui_tx: archon_tui::event_channel::TuiEventSender) -> Comm
         session_id: None,
         session_store: None,
         memory: None,
+        default_model: None,
         garden_config: None,
         fast_mode_shared: None,
         show_thinking: None,

@@ -19,6 +19,45 @@ async fn display_initial_resume_history(
     crate::session_loop::session_history::send_history(tui_event_tx, &banner, messages).await
 }
 
+/// The most recent inner-voice snapshot, newest first.
+///
+/// Fetched by explicit type rather than `recall_memories("inner_voice_snapshot")`.
+/// The text-search form only worked because the row was written as a `Fact` at
+/// importance 90, which floated a JSON blob of runtime state above every real
+/// memory in ordinary recall.
+///
+/// Falls back to the legacy `Fact` shape so stores written by earlier versions
+/// still restore. Without that, upgrading would silently lose the inner-voice
+/// state -- silently, because the caller has no else branch.
+fn latest_inner_voice_snapshot(
+    memory: &dyn archon_memory::MemoryTrait,
+) -> Option<archon_memory::types::Memory> {
+    let newest = |mut rows: Vec<archon_memory::types::Memory>| {
+        rows.retain(|m| m.tags.iter().any(|t| t == "inner_voice_snapshot"));
+        rows.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+        rows.into_iter().next()
+    };
+
+    let typed = memory
+        .search_memories(&archon_memory::types::SearchFilter {
+            memory_type: Some(archon_memory::types::MemoryType::PersonalitySnapshot),
+            ..Default::default()
+        })
+        .ok()
+        .and_then(newest);
+    if typed.is_some() {
+        return typed;
+    }
+
+    memory
+        .search_memories(&archon_memory::types::SearchFilter {
+            tags: vec!["inner_voice_snapshot".to_string()],
+            ..Default::default()
+        })
+        .ok()
+        .and_then(newest)
+}
+
 async fn replay_resumed_conversation(
     tui_event_tx: &TuiEventSender,
     messages: Vec<serde_json::Value>,
@@ -231,8 +270,7 @@ pub(super) async fn finish(
         }
         if archon_consciousness::inner_voice::InnerVoice::is_enabled(
             config.consciousness.inner_voice,
-        ) && let Ok(memories) = memory.recall_memories("inner_voice_snapshot", 1)
-            && let Some(m) = memories.first()
+        ) && let Some(m) = latest_inner_voice_snapshot(memory.as_ref())
             && let Ok(snapshot) = serde_json::from_str::<
                 archon_consciousness::inner_voice::InnerVoiceSnapshot,
             >(&m.content)

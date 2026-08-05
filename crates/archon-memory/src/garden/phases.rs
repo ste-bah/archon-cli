@@ -169,9 +169,9 @@ pub(super) fn phase_semantic_dedup(
     merge_distance: f64,
     review_distance: f64,
     merge_budget: usize,
-) -> Result<(usize, usize), MemoryError> {
+) -> Result<(usize, Vec<super::ReviewPair>), MemoryError> {
     let mut merged = 0usize;
-    let mut linked = 0usize;
+    let mut review: Vec<super::ReviewPair> = Vec::new();
     let mut superseded_ids: HashSet<String> = HashSet::new();
 
     for mt in &PRUNEABLE_TYPES {
@@ -212,7 +212,22 @@ pub(super) fn phase_semantic_dedup(
                     // A band whose purpose is to withhold a decision must not
                     // write anything another phase treats as a decision, so it
                     // reports and mutates nothing.
-                    linked += 1;
+                    // Recorded for the caller to judge. Deduplicated by
+                    // ordered id pair, because a symmetric neighbour list
+                    // reports every pair from both sides.
+                    let (lo, hi) = if memory.id <= neighbour.id {
+                        (&memory.id, &neighbour.id)
+                    } else {
+                        (&neighbour.id, &memory.id)
+                    };
+                    if !review.iter().any(|p| p.a_id == *lo && p.b_id == *hi) {
+                        review.push(super::ReviewPair {
+                            a_id: lo.clone(),
+                            b_id: hi.clone(),
+                            a_content: memory.content.clone(),
+                            b_content: neighbour.content.clone(),
+                        });
+                    }
                     continue;
                 }
 
@@ -231,7 +246,43 @@ pub(super) fn phase_semantic_dedup(
         }
     }
 
-    Ok((merged, linked))
+    Ok((merged, review))
+}
+
+/// Merge the pairs an adjudicator judged to be the same claim.
+///
+/// Lives here so adjudicated merges go through exactly the same path as the
+/// automatic passes -- same survivor rule, same tag handling, same supersession
+/// -- rather than becoming a second, subtly different way to fold two memories
+/// together.
+pub(super) fn apply_adjudicated_merges(
+    graph: &dyn MemoryTrait,
+    verdicts: &[(super::ReviewPair, super::Adjudication)],
+) -> Result<usize, MemoryError> {
+    let mut merged = 0usize;
+    for (pair, verdict) in verdicts {
+        if *verdict != super::Adjudication::SameClaim {
+            continue;
+        }
+        // Re-read rather than trusting the snapshot the verdict was formed
+        // against. An adjudicator round-trip is slow enough for the store to
+        // have moved, and folding in a memory that has since been superseded
+        // would resurrect its tags into the survivor.
+        let (Ok(a), Ok(b)) = (
+            graph.inspect_memory(&pair.a_id),
+            graph.inspect_memory(&pair.b_id),
+        ) else {
+            continue;
+        };
+        if crate::types::is_superseded(&a.tags) || crate::types::is_superseded(&b.tags) {
+            continue;
+        }
+        let (survivor, victim) = pick_survivor(&a, &b);
+        if merge_duplicate(graph, survivor, victim) {
+            merged += 1;
+        }
+    }
+    Ok(merged)
 }
 
 pub(super) fn phase_dedup(

@@ -178,10 +178,14 @@ fn the_review_band_records_no_relationship() {
     // Inside the review band: closer than "unrelated", further than "the same".
     stub.link(&a, &b, 0.25);
 
-    let (merged, linked) = phase_semantic_dedup(&stub, 0.15, 0.35, 50).expect("dedup");
+    let (merged, review) = phase_semantic_dedup(&stub, 0.15, 0.35, 50).expect("dedup");
 
     assert_eq!(merged, 0, "the review band must never merge");
-    assert!(linked > 0, "the pair must still be counted for reporting");
+    assert_eq!(
+        review.len(),
+        1,
+        "the pair must still be reported for adjudication"
+    );
     assert!(
         stub.get_related_memories(&a, 1)
             .expect("related")
@@ -191,6 +195,97 @@ fn the_review_band_records_no_relationship() {
     );
     assert!(stub.get_memory(&a).is_ok());
     assert!(stub.get_memory(&b).is_ok());
+}
+
+/// A `SameClaim` verdict merges through the same path as the automatic passes.
+#[test]
+fn adjudicated_same_claim_merges_and_supersedes() {
+    let stub = StubNeighbours::new(graph());
+    let a = stub.store("Deploy only to eu-west-2", MemoryType::Fact, 0.6);
+    let b = stub.store("The deploy region is eu-west-2", MemoryType::Fact, 0.4);
+    let pair = super::ReviewPair {
+        a_id: a.clone(),
+        b_id: b.clone(),
+        a_content: "Deploy only to eu-west-2".into(),
+        b_content: "The deploy region is eu-west-2".into(),
+    };
+
+    let merged = super::apply_adjudicated_merges(&stub, &[(pair, super::Adjudication::SameClaim)])
+        .expect("apply");
+
+    assert_eq!(merged, 1);
+    let victim = stub.get_memory(&b).expect("victim retained");
+    assert!(crate::types::is_superseded(&victim.tags));
+    assert!(stub.get_memory(&a).is_ok());
+}
+
+/// A `Distinct` verdict must leave both memories alone.
+#[test]
+fn adjudicated_distinct_changes_nothing() {
+    let stub = StubNeighbours::new(graph());
+    let a = stub.store("Deploy to eu-west-2", MemoryType::Fact, 0.6);
+    let b = stub.store("Never deploy to us-east-1", MemoryType::Fact, 0.5);
+    let pair = super::ReviewPair {
+        a_id: a.clone(),
+        b_id: b.clone(),
+        a_content: "Deploy to eu-west-2".into(),
+        b_content: "Never deploy to us-east-1".into(),
+    };
+
+    let merged = super::apply_adjudicated_merges(&stub, &[(pair, super::Adjudication::Distinct)])
+        .expect("apply");
+
+    assert_eq!(merged, 0);
+    let a_row = stub.get_memory(&a).expect("a");
+    let b_row = stub.get_memory(&b).expect("b");
+    assert!(!crate::types::is_superseded(&a_row.tags));
+    assert!(!crate::types::is_superseded(&b_row.tags));
+}
+
+/// Verdicts are formed against a snapshot, and an adjudicator round-trip is slow.
+///
+/// If either memory was superseded in the meantime, applying the verdict would
+/// fold an already-dead row into a live one and drag its tags back with it.
+#[test]
+fn a_stale_verdict_on_an_already_superseded_memory_is_skipped() {
+    let stub = StubNeighbours::new(graph());
+    let a = stub.store("Deploy only to eu-west-2", MemoryType::Fact, 0.6);
+    let b = stub.store("The deploy region is eu-west-2", MemoryType::Fact, 0.4);
+    // Something else folded `b` away while the verdict was in flight.
+    let mut tags = stub.get_memory(&b).expect("b").tags;
+    tags.push(crate::types::SUPERSEDED_TAG.to_string());
+    stub.update_memory(&b, None, Some(&tags))
+        .expect("supersede");
+
+    let pair = super::ReviewPair {
+        a_id: a.clone(),
+        b_id: b.clone(),
+        a_content: "Deploy only to eu-west-2".into(),
+        b_content: "The deploy region is eu-west-2".into(),
+    };
+    let merged = super::apply_adjudicated_merges(&stub, &[(pair, super::Adjudication::SameClaim)])
+        .expect("apply");
+
+    assert_eq!(merged, 0, "a stale verdict must not be applied");
+}
+
+/// A verdict naming a memory that no longer exists is skipped, not fatal.
+#[test]
+fn a_verdict_for_a_missing_memory_does_not_fail_the_batch() {
+    let stub = StubNeighbours::new(graph());
+    let a = stub.store("still here", MemoryType::Fact, 0.6);
+    let pair = super::ReviewPair {
+        a_id: a.clone(),
+        b_id: "no-such-memory".into(),
+        a_content: "still here".into(),
+        b_content: "gone".into(),
+    };
+
+    let merged = super::apply_adjudicated_merges(&stub, &[(pair, super::Adjudication::SameClaim)])
+        .expect("a missing memory must not fail the batch");
+
+    assert_eq!(merged, 0);
+    assert!(stub.get_memory(&a).is_ok());
 }
 
 /// A store with no vector index degrades to a no-op rather than an error, so

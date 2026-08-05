@@ -317,11 +317,22 @@ impl Agent {
             if let Some(ref graph) = self.memory
                 && let Ok(json) = serde_json::to_string(&snapshot)
             {
+                // Typed as a snapshot, not a Fact.
+                //
+                // It was stored as `Fact` at importance 90 -- against a normal
+                // 0.5 -- because it is fetched with a text `recall_memories`
+                // call, and that weight is what floated it to the top. The cost
+                // was that a JSON blob of runtime state outranked every real
+                // memory in every recall and injection.
+                //
+                // `PersonalitySnapshot` is excluded from untyped reads and
+                // fetched by explicit type instead, so the weight is no longer
+                // doing any work and ordinary importance is correct.
                 let _ = graph.store_memory(
                     &json,
                     "inner_voice_snapshot",
-                    archon_memory::types::MemoryType::Fact,
-                    90.0,
+                    archon_memory::types::MemoryType::PersonalitySnapshot,
+                    0.5,
                     &["inner_voice_snapshot".to_string()],
                     "agent",
                     "",

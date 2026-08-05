@@ -234,9 +234,27 @@ subject, opposite instruction. So distance is banded:
 | up to `semantic_review_max_distance` (0.35) | linked with `RelatedTo`, nothing merged |
 | beyond | ignored |
 
-The middle band records that two memories are probably about the same thing
-without deciding whether they are the same claim. Run the calibration test
-before changing either value:
+The middle band is reported, not acted on. `/garden` then judges it in the
+background: the pairs go to the configured model, which answers `SAME` or
+`DIFFERENT` per pair, and only `SAME` verdicts are merged — through the same
+path as the automatic passes, so survivor selection and supersession are
+identical.
+
+Three properties keep a model acceptable in a path that supersedes memories:
+
+- **It only sees the ambiguous band.** Unambiguous merges never reach it and
+  neither do unrelated pairs, so cost scales with genuine ambiguity, capped at
+  20 pairs per run.
+- **Its mistakes are reversible.** Merges mark rather than delete.
+- **Every ambiguity defaults to not merging.** A truncated reply, a missing
+  line, added commentary, or a failed call all leave both memories intact. The
+  prompt states the asymmetry explicitly: keeping a duplicate costs a little
+  space, merging two different memories destroys one of them.
+
+Verdicts are re-checked against the store before being applied, because a
+round-trip is long enough for a memory to have been superseded in the meantime.
+
+Run the calibration test before changing either distance:
 
 ```bash
 cargo test -p archon-memory --test semantic_distance_calibration -- --ignored --nocapture
@@ -260,6 +278,21 @@ merge to be undone by removing the tag.
 One consequence worth knowing: the marker is a *status*, not a label, so it is
 stripped when tags are merged. Without that, folding a superseded memory into a
 live one propagates the marker and both disappear.
+
+### Snapshots are not memories
+
+Personality and inner-voice snapshots are serialised runtime state, stored in
+the memory graph as JSON. They are excluded from recall, search, and listing,
+and returned only to a caller that asks for `MemoryType::PersonalitySnapshot`
+explicitly — which is how `archon_consciousness::persistence` loads them back.
+
+The inner-voice snapshot was previously written as a `MemoryType::Fact` at
+importance **90.0**, against a normal 0.5. That was not an accident of
+classification: it is fetched with a text `recall_memories` call, and the weight
+is what floated it to the top of the results. The cost was that a JSON blob
+outranked every real memory in every recall and injection. It is now stored as a
+snapshot at ordinary importance and fetched by type, with a fallback to the old
+shape so stores written by earlier versions still restore.
 
 ## System details
 

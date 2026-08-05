@@ -69,6 +69,7 @@ pub(crate) fn build_command_context<'a>(
             // handler that needs a memory handle inherits this field for
             // free without a per-command builder match arm.
             memory: Some(Arc::clone(&slash_ctx.memory)),
+            default_model: Some(slash_ctx.default_model.clone()),
             // TASK-AGS-POST-6-BODIES-B13-GARDEN: /garden DIRECT-pattern
             // consumer. Populated UNCONDITIONALLY here (not gated on the
             // primary name, same as AGS-815 session_id and AGS-817 memory

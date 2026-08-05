@@ -12,7 +12,10 @@ use tracing::{info, warn};
 use crate::access::MemoryTrait;
 use crate::types::{Memory, MemoryError, MemoryType, SearchFilter};
 
+mod adjudication;
 mod phases;
+
+pub use adjudication::{Adjudication, ReviewPair, apply_adjudicated_merges};
 
 use phases::{
     DEDUP_MERGE_BUDGET, phase_dedup, phase_fragment_merge, phase_importance_decay,
@@ -48,10 +51,10 @@ fn default_semantic_dedup_max_distance() -> f64 {
 /// Upper bound of the review band.
 ///
 /// Between the merge distance and this, two memories are probably about the
-/// same thing but not provably the same claim. They are linked with a
-/// `RelatedTo` edge and left intact, so the pairing is visible without a
-/// judgement being made for you. This is the band an LLM adjudicator would
-/// eventually decide, and the band where a naive threshold does its damage.
+/// same thing but not provably the same claim. They are REPORTED as
+/// [`ReviewPair`]s and otherwise untouched, so the pairing is visible without a
+/// judgement being made for you. This is the band an adjudicator decides, and
+/// the band where a naive threshold does its damage.
 fn default_semantic_review_max_distance() -> f64 {
     0.35
 }
@@ -76,8 +79,8 @@ pub struct GardenConfig {
     #[serde(default = "default_semantic_dedup_max_distance")]
     pub semantic_dedup_max_distance: f64,
     /// Upper bound of the review band; pairs between the merge distance and
-    /// this are linked, never merged. Set equal to the merge distance to turn
-    /// review linking off.
+    /// this are reported for adjudication, never merged automatically. Set
+    /// equal to the merge distance to stop reporting them.
     #[serde(default = "default_semantic_review_max_distance")]
     pub semantic_review_max_distance: f64,
     pub staleness_days: u32,
@@ -115,6 +118,12 @@ pub struct GardenReport {
     pub total_memories_before: usize,
     pub total_memories_after: usize,
     pub duration_ms: u64,
+    /// Pairs that landed in the review band: probably the same subject, not
+    /// provably the same claim. Nothing has been done to them. A caller with a
+    /// provider can judge them and apply the verdicts with
+    /// [`apply_adjudicated_merges`].
+    #[serde(default)]
+    pub review_pairs: Vec<ReviewPair>,
 }
 
 /// All memory types for stats enumeration.
@@ -300,7 +309,7 @@ pub fn consolidate_with_run_id(
     // free and exact, so let it take the easy cases before spending vector
     // lookups. A store with no embeddings returns no neighbours and this is a
     // no-op.
-    let (semantic_merged, review_linked) = phase_semantic_dedup(
+    let (semantic_merged, review_pairs) = phase_semantic_dedup(
         graph,
         config.semantic_dedup_max_distance,
         config.semantic_review_max_distance,
@@ -309,7 +318,9 @@ pub fn consolidate_with_run_id(
     let duplicates_merged = lexical_merged + semantic_merged;
     info!(
         lexical_merged,
-        semantic_merged, review_linked, "phase 3: deduplication complete"
+        semantic_merged,
+        review_pairs = review_pairs.len(),
+        "phase 3: deduplication complete"
     );
 
     let fragments_merged = phase_fragment_merge(graph)?;
@@ -333,6 +344,7 @@ pub fn consolidate_with_run_id(
         total_memories_before: total_before,
         total_memories_after: total_after,
         duration_ms,
+        review_pairs,
     };
     info!(?report, "consolidation complete");
     Ok(report)

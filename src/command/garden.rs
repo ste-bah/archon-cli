@@ -167,6 +167,31 @@ impl CommandHandler for GardenHandler {
                 Ok(report) => {
                     let formatted = report.format();
                     ctx.emit(TuiEvent::TextDelta(format!("\n{formatted}\n")));
+
+                    // The review band is everything distance could not settle.
+                    // Judging it needs a provider and an async context, neither
+                    // of which the consolidation pass has, so it happens here
+                    // and afterwards -- the report above is already correct, and
+                    // any merges this produces are reversible.
+                    if !report.review_pairs.is_empty() {
+                        ctx.emit(TuiEvent::TextDelta(format!(
+                            "  {} pair(s) need judgement; reviewing in the background.\n",
+                            report.review_pairs.len()
+                        )));
+                        if let (Some(client), Some(memory_arc), Some(model)) = (
+                            ctx.llm_adapter.clone(),
+                            ctx.memory.clone(),
+                            ctx.default_model.clone(),
+                        ) {
+                            let pairs = report.review_pairs.clone();
+                            tokio::spawn(async move {
+                                crate::command::garden_adjudicate::adjudicate_and_apply(
+                                    client, memory_arc, pairs, model,
+                                )
+                                .await;
+                            });
+                        }
+                    }
                 }
                 Err(e) => {
                     ctx.emit(TuiEvent::Error(format!("Garden consolidation failed: {e}")));
