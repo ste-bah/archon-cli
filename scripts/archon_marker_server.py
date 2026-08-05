@@ -7,24 +7,24 @@ every document pays a ~6 GB model reload with the GPU idle. This server loads th
 and serves every document warm; archon selects it by setting `marker_url` in
 `.archon/policy.toml` (MarkerSource::Http).
 
-Contract (matched by `crates/archon-docs/src/marker_source.rs::fetch_json`):
-    POST /convert   {"pdf_path": "<absolute path>", "device": "cuda", "page_range": "S-E"?}
+Contract (matched by `crates/archon-docs/src/marker_source.rs`):
+    POST /convert   {"pdf_id": "<opaque canonical-path SHA-256>", "device": "cuda", "page_range": "S-E"?}
         → 200, the exact normalized block-tree JSON the sidecar prints to stdout
           (same shared core in archon_marker_core.py, same json.dumps(ensure_ascii=False))
-        → 400 for an invalid/out-of-root/non-PDF `pdf_path` or invalid page range,
+        → 400 for an unknown `pdf_id` or invalid request/page range,
           and 500 with fixed safe messages on conversion failure; detailed failures
           are written only to local server logs
     GET /health     → 200 {"status": "ok", "device": "<startup device>", "models_loaded": true}
 
-`--pdf-root` is required. Requested PDF paths must canonicalize beneath that root and have a
-`.pdf` suffix. The server binds to loopback by default; it has no authentication. Supplying
-`--allow-non-loopback` explicitly accepts exposure for a non-loopback host, but never weakens
-`--pdf-root` containment.
+`--pdf-root` is required. The server recursively freezes canonical regular PDFs beneath it at
+startup, indexed by deterministic opaque IDs. The server binds to loopback by default; it has no
+authentication. Supplying `--allow-non-loopback` explicitly accepts exposure for a non-loopback
+host, but never weakens catalogue containment.
 
 The request's `device` is ADVISORY: the models live on the device resolved at startup; a
 mismatching request device is logged and ignored (restart the server to change device).
-Server and archon run on the same host — the server reads `pdf_path` from the local
-filesystem, so no PDF bytes cross the wire.
+Server and archon run on the same host — the server reads only startup-catalogued PDFs from the
+local filesystem, so no PDF bytes cross the wire.
 
 Usage:
     /home/you/.venv-marker/bin/python3.11 scripts/archon_marker_server.py \
@@ -32,6 +32,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -39,6 +40,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from types import MappingProxyType
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from archon_marker_core import resolve_device, run_marker  # noqa: E402
@@ -60,6 +62,37 @@ def canonical_pdf_root(path: str) -> Path:
     return root
 
 
+def pdf_id_for_path(canonical_path: Path) -> str:
+    """Return the deterministic opaque ID for a canonical UTF-8 PDF path."""
+    try:
+        path_text = str(canonical_path)
+        path_bytes = path_text.encode("utf-8")
+    except UnicodeError:
+        raise ValueError("canonical pdf path is not valid UTF-8") from None
+    return hashlib.sha256(path_bytes).hexdigest()
+
+
+def build_pdf_catalogue(pdf_root: Path) -> MappingProxyType:
+    """Freeze the canonical regular PDFs within ``pdf_root`` under opaque IDs."""
+    catalogue = {}
+    for candidate in pdf_root.rglob("*"):
+        try:
+            canonical = candidate.resolve(strict=True)
+            canonical.relative_to(pdf_root)
+            if canonical.suffix.lower() != ".pdf" or not canonical.is_file():
+                continue
+            pdf_id = pdf_id_for_path(canonical)
+        except (OSError, UnicodeError, ValueError):
+            continue
+        existing = catalogue.get(pdf_id)
+        if existing is not None:
+            if existing != canonical:
+                raise ValueError("PDF catalogue ID collision")
+            continue
+        catalogue[pdf_id] = canonical
+    return MappingProxyType(catalogue)
+
+
 def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
     """Require explicit opt-in before exposing this unauthenticated server externally."""
     if host.lower() == "localhost":
@@ -70,36 +103,6 @@ def validate_bind_host(host: str, allow_non_loopback: bool) -> None:
         is_loopback = False
     if not is_loopback and not allow_non_loopback:
         raise ValueError("non-loopback --host requires --allow-non-loopback")
-
-
-def is_within_pdf_root(root: str, candidate: str) -> bool:
-    """Confirm a candidate parent is the same filesystem object as the PDF root."""
-    ancestor = os.path.dirname(candidate)
-    while True:
-        if os.path.samefile(ancestor, root):
-            return True
-        parent = os.path.dirname(ancestor)
-        if parent == ancestor:
-            return False
-        ancestor = parent
-
-
-def resolve_pdf_path(pdf_root: Path, requested: str) -> Path:
-    """Return an existing PDF only when its canonical path is within ``pdf_root``."""
-    try:
-        root = os.path.realpath(os.fspath(pdf_root), strict=True)
-        candidate = os.path.realpath(os.path.expanduser(requested), strict=True)
-        common = os.path.commonpath((root, candidate))
-        if common != root:
-            raise ValueError
-        if not is_within_pdf_root(root, candidate):
-            raise ValueError
-        resolved = Path(candidate)
-        if resolved.suffix.lower() != ".pdf" or not resolved.is_file():
-            raise ValueError
-    except (OSError, ValueError):
-        raise ValueError("invalid pdf_path") from None
-    return resolved
 
 
 # Marker pages are rendered into memory; accepting more than 1,000 pages in one
@@ -167,6 +170,7 @@ def main(argv: "list[str]") -> int:
 
     try:
         pdf_root = canonical_pdf_root(args.pdf_root)
+        pdf_catalogue = build_pdf_catalogue(pdf_root)
         validate_bind_host(args.host, args.allow_non_loopback)
     except ValueError as exc:
         parser.error(str(exc))
@@ -180,7 +184,7 @@ def main(argv: "list[str]") -> int:
     models = create_model_dict()
     log(f"models loaded in {time.time() - t0:.1f}s; resident for the process lifetime")
 
-    app = build_app(device, models, pdf_root)
+    app = build_app(device, models, pdf_catalogue)
 
     import uvicorn
 
@@ -188,8 +192,8 @@ def main(argv: "list[str]") -> int:
     return 0
 
 
-def build_app(device: str, models: "dict", pdf_root: Path):
-    """Build the FastAPI app around a startup device, resident models, and PDF root.
+def build_app(device: str, models: "dict", pdf_catalogue: MappingProxyType):
+    """Build the FastAPI app around resident models and a frozen PDF catalogue.
 
     Extracted from `main` so the OOM ladder and endpoints are testable (TestClient + fake
     `models`) without a real GPU.
@@ -197,7 +201,7 @@ def build_app(device: str, models: "dict", pdf_root: Path):
     from fastapi import FastAPI, Request
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, Response
-    from pydantic import BaseModel
+    from pydantic import BaseModel, ConfigDict
 
     app = FastAPI(title="archon-marker-server")
 
@@ -210,7 +214,9 @@ def build_app(device: str, models: "dict", pdf_root: Path):
     convert_lock = threading.Lock()
 
     class ConvertRequest(BaseModel):
-        pdf_path: str
+        model_config = ConfigDict(extra="forbid")
+
+        pdf_id: str
         device: "str | None" = None
         page_range: "str | None" = None  # 'S-E', 0-indexed inclusive (sidecar --page-range)
 
@@ -222,10 +228,9 @@ def build_app(device: str, models: "dict", pdf_root: Path):
     def convert(req: ConvertRequest):
         if req.device and req.device not in ("auto", device):
             log(f"request device={req.device!r} ignored; models resident on {device!r}")
-        try:
-            pdf_path = resolve_pdf_path(pdf_root, req.pdf_path)
-        except ValueError:
-            return JSONResponse(status_code=400, content={"error": "invalid pdf_path"})
+        pdf_path = pdf_catalogue.get(req.pdf_id)
+        if pdf_path is None:
+            return JSONResponse(status_code=400, content={"error": "invalid pdf_id"})
         try:
             page_range = parse_page_range(req.page_range)
         except ValueError:
