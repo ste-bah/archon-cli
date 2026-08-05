@@ -163,8 +163,13 @@ pub(crate) async fn adjudicate_and_apply(
 
     match archon_memory::garden::apply_adjudicated_merges(memory.as_ref(), &decided) {
         Ok(merged) => {
+            // `understood` is logged on success as well as failure. Reporting
+            // it only on a shortfall meant a healthy run was identified by the
+            // ABSENCE of a warning, and absence is not evidence -- a filtered
+            // log, a changed level, or a swallowed line all look like health.
             tracing::info!(
                 judged = decided.len(),
+                understood,
                 same,
                 merged,
                 "memory consolidation adjudication complete"
