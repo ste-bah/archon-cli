@@ -64,6 +64,7 @@ hello.txt
 # Exception: phase-3 modularization final report (TUI-329).
 !/docs/tui-modularization-report.md
 # Exception: user-facing documentation tree (README split, v0.1.28+).
+!/docs/ingestion-and-corpus-index.md
 !/docs/README.md
 !/docs/trading-lab.md
 !/docs/getting-started/
