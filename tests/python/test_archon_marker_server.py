@@ -110,6 +110,24 @@ class MarkerServerSecurityTests(unittest.TestCase):
         self.assertEqual(legacy.status_code, 400)
         self.assertEqual(legacy.json(), {"error": "invalid request"})
 
+    def test_convert_rejects_pdf_path_when_valid_pdf_id_is_also_present(self):
+        pdf_id = hashlib.sha256(str(self.pdf.resolve()).encode("utf-8")).hexdigest()
+        app = server.build_app("cpu", {}, MappingProxyType({pdf_id: self.pdf.resolve()}))
+
+        with (
+            mock.patch.object(server, "resolve_pdf_path", return_value=self.pdf.resolve()),
+            mock.patch.object(server, "run_marker", return_value={"children": []}) as run_marker,
+        ):
+            response = TestClient(app).post(
+                "/convert",
+                json={"pdf_id": pdf_id, "pdf_path": str(self.pdf.resolve())},
+            )
+
+        self.assertEqual(
+            (response.status_code, response.json(), run_marker.call_count),
+            (400, {"error": "invalid request"}, 0),
+        )
+
     def test_canonical_pdf_root_returns_resolved_directory(self):
         self.assertEqual(
             server.canonical_pdf_root(str(self.root)),
