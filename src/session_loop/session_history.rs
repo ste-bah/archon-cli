@@ -14,23 +14,41 @@ impl std::fmt::Display for HistorySendError {
 
 impl std::error::Error for HistorySendError {}
 
+/// Restore `session_id` into the live agent and replay it into the transcript.
+///
+/// Returns whether the conversation was actually adopted. The caller uses this
+/// to decide whether to repoint subsequent writes at `session_id`; repointing
+/// after a failed load would write the previous conversation into a session it
+/// does not belong to.
 pub(super) async fn handle_resume_session(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
     store: &Arc<archon_session::storage::SessionStore>,
     session_id: &str,
-) {
-    if let Ok(meta) = store.get_session(session_id)
-        && let Some(name) = meta.name
-        && let Err(error) = input_tui_tx
-            .send_async(TuiEvent::SessionRenamed(name))
-            .await
-    {
-        tracing::warn!(%error, "resumed session name delivery failed");
-        return;
-    }
+) -> bool {
+    // Existence is checked separately from message loading because
+    // `load_messages` maps a missing session to `Ok(empty)`. Treating that as a
+    // successful resume would repoint writes at a session that does not exist,
+    // and the next persist would materialise it.
+    let exists = match store.get_session(session_id) {
+        Ok(meta) => {
+            if let Some(name) = meta.name
+                && let Err(error) = input_tui_tx
+                    .send_async(TuiEvent::SessionRenamed(name))
+                    .await
+            {
+                tracing::warn!(%error, "resumed session name delivery failed");
+                return false;
+            }
+            true
+        }
+        Err(error) => {
+            tracing::warn!(%error, session_id, "resume target session not found");
+            false
+        }
+    };
 
-    match store.load_messages(session_id) {
+    let restored = match store.load_messages(session_id) {
         Ok(raw_messages) => {
             let messages = parse_raw_messages(&raw_messages);
             let count = messages.len();
@@ -38,9 +56,10 @@ pub(super) async fn handle_resume_session(
             if send_history(input_tui_tx, &banner, &messages).await.is_ok() {
                 agent.lock().await.clear_conversation_detached().await;
                 agent.lock().await.restore_conversation(messages);
+                exists
             } else {
                 tracing::error!("failed to replay resumed session history");
-                return;
+                return false;
             }
         }
         Err(e) => {
@@ -49,16 +68,17 @@ pub(super) async fn handle_resume_session(
                 .await
             {
                 tracing::warn!(%error, "session load failure delivery failed");
-                return;
             }
+            false
         }
-    }
+    };
     if let Err(error) = input_tui_tx
         .send_async(TuiEvent::SlashCommandComplete)
         .await
     {
         tracing::warn!(%error, "resume command completion delivery failed");
     }
+    restored
 }
 
 pub(super) async fn handle_truncate_session(
@@ -192,6 +212,28 @@ fn message_text_content(msg: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// Pins the trap that `handle_resume_session`'s separate existence check
+    /// exists for.
+    ///
+    /// `load_messages` maps a missing session to `Ok(empty)` rather than an
+    /// error, so "we loaded messages, therefore we resumed" reports success for
+    /// an id that was never in the store. Adopting that id as the write target
+    /// would make the next `replace_messages` materialise the row. If this
+    /// assertion ever flips to an `Err`, the existence check can collapse back
+    /// into the load.
+    #[test]
+    fn load_messages_reports_empty_rather_than_error_for_a_missing_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = archon_session::storage::SessionStore::open(&dir.path().join("sessions.db"))
+            .expect("open session store");
+
+        let loaded = store
+            .load_messages("no-such-session-id")
+            .expect("a missing session must not surface as an error");
+
+        assert!(loaded.is_empty());
+    }
+
     #[tokio::test]
     async fn display_history_waits_for_capacity() {
         let (tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(1);

@@ -36,6 +36,10 @@ pub(super) struct FinishState {
     pub show_thinking: Arc<AtomicBool>,
     pub session_stats_shared: Arc<tokio::sync::Mutex<SessionStats>>,
     pub last_assistant_response_shared: Arc<tokio::sync::Mutex<String>>,
+    /// Which session row writes land in. Shared with the event forwarder here
+    /// and with the session loop by the caller, so a resume can move both at
+    /// once instead of leaving cost and history in different rows.
+    pub active_session: super::active_session::ActiveSessionId,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -197,6 +201,8 @@ pub(super) async fn finish(
     let (ask_user_tx, ask_user_rx) = tokio::sync::mpsc::channel::<String>(1);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(ask_user_rx)));
 
+    let active_session = super::active_session::ActiveSessionId::new(session_id);
+
     if let Some(messages) = resume_messages {
         let count = messages.len();
         let replayed = replay_resumed_conversation(&tui_event_tx, messages).await;
@@ -206,12 +212,22 @@ pub(super) async fn finish(
         }
         if let Some(Some(ref resume_id)) = cli.resume
             && let Ok(meta) = session_store.get_session(resume_id)
-            && let Some(name) = meta.name
-            && let Err(error) = tui_event_tx
-                .send_async(TuiEvent::SessionRenamed(name))
-                .await
         {
-            tracing::warn!(%error, "resumed session name delivery failed");
+            // Continue the session that was resumed rather than the row this
+            // launch minted. Without this the new row silently takes over:
+            // `post_turn` writes the whole restored conversation under the new
+            // id and the resumed row stays frozen at whatever it last held.
+            //
+            // `meta.id`, not `resume_id` -- the flag accepts an id prefix, and
+            // a prefix is not a key.
+            active_session.set(&meta.id);
+            if let Some(name) = meta.name
+                && let Err(error) = tui_event_tx
+                    .send_async(TuiEvent::SessionRenamed(name))
+                    .await
+            {
+                tracing::warn!(%error, "resumed session name delivery failed");
+            }
         }
         if archon_consciousness::inner_voice::InnerVoice::is_enabled(
             config.consciousness.inner_voice,
@@ -266,7 +282,7 @@ pub(super) async fn finish(
             session_stats: Arc::clone(&session_stats_shared),
             cost_alert_state,
             cost_config: config.cost.clone(),
-            session_id: session_id.to_string(),
+            active_session: active_session.clone(),
             session_store: Arc::clone(&session_store),
             permission_mode: Arc::clone(&permission_mode_shared),
             permission_events_db: governed_learning_db.clone(),
@@ -287,6 +303,7 @@ pub(super) async fn finish(
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,
+        active_session,
     }
 }
 

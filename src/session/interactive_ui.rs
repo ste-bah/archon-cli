@@ -68,6 +68,7 @@ pub(super) async fn run(
     active_model: String,
     auto_capture: Option<Arc<archon_pipeline::capture::AutoCapture>>,
     sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
+    active_session: super::active_session::ActiveSessionId,
 ) -> Result<()> {
     let auth_label = match resolve_auth_with_keys(
         env_vars.anthropic_api_key.as_deref(),
@@ -194,7 +195,7 @@ pub(super) async fn run(
             input_tui_tx,
             user_input_rx,
             session_store_for_input,
-            session_id_for_input,
+            active_session,
             persist_personality,
             personality_history_limit,
             session_start_instant,

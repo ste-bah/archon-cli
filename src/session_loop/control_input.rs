@@ -15,17 +15,29 @@ pub(super) struct ControlInputContext<'a> {
     pub(super) dispatcher: &'a Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     pub(super) mcp_lifecycle_tx: &'a McpLifecycleTx,
     pub(super) cmd_ctx: &'a SlashCommandContext,
+    pub(super) active_session: &'a crate::session::active_session::ActiveSessionId,
 }
 
 pub(super) async fn handle_control_input(input: &str, ctx: ControlInputContext<'_>) -> bool {
     if let Some(session_id) = input.strip_prefix("__resume_session__ ") {
-        handle_resume_session(
-            ctx.agent,
-            ctx.input_tui_tx,
-            ctx.session_store,
-            session_id.trim(),
-        )
-        .await;
+        let session_id = session_id.trim();
+        let resumed =
+            handle_resume_session(ctx.agent, ctx.input_tui_tx, ctx.session_store, session_id).await;
+        // Continue the session that was just restored instead of the row this
+        // process created at launch.
+        //
+        // Without this, resuming forks: the restored conversation is written
+        // back under the launch id by `post_turn`, the resumed row stays frozen
+        // at whatever it last held, and cost lands in a third place. Observed
+        // directly -- resuming a 2-turn session and running one turn left that
+        // row at 2 turns and moved all six messages into the launch row.
+        //
+        // Only on success. A failed load leaves the agent holding the previous
+        // conversation, and repointing writes at a session we could not read
+        // would overwrite it with content that does not belong to it.
+        if resumed {
+            ctx.active_session.set(session_id);
+        }
         return true;
     }
     if let Some(idx_str) = input.strip_prefix("__truncate_session__ ") {

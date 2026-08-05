@@ -24,7 +24,12 @@ pub(super) struct LoopInputContext<'a> {
     pub(super) config: &'a archon_core::config::ArchonConfig,
     pub(super) input_tui_tx: &'a archon_tui::event_channel::TuiEventSender,
     pub(super) session_store: &'a Arc<archon_session::storage::SessionStore>,
+    /// Process-scoped id: guardrail admission and topology claims register
+    /// against this and must not move mid-run.
     pub(super) session_id: &'a str,
+    /// Conversation-scoped id: persistence follows a resume to the session the
+    /// user picked.
+    pub(super) active_session: &'a crate::session::active_session::ActiveSessionId,
     pub(super) dispatcher: &'a Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     pub(super) adapter: &'a Arc<crate::agent_handle::AgentHandle>,
     pub(super) cmd_ctx: &'a mut SlashCommandContext,
@@ -105,6 +110,7 @@ async fn poll_completed_turn(ctx: LoopInputContext<'_>) {
         ctx.dispatcher,
         ctx.adapter,
         ctx.cmd_ctx,
+        ctx.active_session,
     )
     .await;
 }

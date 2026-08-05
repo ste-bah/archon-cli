@@ -13,7 +13,10 @@ pub(super) struct AgentEventForwarderConfig {
     pub session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub cost_alert_state: CostAlertState,
     pub cost_config: archon_core::config::CostConfig,
-    pub session_id: String,
+    /// Resolved per write, not captured once: a resume moves the target row
+    /// after this forwarder is constructed, and a snapshot taken here is what
+    /// used to send cost to one session and history to another.
+    pub active_session: super::active_session::ActiveSessionId,
     pub session_store: Arc<archon_session::storage::SessionStore>,
     pub permission_mode: Arc<tokio::sync::Mutex<String>>,
     pub permission_events_db: Option<Arc<cozo::DbInstance>>,
@@ -34,7 +37,7 @@ pub(super) fn spawn_agent_event_forwarder(
         session_stats,
         mut cost_alert_state,
         cost_config,
-        session_id,
+        active_session,
         session_store,
         permission_mode,
         permission_events_db,
@@ -44,6 +47,10 @@ pub(super) fn spawn_agent_event_forwarder(
     } = config;
     observability::spawn_named("agent-event-forwarder", async move {
         while let Some(timestamped) = event_rx.recv().await {
+            // Re-read per event rather than binding once outside the loop: a
+            // resume moves the target row mid-session, and this task outlives
+            // that move.
+            let session_id = active_session.get();
             let elapsed_ms = (timestamped.sent_at.elapsed().as_millis() as u64).max(1);
             metrics.record_latency_ms(elapsed_ms);
             metrics.record_drained(1);

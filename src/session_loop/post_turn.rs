@@ -27,10 +27,11 @@ pub(super) async fn handle_completed_turn(
     dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     adapter: &Arc<crate::agent_handle::AgentHandle>,
     cmd_ctx: &mut SlashCommandContext,
+    active_session: &crate::session::active_session::ActiveSessionId,
 ) {
     match queue.pop_front() {
         Some(PostTurnAction::PersistSession { guardrail }) => {
-            persist_session_messages(agent, session_store, session_id).await;
+            persist_session_messages(agent, session_store, active_session).await;
             if let Some(guardrail) = guardrail {
                 maybe_spawn_guardrail_repair(
                     outcome,
@@ -64,11 +65,18 @@ pub(super) async fn handle_completed_turn(
     }
 }
 
+/// Write the conversation to the session row it belongs to.
+///
+/// Takes the shared id rather than the loop's process-scoped one: a resume
+/// repoints this at the session the user picked, so continued work lands there
+/// instead of in the row this process minted at launch.
 async fn persist_session_messages(
     agent: &Arc<tokio::sync::Mutex<Agent>>,
     session_store: &Arc<archon_session::storage::SessionStore>,
-    session_id: &str,
+    active_session: &crate::session::active_session::ActiveSessionId,
 ) {
+    let session_id = active_session.get();
+    let session_id = session_id.as_str();
     let guard = agent.lock().await;
     let messages: Vec<String> = guard
         .conversation_state()
@@ -77,10 +85,19 @@ async fn persist_session_messages(
         .filter_map(|msg| serde_json::to_string(msg).ok())
         .collect();
     drop(guard);
-    if !messages.is_empty()
-        && let Err(error) = session_store.replace_messages(session_id, &messages)
-    {
-        tracing::warn!("replace_messages post-turn failed: {error}");
+    if messages.is_empty() {
+        // Previously silent. An empty conversation at turn end wrote nothing
+        // and logged nothing, so a session that banked cost but no messages
+        // left no evidence of why -- which is exactly the state a killed turn
+        // leaves behind.
+        tracing::warn!(
+            session_id,
+            "post-turn persist skipped: conversation is empty"
+        );
+        return;
+    }
+    if let Err(error) = session_store.replace_messages(session_id, &messages) {
+        tracing::warn!(session_id, %error, "replace_messages post-turn failed");
     }
 }
 

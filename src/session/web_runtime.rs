@@ -277,6 +277,7 @@ pub(crate) async fn spawn_web_session(
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,
+        active_session,
     } = super::interactive_finish::finish(
         &mut agent,
         config,
@@ -410,7 +411,7 @@ pub(crate) async fn spawn_web_session(
             tui_event_tx,
             user_input_rx,
             Arc::clone(&session_store),
-            session_id.to_string(),
+            active_session,
             persist_personality,
             personality_history_limit,
             session_start_instant,

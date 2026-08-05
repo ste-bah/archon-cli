@@ -72,7 +72,7 @@ pub(crate) fn run_session_loop(
     input_tui_tx: archon_tui::event_channel::TuiEventSender,
     mut user_input_rx: tokio::sync::mpsc::Receiver<String>,
     session_store_for_input: Arc<archon_session::storage::SessionStore>,
-    session_id_for_input: String,
+    active_session: crate::session::active_session::ActiveSessionId,
     persist_personality: bool,
     personality_history_limit: u32,
     session_start_instant: std::time::Instant,
@@ -109,7 +109,7 @@ pub(crate) fn run_session_loop(
 
         let adapter = Arc::new(crate::agent_handle::AgentHandle::new(
             Arc::clone(&agent),
-            session_id_for_input.clone(),
+            active_session.get(),
             auto_capture,
             auto_trainer.clone(),
         ));
@@ -147,6 +147,20 @@ pub(crate) fn run_session_loop(
             return finish_loop_result(shutdown_result, Some(error));
         }
 
+        // The id this PROCESS registers runtime state under: world-model
+        // guardrail admission and topology claims. It is deliberately NOT
+        // repointed by a resume.
+        //
+        // Those subsystems register a turn under one id and finalize it against
+        // a callback that captured its own copy at setup, so moving this mid-run
+        // makes the lookup miss and blocks the turn with "Guardrail action ...
+        // is not available for finalization". Found by running it, not by
+        // reading it -- the unit tests were all green.
+        //
+        // Only persistence and cost follow the resume, because only those
+        // describe the conversation rather than this process.
+        let session_id_for_input = active_session.get();
+
         let mut loop_error = None;
         loop {
             if last_busy_activity.elapsed() >= Duration::from_secs(30)
@@ -171,6 +185,7 @@ pub(crate) fn run_session_loop(
                 input_tui_tx: &input_tui_tx,
                 session_store: &session_store_for_input,
                 session_id: &session_id_for_input,
+                active_session: &active_session,
                 dispatcher: &agent_dispatcher,
                 adapter: &adapter,
                 cmd_ctx: &mut cmd_ctx,
@@ -205,6 +220,7 @@ pub(crate) fn run_session_loop(
                     dispatcher: &agent_dispatcher,
                     mcp_lifecycle_tx: &mcp_lifecycle_tx,
                     cmd_ctx: &cmd_ctx,
+                    active_session: &active_session,
                 },
             )
             .await

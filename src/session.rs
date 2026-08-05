@@ -13,6 +13,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_tui::observability;
 
 use crate::runtime::provider_observer::observe_llm_provider_with_profile;
+pub(crate) mod active_session;
 mod activity;
 mod agent_ledger;
 mod btw;
@@ -361,6 +362,7 @@ pub(crate) async fn run_interactive_session(
         show_thinking,
         session_stats_shared,
         last_assistant_response_shared,
+        active_session,
     } = interactive_finish::finish(
         &mut agent,
         config,
@@ -436,6 +438,7 @@ pub(crate) async fn run_interactive_session(
         active_model,
         auto_capture,
         sandbox_audit_drain,
+        active_session,
     )
     .await
 }
