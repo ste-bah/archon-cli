@@ -5,19 +5,29 @@ import tempfile
 import types
 import unittest
 
+from contextlib import nullcontext
 from pathlib import Path
 from types import MappingProxyType
 from unittest import mock
 
-import pydantic as installed_pydantic
+import pydantic.v1 as pydantic_v1
 from fastapi.testclient import TestClient
+from pydantic import ValidationError as InstalledValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import archon_marker_server as server  # noqa: E402
 
-PydanticV1Shim = types.SimpleNamespace(BaseModel=installed_pydantic.BaseModel)
+PydanticV1Shim = types.SimpleNamespace(
+    BaseModel=pydantic_v1.BaseModel,
+    StrictStr=pydantic_v1.StrictStr,
+)
+
+MODEL_RUNTIMES = (
+    ("installed", None, InstalledValidationError),
+    ("v1", PydanticV1Shim, pydantic_v1.ValidationError),
+)
 
 
 class MarkerServerSecurityTests(unittest.TestCase):
@@ -172,6 +182,40 @@ class MarkerServerSecurityTests(unittest.TestCase):
             (response.status_code, response.json(), run_marker.call_count),
             (400, {"error": "invalid request"}, 0),
         )
+
+    def test_convert_request_fields_are_strict_strings_or_null(self):
+        invalid_values = (True, False, 1, 1.5, [], ["text"], {}, {"value": "text"})
+
+        for runtime, shim, validation_error in MODEL_RUNTIMES:
+            patcher = mock.patch.dict(sys.modules, {"pydantic": shim}) if shim else nullcontext()
+            with self.subTest(runtime=runtime), patcher:
+                model = server._convert_request_model()
+                valid = model(pdf_id="document", device=None, page_range=None)
+                self.assertEqual((valid.pdf_id, valid.device, valid.page_range), ("document", None, None))
+                for field in ("pdf_id", "device", "page_range"):
+                    for value in invalid_values + ((None,) if field == "pdf_id" else ()):
+                        payload = {"pdf_id": "document", field: value}
+                        with self.subTest(runtime=runtime, field=field, value=value):
+                            with self.assertRaises(validation_error):
+                                model(**payload)
+
+    def test_convert_rejects_numeric_device_before_calling_marker(self):
+        pdf_id = server.pdf_id_for_path(self.pdf.resolve())
+
+        for runtime, shim, *_ in MODEL_RUNTIMES:
+            patcher = mock.patch.dict(sys.modules, {"pydantic": shim}) if shim else nullcontext()
+            with self.subTest(runtime=runtime), patcher:
+                app = server.build_app(
+                    "cpu", {}, MappingProxyType({pdf_id: self.pdf.resolve()})
+                )
+                with mock.patch.object(server, "run_marker") as run_marker:
+                    response = TestClient(app).post(
+                        "/convert", json={"pdf_id": pdf_id, "device": 123}
+                    )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {"error": "invalid request"})
+                run_marker.assert_not_called()
 
     def test_convert_rejects_extra_fields_with_pydantic_v1_config(self):
         pdf_id = server.pdf_id_for_path(self.pdf.resolve())

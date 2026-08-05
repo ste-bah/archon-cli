@@ -215,29 +215,74 @@ def _glob_match(path: str, include: Tuple[str, ...], exclude: Tuple[str, ...]) -
 # atoms. The last rule intentionally fails closed instead of interpreting sets.
 
 
+def _quantifier_bounds_at(regex: str, index: int) -> Optional[Tuple[int, str, Optional[str]]]:
+    """Return a braced quantifier's exclusive end and decimal bounds."""
+    if index >= len(regex) or regex[index] != "{":
+        return None
+    cursor = index + 1
+    lower_start = cursor
+    while cursor < len(regex) and regex[cursor].isdecimal():
+        cursor += 1
+    lower = regex[lower_start:cursor]
+    if cursor < len(regex) and regex[cursor] == "}":
+        return (cursor + 1, lower, None) if lower else None
+    if cursor >= len(regex) or regex[cursor] != ",":
+        return None
+    cursor += 1
+    upper_start = cursor
+    while cursor < len(regex) and regex[cursor].isdecimal():
+        cursor += 1
+    if cursor >= len(regex) or regex[cursor] != "}":
+        return None
+    return cursor + 1, lower, regex[upper_start:cursor]
+
+
+def _decimal_greater(left: str, right: str) -> bool:
+    """Compare non-negative decimal strings without constructing huge integers."""
+    normalized_left = left.lstrip("0") or "0"
+    normalized_right = right.lstrip("0") or "0"
+    return (len(normalized_left), normalized_left) > (len(normalized_right), normalized_right)
+
+
+def _bounds_are_variable(lower: str, upper: Optional[str]) -> bool:
+    """Return whether parsed decimal bounds permit more than one repeat count."""
+    return upper is not None and (not upper or _decimal_greater(upper, lower or "0"))
+
+
+def _quantifier_at(regex: str, index: int) -> Tuple[int, bool, bool]:
+    """Return a quantifier's width, variability, and ability to consume its atom."""
+    if index >= len(regex):
+        return 0, False, True
+    if regex[index] in "*+?":
+        width = 2 if regex[index + 1:index + 2] in "?+" else 1
+        return width, True, True
+    bounds = _quantifier_bounds_at(regex, index)
+    if bounds is None:
+        return 0, False, True
+    end, lower, upper = bounds
+    width = end - index + (1 if regex[end:end + 1] in "?+" else 0)
+    maximum = lower if upper is None else upper
+    can_consume = not maximum or _decimal_greater(maximum, "0")
+    return width, _bounds_are_variable(lower, upper), can_consume
+
+
 def _group_quantifier(regex: str, closing_index: int, verbose: bool = False) -> str:
-    """Return a supported quantifier after a group with a fixed lookahead bound."""
+    """Return a supported quantifier after a group."""
     quantifier_index = _verbose_ignored_end(regex, closing_index + 1, verbose)
     if quantifier_index >= len(regex):
         return ""
     quantifier = regex[quantifier_index]
     if quantifier in "+*?":
         return quantifier
-    if quantifier != "{":
+    bounds = _quantifier_bounds_at(regex, quantifier_index)
+    if bounds is None:
         return ""
-    # A repeat bound longer than 30 digits is invalid for practical Python regex
-    # use; limiting this lookahead keeps the full scanner linear.
-    end = regex.find("}", quantifier_index + 1, quantifier_index + 33)
-    if end == -1:
-        return ""
-    bounds = regex[quantifier_index + 1:end].split(",", 1)
-    if (bounds[0] and not bounds[0].isdecimal()) or (len(bounds) > 1 and bounds[1] and not bounds[1].isdecimal()):
-        return ""
-    if len(bounds) == 1:
-        return "{}" if int(bounds[0] or "0") > 1 else ""
-    if not bounds[1]:
+    _, lower, upper = bounds
+    if upper is None:
+        return "{}" if _decimal_greater(lower, "1") else ""
+    if not upper:
         return "{}"
-    return "{}" if int(bounds[1]) > 1 else ""
+    return "{}" if _decimal_greater(upper, "1") else ""
 
 
 def _new_group(flag_unsafe: bool, zero_width: bool = False) -> Dict[str, Any]:
@@ -388,11 +433,12 @@ def _scan_active_group(
         group["has_quantifier"] = True
         state["quantifier_end"] = index + 2 if regex[index + 1:index + 2] in "?+" else index + 1
     elif char == "{":
+        bounds = _quantifier_bounds_at(regex, index)
         width = _variable_quantifier_at(regex, index)
         group["has_quantifier"] |= bool(width)
-        end = regex.find("}", index + 1, index + 33)
-        if end != -1:
-            state["quantifier_end"] = end + 2 if regex[end + 1:end + 2] in "?+" else end + 1
+        if bounds is not None:
+            end = bounds[0]
+            state["quantifier_end"] = end + 1 if regex[end:end + 1] in "?+" else end
     else:
         _record_atom(group, None if char in ".^$?" else char)
     return False
@@ -452,22 +498,8 @@ def _repeated_groups(regex: str):
 
 def _variable_quantifier_at(regex: str, index: int) -> int:
     """Return the width of a variable quantifier, including an optional suffix."""
-    if index >= len(regex):
-        return 0
-    if regex[index] in "*+?":
-        return 2 if index + 1 < len(regex) and regex[index + 1] in "?+" else 1
-    if regex[index] != "{":
-        return 0
-    end = regex.find("}", index + 1, index + 33)
-    if end == -1 or "," not in regex[index + 1:end]:
-        return 0
-    lower, upper = regex[index + 1:end].split(",", 1)
-    if (lower and not lower.isdecimal()) or (upper and not upper.isdecimal()):
-        return 0
-    if upper and int(upper) <= int(lower or "0"):
-        return 0
-    width = end - index + 1
-    return width + 1 if width + index < len(regex) and regex[index + width] in "?+" else width
+    width, variable, _ = _quantifier_at(regex, index)
+    return width if variable else 0
 
 
 def _escaped_atom_end(regex: str, index: int) -> int:
@@ -606,7 +638,7 @@ def _close_adjacent_group(
     regex: str,
     index: int,
     previous: List[bool],
-    content: List[bool],
+    content: List[List[bool]],
     zero_width: List[bool],
     verbose: List[bool],
     terminal_variable: List[bool],
@@ -614,14 +646,17 @@ def _close_adjacent_group(
 ) -> Tuple[int, bool, bool]:
     """Fold one completed group into its parent adjacency state."""
     child_content, child_zero = content.pop(), zero_width.pop()
+    child_zero |= not child_content[1]
     previous.pop()
     terminal_variable.pop()
     child_variable = group_variable.pop()
     quantifier_start = _verbose_ignored_end(regex, index + 1, verbose[-1])
-    width = _variable_quantifier_at(regex, quantifier_start)
-    variable = bool(width) or child_variable
-    significant = child_content and not child_zero
+    width, quantified_variable, can_consume = _quantifier_at(regex, quantifier_start)
+    variable = quantified_variable or (child_variable and can_consume)
+    significant = child_content[0] and not child_zero and can_consume
     unsafe = _record_adjacent_atom(previous, variable, significant)
+    content[-1][0] |= significant
+    content[-1][1] |= significant
     return quantifier_start - index + width, unsafe, variable if significant else False
 
 
@@ -629,7 +664,7 @@ def _consume_adjacent_group(
     regex: str,
     index: int,
     previous: List[bool],
-    content: List[bool],
+    content: List[List[bool]],
     zero_width: List[bool],
     verbose: List[bool],
     entry_previous: List[bool],
@@ -648,7 +683,7 @@ def _consume_adjacent_group(
         zero_width.append(child_zero)
         entry_previous.append(False if child_zero else previous[-1])
         previous.append(entry_previous[-1])
-        content.append(False)
+        content.append([False, False])
         terminal_variable.append(False)
         group_variable.append(False)
         verbose.append(_scoped_verbose_mode(regex, index, verbose[-1]))
@@ -676,7 +711,7 @@ def _consume_adjacent_atom(
     index: int,
     char: str,
     previous: List[bool],
-    content: List[bool],
+    content: List[List[bool]],
     terminal_variable: List[bool],
     group_variable: List[bool],
     verbose: bool,
@@ -695,10 +730,12 @@ def _consume_adjacent_atom(
         end = _class_end(regex, index)
     else:
         end = index + 1
-    content[-1] = True
     quantifier_start = _verbose_ignored_end(regex, end, verbose)
-    width = _variable_quantifier_at(regex, quantifier_start)
-    variable = bool(width)
+    width, variable, can_consume = _quantifier_at(regex, quantifier_start)
+    if not can_consume:
+        return quantifier_start + width, False
+    content[-1][0] = True
+    content[-1][1] = True
     unsafe = _record_adjacent_atom(previous, variable, True)
     terminal_variable[-1] = variable
     group_variable[-1] |= variable
@@ -707,7 +744,7 @@ def _consume_adjacent_atom(
 
 def _adjacent_quantifier_overlap(regex: str) -> bool:
     """Statically reject structurally adjacent variable quantified atoms."""
-    previous, content, zero_width, verbose = [False], [False], [False], [False]
+    previous, content, zero_width, verbose = [False], [[False, False]], [False], [False]
     entry_previous, terminal_variable, group_variable = [False], [False], [False]
     index = 0
     while index < len(regex):
@@ -728,7 +765,9 @@ def _adjacent_quantifier_overlap(regex: str) -> bool:
                 group_variable[-1] = True
             continue
         if char == "|":
-            previous[-1], terminal_variable[-1], content[-1] = entry_previous[-1], False, True
+            zero_width[-1] |= not content[-1][1]
+            content[-1][1] = False
+            previous[-1], terminal_variable[-1] = entry_previous[-1], False
             index += 1
             continue
         index, unsafe = _consume_adjacent_atom(

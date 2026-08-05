@@ -488,8 +488,62 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     )
                 )
 
+    def test_rejects_long_zero_padded_variable_quantifiers_before_compile(self):
+        zero = "0" * 31
+        unsafe = (
+            f"(a+){{{zero}2}}",
+            f"(a+){{{zero}2,}}",
+            f"(a+){{{zero}1,{zero}2}}",
+            f"(a+){{,{zero}2}}",
+            f"a{{{zero}1,}}a+",
+            f"a{{{zero}1,{zero}2}}a+",
+            f"a{{,{zero}2}}a+",
+            f"a{{{zero}0,{zero}1}}a+",
+            f"(a*){{{zero}1}}a*!",
+            f"(a*){{{zero}1,{zero}1}}a*!",
+            f"a*b{{{zero}0}}a*!",
+            f"a*b{{{zero}0,{zero}0}}a*!",
+            f"a*(b{{{zero}0}})a*!",
+            f"a*(b{{{zero}0,{zero}0}})a*!",
+            f"a*((?:b{{{zero}0}}))a*!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "long-bound")
+
+    def test_rejects_zero_consumption_alternation_between_variable_atoms(self):
+        zero = "0" * 31
+        unsafe = (
+            r"a*(?:|)a*!",
+            r"a*(?:b|)a*!",
+            r"a*(?:|b)a*!",
+            f"a*(?:b{{{zero}0}}|)a*!",
+            f"a*(?:b{{{zero}0}}|c{{{zero}0}})a*!",
+            f"a*(?:b|c{{{zero}0}})a*!",
+        )
+
+        for pattern in unsafe:
+            with self.subTest(pattern=pattern):
+                self._assert_rejected_before_compile(pattern, "zero-alternation")
+
+    def test_allows_semantically_fixed_long_zero_padded_bounds(self):
+        zero = "0" * 31
+        safe = (
+            f"a{{{zero}1}}",
+            f"a{{{zero}1,{zero}1}}",
+            f"(?:ab){{{zero}1}}c{{{zero}1,{zero}1}}",
+            f"(a*){{{zero}0}}a*!",
+            f"(a*){{{zero}0,{zero}0}}a*!",
+        )
+
+        for pattern in safe:
+            with self.subTest(pattern=pattern):
+                self.assertFalse(extensibility._has_redos_structure(pattern))
+                self.assertIsNotNone(extensibility._validated_regex("long-fixed", pattern))
+
     def test_rejects_unrepresentable_repeat_bounds_without_crashing(self):
-        enormous_bound = "9" * 30
+        enormous_bound = "9" * 64
 
         for pattern in (f"a{{{enormous_bound}}}", f"a{{0,{enormous_bound}}}"):
             with self.subTest(pattern=pattern):
