@@ -49,6 +49,13 @@ pub struct LifecycleDriver {
     pub(crate) target_repository_root: Option<String>,
     pub(crate) project_artifact_root: Option<String>,
     pub(crate) governed_learning_context: Value,
+    /// The run that owns this lifecycle's board partition (`wf-{uuid}`), and
+    /// the board to drain at the end. Both or neither — a run wired to a board
+    /// it cannot name has no partition to drain, and `with_board_drain` is the
+    /// only way to set either. Absent means no board is configured for this
+    /// run and the drain gate is a no-op; a board that IS configured and comes
+    /// back with open items fails the run.
+    pub(crate) board_drain: Option<(String, Arc<dyn crate::board_port::WorkflowBoardPort>)>,
     pub(crate) max_repair_iterations: usize,
     pub(crate) max_investigation_iterations: usize,
     pub(crate) max_dependency_waves: usize,
@@ -88,13 +95,16 @@ pub struct LifecycleEvidence {
     pub(crate) final_evidence_repair_attempts: Vec<Value>,
 }
 
+mod board_drain;
 mod boundary_repair;
 mod driver_a;
 mod driver_b;
 mod driver_c;
+mod final_gates;
 mod implementation;
 mod orchestrated;
 mod review;
+mod review_assignment_invalid;
 mod review_remediation;
 mod review_verification;
 mod verify;
@@ -112,7 +122,15 @@ pub use orchestrated::OrchestrationLedger;
 pub use verify_remediation::is_transport_failure_text;
 
 #[cfg(test)]
+mod board_drain_tests;
+#[cfg(test)]
+mod review_assignment_invalid_tests;
+#[cfg(test)]
 mod review_remediation_tests;
+#[cfg(test)]
+mod review_round_bound_tests;
+#[cfg(test)]
+mod review_test_host;
 #[cfg(test)]
 mod review_verification_tests;
 #[cfg(test)]

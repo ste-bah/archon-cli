@@ -4,6 +4,7 @@ pub mod acceptance;
 pub mod agent_dispatch_port;
 pub mod agent_select;
 pub mod approval;
+pub mod board_port;
 pub mod bundle;
 pub mod command;
 mod command_execution;
@@ -66,6 +67,7 @@ pub use approval::{
     WorkflowApprovalDecision, WorkflowApprovalInspection, WorkflowApprovalRecord,
     WorkflowApprovalStore,
 };
+pub use board_port::{DrainItem, DrainItemKind, DrainStatus, WorkflowBoardPort};
 pub use bundle::{WorkflowBundle, WorkflowBundleManifest, WorkflowBundleOrigin, WorkflowHarness};
 pub use command::{CommandAction, WorkflowCommand};
 pub use config::WorkflowConfig;

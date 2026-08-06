@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use crate::generated_lifecycle_support as support;
 
-use super::adversarial;
+use super::{adversarial, assignment_invalid};
 
 /// Longest digest line kept per finding. A digest is for spotting
 /// contradictions BETWEEN findings, not for re-adjudicating one.
@@ -93,12 +93,23 @@ pub fn merge_review(per_task_findings: &[Value], cross: &Value) -> Value {
     let mut items: Vec<Value> = per_task_findings.to_vec();
     let cross_cutting_kept = kept.len();
     items.extend(kept);
-    // Fail-closed in both directions. Surviving findings force remediation; an
-    // empty finding set accepts ONLY if the cross-cutting reduce itself
-    // accepted. Defaulting an empty result to "accepted" would have turned a
-    // reducer that transport-failed — which returns no items because it never
-    // ran, not because it found nothing — into a clean bill of health.
-    let status = if !items.is_empty() {
+    // The third verdict is adjudicated here, over the SAME merged list, for the
+    // same reason the status is derived here: a reviewer's word alone decides
+    // nothing. Rejected claims come back downgraded and stay in `items`, so the
+    // round loses no finding to a refused verdict.
+    let admission = assignment_invalid::admit(&items);
+    let items = admission.findings;
+    // Fail-closed in three directions now. An admitted `assignment_invalid`
+    // outranks remediation — it is not work to redo, it is work not to attempt
+    // — so it takes the status and the driver stops the loop on it. Otherwise
+    // surviving findings force remediation; an empty finding set accepts ONLY
+    // if the cross-cutting reduce itself accepted. Defaulting an empty result
+    // to "accepted" would have turned a reducer that transport-failed — which
+    // returns no items because it never ran, not because it found nothing —
+    // into a clean bill of health.
+    let status = if !admission.admitted.is_empty() {
+        assignment_invalid::VERDICT
+    } else if !items.is_empty() {
         "needs_remediation"
     } else if support::outcome_accepted_or_noop(cross) {
         "accepted"
@@ -129,6 +140,17 @@ pub fn merge_review(per_task_findings: &[Value], cross: &Value) -> Value {
     merged.insert(
         "duplicate_cross_cutting_findings_dropped".to_string(),
         serde_json::json!(duplicates),
+    );
+    merged.insert(
+        "assignment_invalid".to_string(),
+        Value::Array(admission.admitted),
+    );
+    // Refused claims are recorded, not just downgraded. A reviewer that keeps
+    // reaching for the verdict without evidence is itself a finding about the
+    // run, and it is invisible if the only trace is a stripped field.
+    merged.insert(
+        "assignment_invalid_rejected".to_string(),
+        Value::Array(admission.rejected),
     );
     merged.insert("cross_cutting_review".to_string(), cross.clone());
     Value::Object(merged)
