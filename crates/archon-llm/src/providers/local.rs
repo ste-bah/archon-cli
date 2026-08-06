@@ -11,6 +11,7 @@ use crate::provider::{
     ProviderFeature, classify_data_flow_endpoint,
 };
 use crate::providers::openai::{build_openai_request_body, parse_openai_sse_chunk};
+use crate::reasoning::ReasoningConfig;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
@@ -25,6 +26,9 @@ pub struct LocalProvider {
     timeout_secs: u64,
     pull_if_missing: bool,
     http: reqwest::Client,
+    /// #123: how `/effort` is projected onto this backend's reasoning
+    /// controls. Defaults to `Off`, which reproduces pre-#123 wire bytes.
+    reasoning: ReasoningConfig,
 }
 
 impl LocalProvider {
@@ -41,7 +45,18 @@ impl LocalProvider {
             timeout_secs,
             pull_if_missing,
             http,
+            reasoning: ReasoningConfig::default(),
         }
+    }
+
+    /// Attach reasoning controls (#123).
+    ///
+    /// Kept as a builder method rather than a fifth `new` parameter so the
+    /// existing call sites — including the Ollama paths, which have no
+    /// reasoning switch — stay untouched and keep the inert default.
+    pub fn with_reasoning(mut self, reasoning: ReasoningConfig) -> Self {
+        self.reasoning = reasoning;
+        self
     }
 
     /// Return the base URL for this provider.
@@ -131,7 +146,7 @@ impl LocalProvider {
             request.model.clone()
         };
 
-        let body = build_openai_request_body(
+        let mut body = build_openai_request_body(
             &effective_model,
             request.max_tokens,
             &request.system,
@@ -139,6 +154,10 @@ impl LocalProvider {
             &request.tools,
             true,
         );
+        // #123: project the canonical effort level onto whatever reasoning
+        // control this backend exposes. Inert unless configured, so Ollama
+        // and llama.cpp deployments see byte-identical requests.
+        self.reasoning.apply(&mut body, request.effort.as_deref());
 
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {

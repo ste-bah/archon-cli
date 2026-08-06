@@ -139,6 +139,24 @@ pub struct LlmLocalConfig {
     pub timeout_secs: u64,
     /// Whether to pull the model if not present (Ollama-specific).
     pub pull_if_missing: bool,
+    /// #123: how `/effort` maps onto this backend's reasoning controls.
+    ///
+    /// Defaults to `mode = "off"`, which sends no reasoning fields — this
+    /// provider also serves Ollama and llama.cpp, where an unexpected
+    /// top-level field can be a hard 400. Enable it per deployment, e.g. for
+    /// a vLLM server:
+    ///
+    /// ```toml
+    /// [llm.local.reasoning]
+    /// mode = "top_level"          # validated server-side; 400s on a typo
+    /// effort_key = "reasoning_effort"
+    /// [llm.local.reasoning.effort_map]
+    /// low = "low"
+    /// medium = "medium"
+    /// high = "high"
+    /// max = "max"
+    /// ```
+    pub reasoning: archon_llm::reasoning::ReasoningConfig,
 }
 
 impl Default for LlmLocalConfig {
@@ -148,6 +166,7 @@ impl Default for LlmLocalConfig {
             model: "llama3:8b".to_string(),
             timeout_secs: 300,
             pull_if_missing: true,
+            reasoning: archon_llm::reasoning::ReasoningConfig::default(),
         }
     }
 }

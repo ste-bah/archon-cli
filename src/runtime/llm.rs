@@ -329,7 +329,8 @@ pub(crate) fn build_llm_provider_selection(
                 llm_cfg.local.model.clone(),
                 llm_cfg.local.timeout_secs,
                 llm_cfg.local.pull_if_missing,
-            ),
+            )
+            .with_reasoning(llm_cfg.local.reasoning.clone()),
             None,
         ),
 

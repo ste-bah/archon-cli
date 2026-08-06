@@ -23,6 +23,8 @@ pub mod oauth;
 pub mod oauth_codex;
 pub mod provider;
 pub mod providers;
+// #123: declarative reasoning controls for OpenAI-compatible backends.
+pub mod reasoning;
 // TASK-AGS-708: RetryProvider<P> decorator with exponential backoff.
 pub mod retry;
 pub mod runtime;

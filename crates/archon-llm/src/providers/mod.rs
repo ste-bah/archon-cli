@@ -10,6 +10,8 @@ pub mod gcp_auth;
 pub mod local;
 pub mod openai;
 mod openai_protocol;
+// #123: SSE chunk parsing, split out of `openai` to stay under the 500-line gate.
+mod openai_stream;
 pub mod vertex;
 
 // TASK-AGS-700: descriptor-driven Phase 7 scaffolding. Coexists with the

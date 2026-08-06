@@ -72,6 +72,36 @@ provider = "anthropic"
 # timeout_secs = 300
 # pull_if_missing = true
 
+# Reasoning controls for the local/OpenAI-compatible backend (#123).
+#
+# `/effort low|medium|high|max` only reaches an OpenAI-compatible server if
+# this is configured — there is no portable reasoning switch, so archon will
+# not guess one. Default is `mode = "off"`, which sends no reasoning fields at
+# all; Ollama and llama.cpp are unaffected.
+#
+# vLLM exposes a validated top-level `reasoning_effort` field. Prefer it: a
+# typo returns a 400 naming the accepted tiers, whereas an unknown
+# `chat_template_kwargs` key returns 200 and is silently ignored.
+#
+# [llm.local.reasoning]
+# mode = "top_level"
+# effort_key = "reasoning_effort"
+# [llm.local.reasoning.effort_map]
+# low = "low"
+# medium = "medium"
+# high = "high"
+# max = "max"
+#
+# For a server whose template reads the switch instead of the top-level field,
+# use `chat_template_kwargs` mode. Note that on a DeepSeek template
+# `reasoning_effort` is INERT unless thinking is turned on in the same bag, so
+# `kwargs` is not optional there:
+#
+# [llm.local.reasoning]
+# mode = "chat_template_kwargs"
+# effort_key = "reasoning_effort"
+# kwargs = { thinking = true }        # Qwen3/GLM read `enable_thinking` instead
+
 
 # ----------------------------------------------------------------------------
 # [models.anthropic] — Anthropic model aliases
