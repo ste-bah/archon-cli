@@ -1,7 +1,14 @@
+use super::api::EffectivePolicySummary;
+use super::server::{build_app, validate_bind_auth};
 use super::*;
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, header};
+use futures_util::StreamExt;
 use tower::ServiceExt;
+
+/// Anything longer than this and the stream is not streaming.
+const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn test_state(config: &WebConfig, token: Option<String>) -> AppState {
     let auth_required = token.is_some();
@@ -18,7 +25,206 @@ fn test_state(config: &WebConfig, token: Option<String>) -> AppState {
         paths,
         chat_backend: None,
         ingest_jobs: ingest::new_job_store(),
+        handles: WebRuntimeHandles::default(),
+        agents: agents::WebAgentObserver::new(),
+        attached: false,
     }
+}
+
+/// Read SSE frames until one carries a `data:` payload, and return it.
+async fn first_sse_payload(app: Router, uri: &str) -> String {
+    let response = app
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    tokio::time::timeout(FRAME_TIMEOUT, async {
+        while let Some(chunk) = body.next().await {
+            buffer.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            if let Some(line) = buffer.lines().find(|line| line.starts_with("data:")) {
+                return line.trim_start_matches("data:").trim().to_string();
+            }
+        }
+        panic!("live stream ended before emitting a frame");
+    })
+    .await
+    .expect("live stream frame")
+}
+
+#[tokio::test]
+async fn live_stream_emits_events_after_the_supplied_cursor() {
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let state = test_state(&config, None);
+    let first = state.live.record("first", "first event");
+    state.live.record("second", "second event");
+    let app = build_app(&config, state);
+
+    let payload = first_sse_payload(app, &format!("/api/live/stream?after={first}")).await;
+    let snapshot: live::WebLiveSnapshot = serde_json::from_str(&payload).unwrap();
+
+    assert_eq!(snapshot.events.len(), 1, "{payload}");
+    assert_eq!(snapshot.events[0].event_type, "second");
+    assert_eq!(snapshot.next_cursor, 3);
+}
+
+#[tokio::test]
+async fn live_stream_emits_the_expired_shape_for_a_compacted_cursor() {
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let mut state = test_state(&config, None);
+    // One-event buffer: recording twice drops the first and marks the buffer
+    // compacted, so cursor 0 is now unreachable.
+    state.live = WebLiveManager::new(1);
+    state.live.record("first", "first event");
+    state.live.record("second", "second event");
+    let app = build_app(&config, state);
+
+    let payload = first_sse_payload(app, "/api/live/stream?after=0").await;
+    let expired: live::WebLiveCursorExpired = serde_json::from_str(&payload).unwrap();
+
+    assert!(expired.cursor_expired, "{payload}");
+    assert_eq!(expired.recovery, "refetch full snapshot");
+}
+
+#[tokio::test]
+async fn live_stream_requires_bearer_auth_when_token_is_configured() {
+    let config = WebConfig {
+        bind_address: "0.0.0.0".to_string(),
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let app = build_app(&config, test_state(&config, Some("secret-token".into())));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/live/stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn agents_live_requires_bearer_auth_when_token_is_configured() {
+    let config = WebConfig {
+        bind_address: "0.0.0.0".to_string(),
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let app = build_app(&config, test_state(&config, Some("secret-token".into())));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/agents/live")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+async fn get_json(app: Router, uri: &str) -> serde_json::Value {
+    let response = app
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn agent_ids(snapshot: &serde_json::Value) -> Vec<String> {
+    snapshot["agents"]
+        .as_array()
+        .expect("agents array")
+        .iter()
+        .map(|agent| agent["id"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn agents_live_reports_a_running_agent_and_drops_it_once_terminal() {
+    use archon_tools::background_agents::{
+        AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, new_result_slot,
+    };
+
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let state = test_state(&config, None);
+    let agent_id = uuid::Uuid::new_v4();
+    // Keep a clone of the status slot: the handle itself is moved into the
+    // registry, and driving it terminal is the point of the test.
+    let status = std::sync::Arc::new(std::sync::Mutex::new(AgentStatus::Running));
+    BACKGROUND_AGENTS
+        .register(BackgroundAgentHandle {
+            agent_id,
+            join_handle: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            spawned_at: std::time::SystemTime::now(),
+            status: std::sync::Arc::clone(&status),
+            result_slot: new_result_slot(),
+        })
+        .expect("register background agent");
+
+    let running = get_json(build_app(&config, state.clone()), "/api/agents/live").await;
+    assert!(
+        agent_ids(&running).contains(&agent_id.to_string()),
+        "{running}"
+    );
+
+    *status.lock().unwrap() = AgentStatus::Finished;
+
+    let after = get_json(build_app(&config, state), "/api/agents/live").await;
+    assert!(
+        !agent_ids(&after).contains(&agent_id.to_string()),
+        "terminal agent must stop being reported as live: {after}"
+    );
+}
+
+#[tokio::test]
+async fn agents_live_includes_task_manager_spawned_agents() {
+    use archon_tools::task_manager::{TASK_MANAGER, TaskStatus};
+
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let state = test_state(&config, None);
+    // TaskCreate-spawned agents never reach BACKGROUND_AGENTS, so a projection
+    // that reads only that registry silently reports them as nothing running.
+    let task_id = TASK_MANAGER.create_task("web dashboard projection probe");
+    TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+
+    let snapshot = get_json(build_app(&config, state.clone()), "/api/agents/live").await;
+    let entry = snapshot["agents"]
+        .as_array()
+        .expect("agents array")
+        .iter()
+        .find(|agent| agent["id"].as_str() == Some(task_id.as_str()))
+        .unwrap_or_else(|| panic!("task agent missing from projection: {snapshot}"));
+    assert_eq!(entry["kind"], "task");
+    assert_eq!(entry["status"], "running");
+    assert_eq!(entry["label"], "web dashboard projection probe");
+
+    TASK_MANAGER.stop_task(&task_id).expect("stop probe task");
+    let after = get_json(build_app(&config, state), "/api/agents/live").await;
+    assert!(!agent_ids(&after).contains(&task_id), "{after}");
 }
 
 #[test]

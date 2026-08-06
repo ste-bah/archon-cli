@@ -23,11 +23,14 @@ import type {
   MetricsSummary,
   PipelineSummary,
   SettingsSummary,
+  WebAgentActivitySnapshot,
+  WebLiveEvent,
   WebUploadPolicy,
   WebIngestSummary,
   WorkflowWebSummary,
   WorldInspectionSummary,
 } from "../api/generated/web";
+import type { LiveStatus } from "../api/useLiveEvents";
 import { WorkflowPage } from "./WorkflowPage";
 
 const EvidenceGraphPage = lazy(() =>
@@ -41,6 +44,9 @@ interface WorkbenchRoutesProps {
   config?: EffectiveConfigSummary;
   policy?: EffectivePolicySummary;
   liveCount?: number;
+  liveEvents?: WebLiveEvent[];
+  liveStatus?: LiveStatus;
+  agents?: WebAgentActivitySnapshot;
   authRequired?: boolean;
   uploadsEnabled?: boolean;
   uploadPolicy?: WebUploadPolicy;

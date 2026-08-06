@@ -19,6 +19,9 @@ archon-docs = { path = "../archon-docs" }
 archon-llm = { path = "../archon-llm" }
 archon-learning = { path = "../archon-learning" }
 archon-cozo = { path = "../archon-cozo" }
+# The attached (in-process) web server reads the host's already-open memory
+# store instead of opening a second connection to the same database file.
+archon-memory = { path = "../archon-memory" }
 archon-tools = { path = "../archon-tools" }
 archon-workflow = { path = "../archon-workflow" }
 
@@ -44,3 +47,5 @@ rust-embed = "8"
 tokio = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["util"] }
 uuid = { workspace = true }
+# Building a BackgroundAgentHandle in tests needs a CancellationToken.
+tokio-util = { workspace = true }

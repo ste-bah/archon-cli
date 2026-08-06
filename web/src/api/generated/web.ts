@@ -26,6 +26,24 @@ export type WebLiveSnapshot = { events: Array<WebLiveEvent>, nextCursor: number,
 
 export type WebLiveCursorExpired = { cursorExpired: boolean, oldestAvailableCursor: number, recovery: string, };
 
+export type WebAgentActivity = { id: string, 
+/**
+ * Which registry this came from: `background` or `task`.
+ */
+kind: string, 
+/**
+ * Human label — the task description, or the agent id for background
+ * agents, whose registry carries no description.
+ */
+label: string, status: string, elapsedMs: number, };
+
+export type WebAgentActivitySnapshot = { agents: Array<WebAgentActivity>, observedAtMs: number, 
+/**
+ * `false` when the server was started standalone, where both registries
+ * are empty by construction rather than because nothing is running.
+ */
+attached: boolean, };
+
 export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
 
 export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };
@@ -144,6 +162,8 @@ export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: strin
 export type WorkflowApprovalView = { workflowHash: string, projectRoot: string, workflowName: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, externalRequirements: Array<string>, costWarning: string, rawScriptPath: string, compiledSpecPath: string, decision: string | null, decidedAt: string | null, decidedBy: string | null, };
 
 export type WorkflowAgentView = { stageId: string, itemId: string, status: string, promptPath: string | null, inputHash: string | null, promptHash: string | null, promptCreatedAt: string | null, provider: string | null, model: string | null, tokensIn: number, tokensOut: number, costUsd: number, artifactId: string | null, artifactPath: string | null, resultPreview: string | null, error: string | null, recentPublicToolCalls: Array<WorkflowToolCallPreview>, outputPath: string, };
+
+export type WorkflowToolCallPreview = { toolName: string, inputPreview: string | null, outputPreview: string | null, };
 
 export type WorkflowV2ResultView = { callId: string, status: string, summary: string, resultPath: string, artifactCount: number, branchCount: number, };
 

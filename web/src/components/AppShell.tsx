@@ -13,6 +13,12 @@ interface AppShellProps {
 
 export function AppShell({ status, theme, onThemeToggle, children }: AppShellProps) {
   const ThemeIcon = theme === "dark" ? Sun : Moon;
+  // Attached to a running session the TUI owns the conversation, so the server
+  // builds no chat backend and reports the lane as unavailable. Hide the tab
+  // rather than offer a surface every submit would refuse.
+  const items = navItems.filter(
+    (item) => item.path !== "/chat" || status?.features.chat !== false,
+  );
   return (
     <div className="workbench-shell">
       <aside className="sidebar" aria-label="Archon workbench sections">
@@ -24,7 +30,7 @@ export function AppShell({ status, theme, onThemeToggle, children }: AppShellPro
           </div>
         </div>
         <nav className="nav-list">
-          {navItems.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

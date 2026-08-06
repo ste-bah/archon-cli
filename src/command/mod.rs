@@ -272,7 +272,9 @@ pub(crate) mod video_delete;
 pub(crate) mod vim;
 pub(crate) mod voice;
 pub(crate) mod web;
+pub(crate) mod web_attach;
 pub(crate) mod web_chat;
+pub(crate) mod web_slash;
 pub(crate) mod workflow;
 /// What `src/command/workflow*.rs` may name, pinned as a scan rather than a
 /// convention.

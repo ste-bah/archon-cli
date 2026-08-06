@@ -350,6 +350,9 @@ pub fn generated_typescript() -> String {
         WorkflowBundleView::decl(&cfg),
         WorkflowApprovalView::decl(&cfg),
         WorkflowAgentView::decl(&cfg),
+        // Referenced by WorkflowAgentView but never exported, so the checked-in
+        // web.ts named a type it never declared and typecheck failed on it.
+        WorkflowToolCallPreview::decl(&cfg),
         WorkflowV2ResultView::decl(&cfg),
         WorkflowV2BranchView::decl(&cfg),
         WorkflowStageView::decl(&cfg),

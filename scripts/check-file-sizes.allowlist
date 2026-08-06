@@ -268,7 +268,6 @@ src/cli_args/tests.rs
 crates/archon-learning/src/proposal.rs
 crates/archon-llm/tests/retry_decorator.rs
 crates/archon-memory/tests/embedding_tests.rs
-crates/archon-sdk/src/web/mod.rs
 crates/archon-tools/tests/tool_tests.rs
 src/command/behaviour.rs
 src/command/world_model/ingest_files.rs

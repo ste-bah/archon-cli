@@ -277,6 +277,10 @@ pub(super) async fn run(
     }
     leann_init_cancel.store(true, Ordering::Relaxed);
 
+    // A `/web` dashboard is a task in this runtime, not a child process, so
+    // nothing else would ever stop it.
+    crate::command::web_attach::shutdown().await;
+
     cron_shutdown.shutdown().await;
     tracing::info!("cron scheduler shut down");
 
