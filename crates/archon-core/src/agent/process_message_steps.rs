@@ -72,7 +72,14 @@ impl Agent {
 
         let active_model = self.active_model().await;
         let effort = self.turn_effort(user_input).await;
-        let (max_tokens, thinking, speed) = self.config.build_base_request_fields(&active_model);
+        // #123: `ultrathink` escalates BOTH knobs for this turn — effort to
+        // `Max` (above, inside `turn_effort`) and the thinking budget here.
+        // The two are resolved from the same `user_input` so they cannot
+        // disagree about whether the turn was escalated.
+        let ultrathink = archon_llm::thinking::ultrathink_requested(user_input);
+        let (max_tokens, thinking, speed) = self
+            .config
+            .build_base_request_fields_with(&active_model, ultrathink);
         let messages = self.messages_for_turn_request(&active_model)?;
 
         let mut request = LlmRequest {

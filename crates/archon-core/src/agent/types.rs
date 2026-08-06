@@ -192,6 +192,25 @@ impl AgentConfig {
         &self,
         model: &str,
     ) -> (u32, Option<serde_json::Value>, Option<String>) {
+        self.build_base_request_fields_with(model, false)
+    }
+
+    /// As [`Self::build_base_request_fields`], but able to escalate thinking
+    /// for an `ultrathink` turn (#123).
+    ///
+    /// Split rather than added as a parameter to the existing method so the
+    /// dozen-odd call sites that have no notion of turn input keep compiling
+    /// unchanged; only the two request-building paths pass `true`.
+    ///
+    /// Note that on adaptive models (Opus/Sonnet) this returns the same
+    /// `{"type": "adaptive"}` either way — adaptive thinking has no depth
+    /// knob. The `ultrathink` escalation on those models is carried by effort
+    /// instead, which `turn_effort` raises to `Max` for the same turn.
+    pub fn build_base_request_fields_with(
+        &self,
+        model: &str,
+        ultrathink: bool,
+    ) -> (u32, Option<serde_json::Value>, Option<String>) {
         let speed = if self.fast_mode.load(std::sync::atomic::Ordering::Relaxed) {
             Some("fast".to_string())
         } else {
@@ -199,6 +218,11 @@ impl AgentConfig {
         };
         let thinking = {
             let mode = archon_llm::thinking::select_thinking_mode(model, self.thinking_budget);
+            let mode = if ultrathink {
+                archon_llm::thinking::escalated_for_ultrathink(mode, self.max_tokens)
+            } else {
+                mode
+            };
             archon_llm::thinking::thinking_param(&mode)
         };
         (self.max_tokens, thinking, speed)
