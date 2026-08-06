@@ -56,6 +56,8 @@ pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;
 mod segment_compaction_runtime;
+#[cfg(test)]
+mod self_check_hook_tests;
 mod summary_text;
 mod support;
 #[cfg(test)]

@@ -253,6 +253,15 @@ impl Agent {
         self.fire_hook(
             crate::hooks::HookEvent::PostToolUse,
             serde_json::json!({
+                // `file_path` and `tool_input` are what make a per-file
+                // self-check possible: PostToolUse is the only event whose
+                // output the model ever reads back (see
+                // `apply_post_tool_aggregate`), and without the edited path a
+                // hook can only be told that *something* was written.
+                // `tool_input` additionally lets `if_condition` filter on the
+                // `Tool(pattern)` form, which reads `tool_input.command`.
+                "file_path": pre.file_path,
+                "tool_input": pre.input,
                 "hook_event": "PostToolUse",
                 "tool_name": pre.tool_name,
                 "tool_id": pre.tool_id,

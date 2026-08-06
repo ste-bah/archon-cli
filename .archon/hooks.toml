@@ -1,0 +1,33 @@
+# Archon self-monitoring hooks (issue #124).
+#
+# PostToolUse is the ONLY hook event whose output reaches the model. A hook's
+# `additional_context` is appended to the tool result as "[Hook Context]"
+# (crates/archon-core/src/agent/tool_postprocess_steps.rs, `apply_post_tool_aggregate`)
+# and that mutated result enters the transcript, so the agent reads the finding
+# on its next turn as its own observation. PreToolUse can block but cannot
+# narrate; UserPromptSubmit and the runtime lifecycle events discard hook output
+# entirely.
+#
+# `if_condition` is what actually filters. `HookMatcher.matcher` is a stubbed
+# placeholder in crates/archon-core/src/hooks/registry.rs and is never applied at
+# execution time, so a hook keyed only on `matcher` fires on every tool call.
+#
+# The three entries pass the tool name as an argument even though one script
+# handles all of them: the registry deduplicates by `(type, command)` and keeps
+# only the last match (crates/archon-core/src/hooks/registry/matching.rs,
+# `deduplicate`), so three identical command strings would collapse into one and
+# only NotebookEdit would survive.
+#
+# `timeout = 5` is explicit because the default is 60 s. The check is ~0.4 s on
+# Windows and faster elsewhere; anything near the default means something is
+# wrong and the turn should not wait for it. `on_failure` is left at its default,
+# which for non-PreToolUse events is "allow" — a self-check must never block.
+
+[hooks.PostToolUse]
+matchers = [
+  { hooks = [
+    { type = "prompt", command = "bash scripts/self-check-file.sh Edit", if_condition = "Edit", timeout = 5 },
+    { type = "prompt", command = "bash scripts/self-check-file.sh Write", if_condition = "Write", timeout = 5 },
+    { type = "prompt", command = "bash scripts/self-check-file.sh NotebookEdit", if_condition = "NotebookEdit", timeout = 5 },
+  ] },
+]

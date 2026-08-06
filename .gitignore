@@ -1,6 +1,10 @@
 # Rust build output
 /target/
-.archon/
+# `.archon/*` rather than `.archon/`: git does not descend into an excluded
+# directory, so a bare `.archon/` makes the negation below unreachable and the
+# shipped hook config silently untracked.
+.archon/*
+!.archon/hooks.toml
 artifacts/
 **/*.rs.bk
 
