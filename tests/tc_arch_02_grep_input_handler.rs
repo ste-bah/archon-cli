@@ -59,26 +59,29 @@ fn input_handler_markers_exist() {
 fn bash_program() -> std::ffi::OsString {
     #[cfg(windows)]
     {
-        use std::path::PathBuf;
         // Git's bash FIRST, deliberately. A bare `bash` on Windows usually
         // resolves to the WSL launcher in System32, which runs inside
         // the Linux filesystem and cannot see `F:/...` at all -- it reports
         // "No such file or directory" for a perfectly valid Windows path.
-        if let Ok(output) = Command::new("where").arg("git").output()
-            && let Some(git) = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .map(PathBuf::from)
-        {
-            let candidate = git
-                .parent()
-                .and_then(|cmd_dir| cmd_dir.parent())
-                .map(|root| root.join("bin").join("bash.exe"));
-            if let Some(path) = candidate
-                && path.is_file()
-            {
-                return path.into_os_string();
+        //
+        // `where git` returns a DIFFERENT layout depending on the calling
+        // shell: `<root>\cmd\git.exe` from PowerShell/cmd, but
+        // `<root>\mingw64\bin\git.exe` first from Git Bash. Deriving the
+        // install root by stripping exactly two components only works for
+        // the former; from Git Bash it produced
+        // `<root>\mingw64\bin\bash.exe`, which does not exist, silently fell
+        // back to the WSL launcher, and failed the suite. Walk every
+        // ancestor of every candidate instead and take the first bash.exe
+        // that actually exists.
+        if let Ok(output) = Command::new("where").arg("git").output() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let git = std::path::Path::new(line.trim());
+                if git.as_os_str().is_empty() {
+                    continue;
+                }
+                if let Some(bash) = bash_near(git) {
+                    return bash.into_os_string();
+                }
             }
         }
         "bash".into()
@@ -87,6 +90,25 @@ fn bash_program() -> std::ffi::OsString {
     {
         "bash".into()
     }
+}
+
+/// First `bash.exe` found in any ancestor of `git`, checking both layouts Git
+/// for Windows ships (`<root>\bin` and `<root>\usr\bin`).
+#[cfg(windows)]
+fn bash_near(git: &std::path::Path) -> Option<std::path::PathBuf> {
+    const RELATIVE: [&[&str]; 2] = [&["bin", "bash.exe"], &["usr", "bin", "bash.exe"]];
+    for root in git.ancestors() {
+        for parts in RELATIVE {
+            let mut candidate = root.to_path_buf();
+            for part in parts {
+                candidate.push(part);
+            }
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// A path bash will accept.
