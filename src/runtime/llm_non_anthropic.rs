@@ -65,12 +65,15 @@ fn build_vertex(llm_cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
 }
 
 fn build_local(llm_cfg: &LlmConfig) -> Arc<dyn LlmProvider> {
-    Arc::new(LocalProvider::new(
-        llm_cfg.local.base_url.clone(),
-        llm_cfg.local.model.clone(),
-        llm_cfg.local.timeout_secs,
-        llm_cfg.local.pull_if_missing,
-    ))
+    Arc::new(
+        LocalProvider::new(
+            llm_cfg.local.base_url.clone(),
+            llm_cfg.local.model.clone(),
+            llm_cfg.local.timeout_secs,
+            llm_cfg.local.pull_if_missing,
+        )
+        .with_reasoning(llm_cfg.local.reasoning.clone()),
+    )
 }
 
 fn build_openai_compatible(provider: &str) -> Result<Arc<dyn LlmProvider>> {

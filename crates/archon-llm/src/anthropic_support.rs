@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 use std::sync::{Mutex as StdMutex, OnceLock};
 
+use crate::effort::EFFORT_BETA;
+use crate::fast_mode::FAST_MODE_BETA;
+
 #[derive(Debug, Clone)]
 pub struct MessageRequest {
     pub model: String,
@@ -54,36 +57,168 @@ pub enum ApiError {
     SerializeError(String),
 }
 
+/// Wire name of the `speed` knob, used as its key in the unsupported registry
+/// and in the dropped-knob warning.
+pub(crate) const SPEED_KNOB: &str = "speed";
+/// Wire name of the effort knob.
+pub(crate) const EFFORT_KNOB: &str = "output_config.effort";
+
+/// #123: `speed` is sent for any model unless the API has rejected it.
+///
+/// This replaced `supports_speed`, a stub that returned `false` for every
+/// model — so fast mode was silently dropped on the wire for all of them while
+/// `/fast` still reported success. Same failure as the effort allowlist, same
+/// fix.
 pub(crate) fn effective_speed(request: &MessageRequest) -> Option<&str> {
     let value = request.speed.as_deref()?;
-    if supports_speed(&request.model) {
-        return Some(value);
+    if knob_known_unsupported(&request.model, SPEED_KNOB) {
+        warn_dropped_knob(&request.model, SPEED_KNOB, value);
+        return None;
     }
-    warn_dropped_knob(&request.model, "speed", value);
-    None
+    Some(value)
 }
 
+/// Project the canonical effort ladder onto Anthropic's `output_config.effort`.
+///
+/// `high` and `max` both map to `None`: omitting the field already means high
+/// on this API, and Anthropic has no rung above it — `max` is expressed through
+/// the `thinking` parameter instead (see `select_thinking_mode`). The resulting
+/// wire bytes are identical to the pre-#123 behaviour, when the core layer
+/// omitted those levels before the request was ever built.
+///
+/// **This is where the omission decision lives, and it must not move back up
+/// into the shared layer.** On an OpenAI-compatible backend an absent
+/// `reasoning_effort` means "no reasoning at all", not "high", so a shared
+/// `High => None` silently disables reasoning on vLLM. The core now always
+/// sends a concrete level and each provider clamps it here.
 pub(crate) fn effective_effort(request: &MessageRequest) -> Option<&str> {
     let value = request.effort.as_deref()?;
-    if supports_output_effort(&request.model) {
-        return Some(value);
+    // Checked first: these levels are a no-op on every Anthropic model, so
+    // warning that they were "dropped" would be noise.
+    if matches!(value, "high" | "max") {
+        return None;
     }
-    warn_dropped_knob(&request.model, "output_config.effort", value);
+    // Model-agnostic: the knob is sent for ANY model unless this process has
+    // actually watched the API reject it. See `mark_knob_unsupported`.
+    if knob_known_unsupported(&request.model, EFFORT_KNOB) {
+        warn_dropped_knob(&request.model, EFFORT_KNOB, value);
+        return None;
+    }
+    Some(value)
+}
+
+/// Append the betas required by whichever conditional knobs this request
+/// actually carries, preserving any the identity already set.
+///
+/// The betas are NOT sent unconditionally: the API rejects betas for features
+/// that are not active, so each one is gated on its knob surviving
+/// `effective_speed` / `effective_effort`. That keeps the header and the body
+/// in lockstep — including after the degrade path switches a knob off.
+pub(crate) fn apply_conditional_betas(
+    request: &MessageRequest,
+    headers: &mut std::collections::HashMap<String, String>,
+) {
+    let mut extra: Vec<&str> = Vec::new();
+    if effective_speed(request).is_some() {
+        extra.push(FAST_MODE_BETA);
+    }
+    if effective_effort(request).is_some() {
+        extra.push(EFFORT_BETA);
+    }
+    if extra.is_empty() {
+        return;
+    }
+    let existing = headers.get("anthropic-beta").cloned().unwrap_or_default();
+    let combined = if existing.is_empty() {
+        extra.join(",")
+    } else {
+        format!("{},{}", existing, extra.join(","))
+    };
+    headers.insert("anthropic-beta".into(), combined);
+}
+
+/// `(model, knob)` pairs this process has observed the API reject.
+///
+/// #123 replaced two hardcoded gates with runtime learning: a model allowlist
+/// for effort (wrong in both directions — it dropped the knob on `opus-5` and
+/// `sonnet-4-6`, and needed a code edit per release) and a blanket `false`
+/// stub for speed. Both knobs are now sent by default and switched off per
+/// model only when the API says no.
+static UNSUPPORTED_KNOBS: OnceLock<StdMutex<HashSet<(String, &'static str)>>> = OnceLock::new();
+
+fn unsupported_knobs() -> &'static StdMutex<HashSet<(String, &'static str)>> {
+    UNSUPPORTED_KNOBS.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
+pub(crate) fn knob_known_unsupported(model: &str, knob: &'static str) -> bool {
+    unsupported_knobs()
+        .lock()
+        .map(|set| set.contains(&(model.to_string(), knob)))
+        .unwrap_or(false)
+}
+
+/// Record that `model` rejects `knob`. Returns `true` if this is the first
+/// time, i.e. the caller should rebuild and retry the request once. Returns
+/// `false` on a repeat so a persistent 400 cannot loop.
+pub(crate) fn mark_knob_unsupported(model: &str, knob: &'static str) -> bool {
+    unsupported_knobs()
+        .lock()
+        .map(|mut set| set.insert((model.to_string(), knob)))
+        .unwrap_or(false)
+}
+
+/// Whether this error response means "retry without the knob it blames".
+///
+/// Records the `(model, knob)` pair as a side effect so the rebuilt request
+/// omits it and every later request for that model skips it too. Returns
+/// `false` on a repeat — `mark_knob_unsupported` only reports the first
+/// sighting — so a 400 that merely mentions a knob for some unrelated reason
+/// cannot put the caller into a retry loop.
+pub(crate) fn should_retry_without_knob(request: &MessageRequest, status: u16, body: &str) -> bool {
+    if status != 400 {
+        return false;
+    }
+    let Some(knob) = rejected_knob(request, body) else {
+        return false;
+    };
+    if !mark_knob_unsupported(&request.model, knob) {
+        return false;
+    }
+    tracing::warn!(
+        model = %request.model,
+        knob,
+        "Anthropic rejected a request knob; retrying without it and disabling it for this model"
+    );
+    true
+}
+
+/// Which knob a 400 body blames, if any — and only among knobs the request
+/// actually carried.
+///
+/// Deliberately narrow: a blanket "any 400 disables the knobs" would switch
+/// them off on the first context-length or malformed-request error and never
+/// switch them back on.
+pub(crate) fn rejected_knob(request: &MessageRequest, body: &str) -> Option<&'static str> {
+    let unknown_beta = extract_unknown_beta(body);
+    if effective_effort(request).is_some()
+        && (unknown_beta.as_deref() == Some(EFFORT_BETA) || body.contains("output_config"))
+    {
+        return Some(EFFORT_KNOB);
+    }
+    if effective_speed(request).is_some()
+        && (unknown_beta.as_deref() == Some(FAST_MODE_BETA) || body.contains("\"speed\""))
+    {
+        return Some(SPEED_KNOB);
+    }
     None
 }
 
-fn supports_speed(_model: &str) -> bool {
-    false
-}
-
-fn supports_output_effort(model: &str) -> bool {
-    // Current-generation Claude models accept `output_config.effort`. Previously a
-    // blanket `false` stub, which silently dropped the knob for every model; enabled
-    // here for the models that support it (needed by the FCDP drafting pipeline, which
-    // relies on effort:medium to cap runaway thinking). No other caller sets
-    // `request.effort` today, so the blast radius is limited to opt-in effort requests.
-    model.contains("opus-4") || model.contains("sonnet-5") || model.contains("fable-5")
-}
+// #123: `supports_output_effort` is gone. It was a hand-maintained substring
+// allowlist (`opus-4` / `sonnet-5` / `fable-5`) that silently dropped the knob
+// on every model not named in it — `opus-5` and `sonnet-4-6` included — and
+// needed a code edit per release. Replacing it with a wider substring match
+// would have kept the same failure mode, just further out. The knob is now
+// model-agnostic and self-correcting: see `effort_known_unsupported`.
 
 fn warn_dropped_knob(model: &str, field: &str, value: &str) {
     static WARNED: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();

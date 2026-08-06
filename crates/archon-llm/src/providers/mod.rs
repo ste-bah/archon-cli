@@ -10,6 +10,8 @@ pub mod gcp_auth;
 pub mod local;
 pub mod openai;
 mod openai_protocol;
+// #123: SSE chunk parsing, split out of `openai` to stay under the 500-line gate.
+mod openai_stream;
 pub mod vertex;
 
 // TASK-AGS-700: descriptor-driven Phase 7 scaffolding. Coexists with the
@@ -47,7 +49,7 @@ pub use capabilities::{
     CapabilityStatus, ProviderCapability, ProviderCapabilityRow, capabilities_for,
     provider_capabilities, render_capability_markdown, render_capability_table, supports,
 };
-pub use local::LocalProvider;
+pub use local::{LocalProvider, max_model_len};
 pub use openai::OpenAiProvider;
 pub use vertex::VertexProvider;
 

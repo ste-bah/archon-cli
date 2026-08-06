@@ -5,9 +5,9 @@ use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
 };
-use crate::providers::openai_protocol::{map_http_error, usage_event, usage_from_openai_chunk};
+use crate::providers::openai_protocol::map_http_error;
 use crate::streaming::StreamEvent;
-use crate::types::{ContentBlockType, Usage};
+use crate::types::Usage;
 
 // ---------------------------------------------------------------------------
 // OpenAiProvider
@@ -277,118 +277,9 @@ pub fn build_openai_stream_request_body(
     body
 }
 
-// ---------------------------------------------------------------------------
-// SSE parsing (shared with LocalProvider)
-// ---------------------------------------------------------------------------
-
-/// Parse a single OpenAI SSE JSON chunk into StreamEvents.
-///
-/// Handles text deltas, tool call starts/argument chunks, and finish reasons.
-pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
-    let value: serde_json::Value = match serde_json::from_str(chunk) {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-
-    let usage = usage_from_openai_chunk(&value);
-    let choices = match value.get("choices").and_then(|c| c.as_array()) {
-        Some(arr) if !arr.is_empty() => arr,
-        _ => return usage.map_or_else(Vec::new, usage_event),
-    };
-
-    let choice = &choices[0];
-    let delta = match choice.get("delta") {
-        Some(d) => d,
-        None => return usage.map_or_else(Vec::new, usage_event),
-    };
-
-    let finish_reason = choice
-        .get("finish_reason")
-        .and_then(|fr| fr.as_str())
-        .unwrap_or("");
-
-    let mut events = Vec::new();
-
-    // Text content delta.
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
-        && !content.is_empty()
-    {
-        events.push(StreamEvent::ContentBlockStart {
-            index: 0,
-            block_type: ContentBlockType::Text,
-            tool_use_id: None,
-            tool_name: None,
-        });
-        events.push(StreamEvent::TextDelta {
-            index: 0,
-            text: content.to_string(),
-        });
-    }
-
-    // Tool call deltas.
-    if let Some(tool_calls) = delta.get("tool_calls").and_then(|tc| tc.as_array()) {
-        for tc in tool_calls {
-            let tc_index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
-            let tc_id = tc.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
-            let func = tc.get("function");
-
-            let func_name = func
-                .and_then(|f| f.get("name"))
-                .and_then(|n| n.as_str())
-                .map(|s| s.to_string());
-            let func_args = func
-                .and_then(|f| f.get("arguments"))
-                .and_then(|a| a.as_str())
-                .map(|s| s.to_string());
-
-            // If we have an id and name, this is the start of a new tool call.
-            if tc_id.is_some() && func_name.is_some() {
-                events.push(StreamEvent::ContentBlockStart {
-                    index: tc_index,
-                    block_type: ContentBlockType::ToolUse,
-                    tool_use_id: tc_id,
-                    tool_name: func_name,
-                });
-            }
-
-            // Argument chunk.
-            if let Some(args) = func_args
-                && !args.is_empty()
-            {
-                events.push(StreamEvent::InputJsonDelta {
-                    index: tc_index,
-                    partial_json: args,
-                });
-            }
-        }
-    }
-
-    // Finish reason handling.
-    match finish_reason {
-        "tool_calls" => {
-            events.push(StreamEvent::ContentBlockStop { index: 0 });
-            events.push(StreamEvent::MessageDelta {
-                stop_reason: Some("tool_use".to_string()),
-                usage: None,
-            });
-        }
-        "stop" => {
-            events.push(StreamEvent::MessageDelta {
-                stop_reason: Some("end_turn".to_string()),
-                usage: None,
-            });
-        }
-        _ => {}
-    }
-
-    if let Some(usage) = usage {
-        events.push(StreamEvent::MessageDelta {
-            stop_reason: None,
-            usage: Some(usage),
-        });
-    }
-    events
-}
+// SSE parsing lives in `openai_stream`; re-exported here so existing
+// `providers::openai::parse_openai_sse_chunk` call sites keep working.
+pub(crate) use super::openai_stream::parse_openai_sse_chunk;
 
 // ---------------------------------------------------------------------------
 // LlmProvider impl

@@ -4,7 +4,10 @@ use serde_json::json;
 // Constants
 // ---------------------------------------------------------------------------
 
-const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
+/// Beta header required whenever `speed` is on the wire. Public so the
+/// Anthropic adapter can both send it and recognise it in a rejection body
+/// without duplicating the literal.
+pub const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 
 // ---------------------------------------------------------------------------
 // Fast mode state

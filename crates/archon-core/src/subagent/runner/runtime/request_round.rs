@@ -213,15 +213,20 @@ fn first_text_content(content: &serde_json::Value) -> Option<&str> {
     })
 }
 
+/// Resolve the subagent's effort level, per-agent-def override winning over
+/// the live `/effort` level.
+///
+/// #123: returns a concrete level rather than `None` for `High`. See
+/// `Agent::turn_effort` for why that omission had to move down into the
+/// provider adapters — the short version is that an absent effort field means
+/// "high" on Anthropic but "no reasoning at all" on an OpenAI-compatible
+/// backend, so it cannot be decided here.
 async fn resolve_effort(runner: &SubagentRunner) -> Option<String> {
     if runner.effort.is_some() {
         return runner.effort.clone();
     }
-    let level = runner.agent_config.effort_level.lock().await;
-    match *level {
-        archon_llm::effort::EffortLevel::High => None,
-        other => Some(other.to_string()),
-    }
+    let level = *runner.agent_config.effort_level.lock().await;
+    Some(level.to_string())
 }
 
 #[allow(clippy::too_many_arguments)]

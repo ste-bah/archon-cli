@@ -43,6 +43,47 @@ pub fn select_thinking_mode(model: &str, config_budget: u32) -> ThinkingMode {
     }
 }
 
+/// Whether this turn's input asks for maximum reasoning via the `ultrathink`
+/// keyword.
+///
+/// Case-insensitive substring match, matching the TUI's own highlight scan so
+/// the rainbow-coloured word and the escalated request never disagree.
+pub fn ultrathink_requested(user_input: &str) -> bool {
+    user_input.to_lowercase().contains("ultrathink")
+}
+
+/// Escalate a thinking mode for an `ultrathink` turn (#123).
+///
+/// - [`ThinkingMode::Budgeted`] is raised to the largest budget that still
+///   leaves room under `max_tokens`. Anthropic requires `budget_tokens` to be
+///   strictly less than `max_tokens`, so the ceiling is clamped rather than
+///   blindly set to [`BUDGET_MAX`].
+/// - [`ThinkingMode::Adaptive`] is returned unchanged. Adaptive thinking
+///   exposes no depth knob — there is no budget to raise — so on Opus/Sonnet
+///   the only available lever is effort, which `turn_effort` pushes to `Max`
+///   for the same turn. Inventing a budget here would silently drop the model
+///   OUT of adaptive mode, which is a downgrade, not an escalation.
+/// - [`ThinkingMode::Disabled`] is returned unchanged. That state means the
+///   operator set `thinking_budget = 0`, or the model has no thinking at all;
+///   a keyword in a prompt should not override either.
+pub fn escalated_for_ultrathink(mode: ThinkingMode, max_tokens: u32) -> ThinkingMode {
+    match mode {
+        ThinkingMode::Budgeted { budget_tokens } => {
+            let ceiling = max_tokens.saturating_sub(1).min(BUDGET_MAX);
+            // `max`, not a plain assignment: if the configured budget is
+            // already above the ceiling this leaves it alone rather than
+            // silently shrinking it. A configured budget that exceeds
+            // `max_tokens` is a pre-existing config problem and not this
+            // function's to rewrite — escalation must never lower a budget.
+            let raised = budget_tokens.max(ceiling);
+            ThinkingMode::Budgeted {
+                budget_tokens: raised.clamp(BUDGET_MIN, BUDGET_MAX),
+            }
+        }
+        other => other,
+    }
+}
+
 /// Build the JSON `thinking` parameter for an API request body.
 pub fn thinking_param(mode: &ThinkingMode) -> Option<serde_json::Value> {
     match mode {
@@ -262,5 +303,88 @@ mod tests {
         assert!(d.current_thinking_text.is_empty());
         assert_eq!(d.thinking_tokens, 0);
         assert_eq!(d.thinking_duration_ms, 0);
+    }
+
+    // -- ultrathink escalation (#123) -----------------------------------------
+
+    #[test]
+    fn ultrathink_keyword_detection_is_case_insensitive_and_substring() {
+        assert!(ultrathink_requested("please ULTRATHINK this"));
+        assert!(ultrathink_requested("ultrathink"));
+        assert!(ultrathink_requested("go ultrathinking"));
+        assert!(!ultrathink_requested("think hard about it"));
+        assert!(!ultrathink_requested(""));
+    }
+
+    #[test]
+    fn ultrathink_raises_a_budgeted_mode() {
+        let raised = escalated_for_ultrathink(
+            ThinkingMode::Budgeted {
+                budget_tokens: 4096,
+            },
+            65_536,
+        );
+        assert_eq!(
+            raised,
+            ThinkingMode::Budgeted {
+                budget_tokens: 65_535
+            }
+        );
+    }
+
+    #[test]
+    fn ultrathink_budget_stays_under_max_tokens() {
+        let raised = escalated_for_ultrathink(
+            ThinkingMode::Budgeted {
+                budget_tokens: 2048,
+            },
+            8192,
+        );
+        let ThinkingMode::Budgeted { budget_tokens } = raised else {
+            panic!("expected a budgeted mode, got {raised:?}");
+        };
+        assert!(
+            budget_tokens < 8192,
+            "budget must leave room under max_tokens, got {budget_tokens}"
+        );
+    }
+
+    #[test]
+    fn ultrathink_never_lowers_an_already_larger_budget() {
+        // A configured budget above the ceiling is a pre-existing config
+        // problem; escalation must not quietly shrink it.
+        let raised = escalated_for_ultrathink(
+            ThinkingMode::Budgeted {
+                budget_tokens: 16_384,
+            },
+            8192,
+        );
+        assert_eq!(
+            raised,
+            ThinkingMode::Budgeted {
+                budget_tokens: 16_384
+            }
+        );
+    }
+
+    /// Adaptive thinking has no depth knob — there is no budget to raise, and
+    /// swapping it for an explicit budget would drop the model OUT of adaptive
+    /// mode. On Opus/Sonnet the escalation is carried by effort instead.
+    #[test]
+    fn ultrathink_leaves_adaptive_alone() {
+        assert_eq!(
+            escalated_for_ultrathink(ThinkingMode::Adaptive, 65_536),
+            ThinkingMode::Adaptive
+        );
+    }
+
+    /// `Disabled` means the operator set `thinking_budget = 0`, or the model
+    /// has no thinking at all. A keyword in a prompt should not override that.
+    #[test]
+    fn ultrathink_does_not_resurrect_disabled_thinking() {
+        assert_eq!(
+            escalated_for_ultrathink(ThinkingMode::Disabled, 65_536),
+            ThinkingMode::Disabled
+        );
     }
 }

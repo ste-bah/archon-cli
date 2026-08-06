@@ -2,8 +2,9 @@ use std::time::Duration;
 
 pub use crate::anthropic_support::{ApiError, MessageRequest};
 use crate::anthropic_support::{
-    cached_tool_blocks, classify_error, effective_effort, effective_speed,
+    apply_conditional_betas, cached_tool_blocks, classify_error, effective_effort, effective_speed,
     enforce_cache_breakpoint_budget, extract_unknown_beta, remove_cache_directives,
+    should_retry_without_knob,
 };
 use crate::auth::{AuthError, AuthProvider, OAuthCredentials};
 use crate::identity::IdentityProvider;
@@ -98,29 +99,16 @@ impl AnthropicClient {
         &self,
         request: MessageRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ApiError> {
-        let body = self.build_request_body(&request)?;
+        // `mut` so the effort-degrade path below can rebuild it after the API
+        // tells us this model does not accept `output_config.effort`.
+        let mut body = self.build_request_body(&request)?;
         let mut refreshed_after_401 = false;
 
         for attempt in 0..=MAX_RETRIES {
             let request_id = uuid::Uuid::new_v4().to_string();
             let mut headers = self.identity.request_headers(&request_id);
 
-            let mut extra_betas: Vec<&str> = Vec::new();
-            if effective_speed(&request).is_some() {
-                extra_betas.push("fast-mode-2026-02-01");
-            }
-            if effective_effort(&request).is_some() {
-                extra_betas.push("effort-2025-11-24");
-            }
-            if !extra_betas.is_empty() {
-                let existing = headers.get("anthropic-beta").cloned().unwrap_or_default();
-                let combined = if existing.is_empty() {
-                    extra_betas.join(",")
-                } else {
-                    format!("{},{}", existing, extra_betas.join(","))
-                };
-                headers.insert("anthropic-beta".into(), combined);
-            }
+            apply_conditional_betas(&request, &mut headers);
 
             let (auth_header_name, auth_header_value) = self.request_auth_header().await?;
 
@@ -166,6 +154,13 @@ impl AnthropicClient {
                 retry_after_header,
                 crate::debug_body::debug_body(&response_body)
             );
+
+            // #123: effort and speed are sent for every model, so a model that
+            // rejects one is discovered here rather than guessed at up front.
+            if should_retry_without_knob(&request, status.as_u16(), &response_body) {
+                body = self.build_request_body(&request)?;
+                continue;
+            }
 
             let err = classify_error(
                 status.as_u16(),

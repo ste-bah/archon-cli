@@ -72,6 +72,41 @@ provider = "anthropic"
 # timeout_secs = 300
 # pull_if_missing = true
 
+# Reasoning controls for the local/OpenAI-compatible backend (#123).
+#
+# `/effort low|medium|high|max` only reaches an OpenAI-compatible server if
+# this is configured — there is no portable reasoning switch, so archon will
+# not guess one. Default is `mode = "off"`, which sends no reasoning fields at
+# all; Ollama and llama.cpp are unaffected.
+#
+# Use the interface your deployment documents. For DeepSeek V4 Flash on vLLM
+# that is `chat_template_kwargs` carrying BOTH `thinking` and the level —
+# `reasoning_effort` alone is inert there, so `kwargs` is not optional:
+#
+# [llm.local.reasoning]
+# mode = "chat_template_kwargs"
+# effort_key = "reasoning_effort"
+# kwargs = { thinking = true }        # Qwen3/GLM read `enable_thinking` instead
+# [llm.local.reasoning.effort_map]
+# low = "low"
+# medium = "low"     # DeepSeek V4 documents off/low/high/max — there is no
+#                    # medium tier, and `low` is its no-prefix baseline
+# high = "high"
+# max = "max"
+#
+# A level with no entry in `effort_map` is not sent at all, which is how a
+# backend with a shorter ladder opts out of the top rungs.
+#
+# Some servers also accept a top-level `reasoning_effort` field, which vLLM
+# validates — a bad tier 400s and names the accepted ones, whereas an unknown
+# `chat_template_kwargs` key returns 200 and is silently ignored. That is
+# useful for catching typos, but it is not what the DeepSeek recipe documents,
+# so prefer the documented path unless you have checked:
+#
+# [llm.local.reasoning]
+# mode = "top_level"
+# effort_key = "reasoning_effort"
+
 
 # ----------------------------------------------------------------------------
 # [models.anthropic] — Anthropic model aliases

@@ -3,6 +3,8 @@
 /// Delegates to the OpenAI-compatible API format that Ollama exposes at
 /// `http://localhost:11434/v1`. Uses the same SSE parsing logic as `OpenAiProvider`.
 use async_trait::async_trait;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
@@ -10,7 +12,8 @@ use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
 };
-use crate::providers::openai::{build_openai_request_body, parse_openai_sse_chunk};
+use crate::providers::openai::{build_openai_stream_request_body, parse_openai_sse_chunk};
+use crate::reasoning::ReasoningConfig;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
@@ -25,6 +28,17 @@ pub struct LocalProvider {
     timeout_secs: u64,
     pull_if_missing: bool,
     http: reqwest::Client,
+    /// #123: how `/effort` is projected onto this backend's reasoning
+    /// controls. Defaults to `Off`, which reproduces pre-#123 wire bytes.
+    reasoning: ReasoningConfig,
+    /// Context window reported by the server, or 0 until discovered.
+    ///
+    /// `models()` is sync and on the hot path, so the value is fetched once in
+    /// the background and read atomically. Previously hardcoded to 0, which
+    /// made `resolve_context_window_for_work_dir` skip `ProviderMetadata` and
+    /// fall through to a generic default — the TUI showed `ctx 13k/?` against
+    /// a server advertising a 1M window.
+    context_window: Arc<AtomicU64>,
 }
 
 impl LocalProvider {
@@ -35,13 +49,56 @@ impl LocalProvider {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
-        Self {
+        let provider = Self {
             base_url,
             model,
             timeout_secs,
             pull_if_missing,
             http,
+            reasoning: ReasoningConfig::default(),
+            context_window: Arc::new(AtomicU64::new(0)),
+        };
+        provider.spawn_context_window_probe();
+        provider
+    }
+
+    /// Ask the server for its context window, in the background.
+    ///
+    /// The value is advertised on `/v1/models` as `max_model_len`, so there is
+    /// no reason to guess it or make the operator configure it. Deliberately
+    /// fire-and-forget: a provider that cannot answer simply leaves the value
+    /// at 0 and resolution falls back exactly as before. No-op outside a Tokio
+    /// runtime so `new()` stays usable from sync tests.
+    fn spawn_context_window_probe(&self) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
         }
+        let url = format!("{}/models", self.base_url);
+        let http = self.http.clone();
+        let model = self.model.clone();
+        let slot = Arc::clone(&self.context_window);
+        tokio::spawn(async move {
+            let Ok(response) = http.get(&url).send().await else {
+                return;
+            };
+            let Ok(json) = response.json::<serde_json::Value>().await else {
+                return;
+            };
+            if let Some(window) = max_model_len(&json, &model) {
+                slot.store(window, Ordering::Relaxed);
+                tracing::debug!(model, window, "discovered context window from /v1/models");
+            }
+        });
+    }
+
+    /// Attach reasoning controls (#123).
+    ///
+    /// Kept as a builder method rather than a fifth `new` parameter so the
+    /// existing call sites — including the Ollama paths, which have no
+    /// reasoning switch — stay untouched and keep the inert default.
+    pub fn with_reasoning(mut self, reasoning: ReasoningConfig) -> Self {
+        self.reasoning = reasoning;
+        self
     }
 
     /// Return the base URL for this provider.
@@ -131,14 +188,26 @@ impl LocalProvider {
             request.model.clone()
         };
 
-        let body = build_openai_request_body(
+        // `build_openai_stream_request_body`, not `build_openai_request_body`:
+        // the former adds `stream_options: {"include_usage": true}`. Without
+        // it an OpenAI-compatible server is under no obligation to report
+        // usage on a stream, and vLLM sends none at all — verified against a
+        // live server, where the identical request with the flag returns
+        // `prompt_tokens`/`completion_tokens` and without it returns zero
+        // usage chunks. That is why local sessions showed `$0.00` and no
+        // token counts while other backends, which volunteer usage anyway,
+        // looked fine.
+        let mut body = build_openai_stream_request_body(
             &effective_model,
             request.max_tokens,
             &request.system,
             &request.messages,
             &request.tools,
-            true,
         );
+        // #123: project the canonical effort level onto whatever reasoning
+        // control this backend exposes. Inert unless configured, so Ollama
+        // and llama.cpp deployments see byte-identical requests.
+        self.reasoning.apply(&mut body, request.effort.as_deref());
 
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
@@ -218,6 +287,24 @@ impl LocalProvider {
     }
 }
 
+/// Pull `max_model_len` out of an OpenAI-compatible `/v1/models` payload.
+///
+/// Prefers the entry whose `id` matches the configured model, falling back to
+/// the sole entry when there is exactly one — a single-model server is often
+/// addressed by an alias that differs from the id it advertises. Returns
+/// `None` rather than 0 so callers can tell "unknown" from "zero".
+pub fn max_model_len(models: &serde_json::Value, model: &str) -> Option<u64> {
+    let data = models.get("data")?.as_array()?;
+    let entry = data
+        .iter()
+        .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model))
+        .or_else(|| if data.len() == 1 { data.first() } else { None })?;
+    entry
+        .get("max_model_len")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|window| *window > 0)
+}
+
 impl Default for LocalProvider {
     fn default() -> Self {
         Self::new(
@@ -249,7 +336,9 @@ impl LlmProvider for LocalProvider {
         vec![ModelInfo {
             id: self.model.clone(),
             display_name: self.model.clone(),
-            context_window: 0,
+            // 0 until the background probe answers, which is the same
+            // "unknown" signal resolution already handles.
+            context_window: self.context_window.load(Ordering::Relaxed) as u32,
         }]
     }
 
