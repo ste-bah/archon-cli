@@ -63,12 +63,9 @@ fn marker_http_rejects_non_utf8_canonical_path() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
-    let dir = tempfile::tempdir().unwrap();
-    let pdf = dir.path().join(OsStr::from_bytes(b"invalid-\xff.pdf"));
-    std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
-    let canonical = std::fs::canonicalize(&pdf).unwrap();
+    let pdf = PathBuf::from(OsStr::from_bytes(b"invalid-\xff.pdf"));
 
-    let err = pdf_id_for_canonical_path(&canonical).unwrap_err();
+    let err = pdf_id_for_canonical_path(&pdf).unwrap_err();
 
     assert!(err.to_string().contains("not valid UTF-8"));
 }
