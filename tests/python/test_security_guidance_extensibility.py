@@ -644,6 +644,33 @@ class SecurityGuidanceExtensibilityTests(unittest.TestCase):
                     self.assertIsNone(extensibility._validated_regex("named-invalid", pattern))
                     compile_mock.assert_called_once_with(pattern)
 
+    def test_repeated_unclosed_named_group_headers_complete_within_deadline(self):
+        code = f"""
+import sys
+sys.path.insert(0, {str(PLUGIN_SCRIPTS)!r})
+import extensibility
+repeated = '(?P<' * 1023
+malformed = (repeated, '(?P<name', '(?P<' + ('n' * 512))
+valid = ('(?P<' + ('n' * 512) + '>a)', '(?P<name>a)(?P=name)')
+for _ in range(32):
+    assert extensibility._has_redos_structure(repeated) is False
+for pattern in malformed:
+    assert extensibility._validated_regex('named-invalid', pattern) is None
+for pattern in valid:
+    assert extensibility._validated_regex('named-valid', pattern) == pattern
+print('ok')
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            timeout=1,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "ok")
+
     def test_allows_nullable_alternations_without_variable_consuming_branches(self):
         safe = (
             r"(?:|a)a*!",

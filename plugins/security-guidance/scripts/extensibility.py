@@ -587,7 +587,7 @@ def _group_body_start(regex: str, index: int) -> int:
         cursor = index + 4
         while cursor < len(regex) and regex[cursor] != ">":
             cursor += 1
-        return cursor + 1 if cursor < len(regex) else index + 1
+        return cursor + 1 if cursor < len(regex) else len(regex)
     cursor = index + 2
     while cursor < len(regex) and regex[cursor] in "aiLmsux-":
         cursor += 1
