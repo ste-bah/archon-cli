@@ -106,7 +106,6 @@
 //! subagent's responsibility). Do NOT touch slash.rs in this ticket.
 
 use archon_tui::app::TuiEvent;
-use std::path::PathBuf;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 

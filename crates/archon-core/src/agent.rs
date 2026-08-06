@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};
+use archon_consciousness::corrections::CorrectionTracker;
 use archon_consciousness::inner_voice::InnerVoice;
 use archon_consciousness::rules::RulesEngine;
 use archon_llm::effort::EffortLevel;

@@ -15,10 +15,8 @@ use std::collections::BTreeMap;
 
 #[path = "call_data_tests_a.rs"]
 mod call_data_tests_a;
-use call_data_tests_a::*;
 #[path = "call_data_tests_b.rs"]
 mod call_data_tests_b;
-use call_data_tests_b::*;
 #[path = "call_data_tests_c.rs"]
 mod call_data_tests_c;
 use call_data_tests_c::*;

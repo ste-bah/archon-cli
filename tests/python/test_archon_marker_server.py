@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+import warnings
 
 from contextlib import nullcontext
 from pathlib import Path
@@ -198,6 +199,15 @@ class MarkerServerSecurityTests(unittest.TestCase):
                         with self.subTest(runtime=runtime, field=field, value=value):
                             with self.assertRaises(validation_error):
                                 model(**payload)
+
+    def test_installed_request_model_emits_no_pydantic_deprecation_warning(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            server._convert_request_model()
+
+        self.assertFalse(
+            [warning for warning in caught if "class-based `config`" in str(warning.message).lower()]
+        )
 
     def test_convert_rejects_numeric_device_before_calling_marker(self):
         pdf_id = server.pdf_id_for_path(self.pdf.resolve())

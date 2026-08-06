@@ -30,7 +30,6 @@ mod workflow_live_v2_lifecycle_e2e_tests_a;
 use workflow_live_v2_lifecycle_e2e_tests_a::*;
 #[path = "workflow_live_v2_lifecycle_e2e_tests_b.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests_b;
-use workflow_live_v2_lifecycle_e2e_tests_b::*;
 #[path = "workflow_live_v2_lifecycle_e2e_tests_c.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests_c;
 use workflow_live_v2_lifecycle_e2e_tests_c::*;

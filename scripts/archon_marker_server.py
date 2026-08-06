@@ -197,16 +197,22 @@ def main(argv: "list[str]") -> int:
 
 
 def _convert_request_model():
-    """Create the strict request model lazily for the server-only dependency."""
-    from pydantic import BaseModel, StrictStr
+    """Create the strict request model lazily for either supported Pydantic API."""
+    import pydantic
 
+    BaseModel = pydantic.BaseModel
+    StrictStr = pydantic.StrictStr
     class ConvertRequest(BaseModel):
         pdf_id: StrictStr
         device: StrictStr | None = None
         page_range: StrictStr | None = None
 
-        class Config:
-            extra = "forbid"
+        if hasattr(pydantic, "ConfigDict"):
+            model_config = pydantic.ConfigDict(extra="forbid")
+        else:
+
+            class Config:
+                extra = "forbid"
 
     return ConvertRequest
 

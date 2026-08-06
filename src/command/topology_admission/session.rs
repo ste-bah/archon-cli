@@ -44,14 +44,14 @@ pub(crate) fn install(
     Some(live)
 }
 
-/// Drop the installed tracker. Idempotent.
+#[cfg(test)]
 pub(crate) fn uninstall() {
     if let Ok(mut slot) = slot().write() {
         *slot = None;
     }
 }
 
-/// Begin tracking one more session against the installed tracker.
+#[cfg(test)]
 pub(crate) fn begin_session(session_id: &str) {
     if let Some(live) = active() {
         live.begin_session(session_id);

@@ -214,7 +214,6 @@ fn verification_input_stamps_project_relative_artifacts_into_canonical_fields() 
 
     let stage = stage_request_for_v2_agent("wf-test", ProviderTier::Coder, None, &req);
     let dataset_root = project_root.join(".archon/trading-lab/data/datasets");
-    let registry = project_root.join(".archon/trading-lab/data/registry.json");
     // References are produced by joining the project root to a `/`-separated
     // relative path, so the separator at the join point is always `/` while the
     // root keeps whatever form the platform gave it. `Path::join(..).display()`

@@ -12,7 +12,5 @@ mod verify_options_tests_b;
 use verify_options_tests_b::*;
 #[path = "verify_options_tests_c.rs"]
 mod verify_options_tests_c;
-use verify_options_tests_c::*;
 #[path = "verify_options_tests_d.rs"]
 mod verify_options_tests_d;
-use verify_options_tests_d::*;

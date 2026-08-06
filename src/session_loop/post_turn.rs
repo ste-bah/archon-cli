@@ -23,7 +23,6 @@ pub(super) async fn handle_completed_turn(
     config: &archon_core::config::ArchonConfig,
     input_tui_tx: &archon_tui::event_channel::TuiEventSender,
     session_store: &Arc<archon_session::storage::SessionStore>,
-    session_id: &str,
     dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     adapter: &Arc<crate::agent_handle::AgentHandle>,
     cmd_ctx: &mut SlashCommandContext,

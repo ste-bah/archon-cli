@@ -184,7 +184,6 @@ pub(crate) fn run_session_loop(
                 config: &config,
                 input_tui_tx: &input_tui_tx,
                 session_store: &session_store_for_input,
-                session_id: &session_id_for_input,
                 active_session: &active_session,
                 dispatcher: &agent_dispatcher,
                 adapter: &adapter,

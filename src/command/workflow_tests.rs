@@ -21,7 +21,6 @@ use std::collections::BTreeMap;
 
 #[path = "workflow_tests_a.rs"]
 mod workflow_tests_a;
-use workflow_tests_a::*;
 #[path = "workflow_tests_b.rs"]
 mod workflow_tests_b;
 use workflow_tests_b::*;

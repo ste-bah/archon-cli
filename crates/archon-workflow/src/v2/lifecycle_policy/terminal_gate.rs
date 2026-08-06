@@ -11,4 +11,4 @@ mod terminal_gate_a;
 pub use terminal_gate_a::*;
 #[path = "terminal_gate_b.rs"]
 mod terminal_gate_b;
-pub use terminal_gate_b::*;
+pub(crate) use terminal_gate_b::*;

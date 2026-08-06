@@ -50,9 +50,11 @@ use archon_tools::tool::{ToolRunAdmission, ToolRunAdmissionRequest, ToolRunAttem
 use archon_topology::live::{LiveTopology, Verdict};
 
 pub(crate) use session::{
-    active, begin_session, declare_graph, end_session, install, on_gate_passed, on_node_finished,
-    on_node_started, reset_session, uninstall,
+    active, declare_graph, end_session, install, on_gate_passed, on_node_finished, on_node_started,
+    reset_session,
 };
+#[cfg(test)]
+pub(crate) use session::{begin_session, uninstall};
 
 /// Admit one tool attempt.
 ///
