@@ -1,7 +1,7 @@
 [package]
 name = "archon-accel"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 # Archon accelerator + resource detection and a pure placement planner (Port #2 device layer).
 # RUNTIME (not compile-feature-gated) detection of CUDA / Apple-Metal-unified / CPU plus FREE

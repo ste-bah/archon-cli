@@ -2,7 +2,7 @@
 //! the Marker placement for a document of `pages` pages (default 50) on THIS host. Marker's VRAM
 //! scales with document size (PR-D), so the placement depends on both the card and the doc.
 
-use archon_accel::{detect, marker_footprint_mb, plan_marker_ingest, DeviceOverrides};
+use archon_accel::{DeviceOverrides, detect, marker_footprint_mb, plan_marker_ingest};
 
 fn main() {
     let pages: u32 = std::env::args()

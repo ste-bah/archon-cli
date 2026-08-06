@@ -4,9 +4,9 @@
 //! keys off a page-scaled footprint and falls back GPU→CPU on OOM.
 
 use archon_accel::{
-    marker_env_for, marker_env_ladder, marker_footprint_mb, marker_ingest_plan, plan_marker_ingest,
-    plan_placement, AccelKind, Accelerator, AcceleratorReport, ConsumerKind, ConsumerRequest,
-    DeviceOverrides, MarkerChunk, ModelFootprintTable, Precision, SuryaTier,
+    AccelKind, Accelerator, AcceleratorReport, ConsumerKind, ConsumerRequest, DeviceOverrides,
+    MarkerChunk, ModelFootprintTable, Precision, SuryaTier, marker_env_for, marker_env_ladder,
+    marker_footprint_mb, marker_ingest_plan, plan_marker_ingest, plan_placement,
 };
 
 fn cuda(total: u64, free: u64) -> AcceleratorReport {

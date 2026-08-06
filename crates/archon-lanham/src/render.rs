@@ -279,7 +279,9 @@ pub fn render_output_style(profile: &Profile, profile_key: &str) -> String {
         } else {
             "occasionally, at key turns"
         };
-        l.push(format!("- Deploy notable patterns {budget_count}: parallelism, chiasmus, anaphora, polyptoton."));
+        l.push(format!(
+            "- Deploy notable patterns {budget_count}: parallelism, chiasmus, anaphora, polyptoton."
+        ));
     }
 
     if !claim_strength.is_empty() || !hedges.is_empty() {

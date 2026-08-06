@@ -11,11 +11,11 @@
 //! exercised without a live API.
 
 use crate::fable::{FableError, FableResponse};
-use crate::gauntlet::{run_gauntlet, GauntletReport};
+use crate::gauntlet::{GauntletReport, run_gauntlet};
 use crate::judge::{self, Gate, JudgeReport};
 use crate::provenance;
 use crate::{
-    ga_compare, measure_text, strip_markup, substitute_quote_ids, GateConfig, Pack, QuoteBank,
+    GateConfig, Pack, QuoteBank, ga_compare, measure_text, strip_markup, substitute_quote_ids,
 };
 use serde_json::json;
 use std::path::Path;
@@ -97,8 +97,17 @@ pub fn build_head(pack: &Pack) -> String {
     let (lo, hi) = pack.p1_task.target_words;
     format!(
         "TASK: {}. Target {}-{} words total. LaTeX conventions: {}.\n\nUSAGE BOUNDARY: {}\n\nTERMINOLOGY & STYLE LOCKS (hard constraints):\n{}\n\nFORBIDDEN:\n{}\n\nQUOTE INDEX (quotations exist ONLY as \u{ab}Qnn\u{bb}/\u{ab}Qnn+\u{bb} markers; the quoted words enter later by mechanical substitution — never write quoted words):\n{}\n\nEVIDENCE BANK (grades set assertion strength — AUTHOR-CONFIRMED flat; CONFIRMED asserted with its content; UNCERTAIN hedged or omitted):\n{}\n\nCONCEPTUAL SEMANTICS:\n{}\n\nFOUNDATION TEXT (the existing prose this section must cohere with; drop none of its claims silently):\n{}",
-        pack.p1_task.section_identity, lo, hi, pack.p1_task.latex_conventions,
-        pack.p9_usage_statement, locks, neg, qidx, ev, pack.p6_semantics, pack.p7_foundation
+        pack.p1_task.section_identity,
+        lo,
+        hi,
+        pack.p1_task.latex_conventions,
+        pack.p9_usage_statement,
+        locks,
+        neg,
+        qidx,
+        ev,
+        pack.p6_semantics,
+        pack.p7_foundation
     )
 }
 
@@ -149,7 +158,9 @@ fn d2_prompt(
     let prior_block = if prior.is_empty() {
         String::new()
     } else {
-        format!("\n\nALREADY-DRAFTED PRECEDING MOVEMENTS (continue from them; do not repeat them):\n{prior}")
+        format!(
+            "\n\nALREADY-DRAFTED PRECEDING MOVEMENTS (continue from them; do not repeat them):\n{prior}"
+        )
     };
     format!(
         "{head}\n\nFULL MOVEMENT PLAN (for orientation — you are drafting ONLY movement {n} now):\n{d1}\n\nSKELETON FOR THIS MOVEMENT (follow its satellite structure and rhythm placements):\n{movement_seg}\n\n{d15}\n\nVOICE EXEMPLARS for this movement type (match their texture; do NOT quote or closely paraphrase them — any shared 8-word sequence is a gate failure):\n{exemplars}{prior_block}\n\nSTAGE D2 — write ONLY movement {n} as finished prose. Quotations ONLY as \u{ab}Qnn+\u{bb} or \u{ab}Qnn\u{bb} markers placed where the quote belongs, with your prose written around them. Output only the movement's prose body."
