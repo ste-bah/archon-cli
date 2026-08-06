@@ -116,14 +116,17 @@ fn pick_survivor<'a>(
 ///   those edges as merge candidates and hard-deleted one of each pair.
 /// * beyond that -- ignored.
 ///
-/// A store without a vector index returns no neighbours, and this becomes a
-/// no-op rather than an error -- the lexical pass still runs.
+/// A store without a vector index reports `None` for the merge count rather
+/// than `Some(0)`, and the lexical pass still runs. The two readings are not
+/// interchangeable: `Some(0)` is a store this pass examined and found clean,
+/// `None` is a pass that never happened. Every Archon process after the first
+/// reads memory over TCP, so `None` is the common case, not the exotic one.
 pub(crate) fn phase_semantic_dedup(
     graph: &dyn MemoryTrait,
     merge_distance: f64,
     review_distance: f64,
     merge_budget: usize,
-) -> Result<(usize, Vec<crate::garden::ReviewPair>), MemoryError> {
+) -> Result<(Option<usize>, Vec<crate::garden::ReviewPair>), MemoryError> {
     let mut merged = 0usize;
     let mut review: Vec<crate::garden::ReviewPair> = Vec::new();
     let mut superseded_ids: HashSet<String> = HashSet::new();
@@ -140,7 +143,13 @@ pub(crate) fn phase_semantic_dedup(
             if superseded_ids.contains(&memory.id) {
                 continue;
             }
-            let neighbours = graph.embedding_neighbours(&memory.id, 8)?;
+            // Vector search is a property of the STORE, not of one row, so the
+            // first unavailable answer settles it for the whole pass. Bailing
+            // here rather than accumulating a flag also means nothing has been
+            // merged yet, so there is no partial count to throw away.
+            let Some(neighbours) = graph.embedding_neighbours(&memory.id, 8)? else {
+                return Ok((None, Vec::new()));
+            };
             for (neighbour_id, distance) in neighbours {
                 if distance > review_distance || superseded_ids.contains(&neighbour_id) {
                     continue;
@@ -200,7 +209,7 @@ pub(crate) fn phase_semantic_dedup(
         }
     }
 
-    Ok((merged, review))
+    Ok((Some(merged), review))
 }
 
 /// Merge the pairs an adjudicator judged to be the same claim.

@@ -1,9 +1,9 @@
 //! Tests for the semantic deduplication phase.
 //!
-//! An in-memory graph carries no embeddings, so `embedding_neighbours` returns
-//! nothing and the phase would silently pass whatever it was given. These use a
-//! delegating wrapper that supplies canned neighbours, so the merge decisions
-//! are actually exercised rather than skipped.
+//! An in-memory graph carries no embeddings, so `embedding_neighbours` reports
+//! itself unavailable and the phase would skip whatever it was given. Most of
+//! these use a delegating wrapper that supplies canned neighbours, so the merge
+//! decisions are actually exercised rather than skipped.
 
 use std::collections::HashMap;
 
@@ -84,8 +84,10 @@ impl MemoryTrait for StubNeighbours {
         self.inner.get_related_memories(id, depth)
     }
 
-    fn embedding_neighbours(&self, memory_id: &str, top_k: usize) -> Result<Vec<(String, f64)>, MemoryError> {
-        Ok(self.neighbours.get(memory_id).cloned().unwrap_or_default().into_iter().take(top_k).collect())
+    fn embedding_neighbours(&self, memory_id: &str, top_k: usize) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
+        // Always `Some`: this stub stands in for a store that HAS vector
+        // search. Absence is exercised against a real unindexed graph below.
+        Ok(Some(self.neighbours.get(memory_id).cloned().unwrap_or_default().into_iter().take(top_k).collect()))
     }
 }
 
@@ -112,7 +114,7 @@ fn merges_a_restatement_that_lexical_overlap_would_miss() {
 
     let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
 
-    assert_eq!(merged, 1);
+    assert_eq!(merged, Some(1));
     // Higher importance survives.
     assert!(
         stub.get_memory(&a).is_ok(),
@@ -155,7 +157,7 @@ fn leaves_related_but_distinct_memories_alone() {
 
     let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
 
-    assert_eq!(merged, 0);
+    assert_eq!(merged, Some(0));
     assert!(stub.get_memory(&a).is_ok());
     assert!(stub.get_memory(&b).is_ok());
 }
@@ -180,7 +182,7 @@ fn the_review_band_records_no_relationship() {
 
     let (merged, review) = phase_semantic_dedup(&stub, 0.15, 0.35, 50).expect("dedup");
 
-    assert_eq!(merged, 0, "the review band must never merge");
+    assert_eq!(merged, Some(0), "the review band must never merge");
     assert_eq!(
         review.len(),
         1,
@@ -288,10 +290,12 @@ fn a_verdict_for_a_missing_memory_does_not_fail_the_batch() {
     assert!(stub.get_memory(&a).is_ok());
 }
 
-/// A store with no vector index degrades to a no-op rather than an error, so
-/// the lexical pass still runs.
+/// A store that HAS vector search and finds nothing near reports zero merges.
+///
+/// The counterpart to the test below, and the guard against fixing the
+/// unavailable case by inverting it: "nothing to merge" must stay sayable.
 #[test]
-fn is_a_no_op_without_embeddings() {
+fn a_searchable_store_with_no_near_neighbours_reports_zero() {
     let stub = StubNeighbours::new(graph());
     stub.store("something", MemoryType::Fact, 0.5);
     stub.store("something else", MemoryType::Fact, 0.5);
@@ -300,8 +304,28 @@ fn is_a_no_op_without_embeddings() {
         phase_semantic_dedup(&stub, 0.15, 0.15, 50)
             .expect("dedup")
             .0,
-        0
+        Some(0)
     );
+}
+
+/// A store with no vector index reports the pass as UNAVAILABLE, not clean.
+///
+/// The distinction the `Option` exists for. A plain in-memory graph never
+/// initialised `memory_embeddings`, so there is no index to query -- the same
+/// condition as a second Archon process reading memory over TCP. Reporting
+/// `Some(0)` here is the bug: it says the store was examined and found to hold
+/// no duplicates, when nothing was examined at all.
+#[test]
+fn an_unindexed_store_reports_the_pass_as_unavailable() {
+    let graph = graph();
+    graph
+        .store_memory("something", "", MemoryType::Fact, 0.5, &[], "test", "")
+        .expect("store");
+
+    let (merged, review) = phase_semantic_dedup(&graph, 0.15, 0.35, 50).expect("dedup");
+
+    assert_eq!(merged, None, "an absent index is not a clean store");
+    assert!(review.is_empty());
 }
 
 /// The budget stops a single pass reshaping the whole graph.
@@ -316,7 +340,7 @@ fn respects_the_merge_budget() {
 
     let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 2).expect("dedup");
 
-    assert_eq!(merged, 2, "the pass must stop at its budget");
+    assert_eq!(merged, Some(2), "the pass must stop at its budget");
 }
 
 /// End-to-end against a REAL vector index, not the stub.
@@ -355,7 +379,8 @@ fn real_vector_index_merges_near_neighbours_and_spares_distant_ones() {
     // Distance semantics, asserted directly.
     let neighbours = graph
         .embedding_neighbours(&anchor, 8)
-        .expect("neighbour search");
+        .expect("neighbour search")
+        .expect("a store with a live index reports available");
     let distance_to = |id: &str| {
         neighbours
             .iter()
@@ -377,7 +402,7 @@ fn real_vector_index_merges_near_neighbours_and_spares_distant_ones() {
 
     let (merged, _linked) = phase_semantic_dedup(&graph, 0.15, 0.15, 50).expect("dedup");
 
-    assert_eq!(merged, 1, "only the paraphrase should merge");
+    assert_eq!(merged, Some(1), "only the paraphrase should merge");
     assert!(graph.get_memory(&anchor).is_ok(), "the anchor survives");
     let folded = graph
         .get_memory(&paraphrase)
@@ -402,7 +427,7 @@ fn does_not_merge_across_memory_types() {
 
     let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
 
-    assert_eq!(merged, 0);
+    assert_eq!(merged, Some(0));
     assert!(stub.get_memory(&fact).is_ok());
     assert!(stub.get_memory(&rule).is_ok());
 }

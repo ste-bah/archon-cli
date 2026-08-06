@@ -329,6 +329,18 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(mems).map_err(|e| e.to_string())
         }
 
+        "embedding_neighbours" => {
+            let memory_id = str_param(params, "memory_id")?;
+            let top_k = usize_param(params, "top_k")?;
+            // `null` on the wire is "this store has no vector search", which is
+            // a different answer from an empty list and the reason the client
+            // deserializes into an `Option`.
+            let neighbours =
+                crate::access::MemoryTrait::embedding_neighbours(graph, &memory_id, top_k)
+                    .map_err(|error| error.to_string())?;
+            serde_json::to_value(neighbours).map_err(|error| error.to_string())
+        }
+
         other => Err(format!("unknown method: {other}")),
     }
 }

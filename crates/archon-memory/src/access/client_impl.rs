@@ -276,6 +276,30 @@ impl MemoryTrait for MemoryClient {
         ))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
+
+    fn embedding_neighbours(
+        &self,
+        memory_id: &str,
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
+        let result = block_on_async(self.call(
+            "embedding_neighbours",
+            serde_json::json!({"memory_id": memory_id, "top_k": top_k}),
+        ));
+        match result {
+            Ok(value) => serde_json::from_value(value).map_err(MemoryError::from),
+            // The process holding the database may be an older build whose
+            // dispatch table has no such method, and it answers "unknown
+            // method" rather than null. Unavailable is the honest reading of
+            // that, and unlike the old empty-vec stub it is now sayable --
+            // failing the whole consolidation pass over an optional index is
+            // not.
+            Err(error) => {
+                tracing::debug!(%error, "memory server has no vector-neighbour request");
+                Ok(None)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

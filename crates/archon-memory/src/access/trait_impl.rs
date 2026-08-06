@@ -163,18 +163,20 @@ impl MemoryTrait for MemoryGraph {
         &self,
         memory_id: &str,
         top_k: usize,
-    ) -> Result<Vec<(String, f64)>, MemoryError> {
+    ) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
         // A graph that never initialised the embedding schema has no
         // `memory_embeddings` relation at all, and querying it errors. That is
-        // the same "no vector search here" condition as a missing row, so it
-        // degrades rather than propagating -- otherwise one unindexed store
-        // fails the entire consolidation pass.
+        // "this store has no vector search", so it degrades rather than
+        // propagating -- otherwise one unindexed store fails the entire
+        // consolidation pass.
         let vector = match crate::vector_search::fetch_embedding(self.db(), memory_id) {
             Ok(Some(vector)) => vector,
-            Ok(None) => return Ok(Vec::new()),
+            // The relation exists and this row simply has no vector yet. The
+            // search is available; this memory has no neighbours.
+            Ok(None) => return Ok(Some(Vec::new())),
             Err(error) => {
                 tracing::debug!(%error, "no embedding index; skipping neighbour search");
-                return Ok(Vec::new());
+                return Ok(None);
             }
         };
         // `top_k + 1` because the query vector is this memory's own, so it
@@ -182,18 +184,17 @@ impl MemoryTrait for MemoryGraph {
         let hits = match crate::vector_search::search_similar(self.db(), &vector, top_k + 1) {
             Ok(hits) => hits,
             Err(error) => {
-                // No HNSW index, or one built for a different dimension. The
-                // contract is that empty means "unavailable", so the caller
-                // falls back rather than the whole pass failing.
+                // No HNSW index, or one built for a different dimension.
                 tracing::debug!(%error, "embedding neighbour search unavailable");
-                return Ok(Vec::new());
+                return Ok(None);
             }
         };
-        Ok(hits
-            .into_iter()
-            .filter(|(id, _)| id != memory_id)
-            .take(top_k)
-            .collect())
+        Ok(Some(
+            hits.into_iter()
+                .filter(|(id, _)| id != memory_id)
+                .take(top_k)
+                .collect(),
+        ))
     }
 }
 
@@ -446,13 +447,15 @@ impl MemoryTrait for MemoryAccess {
         &self,
         memory_id: &str,
         top_k: usize,
-    ) -> Result<Vec<(String, f64)>, MemoryError> {
+    ) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
         match self {
             Self::Direct { graph, .. } => graph.embedding_neighbours(memory_id, top_k),
-            // The memory-server protocol has no vector-neighbour request, so a
-            // remote store falls back to the lexical pass. Adding one is a
-            // protocol change and belongs with its own round-trip tests.
-            Self::Remote(_) => Ok(Vec::new()),
+            // Every process after the first reads memory through here, because
+            // CozoDB admits one writer. Answering locally -- as this did before
+            // the protocol gained the request -- meant the semantic dedup pass
+            // was skipped for every session but the first, and reported as
+            // having found nothing.
+            Self::Remote(client) => client.embedding_neighbours(memory_id, top_k),
         }
     }
 }
