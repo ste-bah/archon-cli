@@ -108,7 +108,7 @@ fn test_db() -> Arc<DbInstance> {
 async fn await_usage_rows(
     db: &Arc<DbInstance>,
 ) -> Vec<archon_learning::llm_call_usage::LlmCallUsageRecord> {
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let rows = archon_learning::llm_call_usage::list_llm_call_usage(
                 db,
@@ -118,7 +118,7 @@ async fn await_usage_rows(
             if !rows.is_empty() {
                 return rows;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await

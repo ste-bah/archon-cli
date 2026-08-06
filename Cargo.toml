@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.5.1"
+version = "1.5.2"
 edition = "2024"
 # 1.88 is the floor because the tree uses let-chains (`if cond && let Some(x) =
 # ...`), which are unstable in edition 2024 before then: 1.86 and 1.87 both
@@ -93,7 +93,7 @@ aws-credential-types = "1"
 jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 hmac = "0.12"
 semver = { version = "1", features = ["serde"] }
-russh = "0.61"
+russh = "0.62.5"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 cpal = "0.15"

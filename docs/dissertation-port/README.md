@@ -70,6 +70,20 @@ PDF
 - **Persistent Marker throughput**: a FastAPI server
   (`scripts/archon_marker_server.py`, `MarkerSource::Http`) loads the ~6 GB surya
   models **once** instead of the per-document reload the subprocess sidecar pays.
+  It requires `--pdf-root` and recursively freezes canonical regular PDFs into an
+  immutable startup catalogue. Requests contain only a deterministic SHA-256 ID of
+  the canonical UTF-8 pathname, not a path field or PDF bytes; nested PDFs and
+  duplicate basenames remain distinct. On Windows, Rust strips verbatim drive
+  (`\\?\C:\...`) and verbatim UNC (`\\?\UNC\server\share\...`) prefixes before SHA-256
+  hashing, matching Python's `str(Path.resolve()).encode("utf-8")` pathname text.
+  Archon and server must resolve the same canonical pathname (same host or
+  identically mounted filesystem). Unknown IDs,
+  malformed requests, invalid page ranges, and conversion failures return fixed
+  safe errors. Restart after corpus mutations: the catalogue chooses the
+  startup-approved pathname and does not detect local replacement at that path.
+  It binds to loopback by default; it has no authentication, and an explicit
+  `--allow-non-loopback` is required for a non-loopback host; this opt-in permits
+  exposure but does not weaken or change the frozen startup catalogue.
 - **Integrity sealing**: a `chunks_root` tamper-evidence hash on *all* ingest,
   `docs verify-integrity` to prove no post-ingest tampering, an end-of-run
   `COORD_MARKER` vs `COORD_NONE` tally, and a **strict-fail** rule on the HTTP

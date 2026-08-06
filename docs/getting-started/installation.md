@@ -416,7 +416,7 @@ $env:PATH += ";$PWD\target\release"
 
 ```bash
 archon --version
-# Expected: archon 1.5.1 (<short-sha>)
+# Expected: archon 1.5.2 (<short-sha>)
 
 archon --help                   # full subcommand listing
 archon --list-themes            # 16 MBTI + 6 utility, plus daltonized and auto

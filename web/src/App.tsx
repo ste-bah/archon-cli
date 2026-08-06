@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { HashRouter } from "react-router-dom";
+import { HashRouter } from "react-router";
 import { apiClient } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { WorkbenchRoutes } from "./views/routes";

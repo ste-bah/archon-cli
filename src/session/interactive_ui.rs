@@ -149,7 +149,6 @@ pub(super) async fn run(
 
     let slash_commands_disabled = resolved_flags.disable_slash_commands;
     let session_store_for_input = Arc::clone(&session_store);
-    let session_id_for_input = session_id.to_string();
     let persist_personality = config.consciousness.persist_personality;
     let personality_history_limit = config.consciousness.personality_history_limit;
     let session_start_instant = std::time::Instant::now();

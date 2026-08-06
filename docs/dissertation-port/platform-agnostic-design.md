@@ -31,6 +31,26 @@ sidecar's torch-free `--selftest`) pins the parser contract.
 Transport is orthogonal to device: subprocess vs HTTP vs pre-extracted JSON is
 chosen on the Rust side (`MarkerSource`) independently of which device Marker uses.
 
+### HTTP security boundary
+
+The persistent server requires `--pdf-root`; at startup it recursively resolves and freezes
+regular PDFs beneath that root into an immutable `pdf_id`→canonical-path catalogue. An HTTP
+request carries only that deterministic SHA-256 ID (plus optional `device` and `page_range`),
+never an absolute path or PDF bytes; path-bearing or other extra fields are invalid requests.
+The full canonical UTF-8 pathname makes nested PDFs and duplicate basenames distinct. Rust
+strips Windows verbatim-drive prefixes from `\\?\C:\...` and verbatim-UNC prefixes from
+`\\?\UNC\server\share\...` before
+hashing; Python hashes `str(Path.resolve()).encode("utf-8")`. Therefore both sides must observe
+the same canonical path text (same host or identically mounted filesystem). The catalogue is not
+revalidated during conversion: restart after local additions, moves, deletes, or replacements;
+post-start corpus mutation is outside remote request control. The server defaults to loopback and
+has no authentication; `localhost` and literal loopback IPs are accepted, while a non-loopback
+host requires explicit `--allow-non-loopback`. This opt-in permits exposure but does not weaken or
+change the frozen startup catalogue. Public errors are fixed: `400 invalid request`,
+`400 invalid pdf_id`, `400 invalid page_range`, or `500 conversion failed`; details stay in local
+logs. These transport controls do not change the shared conversion output or device placement
+described above.
+
 ---
 
 ## 2. `archon-accel` — uniform detection + placement across CUDA / Metal / CPU

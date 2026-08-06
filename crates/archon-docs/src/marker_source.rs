@@ -11,13 +11,25 @@
 //! pre-extracted JSON file. All three yield the same block-tree JSON, parsed by
 //! `archon_ingest_ext::marker::parse_marker_str`.
 //!
-//! NOTE on the HTTP transport: the server reads the PDF from ITS OWN local filesystem (it is sent
-//! only a `pdf_path`, never the bytes). So `marker_url` must point at a server that shares
-//! archon's filesystem — same host, or a mount where the identical absolute path resolves. It is
-//! NOT a general remote-upload service.
+//! NOTE on the HTTP transport: the request carries only an opaque ID derived from Archon's
+//! canonical local PDF path (never a path field or PDF bytes). Rust removes Windows verbatim
+//! drive (`\\?\C:\...`) and UNC (`\\?\UNC\server\share\...`) prefixes before hashing, matching
+//! Python's `str(Path.resolve())` text. The server operator must start it with `--pdf-root`; at
+//! startup it recursively freezes canonical regular PDFs into an ID→path catalogue. Archon and
+//! the server must resolve a document to identical canonical path text (same host, or identically
+//! mounted filesystems) for their IDs to match. Nested PDFs and duplicate basenames are supported
+//! because the full canonical path is hashed. The catalogue is static for the process lifetime, so
+//! restart after local corpus changes; those changes are outside remote request control. It is NOT
+//! a general remote-upload service. Server failures use fixed safe messages; Rust treats
+//! non-success bodies as opaque error text and receives no conversion exception details. The server
+//! defaults to loopback and has no authentication. A non-loopback host requires explicit
+//! `--allow-non-loopback`; that opt-in permits exposure but does not weaken or change the frozen
+//! startup catalogue.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 
 use archon_accel::{AccelKind, DeviceOverrides, MarkerChunk, marker_ingest_plan};
 use archon_ingest_ext::chunk::{Block, FigureRegion};
@@ -37,6 +49,35 @@ pub const HTTP_CONVERT_TIMEOUT_SECS: u64 = 900;
 pub const HEALTH_MAX_WAIT_SECS: u64 = 120;
 pub const HEALTH_POLL_INTERVAL_SECS: u64 = 2;
 
+/// Match Python's `Path.resolve()` Windows path text before hashing.
+///
+/// Windows `std::fs::canonicalize` can retain the `\\?\` verbatim prefix while Python's
+/// `Path.resolve()` returns ordinary drive/UNC text. Other path forms stay untouched.
+fn normalized_canonical_path_text(path_text: &str) -> String {
+    if let Some(unc_path) = path_text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc_path}");
+    }
+
+    let Some(drive_path) = path_text.strip_prefix(r"\\?\") else {
+        return path_text.to_string();
+    };
+    let bytes = drive_path.as_bytes();
+    if matches!(bytes, [drive, b':', ..] if drive.is_ascii_alphabetic()) {
+        drive_path.to_string()
+    } else {
+        path_text.to_string()
+    }
+}
+
+/// Return the opaque ID shared with the Marker server for a canonical PDF path.
+fn pdf_id_for_canonical_path(canonical_path: &Path) -> Result<String, DocsError> {
+    let path_text = canonical_path.to_str().ok_or_else(|| DocsError::Storage {
+        message: "canonical pdf path for marker http is not valid UTF-8".to_string(),
+    })?;
+    let normalized_path_text = normalized_canonical_path_text(path_text);
+    Ok(hex::encode(Sha256::digest(normalized_path_text.as_bytes())))
+}
+
 /// Where/how to obtain a PDF's Marker block tree.
 #[derive(Clone, Debug)]
 pub enum MarkerSource {
@@ -50,12 +91,15 @@ pub enum MarkerSource {
         script: PathBuf,
         chunks: Vec<MarkerChunk>,
     },
-    /// POST `{"pdf_path", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
+    /// POST `{"pdf_id", "device"}` to a persistent Marker HTTP server's `/convert` endpoint
     /// (`scripts/archon_marker_server.py`) and get the same normalized block-tree JSON back. The
-    /// server loads the surya models ONCE at startup and keeps them resident, so bulk ingest pays
-    /// no per-document model reload (the subprocess sidecar reloads ~6 GB per PDF). Server and
-    /// archon run on the same host: the absolute `pdf_path` is read locally by the server, so no
-    /// bytes are uploaded. `device` is advisory — the server's models live on its startup device.
+    /// operator must supply `--pdf-root` containing all PDFs Archon sends; each request uses a
+    /// deterministic ID from the canonical absolute local path. The server loads the surya models
+    /// ONCE at startup and keeps them resident, so bulk ingest pays no per-document model reload
+    /// (the subprocess sidecar reloads ~6 GB per PDF). Server and archon run on the same host: no
+    /// PDF bytes are uploaded. `device` is advisory — the server's models live on its startup
+    /// device. Server failures use fixed messages, and this transport treats every non-success
+    /// body as opaque error text.
     Http { url: String, device: Option<String> },
     /// Read a pre-extracted Marker JSON file (decoupled — you run Marker however/whenever).
     PreExtracted { json_path: PathBuf },
@@ -248,8 +292,10 @@ impl MarkerSource {
     /// or a pre-extracted file — both already carry the full document, so neither chunks).
     ///
     /// HTTP contract (matched by `scripts/archon_marker_server.py`):
-    /// `POST {url}/convert` with JSON body `{"pdf_path": "<absolute path>", "device": "<dev>"}` →
+    /// `POST {url}/convert` with JSON body `{"pdf_id": "<canonical path SHA-256>", "device": "<dev>"}` →
     /// 200 with the same normalized block-tree JSON the subprocess sidecar prints to stdout.
+    /// The request body remains unchanged; non-success response bodies remain opaque error text to
+    /// Rust.
     async fn fetch_json(&self, pdf_path: &Path) -> Result<String, DocsError> {
         match self {
             MarkerSource::Http { url, device } => {
@@ -264,8 +310,9 @@ impl MarkerSource {
                                 pdf_path.display()
                             ),
                         })?;
+                let pdf_id = pdf_id_for_canonical_path(&abs)?;
                 let body = serde_json::json!({
-                    "pdf_path": abs.to_string_lossy(),
+                    "pdf_id": pdf_id,
                     "device": device.as_deref().unwrap_or("auto"),
                 });
                 let endpoint = format!("{}/convert", url.trim_end_matches('/'));

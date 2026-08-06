@@ -64,16 +64,16 @@ fn excerpt(content: &str) -> String {
     flat.chars().take(300).collect()
 }
 
-/// Parse the verdict lines back into one decision per pair.
-///
-/// Anything not explicitly `SAME` is `Distinct`: a truncated reply, a missing
-/// line, or commentary the model added all fall through to "do not merge".
+#[cfg(test)]
 pub(crate) fn parse_verdicts(response: &str, pair_count: usize) -> Vec<Adjudication> {
     parse_verdicts_counted(response, pair_count).0
 }
 
-/// As [`parse_verdicts`], also reporting how many lines were actually understood.
+/// Parse the verdict lines back into one decision per pair, also reporting how many lines were
+/// actually understood.
 ///
+/// Anything not explicitly `SAME` is `Distinct`: a truncated reply, a missing
+/// line, or commentary the model added all fall through to "do not merge".
 /// The count matters because "the model said DIFFERENT" and "the reply was
 /// unparseable" both produce zero merges, and without this they are
 /// indistinguishable in the log -- a broken adjudicator would look exactly like

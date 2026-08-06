@@ -25,6 +25,22 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  warnings:
+    name: rust warnings denied
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make
+      - uses: Swatinem/rust-cache@v2
+      - name: Check every Rust target without warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --workspace --all-targets --locked
+
   clippy:
     name: clippy (advisory)
     runs-on: ubuntu-latest
@@ -329,6 +345,22 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --doc -- --test-threads=1
+
+  python-security-tests:
+    name: Python security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install HTTP test dependencies
+        run: python3 -m pip install fastapi httpx uvicorn
+      - name: Run Issue 115 security tests
+        run: |
+          python3 -m unittest -v \
+            tests/python/test_archon_marker_server.py \
+            tests/python/test_security_guidance_extensibility.py
+      - name: Run Issue 115 live smoke
+        run: python3 tests/python/live_issue_115_smoke.py
 
   arch-lint:
     name: arch-lint (D10 spawn-everything)

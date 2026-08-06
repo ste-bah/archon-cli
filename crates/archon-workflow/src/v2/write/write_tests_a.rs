@@ -8,7 +8,5 @@ use super::*;
 
 #[path = "write_tests_a1.rs"]
 mod tests_a1;
-use tests_a1::*;
 #[path = "write_tests_a2.rs"]
 mod tests_a2;
-use tests_a2::*;
