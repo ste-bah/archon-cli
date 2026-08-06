@@ -70,6 +70,18 @@ pub struct TaskInfo {
     pub completed_at: Option<DateTime<Utc>>,
     pub output: String,
     pub cost: f64,
+    /// The subagent this task dispatched, when it dispatched one.
+    ///
+    /// `TaskCreate` mints a subagent id and hands it to the executor, which
+    /// never registers it in `BACKGROUND_AGENTS` — that registry is populated
+    /// by `AgentTool::execute` alone. Without this field a `TaskCreate`
+    /// subagent has no liveness signal anywhere, and anything reading liveness
+    /// off `BACKGROUND_AGENTS` reports it dead while it is still working.
+    ///
+    /// `serde(default)` so stored tasks written before the field existed still
+    /// deserialise.
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +128,7 @@ impl TaskManager {
             completed_at: None,
             output: String::new(),
             cost: 0.0,
+            agent_id: None,
         };
 
         if let Ok(mut tasks) = self.tasks.lock() {
@@ -134,6 +147,36 @@ impl TaskManager {
     /// Get a snapshot of a task's info.
     pub fn get_task(&self, id: &str) -> Option<TaskInfo> {
         self.tasks.lock().ok()?.get(id).cloned()
+    }
+
+    /// Record the subagent a task dispatched, so its liveness stays findable.
+    ///
+    /// The task id and the subagent id are two unrelated UUIDs minted moments
+    /// apart in `TaskCreate`; nothing else ever writes the association down,
+    /// and once `execute` returns the link is gone.
+    pub fn set_agent_id(&self, id: &str, agent_id: &str) {
+        if let Ok(mut tasks) = self.tasks.lock()
+            && let Some(info) = tasks.get_mut(id)
+        {
+            info.agent_id = Some(agent_id.to_string());
+        }
+    }
+
+    /// Is the subagent dispatched under `agent_id` still executing?
+    ///
+    /// `None` means no task in this process ever dispatched that id — which is
+    /// not the same as "it is dead". A caller checking liveness across
+    /// registries needs that distinction: an `AgentTool` subagent is absent
+    /// here and perfectly alive in `BACKGROUND_AGENTS`.
+    ///
+    /// `Pending` counts as running: the task has been dispatched and the runner
+    /// simply has not reported back yet.
+    pub fn agent_is_running(&self, agent_id: &str) -> Option<bool> {
+        let tasks = self.tasks.lock().ok()?;
+        tasks
+            .values()
+            .find(|info| info.agent_id.as_deref() == Some(agent_id))
+            .map(|info| matches!(info.status, TaskStatus::Pending | TaskStatus::Running))
     }
 
     /// Update a task's description.

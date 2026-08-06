@@ -274,6 +274,16 @@ pub fn create_default_registry(
     registry.register(Box::new(archon_tools::task_output::TaskOutputTool));
     registry.register(Box::new(archon_tools::worktree::EnterWorktreeTool));
     registry.register(Box::new(archon_tools::worktree::ExitWorktreeTool));
+    // Task board. Registered unconditionally: the tools resolve the board
+    // handle at call time, not here, because `create_default_registry` runs
+    // before the memory service is opened and in ~25 places that never open one
+    // at all. Without a handle they return "the task board is unavailable"
+    // rather than being silently absent from the tool list — an agent told to
+    // drain the board can then say why it could not.
+    registry.register(Box::new(archon_tools::board::BoardRaiseTool::new()));
+    registry.register(Box::new(archon_tools::board::BoardClaimTool::new()));
+    registry.register(Box::new(archon_tools::board::BoardListTool::new()));
+    registry.register(Box::new(archon_tools::board::BoardResolveTool::new()));
     registry.register(Box::new(
         archon_tools::mcp_resources::ListMcpResourcesTool::default(),
     ));

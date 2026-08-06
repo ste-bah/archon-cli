@@ -196,15 +196,25 @@ Stated plainly, because the storage layer reads as more complete than the
 feature is:
 
 - **`round` has no mutator.** It is stored, decoded, and returned, and nothing
-  ever advances it. Deciding which claim starts a new attempt is an
-  escalation-ladder policy question and belongs with that half of #125 rather
-  than being guessed at here.
-- **There are no board tools exposed to subagents.** Nothing outside
-  `archon-memory` calls `BoardAccess` today. An agent cannot raise, claim, or
-  resolve an item.
-- **There is no drain gate.** The `run_id` partition and the `by_run` index
-  exist for it, and the status vocabulary anticipates it, but nothing yet blocks
-  a run from finishing while items are still open.
+  ever advances it. The review loop bounds its own rounds internally, so the
+  column is currently a place for an escalation ladder to record itself rather
+  than something any code reads.
+- **A subagent spawned with an explicit `allowed_tools` list cannot reach the
+  board.** `BoardRaise`, `BoardClaim`, `BoardList` and `BoardResolve` are in
+  `DEFAULT_TOOLS`, which applies only when neither the spawn request nor the
+  agent definition names any tools. Most pipeline agents name their tools, so
+  they are excluded. There is no always-allow counterpart to the denylist;
+  adding one is a policy change rather than a wiring fix.
+- **One spawn path has no liveness signal at all.**
+  `archon-pipeline/src/subagent_adapter.rs` calls the foreground runners
+  directly and registers in neither `BACKGROUND_AGENTS` nor `TASK_MANAGER`, so
+  the lease sweep would release a pipeline agent's claim while it is still
+  working. The fix is the same one-line association added to `TaskCreate`, but
+  it lands in another crate.
+- **The drain gate runs only in the V2 lifecycle.** The v3 orchestrated path
+  (`ARCHON_ORCHESTRATED_LIFECYCLE=1`) has its own terminal report and does not
+  pass through `run_final_gates`, so neither the gate nor the third verdict
+  applies there.
 
 ## See also
 

@@ -64,6 +64,7 @@ pub mod task_update;
 pub mod worktree;
 pub mod worktree_manager;
 
+pub mod board;
 pub mod cron_create;
 pub mod cron_delete;
 pub mod cron_list;

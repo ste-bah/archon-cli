@@ -102,7 +102,15 @@ pub(super) async fn prepare(
             }
         }
     }
-    let memory: Arc<dyn MemoryTrait> = Arc::new(memory_access);
+    let memory_access = Arc::new(memory_access);
+    // The board tools resolve this handle at call time. Installed from the same
+    // `MemoryAccess` the rest of the session uses, so the claim CAS lands in
+    // whichever process owns the CozoDB writer — a direct-only board would
+    // silently be a private board.
+    archon_tools::board::install_board_access(
+        Arc::clone(&memory_access) as Arc<dyn archon_memory::board::BoardAccess>
+    );
+    let memory: Arc<dyn MemoryTrait> = memory_access;
     tracing::info!("memory system opened");
 
     if let Err(e) = config.personality.validate() {
