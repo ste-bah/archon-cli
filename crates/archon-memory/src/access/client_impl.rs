@@ -14,7 +14,7 @@ static CURRENT_THREAD_BRIDGE_LOCK: Mutex<()> = Mutex::new(());
 /// local runtime. Current-thread runtime callers use a serialized scoped
 /// thread so Tokio runtimes are not nested and bridge concurrency stays bounded.
 /// The remote server must not depend on the blocked current-thread executor.
-fn block_on_async<F>(future: F) -> F::Output
+pub(super) fn block_on_async<F>(future: F) -> F::Output
 where
     F: std::future::Future + Send,
     F::Output: Send,

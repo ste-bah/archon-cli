@@ -15,6 +15,7 @@ use crate::graph::MemoryGraph;
 use crate::server::MemoryServer;
 use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
 
+mod board_impl;
 mod client_impl;
 #[cfg(test)]
 mod tests;

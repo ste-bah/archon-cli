@@ -14,6 +14,8 @@ use archon_memory::protocol::{Request, Response, make_request, parse_response};
 use archon_memory::server::MemoryServer;
 use archon_memory::types::{MemoryType, RelType, SearchFilter};
 
+#[path = "memory_server_tests/board.rs"]
+mod board;
 #[path = "memory_server_tests/client.rs"]
 mod client;
 #[path = "memory_server_tests/factory.rs"]

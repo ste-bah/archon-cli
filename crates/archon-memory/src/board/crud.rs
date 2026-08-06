@@ -1,0 +1,175 @@
+use std::collections::BTreeMap;
+
+use chrono::Utc;
+use cozo::{DataValue, ScriptMutability};
+use uuid::Uuid;
+
+use super::rows::{BOARD_COLUMNS, BOARD_PUT, row_values_to_item, row_values_to_update};
+use super::{BoardItem, BoardStatus, NewBoardItem};
+use crate::graph::MemoryGraph;
+use crate::graph::helpers::run_mutable;
+use crate::types::MemoryError;
+
+pub(super) fn db_err(error: impl std::fmt::Display) -> MemoryError {
+    MemoryError::Database(error.to_string())
+}
+
+impl MemoryGraph {
+    /// Raise a board item and return the stored row.
+    ///
+    /// Empty `evidence` is a hard error, not a warning. An item without file
+    /// references cannot be acted on by whoever picks it up — they would have to
+    /// rediscover the finding from scratch, which is the failure the board
+    /// exists to prevent. Rejecting at the write is the only place the rule can
+    /// hold, because by the time a claimant reads the row the agent that knew
+    /// the references is gone.
+    ///
+    /// An id already on the board is also rejected rather than overwritten:
+    /// `:put` is last-writer-wins, and a colliding write would silently destroy
+    /// another agent's item along with its round history.
+    pub fn create_board_item(&self, item: &NewBoardItem) -> Result<BoardItem, MemoryError> {
+        if item.evidence.trim().is_empty() {
+            return Err(MemoryError::Database(
+                "a board item needs evidence: file:line references and what was observed"
+                    .to_string(),
+            ));
+        }
+        if item.run_id.trim().is_empty() {
+            return Err(MemoryError::Database(
+                "a board item needs a run_id; the drain gate is defined over that partition"
+                    .to_string(),
+            ));
+        }
+
+        let id = item
+            .id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let now = Utc::now().to_rfc3339();
+        let params = BTreeMap::from([
+            ("id".to_string(), DataValue::from(id.as_str())),
+            ("run_id".to_string(), DataValue::from(item.run_id.as_str())),
+            ("kind".to_string(), DataValue::from(item.kind.to_string())),
+            (
+                "status".to_string(),
+                DataValue::from(BoardStatus::Open.to_string()),
+            ),
+            ("title".to_string(), DataValue::from(item.title.as_str())),
+            (
+                "evidence".to_string(),
+                DataValue::from(item.evidence.as_str()),
+            ),
+            (
+                "acceptance".to_string(),
+                DataValue::from(item.acceptance.as_str()),
+            ),
+            (
+                "raised_by".to_string(),
+                DataValue::from(item.raised_by.as_str()),
+            ),
+            ("claimed_by".to_string(), DataValue::Null),
+            ("round".to_string(), DataValue::from(0i64)),
+            ("created_at".to_string(), DataValue::from(now.as_str())),
+            ("updated_at".to_string(), DataValue::from(now.as_str())),
+        ]);
+
+        let script = format!(
+            "{{
+                ?[{BOARD_COLUMNS}, applied] := *board_items{{{BOARD_COLUMNS}}},
+                    id = $id, applied = false
+            }} as _existing
+            %if _existing
+            %then %return _existing
+            %end
+            {{
+                ?[{BOARD_COLUMNS}] <- [[$id, $run_id, $kind, $status, $title, $evidence,
+                    $acceptance, $raised_by, $claimed_by, $round, $created_at, $updated_at]]
+                {BOARD_PUT}
+            }}
+            {{
+                ?[{BOARD_COLUMNS}, applied] := *board_items{{{BOARD_COLUMNS}}},
+                    id = $id, applied = true
+            }} as _created
+            %return _created"
+        );
+
+        let result = run_mutable(&self.db, &script, params, "board: create item")?;
+        let row = result
+            .rows
+            .first()
+            .ok_or_else(|| MemoryError::Database("board create returned no row".to_string()))?;
+        let update = row_values_to_update(row)?;
+        if !update.applied {
+            return Err(MemoryError::Database(format!(
+                "board item {id} already exists; raised by {}",
+                update.item.raised_by
+            )));
+        }
+        Ok(update.item)
+    }
+
+    /// Read one board item by id.
+    pub fn get_board_item(&self, id: &str) -> Result<BoardItem, MemoryError> {
+        let params = BTreeMap::from([("id".to_string(), DataValue::from(id))]);
+        let script = format!("?[{BOARD_COLUMNS}] := *board_items{{{BOARD_COLUMNS}}}, id = $id");
+        let result = self
+            .db
+            .run_script(&script, params, ScriptMutability::Immutable)
+            .map_err(db_err)?;
+        let row = result
+            .rows
+            .first()
+            .ok_or_else(|| MemoryError::NotFound(id.to_string()))?;
+        row_values_to_item(row)
+    }
+
+    /// Items owned by `run_id`, oldest first; an empty `statuses` means all.
+    ///
+    /// Goes through the `board_items:by_run` index rather than filtering a scan.
+    /// A board is polled — the drain gate reads it at every reduce, and every
+    /// agent looking for work reads it again — so the per-read cost is paid
+    /// constantly and must not grow with the size of the whole board.
+    pub fn list_board_items_by_run(
+        &self,
+        run_id: &str,
+        statuses: &[BoardStatus],
+    ) -> Result<Vec<BoardItem>, MemoryError> {
+        let mut params = BTreeMap::from([("run_id".to_string(), DataValue::from(run_id))]);
+        let status_clause = if statuses.is_empty() {
+            String::new()
+        } else {
+            params.insert(
+                "statuses".to_string(),
+                DataValue::List(
+                    statuses
+                        .iter()
+                        .map(|status| DataValue::from(status.to_string()))
+                        .collect(),
+                ),
+            );
+            ", is_in(status, $statuses)".to_string()
+        };
+        let script = format!(
+            "?[{BOARD_COLUMNS}] := *board_items:by_run{{run_id, id}},
+                run_id = $run_id,
+                *board_items{{{BOARD_COLUMNS}}}{status_clause}"
+        );
+        let result = self
+            .db
+            .run_script(&script, params, ScriptMutability::Immutable)
+            .map_err(db_err)?;
+        let mut items = result
+            .rows
+            .iter()
+            .map(|row| row_values_to_item(row))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Oldest first: a board is read as a queue of outstanding work, and the
+        // item raised first is the one that has been waiting longest.
+        items.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(items)
+    }
+}
