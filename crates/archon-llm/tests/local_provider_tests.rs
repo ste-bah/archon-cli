@@ -263,7 +263,74 @@ async fn captured_body(
         .received_requests()
         .await
         .expect("mock server records requests");
-    serde_json::from_slice(&requests[0].body).expect("request body is JSON")
+    // Select the chat POST explicitly: constructing a LocalProvider also fires
+    // a background GET /models probe for the context window, which lands in
+    // this list first and carries no body.
+    let chat = requests
+        .iter()
+        .find(|r| r.url.path().ends_with("/chat/completions"))
+        .expect("a chat/completions request should have been sent");
+    serde_json::from_slice(&chat.body).expect("request body is JSON")
+}
+
+/// Without `stream_options.include_usage` an OpenAI-compatible server is under
+/// no obligation to report usage on a stream, and vLLM sends none — which is
+/// why local sessions showed `$0.00` and no token counts.
+#[tokio::test]
+async fn stream_requests_usage_so_tokens_can_be_counted() {
+    let server = MockServer::start().await;
+    let provider = LocalProvider::new(server.uri(), "local-model".into(), 30, false);
+    let body = captured_body(provider, &server, None).await;
+
+    assert_eq!(body["stream"], serde_json::json!(true));
+    assert_eq!(
+        body["stream_options"]["include_usage"],
+        serde_json::json!(true),
+        "usage must be requested explicitly: {body}"
+    );
+}
+
+#[test]
+fn max_model_len_prefers_the_matching_model_id() {
+    let payload = serde_json::json!({"data": [
+        {"id": "other-model", "max_model_len": 4096},
+        {"id": "local-model", "max_model_len": 1_048_576},
+    ]});
+    assert_eq!(
+        archon_llm::providers::max_model_len(&payload, "local-model"),
+        Some(1_048_576)
+    );
+}
+
+/// A single-model server is often addressed by an alias that differs from the
+/// id it advertises, so a lone entry is accepted.
+#[test]
+fn max_model_len_falls_back_to_a_sole_entry() {
+    let payload = serde_json::json!({"data": [{"id": "served-name", "max_model_len": 32_768}]});
+    assert_eq!(
+        archon_llm::providers::max_model_len(&payload, "an-alias"),
+        Some(32_768)
+    );
+}
+
+#[test]
+fn max_model_len_is_none_when_unknown() {
+    let no_match = serde_json::json!({"data": [
+        {"id": "a", "max_model_len": 10},
+        {"id": "b", "max_model_len": 20},
+    ]});
+    assert_eq!(archon_llm::providers::max_model_len(&no_match, "c"), None);
+
+    let absent = serde_json::json!({"data": [{"id": "a"}]});
+    assert_eq!(archon_llm::providers::max_model_len(&absent, "a"), None);
+
+    let zero = serde_json::json!({"data": [{"id": "a", "max_model_len": 0}]});
+    assert_eq!(archon_llm::providers::max_model_len(&zero, "a"), None);
+
+    assert_eq!(
+        archon_llm::providers::max_model_len(&serde_json::json!({}), "a"),
+        None
+    );
 }
 
 /// Default is `Off`: byte-identical to pre-#123 requests, so Ollama and
