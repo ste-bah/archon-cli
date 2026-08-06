@@ -89,11 +89,13 @@
 //! `CommandHandler::execute` signature cannot `.await`, so this
 //! handler uses `ctx.tui_tx.try_send(..)` (sync, best-effort drop on
 //! full). Matches AGS-806..819 emission precedent verbatim. All three
-//! shipped format strings are preserved BYTE-FOR-BYTE:
+//! shipped format strings are preserved BYTE-FOR-BYTE, except for the
+//! tier list, which #123 widened from `high|medium|low` to
+//! `low|medium|high|max` in both the usage line and `description()`:
 //!
-//! 1. `"\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n"`
+//! 1. `"\nCurrent effort level: {}\nUsage: /effort <low|medium|high|max>\n"`
 //!    (empty-arg branch — `{}` is the snapshot level's `Display`
-//!    impl, which yields `"high"` / `"medium"` / `"low"`).
+//!    impl, which yields `"low"` / `"medium"` / `"high"` / `"max"`).
 //! 2. `"\nEffort level set to {level}.\n"` (success branch —
 //!    `{level}` is the parsed `EffortLevel::Display`).
 //! 3. Validation error — pass-through from
@@ -153,10 +155,10 @@
 //! Five literal/format strings pinned via `assert_eq!` in the test
 //! module:
 //!
-//! * `description()` — "Show or set reasoning effort (high|medium|low)"
+//! * `description()` — "Show or set reasoning effort (low|medium|high|max)"
 //! * `aliases()` — `&[]`
 //! * empty-arg TextDelta — `format!("\nCurrent effort level: {}\nUsage:
-//!   /effort <high|medium|low>\n", snapshot_level)`
+//!   /effort <low|medium|high|max>\n", snapshot_level)`
 //! * success TextDelta — `format!("\nEffort level set to {level}.\n")`
 //! * validation Error — exact string returned by
 //!   `archon_tools::validation::validate_effort_level(level_str)`.
@@ -247,7 +249,7 @@ impl CommandHandler for EffortHandler {
             // slash.rs:97-101. `{}` uses EffortLevel's `Display` impl
             // which yields "high"/"medium"/"low".
             let msg = format!(
-                "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
+                "\nCurrent effort level: {}\nUsage: /effort <low|medium|high|max>\n",
                 snap.current_level
             );
             ctx.emit(TuiEvent::TextDelta(msg));
@@ -293,7 +295,7 @@ impl CommandHandler for EffortHandler {
     fn description(&self) -> &str {
         // Byte-for-byte preservation of the shipped declare_handler!
         // stub at registry.rs:801 (shipped-wins drift-reconcile).
-        "Show or set reasoning effort (high|medium|low)"
+        "Show or set reasoning effort (low|medium|high|max)"
     }
 
     fn aliases(&self) -> &'static [&'static str] {

@@ -33,7 +33,7 @@ fn effort_handler_description_byte_identical_to_shipped() {
     let h = EffortHandler;
     assert_eq!(
         h.description(),
-        "Show or set reasoning effort (high|medium|low)",
+        "Show or set reasoning effort (low|medium|high|max)",
         "EffortHandler description must match the shipped \
          declare_handler! stub verbatim (shipped-wins drift-reconcile)"
     );
@@ -56,7 +56,7 @@ fn effort_handler_aliases_are_empty() {
 /// Bare `/effort` (no args) must emit a single `TuiEvent::TextDelta`
 /// whose payload is byte-identical to the shipped
 /// `"\nCurrent effort level: {snapshot_level}\nUsage: /effort
-/// <high|medium|low>\n"` format. NO `pending_effect` and NO
+/// <low|medium|high|max>\n"` format. NO `pending_effect` and NO
 /// `pending_effort_set` must be stashed — the empty-arg branch is
 /// read-only.
 #[test]
@@ -91,7 +91,7 @@ fn effort_handler_execute_with_no_args_emits_snapshot_text() {
         "empty-arg branch must emit exactly one event; got: {events:?}"
     );
     let expected = format!(
-        "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
+        "\nCurrent effort level: {}\nUsage: /effort <low|medium|high|max>\n",
         EffortLevel::Medium
     );
     match &events[0] {
@@ -334,7 +334,7 @@ fn dispatcher_routes_slash_effort_to_handler_end_to_end() {
          {events:?}"
     );
     let expected = format!(
-        "\nCurrent effort level: {}\nUsage: /effort <high|medium|low>\n",
+        "\nCurrent effort level: {}\nUsage: /effort <low|medium|high|max>\n",
         EffortLevel::Medium
     );
     match &events[0] {

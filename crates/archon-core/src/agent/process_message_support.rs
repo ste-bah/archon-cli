@@ -36,15 +36,30 @@ impl Agent {
             override_model.clone()
         }
     }
+    /// The effort level for this turn, always as a concrete level (#123).
+    ///
+    /// This used to return `None` for `High`, and `None` for any turn
+    /// containing `ultrathink`. That encoded an Anthropic convention —
+    /// omitting `output_config.effort` means high there — inside a
+    /// provider-agnostic layer. On an OpenAI-compatible backend an absent
+    /// `reasoning_effort` means "no reasoning at all", so the omission
+    /// silently disabled reasoning on vLLM instead of maximising it. Each
+    /// provider now clamps the level itself: `effective_effort` for Anthropic,
+    /// `clamp_reasoning_effort` for Codex, the configured `effort_map` for
+    /// OpenAI-compatible backends.
+    ///
+    /// `ultrathink` raises the level to `Max` for this turn only. It uses
+    /// `raised_to`, so an explicitly higher level is never lowered, and it
+    /// does not touch the persisted level — the user's `/effort medium` is
+    /// still in force next turn.
     pub(super) async fn turn_effort(&self, user_input: &str) -> Option<String> {
-        if user_input.to_lowercase().contains("ultrathink") {
-            return None;
-        }
-        let level = self.config.effort_level.lock().await;
-        match *level {
-            EffortLevel::High => None,
-            other => Some(other.to_string()),
-        }
+        let level = *self.config.effort_level.lock().await;
+        let level = if archon_llm::thinking::ultrathink_requested(user_input) {
+            level.raised_to(EffortLevel::Max)
+        } else {
+            level
+        };
+        Some(level.to_string())
     }
     pub(super) async fn fail_parent_turn(&mut self, message: String) {
         self.emit_activity(

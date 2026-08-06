@@ -6,15 +6,25 @@ use std::str::FromStr;
 // Constants
 // ---------------------------------------------------------------------------
 
-const EFFORT_BETA: &str = "effort-2025-11-24";
+/// Beta header required whenever `output_config.effort` is on the wire.
+/// Public so the Anthropic adapter can both send it and recognise it in a
+/// rejection body without duplicating the literal.
+pub const EFFORT_BETA: &str = "effort-2025-11-24";
 
 // ---------------------------------------------------------------------------
 // Effort level enum
 // ---------------------------------------------------------------------------
 
 /// Controls the reasoning effort the model should apply.
+///
+/// The canonical ladder is `Low < Medium < High < Max`. Providers project it
+/// onto whatever tiers they actually accept, clamping DOWN where a rung does
+/// not exist — see `clamp_reasoning_effort` (Codex) and `effective_effort`
+/// (Anthropic). Adding a rung here therefore never breaks a provider; it just
+/// saturates at that provider's ceiling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffortLevel {
+    Max,
     High,
     Medium,
     Low,
@@ -23,11 +33,37 @@ pub enum EffortLevel {
 impl fmt::Display for EffortLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
+            Self::Max => "max",
             Self::High => "high",
             Self::Medium => "medium",
             Self::Low => "low",
         };
         f.write_str(s)
+    }
+}
+
+impl EffortLevel {
+    /// Position on the canonical ladder, ascending: `Low` = 0, `Max` = 3.
+    ///
+    /// Used to compare tiers without relying on the enum's declaration order,
+    /// which is descending for readability. `ultrathink` uses this to escalate
+    /// without ever lowering an explicitly-set level.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Low => 0,
+            Self::Medium => 1,
+            Self::High => 2,
+            Self::Max => 3,
+        }
+    }
+
+    /// The higher of two tiers on the canonical ladder.
+    pub fn raised_to(self, other: Self) -> Self {
+        if other.rank() > self.rank() {
+            other
+        } else {
+            self
+        }
     }
 }
 
@@ -76,20 +112,29 @@ impl EffortState {
     /// Build the JSON effort parameter for non-default levels.
     ///
     /// Returns `{"effort": "<level>"}` for `Medium` and `Low`, `None` for
-    /// `High` (the default, which needs no parameter).
+    /// `High` and `Max`.
+    ///
+    /// `High` maps to `None` because omitting `output_config.effort` IS high
+    /// on the Anthropic API. `Max` maps to `None` for the same reason: the
+    /// Anthropic ladder stops at high, so `Max` clamps onto it here and is
+    /// expressed instead through the `thinking` parameter. This helper is
+    /// Anthropic-shaped — do NOT reuse it for OpenAI-compatible backends,
+    /// where an absent field means "no reasoning at all" rather than "high".
     pub fn effort_param(&self) -> Option<serde_json::Value> {
         match self.level {
-            EffortLevel::High => None,
+            EffortLevel::High | EffortLevel::Max => None,
             other => Some(json!({ "effort": other.to_string() })),
         }
     }
 
     /// Return the beta header string required for non-default effort levels.
     ///
-    /// Returns `Some("effort-2025-11-24")` for `Medium`/`Low`, `None` for `High`.
+    /// Returns `Some("effort-2025-11-24")` for `Medium`/`Low`, `None` for
+    /// `High`/`Max`. Kept in lockstep with [`Self::effort_param`]: the beta is
+    /// only required when the parameter is actually sent.
     pub fn beta_header(&self) -> Option<&'static str> {
         match self.level {
-            EffortLevel::High => None,
+            EffortLevel::High | EffortLevel::Max => None,
             _ => Some(EFFORT_BETA),
         }
     }
@@ -102,11 +147,12 @@ impl EffortState {
 /// Parse a case-insensitive string into an [`EffortLevel`].
 pub fn parse_level(s: &str) -> Result<EffortLevel, String> {
     match s.trim().to_lowercase().as_str() {
+        "max" => Ok(EffortLevel::Max),
         "high" => Ok(EffortLevel::High),
         "medium" | "med" => Ok(EffortLevel::Medium),
         "low" => Ok(EffortLevel::Low),
         _ => Err(format!(
-            "invalid effort level: '{s}' (expected high, medium, or low)"
+            "invalid effort level: '{s}' (expected low, medium, high, or max)"
         )),
     }
 }
@@ -210,5 +256,56 @@ mod tests {
         let mut state = EffortState::new();
         state.set_level(EffortLevel::Low);
         assert_eq!(state.beta_header(), Some(EFFORT_BETA));
+    }
+
+    // -- max tier (#123) ------------------------------------------------------
+
+    #[test]
+    fn display_and_parse_max() {
+        assert_eq!(EffortLevel::Max.to_string(), "max");
+        assert_eq!(parse_level("max"), Ok(EffortLevel::Max));
+        assert_eq!(parse_level(" MAX "), Ok(EffortLevel::Max));
+    }
+
+    #[test]
+    fn parse_error_lists_all_four_tiers() {
+        let err = parse_level("turbo").expect_err("turbo is not a tier");
+        for tier in ["low", "medium", "high", "max"] {
+            assert!(err.contains(tier), "error should mention {tier}: {err}");
+        }
+    }
+
+    #[test]
+    fn rank_is_ascending_and_independent_of_declaration_order() {
+        assert!(EffortLevel::Low.rank() < EffortLevel::Medium.rank());
+        assert!(EffortLevel::Medium.rank() < EffortLevel::High.rank());
+        assert!(EffortLevel::High.rank() < EffortLevel::Max.rank());
+    }
+
+    #[test]
+    fn raised_to_never_lowers() {
+        assert_eq!(
+            EffortLevel::Low.raised_to(EffortLevel::Max),
+            EffortLevel::Max
+        );
+        assert_eq!(
+            EffortLevel::Max.raised_to(EffortLevel::Low),
+            EffortLevel::Max
+        );
+        assert_eq!(
+            EffortLevel::High.raised_to(EffortLevel::High),
+            EffortLevel::High
+        );
+    }
+
+    /// `Max` must behave like `High` on the Anthropic-shaped helpers: the
+    /// Anthropic ladder stops at high, so the parameter is omitted and the
+    /// beta is not required.
+    #[test]
+    fn max_omits_param_and_beta_like_high() {
+        let mut state = EffortState::new();
+        state.set_level(EffortLevel::Max);
+        assert!(state.effort_param().is_none());
+        assert!(state.beta_header().is_none());
     }
 }

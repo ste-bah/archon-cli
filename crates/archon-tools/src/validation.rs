@@ -45,7 +45,9 @@ pub const CODEX_KNOWN_SHORTCUTS: &[(&str, &str)] = &[
 // `archon-core` in the workspace dependency order).
 
 /// Valid effort level values (case-insensitive).
-pub const VALID_EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
+/// Listed in canonical ladder order (ascending) so the "Valid levels:" error
+/// message reads as the ladder it is. See `archon_llm::effort::EffortLevel`.
+pub const VALID_EFFORT_LEVELS: &[&str] = &["low", "medium", "high", "max"];
 
 /// Valid permission mode identifiers (case-sensitive to match Claude Code conventions).
 pub const VALID_PERMISSION_MODES: &[&str] = &[

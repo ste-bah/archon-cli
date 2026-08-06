@@ -92,7 +92,9 @@ fn known_model_ids_are_complete() {
 
 #[test]
 fn valid_effort_levels_are_complete() {
-    assert_eq!(VALID_EFFORT_LEVELS, &["high", "medium", "low"]);
+    // Ascending ladder order (#123). `max` is the top tier; providers without a
+    // rung above high clamp down onto their own ceiling.
+    assert_eq!(VALID_EFFORT_LEVELS, &["low", "medium", "high", "max"]);
 }
 
 #[test]
@@ -232,10 +234,16 @@ fn effort_low() {
 }
 
 #[test]
+fn effort_max() {
+    assert_eq!(validate_effort_level("max"), Ok("max".into()));
+}
+
+#[test]
 fn effort_case_insensitive() {
     assert_eq!(validate_effort_level("HIGH"), Ok("high".into()));
     assert_eq!(validate_effort_level("Medium"), Ok("medium".into()));
     assert_eq!(validate_effort_level("LOW"), Ok("low".into()));
+    assert_eq!(validate_effort_level("MAX"), Ok("max".into()));
 }
 
 #[test]
@@ -244,7 +252,10 @@ fn effort_invalid_critical() {
     assert!(result.is_err());
     let msg = result.unwrap_err();
     assert!(
-        msg.contains("high") && msg.contains("medium") && msg.contains("low"),
+        msg.contains("high")
+            && msg.contains("medium")
+            && msg.contains("low")
+            && msg.contains("max"),
         "Should list valid levels: {msg}"
     );
 }
