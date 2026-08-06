@@ -75,10 +75,18 @@ pub(super) async fn build_session_agent(
     let tool_defs = registry.tool_definitions();
     let fast_mode_shared = Arc::new(AtomicBool::new(cli.fast));
     let sandbox_flag = Arc::new(AtomicBool::new(false));
+    // Precedence: --effort flag, then `[api] default_effort` (which is also
+    // what ARCHON_EFFORT sets), then Medium. Mirrors the interactive path in
+    // `interactive_bootstrap`.
+    //
+    // #123: this used to read the flag ONLY, so a headless run silently ran at
+    // Medium no matter what the config or ARCHON_EFFORT said — another knob
+    // that reported success and did nothing.
     let initial_effort = cli
         .effort
         .as_deref()
         .and_then(|value| archon_llm::effort::parse_level(value).ok())
+        .or_else(|| archon_llm::effort::parse_level(&config.api.default_effort).ok())
         .unwrap_or(EffortLevel::Medium);
     let effort_level_shared = Arc::new(tokio::sync::Mutex::new(initial_effort));
     let model_override_shared = Arc::new(tokio::sync::Mutex::new(String::new()));

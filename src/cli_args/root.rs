@@ -26,7 +26,7 @@ pub struct Cli {
     #[arg(long)]
     pub fast: bool,
 
-    /// Set reasoning effort level (high, medium, low)
+    /// Set reasoning effort level (low, medium, high, max)
     #[arg(long, value_name = "LEVEL")]
     pub effort: Option<String>,
 

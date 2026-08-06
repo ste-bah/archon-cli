@@ -79,28 +79,33 @@ provider = "anthropic"
 # not guess one. Default is `mode = "off"`, which sends no reasoning fields at
 # all; Ollama and llama.cpp are unaffected.
 #
-# vLLM exposes a validated top-level `reasoning_effort` field. Prefer it: a
-# typo returns a 400 naming the accepted tiers, whereas an unknown
-# `chat_template_kwargs` key returns 200 and is silently ignored.
-#
-# [llm.local.reasoning]
-# mode = "top_level"
-# effort_key = "reasoning_effort"
-# [llm.local.reasoning.effort_map]
-# low = "low"
-# medium = "medium"
-# high = "high"
-# max = "max"
-#
-# For a server whose template reads the switch instead of the top-level field,
-# use `chat_template_kwargs` mode. Note that on a DeepSeek template
-# `reasoning_effort` is INERT unless thinking is turned on in the same bag, so
-# `kwargs` is not optional there:
+# Use the interface your deployment documents. For DeepSeek V4 Flash on vLLM
+# that is `chat_template_kwargs` carrying BOTH `thinking` and the level —
+# `reasoning_effort` alone is inert there, so `kwargs` is not optional:
 #
 # [llm.local.reasoning]
 # mode = "chat_template_kwargs"
 # effort_key = "reasoning_effort"
 # kwargs = { thinking = true }        # Qwen3/GLM read `enable_thinking` instead
+# [llm.local.reasoning.effort_map]
+# low = "low"
+# medium = "low"     # DeepSeek V4 documents off/low/high/max — there is no
+#                    # medium tier, and `low` is its no-prefix baseline
+# high = "high"
+# max = "max"
+#
+# A level with no entry in `effort_map` is not sent at all, which is how a
+# backend with a shorter ladder opts out of the top rungs.
+#
+# Some servers also accept a top-level `reasoning_effort` field, which vLLM
+# validates — a bad tier 400s and names the accepted ones, whereas an unknown
+# `chat_template_kwargs` key returns 200 and is silently ignored. That is
+# useful for catching typos, but it is not what the DeepSeek recipe documents,
+# so prefer the documented path unless you have checked:
+#
+# [llm.local.reasoning]
+# mode = "top_level"
+# effort_key = "reasoning_effort"
 
 
 # ----------------------------------------------------------------------------
