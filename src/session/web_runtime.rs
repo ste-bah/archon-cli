@@ -10,7 +10,7 @@ use crate::cli_args::Cli;
 
 #[path = "web_runtime_reply.rs"]
 mod reply;
-use reply::{auth_label, finish_reply, sanitize_web_reply};
+use reply::{auth_label, finish_reply};
 
 const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
 const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration =

@@ -50,7 +50,7 @@ async fn windows_timeout_kills_background_descendant() {
     let fixture = write_windows_descendant_fixture(&pid_file);
     let working_dir = dir.path().to_path_buf();
     let tool = BashTool {
-        // 15s, not 3s. This test probes `!invocation.is_finished()` AFTER
+        // 45s, not 3s. This test probes `!invocation.is_finished()` AFTER
         // waiting for the descendant's pid file, so the gap between that wait
         // and this timeout IS the probe window. At a 2s wait against a 3s
         // timeout the window was one second, and on a loaded runner the wait
@@ -62,14 +62,21 @@ async fn windows_timeout_kills_background_descendant() {
         // it failed 4 runs in 6; the numbers here now match it. What the test
         // proves is unchanged -- the descendant is live before the timeout and
         // dead after it.
-        timeout_secs: 15,
+        //
+        // Raised again from 15s after a CI failure: the ladder has to hold as
+        // pid-guard (20s) < tool timeout (45s) < child lifetime (300s), with
+        // the outer deadline clearing the tool timeout. The child now sleeps
+        // long enough that it can only die by being killed, so a slow runner
+        // can no longer let it exit on its own and pass the test for the wrong
+        // reason.
+        timeout_secs: 45,
         max_output_bytes: 1024,
         ..Default::default()
     };
     let command = windows_powershell_file_command(&fixture);
     let invocation = tokio::spawn(async move {
         tool.execute(
-            json!({"command": command, "timeout": 15_000}),
+            json!({"command": command, "timeout": 45_000}),
             &ToolContext {
                 working_dir,
                 ..ToolContext::default()
@@ -87,8 +94,8 @@ async fn windows_timeout_kills_background_descendant() {
         !invocation.is_finished(),
         "invocation ended before timeout probe"
     );
-    // Outer deadline must clear the 15s tool timeout with room for teardown.
-    let result = tokio::time::timeout(Duration::from_secs(30), invocation)
+    // Outer deadline must clear the 45s tool timeout with room for teardown.
+    let result = tokio::time::timeout(Duration::from_secs(90), invocation)
         .await
         .expect("Bash invocation exceeded outer deadline")
         .expect("Bash invocation task panicked");
@@ -128,7 +135,7 @@ fn write_windows_descendant_fixture(pid_file: &std::path::Path) -> std::path::Pa
         &fixture,
         format!(
             "\
-$child = Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru
+$child = Start-Process '{shell}' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'child.pid'), [string]$child.Id)
 Wait-Process -Id $child.Id
 "
@@ -150,7 +157,13 @@ async fn wait_for_windows_pid_file(pid_file: &std::path::Path) -> String {
     // Hang guard, not a speed assertion, and it must stay comfortably UNDER the
     // timeout of the test it precedes -- see
     // `windows_timeout_kills_background_descendant`.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    //
+    // 20s, not 5s. Reaching the pid file costs two cold PowerShell starts —
+    // `bash` spawns `powershell -File`, which `Start-Process`es another — on
+    // the slowest runner in the matrix. At 5s this guard fired BEFORE the
+    // timeout it precedes, so a slow start was reported as "pid file was not
+    // written" rather than as what it was.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
         if let Ok(pid) = std::fs::read_to_string(pid_file) {
             let pid = pid.trim();

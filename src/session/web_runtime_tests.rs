@@ -2,7 +2,8 @@ use std::sync::{Arc, atomic};
 
 use archon_tui::AgentDispatcher;
 
-use super::{WebSessionHandle, finish_reply, sanitize_web_reply};
+use super::reply::sanitize_web_reply;
+use super::{WebSessionHandle, finish_reply};
 
 #[tokio::test]
 async fn shutdown_releases_submission_blocked_on_full_input_queue() {
