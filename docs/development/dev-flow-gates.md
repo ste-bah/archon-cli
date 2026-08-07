@@ -45,7 +45,7 @@ Run separately from ci-gate.sh; invoked from TUI workflow paths:
 
 | Script | Purpose |
 |---|---|
-| `scripts/tui-file-size-gate.sh` | Ratchet-style file-size enforcement for `crates/archon-tui/` |
+| `scripts/check-tui-file-sizes.sh` | 500-line limit for `crates/archon-tui/src/`, with a shrink-only allowlist |
 | `scripts/tui-banned-patterns-gate.sh` | Banned-pattern detection in TUI sources |
 | `scripts/check-tui-duplication.sh` | Duplication detection |
 | `scripts/check-tui-coverage.sh` | Coverage tracking |
@@ -58,6 +58,12 @@ Run separately from ci-gate.sh; invoked from TUI workflow paths:
 |---|---|
 | `scripts/check-preserve-invariants.sh` | Preservation invariant tests for migration phases |
 | `scripts/check-banned-imports.sh` | Cross-workspace banned-import policing |
+| `scripts/check-context-window-literals.sh` | No hardcoded context windows or 4/5 budget fractions in production code |
+
+Every script in this section runs in CI. A gate that is not wired in has no
+enforcement and the thing it guards drifts past it unnoticed — that is what
+happened to `check-context-window-literals.sh` (#132). If you add a gate here,
+add it to `.github/workflows/ci.yml` in the same change.
 
 ## WSL2 thread policy
 

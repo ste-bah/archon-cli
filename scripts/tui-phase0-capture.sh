@@ -6,7 +6,7 @@
 #
 # Runs every phase-0 baseline/gate script and test in order:
 #   1. bash scripts/tui-baseline-loc.sh          (TASK-TUI-002)
-#   2. bash scripts/tui-file-size-gate.sh        (TASK-TUI-003)
+#   2. bash scripts/check-tui-file-sizes.sh      (TASK-TUI-003)
 #   3. bash scripts/tui-banned-patterns-gate.sh  (TASK-TUI-004)
 #   4. cargo test -j1 -p archon-tui-test-support --lib --tests -- --test-threads=2
 #   5. cargo bench -j1 -p archon-tui-test-support --bench eventloop_throughput -- --quick
@@ -46,8 +46,14 @@ log "step 1: bash scripts/tui-baseline-loc.sh"
 bash scripts/tui-baseline-loc.sh || fail "tui-baseline-loc.sh exited non-zero"
 
 # ----- step 2: file-size gate (TASK-TUI-003) -----------------------------
-log "step 2: bash scripts/tui-file-size-gate.sh"
-bash scripts/tui-file-size-gate.sh || fail "tui-file-size-gate.sh exited non-zero"
+# Was `tui-file-size-gate.sh`, deleted for #132. Its allowlist lived at
+# project-tasks/.../baselines/file-size-allowlist.json, which was never
+# committed, so it ran with an empty allow-list and reported 14 violations on a
+# clean tree — a gate nothing invoked, failing against a baseline that did not
+# exist. `check-tui-file-sizes.sh` is the maintained replacement and is the one
+# CI runs.
+log "step 2: bash scripts/check-tui-file-sizes.sh"
+bash scripts/check-tui-file-sizes.sh || fail "check-tui-file-sizes.sh exited non-zero"
 
 # ----- step 3: banned-patterns gate (TASK-TUI-004) -----------------------
 log "step 3: bash scripts/tui-banned-patterns-gate.sh"
