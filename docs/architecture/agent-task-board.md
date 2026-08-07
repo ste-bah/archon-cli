@@ -333,14 +333,54 @@ accepts writes nobody reads, and a raw `MemoryGraph::open` would bypass the one
 thing that enforces CozoDB's single writer (see the #134 note above). So the
 board is reachable from every session surface — the TUI, `--print`,
 `--headless`, and a standalone `archon web`, which elects its own handle in
-`WebBoardStore`. The two install sites cannot race: `main_modes` exits the
-process from the print and headless arms before the interactive path is
-reached, so at most one runs per process.
+`WebBoardStore`.
 
-What still has no board is a process with no session — a bare subcommand builds
-no agent and installs nothing — and a session whose memory will not open, which
-is logged once at startup and leaves the tools reporting the board as
-unavailable rather than failing the run.
+## Where the board exists, and what happens where it does not
+
+A standalone `archon workflow` was the last entry point without one, and it was
+the worst place to be missing it (#142). `archon workflow` is a subcommand:
+`main_modes::handle_subcommand_if_present` dispatches it and returns from `main`,
+so the process builds no session and neither install site above ever runs. The
+stage subagents' board tools reported the board as offline, which was merely
+useless — and the lifecycle's drain gate read `None` and **passed every run**,
+which was not. The gate exists to make "leave no gaps" enforceable; one that
+reports a clean run because it cannot see the board produces the exact record an
+enforced run produces, and is therefore worse than no gate.
+
+Both halves were fixed:
+
+- **`src/command/workflow_live_board.rs`** installs the handle at the top of
+  `run_live_cli_action`, before anything can run a stage, with the same
+  config-derived paths and the same election. Deliberately not in
+  `run_live_action`, which the TUI also reaches — there the board is already
+  installed from a `MemoryAccess` this process holds, and a second
+  `open_memory_with_db_path` against a database it already owns is precisely the
+  bypass the election prevents.
+- **`process_board_drain` no longer returns `Option`.** It always names a board,
+  and a process without one gets `UnreachableBoardDrain`, whose read fails with
+  the reason. `LifecycleDriver` distinguishes three cases — a board that reads
+  clean passes, a board that cannot be read fails, and no board configured
+  passes — and that last exemption is right for `archon-workflow`, which has
+  consumers with no memory at all, and wrong for this binary, where every
+  production entry point installs a board and its absence means something broke.
+
+The three `install_board_access` sites cannot race. `main` returns straight out
+of `handle_subcommand_if_present`, so a process running a workflow subcommand
+reaches neither `build_agent.rs` nor the interactive bootstrap; `main_modes`
+exits from the print and headless arms before the interactive path; and
+`run_live_cli_action` runs once per invocation. `workflow_live_board.rs` still
+resolves `BoardHandle::Global` before opening anything, because the *test* binary
+can reach all three from one process and a `OnceLock` that silently keeps the
+first handle would hide a second, unelected open rather than prevent it.
+
+What has no board now is a bare subcommand other than `workflow`, a test binary
+that installed none, and a session or workflow whose memory would not open —
+logged once and left uninstalled, since a run does useful work without a board.
+For the tools that stays a truthful "unavailable" rather than a refusal to start.
+For a decomposed-PRD run it is no longer free: the run reaches the drain gate,
+the gate reports why it could not check, and the run ends `needs_review` instead
+of accepted. A run whose completion could not be checked has not been shown to be
+complete.
 
 ## See also
 

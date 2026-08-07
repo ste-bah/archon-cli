@@ -97,13 +97,14 @@ impl WorkflowV2ScriptRunner {
         // failure mode the board exists to make visible, so it would be a poor
         // one to reproduce here.
         //
-        // Attached unconditionally when this process has a board at all. Scoping
-        // it to runs that "look like they use the board" would mean deciding in
-        // advance which runs are allowed to leave work behind.
-        let driver = match process_board_drain() {
-            Some(board) => driver.with_board_drain(run_id, board),
-            None => driver,
-        };
+        // Attached unconditionally -- including when this process has no board.
+        // `process_board_drain` answers that case with a port that reports why it
+        // cannot read rather than with `None`, because `None` means "pass" and a
+        // run whose completion could not be checked has not been shown to be
+        // complete. Scoping the gate to runs that "look like they use the board"
+        // would likewise mean deciding in advance which runs are allowed to leave
+        // work behind.
+        let driver = driver.with_board_drain(run_id, process_board_drain());
         // v3: ONE persistent orchestrator conversation instead of the v2
         // reducer relay. Opt-in via env until certified as the default.
         let orchestrated = std::env::var("ARCHON_ORCHESTRATED_LIFECYCLE")

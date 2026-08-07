@@ -7,28 +7,16 @@
 // wired the gate itself would pass just as happily if the composition root
 // never did, which is exactly the situation `acceptance.rs` was in.
 
-use std::sync::{Arc, OnceLock};
-
 use archon_memory::MemoryGraph;
-use archon_memory::board::{BoardAccess, BoardItemKind, BoardStatus, NewBoardItem};
+use archon_memory::board::{BoardItemKind, BoardStatus, NewBoardItem};
 
-use super::workflow_live_v2_lifecycle_e2e_tests_b::{full_lifecycle_fixture, run_full_lifecycle};
+// The board lives with the fixture, not here: since #142 every full-lifecycle
+// run needs one installed or the drain gate refuses it, so installing it is part
+// of building the fixture rather than something the drain tests do on their own.
+use super::workflow_live_v2_lifecycle_e2e_tests_b::{
+    full_lifecycle_fixture, installed_board, run_full_lifecycle,
+};
 use super::*;
-
-/// The board this test binary shares, installed exactly as `session::bootstrap`
-/// installs the session's own.
-///
-/// One graph for the whole binary because the handle is a `OnceLock`: a second
-/// test installing a second graph would be ignored and would then assert against
-/// a board the run never read. Run partitioning is what keeps the tests from
-/// seeing each other's items, which is the same thing that keeps two concurrent
-/// workflow runs apart in production.
-fn installed_board() -> Arc<MemoryGraph> {
-    static BOARD: OnceLock<Arc<MemoryGraph>> = OnceLock::new();
-    let graph = BOARD.get_or_init(|| Arc::new(MemoryGraph::in_memory().expect("board graph")));
-    archon_tools::board::install_board_access(Arc::clone(graph) as Arc<dyn BoardAccess>);
-    Arc::clone(graph)
-}
 
 fn raise(board: &MemoryGraph, run_id: &str, title: &str) -> String {
     board

@@ -20,6 +20,8 @@ mod planner_repair_tests;
 mod tests;
 #[path = "workflow_live_approval.rs"]
 mod workflow_live_approval;
+#[path = "workflow_live_board.rs"]
+mod workflow_live_board;
 #[cfg(test)]
 #[path = "workflow_live_canary_retry_tests.rs"]
 mod workflow_live_canary_retry_tests;
@@ -135,6 +137,14 @@ pub(crate) async fn run_live_cli_action(
     env_vars: &ArchonEnvVars,
     llm_factory: &dyn WorkflowLlmClientFactory,
 ) -> Result<String> {
+    // Before anything that can run a stage. A CLI workflow builds no session, so
+    // this is the only place in the process that installs the process-global
+    // board — without it the stage subagents' board tools report the board as
+    // offline and the lifecycle's drain gate has nothing to read (#142). It is
+    // deliberately not in `run_live_action`: the TUI reaches that function too,
+    // and there the board was already installed by `interactive_bootstrap` from
+    // a `MemoryAccess` this process holds.
+    workflow_live_board::install_workflow_board_access(config).await;
     let llm = llm_factory
         .build_client(WorkflowLlmClientRequest {
             cwd: cwd.to_path_buf(),

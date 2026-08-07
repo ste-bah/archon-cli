@@ -135,3 +135,28 @@ fn the_decline_reason_reaches_the_gate() {
         "only the declined item carries a reason, and it carries the one recorded"
     );
 }
+
+/// The half of #142 that makes the other half's regression loud. A process with
+/// no board must hand the gate a port that REFUSES, because the driver reads a
+/// missing port as "no board configured, pass" — and a run nobody could check is
+/// not a run that was shown to be complete.
+#[test]
+fn a_process_without_a_board_refuses_the_drain_read_instead_of_answering_empty() {
+    let port = UnreachableBoardDrain {
+        reason: "no memory service is open in this process".to_string(),
+    };
+
+    let error = port
+        .drain_items_for_run("wf-11111111")
+        .expect_err("an absent board must not read as an empty one");
+
+    let message = error.to_string();
+    // The run id and the reason both travel into the `blocked-board-drain`
+    // record: "this run left no gaps" and "nobody checked" are only
+    // distinguishable afterwards if the refusal says which one it was.
+    assert!(message.contains("wf-11111111"), "{message}");
+    assert!(
+        message.contains("no memory service is open in this process"),
+        "{message}"
+    );
+}

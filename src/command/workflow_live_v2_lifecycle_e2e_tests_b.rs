@@ -1,5 +1,28 @@
 use super::*;
 
+/// The board this test binary shares, installed exactly as session boot and
+/// `workflow_live_board.rs` install a real one.
+///
+/// One graph for the whole binary because the handle is a `OnceLock`: a second
+/// test installing a second graph would be ignored and would then assert against
+/// a board the run never read. Run partitioning is what keeps the tests from
+/// seeing each other's items, which is the same thing that keeps two concurrent
+/// workflow runs apart in production.
+///
+/// Every full-lifecycle fixture installs it, not just the drain tests. Since
+/// #142 the drain gate refuses a run it cannot check, so a lifecycle test that
+/// left the global unset would be asserting on whichever test happened to run
+/// first — the ordering dependency the gate's own honesty introduces.
+pub(super) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
+    static BOARD: std::sync::OnceLock<Arc<archon_memory::MemoryGraph>> = std::sync::OnceLock::new();
+    let graph = BOARD
+        .get_or_init(|| Arc::new(archon_memory::MemoryGraph::in_memory().expect("board graph")));
+    archon_tools::board::install_board_access(
+        Arc::clone(graph) as Arc<dyn archon_memory::board::BoardAccess>
+    );
+    Arc::clone(graph)
+}
+
 /// Everything the FullLifecycle fixture needs on disk and in memory, up to the
 /// point of running it.
 ///
@@ -15,6 +38,7 @@ pub(super) struct FullLifecycleFixture {
 }
 
 pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFixture {
+    installed_board();
     let repo = root.join("repo");
     std::fs::create_dir_all(repo.join("src")).expect("repo src");
     for path in [

@@ -127,3 +127,35 @@ async fn a_run_without_a_board_still_reaches_acceptance() {
             .contains(&"final-acceptance-report".to_string())
     );
 }
+
+/// A board that answers with an error is the composition root saying "this run's
+/// completion could not be checked", and the gate has to treat that as a
+/// refusal. The binary's `process_board_drain` relies on exactly this: it hands
+/// a process with no board a port that errors rather than no port at all,
+/// because no port means the test above — acceptance.
+#[tokio::test]
+async fn a_board_that_cannot_be_read_fails_the_run() {
+    struct UnreadableBoard;
+    impl WorkflowBoardPort for UnreadableBoard {
+        fn drain_items_for_run(&self, run_id: &str) -> crate::WorkflowResult<Vec<DrainItem>> {
+            Err(crate::WorkflowError::port(format!(
+                "run {run_id} has no task board in this process"
+            )))
+        }
+    }
+
+    let host = RecordingHost::new(Box::new(clean_run_responder));
+    let driver = driver(host.clone()).with_board_drain("wf-11111111", Arc::new(UnreadableBoard));
+    let mut evidence = LifecycleEvidence::default();
+    driver
+        .run_review_and_final_gates(&serde_json::json!({ "items": [] }), &mut evidence)
+        .await
+        .expect("review gates run to a report");
+
+    let ids = host.call_ids();
+    assert!(ids.contains(&"blocked-board-drain".to_string()), "{ids:?}");
+    assert!(
+        !ids.contains(&"final-acceptance-report".to_string()),
+        "{ids:?}"
+    );
+}

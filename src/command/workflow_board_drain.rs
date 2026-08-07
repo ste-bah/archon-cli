@@ -80,23 +80,53 @@ fn drain_item(item: &BoardItem) -> DrainItem {
     }
 }
 
-/// The board this process drains against, if it has one.
+/// The port handed to the gate when this process installed no board.
 ///
-/// `None` when no memory service is open — a subcommand that builds no session,
-/// a test binary, an early failure before session boot, or a session whose
-/// memory would not open. `--print` and `--headless` are no longer on that list:
-/// they install a handle in `src/session/build_agent_board.rs` like the TUI
-/// does (#137). The driver treats a missing board as "no board configured" and
-/// passes, which is correct: the gate asserts that a board which exists was
-/// drained, and inventing a failure for a runtime that never had one would make
-/// the board mandatory by accident. A board that exists and cannot be READ is a
-/// different thing entirely, and fails.
-pub(crate) fn process_board_drain() -> Option<Arc<dyn WorkflowBoardPort>> {
+/// A port that refuses, not the absence of one. `LifecycleDriver` distinguishes
+/// three cases and only two of them are honest here: a board that reads clean
+/// passes, a board that cannot be read fails, and *no board configured* passes
+/// on the grounds that a runtime which never had a board should not be forced
+/// to have one. That last exemption is right for the crate — `LifecycleDriver`
+/// has consumers with no memory at all — and wrong for this binary, where every
+/// production entry point installs a board and its absence means something
+/// broke. #142 is what that costs: a standalone `archon workflow` run installed
+/// nothing, the gate read `None`, and every such run reported a drained board it
+/// had never looked at.
+///
+/// So the composition root always names a board, and one it cannot reach says
+/// so. The reason travels into the run's `blocked-board-drain` record, which is
+/// the difference between "this run left no gaps" and "nobody checked".
+struct UnreachableBoardDrain {
+    reason: String,
+}
+
+impl WorkflowBoardPort for UnreachableBoardDrain {
+    fn drain_items_for_run(&self, run_id: &str) -> WorkflowResult<Vec<DrainItem>> {
+        Err(WorkflowError::port(format!(
+            "run {run_id} has no task board in this process, so its completion could not be \
+             checked: {}",
+            self.reason
+        )))
+    }
+}
+
+/// The board this process drains against — always a port, never nothing.
+///
+/// The global resolves for every surface that boots one: the TUI, `--print` and
+/// `--headless` through `src/session/build_agent_board.rs` (#137), and a
+/// standalone `archon workflow` through `workflow_live_board.rs` (#142). It does
+/// not resolve in a test binary that installed no board, or after a session
+/// whose memory would not open — and those runs now fail their drain gate with
+/// the reason attached, rather than passing it in silence.
+pub(crate) fn process_board_drain() -> Arc<dyn WorkflowBoardPort> {
     match archon_tools::board::BoardHandle::Global.resolve() {
-        Ok(board) => Some(Arc::new(MemoryBoardDrain::new(board)) as Arc<dyn WorkflowBoardPort>),
+        Ok(board) => Arc::new(MemoryBoardDrain::new(board)) as Arc<dyn WorkflowBoardPort>,
         Err(reason) => {
-            tracing::debug!(%reason, "no task board in this process; the drain gate will not run");
-            None
+            tracing::warn!(
+                %reason,
+                "no task board in this process; the drain gate will refuse the run"
+            );
+            Arc::new(UnreachableBoardDrain { reason }) as Arc<dyn WorkflowBoardPort>
         }
     }
 }
