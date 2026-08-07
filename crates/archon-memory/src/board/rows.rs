@@ -53,6 +53,11 @@ pub(crate) fn row_values_to_item(row: &[DataValue]) -> Result<BoardItem, MemoryE
         round: row.get(9).and_then(DataValue::get_int).unwrap_or(0).max(0) as u32,
         created_at: timestamp_at(row, 10),
         updated_at: timestamp_at(row, 11),
+        // Not a column: it lives in `board_item_events` and is filled in by the
+        // read paths through `with_decline_reason`. Left `None` here so the
+        // decoder stays a pure function of the row it was given -- deriving it
+        // would mean a database query inside a decoder that has no database.
+        decline_reason: None,
     })
 }
 

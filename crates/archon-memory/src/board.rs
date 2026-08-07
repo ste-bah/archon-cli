@@ -27,11 +27,15 @@ use crate::types::MemoryError;
 
 mod claim;
 mod crud;
+mod history;
 mod rows;
 
 #[cfg(test)]
 #[path = "board/board_tests.rs"]
 mod board_tests;
+#[cfg(test)]
+#[path = "board/history_tests.rs"]
+mod history_tests;
 
 /// What a board item is for.
 ///
@@ -136,6 +140,46 @@ pub struct BoardItem {
     pub round: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Why the item was declined, for an item that was.
+    ///
+    /// Derived on read from the transition history rather than stored on the
+    /// row — see [`MemoryGraph::init_board_history_schema`] for why the column
+    /// could not exist. It is carried here anyway because the drain gate judges
+    /// a declined item on this field and reads the whole run at once: a shape
+    /// that made the caller fetch it separately would be one round trip per
+    /// declined item across the memory socket.
+    ///
+    /// `None` on anything not `Declined`, and — until the storage layer refused
+    /// it — `None` was also how a declined item with no justification looked.
+    /// It cannot be written that way any more; see
+    /// [`MemoryGraph::decline_board_item`].
+    #[serde(default)]
+    pub decline_reason: Option<String>,
+}
+
+/// One recorded transition in an item's life.
+///
+/// The escalation ladder needs to know what an item has already been through —
+/// which round left gaps, what a reviewer said, why a decline was refused — and
+/// that is a sequence, not a value. A column could only hold it as serialised
+/// JSON inside a string, which is the `PersonalitySnapshot` mistake this
+/// module's header opens by naming.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardEvent {
+    pub item_id: String,
+    /// Per-item, 0-based, allocated inside the transition's own transaction.
+    pub seq: u32,
+    pub at: DateTime<Utc>,
+    /// Copied from the item so a run can read its whole history in one query.
+    pub run_id: String,
+    pub from_status: BoardStatus,
+    pub to_status: BoardStatus,
+    /// The item's attempt counter when the transition happened.
+    pub round: u32,
+    /// Who held the item at the time, if anyone.
+    pub actor: Option<String>,
+    /// What the transition recorded. Required for a decline, empty otherwise.
+    pub note: String,
 }
 
 /// The fields a caller supplies when raising an item.
@@ -194,10 +238,30 @@ pub trait BoardAccess: Send + Sync {
     fn release_board_claim(&self, id: &str) -> Result<BoardUpdate, MemoryError>;
 
     /// Move an item between statuses, conditional on `from` still holding.
+    ///
+    /// Refuses `to == Declined`: that transition has to carry a reason, so it
+    /// has its own method rather than an optional argument here.
     fn set_board_item_status(
         &self,
         id: &str,
         from: BoardStatus,
         to: BoardStatus,
     ) -> Result<BoardUpdate, MemoryError>;
+
+    /// Close an item as `declined`, recording why.
+    ///
+    /// Separate from [`Self::set_board_item_status`], and `reason` is a `&str`
+    /// rather than an `Option`, so that "declined without a reason" is not a
+    /// call anyone can make. Declining is the only ending that closes an item on
+    /// an assertion alone; the drain gate refuses one with nothing behind it,
+    /// and a gate is the wrong and last place for that rule to live.
+    fn decline_board_item(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        reason: &str,
+    ) -> Result<BoardUpdate, MemoryError>;
+
+    /// Every recorded transition for one item, oldest first.
+    fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError>;
 }

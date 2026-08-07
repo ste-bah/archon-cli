@@ -1,10 +1,21 @@
 use super::*;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
-    let started = Instant::now();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let repo = temp.path().join("repo");
+/// Everything the FullLifecycle fixture needs on disk and in memory, up to the
+/// point of running it.
+///
+/// Extracted from the test below so the board-drain coverage can drive the SAME
+/// production entry point rather than a second hand-built approximation of it —
+/// a drain test that ran against its own harness would prove the harness.
+pub(super) struct FullLifecycleFixture {
+    pub(super) runner: WorkflowV2ScriptRunner,
+    pub(super) run_id: String,
+    pub(super) v2_store: WorkflowV2ResultStore,
+    pub(super) llm: Arc<CannedLifecycleLlm>,
+    pub(super) repo: std::path::PathBuf,
+}
+
+pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFixture {
+    let repo = root.join("repo");
     std::fs::create_dir_all(repo.join("src")).expect("repo src");
     for path in [
         "src/refuted.rs",
@@ -15,14 +26,14 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         std::fs::write(repo.join(path), "// pending\n").expect("seed source");
     }
     init_git_repo(&repo);
-    std::fs::create_dir_all(temp.path().join(".archon/artifacts")).expect("artifact root");
+    std::fs::create_dir_all(root.join(".archon/artifacts")).expect("artifact root");
     std::fs::write(
-        temp.path().join(".archon/artifacts/example-contract.json"),
+        root.join(".archon/artifacts/example-contract.json"),
         r#"{"status":"ready","records":[{"id":"example","value":1}]}"#,
     )
     .expect("stub artifact");
     std::fs::write(
-        temp.path().join(".archon/artifacts/instances.json"),
+        root.join(".archon/artifacts/instances.json"),
         r#"{"records":{}}"#,
     )
     .expect("empty instance source");
@@ -38,10 +49,15 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         permissions: BTreeMap::new(),
         learning_hooks: Vec::new(),
     };
-    let workflow_store = WorkflowStore::new(temp.path().join(".archon/workflows"));
+    let workflow_store = WorkflowStore::new(root.join(".archon/workflows"));
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
-    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
+    let (ui_sink, mut tui_rx) = default_workflow_ui_sink();
+    // The receiver has to outlive this constructor: delivery is required, so a
+    // receiver dropped on return would fail the fixture on teardown rather than
+    // on the behaviour under test. Drained in the background so the bounded
+    // capacity also cannot stall a long run.
+    tokio::spawn(async move { while tui_rx.recv().await.is_some() {} });
     let llm = Arc::new(CannedLifecycleLlm {
         scenario: CannedLifecycleScenario::FullLifecycle,
         calls: Mutex::new(Vec::new()),
@@ -75,13 +91,23 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         client,
         v2_store.clone(),
         workflow_store,
-        run.id,
+        run.id.clone(),
         true,
-        Some(synthetic_task_universe(temp.path())),
+        Some(synthetic_task_universe(root)),
         None,
     );
+    FullLifecycleFixture {
+        runner,
+        run_id: run.id,
+        v2_store,
+        llm,
+        repo,
+    }
+}
 
-    let summary = tokio::time::timeout(
+/// Drive the fixture through the real production entry point.
+pub(super) async fn run_full_lifecycle(runner: WorkflowV2ScriptRunner) -> WorkflowV2ScriptSummary {
+    tokio::time::timeout(
         Duration::from_secs(120),
         runner.run_decomposed_lifecycle(
             "# Archon decomposed-PRD workflow (native lifecycle e2e fixture)",
@@ -90,7 +116,20 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
     )
     .await
     .expect("lifecycle harness timeout")
-    .expect("lifecycle summary");
+    .expect("lifecycle summary")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
+    let started = Instant::now();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture = full_lifecycle_fixture(temp.path());
+    let (repo, v2_store, llm) = (
+        fixture.repo.clone(),
+        fixture.v2_store.clone(),
+        Arc::clone(&fixture.llm),
+    );
+    let summary = run_full_lifecycle(fixture.runner).await;
 
     assert_eq!(
         summary.status,

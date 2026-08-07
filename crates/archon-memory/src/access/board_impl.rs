@@ -4,7 +4,7 @@
 //! and every process after the first reaches the graph over TCP because CozoDB
 //! admits one writer. A direct-only board would silently be a private board.
 
-use crate::board::{BoardAccess, BoardItem, BoardStatus, BoardUpdate, NewBoardItem};
+use crate::board::{BoardAccess, BoardEvent, BoardItem, BoardStatus, BoardUpdate, NewBoardItem};
 use crate::client::MemoryClient;
 use crate::graph::MemoryGraph;
 use crate::types::MemoryError;
@@ -46,6 +46,19 @@ impl BoardAccess for MemoryGraph {
         to: BoardStatus,
     ) -> Result<BoardUpdate, MemoryError> {
         MemoryGraph::set_board_item_status(self, id, from, to)
+    }
+
+    fn decline_board_item(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        reason: &str,
+    ) -> Result<BoardUpdate, MemoryError> {
+        MemoryGraph::decline_board_item(self, id, from, reason)
+    }
+
+    fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        MemoryGraph::board_item_history(self, id)
     }
 }
 
@@ -110,6 +123,29 @@ impl BoardAccess for MemoryClient {
         ))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
+
+    fn decline_board_item(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        reason: &str,
+    ) -> Result<BoardUpdate, MemoryError> {
+        let result = block_on_async(self.call(
+            "decline_board_item",
+            serde_json::json!({
+                "id": id,
+                "from": from.to_string(),
+                "reason": reason,
+            }),
+        ))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        let result =
+            block_on_async(self.call("board_item_history", serde_json::json!({ "id": id })))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
 }
 
 // ── MemoryAccess impl ──────────────────────────────────────────
@@ -165,6 +201,25 @@ impl BoardAccess for MemoryAccess {
         match self {
             Self::Direct { graph, .. } => graph.set_board_item_status(id, from, to),
             Self::Remote(client) => client.set_board_item_status(id, from, to),
+        }
+    }
+
+    fn decline_board_item(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        reason: &str,
+    ) -> Result<BoardUpdate, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.decline_board_item(id, from, reason),
+            Self::Remote(client) => client.decline_board_item(id, from, reason),
+        }
+    }
+
+    fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.board_item_history(id),
+            Self::Remote(client) => client.board_item_history(id),
         }
     }
 }

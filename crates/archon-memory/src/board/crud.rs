@@ -120,7 +120,7 @@ impl MemoryGraph {
             .rows
             .first()
             .ok_or_else(|| MemoryError::NotFound(id.to_string()))?;
-        row_values_to_item(row)
+        self.with_decline_reason(row_values_to_item(row)?)
     }
 
     /// Items owned by `run_id`, oldest first; an empty `statuses` means all.
@@ -170,6 +170,6 @@ impl MemoryGraph {
                 .cmp(&right.created_at)
                 .then_with(|| left.id.cmp(&right.id))
         });
-        Ok(items)
+        self.with_decline_reasons_for_run(run_id, items)
     }
 }

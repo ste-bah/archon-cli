@@ -408,6 +408,25 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(update).map_err(|e| e.to_string())
         }
 
+        // Declining is on the wire as its own method rather than as a `to` on
+        // `set_board_item_status`, so that the requirement travels: a remote
+        // caller cannot reach `declined` through a shape with no reason in it.
+        "decline_board_item" => {
+            let id = str_param(params, "id")?;
+            let from = board_status_param(params, "from")?;
+            let reason = str_param(params, "reason")?;
+            let update = graph
+                .decline_board_item(&id, from, &reason)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(update).map_err(|e| e.to_string())
+        }
+
+        "board_item_history" => {
+            let id = str_param(params, "id")?;
+            let events = graph.board_item_history(&id).map_err(|e| e.to_string())?;
+            serde_json::to_value(events).map_err(|e| e.to_string())
+        }
+
         other => Err(format!("unknown method: {other}")),
     }
 }

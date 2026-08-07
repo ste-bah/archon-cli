@@ -5,7 +5,7 @@ use super::{BoardItemKind, BoardStatus, NewBoardItem};
 use crate::graph::MemoryGraph;
 use crate::types::MemoryError;
 
-fn new_item(run_id: &str, title: &str) -> NewBoardItem {
+pub(super) fn new_item(run_id: &str, title: &str) -> NewBoardItem {
     NewBoardItem {
         id: None,
         run_id: run_id.to_string(),

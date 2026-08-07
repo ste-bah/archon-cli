@@ -167,6 +167,94 @@ async fn remote_status_transition_is_refused_from_the_wrong_prior_status() {
     handle.abort();
 }
 
+/// A decline is only useful if its reason survives the transport. The drain
+/// gate runs in the process that owns the workflow, which is not necessarily the
+/// process that owns the writer, so a reason that existed only in-process would
+/// look to the gate exactly like a decline with no reason at all -- and it fails
+/// a run for that.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_remote_decline_carries_its_reason_back_over_the_wire() {
+    let (_dir, port_file) = temp_port_file();
+    let (port, graph, handle) = start_test_server(port_file).await;
+    let access = remote(port).await;
+
+    let item = access
+        .create_board_item(&new_item("run-decline", "declined remotely", "agent-a"))
+        .expect("create");
+    let reason = "the behaviour is deliberate; changing it would break the resume path";
+
+    let declined = access
+        .decline_board_item(&item.id, BoardStatus::Open, reason)
+        .expect("remote decline");
+    assert!(declined.applied);
+    assert_eq!(declined.item.decline_reason.as_deref(), Some(reason));
+
+    assert_eq!(
+        graph
+            .get_board_item(&item.id)
+            .expect("direct get")
+            .decline_reason
+            .as_deref(),
+        Some(reason),
+        "a reason recorded over the wire must be readable by the process holding the graph"
+    );
+    assert_eq!(
+        access.get_board_item(&item.id).expect("remote get"),
+        graph.get_board_item(&item.id).expect("direct get"),
+        "remote and direct reads of a declined item must agree in every field"
+    );
+    assert_eq!(
+        access
+            .list_board_items_by_run("run-decline", &[])
+            .expect("remote list"),
+        graph
+            .list_board_items_by_run("run-decline", &[])
+            .expect("direct list"),
+        "the run-scoped read the drain gate uses must agree across the transport"
+    );
+
+    let history = access.board_item_history(&item.id).expect("remote history");
+    assert_eq!(history, graph.board_item_history(&item.id).expect("direct"));
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].to_status, BoardStatus::Declined);
+    assert_eq!(history[0].note, reason);
+
+    handle.abort();
+}
+
+/// The requirement has to travel, not just the value. A remote caller must not
+/// be able to reach `declined` through a shape with no reason in it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_remote_decline_without_a_reason_is_refused() {
+    let (_dir, port_file) = temp_port_file();
+    let (port, graph, handle) = start_test_server(port_file).await;
+    let access = remote(port).await;
+
+    let item = access
+        .create_board_item(&new_item("run-no-reason", "unjustified", "agent-a"))
+        .expect("create");
+
+    let via_transition = access
+        .set_board_item_status(&item.id, BoardStatus::Open, BoardStatus::Declined)
+        .expect_err("the general transition must not reach declined over the wire either");
+    assert!(
+        via_transition.to_string().contains("decline_board_item"),
+        "the refusal must survive the wire intact, got: {via_transition}"
+    );
+
+    let blank = access
+        .decline_board_item(&item.id, BoardStatus::Open, "  ")
+        .expect_err("a blank reason must be refused over the wire");
+    assert!(blank.to_string().contains("reason"), "got: {blank}");
+
+    assert_eq!(
+        graph.get_board_item(&item.id).expect("direct get").status,
+        BoardStatus::Open
+    );
+
+    handle.abort();
+}
+
 /// The evidence rule is enforced at the store, so it must reach a remote caller
 /// as a refusal rather than an empty success.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

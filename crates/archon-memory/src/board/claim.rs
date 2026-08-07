@@ -3,21 +3,37 @@ use std::collections::BTreeMap;
 use chrono::Utc;
 use cozo::DataValue;
 
+use super::history::transition_event_chunk;
 use super::rows::{BOARD_COLUMNS, BOARD_PUT, row_values_to_update};
 use super::{BoardStatus, BoardUpdate};
 use crate::graph::MemoryGraph;
 use crate::graph::helpers::run_mutable;
 use crate::types::MemoryError;
 
+/// The Datalog a compare-and-set is assembled from.
+///
+/// Grouped rather than passed as four `&str`s, because four adjacent string
+/// arguments is four chances to transpose two of them into a script that still
+/// compiles and writes the wrong rows.
+struct CasScript<'a> {
+    /// The columns the precondition reads.
+    guard_binding: &'a str,
+    /// The precondition itself.
+    guard_expr: &'a str,
+    /// The rule that replaces the row. It REPEATS the precondition, and the
+    /// repetition is deliberate: the `%if` decides whether the block runs at
+    /// all, and the rule body decides which rows it touches, so a mistake in
+    /// either one alone cannot produce a write that ignores the prior state.
+    write_rule: &'a str,
+    /// Spliced in behind the row write and inside the same `%then`, which is
+    /// how a transition's history entry lands in the transaction that decided
+    /// the transition. Empty for the writes that record no history — see
+    /// [`super::history`] for which and why.
+    after_write: &'a str,
+}
+
 impl MemoryGraph {
     /// Compare-and-set over one board item.
-    ///
-    /// `guard_binding` names the columns the precondition reads and
-    /// `guard_expr` is the precondition itself; `write_rule` is the rule that
-    /// replaces the row, and it repeats the precondition. The repetition is
-    /// deliberate: the `%if` decides whether the block runs at all, and the rule
-    /// body decides which rows it touches, so a mistake in either one alone
-    /// cannot produce a write that ignores the prior state.
     ///
     /// The whole script is one Cozo transaction, and `run_mutable` holds the
     /// `archon-cozo` write guard across it — the process mutex, the cross-process
@@ -28,12 +44,16 @@ impl MemoryGraph {
     fn board_cas(
         &self,
         id: &str,
-        guard_binding: &str,
-        guard_expr: &str,
-        write_rule: &str,
+        cas: CasScript<'_>,
         mut params: BTreeMap<String, DataValue>,
         context: &str,
     ) -> Result<BoardUpdate, MemoryError> {
+        let CasScript {
+            guard_binding,
+            guard_expr,
+            write_rule,
+            after_write,
+        } = cas;
         params.insert("id".to_string(), DataValue::from(id));
         params.insert(
             "now".to_string(),
@@ -53,6 +73,7 @@ impl MemoryGraph {
                     {write_rule}
                     {BOARD_PUT}
                 }}
+                {after_write}
                 {{
                     ?[{BOARD_COLUMNS}, applied] := *board_items{{{BOARD_COLUMNS}}},
                         id = $id, applied = true
@@ -71,7 +92,9 @@ impl MemoryGraph {
             .rows
             .first()
             .ok_or_else(|| MemoryError::NotFound(id.to_string()))?;
-        row_values_to_update(row)
+        let mut update = row_values_to_update(row)?;
+        update.item = self.with_decline_reason(update.item)?;
+        Ok(update)
     }
 
     /// Take ownership of an unclaimed item.
@@ -104,9 +127,12 @@ impl MemoryGraph {
         );
         self.board_cas(
             id,
-            "id, claimed_by",
-            "is_null(claimed_by)",
-            &write_rule,
+            CasScript {
+                guard_binding: "id, claimed_by",
+                guard_expr: "is_null(claimed_by)",
+                write_rule: &write_rule,
+                after_write: "",
+            },
             params,
             "board: claim item",
         )
@@ -142,9 +168,12 @@ impl MemoryGraph {
         );
         self.board_cas(
             id,
-            "id, claimed_by",
-            "!is_null(claimed_by)",
-            &write_rule,
+            CasScript {
+                guard_binding: "id, claimed_by",
+                guard_expr: "!is_null(claimed_by)",
+                write_rule: &write_rule,
+                after_write: "",
+            },
             params,
             "board: release claim",
         )
@@ -157,15 +186,68 @@ impl MemoryGraph {
     /// `escalated` are separate agents acting on separate reads, and an
     /// unconditional write would let the later one erase a verdict it never
     /// saw.
+    ///
+    /// `Declined` is refused here. It is the one ending that closes an item on
+    /// nothing but an assertion, so it has to carry a justification, and an
+    /// `Option<&str>` on this method would make the justification something a
+    /// caller can pass `None` for. [`Self::decline_board_item`] takes it as a
+    /// `&str` instead, which is the difference between a rule and a check.
     pub fn set_board_item_status(
         &self,
         id: &str,
         from: BoardStatus,
         to: BoardStatus,
     ) -> Result<BoardUpdate, MemoryError> {
+        if to == BoardStatus::Declined {
+            return Err(MemoryError::Database(
+                "declining a board item needs a reason: call decline_board_item(id, from, reason). \
+                 The drain gate refuses a declined item with nothing recorded behind it"
+                    .to_string(),
+            ));
+        }
+        self.transition(id, from, to, "", "board: set item status")
+    }
+
+    /// Close an item as `declined`, recording why.
+    ///
+    /// An empty reason is refused at the write, the way empty evidence is on
+    /// `create_board_item` and an anonymous claim is on `claim_board_item`: by
+    /// the time the drain gate reads the row, the agent that knew the argument
+    /// for declining is gone, and there is nowhere else the rule can hold.
+    pub fn decline_board_item(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        reason: &str,
+    ) -> Result<BoardUpdate, MemoryError> {
+        if reason.trim().is_empty() {
+            return Err(MemoryError::Database(
+                "a decline needs a reason: what was judged, and why the work should not happen"
+                    .to_string(),
+            ));
+        }
+        self.transition(
+            id,
+            from,
+            BoardStatus::Declined,
+            reason,
+            "board: decline item",
+        )
+    }
+
+    /// The status compare-and-set both public transitions share.
+    fn transition(
+        &self,
+        id: &str,
+        from: BoardStatus,
+        to: BoardStatus,
+        note: &str,
+        context: &str,
+    ) -> Result<BoardUpdate, MemoryError> {
         let params = BTreeMap::from([
             ("from".to_string(), DataValue::from(from.to_string())),
             ("to".to_string(), DataValue::from(to.to_string())),
+            ("note".to_string(), DataValue::from(note)),
         ]);
         let write_rule = format!(
             "?[{BOARD_COLUMNS}] :=
@@ -178,11 +260,14 @@ impl MemoryGraph {
         );
         self.board_cas(
             id,
-            "id, status",
-            "status = $from",
-            &write_rule,
+            CasScript {
+                guard_binding: "id, status",
+                guard_expr: "status = $from",
+                write_rule: &write_rule,
+                after_write: &transition_event_chunk(),
+            },
             params,
-            "board: set item status",
+            context,
         )
     }
 }
