@@ -318,6 +318,30 @@ feature is:
   pass through `run_final_gates`, so neither the gate nor the third verdict
   applies there.
 
+`--print` and `--headless` used to head that list. `install_board_access` had
+one caller, the TUI bootstrap, and `src/session/build_agent.rs` — which builds
+every non-interactive agent — never opened memory, so `BoardHandle::Global`
+resolved to nothing and every board call in those modes answered *"the task
+board is unavailable: no memory service is open in this process"* (#137). The
+tools are in `DEFAULT_TOOLS`, so the model was offered them, tried them, and
+always failed.
+
+They now install the handle themselves, in `src/session/build_agent_board.rs`,
+from `config.memory.db_path` through the same singleton election. Both halves of
+that matter: a guessed default data dir would give the run a private board that
+accepts writes nobody reads, and a raw `MemoryGraph::open` would bypass the one
+thing that enforces CozoDB's single writer (see the #134 note above). So the
+board is reachable from every session surface — the TUI, `--print`,
+`--headless`, and a standalone `archon web`, which elects its own handle in
+`WebBoardStore`. The two install sites cannot race: `main_modes` exits the
+process from the print and headless arms before the interactive path is
+reached, so at most one runs per process.
+
+What still has no board is a process with no session — a bare subcommand builds
+no agent and installs nothing — and a session whose memory will not open, which
+is logged once at startup and leaves the tools reporting the board as
+unavailable rather than failing the run.
+
 ## See also
 
 - [Learning systems](learning-systems.md) — the garden, consolidation, and why memories decay

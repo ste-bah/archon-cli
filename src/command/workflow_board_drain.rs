@@ -82,12 +82,15 @@ fn drain_item(item: &BoardItem) -> DrainItem {
 
 /// The board this process drains against, if it has one.
 ///
-/// `None` when no memory service is open — a `--headless` invocation, a test
-/// binary, an early failure before session boot. The driver treats that as "no
-/// board configured" and passes, which is correct: the gate asserts that a board
-/// which exists was drained, and inventing a failure for a runtime that never
-/// had one would make the board mandatory by accident. A board that exists and
-/// cannot be READ is a different thing entirely, and fails.
+/// `None` when no memory service is open — a subcommand that builds no session,
+/// a test binary, an early failure before session boot, or a session whose
+/// memory would not open. `--print` and `--headless` are no longer on that list:
+/// they install a handle in `src/session/build_agent_board.rs` like the TUI
+/// does (#137). The driver treats a missing board as "no board configured" and
+/// passes, which is correct: the gate asserts that a board which exists was
+/// drained, and inventing a failure for a runtime that never had one would make
+/// the board mandatory by accident. A board that exists and cannot be READ is a
+/// different thing entirely, and fails.
 pub(crate) fn process_board_drain() -> Option<Arc<dyn WorkflowBoardPort>> {
     match archon_tools::board::BoardHandle::Global.resolve() {
         Ok(board) => Some(Arc::new(MemoryBoardDrain::new(board)) as Arc<dyn WorkflowBoardPort>),
