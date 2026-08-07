@@ -236,7 +236,10 @@ fn finds_usr_bin_shell_from_both_layouts() {
         dir.path().join("cmd").join("git.exe"),
         dir.path().join("mingw64").join("bin").join("git.exe"),
     ] {
-        assert_eq!(super::shell_near_git(&git, "bash.exe"), Some(expected.clone()));
+        assert_eq!(
+            super::shell_near_git(&git, "bash.exe"),
+            Some(expected.clone())
+        );
     }
 }
 
