@@ -70,6 +70,7 @@ pub(crate) async fn handle_subcommand(
             crate::command::requirement_trace::handle_requirements_command(
                 &action,
                 working_dir_for_config,
+                config,
             )
         }
         Commands::Draft {

@@ -50,25 +50,65 @@ pub(crate) async fn handle_web_command(
         config.memory.db_path.as_deref(),
         config.session.db_path.as_deref(),
     );
-    let chat_backend = Arc::new(
-        crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags).await?,
-    );
-    let mut server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths)
-        .with_chat_backend(chat_backend.clone());
+    // The chat tab is the ONLY surface here that needs a provider. Memory,
+    // corpus, ingest, learning, cognitive, world model, JEPA, pipelines,
+    // workflows, metrics, settings, evidence and the task board are all read
+    // from local files and databases.
+    //
+    // So a credential that will not refresh must not take the workbench down
+    // with it (#147): thirteen working surfaces are not worth forfeiting to
+    // protect one, and a stale token is the common case, not an exotic one.
+    // `WebServer` already serves a chat-less dashboard — attached `/web` runs
+    // exactly that way and reports `features.chat: false`, which the frontend
+    // already handles by hiding the tab.
+    let chat_backend = match crate::command::web_chat::WebChatBridge::new(
+        config,
+        cli,
+        env_vars,
+        resolved_flags,
+    )
+    .await
+    {
+        Ok(bridge) => Some(Arc::new(bridge)),
+        Err(error) => {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "chat backend unavailable; serving the workbench without the chat tab"
+            );
+            eprintln!(
+                "Chat is unavailable ({error:#}).\n\
+                 Every other tab still works; run `archon auth login` to restore chat."
+            );
+            None
+        }
+    };
+    let mut server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths);
+    if let Some(backend) = chat_backend.clone() {
+        server = server.with_chat_backend(backend);
+    }
     if allow_unauthenticated_nonlocal_bind {
         server = server.unsafe_allow_unauthenticated_nonlocal_bind_for_cli();
     }
     let (shutdown_error_tx, shutdown_error_rx) = tokio::sync::oneshot::channel();
-    let chat_backend_for_shutdown = Arc::clone(&chat_backend);
+    let chat_backend_for_shutdown = chat_backend.clone();
     let server_result = server
         .run_until(async move {
             let result = shutdown_signal.await;
-            chat_backend_for_shutdown.begin_shutdown().await;
+            if let Some(backend) = chat_backend_for_shutdown {
+                backend.begin_shutdown().await;
+            }
             let _ = shutdown_error_tx.send(result);
         })
         .await;
-    chat_backend.begin_shutdown().await;
-    let audit_result = chat_backend.finish_shutdown().await;
+    let audit_result = match chat_backend {
+        Some(backend) => {
+            backend.begin_shutdown().await;
+            backend.finish_shutdown().await
+        }
+        // Nothing was started, so there is no audit to drain and nothing to
+        // report as a shutdown failure.
+        None => Ok(()),
+    };
     let signal_result = shutdown_error_rx
         .await
         .map_err(|_| anyhow::anyhow!("web shutdown signal task ended without a result"))

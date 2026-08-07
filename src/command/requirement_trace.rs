@@ -83,6 +83,15 @@ pub(crate) struct TraceOptions {
     pub(crate) limit_per_scope: usize,
     /// Declared path scopes searched per task, capping the query budget.
     pub(crate) max_scopes: usize,
+    /// How to embed the queries put to the code index.
+    ///
+    /// Carried here rather than threaded as an `&ArchonConfig` because
+    /// `build_report` has eight test call sites that have no config and want
+    /// none. It MUST match whatever built the index: cosine similarity between
+    /// vectors from two different models is not a weaker signal, it is an
+    /// unrelated number, and this command's whole job is saying whether a
+    /// requirement is proven. See #148.
+    pub(crate) embedding: archon_memory::embedding::EmbeddingConfig,
 }
 
 impl TraceOptions {
@@ -100,6 +109,10 @@ impl TraceOptions {
             json: false,
             limit_per_scope: 3,
             max_scopes: 8,
+            // Both entry points overwrite this from `[memory]`; what is left
+            // reaching the default is a test that built its own index with the
+            // same default, which is consistent by construction.
+            embedding: archon_memory::embedding::EmbeddingConfig::default(),
         }
     }
 }
@@ -112,6 +125,7 @@ impl TraceOptions {
 pub(crate) fn handle_requirements_command(
     action: &crate::cli_args::RequirementsAction,
     cwd: &Path,
+    config: &archon_core::config::ArchonConfig,
 ) -> Result<()> {
     let crate::cli_args::RequirementsAction::Trace {
         prd,
@@ -136,6 +150,9 @@ pub(crate) fn handle_requirements_command(
         json: *json,
         limit_per_scope: *limit_per_scope,
         max_scopes: *max_scopes,
+        // `[memory] embedding_*` through the same mapping every other opener
+        // uses, so the query embedder cannot drift from the index's.
+        embedding: config.memory.open_spec().embedding,
     };
     println!("{}", run_trace(cwd, &options)?);
     Ok(())
@@ -180,7 +197,7 @@ pub(crate) fn build_report(cwd: &Path, options: &TraceOptions) -> Result<TraceRe
     let index = match &options.leann_db {
         Some(path) => Some(leann_source::LeannCodeSearch::open(
             &absolute(cwd, path),
-            Default::default(),
+            options.embedding.clone(),
         )?),
         None => None,
     };

@@ -36,7 +36,20 @@ impl CommandHandler for RequirementsHandler {
                 ));
             }
         };
-        let output = run_trace(&cwd, &options_from_slash_args(rest)?)?;
+        let mut options = options_from_slash_args(rest)?;
+        // Same embedder the index was built with (#148). `CommandContext`
+        // carries the config *path* rather than the config, so this re-reads it
+        // — one file read on a command that then walks a PRD and a task
+        // directory, and the alternative is querying an index with vectors from
+        // a different model, which produces confident nonsense rather than a
+        // visible error. A context with no path (test fixtures) keeps the
+        // default.
+        if let Some(path) = ctx.config_path.clone()
+            && let Ok(config) = archon_core::config::load_config_from(path)
+        {
+            options.embedding = config.memory.open_spec().embedding;
+        }
+        let output = run_trace(&cwd, &options)?;
         ctx.emit(TuiEvent::TextDelta(output));
         ctx.emit(TuiEvent::SlashCommandComplete);
         Ok(())
