@@ -7,18 +7,28 @@
 /// - Agent hook sets guard during execution and resets after
 /// - Agent hook mutex serialization (only one at a time)
 /// - Agent hook timeout behavior
+// Used only by `cfg(unix)` tests in this file. See #136.
+#[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use std::time::Instant;
 
+// Every test here spawns a `#!/bin/sh` hook script, so all of them are
+// `cfg(unix)` and these are dead on Windows. See #136.
+#[cfg(unix)]
 use archon_core::hooks::{HookCommandType, HookConfig, HookEvent, HookMatcher, HookRegistry};
 
 // Re-export guard functions from the hooks module.
-use archon_core::hooks::{is_in_hook_agent, set_in_hook_agent};
+use archon_core::hooks::is_in_hook_agent;
+#[cfg(unix)]
+use archon_core::hooks::set_in_hook_agent;
 
 // ---------------------------------------------------------------------------
 // Helper: build a HookConfig with Agent type
 // ---------------------------------------------------------------------------
 
+// Used only by `cfg(unix)` tests in this file. See #136.
+#[cfg(unix)]
 fn agent_hook_config(command: &str, timeout: Option<u32>) -> HookConfig {
     HookConfig {
         hook_type: HookCommandType::Agent,
@@ -36,6 +46,7 @@ fn agent_hook_config(command: &str, timeout: Option<u32>) -> HookConfig {
     }
 }
 
+#[cfg(unix)]
 fn command_hook_config(command: &str) -> HookConfig {
     HookConfig {
         hook_type: HookCommandType::Command,
@@ -53,6 +64,7 @@ fn command_hook_config(command: &str) -> HookConfig {
     }
 }
 
+#[cfg(unix)]
 fn register_hook(registry: &mut HookRegistry, event: HookEvent, config: HookConfig) {
     registry.register_matchers(
         event,

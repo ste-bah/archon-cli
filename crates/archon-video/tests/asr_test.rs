@@ -1,10 +1,14 @@
+// Used only by the `cfg(unix)` script writer below. See #136.
+#[cfg(unix)]
 use std::io::Write;
 
 use archon_policy::EffectivePolicy;
 use archon_video::asr::{
-    AsrOptions, AsrProvider, MockAsrAdapter, NullAsrAdapter, extract_audio_track,
-    parse_whisper_cpp_json,
+    AsrOptions, AsrProvider, MockAsrAdapter, NullAsrAdapter, parse_whisper_cpp_json,
 };
+// Used only by a `cfg(unix)` test -- it shells out to ffmpeg. See #136.
+#[cfg(unix)]
+use archon_video::asr::extract_audio_track;
 use archon_video::errors::VideoError;
 use archon_video::ingest::{IngestOpts, ingest_video_with_asr_provider};
 use archon_video::schema::create_video_schema;
@@ -153,6 +157,9 @@ fn source_method_count(db: &DbInstance, method: &str) -> i64 {
     result.rows[0][0].get_int().unwrap_or(0)
 }
 
+// Called only from `cfg(unix)` tests -- the script it writes is a shell
+// script. Dead on Windows, where `-D warnings` is a hard error. See #136.
+#[cfg(unix)]
 fn write_script(path: &std::path::Path, body: &str) {
     let mut file = std::fs::File::create(path).unwrap();
     file.write_all(body.as_bytes()).unwrap();

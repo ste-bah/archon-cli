@@ -1,3 +1,5 @@
+// Used only by the `cfg(unix)` script writer below. See #136.
+#[cfg(unix)]
 use std::io::Write;
 
 use archon_video::errors::VideoError;
@@ -80,6 +82,9 @@ exit 7
     assert!(err.to_string().contains("bad media"));
 }
 
+// Called only from `cfg(unix)` tests -- the script it writes is a shell
+// script. Dead on Windows, where `-D warnings` is a hard error. See #136.
+#[cfg(unix)]
 fn write_script(path: &std::path::Path, body: &str) {
     let mut file = std::fs::File::create(path).unwrap();
     file.write_all(body.as_bytes()).unwrap();

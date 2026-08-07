@@ -443,7 +443,9 @@ async fn render_pdf_pages(path: &Path) -> Result<Vec<PdfImage>, DocsError> {
 
 #[path = "pdf_images_list.rs"]
 mod images_list;
-#[cfg(test)]
+// `pdf_tests` is `cfg(all(test, unix))`, so the re-export has to match it
+// rather than plain `test`, or it is unused on Windows. See #136.
+#[cfg(all(test, unix))]
 pub(crate) use images_list::parse_pdfimages_size;
 pub(crate) use images_list::{
     dedupe_entries_by_object, image_dimensions, list_supported_image_files, mime_from_path,

@@ -168,6 +168,9 @@ async fn subprocess_failure_surfaces_as_error() {
 
 /// Fake sidecar (run via bash): SIGKILLs itself on any non-cpu device — `status.code()` is
 /// `None`, no OOM stderr, exactly the jetsam shape — and emits a valid block tree on cpu.
+// Every consumer of this is a `cfg(unix)` test, so on Windows it is dead
+// and `-D warnings` is a hard error there. See #136.
+#[cfg(unix)]
 fn write_signal_kill_sidecar(dir: &Path) -> PathBuf {
     let script = dir.join("fake_sidecar.sh");
     std::fs::write(
@@ -227,6 +230,7 @@ async fn signal_kill_on_last_rung_surfaces_killed_error() {
 
 /// Fake sidecar (run via bash): HANGS (sleeps well past the test budget) on any non-cpu
 /// device — the wedged-GPU shape — and emits a valid block tree on cpu.
+#[cfg(unix)]
 fn write_hanging_sidecar(dir: &Path) -> PathBuf {
     let script = dir.join("hanging_sidecar.sh");
     std::fs::write(

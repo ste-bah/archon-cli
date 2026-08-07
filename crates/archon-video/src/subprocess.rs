@@ -205,11 +205,17 @@ fn join_reader(
 
 #[cfg(test)]
 mod tests {
+    // Every test below that uses these is `cfg(unix)`, so on Windows they
+    // are dead and `-D warnings` is a hard error there. See #136.
+    #[cfg(unix)]
     use std::process::Command as StdCommand;
+    #[cfg(unix)]
     use std::time::Instant;
 
+    #[cfg(unix)]
     use tempfile::NamedTempFile;
 
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

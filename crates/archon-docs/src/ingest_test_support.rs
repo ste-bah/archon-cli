@@ -54,6 +54,9 @@ impl Drop for PdfCommandEnvGuard {
     }
 }
 
+// Every consumer of this is a `cfg(unix)` test, so on Windows it is dead
+// and `-D warnings` is a hard error there. See #136.
+#[cfg(unix)]
 pub(super) fn vlm_enabled_policy() -> archon_policy::EffectivePolicy {
     let mut policy = archon_policy::EffectivePolicy::default();
     policy.docs.vlm.enabled = true;
@@ -119,10 +122,12 @@ impl crate::vlm::VlmDescriptionProvider for FailingVlmProvider {
     }
 }
 
+#[cfg(unix)]
 pub(super) struct FailsOnceVlmProvider {
     pub(super) calls: std::sync::atomic::AtomicUsize,
 }
 
+#[cfg(unix)]
 impl crate::vlm::VlmDescriptionProvider for FailsOnceVlmProvider {
     fn describe_image(
         &self,
@@ -139,10 +144,12 @@ impl crate::vlm::VlmDescriptionProvider for FailsOnceVlmProvider {
     }
 }
 
+#[cfg(unix)]
 pub(super) struct ProviderErrorThenOkVlmProvider {
     pub(super) calls: std::sync::atomic::AtomicUsize,
 }
 
+#[cfg(unix)]
 impl crate::vlm::VlmDescriptionProvider for ProviderErrorThenOkVlmProvider {
     fn describe_image(
         &self,

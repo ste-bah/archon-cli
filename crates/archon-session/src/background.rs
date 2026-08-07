@@ -3,10 +3,16 @@
 //! Spawns a new archon process in print mode with `setsid` (via
 //! `process_group(0)`) so it survives the parent terminal closing.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+// Every signature taking a `&Path` or returning a `SessionError` in this
+// module is `cfg(unix)` -- the launcher relies on `process_group(0)`. Ungated
+// these are dead on Windows, where `-D warnings` is a hard error.
+#[cfg(unix)]
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(unix)]
 use crate::storage::SessionError;
 
 // ---------------------------------------------------------------------------

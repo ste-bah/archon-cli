@@ -1,4 +1,6 @@
 use super::*;
+// Used only by `cfg(unix)` tests in this file. See #136.
+#[cfg(unix)]
 use archon_tools::bash::BashTool;
 
 // ── v0.1.12: parallel tool dispatch regression test ──────────

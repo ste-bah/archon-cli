@@ -1,6 +1,8 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+// Used only by `cfg(unix)` code below. See #136.
+#[cfg(unix)]
 use std::process::Command;
 
 use anyhow::Result;
