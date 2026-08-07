@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic};
 
 use anyhow::Result;
 use archon_core::env_vars::ArchonEnvVars;
@@ -10,14 +10,10 @@ use archon_tui::{AgentDispatcher, app::TuiEvent};
 use crate::cli_args::Cli;
 
 const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
-#[cfg(not(test))]
-const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-#[cfg(test)]
-const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
-#[cfg(not(test))]
-const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-#[cfg(test)]
-const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
+const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 10 } else { 30_000 });
+const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 10 } else { 1_000 });
 
 pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
@@ -30,6 +26,7 @@ pub(crate) struct WebSessionHandle {
     sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle,
     dispatcher: Arc<std::sync::Mutex<AgentDispatcher>>,
     shutdown: tokio_util::sync::CancellationToken,
+    leann_init_cancel: Arc<atomic::AtomicBool>,
 }
 
 impl WebSessionHandle {
@@ -75,6 +72,12 @@ impl WebSessionHandle {
     }
 
     pub(crate) async fn begin_shutdown(&self) {
+        // Stop the background repository index, as `interactive_ui` does for the
+        // TUI. It is a `spawn_blocking` task and dropping a `#[tokio::main]`
+        // runtime waits for those, so left unset Ctrl-C tears the HTTP server
+        // down and then burns cores on ONNX embedding until the repo is indexed.
+        self.leann_init_cancel
+            .store(true, atomic::Ordering::Relaxed);
         self.shutdown.cancel();
         self.signal_inflight_turn();
         self.input_tx.lock().await.take();
@@ -241,7 +244,7 @@ pub(crate) async fn spawn_web_session(
         research_pipeline,
         llm_adapter,
         leann,
-        leann_init_cancel: _,
+        leann_init_cancel,
         learning_cozo_db,
         governed_learning_db,
         auto_trainer,
@@ -444,6 +447,7 @@ pub(crate) async fn spawn_web_session(
         sandbox_audit_drain,
         dispatcher,
         shutdown,
+        leann_init_cancel,
     }))
 }
 

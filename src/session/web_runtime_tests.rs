@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic};
 
 use archon_tui::AgentDispatcher;
 
@@ -26,6 +26,7 @@ async fn shutdown_releases_submission_blocked_on_full_input_queue() {
             tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::new(atomic::AtomicBool::new(false)),
     };
 
     let submit = session.submit("blocked".to_string());
@@ -68,6 +69,7 @@ async fn active_submit_exits_when_shutdown_closes_event_channel() {
             tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::new(atomic::AtomicBool::new(false)),
     };
 
     let submit = session.submit("active request".to_string());
@@ -115,6 +117,7 @@ async fn finish_shutdown_times_out_and_aborts_stalled_session_loop() {
             tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::new(atomic::AtomicBool::new(false)),
     };
 
     let error = tokio::time::timeout(std::time::Duration::from_secs(1), session.finish_shutdown())
@@ -153,6 +156,7 @@ async fn finish_shutdown_bounds_abort_resistant_session_loop() {
             tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::new(atomic::AtomicBool::new(false)),
     };
 
     let error = tokio::time::timeout(std::time::Duration::from_secs(1), session.finish_shutdown())
@@ -186,6 +190,7 @@ async fn begin_shutdown_closes_web_session_input() {
             tokio::sync::mpsc::channel(1).0,
         ))),
         shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::new(atomic::AtomicBool::new(false)),
     };
 
     session.begin_shutdown().await;
@@ -215,4 +220,46 @@ fn finish_reply_removes_legacy_tool_transcript_noise() {
          The document store is locked right now.\n",
     );
     assert_eq!(reply, "The document store is locked right now.");
+}
+
+/// The background repository index must stop when the web session does.
+///
+/// It runs on a `spawn_blocking` thread, and dropping the `#[tokio::main]`
+/// runtime waits for those, so a `begin_shutdown` that leaves this flag clear
+/// does not merely leak work -- it stops `archon web` exiting at all until the
+/// whole repository has been embedded. The TUI wires the same flag in
+/// `interactive_ui`; this asserts the web runtime has not dropped it on the
+/// floor again the way `leann_init_cancel: _` once did.
+#[tokio::test]
+async fn begin_shutdown_cancels_background_repository_index() {
+    let (input_tx, _input_rx) = tokio::sync::mpsc::channel(1);
+    let (permission_tx, _permission_rx) = tokio::sync::mpsc::channel(1);
+    let (ask_user_tx, _ask_user_rx) = tokio::sync::mpsc::channel(1);
+    let (_event_tx, event_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    let leann_init_cancel = Arc::new(atomic::AtomicBool::new(false));
+    let session = WebSessionHandle {
+        input_tx: tokio::sync::Mutex::new(Some(input_tx)),
+        permission_tx,
+        ask_user_tx,
+        event_rx: tokio::sync::Mutex::new(event_rx),
+        last_assistant_response: Arc::new(tokio::sync::Mutex::new(String::new())),
+        cancel_handle: Arc::new(std::sync::Mutex::new(None)),
+        loop_task: tokio::sync::Mutex::new(None),
+        sandbox_audit_drain:
+            crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle::empty_for_test(),
+        dispatcher: Arc::new(std::sync::Mutex::new(AgentDispatcher::new(
+            Arc::new(crate::agent_handle::NoopAgentRouter),
+            tokio::sync::mpsc::channel(1).0,
+        ))),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+        leann_init_cancel: Arc::clone(&leann_init_cancel),
+    };
+
+    assert!(!leann_init_cancel.load(atomic::Ordering::Relaxed));
+    session.begin_shutdown().await;
+
+    assert!(
+        leann_init_cancel.load(atomic::Ordering::Relaxed),
+        "web shutdown must cancel the LEANN background index"
+    );
 }
