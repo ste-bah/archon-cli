@@ -95,6 +95,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, caption-first ingest, `ffmpeg`, `whisper-cpp`, optional frame OCR fallbacks, TUI monitoring, and timecoded evidence consumption
+- [Multi-agent handoffs](cookbook/multi-agent-handoffs.md) — the task board, claims that expire with their holder, the drain gate that makes "leave no gaps" enforceable, and the third review verdict
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
