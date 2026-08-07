@@ -19,14 +19,22 @@
 //! cancellation, and reap terminal handles without holding locks
 //! on the agent loop.
 //!
-//! The `RegistryError::Duplicate` variant exists for TASK-AGS-108
-//! (ERR-ARCH-01) which adds the collision retry policy. For now,
-//! `register` simply surfaces the duplicate as an error.
+//! `register` surfaces a collision as `RegistryError::Duplicate`. Spawn paths
+//! do not use it — they use `register_run`, which has a defined answer for an
+//! id the registry has seen before rather than an error, because a subagent id
+//! is not always new: `AgentTool` registers the same agent from the parent task
+//! as well, and `SendMessage` resumes an agent under its original id. See
+//! [`RunRegistration`].
+//!
+//! This registry is also the *only* thing agent liveness is derived from
+//! (`board::leases::holder_liveness`), which is why it is keyed by runtime
+//! subagent id rather than by UUID: not every spawn path mints a UUID.
 
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use once_cell::sync::Lazy;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -69,10 +77,22 @@ pub fn new_result_slot() -> ResultSlot {
 }
 
 /// Per-subagent handle stored in the registry. Fields match
-/// TECH-AGS-ARCH-FIXES `data_models` section exactly.
+/// TECH-AGS-ARCH-FIXES `data_models` section exactly, plus
+/// [`BackgroundAgentHandle::subagent_id`].
 pub struct BackgroundAgentHandle {
     pub agent_id: AgentId,
-    /// `None` once the handle has been taken for awaiting; otherwise
+    /// The id the *runtime* gave this agent — what reaches the subagent's
+    /// `ToolContext`, what the board records as a claim holder, and what the
+    /// hooks report. It is the registry's key.
+    ///
+    /// It is not always `agent_id.to_string()`: `AgentTool` and `TaskCreate`
+    /// mint UUID subagent ids, but `archon-pipeline` mints
+    /// `{session}-{ordinal}-{agent}`. Keying on the UUID would have left every
+    /// pipeline agent unaskable, which is the whole reason liveness used to be
+    /// derived by asking several registries in turn.
+    pub subagent_id: String,
+    /// `None` once the handle has been taken for awaiting, or when the agent
+    /// runs in the foreground and there is no spawned task to join; otherwise
     /// the live `JoinHandle` for the spawned task.
     pub join_handle: Option<JoinHandle<()>>,
     pub cancel_token: CancellationToken,
@@ -111,6 +131,32 @@ pub enum RegistryError {
     Closed,
 }
 
+/// What starting a run under a given subagent id did to the registry.
+///
+/// The three arms exist because a subagent id is not always new.
+/// `SendMessage` resumes an agent under its *original* id
+/// (`archon-core/src/agent/message_delivery.rs`), so which arm a resume takes
+/// depends only on whether `spawn_gc_task`'s 60s reaper happened to run in
+/// between — a race, and one that must not change whether the agent is
+/// reported alive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunRegistration {
+    /// The id was unregistered; the handle is now the registry's.
+    Registered,
+    /// A run under this id is still executing, so the existing entry stands.
+    /// The runtime does not admit two concurrent runs of one subagent id
+    /// (`SubagentManager::register_with_id` refuses a running duplicate), so
+    /// this means the same run reached the choke point twice — `AgentTool`
+    /// registers on the parent task as well, to keep `execute`'s spawn marker
+    /// truthful.
+    AlreadyRunning,
+    /// A terminal entry was left under this id and has been replaced. This is
+    /// the resume case, and the reason `register` alone was not enough: a
+    /// resumed agent inheriting its predecessor's terminal status would read
+    /// as dead for the whole of its second life.
+    Restarted,
+}
+
 /// Public contract for the background-agents registry. Defined as
 /// a trait so the global singleton can be replaced with a mock in
 /// tests, and so upper layers take `Arc<dyn BackgroundAgentRegistryApi>`
@@ -118,6 +164,12 @@ pub enum RegistryError {
 pub trait BackgroundAgentRegistryApi: Send + Sync {
     /// Insert a handle. Returns `Duplicate(id)` if the id already exists.
     fn register(&self, handle: BackgroundAgentHandle) -> Result<(), RegistryError>;
+
+    /// Record that a run is starting under `handle.subagent_id`, whatever the
+    /// registry currently says about that id. Total, not fallible: see
+    /// [`RunRegistration`] for the three outcomes and why each one is a defined
+    /// result rather than an error.
+    fn register_run(&self, handle: BackgroundAgentHandle) -> RunRegistration;
 
     /// Return the current status of a registered handle, or `None`
     /// if the id is not (or no longer) in the registry.
@@ -138,11 +190,37 @@ pub trait BackgroundAgentRegistryApi: Send + Sync {
 
     /// Return the ids of every handle whose status is still `Running`.
     fn iter_running(&self) -> Vec<AgentId>;
+
+    /// Status of the handle registered under a *runtime* subagent id.
+    ///
+    /// [`Self::get`] can only answer for the spawn paths that mint UUID
+    /// subagent ids. Anything that knows an agent by the id the runtime handed
+    /// it — the board's claim leases, above all — has to ask this way or it
+    /// cannot ask about a pipeline agent at all.
+    fn status_of(&self, subagent_id: &str) -> Option<AgentStatus>;
+
+    /// Record a terminal status for a registered handle without removing it:
+    /// `reap_finished` still owns removal, and a poller that has not looked
+    /// since the agent finished should see `Complete`, not `Unknown`.
+    ///
+    /// Returns `false` if the id is unregistered or was already terminal, so
+    /// the caller can be as idempotent as it likes.
+    fn mark_terminal(&self, subagent_id: &str, status: AgentStatus) -> bool;
+
+    /// Runtime ids of every handle whose status is still `Running`. The
+    /// counterpart to [`Self::iter_running`] for callers that want every live
+    /// agent rather than only the UUID-shaped ones.
+    fn iter_running_ids(&self) -> Vec<String>;
 }
 
 /// DashMap-backed implementation of the registry contract.
+///
+/// Keyed by `BackgroundAgentHandle::subagent_id` rather than by `agent_id`, so
+/// one registry answers for every spawn path. The `AgentId`-typed methods stay
+/// on the contract and resolve through `id.to_string()`, which is exactly the
+/// key for every agent that was given a UUID subagent id.
 pub struct BackgroundAgentRegistry {
-    inner: Arc<DashMap<AgentId, BackgroundAgentHandle>>,
+    inner: Arc<DashMap<String, BackgroundAgentHandle>>,
     metrics_tx: Option<UnboundedSender<RegistryEvent>>,
 }
 
@@ -185,20 +263,43 @@ impl Default for BackgroundAgentRegistry {
 impl BackgroundAgentRegistryApi for BackgroundAgentRegistry {
     fn register(&self, handle: BackgroundAgentHandle) -> Result<(), RegistryError> {
         let id = handle.agent_id;
-        if self.inner.contains_key(&id) {
+        let key = handle.subagent_id.clone();
+        if self.inner.contains_key(&key) {
             return Err(RegistryError::Duplicate(id));
         }
-        self.inner.insert(id, handle);
+        self.inner.insert(key, handle);
         self.emit(RegistryEvent::Registered(id));
         Ok(())
     }
 
+    fn register_run(&self, handle: BackgroundAgentHandle) -> RunRegistration {
+        let id = handle.agent_id;
+        // One `entry` rather than a read then a write: two runners resuming the
+        // same id at once must not both see a terminal entry and both replace
+        // it, leaving one of them holding a handle the registry dropped.
+        match self.inner.entry(handle.subagent_id.clone()) {
+            Entry::Occupied(mut occupied) => {
+                if occupied.get().current_status() == AgentStatus::Running {
+                    return RunRegistration::AlreadyRunning;
+                }
+                occupied.insert(handle);
+                self.emit(RegistryEvent::Registered(id));
+                RunRegistration::Restarted
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(handle);
+                self.emit(RegistryEvent::Registered(id));
+                RunRegistration::Registered
+            }
+        }
+    }
+
     fn get(&self, id: &AgentId) -> Option<AgentStatus> {
-        self.inner.get(id).map(|h| h.current_status())
+        self.status_of(&id.to_string())
     }
 
     fn cancel(&self, id: &AgentId) -> Result<(), RegistryError> {
-        match self.inner.get(id) {
+        match self.inner.get(&id.to_string()) {
             Some(handle) => {
                 handle.cancel_token.cancel();
                 *handle.status.lock().expect("status mutex poisoned") = AgentStatus::Cancelled;
@@ -214,16 +315,21 @@ impl BackgroundAgentRegistryApi for BackgroundAgentRegistry {
     }
 
     fn reap_finished(&self) -> Vec<AgentId> {
-        let reaped: Vec<AgentId> = self
+        let terminal: Vec<String> = self
             .inner
             .iter()
             .filter(|entry| entry.current_status().is_terminal())
-            .map(|entry| *entry.key())
+            .map(|entry| entry.key().clone())
             .collect();
 
-        for id in &reaped {
-            if let Some((_, handle)) = self.inner.remove(id) {
-                self.emit(RegistryEvent::Reaped(*id, handle.current_status()));
+        let mut reaped = Vec::with_capacity(terminal.len());
+        for key in &terminal {
+            if let Some((_, handle)) = self.inner.remove(key) {
+                self.emit(RegistryEvent::Reaped(
+                    handle.agent_id,
+                    handle.current_status(),
+                ));
+                reaped.push(handle.agent_id);
             }
         }
 
@@ -234,7 +340,36 @@ impl BackgroundAgentRegistryApi for BackgroundAgentRegistry {
         self.inner
             .iter()
             .filter(|entry| entry.current_status() == AgentStatus::Running)
-            .map(|entry| *entry.key())
+            .map(|entry| entry.agent_id)
+            .collect()
+    }
+
+    fn status_of(&self, subagent_id: &str) -> Option<AgentStatus> {
+        self.inner.get(subagent_id).map(|h| h.current_status())
+    }
+
+    fn mark_terminal(&self, subagent_id: &str, status: AgentStatus) -> bool {
+        // A `Running` argument would be a caller bug, and silently storing it
+        // would resurrect an agent the runtime has already given up on.
+        if !status.is_terminal() {
+            return false;
+        }
+        let Some(handle) = self.inner.get(subagent_id) else {
+            return false;
+        };
+        let mut current = handle.status.lock().expect("status mutex poisoned");
+        if current.is_terminal() {
+            return false;
+        }
+        *current = status;
+        true
+    }
+
+    fn iter_running_ids(&self) -> Vec<String> {
+        self.inner
+            .iter()
+            .filter(|entry| entry.current_status() == AgentStatus::Running)
+            .map(|entry| entry.key().clone())
             .collect()
     }
 }
@@ -280,7 +415,15 @@ pub enum PollOutcome {
 /// TUI refresh loop). Snapshot-idempotent: repeated calls with the same
 /// id return the same outcome until the registry state changes.
 pub fn poll_background_agent(id: &AgentId) -> PollOutcome {
-    match BACKGROUND_AGENTS.get(id) {
+    poll_subagent(&id.to_string())
+}
+
+/// Non-blocking poll by *runtime* subagent id — the id the board, the hooks and
+/// the executor all know an agent by. Use this rather than
+/// [`poll_background_agent`] unless you are holding a UUID minted by
+/// `AgentTool` or `TaskCreate`; pipeline agents have no such UUID.
+pub fn poll_subagent(subagent_id: &str) -> PollOutcome {
+    match BACKGROUND_AGENTS.status_of(subagent_id) {
         None => PollOutcome::Unknown,
         Some(AgentStatus::Running) => PollOutcome::Running,
         Some(terminal) => PollOutcome::Complete(terminal),
@@ -329,71 +472,5 @@ pub fn spawn_gc_task() -> tokio::task::JoinHandle<()> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Module-local unit tests (smoke — full contract tests live in
-// crates/archon-core/tests/task_ags_101.rs).
-// ---------------------------------------------------------------------------
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn dummy_handle(status: AgentStatus) -> BackgroundAgentHandle {
-        BackgroundAgentHandle {
-            agent_id: Uuid::new_v4(),
-            join_handle: None,
-            cancel_token: CancellationToken::new(),
-            spawned_at: SystemTime::now(),
-            status: Arc::new(Mutex::new(status)),
-            result_slot: new_result_slot(),
-        }
-    }
-
-    #[test]
-    fn register_get_and_duplicate() {
-        let r = BackgroundAgentRegistry::new();
-        let h = dummy_handle(AgentStatus::Running);
-        let id = h.agent_id;
-        r.register(h).unwrap();
-        assert_eq!(r.get(&id), Some(AgentStatus::Running));
-
-        let mut dup = dummy_handle(AgentStatus::Running);
-        dup.agent_id = id;
-        match r.register(dup) {
-            Err(RegistryError::Duplicate(got)) => assert_eq!(got, id),
-            other => panic!("expected Duplicate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn status_is_terminal_helper() {
-        assert!(!AgentStatus::Running.is_terminal());
-        assert!(AgentStatus::Finished.is_terminal());
-        assert!(AgentStatus::Failed.is_terminal());
-        assert!(AgentStatus::Cancelled.is_terminal());
-    }
-
-    // TASK-TUI-402: shim unit test. Running-handle happy-path coverage is
-    // deferred to TASK-TUI-409 integration tests to avoid contaminating
-    // the global BACKGROUND_AGENTS singleton across unit-test runs.
-    #[test]
-    fn poll_unknown_id_returns_unknown() {
-        assert_eq!(poll_background_agent(&Uuid::new_v4()), PollOutcome::Unknown);
-    }
-
-    #[test]
-    fn reap_removes_terminal() {
-        let r = BackgroundAgentRegistry::new();
-        let running = dummy_handle(AgentStatus::Running);
-        let finished = dummy_handle(AgentStatus::Finished);
-        let running_id = running.agent_id;
-        let finished_id = finished.agent_id;
-        r.register(running).unwrap();
-        r.register(finished).unwrap();
-
-        let reaped = r.reap_finished();
-        assert!(reaped.contains(&finished_id));
-        assert!(!reaped.contains(&running_id));
-        assert_eq!(r.get(&running_id), Some(AgentStatus::Running));
-        assert_eq!(r.get(&finished_id), None);
-    }
-}
+mod tests;

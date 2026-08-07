@@ -1,18 +1,19 @@
 //! `GET /api/agents/live` — what the agents in THIS process are doing.
 //!
-//! Two registries hold live agents and neither is serialisable:
-//! `BACKGROUND_AGENTS` owns a `JoinHandle` + `CancellationToken` per agent, and
-//! `TASK_MANAGER` owns cancellation tokens for `TaskCreate`-spawned work. A
-//! separate `archon web` process therefore cannot see either of them at any
-//! price — this endpoint only returns anything when the server runs inside the
-//! session (see `WebServer::attached`).
+//! `BACKGROUND_AGENTS` holds every agent this process spawned — all spawn paths
+//! register at the choke point in `agent_tool::run` — and `TASK_MANAGER` holds
+//! the user-facing tasks that dispatched some of them. Neither is serialisable:
+//! they own `JoinHandle`s and `CancellationToken`s. A separate `archon web`
+//! process therefore cannot see either of them at any price — this endpoint
+//! only returns anything when the server runs inside the session (see
+//! `WebServer::attached`).
 //!
 //! This is a snapshot of current state, not an append-only log, so it is
 //! polled by the client rather than streamed: streaming it would mean either
 //! diffing or resending the world on every change.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -40,8 +41,10 @@ pub struct WebAgentActivity {
     pub id: String,
     /// Which registry this came from: `background` or `task`.
     pub kind: String,
-    /// Human label — the task description, or the agent id for background
-    /// agents, whose registry carries no description.
+    /// Human label — the task description, or the runtime subagent id for
+    /// background agents, whose registry carries no description. Pipeline
+    /// agents read as `{session}-{ordinal}-{agent}`, which is legible; the
+    /// other spawn paths mint UUIDs, which are not.
     pub label: String,
     pub status: String,
     pub elapsed_ms: u64,
@@ -60,7 +63,7 @@ pub struct WebAgentActivitySnapshot {
 
 /// First time this server observed a background agent.
 ///
-/// `BackgroundAgentRegistryApi` exposes `iter_running`/`get` but not
+/// `BackgroundAgentRegistryApi` exposes `iter_running_ids`/`status_of` but not
 /// `spawned_at` — the field lives on the handle, which the trait does not hand
 /// out. Rather than reach around the registry, the projection reports elapsed
 /// since first observation, which is the quantity this layer can actually
@@ -101,28 +104,38 @@ pub(crate) async fn live_handler(State(state): State<AppState>, headers: HeaderM
 }
 
 fn collect_agents(observer: &WebAgentObserver) -> Vec<WebAgentActivity> {
-    let running: Vec<String> = BACKGROUND_AGENTS
-        .iter_running()
+    // Runtime subagent ids, not UUIDs: `AgentTool` and `TaskCreate` mint UUID
+    // ids, but `archon-pipeline` mints `{session}-{ordinal}-{agent}`, and since
+    // every spawn path registers at the choke point in `run_subagent` those
+    // agents are in here too. Asking by UUID would drop them again.
+    let running: Vec<String> = BACKGROUND_AGENTS.iter_running_ids();
+
+    // A `TaskCreate` agent is registered in `BACKGROUND_AGENTS` like every
+    // other spawn path now, so without this it would be listed twice: once
+    // under its subagent id and once under the task that dispatched it. The
+    // task row wins — it carries a description and a true elapsed.
+    let dispatched: HashSet<String> = TASK_MANAGER
+        .list_tasks()
         .into_iter()
-        .map(|id| id.to_string())
+        .filter(|task| !is_terminal_task(&task.status))
+        .filter_map(|task| task.agent_id)
         .collect();
 
-    let mut agents: Vec<WebAgentActivity> = BACKGROUND_AGENTS
-        .iter_running()
-        .into_iter()
+    let mut agents: Vec<WebAgentActivity> = running
+        .iter()
+        .filter(|id| !dispatched.contains(*id))
         .filter_map(|id| {
             // Re-read the status: an agent can go terminal between
-            // `iter_running` and here, and a dashboard that keeps showing a
+            // `iter_running_ids` and here, and a dashboard that keeps showing a
             // dead agent as live is worse than one that shows it late.
-            let status = BACKGROUND_AGENTS.get(&id)?;
+            let status = BACKGROUND_AGENTS.status_of(id)?;
             if status.is_terminal() {
                 return None;
             }
-            let id = id.to_string();
-            let elapsed_ms = observer.elapsed_ms(&id, &running);
+            let elapsed_ms = observer.elapsed_ms(id, &running);
             Some(WebAgentActivity {
                 label: id.clone(),
-                id,
+                id: id.clone(),
                 kind: "background".to_string(),
                 status: background_status_label(status).to_string(),
                 elapsed_ms,
@@ -130,8 +143,9 @@ fn collect_agents(observer: &WebAgentObserver) -> Vec<WebAgentActivity> {
         })
         .collect();
 
-    // TaskCreate-spawned agents live in a different registry and never reach
-    // BACKGROUND_AGENTS, so both have to be read to answer "what is running".
+    // Tasks are listed in their own right, not because their agents are
+    // invisible otherwise: a task has a description and a creation time, and a
+    // dispatched-but-not-yet-running task has no agent to speak of.
     agents.extend(TASK_MANAGER.list_tasks().into_iter().filter_map(|task| {
         if is_terminal_task(&task.status) {
             return None;

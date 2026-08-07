@@ -174,6 +174,7 @@ async fn agents_live_reports_a_running_agent_and_drops_it_once_terminal() {
     BACKGROUND_AGENTS
         .register(BackgroundAgentHandle {
             agent_id,
+            subagent_id: agent_id.to_string(),
             join_handle: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             spawned_at: std::time::SystemTime::now(),
@@ -225,6 +226,90 @@ async fn agents_live_includes_task_manager_spawned_agents() {
     TASK_MANAGER.stop_task(&task_id).expect("stop probe task");
     let after = get_json(build_app(&config, state), "/api/agents/live").await;
     assert!(!agent_ids(&after).contains(&task_id), "{after}");
+}
+
+/// Issue #129: pipeline agents are registered at the spawn choke point like
+/// everything else, so the dashboard shows them — under the id the pipeline
+/// gave them, which reads far better than a UUID.
+#[tokio::test]
+async fn agents_live_includes_pipeline_spawned_agents() {
+    use archon_tools::background_agents::{
+        AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, new_result_slot,
+    };
+
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let state = test_state(&config, None);
+    let subagent_id = "web-probe-run-2-implementer";
+    BACKGROUND_AGENTS
+        .register(BackgroundAgentHandle {
+            agent_id: uuid::Uuid::new_v4(),
+            subagent_id: subagent_id.to_string(),
+            join_handle: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            spawned_at: std::time::SystemTime::now(),
+            status: std::sync::Arc::new(std::sync::Mutex::new(AgentStatus::Running)),
+            result_slot: new_result_slot(),
+        })
+        .expect("register pipeline agent");
+
+    let snapshot = get_json(build_app(&config, state), "/api/agents/live").await;
+    let entry = snapshot["agents"]
+        .as_array()
+        .expect("agents array")
+        .iter()
+        .find(|agent| agent["id"].as_str() == Some(subagent_id))
+        .unwrap_or_else(|| panic!("pipeline agent missing from projection: {snapshot}"));
+    assert_eq!(entry["kind"], "background");
+    assert_eq!(entry["status"], "running");
+    assert_eq!(entry["label"], subagent_id);
+
+    BACKGROUND_AGENTS.mark_terminal(subagent_id, AgentStatus::Finished);
+}
+
+/// A `TaskCreate` agent is now in both registries, so the projection has to
+/// choose. The task row wins: it has a description and a real creation time,
+/// where the registry entry has only an id.
+#[tokio::test]
+async fn a_task_create_agent_is_listed_once_as_its_task() {
+    use archon_tools::background_agents::{
+        AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, new_result_slot,
+    };
+    use archon_tools::task_manager::{TASK_MANAGER, TaskStatus};
+
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let state = test_state(&config, None);
+    let subagent_id = uuid::Uuid::new_v4().to_string();
+    let task_id = TASK_MANAGER.create_task("web dashboard dedupe probe");
+    TASK_MANAGER.set_agent_id(&task_id, &subagent_id);
+    TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+    BACKGROUND_AGENTS
+        .register(BackgroundAgentHandle {
+            agent_id: uuid::Uuid::parse_str(&subagent_id).expect("uuid-shaped"),
+            subagent_id: subagent_id.clone(),
+            join_handle: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            spawned_at: std::time::SystemTime::now(),
+            status: std::sync::Arc::new(std::sync::Mutex::new(AgentStatus::Running)),
+            result_slot: new_result_slot(),
+        })
+        .expect("register task-create agent");
+
+    let snapshot = get_json(build_app(&config, state), "/api/agents/live").await;
+    let ids = agent_ids(&snapshot);
+    assert!(ids.contains(&task_id), "task row missing: {snapshot}");
+    assert!(
+        !ids.contains(&subagent_id),
+        "the same agent was listed twice: {snapshot}"
+    );
+
+    TASK_MANAGER.stop_task(&task_id).expect("stop probe task");
+    BACKGROUND_AGENTS.mark_terminal(&subagent_id, AgentStatus::Finished);
 }
 
 #[test]

@@ -17,11 +17,9 @@ use std::fmt;
 
 use archon_memory::board::BoardAccess;
 use archon_memory::types::MemoryError;
-use uuid::Uuid;
 
 use super::TOP_LEVEL_AGENT;
-use crate::background_agents::{PollOutcome, poll_background_agent};
-use crate::task_manager::TASK_MANAGER;
+use crate::background_agents::{PollOutcome, poll_subagent};
 
 /// Whether an agent holding a claim is still executing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,41 +48,30 @@ pub struct ReleasedClaim {
 
 /// Is the agent holding a claim still executing?
 ///
-/// **Both registries are consulted, and that is the whole point of this
-/// function.** Subagents spawned through `AgentTool` register a handle in
-/// `BACKGROUND_AGENTS`; subagents spawned through `TaskCreate` do not — they go
-/// straight to `run_subagent_foreground`, which never touches that registry, and
-/// the only record of them is the `TASK_MANAGER` task that dispatched them.
-/// Checking one registry alone reports every agent of the other kind as dead and
-/// releases claims out from under agents that are still working.
+/// **One registry, one lookup, and that is the point of this function.** It used
+/// to ask `TASK_MANAGER` and then `BACKGROUND_AGENTS`, because `TaskCreate` and
+/// `AgentTool` happened to record their agents in different places — which meant
+/// `archon-pipeline`, recording in neither, read as dead from birth and had its
+/// claims released while it worked. A fan-out that has to grow an arm per spawn
+/// path fails silently every time a new one is added, so the registration moved
+/// to the one function every runner passes through
+/// (`agent_tool::run::run_subagent_with_auto_background`) and the question moved
+/// with it.
+///
+/// `TASK_MANAGER` still exists and is still right for what it is for — task
+/// status, metadata, `/tasks` — but it is no longer asked about liveness.
 #[must_use]
 pub fn holder_liveness(agent_id: &str) -> HolderLiveness {
-    // The top-level agent is in neither registry — those track subagents. It is
-    // alive for as long as the process is, so "not found" must not be read as
-    // dead here or the sweep would strip the top-level agent's own claims.
+    // The top-level agent was never spawned as a subagent, so it is in no
+    // registry. It is alive for as long as the process is, and "not found" must
+    // not be read as dead here or the sweep would strip its own claims.
     if agent_id == TOP_LEVEL_AGENT {
         return HolderLiveness::Live;
     }
 
-    // TaskCreate agents first: this is the registry that knows about them, and
-    // it answers `None` rather than "dead" for ids it has never seen, so an
-    // AgentTool agent falls through cleanly.
-    if let Some(running) = TASK_MANAGER.agent_is_running(agent_id) {
-        return if running {
-            HolderLiveness::Live
-        } else {
-            HolderLiveness::Dead
-        };
-    }
-
-    // `BACKGROUND_AGENTS` is keyed by UUID. An id that is not one was never in
-    // it, and having already missed `TASK_MANAGER` it belongs to nothing this
-    // process is running.
-    let Ok(id) = Uuid::parse_str(agent_id) else {
-        return HolderLiveness::Dead;
-    };
-
-    match poll_background_agent(&id) {
+    // Asked by runtime subagent id, not by UUID: pipeline agents are keyed by
+    // `{session}-{ordinal}-{agent}` and a UUID-only lookup cannot see them.
+    match poll_subagent(agent_id) {
         PollOutcome::Running => HolderLiveness::Live,
         PollOutcome::Complete(_) => HolderLiveness::Dead,
         // `Unknown` is ambiguous and the ambiguity is not visible from here:

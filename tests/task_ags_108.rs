@@ -21,6 +21,7 @@ fn make_handle(id: uuid::Uuid) -> BackgroundAgentHandle {
     let cancel = CancellationToken::new();
     BackgroundAgentHandle {
         agent_id: id,
+        subagent_id: id.to_string(),
         join_handle: None,
         cancel_token: cancel,
         spawned_at: std::time::SystemTime::now(),

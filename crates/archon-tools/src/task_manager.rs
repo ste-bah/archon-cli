@@ -72,11 +72,9 @@ pub struct TaskInfo {
     pub cost: f64,
     /// The subagent this task dispatched, when it dispatched one.
     ///
-    /// `TaskCreate` mints a subagent id and hands it to the executor, which
-    /// never registers it in `BACKGROUND_AGENTS` — that registry is populated
-    /// by `AgentTool::execute` alone. Without this field a `TaskCreate`
-    /// subagent has no liveness signal anywhere, and anything reading liveness
-    /// off `BACKGROUND_AGENTS` reports it dead while it is still working.
+    /// It is what links a user-facing task back to the agent doing the work —
+    /// not a liveness signal. That comes from `BACKGROUND_AGENTS`, which every
+    /// spawn path registers with, `TaskCreate` included.
     ///
     /// `serde(default)` so stored tasks written before the field existed still
     /// deserialise.
@@ -162,14 +160,17 @@ impl TaskManager {
         }
     }
 
-    /// Is the subagent dispatched under `agent_id` still executing?
+    /// Is the *task* that dispatched `agent_id` still open?
     ///
-    /// `None` means no task in this process ever dispatched that id — which is
-    /// not the same as "it is dead". A caller checking liveness across
-    /// registries needs that distinction: an `AgentTool` subagent is absent
-    /// here and perfectly alive in `BACKGROUND_AGENTS`.
+    /// **Not the answer to "is that agent executing".** That is
+    /// `board::leases::holder_liveness`, which reads `BACKGROUND_AGENTS` and
+    /// nothing else; deriving liveness from here as well is the fan-out issue
+    /// #129 removed. This reports what the task board of `/tasks` shows, which
+    /// can lag the runner in either direction.
     ///
-    /// `Pending` counts as running: the task has been dispatched and the runner
+    /// `None` means no task in this process ever dispatched that id.
+    ///
+    /// `Pending` counts as open: the task has been dispatched and the runner
     /// simply has not reported back yet.
     pub fn agent_is_running(&self, agent_id: &str) -> Option<bool> {
         let tasks = self.tasks.lock().ok()?;

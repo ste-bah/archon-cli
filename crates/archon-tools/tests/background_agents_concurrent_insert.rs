@@ -82,8 +82,10 @@ fn dummy_background_handle() -> BackgroundAgentHandle {
         *result_slot_child.lock().unwrap() = Some(Err("cancelled".into()));
     });
 
+    let agent_id = Uuid::new_v4();
     BackgroundAgentHandle {
-        agent_id: Uuid::new_v4(),
+        agent_id,
+        subagent_id: agent_id.to_string(),
         join_handle: Some(join),
         cancel_token: cancel,
         spawned_at: SystemTime::now(),

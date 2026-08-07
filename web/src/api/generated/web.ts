@@ -32,8 +32,10 @@ export type WebAgentActivity = { id: string,
  */
 kind: string, 
 /**
- * Human label — the task description, or the agent id for background
- * agents, whose registry carries no description.
+ * Human label — the task description, or the runtime subagent id for
+ * background agents, whose registry carries no description. Pipeline
+ * agents read as `{session}-{ordinal}-{agent}`, which is legible; the
+ * other spawn paths mint UUIDs, which are not.
  */
 label: string, status: string, elapsedMs: number, };
 

@@ -35,21 +35,42 @@ fn raise(board: &dyn BoardAccess, run_id: &str, title: &str) -> String {
 /// the id it is keyed by.
 fn register_background_agent(status: AgentStatus) -> Uuid {
     let agent_id = Uuid::new_v4();
+    register_subagent(&agent_id.to_string(), status);
+    agent_id
+}
+
+/// Register an agent the way `agent_tool::run::run_subagent_with_auto_background`
+/// does — by runtime subagent id, whatever shape that id happens to be.
+///
+/// `crates/archon-tools/tests/subagent_liveness_choke_point.rs` is what proves
+/// the runners really do this; here it is spelled out so the lease can be tested
+/// without standing up an executor.
+fn register_subagent(subagent_id: &str, status: AgentStatus) {
     BACKGROUND_AGENTS
         .register(BackgroundAgentHandle {
-            agent_id,
+            agent_id: Uuid::parse_str(subagent_id).unwrap_or_else(|_| Uuid::new_v4()),
+            subagent_id: subagent_id.to_string(),
             join_handle: None,
             cancel_token: CancellationToken::new(),
             spawned_at: SystemTime::now(),
             status: Arc::new(Mutex::new(status)),
             result_slot: new_result_slot(),
         })
-        .expect("fresh uuid cannot collide");
-    agent_id
+        .expect("a test id cannot collide");
+}
+
+/// Spawn an `archon-pipeline`-style agent: its subagent id is
+/// `{session}-{ordinal}-{agent}`, not a UUID, and no task ever describes it.
+fn spawn_pipeline_agent(name: &str, status: AgentStatus) -> String {
+    let subagent_id = format!("run-{name}-3-implementer");
+    register_subagent(&subagent_id, status);
+    subagent_id
 }
 
 /// Dispatch a `TaskCreate`-style agent: a task in `TASK_MANAGER` carrying the
-/// subagent id, and nothing at all in `BACKGROUND_AGENTS`.
+/// subagent id, and nothing at all in `BACKGROUND_AGENTS`. This is now only
+/// half of what dispatching does — the runner registers too — so it is used to
+/// show what `TASK_MANAGER` alone is *not* enough to establish.
 fn dispatch_task_agent(status: TaskStatus) -> String {
     let task_id = TASK_MANAGER.create_task("board lease test");
     let agent_id = Uuid::new_v4().to_string();
@@ -92,28 +113,57 @@ fn the_top_level_agent_is_never_swept() {
     assert_eq!(holder_liveness(TOP_LEVEL_AGENT), HolderLiveness::Live);
 }
 
+/// A `TaskCreate` agent is live because its runner registered it, exactly like
+/// every other spawn path. The `TASK_MANAGER` task that dispatched it is still
+/// there and still useful; it is simply not what the answer comes from.
 #[test]
-fn a_running_task_create_agent_is_live_despite_being_absent_from_background_agents() {
+fn a_running_task_create_agent_is_live() {
     let agent = dispatch_task_agent(TaskStatus::Running);
-    assert_eq!(
-        crate::background_agents::poll_background_agent(
-            &Uuid::parse_str(&agent).expect("uuid-shaped")
-        ),
-        crate::background_agents::PollOutcome::Unknown,
-        "the premise of this test is that TaskCreate agents are not in BACKGROUND_AGENTS"
-    );
+    register_subagent(&agent, AgentStatus::Running);
     assert_eq!(holder_liveness(&agent), HolderLiveness::Live);
 }
 
 #[test]
 fn a_completed_task_create_agent_is_dead() {
     let agent = dispatch_task_agent(TaskStatus::Running);
-    let task = TASK_MANAGER
-        .list_tasks()
-        .into_iter()
-        .find(|task| task.agent_id.as_deref() == Some(agent.as_str()))
-        .expect("dispatched task");
-    TASK_MANAGER.set_status(&task.id, TaskStatus::Completed);
+    register_subagent(&agent, AgentStatus::Running);
+    BACKGROUND_AGENTS.mark_terminal(&agent, AgentStatus::Finished);
+    assert_eq!(holder_liveness(&agent), HolderLiveness::Dead);
+}
+
+/// The fan-out is gone, and this is the assertion that keeps it gone: a task
+/// that says `Running` and an agent that is in no registry disagree, and the
+/// registry wins. `TASK_MANAGER` answers "what is this task doing", which is a
+/// different question from "is this agent executing".
+#[test]
+fn holder_liveness_does_not_consult_the_task_manager() {
+    let agent = dispatch_task_agent(TaskStatus::Running);
+    assert_eq!(
+        TASK_MANAGER.agent_is_running(&agent),
+        Some(true),
+        "the premise of this test is a TASK_MANAGER task that claims to be running"
+    );
+    assert_eq!(
+        crate::background_agents::poll_subagent(&agent),
+        crate::background_agents::PollOutcome::Unknown,
+        "and an agent no runner ever registered"
+    );
+
+    assert_eq!(
+        holder_liveness(&agent),
+        HolderLiveness::Dead,
+        "TASK_MANAGER must not be able to keep an unregistered agent alive"
+    );
+}
+
+/// A pipeline agent is registered by the same choke point as everything else,
+/// and its non-UUID id is no obstacle.
+#[test]
+fn a_running_pipeline_agent_is_live_and_a_finished_one_is_dead() {
+    let agent = spawn_pipeline_agent("liveness", AgentStatus::Running);
+    assert_eq!(holder_liveness(&agent), HolderLiveness::Live);
+
+    BACKGROUND_AGENTS.mark_terminal(&agent, AgentStatus::Finished);
     assert_eq!(holder_liveness(&agent), HolderLiveness::Dead);
 }
 
@@ -166,15 +216,17 @@ fn the_sweep_releases_a_dead_holders_claim_and_leaves_a_live_ones() {
     assert_eq!(live_row.status, BoardStatus::Claimed);
 }
 
-/// The regression the two-registry check exists to prevent: a sweep that only
-/// consulted `BACKGROUND_AGENTS` would see `Unknown` here and release a claim
-/// held by an agent that is still working.
+/// The regression registering at the choke point exists to prevent: a
+/// `TaskCreate` agent used to be findable only through `TASK_MANAGER`, so a
+/// sweep that consulted `BACKGROUND_AGENTS` alone released a claim held by an
+/// agent that was still working.
 #[test]
 fn the_sweep_leaves_a_claim_held_by_a_running_task_create_agent() {
     let board = board();
     let run = "run-sweep-2";
     let item = raise(board.as_ref(), run, "held by a TaskCreate agent");
     let agent = dispatch_task_agent(TaskStatus::Running);
+    register_subagent(&agent, AgentStatus::Running);
 
     assert!(
         board
@@ -192,6 +244,69 @@ fn the_sweep_leaves_a_claim_held_by_a_running_task_create_agent() {
     let row = board.get_board_item(&item).expect("get");
     assert_eq!(row.claimed_by.as_deref(), Some(agent.as_str()));
     assert_eq!(row.status, BoardStatus::Claimed);
+}
+
+/// Issue #129: the sweep used to hand a pipeline agent's work to someone else
+/// while it was still doing it.
+///
+/// The two guards come first on purpose. Both arms of the old fan-out have to
+/// be genuinely blind to this agent, or the test would keep passing for a
+/// reason that has nothing to do with the regression.
+#[test]
+fn the_sweep_leaves_a_claim_held_by_a_running_pipeline_agent() {
+    let board = board();
+    let run = "run-sweep-6";
+    let item = raise(board.as_ref(), run, "held by a pipeline agent");
+    let agent = spawn_pipeline_agent("sweep", AgentStatus::Running);
+
+    assert_eq!(
+        TASK_MANAGER.agent_is_running(&agent),
+        None,
+        "the premise of this test is that pipeline agents dispatch no task"
+    );
+    assert!(
+        Uuid::parse_str(&agent).is_err(),
+        "and that their id is not a UUID, so the old UUID-keyed lookup could not \
+         have found them either"
+    );
+
+    assert!(
+        board
+            .claim_board_item(&item, &agent)
+            .expect("claim")
+            .applied
+    );
+
+    let released = release_dead_claims(board.as_ref(), run).expect("sweep");
+
+    assert!(
+        released.is_empty(),
+        "a running pipeline agent's claim was released: {released:?}"
+    );
+    let row = board.get_board_item(&item).expect("get");
+    assert_eq!(row.claimed_by.as_deref(), Some(agent.as_str()));
+    assert_eq!(row.status, BoardStatus::Claimed);
+}
+
+/// And the other half: once the pipeline agent stops, its claim does come back.
+#[test]
+fn the_sweep_releases_a_finished_pipeline_agents_claim() {
+    let board = board();
+    let run = "run-sweep-7";
+    let item = raise(
+        board.as_ref(),
+        run,
+        "held by a pipeline agent that finished",
+    );
+    let agent = spawn_pipeline_agent("sweep-done", AgentStatus::Running);
+    board.claim_board_item(&item, &agent).expect("claim");
+
+    BACKGROUND_AGENTS.mark_terminal(&agent, AgentStatus::Finished);
+    let released = release_dead_claims(board.as_ref(), run).expect("sweep");
+
+    assert_eq!(released.len(), 1, "released: {released:?}");
+    assert_eq!(released[0].holder, agent);
+    assert_eq!(board.get_board_item(&item).expect("get").claimed_by, None);
 }
 
 /// The sweep is partitioned like everything else on the board: another run's

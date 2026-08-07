@@ -21,6 +21,19 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 const INLINE_AGENT_LIMIT: usize = 20;
 pub(crate) const AGENT_DESCRIPTION_LIMIT_BYTES: usize = 4096;
 
+/// Register a handle, treating "already there" as done.
+///
+/// `run_subagent` registers every subagent at the choke point, so by the time
+/// `execute` gets here the runner may already have claimed the id. That is the
+/// same agent, so the only thing left to report is a registry that genuinely
+/// refused the write.
+fn register_once(handle: BackgroundAgentHandle) -> Result<(), RegistryError> {
+    match BACKGROUND_AGENTS.register(handle) {
+        Ok(()) | Err(RegistryError::Duplicate(_)) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 pub struct AgentTool {
     /// Dynamic description including available agents. Built at registration time.
     description: String,
@@ -265,10 +278,9 @@ impl Tool for AgentTool {
                     let _ = join.await;
                 });
 
-            // TASK-AGS-108 ERR-ARCH-01: keep a clone for retry on collision.
-            let result_slot_retry = Arc::clone(&result_slot);
             let handle = BackgroundAgentHandle {
                 agent_id,
+                subagent_id: subagent_id.clone(),
                 join_handle: Some(adapter),
                 cancel_token: cancel,
                 spawned_at: SystemTime::now(),
@@ -276,37 +288,21 @@ impl Tool for AgentTool {
                 result_slot,
             };
 
-            // TASK-AGS-108 ERR-ARCH-01: retry-once on duplicate UUID collision.
-            // If the astronomically-rare UUID collision hits, regenerate the
-            // agent_id in the handle and retry once. On second collision,
-            // surface the error and cancel the spawned task.
-            match BACKGROUND_AGENTS.register(handle) {
-                Ok(()) => {}
-                Err(RegistryError::Duplicate(dup_id)) => {
-                    tracing::warn!(
-                        agent_id = %dup_id,
-                        "Subagent ID collision: retrying with new UUID"
-                    );
-                    let new_id = Uuid::new_v4();
-                    let retry_handle = BackgroundAgentHandle {
-                        agent_id: new_id,
-                        join_handle: None, // adapter already consumed; the task runs detached
-                        cancel_token: cancel_for_failure.clone(),
-                        spawned_at: SystemTime::now(),
-                        status: Arc::new(Mutex::new(AgentStatus::Running)),
-                        result_slot: result_slot_retry,
-                    };
-                    if let Err(e2) = BACKGROUND_AGENTS.register(retry_handle) {
-                        cancel_for_failure.cancel();
-                        return ToolResult::error(format!(
-                            "background registry register failed after retry: {e2}"
-                        ));
-                    }
-                }
-                Err(e) => {
-                    cancel_for_failure.cancel();
-                    return ToolResult::error(format!("background registry register failed: {e}"));
-                }
+            // This registration is not the one that makes the agent live —
+            // `run_subagent` registers every spawn path at the choke point. It
+            // survives because `execute` returns a spawn marker synchronously
+            // and callers (and the AGS-104 latency gates) expect the registry
+            // to already know the id by then, which a registration inside the
+            // spawned runner cannot promise.
+            //
+            // TASK-AGS-108 ERR-ARCH-01's retry-with-a-fresh-UUID is gone with
+            // it: a `Duplicate` now means the runner won the race and
+            // registered the same agent under the same id first, not that
+            // uuid-v4 collided. Minting a replacement id would leave the caller
+            // holding an `agent_id` that resolves to no handle.
+            if let Err(e) = register_once(handle) {
+                cancel_for_failure.cancel();
+                return ToolResult::error(format!("background registry register failed: {e}"));
             }
             drop(cancel_for_failure);
 
@@ -353,6 +349,7 @@ impl Tool for AgentTool {
 
             BackgroundAgentHandle {
                 agent_id,
+                subagent_id: subagent_id.clone(),
                 join_handle: Some(noop_join),
                 cancel_token: cancel.clone(),
                 spawned_at: SystemTime::now(),
@@ -360,7 +357,7 @@ impl Tool for AgentTool {
                 result_slot: Arc::clone(&result_slot),
             }
         };
-        if let Err(e) = BACKGROUND_AGENTS.register(handle) {
+        if let Err(e) = register_once(handle) {
             cancel_for_failure.cancel();
             let msg = format!("background registry register failed: {e}");
             return ToolResult::error(format!("{} {}", classify_failure_prefix(&msg), msg));

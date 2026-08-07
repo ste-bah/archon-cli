@@ -32,8 +32,10 @@ fn make_handle(status: AgentStatus) -> BackgroundAgentHandle {
         *result_slot_child.lock().unwrap() = Some(Err("cancelled".into()));
     });
 
+    let agent_id = Uuid::new_v4();
     BackgroundAgentHandle {
-        agent_id: Uuid::new_v4(),
+        agent_id,
+        subagent_id: agent_id.to_string(),
         join_handle: Some(join),
         cancel_token: cancel,
         spawned_at: SystemTime::now(),
@@ -59,9 +61,11 @@ async fn duplicate_register_returns_duplicate_error() {
     let id = handle1.agent_id;
     registry.register(handle1).expect("first register ok");
 
-    // Fabricate a second handle reusing the same id.
+    // Fabricate a second handle reusing the same id. The registry is keyed by
+    // `subagent_id`, so that is the field the collision has to be on.
     let mut handle2 = make_handle(AgentStatus::Running);
     handle2.agent_id = id;
+    handle2.subagent_id = id.to_string();
     let err = registry
         .register(handle2)
         .expect_err("duplicate register must fail");

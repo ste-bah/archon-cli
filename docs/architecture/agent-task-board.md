@@ -190,6 +190,35 @@ process after the first reaches memory over TCP — a direct-only board would
 silently be a private board. Claims resolve in the one process that owns the
 writer, which is what keeps the compare-and-set global rather than per-process.
 
+## A claim lasts as long as its holder
+
+A claim has no TTL. It is valid while the agent holding it is still executing,
+and the sweep in `crates/archon-tools/src/board/leases.rs` releases the rest.
+
+`holder_liveness` is one lookup against `BACKGROUND_AGENTS`, keyed by the
+runtime subagent id — the same id the board records as the claim holder. It
+used to be a fan-out over `TASK_MANAGER` and then `BACKGROUND_AGENTS`, because
+`TaskCreate` and `AgentTool` happened to record their agents in different
+places. `archon-pipeline` recorded in neither, so its agents read as dead from
+birth and had their claims released while they worked, and a fan-out has to
+grow an arm for every spawn path added afterwards or fail exactly that way
+again, silently.
+
+So the registration moved to the one function every runner passes through,
+`run_subagent_with_auto_background` in `crates/archon-tools/src/agent_tool/run.rs`.
+Liveness is now a property of having been spawned. Two details make it hold:
+
+- The registration is released when the **runner** ends, not when
+  `run_subagent` returns. Those differ on the `AutoBackgrounded` arm, where the
+  agent keeps working after the call returns — and where `SubagentStop` never
+  fires, which is why nothing hook-based can be trusted with this.
+- `TOP_LEVEL_AGENT` is in no registry and is alive as long as the process is,
+  so it is answered before the lookup. Reading its absence as death would have
+  the sweep strip its own claims.
+
+`TASK_MANAGER` is untouched by this and still owns task status, metadata and
+`/tasks`. It is simply no longer asked whether an agent is alive.
+
 ## What is not built
 
 Stated plainly, because the storage layer reads as more complete than the
@@ -205,12 +234,6 @@ feature is:
   agent definition names any tools. Most pipeline agents name their tools, so
   they are excluded. There is no always-allow counterpart to the denylist;
   adding one is a policy change rather than a wiring fix.
-- **One spawn path has no liveness signal at all.**
-  `archon-pipeline/src/subagent_adapter.rs` calls the foreground runners
-  directly and registers in neither `BACKGROUND_AGENTS` nor `TASK_MANAGER`, so
-  the lease sweep would release a pipeline agent's claim while it is still
-  working. The fix is the same one-line association added to `TaskCreate`, but
-  it lands in another crate.
 - **The drain gate runs only in the V2 lifecycle.** The v3 orchestrated path
   (`ARCHON_ORCHESTRATED_LIFECYCLE=1`) has its own terminal report and does not
   pass through `run_final_gates`, so neither the gate nor the third verdict
