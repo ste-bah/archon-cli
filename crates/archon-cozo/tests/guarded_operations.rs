@@ -156,6 +156,7 @@ fn writes_through_symlinked_parent_are_serialized_after_lock_creation() {
         initial_backoff: Duration::ZERO,
         max_backoff: Duration::ZERO,
         write_lock_path: Some(alias_path),
+        write_lock_wait: None,
     };
     let (first_entered_tx, first_entered_rx) = mpsc::channel();
     let (release_first_tx, release_first_rx) = mpsc::channel();
@@ -178,6 +179,7 @@ fn writes_through_symlinked_parent_are_serialized_after_lock_creation() {
                 initial_backoff: Duration::ZERO,
                 max_backoff: Duration::ZERO,
                 write_lock_path: Some(real_path),
+                write_lock_wait: None,
             },
             || {
                 second_entered_tx.send(()).unwrap();

@@ -2,12 +2,15 @@ use std::sync::{Arc, atomic};
 
 use anyhow::Result;
 use archon_core::env_vars::ArchonEnvVars;
-use archon_llm::auth::{AuthProvider, resolve_auth_with_keys};
 use archon_tui::event_channel::TuiEventReceiver;
 use archon_tui::observability;
 use archon_tui::{AgentDispatcher, app::TuiEvent};
 
 use crate::cli_args::Cli;
+
+#[path = "web_runtime_reply.rs"]
+mod reply;
+use reply::{auth_label, finish_reply, sanitize_web_reply};
 
 const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
 const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration =
@@ -449,50 +452,6 @@ pub(crate) async fn spawn_web_session(
         shutdown,
         leann_init_cancel,
     }))
-}
-
-fn finish_reply(streamed: &str, fallback: &str) -> String {
-    let streamed = streamed.trim();
-    if streamed.is_empty() {
-        sanitize_web_reply(fallback)
-    } else {
-        sanitize_web_reply(streamed)
-    }
-}
-
-fn sanitize_web_reply(value: &str) -> String {
-    let mut lines = Vec::new();
-    let mut skipping_tool_output = false;
-    for line in value.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("[tool] ") {
-            skipping_tool_output = trimmed.contains(" done:");
-            continue;
-        }
-        if skipping_tool_output {
-            if trimmed.is_empty() {
-                skipping_tool_output = false;
-            }
-            continue;
-        }
-        lines.push(line);
-    }
-    lines.join("\n").trim().to_string()
-}
-
-fn auth_label(env_vars: &ArchonEnvVars) -> String {
-    match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(AuthProvider::OAuthToken(_)) => "OAuth".into(),
-        Ok(AuthProvider::CodexOAuthToken(_)) => "Codex OAuth".into(),
-        Ok(AuthProvider::ApiKey(_)) => "API key".into(),
-        Ok(AuthProvider::BearerToken(_)) => "Bearer token".into(),
-        Err(_) => "none".into(),
-    }
 }
 
 #[cfg(test)]

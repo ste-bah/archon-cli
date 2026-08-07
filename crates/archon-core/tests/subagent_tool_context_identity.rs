@@ -252,7 +252,7 @@ async fn tool_inside_subagent_sees_the_registered_subagent_id() {
 
     assert_eq!(
         registered.as_slice(),
-        &[subagent_id.clone()],
+        std::slice::from_ref(&subagent_id),
         "exactly one subagent should have been registered while the tool ran"
     );
     assert_eq!(
