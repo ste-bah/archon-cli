@@ -39,7 +39,7 @@ export function BoardHeader({
         <h3>Task Board</h3>
         <p>
           Raised, claimed and closed by agents. This view is read-only — every
-          board endpoint is a `GET`.
+          board endpoint is a <code>GET</code>.
         </p>
       </div>
 
