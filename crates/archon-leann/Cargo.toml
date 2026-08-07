@@ -35,3 +35,6 @@ tokio = { workspace = true }
 tempfile = { workspace = true }
 cozo = { workspace = true }
 ndarray = "0.16"
+# Only the `concurrent_index` example needs a subscriber: it is a standalone
+# process, so the guard's contention warnings have nowhere to go otherwise.
+tracing-subscriber = { workspace = true }

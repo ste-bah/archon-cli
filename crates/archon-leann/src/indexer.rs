@@ -13,8 +13,8 @@ use archon_memory::embedding::EmbeddingProvider;
 
 use crate::chunker::{Chunker, Language};
 use crate::embedding_pass;
-use crate::index_storage::{FileStore, ReplaceFileOutcome};
-use crate::language;
+use crate::index_storage::{FileState, FileStore, ReplaceFileOutcome, skip_if_contended};
+use crate::language::{self, configured_excludes, configured_includes};
 use crate::metadata::{CodeChunk, IndexConfig, IndexStats};
 
 /// Which embedding backend to use for indexing.
@@ -204,11 +204,18 @@ impl Indexer {
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
-            if self
+            match self
                 .file_store()
-                .file_hash_matches(path.to_string_lossy().as_ref(), &sha256_hex(&content))?
+                .file_state(path.to_string_lossy().as_ref(), &sha256_hex(&content))?
             {
-                continue;
+                FileState::Current => continue,
+                // Counted, not silently dropped: the store never answered for
+                // this file, so the pass cannot claim to have covered it.
+                FileState::Contended => {
+                    stats.skipped_files += 1;
+                    continue;
+                }
+                FileState::Stale => {}
             }
             pending.push(PendingFile {
                 language_name,
@@ -283,7 +290,10 @@ impl Indexer {
                     &file.file_hash,
                     &chunks,
                     || is_cancelled(cancel),
-                )?;
+                );
+                let Some(outcome) = skip_if_contended(&file.file_path, outcome, &mut stats)? else {
+                    continue;
+                };
                 if matches!(outcome, ReplaceFileOutcome::Cancelled) {
                     return Ok(stats);
                 }
@@ -304,6 +314,16 @@ impl Indexer {
                 "LEANN indexing progress"
             );
         }
+        // Skips are reported here as well as warned about per file: a pass that
+        // lost four hundred files to a peer and still returned `Ok` otherwise
+        // looks exactly like a complete one, and the difference is a search
+        // corpus with holes in it.
+        tracing::info!(
+            files_indexed = stats.total_files,
+            chunks_indexed = stats.total_chunks,
+            skipped = stats.skipped_files,
+            "LEANN indexing finished"
+        );
         Ok(stats)
     }
 
@@ -333,11 +353,12 @@ impl Indexer {
     ) -> Result<Option<usize>> {
         let file_path = path.to_string_lossy();
         let file_hash = sha256_hex(content);
-        if self
-            .file_store()
-            .file_hash_matches(&file_path, &file_hash)?
-        {
-            return Ok(Some(0));
+        match self.file_store().file_state(&file_path, &file_hash)? {
+            FileState::Current => return Ok(Some(0)),
+            // Nothing was written, so the caller's next attempt still sees the
+            // file as stale. `None` is the existing "did no work" answer.
+            FileState::Contended => return Ok(None),
+            FileState::Stale => {}
         }
         self.prepare_and_commit(path, content, language_name, &file_path, &file_hash, cancel)
     }
@@ -367,10 +388,14 @@ impl Indexer {
         }
         let outcome =
             self.file_store()
-                .replace_file_with_cancel(file_path, file_hash, &prepared, || cancelled(cancel))?;
-        match outcome {
-            ReplaceFileOutcome::Committed => Ok(Some(prepared.len())),
-            ReplaceFileOutcome::Cancelled => Ok(None),
+                .replace_file_with_cancel(file_path, file_hash, &prepared, || cancelled(cancel));
+        // Single-file indexing has no walk to protect, but it shares the rule:
+        // a contended file is left stale for the next attempt rather than
+        // raised as a failure the caller cannot act on.
+        let mut ignored = IndexStats::default();
+        match skip_if_contended(file_path, outcome, &mut ignored)? {
+            Some(ReplaceFileOutcome::Committed) => Ok(Some(prepared.len())),
+            Some(ReplaceFileOutcome::Cancelled) | None => Ok(None),
         }
     }
 
@@ -415,54 +440,6 @@ impl Indexer {
     fn remove_file_chunks(&self, file_path: &str) -> Result<()> {
         self.file_store().remove_file_chunks(file_path)
     }
-}
-
-/// Caller patterns EXTEND the defaults; they do not replace them.
-///
-/// Replacing was a footgun with no upside: a caller naming three directories it
-/// cared about silently lost the other nine the defaults cover -- `.venv`,
-/// `dist`, `build`, `__pycache__`, `site-packages`, `.archon` and friends --
-/// and nothing reported the loss. Nobody passing `target` means "and please
-/// start indexing my virtualenv".
-///
-/// A caller that genuinely wants to index a defaulted directory can still do
-/// so, but it has to be a deliberate change here rather than a side effect of
-/// naming something unrelated.
-fn configured_excludes(config: &IndexConfig) -> Vec<String> {
-    let mut excludes = language::default_exclude_patterns();
-    for pattern in &config.exclude_patterns {
-        let normalized = language::normalize_exclude_pattern(pattern).to_string();
-        if !normalized.is_empty() && !excludes.contains(&normalized) {
-            excludes.push(normalized);
-        }
-    }
-    excludes
-}
-
-/// Compile `include_patterns` into globs, narrowing what the walk accepts.
-///
-/// Unlike the excludes these are real globs, because that is what the field has
-/// always been given: `**/*.rs` names an extension, not a directory component,
-/// so `is_excluded`'s component matcher could never express it. An empty list
-/// means "every recognised code language", which is what every caller that
-/// never set the field has been getting.
-///
-/// An unparseable pattern is dropped with a warning rather than failing the
-/// index. Silently dropping it would narrow the corpus with no trace -- the
-/// exact failure mode that let the whole field go unread -- and aborting a
-/// repository index over one malformed glob helps nobody.
-fn configured_includes(config: &IndexConfig) -> Vec<glob::Pattern> {
-    config
-        .include_patterns
-        .iter()
-        .filter_map(|pattern| match glob::Pattern::new(pattern) {
-            Ok(compiled) => Some(compiled),
-            Err(error) => {
-                tracing::warn!(pattern, %error, "ignoring invalid LEANN include pattern");
-                None
-            }
-        })
-        .collect()
 }
 
 /// Compute SHA-256 hash of content as hex string.

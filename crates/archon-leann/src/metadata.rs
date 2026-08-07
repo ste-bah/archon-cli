@@ -49,6 +49,16 @@ pub struct IndexStats {
     pub index_size_bytes: u64,
     pub languages: HashMap<String, usize>,
     pub created_at: Option<String>,
+    /// Files this pass gave up on because another process held the store.
+    ///
+    /// Reported rather than merely logged because a pass that skipped several
+    /// hundred files and still returned `Ok` is otherwise indistinguishable
+    /// from a complete one, and the difference is a silently partial search
+    /// corpus. Nothing was written for these files, so the next pass sees them
+    /// as stale and retries them; `default` keeps older serialised stats
+    /// readable.
+    #[serde(default)]
+    pub skipped_files: usize,
 }
 
 /// Result of processing the indexing queue.

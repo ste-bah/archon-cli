@@ -255,6 +255,16 @@ pub(crate) fn with_write_lock<T>(
     run()
 }
 
+/// The phrase every bounded acquire failure carries, whichever layer expired.
+///
+/// A wedged holder is deliberately *not* a retryable busy signal -- we already
+/// waited the whole budget, so another 19s of backoff would only delay the
+/// diagnosis. But a caller that can degrade (skip one file rather than abandon
+/// a walk) still has to tell "lost the store" apart from "the schema is wrong",
+/// and it should not do that by re-spelling this sentence at the call site.
+/// [`crate::is_store_contention`] matches on this constant instead.
+pub(crate) const WRITE_LOCK_WAIT_EXPIRED: &str = "was still held";
+
 /// Run `run` while holding the write lock for `path`, waiting up to `wait` for
 /// a current holder to finish.
 ///

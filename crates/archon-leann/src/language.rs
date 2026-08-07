@@ -2,6 +2,56 @@
 
 use std::path::Path;
 
+use crate::metadata::IndexConfig;
+
+/// Caller patterns EXTEND the defaults; they do not replace them.
+///
+/// Replacing was a footgun with no upside: a caller naming three directories it
+/// cared about silently lost the other nine the defaults cover -- `.venv`,
+/// `dist`, `build`, `__pycache__`, `site-packages`, `.archon` and friends --
+/// and nothing reported the loss. Nobody passing `target` means "and please
+/// start indexing my virtualenv".
+///
+/// A caller that genuinely wants to index a defaulted directory can still do
+/// so, but it has to be a deliberate change here rather than a side effect of
+/// naming something unrelated.
+pub(crate) fn configured_excludes(config: &IndexConfig) -> Vec<String> {
+    let mut excludes = default_exclude_patterns();
+    for pattern in &config.exclude_patterns {
+        let normalized = normalize_exclude_pattern(pattern).to_string();
+        if !normalized.is_empty() && !excludes.contains(&normalized) {
+            excludes.push(normalized);
+        }
+    }
+    excludes
+}
+
+/// Compile `include_patterns` into globs, narrowing what the walk accepts.
+///
+/// Unlike the excludes these are real globs, because that is what the field has
+/// always been given: `**/*.rs` names an extension, not a directory component,
+/// so `is_excluded`'s component matcher could never express it. An empty list
+/// means "every recognised code language", which is what every caller that
+/// never set the field has been getting.
+///
+/// An unparseable pattern is dropped with a warning rather than failing the
+/// index. Silently dropping it would narrow the corpus with no trace -- the
+/// exact failure mode that let the whole field go unread -- and aborting a
+/// repository index over one malformed glob helps nobody.
+pub(crate) fn configured_includes(config: &IndexConfig) -> Vec<glob::Pattern> {
+    config
+        .include_patterns
+        .iter()
+        .filter_map(|pattern| match glob::Pattern::new(pattern) {
+            Ok(compiled) => Some(compiled),
+            Err(error) => {
+                tracing::warn!(pattern, %error, "ignoring invalid LEANN include pattern");
+                None
+            }
+        })
+        .collect()
+}
+
 /// Detect the programming language of a file based on its extension.
 ///
 /// Returns `None` if the extension is not recognized.
