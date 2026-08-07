@@ -38,6 +38,38 @@ archon web
 There is no per-project web install step. Normal users do not need Node.js,
 Vite, or `npm install`; those are only needed when developing the web UI itself.
 
+### Attached mode: `/web` from inside a session
+
+`archon web` is a **separate process**, and that is not a detail — it decides
+what the dashboard can ever show you. The registry of running agents holds live
+`JoinHandle`s and `CancellationToken`s, which do not cross a process boundary at
+any price, so a standalone workbench cannot report what the agents in your TUI
+session are doing regardless of what is recorded for it.
+
+Typing `/web` inside the TUI starts the same server **in that process**:
+
+```
+/web            # port 8421
+/web 9000       # a different port
+/web status     # is one running, and where
+/web stop       # stop it (it also stops when the session ends)
+```
+
+Two differences from standalone, both deliberate:
+
+- **The agent panel is populated**, because the registries are in reach. It
+  reports every agent this session spawned.
+- **The chat tab is not constructed.** The TUI is already serving the
+  conversation, and a second independent chat beside the one you are watching
+  means two histories in one session with nothing saying which you are reading.
+
+Everything sourced from the project's own state — memory, corpus, world model,
+pipelines, the agent task board — works identically in both modes, because it
+lives in the database rather than in process memory.
+
+Attached mode binds loopback only and issues no bearer token, matching what
+`archon web` does on a localhost bind.
+
 ## Configuration
 
 The web workbench uses the normal Archon config layers:

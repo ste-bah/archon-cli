@@ -102,6 +102,7 @@ Beyond the 87 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
 | `/hooks` | — | List or manage hook registrations (list, enable, disable, reload) |
 | `/voice` | — | Show or toggle voice input configuration (status, on, off) |
+| `/web` | — | Start the web dashboard **inside this session**: `/web`, `/web <port>` (default 8421), `/web status`, `/web stop`. Unlike `archon web`, which is a separate process, this one can report the agents this session spawned — `BACKGROUND_AGENTS` holds live `JoinHandle`s that do not cross a process boundary. The dashboard's chat tab is hidden in this mode because the TUI is already serving the conversation. Binds loopback only, and stops with the session. See [web workbench](../operations/web-workbench.md) |
 
 ## Authentication & providers (v0.1.40+)
 
