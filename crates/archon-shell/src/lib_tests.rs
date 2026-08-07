@@ -257,6 +257,12 @@ fn absent_shell_is_none() {
 /// The Windows build must never select the WSL launcher: it runs in a separate
 /// filesystem namespace, so it does not fail on a Windows path — it silently
 /// runs against paths it cannot see (#118).
+///
+/// Windows-only because the assertions are about Windows path *parsing*: on
+/// Unix a backslash is an ordinary character, so `Path::new(r"C:\...\bash.exe")`
+/// has no parent and its whole string is the file name. The production code is
+/// gated on `is_windows` and so is unaffected — only the test needs the gate.
+#[cfg(windows)]
 #[test]
 fn wsl_launcher_is_recognised() {
     for path in [
@@ -272,6 +278,10 @@ fn wsl_launcher_is_recognised() {
     }
 }
 
+/// Windows-only for the same path-parsing reason as above: on Unix these
+/// backslash paths would pass for the wrong reason, which is worse than not
+/// running.
+#[cfg(windows)]
 #[test]
 fn real_shells_are_not_mistaken_for_wsl() {
     for path in [
