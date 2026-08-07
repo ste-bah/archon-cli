@@ -11,3 +11,8 @@ description = "Shell discovery for archon-cli: resolves the program and command 
 # subprocess in src/command/posix_shell.rs, which cost a process launch per
 # resolution for information `which` reads straight off PATH.
 which.workspace = true
+
+[dev-dependencies]
+# Builds fake Git-for-Windows install trees so shell discovery precedence is
+# testable on any platform, including from a Linux CI runner.
+tempfile.workspace = true

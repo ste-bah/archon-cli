@@ -131,28 +131,82 @@ fn discover_candidates(is_windows: bool) -> ShellCandidates {
     } else {
         (None, None)
     };
+    // On Windows a PATH hit may be the WSL launcher, which is rejected
+    // outright — see `is_wsl_launcher`. Off Windows the filter never applies,
+    // so a real `/bin/bash` inside WSL is used normally by the Linux build.
+    let usable = |path: PathBuf| (!is_windows || !is_wsl_launcher(&path)).then_some(path);
     ShellCandidates {
-        path_sh: which::which("sh").ok(),
-        path_bash: which::which("bash").ok(),
+        path_sh: which::which("sh").ok().and_then(usable),
+        path_bash: which::which("bash").ok().and_then(usable),
         git_sh,
         git_bash,
     }
 }
 
+/// Whether `path` is the WSL launcher rather than a Win32 POSIX shell.
+///
+/// `C:\Windows\System32\bash.exe` starts a Linux environment in a different
+/// filesystem namespace. It does not fail on a Windows path — it runs the
+/// command against paths it cannot see, which is worse, and it ignores the
+/// Windows `current_dir` entirely.
+///
+/// The Windows build therefore never selects it (#118): if no Win32 POSIX
+/// shell exists, `resolve_shell` falls back to `cmd /C` and
+/// `resolve_posix_shell` returns a bare `sh` that fails closed at spawn. Linux
+/// semantics are available by running the Linux build inside WSL, where this
+/// check does not apply.
+fn is_wsl_launcher(path: &Path) -> bool {
+    let is_bash = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("bash.exe"));
+    if !is_bash {
+        return false;
+    }
+    // System32 is the real launcher; Sysnative is the same binary seen from a
+    // 32-bit process, and WindowsApps carries the Store-distributed alias.
+    path.parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|dir| dir.to_str())
+        .is_some_and(|dir| {
+            ["system32", "sysnative", "windowsapps"]
+                .iter()
+                .any(|reserved| dir.eq_ignore_ascii_case(reserved))
+        })
+}
+
 /// Finds a shell beside the `git.exe` already on PATH.
 ///
-/// Git for Windows puts `git.exe` in `<git>\cmd` (or `<git>\bin`) and its shells
-/// in `<git>\bin` and `<git>\usr\bin`, so the grandparent of the resolved
-/// `git.exe` is the install root either way.
+/// Git for Windows keeps its shells in `<git>\bin` and `<git>\usr\bin`, but
+/// `git.exe` itself turns up at more than one depth: `<git>\cmd\git.exe` is
+/// what PATH resolves to from PowerShell or cmd, while `<git>\mingw64\bin\git.exe`
+/// comes first inside a Git Bash environment.
+///
+/// Taking a fixed grandparent therefore worked only for the first layout. From
+/// Git Bash it derived `<git>\mingw64` as the install root, found no shell
+/// under it, and returned `None` — so `git_sh`/`git_bash` both dropped out of
+/// the candidate set and selection fell through to whatever PATH called
+/// `bash`, which on a default Git for Windows install is the `System32`
+/// WSL launcher this crate exists to avoid (#118).
+///
+/// Walks the ancestors instead, so any `git.exe` depth resolves.
 fn git_relative_shell(exe: &str) -> Option<PathBuf> {
     let git = which::which("git").ok()?;
-    let root = git.parent()?.parent()?;
-    [
-        root.join("bin").join(exe),
-        root.join("usr").join("bin").join(exe),
-    ]
-    .into_iter()
-    .find(|candidate| candidate.is_file())
+    shell_near_git(&git, exe)
+}
+
+/// First `<root>\bin\<exe>` or `<root>\usr\bin\<exe>` found in any ancestor of
+/// `git`. Split out from PATH resolution so the precedence is unit-testable on
+/// any platform, matching how `best_posix_shell` is kept pure.
+fn shell_near_git(git: &Path, exe: &str) -> Option<PathBuf> {
+    git.ancestors().find_map(|root| {
+        [
+            root.join("bin").join(exe),
+            root.join("usr").join("bin").join(exe),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+    })
 }
 
 #[cfg(test)]
