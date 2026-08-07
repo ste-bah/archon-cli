@@ -61,27 +61,23 @@ pub(crate) async fn handle_web_command(
     // `WebServer` already serves a chat-less dashboard — attached `/web` runs
     // exactly that way and reports `features.chat: false`, which the frontend
     // already handles by hiding the tab.
-    let chat_backend = match crate::command::web_chat::WebChatBridge::new(
-        config,
-        cli,
-        env_vars,
-        resolved_flags,
-    )
-    .await
-    {
-        Ok(bridge) => Some(Arc::new(bridge)),
-        Err(error) => {
-            tracing::warn!(
-                error = format!("{error:#}"),
-                "chat backend unavailable; serving the workbench without the chat tab"
-            );
-            eprintln!(
-                "Chat is unavailable ({error:#}).\n\
+    let chat_backend =
+        match crate::command::web_chat::WebChatBridge::new(config, cli, env_vars, resolved_flags)
+            .await
+        {
+            Ok(bridge) => Some(Arc::new(bridge)),
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "chat backend unavailable; serving the workbench without the chat tab"
+                );
+                eprintln!(
+                    "Chat is unavailable ({error:#}).\n\
                  Every other tab still works; run `archon auth login` to restore chat."
-            );
-            None
-        }
-    };
+                );
+                None
+            }
+        };
     let mut server = WebServer::with_policy_and_paths(web_cfg, token, policy, paths);
     if let Some(backend) = chat_backend.clone() {
         server = server.with_chat_backend(backend);
