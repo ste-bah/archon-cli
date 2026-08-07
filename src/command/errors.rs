@@ -173,14 +173,15 @@ mod tests {
 
     #[test]
     fn format_unknown_one_suggestion_returns_did_you_mean() {
-        // "hel" is 1 edit from "help" and > 2 from every other
-        // primary in the default registry, so suggest() returns
-        // ["help"] only. Expected: the singular "Did you mean '/help'?"
-        // form.
+        // "helo" is 1 edit from "help" and further than the cutoff from
+        // every other primary. It replaced "hel", which stopped being
+        // unambiguous once `/web` was registered -- "hel" is two edits from
+        // "web" as well, so the singular path was no longer reachable through
+        // it. The property under test is the singular form, not the input.
         let registry = default_registry();
-        let msg = format_unknown_command("hel", &registry);
+        let msg = format_unknown_command("helo", &registry);
         assert_eq!(
-            msg, "Unknown command '/hel'. Did you mean '/help'?",
+            msg, "Unknown command '/helo'. Did you mean '/help'?",
             "one-suggestion path must emit the singular 'Did you mean' form"
         );
     }

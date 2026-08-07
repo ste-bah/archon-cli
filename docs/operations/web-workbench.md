@@ -38,6 +38,38 @@ archon web
 There is no per-project web install step. Normal users do not need Node.js,
 Vite, or `npm install`; those are only needed when developing the web UI itself.
 
+### Attached mode: `/web` from inside a session
+
+`archon web` is a **separate process**, and that is not a detail — it decides
+what the dashboard can ever show you. The registry of running agents holds live
+`JoinHandle`s and `CancellationToken`s, which do not cross a process boundary at
+any price, so a standalone workbench cannot report what the agents in your TUI
+session are doing regardless of what is recorded for it.
+
+Typing `/web` inside the TUI starts the same server **in that process**:
+
+```
+/web            # port 8421
+/web 9000       # a different port
+/web status     # is one running, and where
+/web stop       # stop it (it also stops when the session ends)
+```
+
+Two differences from standalone, both deliberate:
+
+- **The agent panel is populated**, because the registries are in reach. It
+  reports every agent this session spawned.
+- **The chat tab is not constructed.** The TUI is already serving the
+  conversation, and a second independent chat beside the one you are watching
+  means two histories in one session with nothing saying which you are reading.
+
+Everything sourced from the project's own state — memory, corpus, world model,
+pipelines, the agent task board — works identically in both modes, because it
+lives in the database rather than in process memory.
+
+Attached mode binds loopback only and issues no bearer token, matching what
+`archon web` does on a localhost bind.
+
 ## Configuration
 
 The web workbench uses the normal Archon config layers:
@@ -166,6 +198,38 @@ multiple slash commands.
 Buttons that inspect behaviour proposals use dry-run action previews. They do
 not apply behaviour changes unless policy and confirmation gates allow that
 action.
+
+### Task Board
+
+The task board tab shows what agents have raised for each other: the
+`board_items` rows, as a board.
+
+| Area | Shows |
+|---|---|
+| Run selector | every run with items, most recently touched first |
+| Stat tiles | total and per-status counts for the selected run |
+| Columns | one per status, in lifecycle order, each card carrying title, evidence, acceptance, who raised it, who holds it |
+| Recent activity | the run's status transitions — actor, from, to, round, note |
+
+**Unlike the Overview tab's agent panel, this works in standalone mode.** The
+agent panel reads in-process registries holding `JoinHandle`s, which cannot
+cross a process boundary. The board is in the memory database, so any process
+that can open that database sees the same rows.
+
+Three things the cards deliberately do not show, because there is no field
+behind them: priority, progress percentage, and due dates. The chip is `kind`
+(an **issue** is work that must happen, a **note** is context) and the badge is
+`round`, the attempt counter.
+
+All eight statuses get a column rather than being grouped into a tidier five.
+The distinctions are load-bearing: the drain gate does not count `escalated` as
+done, and `resolved`, `promoted` and `declined` are three different endings.
+
+The tab is read-only — every route behind it is a `GET`. The board is written by
+agents through `BoardRaise`, `BoardClaim` and `BoardResolve`. See
+[agent task board](../architecture/agent-task-board.md) for the design and
+[multi-agent handoffs](../cookbook/multi-agent-handoffs.md) for how agents use
+it.
 
 ### World
 

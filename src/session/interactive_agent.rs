@@ -113,51 +113,10 @@ pub(super) async fn build(
         10000,
     ));
 
-    let leann_init_cancel = Arc::new(AtomicBool::new(false));
-    let leann: Option<Arc<archon_pipeline::runner::LeannIntegration>> = {
-        let db_path = working_dir.join(".archon").join("leann.db");
-        if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match archon_leann::CodeIndex::new(&db_path, Default::default()) {
-            Ok(idx) => {
-                let li = Arc::new(archon_pipeline::runner::LeannIntegration::new(
-                    std::sync::Arc::new(idx),
-                ));
-                let li_bg = Arc::clone(&li);
-                let wd = working_dir.clone();
-                let leann_cancel = Arc::clone(&leann_init_cancel);
-                observability::spawn_named("leann-background-init", async move {
-                    let leann_cancel_for_blocking = Arc::clone(&leann_cancel);
-                    let result =
-                        observability::spawn_blocking_named("leann-background-index", move || {
-                            li_bg.init_repository_blocking_with_cancel(
-                                &wd,
-                                leann_cancel_for_blocking.as_ref(),
-                            )
-                        })
-                        .await;
-                    match result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => {
-                            tracing::warn!(error = %e, "LEANN background init failed; continuing without code context");
-                        }
-                        Err(e) if e.is_cancelled() => {
-                            tracing::info!("LEANN background init cancelled");
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "LEANN background init join failed; continuing without code context");
-                        }
-                    }
-                });
-                Some(li)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "LEANN unavailable; continuing without code context");
-                None
-            }
-        }
-    };
+    let super::leann_startup::LeannStartup {
+        integration: leann,
+        cancel: leann_init_cancel,
+    } = super::leann_startup::begin(config, &working_dir);
 
     let initialized_learning = super::interactive_learning_init::initialize(&working_dir).await;
     let learning_cozo_db = initialized_learning.pipeline;

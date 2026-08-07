@@ -169,6 +169,12 @@ impl Tool for TaskCreateTool {
         // Pre-allocate subagent id (mirror AgentTool::execute's authoritative id).
         let subagent_id = uuid::Uuid::new_v4().to_string();
 
+        // Record the task -> subagent link before dispatching, so `/tasks` can
+        // name the agent doing the work. Liveness does not come from here — the
+        // runners register every subagent in `BACKGROUND_AGENTS` themselves
+        // (`agent_tool::run`), which is what the board claim leases read.
+        crate::task_manager::TASK_MANAGER.set_agent_id(&task_id, &subagent_id);
+
         // Nested ToolContext: inherit caller's ctx, flip nested=true.
         let nested_ctx = ToolContext {
             nested: true,

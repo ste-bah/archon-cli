@@ -1,6 +1,8 @@
 use serde_json::json;
 
 use archon_tools::bash::BashTool;
+// Used only by `cfg(not(target_os = "windows"))` tests below. See #136.
+#[cfg(not(target_os = "windows"))]
 use archon_tools::provider_env::{ProviderEnvPolicy, resolve_provider_env};
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 

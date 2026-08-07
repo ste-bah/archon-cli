@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { HashRouter } from "react-router";
 import { apiClient } from "./api/client";
+import { useLiveEvents } from "./api/useLiveEvents";
 import { AppShell } from "./components/AppShell";
 import { WorkbenchRoutes } from "./views/routes";
 
@@ -14,7 +15,16 @@ export function App() {
   const status = useQuery({ queryKey: ["status"], queryFn: apiClient.status });
   const config = useQuery({ queryKey: ["config"], queryFn: apiClient.config });
   const policy = useQuery({ queryKey: ["policy"], queryFn: apiClient.policy });
-  const live = useQuery({ queryKey: ["live"], queryFn: apiClient.liveSnapshot });
+  const live = useLiveEvents();
+  const agents = useQuery({
+    queryKey: ["agents"],
+    queryFn: apiClient.agentsLive,
+    // Current state, not an append-only log, so it is polled rather than
+    // streamed. Same conditional-interval shape as `ingest`: fast while
+    // something is running, slow when idle — but never off, because a new
+    // agent appearing is exactly what this view exists to show.
+    refetchInterval: (query) => (query.state.data?.agents.length ? 5000 : 10000),
+  });
   const auth = useQuery({ queryKey: ["auth"], queryFn: apiClient.authSession });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: apiClient.uploadPolicy });
   const corpus = useQuery({ queryKey: ["corpus"], queryFn: apiClient.corpusSummary });
@@ -57,7 +67,10 @@ export function App() {
           status={status.data}
           config={config.data}
           policy={policy.data}
-          liveCount={live.data?.events.length}
+          liveCount={live.events.length}
+          liveEvents={live.events}
+          liveStatus={live.status}
+          agents={agents.data}
           authRequired={auth.data?.authRequired}
           uploadsEnabled={uploads.data?.enabled}
           uploadPolicy={uploads.data}

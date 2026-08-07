@@ -51,6 +51,13 @@ fn auto_consolidation_summary(report: &archon_memory::garden::GardenReport) -> O
             report.review_pairs.len()
         ));
     }
+    // Reported even on an otherwise silent run, because it is the one outcome
+    // the counts above cannot express: zero duplicates merged by a pass that
+    // never ran looks exactly like zero merged by a pass that found nothing.
+    // Kept terse -- the splash column truncates past roughly fifty characters.
+    if report.semantic_pass_unavailable {
+        parts.push("semantic pass unavailable (second instance)".to_string());
+    }
     if parts.is_empty() {
         return None;
     }
@@ -228,6 +235,7 @@ pub(super) async fn finish(
                             after = report.total_memories_after,
                             ms = report.duration_ms,
                             review_pairs = report.review_pairs.len(),
+                            semantic_pass_unavailable = report.semantic_pass_unavailable,
                             "garden: consolidation complete"
                         );
                         // Handed to the splash panel by the caller. This pass

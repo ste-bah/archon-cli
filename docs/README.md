@@ -14,6 +14,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [Overview](architecture/overview.md) — workspace crates, request lifecycle, data flow
 - [Learning systems](architecture/learning-systems.md) — SONA, ReasoningBank (12 modes), GNN, CausalMemory, Provenance, DESC, Reflexion, AutoCapture, and live pipeline/GameTheory wiring
+- [Agent task board](architecture/agent-task-board.md) — durable handoffs between agents: why a dedicated Cozo relation rather than a memory type, atomic claims, and why board items are never pruned
 - [Cognitive Executive Loop](architecture/cognitive-executive-loop.md) — situation classification, candidate planning, JEPA/world-model scoring, policy gates, reflection, and autonomous tick orchestration
 - [Learning systems index](architecture/learning-systems-index.md) — ownership map for memory, completion, world model, reasoning quality, and governed learning signals
 - [Reasoning quality](architecture/reasoning-quality.md) — first-class visible claim/evidence events, correction links, critic gates, and briefing warnings
@@ -58,7 +59,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 - [MCP servers](integrations/mcp-servers.md) — Model Context Protocol transport, registration, discovery
 - [Plugins](integrations/plugins.md) — markdown bundles and WASM plugins: layout, lifecycle, packaging
-- [Hooks](integrations/hooks.md) — event-driven shell command triggers
+- [Hooks](reference/hooks.md) — all 39 events, the TOML shape and precedence, exit-code semantics, and which events output the runtime actually consumes
 - [Identity & spoofing](integrations/identity-spoofing.md) — OAuth, API key, Claude Code mimicry
 - [VLM image descriptions](integrations/vlm.md) — Ollama, Gemini, and Anthropic vision providers for image ingest
 - [LSP integration](integrations/lsp.md) — language server discovery and operations
@@ -94,6 +95,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, caption-first ingest, `ffmpeg`, `whisper-cpp`, optional frame OCR fallbacks, TUI monitoring, and timecoded evidence consumption
+- [Multi-agent handoffs](cookbook/multi-agent-handoffs.md) — the task board, claims that expire with their holder, the drain gate that makes "leave no gaps" enforceable, and the third review verdict
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI
@@ -137,6 +139,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.6.0](release-notes/v1.6.0.md) — Agent task board with atomic claims, subagent identity in ToolContext, self-checking edits via PostToolUse, an in-process web dashboard with a board view, a fix for semantic dedup silently no-opping on a second instance, and the repository code index no longer building itself at session start (`[code_index] index_on_startup`, now off by default)
 - [v1.5.2](release-notes/v1.5.2.md) — Patch: contain Marker HTTP PDF access behind a frozen opaque-ID catalogue, harden custom-regex validation, fix bounded memory recall/writes/consolidation and resumed-session continuity, expose `/memory store` and automatic consolidation summaries, and update security-sensitive dependencies
 - [v1.5.1](release-notes/v1.5.1.md) — Patch: cancelling a turn no longer wedges the session (admission claims leaked on every cancel), memory recall is bounded and moved off the async executor (38 minutes of one core per turn on a 1.7 GB store), shifted symbols and non-ASCII characters type on non-US keyboards, and the LEANN indexer's exclusions actually exclude
 - [v1.5.0](release-notes/v1.5.0.md) — Topology layer (`TaskGraph` IR, ambient trace, guardrail admission), `archon requirements trace` with a four-level proof ladder and `--falsify`, advisory `archon workflow lint`, `/workflow-prd` and `/workflow-prd-spec` skills, SONA tuning of the generated-workflow limits plus a learned fan-out width, and two behaviour changes: hooks resolve a POSIX shell on Windows, and `ARCHON_DATA_DIR` means one directory

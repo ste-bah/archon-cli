@@ -1,18 +1,30 @@
 use std::{
     collections::VecDeque,
+    convert::Infallible,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use axum::{
     Json,
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::{Config as TsConfig, TS};
 
 use super::{AppState, check_auth};
+
+/// How often the stream re-reads the ring buffer.
+///
+/// The buffer is a plain `Mutex<VecDeque>` with no notification primitive, so
+/// the stream has to poll it. One second matches the workflow event stream and
+/// is well inside what a human reads as "live".
+const STREAM_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -135,7 +147,76 @@ pub(crate) async fn snapshot_handler(
     }
 }
 
-fn now_ms() -> u128 {
+/// Poll state carried through the SSE stream.
+struct StreamCursor {
+    live: WebLiveManager,
+    after: Option<u64>,
+    interval: tokio::time::Interval,
+    /// Set once the cursor-expired frame has been sent. The client must go
+    /// back to `/api/live/snapshot` at that point, so there is nothing useful
+    /// left to send on this connection.
+    finished: bool,
+}
+
+/// `GET /api/live/stream` — the ring buffer as a server-sent event stream.
+///
+/// Each frame is a whole [`WebLiveSnapshot`], so the client gets `nextCursor`
+/// and `compacted` on every frame instead of having to track them itself.
+/// A cursor older than the compaction window produces one
+/// [`WebLiveCursorExpired`] frame and then end-of-stream; the shapes are
+/// distinguished client-side by the `cursorExpired` field.
+pub(crate) async fn stream_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<LiveSnapshotQuery>,
+) -> Response {
+    if let Err(resp) = check_auth(&state, &headers) {
+        return resp;
+    }
+    let cursor = StreamCursor {
+        live: state.live.clone(),
+        after: query.after,
+        interval: tokio::time::interval(STREAM_POLL),
+        finished: false,
+    };
+    let stream = futures_util::stream::unfold(cursor, |mut cursor| async move {
+        if cursor.finished {
+            return None;
+        }
+        loop {
+            cursor.interval.tick().await;
+            match cursor.live.snapshot(cursor.after) {
+                // Nothing new: stay silent and let SSE keep-alive hold the
+                // connection open rather than shipping an empty frame a second.
+                Ok(snapshot) if snapshot.events.is_empty() => continue,
+                Ok(snapshot) => {
+                    cursor.after = Some(snapshot.next_cursor.saturating_sub(1));
+                    return Some((Ok::<_, Infallible>(sse_event(&snapshot)), cursor));
+                }
+                Err(expired) => {
+                    cursor.finished = true;
+                    return Some((Ok::<_, Infallible>(sse_event(&expired)), cursor));
+                }
+            }
+        }
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+fn sse_event<T: Serialize>(payload: &T) -> Event {
+    Event::default()
+        .event("live-snapshot")
+        .json_data(payload)
+        .unwrap_or_else(|_| {
+            Event::default()
+                .event("live-error")
+                .data("serialization failed")
+        })
+}
+
+pub(super) fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())

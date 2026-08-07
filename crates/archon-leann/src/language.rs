@@ -2,6 +2,56 @@
 
 use std::path::Path;
 
+use crate::metadata::IndexConfig;
+
+/// Caller patterns EXTEND the defaults; they do not replace them.
+///
+/// Replacing was a footgun with no upside: a caller naming three directories it
+/// cared about silently lost the other nine the defaults cover -- `.venv`,
+/// `dist`, `build`, `__pycache__`, `site-packages`, `.archon` and friends --
+/// and nothing reported the loss. Nobody passing `target` means "and please
+/// start indexing my virtualenv".
+///
+/// A caller that genuinely wants to index a defaulted directory can still do
+/// so, but it has to be a deliberate change here rather than a side effect of
+/// naming something unrelated.
+pub(crate) fn configured_excludes(config: &IndexConfig) -> Vec<String> {
+    let mut excludes = default_exclude_patterns();
+    for pattern in &config.exclude_patterns {
+        let normalized = normalize_exclude_pattern(pattern).to_string();
+        if !normalized.is_empty() && !excludes.contains(&normalized) {
+            excludes.push(normalized);
+        }
+    }
+    excludes
+}
+
+/// Compile `include_patterns` into globs, narrowing what the walk accepts.
+///
+/// Unlike the excludes these are real globs, because that is what the field has
+/// always been given: `**/*.rs` names an extension, not a directory component,
+/// so `is_excluded`'s component matcher could never express it. An empty list
+/// means "every recognised code language", which is what every caller that
+/// never set the field has been getting.
+///
+/// An unparseable pattern is dropped with a warning rather than failing the
+/// index. Silently dropping it would narrow the corpus with no trace -- the
+/// exact failure mode that let the whole field go unread -- and aborting a
+/// repository index over one malformed glob helps nobody.
+pub(crate) fn configured_includes(config: &IndexConfig) -> Vec<glob::Pattern> {
+    config
+        .include_patterns
+        .iter()
+        .filter_map(|pattern| match glob::Pattern::new(pattern) {
+            Ok(compiled) => Some(compiled),
+            Err(error) => {
+                tracing::warn!(pattern, %error, "ignoring invalid LEANN include pattern");
+                None
+            }
+        })
+        .collect()
+}
+
 /// Detect the programming language of a file based on its extension.
 ///
 /// Returns `None` if the extension is not recognized.
@@ -48,11 +98,101 @@ pub fn detect_language(path: &Path) -> Option<String> {
     Some(lang.to_string())
 }
 
-/// Check if a path matches any of the given exclusion patterns.
+/// Whether a detected language is source code the indexer should chunk.
+///
+/// [`detect_language`] also names markup and data formats (`markdown`, `json`,
+/// `yaml`, `toml`, `sql`) because other callers want them; the code index does
+/// not. Kept next to `detect_language` so the two lists are read together --
+/// adding an extension without adding it here silently indexes nothing.
+pub fn is_code_language(language: &str) -> bool {
+    matches!(
+        language,
+        "rust"
+            | "python"
+            | "typescript"
+            | "typescriptreact"
+            | "javascript"
+            | "javascriptreact"
+            | "go"
+            | "java"
+            | "c"
+            | "cpp"
+            | "ruby"
+            | "php"
+            | "swift"
+            | "kotlin"
+            | "scala"
+            | "csharp"
+            | "lua"
+            | "shell"
+            | "r"
+            | "dart"
+            | "elixir"
+            | "erlang"
+            | "haskell"
+            | "ocaml"
+            | "perl"
+            | "zig"
+            | "nim"
+            | "v"
+    )
+}
+
+/// Check whether a repository-relative path matches any include glob.
+///
+/// An empty pattern list includes everything, so a caller that never set
+/// `include_patterns` keeps the language check as its only filter.
+///
+/// Matching is on the relative path with `/` separators, because the patterns
+/// callers write (`**/*.rs`) are repo-relative and slash-spelled while the walk
+/// hands us absolute Windows paths. The bare file name is tried as well so a
+/// caller can write `*.rs` and mean it -- glob's `**/` needs a separator to
+/// match against, which a file at the repository root does not have.
+pub fn is_included(relative: &Path, patterns: &[glob::Pattern]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    let file_name = relative.file_name().and_then(|name| name.to_str());
+    patterns.iter().any(|pattern| {
+        pattern.matches(&normalized) || file_name.is_some_and(|n| pattern.matches(n))
+    })
+}
+
+/// Check whether a walked path under `root` is excluded.
+///
+/// This is the only form that is safe for a walk, because [`is_excluded`]
+/// compares path *components*: given an absolute path it lets directories
+/// *above* the repository decide what is in the index. A checkout at
+/// `C:\build\my-project`, `~/dist/archon-cli` or `/var/tmp/target/work/repo`
+/// therefore excluded itself in full — `filter_entry` rejected the walk root
+/// itself, `skip_current_dir` took everything beneath it, and the pass reported
+/// success over zero files. `build`, `dist` and `target` are ordinary names for
+/// a directory people keep checkouts in, so this was reachable by accident, and
+/// the symptom — search returning nothing from an index that believes it is
+/// complete — reads as "indexing is broken" rather than "my checkout path
+/// contains the word build" (issue #143).
+///
+/// A path that is not under `root` is not part of the repository being walked,
+/// so this walk's exclusions have no opinion about it. That case does not arise
+/// from `WalkDir`, which always yields paths prefixed by the root it was given.
+pub fn is_excluded_under_root(path: &Path, root: &Path, patterns: &[String]) -> bool {
+    match path.strip_prefix(root) {
+        Ok(relative) => is_excluded(relative, patterns),
+        Err(_) => false,
+    }
+}
+
+/// Check if a *repository-relative* path matches any of the exclusion patterns.
 ///
 /// Performs component-based matching: if any path component equals one of the
 /// patterns, the path is excluded. Patterns are therefore directory *names*
 /// (`target`), not globs.
+///
+/// The path must be relative to the repository root. Every component is a
+/// candidate for exclusion, so an absolute path drags the whole ancestry of the
+/// checkout into the decision — see [`is_excluded_under_root`], which is what
+/// the walk should call.
 ///
 /// Glob-shaped patterns are normalised rather than ignored. A caller that
 /// passes `**/target/**` — which no path component can ever equal — otherwise
@@ -62,8 +202,8 @@ pub fn detect_language(path: &Path) -> Option<String> {
 /// repository it turned a small corpus into tens of gigabytes of build output
 /// with no error and no log line to say so. Accepting both spellings costs one
 /// trim and removes a class of silent misconfiguration.
-pub fn is_excluded(path: &Path, patterns: &[String]) -> bool {
-    for component in path.components() {
+pub fn is_excluded(relative: &Path, patterns: &[String]) -> bool {
+    for component in relative.components() {
         let s = component.as_os_str().to_string_lossy();
         for pattern in patterns {
             if s == normalize_exclude_pattern(pattern) {

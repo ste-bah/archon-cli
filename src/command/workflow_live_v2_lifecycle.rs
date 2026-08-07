@@ -16,6 +16,13 @@ use super::*;
 
 use archon_workflow::v2::lifecycle_driver::{LifecycleDriver, LifecycleLimits};
 
+// The one adapter this composition root owns that is not the host: the board
+// behind `archon_workflow::WorkflowBoardPort`. Declared here because here is the
+// only place it is installed.
+#[path = "workflow_board_drain.rs"]
+mod workflow_board_drain;
+use workflow_board_drain::process_board_drain;
+
 impl WorkflowV2ScriptRunner {
     /// Run the decomposed-PRD lifecycle natively. `harness_source` is the
     /// recorded scaffold (hash identity for reuse/metadata); it is NOT
@@ -62,6 +69,10 @@ impl WorkflowV2ScriptRunner {
                 .project_root;
         let resume_completed_ids = self.resume_completed_ids.clone();
         let generated_config = self.runtime.generated_config.clone();
+        // Read before `self` moves into the host. This is `WorkflowRun.id` --
+        // the same `wf-{uuid}` a subagent inherits as its session id prefix, and
+        // therefore the exact partition its board writes landed in.
+        let run_id = self.run_id.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
             runner: self,
@@ -81,6 +92,19 @@ impl WorkflowV2ScriptRunner {
                     .implementation_wave_max_parallelism,
             },
         );
+        // The drain gate's only production wiring. Without this line the gate,
+        // its policy and its tests are code that never runs -- which is the
+        // failure mode the board exists to make visible, so it would be a poor
+        // one to reproduce here.
+        //
+        // Attached unconditionally -- including when this process has no board.
+        // `process_board_drain` answers that case with a port that reports why it
+        // cannot read rather than with `None`, because `None` means "pass" and a
+        // run whose completion could not be checked has not been shown to be
+        // complete. Scoping the gate to runs that "look like they use the board"
+        // would likewise mean deciding in advance which runs are allowed to leave
+        // work behind.
+        let driver = driver.with_board_drain(run_id, process_board_drain());
         // v3: ONE persistent orchestrator conversation instead of the v2
         // reducer relay. Opt-in via env until certified as the default.
         let orchestrated = std::env::var("ARCHON_ORCHESTRATED_LIFECYCLE")

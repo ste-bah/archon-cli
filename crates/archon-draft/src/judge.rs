@@ -48,17 +48,53 @@ type BatteryItem = (&'static str, &'static str, &'static str);
 fn base_battery(gate: Gate) -> Vec<BatteryItem> {
     match gate {
         Gate::GE => vec![
-            ("E1", "Is every claim of the foundation text present in the passage (none silently dropped)?", "NO"),
-            ("E2", "Does the passage alter any foundation claim's strength or modality beyond what its evidence grade licenses (e.g., asserting an UNCERTAIN item flatly)?", "YES"),
-            ("E3", "Does the passage assert anything with no warrant in the evidence bank or foundation text?", "YES"),
-            ("E4", "Is each quotation used in a way consistent with its stated intended rhetorical use in the quote index?", "NO"),
-            ("E5", "Are all evidence items asserted at a strength matching their grade (AUTHOR-CONFIRMED flat; CONFIRMED with its measure; UNCERTAIN hedged or omitted)?", "NO"),
+            (
+                "E1",
+                "Is every claim of the foundation text present in the passage (none silently dropped)?",
+                "NO",
+            ),
+            (
+                "E2",
+                "Does the passage alter any foundation claim's strength or modality beyond what its evidence grade licenses (e.g., asserting an UNCERTAIN item flatly)?",
+                "YES",
+            ),
+            (
+                "E3",
+                "Does the passage assert anything with no warrant in the evidence bank or foundation text?",
+                "YES",
+            ),
+            (
+                "E4",
+                "Is each quotation used in a way consistent with its stated intended rhetorical use in the quote index?",
+                "NO",
+            ),
+            (
+                "E5",
+                "Are all evidence items asserted at a strength matching their grade (AUTHOR-CONFIRMED flat; CONFIRMED with its measure; UNCERTAIN hedged or omitted)?",
+                "NO",
+            ),
         ],
         Gate::GG => vec![
-            ("G1", "Is every locked term used per its locked definition at every occurrence?", "NO"),
-            ("G2", "Does any later passage contradict an earlier passage's claim without explicit acknowledgment?", "YES"),
-            ("G3", "Is each evidence item characterized with the same value/strength everywhere it appears?", "NO"),
-            ("G4", "Do any two passages characterize the same concept incompatibly?", "YES"),
+            (
+                "G1",
+                "Is every locked term used per its locked definition at every occurrence?",
+                "NO",
+            ),
+            (
+                "G2",
+                "Does any later passage contradict an earlier passage's claim without explicit acknowledgment?",
+                "YES",
+            ),
+            (
+                "G3",
+                "Is each evidence item characterized with the same value/strength everywhere it appears?",
+                "NO",
+            ),
+            (
+                "G4",
+                "Do any two passages characterize the same concept incompatibly?",
+                "YES",
+            ),
         ],
     }
 }

@@ -25,7 +25,14 @@ impl AgentSubagentExecutor {
         self.cache_run_metadata(&ids.cache_id, &worktree_info, prepared)
             .await;
         let tool_ctx = self
-            .build_child_tool_context(ctx, requested_cwd, worktree_info.as_ref(), prepared, cancel)
+            .build_child_tool_context(
+                ids,
+                ctx,
+                requested_cwd,
+                worktree_info.as_ref(),
+                prepared,
+                cancel,
+            )
             .await;
         let mut runner = crate::subagent::runner::SubagentRunner::new(
             self.client.clone(),
@@ -105,6 +112,7 @@ impl AgentSubagentExecutor {
 
     async fn build_child_tool_context(
         &self,
+        ids: &RunIdentity,
         parent_ctx: &ToolContext,
         requested_cwd: Option<std::path::PathBuf>,
         worktree_info: Option<&WorktreeInfo>,
@@ -146,7 +154,17 @@ impl AgentSubagentExecutor {
         }
         ToolContext {
             working_dir,
+            // The parent's `session_id` is deliberately kept alongside
+            // `subagent_id`: the two answer different questions. Hooks,
+            // transcripts and activity records key off the session that owns
+            // the whole agent tree, so narrowing it to the child would orphan
+            // them; attribution of an individual tool call needs the child id,
+            // which `session_id` (identical across every sibling) cannot give.
             session_id: self.session_id.clone(),
+            // `cache_id` is the id the run was registered under — the same
+            // string used for the manager entry, the worktree/memory caches
+            // and every hook payload (see `run_prepare::register_subagent_run`).
+            subagent_id: Some(ids.cache_id.clone()),
             mode,
             extra_dirs,
             in_fork,

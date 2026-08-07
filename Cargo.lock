@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "archon-accel"
-version = "0.1.0"
+version = "1.6.0"
 dependencies = [
  "serde",
  "sysinfo",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "arc-swap",
  "archon-core",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-accel",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cognitive"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-cozo",
  "archon-policy",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -451,14 +451,14 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-cozo",
  "archon-meaning",
  "chrono",
  "cozo-ce",
  "hex",
- "ndarray",
+ "ndarray 0.16.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cozo"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "cozo-ce",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-accel",
@@ -583,7 +583,7 @@ dependencies = [
  "hnsw_rs",
  "image",
  "lopdf",
- "ndarray",
+ "ndarray 0.16.1",
  "reqwest 0.12.28",
  "rust-rocksdb",
  "serde",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "archon-draft"
-version = "0.1.0"
+version = "1.6.0"
 dependencies = [
  "archon-lanham",
  "archon-llm",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "archon-ingest-ext"
-version = "0.1.0"
+version = "1.6.0"
 dependencies = [
  "regex",
  "serde_json",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -634,7 +634,7 @@ dependencies = [
  "chrono",
  "cozo-ce",
  "hex",
- "ndarray",
+ "ndarray 0.16.1",
  "regex",
  "serde",
  "serde_json",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "archon-lanham"
-version = "0.1.0"
+version = "1.6.0"
 dependencies = [
  "once_cell",
  "regex",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -664,9 +664,10 @@ dependencies = [
  "async-trait",
  "chrono",
  "cozo-ce",
+ "glob",
  "hex",
  "libloading 0.8.9",
- "ndarray",
+ "ndarray 0.16.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -674,6 +675,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-python",
@@ -685,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -702,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -745,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -775,13 +777,13 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-cozo",
  "chrono",
  "cozo-ce",
  "hex",
- "ndarray",
+ "ndarray 0.16.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -791,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -800,7 +802,7 @@ dependencies = [
  "dirs",
  "fastembed",
  "fd-lock",
- "ndarray",
+ "ndarray 0.16.1",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -813,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -838,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "glob",
@@ -851,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -872,7 +874,7 @@ dependencies = [
  "futures-util",
  "glob",
  "hex",
- "ndarray",
+ "ndarray 0.16.1",
  "petgraph",
  "process-wrap",
  "rand 0.9.4",
@@ -893,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -911,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "dirs",
  "serde",
@@ -922,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-cozo",
  "chrono",
@@ -938,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "archon-reasoning-quality"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -955,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cognitive",
@@ -964,6 +966,7 @@ dependencies = [
  "archon-docs",
  "archon-learning",
  "archon-llm",
+ "archon-memory",
  "archon-tools",
  "archon-workflow",
  "async-trait",
@@ -975,9 +978,11 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",
@@ -987,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -1005,14 +1010,14 @@ dependencies = [
 
 [[package]]
 name = "archon-shell"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "which",
 ]
 
 [[package]]
 name = "archon-test-support"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -1026,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -1074,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "archon-topology"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-write-plan",
  "dashmap 6.1.0",
@@ -1085,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "archon-trading"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -1103,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -1156,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -1172,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "archon-video"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -1200,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "archon-workflow"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "archon-llm",
  "archon-shell",
@@ -1230,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "archon-world-model"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -1259,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "archon-write-plan"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "globset",
  "serde",
@@ -2037,7 +2042,7 @@ dependencies = [
  "rayon",
  "safetensors 0.7.0",
  "thiserror 2.0.18",
- "tokenizers 0.22.2",
+ "tokenizers",
  "yoke 0.8.2",
  "zip 7.2.0",
 ]
@@ -2450,25 +2455,13 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.15.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
-dependencies = [
- "encode_unicode",
- "libc",
- "once_cell",
- "unicode-width 0.2.0",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "console"
 version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
 dependencies = [
  "encode_unicode",
  "libc",
+ "unicode-width 0.2.0",
  "windows-sys 0.61.2",
 ]
 
@@ -2497,6 +2490,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "affbf0190ed2caf063e3def54ff444b449371d55c58e513a95ab98eca50adb49"
 dependencies = [
  "unicode-segmentation",
+]
+
+[[package]]
+name = "cookie"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
+dependencies = [
+ "percent-encoding",
+ "time",
+ "version_check",
+]
+
+[[package]]
+name = "cookie_store"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15b2c103cf610ec6cae3da84a766285b42fd16aad564758459e6ecf128c75206"
+dependencies = [
+ "cookie",
+ "document-features",
+ "idna",
+ "indexmap 2.14.0",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "time",
+ "url",
 ]
 
 [[package]]
@@ -2559,7 +2581,7 @@ dependencies = [
  "lazy_static",
  "log",
  "miette",
- "ndarray",
+ "ndarray 0.16.1",
  "num-traits",
  "ordered-float",
  "pest",
@@ -3747,19 +3769,19 @@ dependencies = [
 
 [[package]]
 name = "fastembed"
-version = "4.9.1"
+version = "5.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04c269a76bfc6cea69553b7d040acb16c793119cebd97c756d21e08d0f075ff8"
+checksum = "4539f4a2c4472269adc227587b935c0a973e6b5fc4a03e14bbe62608e06c2298"
 dependencies = [
  "anyhow",
  "hf-hub",
  "image",
- "ndarray",
+ "ndarray 0.17.2",
  "ort",
- "ort-sys",
- "rayon",
+ "safetensors 0.8.0",
+ "serde",
  "serde_json",
- "tokenizers 0.21.4",
+ "tokenizers",
 ]
 
 [[package]]
@@ -4562,9 +4584,9 @@ checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hf-hub"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
+checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
 dependencies = [
  "dirs",
  "http 1.4.0",
@@ -4577,7 +4599,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "ureq",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4606,6 +4628,12 @@ checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
  "digest 0.11.3",
 ]
+
+[[package]]
+name = "hmac-sha256"
+version = "1.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
 
 [[package]]
 name = "hnsw_rs"
@@ -4752,7 +4780,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.7",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -5014,14 +5042,14 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.17.11"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
+checksum = "993f007684f2e9727160da8b960ec161264703bfd1af084fd2e34d040c9a0dd4"
 dependencies = [
- "console 0.15.11",
- "number_prefix",
+ "console",
  "portable-atomic",
  "unicode-width 0.2.0",
+ "unit-prefix",
  "web-time",
 ]
 
@@ -5080,7 +5108,7 @@ version = "1.47.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b4a6248eb93a4401ed2f37dfe8ea592d3cf05b7cf4f8efa867b6895af7e094e"
 dependencies = [
- "console 0.16.3",
+ "console",
  "once_cell",
  "serde",
  "similar",
@@ -5802,6 +5830,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lzma-rust2"
+version = "0.15.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
+
+[[package]]
 name = "mach-sys"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6173,6 +6207,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndarray"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520080814a7a6b4a6e9070823bb24b4531daac8c4627e08ba5de8c5ef2f2752d"
+dependencies = [
+ "matrixmultiply",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rawpointer",
+]
+
+[[package]]
 name = "ndk"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6453,12 +6502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
-
-[[package]]
 name = "oauth2"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6640,25 +6683,25 @@ dependencies = [
 
 [[package]]
 name = "ort"
-version = "2.0.0-rc.9"
+version = "2.0.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52afb44b6b0cffa9bf45e4d37e5a4935b0334a51570658e279e9e3e6cf324aa5"
+checksum = "4336a1e2b38848325241c72889086886004e589b7c74f335e60a8e8db5138a0b"
 dependencies = [
- "ndarray",
+ "ndarray 0.17.2",
  "ort-sys",
+ "smallvec",
  "tracing",
+ "ureq",
 ]
 
 [[package]]
 name = "ort-sys"
-version = "2.0.0-rc.9"
+version = "2.0.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c41d7757331aef2d04b9cb09b45583a59217628beaf91895b7e76187b6e8c088"
+checksum = "cf211e3776eea6aec988552fa118dd746d70e1b1e5e244058d1c98015f3e5872"
 dependencies = [
- "flate2",
- "pkg-config",
- "sha2 0.10.9",
- "tar",
+ "hmac-sha256",
+ "lzma-rust2",
  "ureq",
 ]
 
@@ -7839,7 +7882,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.7",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -8380,6 +8423,19 @@ dependencies = [
  "hashbrown 0.16.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "safetensors"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79b079b829cb27a1c3c374341345ed2e8b2c0c839034522cee576c140bd7f846"
+dependencies = [
+ "hashbrown 0.16.1",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -9258,17 +9314,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
-name = "tar"
-version = "0.4.46"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
-dependencies = [
- "filetime",
- "libc",
- "xattr",
-]
-
-[[package]]
 name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9457,39 +9502,6 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
-name = "tokenizers"
-version = "0.21.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a620b996116a59e184c2fa2dfd8251ea34a36d0a514758c6f966386bd2e03476"
-dependencies = [
- "ahash 0.8.12",
- "aho-corasick",
- "compact_str 0.9.0",
- "dary_heap",
- "derive_builder",
- "esaxx-rs",
- "getrandom 0.3.4",
- "itertools 0.14.0",
- "log",
- "macro_rules_attribute",
- "monostate",
- "onig",
- "paste",
- "rand 0.9.4",
- "rayon",
- "rayon-cond",
- "regex",
- "regex-syntax",
- "serde",
- "serde_json",
- "spm_precompiled",
- "thiserror 2.0.18",
- "unicode-normalization-alignments",
- "unicode-segmentation",
- "unicode_categories",
-]
 
 [[package]]
 name = "tokenizers"
@@ -10145,6 +10157,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
 
 [[package]]
+name = "unit-prefix"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
+
+[[package]]
 name = "universal-hash"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10174,21 +10192,35 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "2.12.1"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+checksum = "dea7109cdcd5864d4eeb1b58a1648dc9bf520360d7af16ec26d0a9354bafcfc0"
 dependencies = [
  "base64 0.22.1",
+ "cookie_store",
  "flate2",
  "log",
- "once_cell",
+ "percent-encoding",
  "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "socks",
- "url",
- "webpki-roots 0.26.11",
+ "ureq-proto",
+ "utf8-zero",
+ "webpki-roots",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e994ba84b0bd1b1b0cf92878b7ef898a5c1760108fe7b6010327e274917a808c"
+dependencies = [
+ "base64 0.22.1",
+ "http 1.4.0",
+ "httparse",
+ "log",
 ]
 
 [[package]]
@@ -10215,6 +10247,12 @@ name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"
@@ -10829,15 +10867,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
 dependencies = [
  "rustls-pki-types",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -11690,16 +11719,6 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
-
-[[package]]
-name = "xattr"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
-dependencies = [
- "libc",
- "rustix 1.1.4",
-]
 
 [[package]]
 name = "y4m"

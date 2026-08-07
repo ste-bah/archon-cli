@@ -15,10 +15,14 @@ use crate::graph::MemoryGraph;
 use crate::server::MemoryServer;
 use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
 
+mod board_impl;
 mod client_impl;
+mod configured;
 #[cfg(test)]
 mod tests;
 mod trait_impl;
+
+pub use configured::{EmbeddingSetup, MemoryOpenSpec, OpenedMemory, open_configured_memory};
 
 // ── MemoryAccess enum ──────────────────────────────────────────
 
@@ -163,16 +167,25 @@ pub trait MemoryTrait: Send + Sync {
     /// one instruction scored around 0.31 Jaccard against a 0.92 threshold,
     /// because "deploy" and "deploys" are already different words.
     ///
-    /// Defaulted to empty rather than required. A store with no vector index --
-    /// a remote store, or one running without an embedding provider -- should
-    /// fall back to the lexical pass, not fail. Callers must therefore treat an
-    /// empty result as "no vector search available", never as "no neighbours".
+    /// `None` means this store has no vector search at all; `Some(rows)` means
+    /// the search ran, and an empty `rows` means it genuinely found nothing.
+    ///
+    /// The distinction is carried in the type because the flat `Vec` that came
+    /// before could not express it, and every caller collapsed the two into
+    /// "no neighbours". A second Archon process reads memory over TCP and had
+    /// no vector-neighbour request to make, so it reported an untouched store
+    /// as a clean one -- `semantic_merged=0`, indistinguishable from a pass
+    /// that ran and found nothing to merge.
+    ///
+    /// Defaulted to `None` rather than required, so an implementor with no
+    /// vector index inherits "unavailable" and its callers fall back to the
+    /// lexical pass instead of failing.
     fn embedding_neighbours(
         &self,
         _memory_id: &str,
         _top_k: usize,
-    ) -> Result<Vec<(String, f64)>, MemoryError> {
-        Ok(Vec::new())
+    ) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
+        Ok(None)
     }
 }
 

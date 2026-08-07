@@ -4,13 +4,19 @@ import type {
   ApiStatus,
   EffectiveConfigSummary,
   EffectivePolicySummary,
+  WebAgentActivitySnapshot,
+  WebLiveEvent,
 } from "../api/generated/web";
+import type { LiveStatus } from "../api/useLiveEvents";
 
 interface DashboardPageProps {
   status?: ApiStatus;
   config?: EffectiveConfigSummary;
   policy?: EffectivePolicySummary;
   liveCount?: number;
+  liveEvents?: WebLiveEvent[];
+  liveStatus?: LiveStatus;
+  agents?: WebAgentActivitySnapshot;
   authRequired?: boolean;
   uploadsEnabled?: boolean;
 }
@@ -20,6 +26,9 @@ export function DashboardPage({
   config,
   policy,
   liveCount,
+  liveEvents,
+  liveStatus,
+  agents,
   authRequired,
   uploadsEnabled,
 }: DashboardPageProps) {
@@ -55,13 +64,71 @@ export function DashboardPage({
           <MetricTile
             label="Live events"
             value={`${liveCount ?? 0}`}
-            detail="bounded snapshot buffer"
+            detail="streamed from the event log"
           />
           <MetricTile
             label="Uploads"
             value={uploadsEnabled ? "enabled" : "disabled"}
             detail="policy-gated attachment lane"
           />
+        </div>
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Live</span>
+            <h3>Event feed</h3>
+          </div>
+          <StatusPill tone={liveStatusTone(liveStatus)}>{liveStatus ?? "connecting"}</StatusPill>
+        </div>
+        <div className="store-list">
+          {(liveEvents ?? []).length === 0 && (
+            <div className="store-row">
+              <strong>no events yet</strong>
+              <span>Events appear here as the session records them.</span>
+            </div>
+          )}
+          {(liveEvents ?? []).slice(0, 25).map((event) => (
+            <div key={event.cursor} className="store-row">
+              <strong>{event.eventType}</strong>
+              <span>{event.summary}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Agents</span>
+            <h3>Live agent activity</h3>
+          </div>
+          <StatusPill tone={(agents?.agents.length ?? 0) > 0 ? "good" : "muted"}>
+            {agents ? `${agents.agents.length} running` : "loading"}
+          </StatusPill>
+        </div>
+        <div className="store-list">
+          {agents && agents.agents.length === 0 && (
+            <div className="store-row">
+              <strong>no agents running</strong>
+              <span>
+                {agents.attached
+                  ? "Nothing is executing in this session right now."
+                  : "Run the dashboard with /web inside the TUI to see live agents."}
+              </span>
+            </div>
+          )}
+          {agents?.agents.map((agent) => (
+            <div key={`${agent.kind}-${agent.id}`} className="store-row">
+              <strong>
+                {agent.kind} · {agent.status}
+              </strong>
+              <span>
+                {agent.label} — {formatElapsed(agent.elapsedMs)}
+              </span>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -103,4 +170,20 @@ export function DashboardPage({
       </section>
     </div>
   );
+}
+
+function liveStatusTone(status?: LiveStatus): "good" | "warn" | "muted" {
+  if (status === "live") {
+    return "good";
+  }
+  return status === "offline" ? "warn" : "muted";
+}
+
+function formatElapsed(elapsedMs: number): string {
+  const seconds = Math.floor(elapsedMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes}m ${seconds % 60}s` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }

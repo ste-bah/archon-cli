@@ -40,6 +40,34 @@ fn retryable_errors_include_sqlite_and_file_lock_variants() {
     assert!(!is_retryable_cozo_error("relation not found"));
 }
 
+/// Contention and retryability are separate questions; #140 turned on the gap.
+///
+/// The write path's own failure -- `Cozo write lock unavailable ... operation
+/// would block` -- and the bounded wait's expiry both mean "another process has
+/// the store". Only the first is worth another round of backoff, but a caller
+/// that can drop one file and continue must recognise both, or it goes back to
+/// unwinding a whole repository walk over a single contended file.
+#[test]
+fn contention_covers_both_a_busy_store_and_an_expired_wait() {
+    assert!(is_store_contention("database is locked (code 5)"));
+    assert!(is_store_contention(
+        "leann index: replace indexed file: Cozo write lock unavailable at \
+         /repo/.archon/leann.db.archon-cozo-write.lock: operation would block"
+    ));
+
+    let expired = "index: Cozo write lock at /repo/leann.db.archon-cozo-write.lock \
+                   was still held after waiting 60000ms: operation would block";
+    assert!(is_store_contention(expired));
+    // Still not worth retrying: we already waited the whole budget.
+    assert!(!is_retryable_cozo_error(expired));
+
+    // A fault is neither. Skipping past these would hide a real defect.
+    assert!(!is_store_contention("relation not found"));
+    assert!(!is_store_contention(
+        "when executing against relation 'code_chunks'"
+    ));
+}
+
 #[test]
 fn retryable_errors_match_only_precise_busy_signals() {
     for message in [

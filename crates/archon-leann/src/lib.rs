@@ -1,6 +1,7 @@
 //! Archon LeANN — native semantic code search and indexing.
 
 pub mod chunker;
+mod embedding_pass;
 mod index_storage;
 pub mod indexer;
 pub mod language;
@@ -37,7 +38,20 @@ impl CodeIndex {
         // The code index is a persistent SQLite-backed store, so both the open
         // and every subsequent write are serialised by the `archon-cozo` guard
         // keyed on this path.
-        let guard = archon_cozo::CozoGuardConfig::for_db_path(&db_path);
+        //
+        // Queue for that lock rather than sampling it. Indexing takes the write
+        // lock once per file, back to back for a whole persist group, so two
+        // indexers on one repository present each other with a lock that is
+        // almost always held for an instant and almost never held for long. The
+        // default fail-fast acquire samples on the retry backoff -- 100ms rising
+        // to 2s -- and against that pattern the loser reliably starved, burned
+        // its 19s budget and abandoned the pass (#140). Polling at 1-25ms lands
+        // in the gaps between the peer's transactions instead, so both
+        // processes interleave. The ceiling still exists to turn a wedged
+        // holder into a diagnosable error rather than a hang; a file that
+        // reaches it is skipped, not fatal.
+        let guard = archon_cozo::CozoGuardConfig::for_db_path(&db_path)
+            .with_write_lock_wait(archon_cozo::DEFAULT_WRITE_LOCK_WAIT);
         let db = archon_cozo::open_sqlite_guarded(
             db_path.to_string_lossy().as_ref(),
             "open leann code index",

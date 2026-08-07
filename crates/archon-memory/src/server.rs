@@ -24,9 +24,17 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{debug, error, warn};
 
+use crate::board::NewBoardItem;
 use crate::graph::MemoryGraph;
 use crate::protocol::{Request, make_response_err, make_response_ok};
-use crate::types::{MemoryError, MemoryType, RelType, SearchFilter};
+use crate::types::{MemoryError, SearchFilter};
+
+mod params;
+
+use params::{
+    board_status_array_param, board_status_param, f64_param, memory_type_param, opt_str_param,
+    opt_string_array_param, rel_type_param, str_param, string_array_param, usize_param,
+};
 
 /// A TCP server wrapping a shared [`MemoryGraph`].
 pub struct MemoryServer;
@@ -329,95 +337,116 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(mems).map_err(|e| e.to_string())
         }
 
+        "embedding_neighbours" => {
+            let memory_id = str_param(params, "memory_id")?;
+            let top_k = usize_param(params, "top_k")?;
+            // `null` on the wire is "this store has no vector search", which is
+            // a different answer from an empty list and the reason the client
+            // deserializes into an `Option`.
+            let neighbours =
+                crate::access::MemoryTrait::embedding_neighbours(graph, &memory_id, top_k)
+                    .map_err(|error| error.to_string())?;
+            serde_json::to_value(neighbours).map_err(|error| error.to_string())
+        }
+
+        // ── task board ─────────────────────────────────────────
+        //
+        // On the RPC surface for the same reason every memory operation is:
+        // CozoDB admits one writer, so every Archon process after the first
+        // reaches the graph through here. A board only reachable in-process
+        // would be a board no subagent in a second process could hand work to.
+        "create_board_item" => {
+            let item: NewBoardItem = params
+                .get("item")
+                .ok_or_else(|| "missing param: item".to_string())
+                .and_then(|value| {
+                    serde_json::from_value(value.clone()).map_err(|e| e.to_string())
+                })?;
+            let created = graph
+                .create_board_item(&item)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(created).map_err(|error| error.to_string())
+        }
+
+        "get_board_item" => {
+            let id = str_param(params, "id")?;
+            let item = graph.get_board_item(&id).map_err(|e| e.to_string())?;
+            serde_json::to_value(item).map_err(|e| e.to_string())
+        }
+
+        // Takes no parameters, and is on the wire regardless: a client that
+        // could not enumerate runs would have to be told one, which is exactly
+        // the handle a reader outside the run does not have.
+        "list_board_runs" => {
+            let runs = graph.list_board_runs().map_err(|e| e.to_string())?;
+            serde_json::to_value(runs).map_err(|e| e.to_string())
+        }
+
+        "list_board_items_by_run" => {
+            let run_id = str_param(params, "run_id")?;
+            let statuses = board_status_array_param(params, "statuses")?;
+            let items = graph
+                .list_board_items_by_run(&run_id, &statuses)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(items).map_err(|e| e.to_string())
+        }
+
+        "claim_board_item" => {
+            let id = str_param(params, "id")?;
+            let agent_id = str_param(params, "agent_id")?;
+            let update = graph
+                .claim_board_item(&id, &agent_id)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(update).map_err(|e| e.to_string())
+        }
+
+        "release_board_claim" => {
+            let id = str_param(params, "id")?;
+            let update = graph.release_board_claim(&id).map_err(|e| e.to_string())?;
+            serde_json::to_value(update).map_err(|e| e.to_string())
+        }
+
+        "set_board_item_status" => {
+            let id = str_param(params, "id")?;
+            let from = board_status_param(params, "from")?;
+            let to = board_status_param(params, "to")?;
+            let update = graph
+                .set_board_item_status(&id, from, to)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(update).map_err(|e| e.to_string())
+        }
+
+        // Declining is on the wire as its own method rather than as a `to` on
+        // `set_board_item_status`, so that the requirement travels: a remote
+        // caller cannot reach `declined` through a shape with no reason in it.
+        "decline_board_item" => {
+            let id = str_param(params, "id")?;
+            let from = board_status_param(params, "from")?;
+            let reason = str_param(params, "reason")?;
+            let update = graph
+                .decline_board_item(&id, from, &reason)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(update).map_err(|e| e.to_string())
+        }
+
+        "board_item_history" => {
+            let id = str_param(params, "id")?;
+            let events = graph.board_item_history(&id).map_err(|e| e.to_string())?;
+            serde_json::to_value(events).map_err(|e| e.to_string())
+        }
+
+        // On the wire alongside `board_item_history` and not only in-process:
+        // the dashboard is usually the second process, so a direct-only run
+        // activity read would answer an empty list over TCP and be indexed as
+        // "this run has no history" — the exact shape of #128.
+        "board_run_activity" => {
+            let run_id = str_param(params, "run_id")?;
+            let events = graph
+                .board_run_activity(&run_id)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(events).map_err(|e| e.to_string())
+        }
+
         other => Err(format!("unknown method: {other}")),
     }
-}
-
-// ── parameter extraction helpers ───────────────────────────────
-
-fn str_param(params: &Value, key: &str) -> Result<String, String> {
-    params
-        .get(key)
-        .and_then(Value::as_str)
-        .map(String::from)
-        .ok_or_else(|| format!("missing or invalid string param: {key}"))
-}
-
-fn opt_str_param(params: &Value, key: &str) -> Option<String> {
-    params
-        .get(key)
-        .and_then(|v| if v.is_null() { None } else { v.as_str() })
-        .map(String::from)
-}
-
-fn f64_param(params: &Value, key: &str) -> Result<f64, String> {
-    params
-        .get(key)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| format!("missing or invalid f64 param: {key}"))
-}
-
-fn usize_param(params: &Value, key: &str) -> Result<usize, String> {
-    params
-        .get(key)
-        .and_then(Value::as_u64)
-        .map(|v| v as usize)
-        .ok_or_else(|| format!("missing or invalid usize param: {key}"))
-}
-
-fn string_array_param(params: &Value, key: &str) -> Result<Vec<String>, String> {
-    let arr = params
-        .get(key)
-        .and_then(Value::as_array)
-        .ok_or_else(|| format!("missing or invalid array param: {key}"))?;
-    arr.iter()
-        .map(|v| {
-            v.as_str()
-                .map(String::from)
-                .ok_or_else(|| format!("non-string element in {key}"))
-        })
-        .collect()
-}
-
-fn opt_string_array_param(params: &Value, key: &str) -> Option<Vec<String>> {
-    params
-        .get(key)
-        .and_then(|v| if v.is_null() { None } else { v.as_array() })
-        .and_then(|arr| {
-            arr.iter()
-                .map(|v| v.as_str().map(String::from))
-                .collect::<Option<Vec<_>>>()
-        })
-}
-
-fn memory_type_param(params: &Value, key: &str) -> Result<MemoryType, String> {
-    let s = str_param(params, key)?;
-    // Support both enum variant names ("Fact") and stored format ("fact")
-    MemoryType::from_str_opt(&s)
-        .or_else(|| MemoryType::from_str_opt(&s.to_lowercase()))
-        .ok_or_else(|| format!("invalid memory type: {s}"))
-}
-
-fn rel_type_param(params: &Value, key: &str) -> Result<RelType, String> {
-    let s = str_param(params, key)?;
-    // Support both enum variant names ("RelatedTo") and stored format ("related_to")
-    RelType::from_str_opt(&s)
-        .or_else(|| {
-            // Convert PascalCase to snake_case for lookup
-            let snake = pascal_to_snake(&s);
-            RelType::from_str_opt(&snake)
-        })
-        .ok_or_else(|| format!("invalid relationship type: {s}"))
-}
-
-/// Simple PascalCase to snake_case converter for enum variant matching.
-fn pascal_to_snake(s: &str) -> String {
-    let mut result = String::with_capacity(s.len() + 4);
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 {
-            result.push('_');
-        }
-        result.push(ch.to_ascii_lowercase());
-    }
-    result
 }

@@ -1,9 +1,13 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
+use crate::background_agents::{
+    AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RunRegistration, new_result_slot,
+};
 use crate::subagent_executor::{
     ExecutorError, SubagentExecutor, SubagentOutcome, get_subagent_executor,
 };
@@ -27,6 +31,86 @@ impl ExecutionResult {
                 Err(error) => SubagentOutcome::Failed(error.to_string()),
             }
         }
+    }
+
+    fn terminal_status(&self) -> AgentStatus {
+        if self.cancelled {
+            AgentStatus::Cancelled
+        } else if self.result.is_ok() {
+            AgentStatus::Finished
+        } else {
+            AgentStatus::Failed
+        }
+    }
+}
+
+/// Marks a subagent as running in `BACKGROUND_AGENTS` for exactly as long as
+/// its runner lives.
+///
+/// This exists so liveness is a property of *having been spawned* rather than
+/// something each spawn path has to remember. Every public runner in this
+/// module funnels through `run_subagent_with_auto_background`, so registering
+/// there covers `AgentTool`, `TaskCreate`, `archon-pipeline`, `message_delivery`
+/// and whatever is added next, and `board::leases::holder_liveness` gets to be
+/// one lookup instead of a fan-out that grows with the spawn paths.
+///
+/// Release is a `Drop` rather than a call at the end of the runner because the
+/// runner does not always reach its end: it can panic, and
+/// `await_cancelled_foreground` aborts it outright after the cleanup grace
+/// period. A leaked `Running` entry parks a board claim for the life of the
+/// process, which is the failure the lease was built to prevent.
+struct SpawnedAgent {
+    subagent_id: String,
+    outcome: AgentStatus,
+}
+
+impl SpawnedAgent {
+    fn register(subagent_id: &str, cancel: &CancellationToken) -> Self {
+        let handle = BackgroundAgentHandle {
+            // Only the UUID-minting spawn paths have a meaningful `agent_id`;
+            // for the rest the identity that matters is `subagent_id`, which is
+            // what the registry is keyed by.
+            agent_id: Uuid::parse_str(subagent_id).unwrap_or_else(|_| Uuid::new_v4()),
+            subagent_id: subagent_id.to_string(),
+            // A foreground run has no spawned task to hand over; the field is
+            // already an `Option` for exactly this.
+            join_handle: None,
+            cancel_token: cancel.clone(),
+            spawned_at: SystemTime::now(),
+            status: Arc::new(Mutex::new(AgentStatus::Running)),
+            result_slot: new_result_slot(),
+        };
+        // Registering an id the registry has already seen is a defined
+        // outcome, not an error: `AgentTool` registers on the parent task too
+        // (so `execute`'s spawn marker is truthful), and `SendMessage` resumes
+        // an agent under its original id, which may or may not still be in the
+        // registry depending on whether the reaper has run. `register_run`
+        // revives a terminal entry for exactly that reason.
+        match BACKGROUND_AGENTS.register_run(handle) {
+            RunRegistration::Registered | RunRegistration::AlreadyRunning => {}
+            RunRegistration::Restarted => {
+                tracing::debug!(
+                    subagent_id = %subagent_id,
+                    "subagent id resumed; replacing the terminal registry entry"
+                );
+            }
+        }
+        Self {
+            subagent_id: subagent_id.to_string(),
+            // Overwritten by `finished` on every path that produces an outcome.
+            // What is left is a runner that was torn down without one.
+            outcome: AgentStatus::Cancelled,
+        }
+    }
+
+    fn finished(&mut self, outcome: AgentStatus) {
+        self.outcome = outcome;
+    }
+}
+
+impl Drop for SpawnedAgent {
+    fn drop(&mut self) {
+        BACKGROUND_AGENTS.mark_terminal(&self.subagent_id, self.outcome);
     }
 }
 
@@ -125,6 +209,13 @@ async fn run_subagent_with_auto_background(
     };
 
     let nested = ctx.nested;
+    // Registered here, on the caller's task, so the entry exists from the
+    // instant the runner is spawned; the guard is then moved into the runner so
+    // that the release happens when the *runner* ends, not when this function
+    // returns. Those are different moments on the `AutoBackgrounded` arm, and
+    // the agent still working past that arm is precisely the one whose claim
+    // must not be swept.
+    let alive = SpawnedAgent::register(&subagent_id, &cancel);
     let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
@@ -133,11 +224,13 @@ async fn run_subagent_with_auto_background(
         let system = system.clone();
         let sid = subagent_id.clone();
         async move {
+            let mut alive = alive;
             let result = exec
                 .run_to_completion_with_system(sid, req, system, ctx, cancel.clone())
                 .await;
             let cancelled = result.is_err() && cancel.is_cancelled();
             let execution = ExecutionResult { result, cancelled };
+            alive.finished(execution.terminal_status());
             if let Some(completion) = auto_background_completion {
                 let _ = completion.send(execution.outcome());
             }

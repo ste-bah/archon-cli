@@ -258,6 +258,7 @@ fn garden_report_format() {
         total_memories_after: 875,
         duration_ms: 342,
         review_pairs: Vec::new(),
+        semantic_pass_unavailable: false,
     };
     let formatted = report.format();
     assert!(
@@ -308,4 +309,85 @@ fn garden_stats_format() {
     assert!(stats.contains("Total memories:"), "should show total");
     assert!(stats.contains("Fact"), "should show Fact type");
     assert!(stats.contains("By type:"), "should have type section");
+}
+
+// ── 17. semantic pass availability is reported, not assumed ─
+
+/// A store with no vector search reports the semantic pass as UNAVAILABLE.
+///
+/// The report used to say `duplicates_merged: 0` and stop there, which reads as
+/// "examined, nothing to merge". Every Archon process after the first is in
+/// exactly this position -- CozoDB admits one writer, so the rest read memory
+/// over TCP -- so the common case was a pass that never ran being reported as a
+/// clean store.
+#[test]
+fn garden_reports_semantic_pass_unavailable_without_a_vector_index() {
+    let graph = MemoryGraph::in_memory().expect("create in-memory graph");
+    for i in 1..=2 {
+        graph
+            .store_memory(
+                &format!("Distinct subject {i}"),
+                &format!("s-{i}"),
+                MemoryType::Fact,
+                0.6,
+                &[],
+                "test",
+                "/test",
+            )
+            .expect("store fact");
+    }
+
+    let report = consolidate(&graph, &make_config()).expect("consolidate");
+
+    assert!(
+        report.semantic_pass_unavailable,
+        "an unindexed store must report the semantic pass as unavailable"
+    );
+    assert!(
+        report.format().contains("unavailable"),
+        "the human-readable report must say so too, got:\n{}",
+        report.format()
+    );
+}
+
+/// A store WITH vector search still reports ordinary counts.
+///
+/// The guard against fixing the case above by inverting it: an available pass
+/// that merged something must not be reported as unavailable.
+#[test]
+fn garden_reports_counts_normally_with_a_vector_index() {
+    let graph = MemoryGraph::in_memory().expect("create in-memory graph");
+    archon_memory::vector_search::init_embedding_schema(graph.db(), 4).expect("embedding schema");
+
+    let store = |content: &str, importance: f64| {
+        graph
+            .store_memory(content, "", MemoryType::Fact, importance, &[], "test", "")
+            .expect("store")
+    };
+    let anchor = store("deploy to eu-west-2", 0.9);
+    let paraphrase = store("target the eu-west-2 region", 0.4);
+
+    // Hand-built vectors so the geometry is exact rather than model-dependent.
+    let put = |id: &str, v: [f32; 4]| {
+        archon_memory::vector_search::store_embedding(graph.db(), id, &v, "test", 4)
+            .expect("embedding")
+    };
+    put(&anchor, [1.0, 0.0, 0.0, 0.0]);
+    put(&paraphrase, [0.99, 0.09, 0.0, 0.0]);
+
+    let report = consolidate(&graph, &make_config()).expect("consolidate");
+
+    assert!(
+        !report.semantic_pass_unavailable,
+        "a store with a live vector index must not report the pass as unavailable"
+    );
+    assert_eq!(
+        report.duplicates_merged, 1,
+        "the paraphrase must be merged and counted"
+    );
+    assert!(
+        !report.format().contains("unavailable"),
+        "an available pass must not print the unavailable notice, got:\n{}",
+        report.format()
+    );
 }

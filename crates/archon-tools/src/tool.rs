@@ -84,6 +84,14 @@ pub enum AgentMode {
 pub struct ToolContext {
     pub working_dir: PathBuf,
     pub session_id: String,
+    /// Identity of the subagent this invocation is running inside.
+    ///
+    /// `session_id` is copied verbatim from parent to child, so it answers
+    /// "which session owns this tree" and can never separate one subagent
+    /// from its siblings. A tool that must attribute its action to the
+    /// caller reads this instead. `None` means the top-level agent made the
+    /// call — that is a real answer, not absent data.
+    pub subagent_id: Option<String>,
     pub mode: AgentMode,
     /// Additional directories added at runtime via `/add-dir`.
     pub extra_dirs: Vec<PathBuf>,
@@ -141,6 +149,7 @@ impl std::fmt::Debug for ToolContext {
         f.debug_struct("ToolContext")
             .field("working_dir", &self.working_dir)
             .field("session_id", &self.session_id)
+            .field("subagent_id", &self.subagent_id)
             .field("mode", &self.mode)
             .field("extra_dirs", &self.extra_dirs)
             .field("in_fork", &self.in_fork)

@@ -393,10 +393,11 @@ fn cancellation_before_commit_rolls_back_replacement_mutations() {
         .chunker
         .chunk_file(&file, replacement, super::Language::Rust);
     let cancel = AtomicBool::new(false);
-    let prepared = indexer
-        .prepare_chunks(chunks, Some(&cancel))
-        .unwrap()
-        .unwrap();
+    let prepared = crate::embedding_pass::prepare_chunks(&indexer.embedder, chunks, &|| {
+        cancel.load(Ordering::Relaxed)
+    })
+    .unwrap()
+    .unwrap();
 
     let outcome = indexer
         .file_store()

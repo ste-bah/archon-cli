@@ -100,8 +100,10 @@ impl LocalEmbeddingProvider for FastembedProvider {
         if chunks.is_empty() {
             return Ok(Vec::new());
         }
-        let guard = self.ensure_model()?;
-        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+        // `as_mut`: fastembed 5 takes `&mut self` for `embed`. The Mutex was
+        // already serialising inference, so mutable access costs nothing here.
+        let mut guard = self.ensure_model()?;
+        let model = guard.as_mut().ok_or_else(|| DocsError::Embedding {
             message: "model not loaded".into(),
         })?;
         let prefixed = chunks
@@ -117,8 +119,8 @@ impl LocalEmbeddingProvider for FastembedProvider {
     }
 
     fn embed_query(&self, query: &str) -> Result<Vec<f32>, DocsError> {
-        let guard = self.ensure_model()?;
-        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+        let mut guard = self.ensure_model()?;
+        let model = guard.as_mut().ok_or_else(|| DocsError::Embedding {
             message: "model not loaded".into(),
         })?;
         let raw = model
@@ -130,8 +132,8 @@ impl LocalEmbeddingProvider for FastembedProvider {
     }
 
     fn embed_image(&self, image_bytes: &[u8]) -> Result<Option<Vec<f32>>, DocsError> {
-        let guard = self.ensure_image_model()?;
-        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+        let mut guard = self.ensure_image_model()?;
+        let model = guard.as_mut().ok_or_else(|| DocsError::Embedding {
             message: "image model not loaded".into(),
         })?;
         let raw = model
@@ -143,8 +145,8 @@ impl LocalEmbeddingProvider for FastembedProvider {
     }
 
     fn embed_image_query(&self, query: &str) -> Result<Option<Vec<f32>>, DocsError> {
-        let guard = self.ensure_clip_text_model()?;
-        let model = guard.as_ref().ok_or_else(|| DocsError::Embedding {
+        let mut guard = self.ensure_clip_text_model()?;
+        let model = guard.as_mut().ok_or_else(|| DocsError::Embedding {
             message: "clip text model not loaded".into(),
         })?;
         // CLIP text encoder takes the raw query (no BGE search_query prefix).

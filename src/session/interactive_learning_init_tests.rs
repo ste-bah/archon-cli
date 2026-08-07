@@ -187,6 +187,7 @@ fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
         initial_backoff: Duration::ZERO,
         max_backoff: Duration::ZERO,
         write_lock_path: Some(lock_path.clone()),
+        write_lock_wait: None,
     };
     let db = archon_cozo::open_sqlite_guarded_instance(
         &db_path.to_string_lossy(),

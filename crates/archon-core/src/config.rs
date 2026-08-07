@@ -5,6 +5,8 @@ mod generated_tuning;
 mod interfaces;
 mod io;
 mod learning;
+// Inherent impl on `MemoryConfig` only — nothing to re-export.
+mod memory_open;
 mod providers;
 mod runtime;
 mod sections;
@@ -62,6 +64,9 @@ pub struct ArchonConfig {
     pub logging: LoggingConfig,
     pub session: SessionConfig,
     pub checkpoint: CheckpointConfig,
+    /// Repository code index (LEANN).
+    #[serde(default)]
+    pub code_index: CodeIndexConfig,
     pub personality: archon_consciousness::personality::PersonalityProfile,
     pub consciousness: ConsciousnessConfig,
     pub tui: TuiConfig,

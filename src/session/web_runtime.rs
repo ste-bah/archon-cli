@@ -1,23 +1,22 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic};
 
 use anyhow::Result;
 use archon_core::env_vars::ArchonEnvVars;
-use archon_llm::auth::{AuthProvider, resolve_auth_with_keys};
 use archon_tui::event_channel::TuiEventReceiver;
 use archon_tui::observability;
 use archon_tui::{AgentDispatcher, app::TuiEvent};
 
 use crate::cli_args::Cli;
 
+#[path = "web_runtime_reply.rs"]
+mod reply;
+use reply::{auth_label, finish_reply};
+
 const WEB_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(86400);
-#[cfg(not(test))]
-const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-#[cfg(test)]
-const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
-#[cfg(not(test))]
-const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-#[cfg(test)]
-const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10);
+const WEB_SESSION_SHUTDOWN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 10 } else { 30_000 });
+const WEB_SESSION_ABORT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 10 } else { 1_000 });
 
 pub(crate) struct WebSessionHandle {
     input_tx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
@@ -30,6 +29,7 @@ pub(crate) struct WebSessionHandle {
     sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle,
     dispatcher: Arc<std::sync::Mutex<AgentDispatcher>>,
     shutdown: tokio_util::sync::CancellationToken,
+    leann_init_cancel: Arc<atomic::AtomicBool>,
 }
 
 impl WebSessionHandle {
@@ -75,6 +75,12 @@ impl WebSessionHandle {
     }
 
     pub(crate) async fn begin_shutdown(&self) {
+        // Stop the background repository index, as `interactive_ui` does for the
+        // TUI. It is a `spawn_blocking` task and dropping a `#[tokio::main]`
+        // runtime waits for those, so left unset Ctrl-C tears the HTTP server
+        // down and then burns cores on ONNX embedding until the repo is indexed.
+        self.leann_init_cancel
+            .store(true, atomic::Ordering::Relaxed);
         self.shutdown.cancel();
         self.signal_inflight_turn();
         self.input_tx.lock().await.take();
@@ -241,7 +247,7 @@ pub(crate) async fn spawn_web_session(
         research_pipeline,
         llm_adapter,
         leann,
-        leann_init_cancel: _,
+        leann_init_cancel,
         learning_cozo_db,
         governed_learning_db,
         auto_trainer,
@@ -444,51 +450,8 @@ pub(crate) async fn spawn_web_session(
         sandbox_audit_drain,
         dispatcher,
         shutdown,
+        leann_init_cancel,
     }))
-}
-
-fn finish_reply(streamed: &str, fallback: &str) -> String {
-    let streamed = streamed.trim();
-    if streamed.is_empty() {
-        sanitize_web_reply(fallback)
-    } else {
-        sanitize_web_reply(streamed)
-    }
-}
-
-fn sanitize_web_reply(value: &str) -> String {
-    let mut lines = Vec::new();
-    let mut skipping_tool_output = false;
-    for line in value.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("[tool] ") {
-            skipping_tool_output = trimmed.contains(" done:");
-            continue;
-        }
-        if skipping_tool_output {
-            if trimmed.is_empty() {
-                skipping_tool_output = false;
-            }
-            continue;
-        }
-        lines.push(line);
-    }
-    lines.join("\n").trim().to_string()
-}
-
-fn auth_label(env_vars: &ArchonEnvVars) -> String {
-    match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
-        std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
-    ) {
-        Ok(AuthProvider::OAuthToken(_)) => "OAuth".into(),
-        Ok(AuthProvider::CodexOAuthToken(_)) => "Codex OAuth".into(),
-        Ok(AuthProvider::ApiKey(_)) => "API key".into(),
-        Ok(AuthProvider::BearerToken(_)) => "Bearer token".into(),
-        Err(_) => "none".into(),
-    }
 }
 
 #[cfg(test)]

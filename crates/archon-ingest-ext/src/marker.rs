@@ -205,7 +205,7 @@ pub fn parse_marker_figures_str(json: &str) -> Result<Vec<FigureRegion>, serde_j
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::{chunk_blocks_default, BlockType};
+    use crate::chunk::{BlockType, chunk_blocks_default};
 
     /// A two-page Marker tree exercising: page increment (0→1, 1→2), HTML strip,
     /// nested-tag text, document order, and skipping a non-text (Figure) block.

@@ -10,12 +10,18 @@ use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 mod guard_registry;
 mod locking;
 mod panic_guard;
+mod retry;
 
 use guard_registry::register_guarded_database;
 use locking::{
     HeldWriteLock, lock_recovering_poison, process_write_lock, write_lock_is_held, write_lock_key,
 };
 use panic_guard::catch_guarded_operation;
+pub use retry::{is_retryable_cozo_error, is_store_contention, render_cozo_error};
+use retry::{normalized_attempts, retry_backoff};
+
+#[cfg(test)]
+use retry::cumulative_backoff_budget;
 
 /// How long [`with_write_lock_blocking`] waits before declaring the holder stuck.
 ///
@@ -40,6 +46,22 @@ pub struct CozoGuardConfig {
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
     pub write_lock_path: Option<PathBuf>,
+    /// Queue for the cross-process write lock instead of failing fast.
+    ///
+    /// The default (`None`) samples the lock once per attempt and sleeps the
+    /// retry backoff in between -- 100ms rising to 2s. Against a peer that
+    /// takes the lock back to back, as a repository index does for every file
+    /// it persists, sampling on that cadence starves: the loser almost never
+    /// lands in a gap, burns its whole 19s budget and fails while the winner
+    /// runs to completion. That is issue #140, and it is not a retry-count
+    /// problem -- more attempts on the same cadence starve just as reliably.
+    ///
+    /// Setting this polls at 1-25ms under a bounded deadline instead, which
+    /// catches the microsecond gap between the peer's transactions, so both
+    /// processes interleave and make progress. It is opt-in because an
+    /// interactive caller would rather report a busy store promptly than block
+    /// a keystroke; batch writers are the ones that would rather wait.
+    pub write_lock_wait: Option<Duration>,
 }
 
 impl Default for CozoGuardConfig {
@@ -49,6 +71,7 @@ impl Default for CozoGuardConfig {
             initial_backoff: Duration::from_millis(DEFAULT_INITIAL_BACKOFF_MS),
             max_backoff: Duration::from_millis(DEFAULT_MAX_BACKOFF_MS),
             write_lock_path: None,
+            write_lock_wait: None,
         }
     }
 }
@@ -67,6 +90,13 @@ impl CozoGuardConfig {
 
     pub fn with_write_lock_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.write_lock_path = Some(path.into());
+        self
+    }
+
+    /// Wait up to `wait` for the cross-process write lock rather than failing
+    /// fast. See [`CozoGuardConfig::write_lock_wait`].
+    pub fn with_write_lock_wait(mut self, wait: Duration) -> Self {
+        self.write_lock_wait = Some(wait);
         self
     }
 }
@@ -288,71 +318,6 @@ where
     unreachable!("a guarded retry loop always returns from an attempt")
 }
 
-fn normalized_attempts(config: &CozoGuardConfig) -> usize {
-    config.max_attempts.max(1)
-}
-
-#[cfg(test)]
-fn cumulative_backoff_budget(config: &CozoGuardConfig) -> Duration {
-    (0..normalized_attempts(config).saturating_sub(1))
-        .map(|attempt| backoff_duration(config, attempt))
-        .sum()
-}
-
-fn retry_backoff(
-    context: &str,
-    config: &CozoGuardConfig,
-    attempt: usize,
-    attempts: usize,
-    error: &str,
-) -> Option<Duration> {
-    if !is_retryable_cozo_error(error) || attempt + 1 >= attempts {
-        return None;
-    }
-
-    tracing::warn!(
-        context,
-        attempt = attempt + 1,
-        max_attempts = attempts,
-        error,
-        "Cozo store busy; retrying guarded operation"
-    );
-    Some(backoff_duration(config, attempt))
-}
-
-pub fn is_retryable_cozo_error(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    if explicit_error_codes(&message).any(|code| code != 5) {
-        return false;
-    }
-    [
-        "database is locked",
-        "database table is locked",
-        "locked (code 5)",
-        "code: some(5)",
-        "sqlite_busy",
-        "write-lock unavailable",
-        "write lock unavailable",
-    ]
-    .iter()
-    .any(|signal| message.contains(signal))
-}
-
-fn explicit_error_codes(message: &str) -> impl Iterator<Item = u64> + '_ {
-    message.match_indices("code").filter_map(|(index, _)| {
-        let suffix = &message[index + "code".len()..];
-        let suffix = suffix.trim_start_matches(|character: char| {
-            character.is_ascii_whitespace() || matches!(character, ':' | '(')
-        });
-        let suffix = suffix.strip_prefix("some(").unwrap_or(suffix);
-        let digits = suffix
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>();
-        digits.parse().ok()
-    })
-}
-
 /// Make every guarded Cozo operation **on the calling thread** panic until
 /// [`clear_guarded_script_poison`] is called.
 ///
@@ -414,6 +379,17 @@ fn run_guarded_once<T>(
         if write_lock_is_held(&key) {
             return catch_guarded_operation(context, run);
         }
+        // Queueing mode does its own key, process-mutex and thread-local
+        // bookkeeping, so it is entered *instead of* the block below rather
+        // than inside it -- pre-taking the lock here would make the acquire
+        // look re-entrant to itself and skip locking altogether.
+        if let (Some(path), Some(wait)) =
+            (config.write_lock_path.as_deref(), config.write_lock_wait)
+        {
+            return locking::with_write_lock_blocking(path, context, wait, || {
+                catch_guarded_operation(context, run)
+            });
+        }
         let process_lock = process_write_lock(&key);
         let _process_guard = lock_recovering_poison(&process_lock);
         let _held_lock = HeldWriteLock::enter(key);
@@ -473,12 +449,6 @@ pub fn with_write_lock_blocking_timeout<T>(
 
 pub fn in_guarded_operation() -> bool {
     panic_guard::in_guarded_operation()
-}
-
-fn backoff_duration(config: &CozoGuardConfig, attempt: usize) -> Duration {
-    let initial = config.initial_backoff.as_millis() as u64;
-    let max = config.max_backoff.as_millis() as u64;
-    Duration::from_millis(initial.saturating_mul(attempt as u64 + 1).min(max))
 }
 
 #[cfg(test)]

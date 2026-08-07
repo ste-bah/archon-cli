@@ -362,6 +362,13 @@ impl HookRegistry {
         if let Some(tool_output) = input.get("tool_output") {
             ctx_builder = ctx_builder.tool_output(tool_output.clone());
         }
+        // Command and HTTP hooks receive the raw payload and can read
+        // `subagent_id` from it directly; in-process callbacks only ever see
+        // `HookContext`, so without this a `SubagentStop` callback could tell
+        // that *a* subagent stopped but not which one.
+        if let Some(subagent_id) = input.get("subagent_id").and_then(|v| v.as_str()) {
+            ctx_builder = ctx_builder.agent_id(subagent_id.to_string());
+        }
         let ctx = ctx_builder.build();
         self.execute_callbacks(&event, &ctx, &mut aggregated, budget_start, budget)
             .await;

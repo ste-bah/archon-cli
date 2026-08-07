@@ -29,6 +29,8 @@ pub(crate) mod agent_evolve_world_model;
 pub(crate) mod agent_slash;
 pub(crate) mod auth;
 pub(crate) mod background;
+// #146: the one open-and-install body behind every board-only entry point.
+pub(crate) mod board_access;
 pub(crate) mod bug;
 pub(crate) mod cancel;
 pub(crate) mod chat;
@@ -272,7 +274,9 @@ pub(crate) mod video_delete;
 pub(crate) mod vim;
 pub(crate) mod voice;
 pub(crate) mod web;
+pub(crate) mod web_attach;
 pub(crate) mod web_chat;
+pub(crate) mod web_slash;
 pub(crate) mod workflow;
 /// What `src/command/workflow*.rs` may name, pinned as a scan rather than a
 /// convention.

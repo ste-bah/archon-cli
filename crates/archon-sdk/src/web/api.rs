@@ -288,7 +288,15 @@ impl EffectivePolicySummary {
 }
 
 pub(crate) async fn status_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    authed_json(&state, &headers, state.api.status())
+    if let Err(resp) = check_auth(&state, &headers) {
+        return resp;
+    }
+    let mut status = state.api.status();
+    // Attached mode deliberately constructs no chat bridge — the host owns the
+    // conversation. Report the lane as unavailable so the shell hides the tab
+    // instead of offering a surface every submit would refuse.
+    status.features.chat = state.chat_backend.is_some();
+    (StatusCode::OK, Json(status)).into_response()
 }
 
 pub(crate) async fn config_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -324,6 +332,12 @@ pub fn generated_typescript() -> String {
     .into_iter()
     .chain([
         super::live::generated_typescript(),
+        super::agents::generated_typescript(),
+        super::board::generated_typescript(),
+        // Separate module, so separate entry: `WebBoardActivity` is referenced
+        // by the generated client and a type that is declared nowhere fails
+        // `npm run typecheck` rather than anything in Rust.
+        super::board_activity::generated_typescript(),
         super::actions::generated_typescript(),
         super::auth::generated_typescript(),
         super::chat::generated_typescript(),

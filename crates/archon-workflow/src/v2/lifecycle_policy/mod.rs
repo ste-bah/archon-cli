@@ -13,8 +13,10 @@
 //! that type until the host is behind a port trait.
 
 pub mod adversarial;
+pub mod assignment_invalid;
 pub mod boundary_repair;
 pub mod cross_cutting;
+pub mod drain_gate;
 pub mod inventory_items;
 pub mod noop_routing;
 pub mod terminal_gate;

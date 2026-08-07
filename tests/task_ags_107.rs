@@ -309,6 +309,9 @@ async fn background_agents_cancel_flips_status() {
 
     let handle = BackgroundAgentHandle {
         agent_id,
+        // The registry keys on `subagent_id`, not `agent_id`. This test mints
+        // its own UUID, matching how `AgentTool`/`TaskCreate` name an agent.
+        subagent_id: agent_id.to_string(),
         join_handle: Some(tokio::runtime::Handle::current().spawn(async {
             // Long-running work that waits for cancel
             tokio::time::sleep(std::time::Duration::from_secs(300)).await;

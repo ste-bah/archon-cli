@@ -19,10 +19,20 @@ fn ctx() -> ToolContext {
     }
 }
 
+/// Generous relative to process spawn, not to the work being timed.
+///
+/// The two tests below assert on `printf` output and shell out to a real
+/// `bash` to get it. Spawning one costs a few hundred milliseconds cold on
+/// Windows, and at the default test parallelism a dozen start at once, so one
+/// second is not a margin: the suite failed on Windows at full width while
+/// passing under `--test-threads=4`, which is a false red in a crate that is
+/// otherwise clean. A genuinely hung shell still fails, just later. See #131.
+const SHELL_SPAWN_TIMEOUT_SECS: u64 = 15;
+
 #[tokio::test]
 async fn printf_format_starting_with_dash_succeeds() {
     let tool = BashTool {
-        timeout_secs: 1,
+        timeout_secs: SHELL_SPAWN_TIMEOUT_SECS,
         max_output_bytes: 1024,
         ..Default::default()
     };
@@ -38,7 +48,7 @@ async fn printf_format_starting_with_dash_succeeds() {
 #[tokio::test]
 async fn printf_wrapper_preserves_dash_dash_and_v() {
     let tool = BashTool {
-        timeout_secs: 1,
+        timeout_secs: SHELL_SPAWN_TIMEOUT_SECS,
         max_output_bytes: 1024,
         ..Default::default()
     };

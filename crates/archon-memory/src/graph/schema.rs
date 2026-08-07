@@ -61,7 +61,121 @@ impl MemoryGraph {
         )
         .or_else(ignore_already_exists)?;
 
+        self.init_board_schema()?;
         self.init_memory_fts()?;
+
+        Ok(())
+    }
+
+    /// Create the agent task board relation and its run index.
+    ///
+    /// Real columns, not tags. `memories` could not carry this: its schema is
+    /// fixed at twelve columns, so status, claim, and round would have to be
+    /// tag-encoded against the sixteen non-trend tags that
+    /// `crud_importance.rs` asserts in Datalog, and `update_memory` replaces
+    /// the whole tag vector last-writer-wins with no compare-and-set. Two
+    /// agents claiming one item would both believe they won.
+    ///
+    /// `claimed_by` is the only nullable column, and it is nullable rather than
+    /// an empty-string sentinel because the claim CAS turns on `is_null` --
+    /// "unclaimed" has to be a state the database can test, not a convention
+    /// each query re-implements.
+    ///
+    /// Idempotent like every relation above it, so an existing store picks the
+    /// board up on next open with no migration step.
+    fn init_board_schema(&self) -> Result<(), MemoryError> {
+        run_mutable(
+            &self.db,
+            ":create board_items {
+                    id: String
+                    =>
+                    run_id: String,
+                    kind: String,
+                    status: String,
+                    title: String,
+                    evidence: String,
+                    acceptance: String,
+                    raised_by: String,
+                    claimed_by: String?,
+                    round: Int,
+                    created_at: String,
+                    updated_at: String
+                }",
+            Default::default(),
+            "memory schema: create board_items relation",
+        )
+        .or_else(ignore_already_exists)?;
+
+        // A board is polled: the drain gate reads it at every barrier and every
+        // agent looking for work reads it again. Without this index a run-scoped
+        // read is a full scan of every run's items, and the cost grows with the
+        // whole board rather than with the caller's own run.
+        run_mutable(
+            &self.db,
+            "::index create board_items:by_run {run_id}",
+            Default::default(),
+            "memory schema: create board_items:by_run index",
+        )
+        .or_else(ignore_already_exists)?;
+
+        self.init_board_history_schema()
+    }
+
+    /// Create the board's transition history and its run index.
+    ///
+    /// A RELATION, NOT A COLUMN, and the reason is the sentence above about
+    /// migrations. `board_items` shipped in 1.6.0, so stores of it exist; Cozo
+    /// has no `ALTER`, and `:create` on an existing relation is skipped by
+    /// `ignore_already_exists`. A `decline_reason` column would therefore be
+    /// created on fresh stores and silently absent on every upgraded one, and
+    /// every query naming it would fail there at runtime. Making it appear would
+    /// take a copy-drop-rename migration, which is exactly what "idempotent
+    /// creation, no migration" rules out. A new relation has no such problem: an
+    /// existing store picks it up empty on next open.
+    ///
+    /// One relation for two needs, because they are the same need. A decline
+    /// reason is the note on the transition into `declined`; the escalation
+    /// ladder's per-round history is the same log read whole. Storing the reason
+    /// separately would mean two writers for one fact and a way for them to
+    /// disagree.
+    ///
+    /// `seq` is per item and monotonic rather than a timestamp key: transitions
+    /// are serialised by the write guard and can land inside one clock tick on
+    /// Windows, where a timestamp key would let the second silently overwrite
+    /// the first. `actor` is nullable for the same reason `claimed_by` is — an
+    /// unclaimed item can still be transitioned, and an empty string would read
+    /// as an agent named nothing.
+    fn init_board_history_schema(&self) -> Result<(), MemoryError> {
+        run_mutable(
+            &self.db,
+            ":create board_item_events {
+                    item_id: String,
+                    seq: Int
+                    =>
+                    at: String,
+                    run_id: String,
+                    from_status: String,
+                    to_status: String,
+                    round: Int,
+                    actor: String?,
+                    note: String
+                }",
+            Default::default(),
+            "memory schema: create board_item_events relation",
+        )
+        .or_else(ignore_already_exists)?;
+
+        // The drain gate needs the decline reason for every item in one run, and
+        // it asks at the barrier of every run. Keyed on `item_id`, that question
+        // is a full scan of every run's history; through this index it is a
+        // prefix read of the asking run's own.
+        run_mutable(
+            &self.db,
+            "::index create board_item_events:by_run {run_id}",
+            Default::default(),
+            "memory schema: create board_item_events:by_run index",
+        )
+        .or_else(ignore_already_exists)?;
 
         Ok(())
     }

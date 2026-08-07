@@ -185,10 +185,16 @@ impl CommandHandler for LogoutHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Used only by `cfg(unix)` tests in this module. See #136.
+    #[cfg(unix)]
     use std::sync::{Arc, Mutex};
 
+    #[cfg(unix)]
     use crate::command::dispatcher::Dispatcher;
-    use crate::command::registry::{CommandContext, RegistryBuilder};
+    #[cfg(unix)]
+    use crate::command::registry::CommandContext;
+    #[cfg(unix)]
+    use crate::command::registry::RegistryBuilder;
 
     /// Process-wide lock so tests that mutate `HOME` do not race. The
     /// env_guard crate does not serialise arbitrary env vars across
@@ -196,16 +202,20 @@ mod tests {
     /// `Mutex<()>` suffices — poisoning is tolerated (tests inside
     /// `.lock()` may panic; the next test recovers). Mirrors the
     /// AGS-815 / B20 / B22 env-mutation serialisation pattern.
+    // Used only by `cfg(unix)` tests in this module. See #136.
+    #[cfg(unix)]
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// RAII guard that overrides an env var for the lifetime of a
     /// single test body and restores the prior value on drop.
     /// Not re-entrant. Acquire `ENV_LOCK` FIRST.
+    #[cfg(unix)]
     struct EnvGuard {
         key: &'static str,
         prev: Option<std::ffi::OsString>,
     }
 
+    #[cfg(unix)]
     impl EnvGuard {
         fn set(key: &'static str, value: &std::path::Path) -> Self {
             let prev = std::env::var_os(key);
@@ -221,6 +231,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             // SAFETY: same discipline as `EnvGuard::set` — ENV_LOCK is
@@ -240,6 +251,7 @@ mod tests {
     /// adds no new CommandContext field, so every optional field is
     /// `None` — mirroring `make_bug_ctx` (the other new-field-free
     /// handler). No `auth_label` argument needed.
+    #[cfg(unix)]
     fn make_logout_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
         // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()

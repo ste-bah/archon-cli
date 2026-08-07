@@ -206,7 +206,32 @@ impl AgentSubagentExecutor {
             "TaskStop",
         ];
 
-        const DEFAULT_TOOLS: &[&str] = &["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
+        // The board tools are in the default set on purpose. A subagent that
+        // finds something outside its assignment has exactly one other place to
+        // put it — its return string — which the parent then summarises, and the
+        // finding is gone. That is the failure #125 exists to close, so the
+        // destination has to be reachable without every caller remembering to
+        // ask for it. They are also `Safe`, run-scoped and non-mutating outside
+        // the board, so they widen no blast radius the way `Bash` or `Write`
+        // (already here) do.
+        //
+        // Note the limit: this list applies only when neither the request nor
+        // the agent definition names any tools. A subagent spawned WITH an
+        // `allowed_tools` list still cannot reach the board, and there is no
+        // always-allow set to fix that — only the `DENYLIST` above is
+        // unconditional.
+        const DEFAULT_TOOLS: &[&str] = &[
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash",
+            "Write",
+            "Edit",
+            "BoardRaise",
+            "BoardClaim",
+            "BoardList",
+            "BoardResolve",
+        ];
 
         let base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request

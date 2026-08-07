@@ -16,6 +16,9 @@ impl Agent {
         ToolContext {
             working_dir: self.config.working_dir.clone(),
             session_id: self.config.session_id.clone(),
+            // Top-level agent: no subagent is in scope. The executor stamps a
+            // real id onto the child context it derives from this one.
+            subagent_id: None,
             mode: effective_mode,
             extra_dirs: extra,
             in_fork,
@@ -36,5 +39,20 @@ impl Agent {
             tool_run_admission: self.tool_run_admission_callback.clone(),
             tool_run_outcome: self.tool_run_outcome_callback.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::test_agent;
+    use archon_tools::tool::AgentMode;
+
+    #[tokio::test]
+    async fn top_level_tool_context_carries_no_subagent_id() {
+        let agent = test_agent();
+
+        let ctx = agent.build_tool_context(AgentMode::Normal, "mock").await;
+
+        assert_eq!(ctx.subagent_id, None);
     }
 }

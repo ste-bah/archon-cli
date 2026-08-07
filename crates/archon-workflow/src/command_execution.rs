@@ -1,6 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
+// Only the unix process-group teardown sleeps between SIGTERM and SIGKILL; the
+// `cfg(not(unix))` arm of `terminate_process_group` returns immediately. Left
+// ungated these are dead on Windows, and `-D warnings` is a hard error there.
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::Duration;
 
 use chrono::Utc;

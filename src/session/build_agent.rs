@@ -15,6 +15,8 @@ use archon_observability::ChannelMetricSink;
 mod agent_catalog;
 #[path = "build_agent_definition.rs"]
 mod agent_definition;
+#[path = "build_agent_board.rs"]
+mod board;
 #[path = "build_agent_provider.rs"]
 mod provider;
 pub(super) use agent_definition::{
@@ -36,6 +38,11 @@ pub(super) async fn build_session_agent(
         resolve_identity_and_api_client(config, session_id, cli, env_vars).await?;
 
     super::configure_session_vlm_provider(&working_dir);
+    // Before the registry is built, so the handle is in place by the time the
+    // model can call a board tool. `BoardHandle::Global` resolves at call time,
+    // so ordering against `create_default_registry` is not what matters — being
+    // installed before the agent runs is.
+    board::install_session_board_access(config).await;
     let leann_index = super::init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
     registry.replace(Box::new(archon_tools::bash::BashTool {

@@ -3,6 +3,10 @@
 //! Provides `stream_logs` (tail -f equivalent for running sessions) and
 //! `view_logs` (non-streaming read).
 
+// Only the unix `stream_logs*` pair writes to stdout directly; `view_logs`
+// returns a String. Ungated this is dead on Windows, where `-D warnings`
+// is a hard error.
+#[cfg(unix)]
 use std::io::Write as _;
 use std::path::Path;
 
@@ -113,6 +117,8 @@ pub fn stream_logs_in_dir(dir: &Path, session_id: &str, follow: bool) -> Result<
 ///
 /// For assistant text events, the text is shown as-is. Tool call events are
 /// rendered as a one-liner summary. Unparseable lines pass through unchanged.
+// Called only from the unix-gated streaming path above.
+#[cfg(unix)]
 fn format_log_line(line: &str) -> String {
     let trimmed = line.trim();
     if trimmed.is_empty() {

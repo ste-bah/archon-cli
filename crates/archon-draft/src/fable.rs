@@ -16,10 +16,10 @@
 use archon_llm::anthropic::{AnthropicClient, MessageRequest};
 use archon_llm::auth::resolve_auth_from_env;
 use archon_llm::identity::{
-    get_or_create_device_id, resolve_identity_mode, IdentityConfigView, IdentityProvider,
+    IdentityConfigView, IdentityProvider, get_or_create_device_id, resolve_identity_mode,
 };
 use archon_llm::streaming::StreamEvent;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Committed/public default (guaranteed fallback since public Fable access is uncertain).
 /// Local runs override to `claude-fable-5` via config/CLI (see `resolve_model`).

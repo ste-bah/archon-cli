@@ -46,36 +46,30 @@ async fn handle_reindex(all: bool, config: &ArchonConfig) -> Result<()> {
         "world_model.memory_advisory"
     );
 
-    let (memory_data_dir, memory_db_path) =
-        archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
-
-    // Open the memory graph in Direct mode (we need set_embedding_provider
-    // + reindex_all_embeddings, both of which require the concrete
-    // MemoryGraph rather than the trait-object access wrapper).
-    let access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
+    // Resolve, open through the election, attach the embedding provider — the
+    // shared body every entry point uses since #146. Direct mode is still
+    // required afterwards: `reindex_all_embeddings` is on the concrete
+    // MemoryGraph, not on the trait-object access wrapper.
+    let spec = config.memory.open_spec();
+    let opened = archon_memory::open_configured_memory(&spec)
         .await
         .context("failed to open memory graph")?;
-    let graph = access
+
+    // The one caller that must refuse a store with no embedder. Everywhere else
+    // keyword-only search is a degraded but honest service; here it would mean
+    // re-embedding nothing and printing a completion for it.
+    if let archon_memory::EmbeddingSetup::Unavailable(reason) = &opened.embedding {
+        anyhow::bail!("{reason}");
+    }
+    let graph = opened
+        .access
         .graph()
         .context("memory graph not in Direct mode (cannot reindex)")?;
-
-    // Wire up an embedding provider — same code path as session bootstrap.
-    let embed_cfg = archon_memory::embedding::EmbeddingConfig {
-        provider: config.memory.embedding_provider,
-        hybrid_alpha: config.memory.hybrid_alpha,
-        base_url: config.memory.embedding_base_url.clone(),
-        model: config.memory.embedding_model.clone(),
-    };
-    let provider = archon_memory::embedding::create_provider(&embed_cfg)
-        .context("failed to create embedding provider")?;
-    graph
-        .set_embedding_provider(provider)
-        .context("failed to attach embedding provider to graph")?;
 
     let total = graph.memory_count().context("failed to count memories")?;
     println!(
         "Reindexing {total} memories under provider '{}'...",
-        embed_cfg.provider
+        spec.embedding.provider
     );
 
     let started = std::time::Instant::now();

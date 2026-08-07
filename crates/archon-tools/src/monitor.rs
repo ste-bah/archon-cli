@@ -246,6 +246,8 @@ fn format_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Used only by the `cfg(unix)` helper below. See #136.
+    #[cfg(unix)]
     use serde_json::Value;
 
     fn ctx() -> ToolContext {
@@ -256,6 +258,8 @@ mod tests {
         }
     }
 
+    // Both callers are `cfg(unix)` tests. See #136.
+    #[cfg(unix)]
     fn parse(result: &ToolResult) -> Value {
         assert!(
             !result.is_error,

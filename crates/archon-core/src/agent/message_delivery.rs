@@ -115,6 +115,10 @@ impl Agent {
                                     let resume_ctx = archon_tools::tool::ToolContext {
                                         working_dir: self.config.working_dir.clone(),
                                         session_id: self.config.session_id.clone(),
+                                        // Parent-side context for the resume;
+                                        // `resume_sid` reaches the child through
+                                        // the executor, not through here.
+                                        subagent_id: None,
                                         mode: archon_tools::tool::AgentMode::Normal,
                                         extra_dirs: vec![],
                                         in_fork:

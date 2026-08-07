@@ -139,7 +139,8 @@ fn read_pid() -> Result<Option<u32>> {
     Ok(text.trim().parse::<u32>().ok())
 }
 
-fn process_running(pid: u32) -> bool {
+// `pid` is read only by the unix branch; the windows branch cannot use it.
+fn process_running(#[allow(unused_variables)] pid: u32) -> bool {
     #[cfg(unix)]
     {
         Command::new("kill")

@@ -1,6 +1,9 @@
 use super::test_support::*;
 use super::*;
 
+// Every consumer of this is a `cfg(unix)` test, so on Windows it is dead
+// and `-D warnings` is a hard error there. See #136.
+#[cfg(unix)]
 use crate::models::ProvenanceEdgeType;
 
 #[cfg(unix)]

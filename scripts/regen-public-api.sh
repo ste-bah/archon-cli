@@ -49,15 +49,20 @@ HEADER="# ${TOOL_VERSION}"
 BASELINE_DIR="tests/fixtures/baseline"
 mkdir -p "$BASELINE_DIR"
 
-TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
+# NOT named TMP: on Windows that is the environment variable naming
+# the temp directory, and bash assignment to an already-exported name
+# updates the environment. Cargo then writes its argfile -- these
+# rustdoc command lines are long enough to need one -- into a path
+# built from a file rather than a directory, and fails with os error 3.
+PA_TMP=$(mktemp)
+trap 'rm -f "$PA_TMP"' EXIT
 
 # --- archon-memory full surface ---
 CARGO_BUILD_JOBS=1 cargo public-api --package archon-memory --simplified \
-    2>/dev/null > "$TMP"
+    2>/dev/null > "$PA_TMP"
 {
     echo "$HEADER"
-    cat "$TMP"
+    cat "$PA_TMP"
 } > "$BASELINE_DIR/archon_memory_api.txt"
 
 # --- archon-core filtered to archon_core::agents::memory::<item> ---
@@ -68,10 +73,10 @@ CARGO_BUILD_JOBS=1 cargo public-api --package archon-memory --simplified \
 # after filter) is tolerated via `|| true`; the resulting snapshot
 # is still non-empty because of the `# header` line.
 CARGO_BUILD_JOBS=1 cargo public-api --package archon-core --simplified \
-    2>/dev/null > "$TMP"
+    2>/dev/null > "$PA_TMP"
 {
     echo "$HEADER"
-    grep -F 'archon_core::agents::memory::' "$TMP" || true
+    grep -F 'archon_core::agents::memory::' "$PA_TMP" || true
 } > "$BASELINE_DIR/agents_memory_api.txt"
 
 echo "regen-public-api.sh: wrote snapshots under $BASELINE_DIR/"

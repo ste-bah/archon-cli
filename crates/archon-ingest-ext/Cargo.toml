@@ -1,7 +1,7 @@
 [package]
 name = "archon-ingest-ext"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 # Surgical ingestion extensions for Archon (Port #2): the token-aware, bbox-carrying
 # chunker (spine), plus the table gate + locators (forthcoming). Pure-Rust, deterministic,

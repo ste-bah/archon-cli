@@ -238,6 +238,10 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("archon-code", Arc::new(ArchonCodeHandler));
     b.insert_primary("archon-research", Arc::new(ArchonResearchHandler));
     b.insert_primary("workflow", Arc::new(WorkflowHandler));
+    // #126: /web starts the dashboard INSIDE this process. The `archon web`
+    // subcommand is a separate process and so can only ever show its own
+    // session; only an attached server can read the live agent registries.
+    b.insert_primary("web", Arc::new(crate::command::web_slash::WebHandler));
     // Phase 6 traceability: /requirements trace (alias /reqs). Read-only over a
     // PRD, a task directory and an already-built code index — no CommandContext
     // field needed, and no indexing, ever.

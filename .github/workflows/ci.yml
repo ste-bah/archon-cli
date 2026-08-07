@@ -371,6 +371,21 @@ jobs:
         run: bash scripts/lint/arch-lint.sh
       - name: check-file-sizes (NFR-FOR-D4-MAINTAINABILITY)
         run: bash scripts/check-file-sizes.sh
+      # Wired in for #132. It existed unreferenced for long enough that the
+      # thing it guards had already drifted past it, which is the failure mode
+      # a gate is supposed to prevent rather than exhibit.
+      #
+      # ripgrep is not on the ubuntu-latest image, and the script refuses to
+      # report clean without it (exit 2) rather than silently scanning nothing —
+      # correct behaviour, so install the tool instead of weakening the check.
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep
+      - name: check-context-window-literals
+        run: bash scripts/check-context-window-literals.sh
+      - name: tui-banned-patterns-gate
+        run: bash scripts/tui-banned-patterns-gate.sh
+      - name: tui-banned-patterns-gate self-test
+        run: bash scripts/tui-banned-patterns-gate.selftest.sh
 
   config-sync:
     name: config-sync (template vs shipped .archon config)

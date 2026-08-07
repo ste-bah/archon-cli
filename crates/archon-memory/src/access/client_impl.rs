@@ -14,7 +14,7 @@ static CURRENT_THREAD_BRIDGE_LOCK: Mutex<()> = Mutex::new(());
 /// local runtime. Current-thread runtime callers use a serialized scoped
 /// thread so Tokio runtimes are not nested and bridge concurrency stays bounded.
 /// The remote server must not depend on the blocked current-thread executor.
-fn block_on_async<F>(future: F) -> F::Output
+pub(super) fn block_on_async<F>(future: F) -> F::Output
 where
     F: std::future::Future + Send,
     F::Output: Send,
@@ -275,6 +275,30 @@ impl MemoryTrait for MemoryClient {
             serde_json::json!({"id": id, "depth": depth}),
         ))?;
         serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn embedding_neighbours(
+        &self,
+        memory_id: &str,
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f64)>>, MemoryError> {
+        let result = block_on_async(self.call(
+            "embedding_neighbours",
+            serde_json::json!({"memory_id": memory_id, "top_k": top_k}),
+        ));
+        match result {
+            Ok(value) => serde_json::from_value(value).map_err(MemoryError::from),
+            // The process holding the database may be an older build whose
+            // dispatch table has no such method, and it answers "unknown
+            // method" rather than null. Unavailable is the honest reading of
+            // that, and unlike the old empty-vec stub it is now sayable --
+            // failing the whole consolidation pass over an optional index is
+            // not.
+            Err(error) => {
+                tracing::debug!(%error, "memory server has no vector-neighbour request");
+                Ok(None)
+            }
+        }
     }
 }
 

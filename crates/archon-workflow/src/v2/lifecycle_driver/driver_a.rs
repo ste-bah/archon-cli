@@ -24,6 +24,7 @@ impl LifecycleDriver {
             target_repository_root,
             project_artifact_root,
             governed_learning_context,
+            board_drain: None,
             max_repair_iterations: usize::from(limits.max_repair_iterations.clamp(1, 8)),
             max_investigation_iterations: usize::from(
                 limits.max_investigation_iterations.clamp(1, 8),
@@ -39,6 +40,26 @@ impl LifecycleDriver {
                 },
             ),
         }
+    }
+
+    /// Give this run a task board to drain before it may report acceptance.
+    ///
+    /// A builder method rather than a `new` parameter because the board is
+    /// optional and `new` already takes seven arguments: an eighth `None` at
+    /// every existing call site buys nothing, and a run without a board is a
+    /// legitimate configuration, not a degraded one.
+    ///
+    /// `run_id` is `WorkflowRun.id` — `wf-{uuid}` — which is the partition key
+    /// subagents inherit through their session id, so the gate reads exactly
+    /// the items this run's agents raised.
+    #[must_use]
+    pub fn with_board_drain(
+        mut self,
+        run_id: impl Into<String>,
+        board: Arc<dyn crate::board_port::WorkflowBoardPort>,
+    ) -> Self {
+        self.board_drain = Some((run_id.into(), board));
+        self
     }
 
     pub(crate) fn contract(&self) -> LifecycleContract<'_> {

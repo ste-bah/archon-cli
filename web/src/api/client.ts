@@ -27,8 +27,14 @@ import type {
   WorkflowEventPreview,
   WorkflowRunDetail,
   WorkflowWebSummary,
+  WebAgentActivitySnapshot,
+  WebBoardActivity,
+  WebBoardHistory,
+  WebBoardItems,
+  WebBoardRunList,
   WebKbCreateRequest,
   WebKbCreateResponse,
+  WebLiveCursorExpired,
   WebLiveSnapshot,
   WebUploadIntent,
   WebUploadIntentResponse,
@@ -140,11 +146,56 @@ function authHeaders(): HeadersInit {
     : jsonHeaders;
 }
 
+/**
+ * A frame from `/api/live/stream`. The backend puts both shapes on one stream
+ * because cursor expiry is a property of the cursor you connected with, not a
+ * separate resource.
+ */
+export type WebLiveFrame = WebLiveSnapshot | WebLiveCursorExpired;
+
+export function isCursorExpired(frame: WebLiveFrame): frame is WebLiveCursorExpired {
+  return (frame as WebLiveCursorExpired).cursorExpired === true;
+}
+
 export const apiClient = {
   status: () => getJson<ApiStatus>("/api/status"),
   config: () => getJson<EffectiveConfigSummary>("/api/config/effective"),
   policy: () => getJson<EffectivePolicySummary>("/api/policy/effective"),
   liveSnapshot: () => getJson<WebLiveSnapshot>("/api/live/snapshot"),
+  // fetch-based rather than EventSource: EventSource cannot set an
+  // Authorization header, and the server rejects query-string tokens, so it
+  // would work on loopback and 401 on any other bind.
+  liveStream: (
+    after: number | undefined,
+    onFrame: (frame: WebLiveFrame) => void,
+    signal: AbortSignal,
+  ) =>
+    streamSseJson<WebLiveFrame>(
+      after === undefined ? "/api/live/stream" : `/api/live/stream?after=${after}`,
+      onFrame,
+      signal,
+    ),
+  agentsLive: () => getJson<WebAgentActivitySnapshot>("/api/agents/live"),
+  // The board is rows in the memory database rather than an in-process
+  // registry, so unlike `agentsLive` these answer in a standalone `archon web`
+  // as well as an attached one.
+  boardRuns: () => getJson<WebBoardRunList>("/api/board/runs"),
+  boardItems: (runId: string, statuses: string[]) =>
+    getJson<WebBoardItems>(
+      `/api/board/runs/${encodeURIComponent(runId)}/items${
+        statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : ""
+      }`,
+    ),
+  boardItemHistory: (itemId: string) =>
+    getJson<WebBoardHistory>(
+      `/api/board/items/${encodeURIComponent(itemId)}/history`,
+    ),
+  // Run-scoped and server-capped, so the caller takes what it is given rather
+  // than paging: the feed is only ever read from its recent end.
+  boardRunActivity: (runId: string) =>
+    getJson<WebBoardActivity>(
+      `/api/board/runs/${encodeURIComponent(runId)}/activity`,
+    ),
   authSession: () => getJson<WebAuthSession>("/api/auth/session"),
   uploadPolicy: () => getJson<WebUploadPolicy>("/api/uploads/policy"),
   uploadIntent: (request: WebUploadIntent) =>

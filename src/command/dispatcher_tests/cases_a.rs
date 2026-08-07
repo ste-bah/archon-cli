@@ -281,21 +281,25 @@ fn recognizes_returns_false_for_unknown_alias() {
 
 #[test]
 fn dispatch_unknown_emits_suggestion_when_close_match_exists() {
-    // "/hel" is 1 edit away from "/help" and > 2 from every other
+    // "/helo" is 1 edit away from "/help" and further than the cutoff from
+    // every other primary. It replaced "/helo", which stopped being unambiguous
+    // once `/web` was registered -- two edits from "web" as well.
+    // (original note follows)
+    // "/helo" is 1 edit away from "/help" and > 2 from every other
     // primary. The TASK-AGS-804 formatter emits the single-match
-    // form verbatim: `Unknown command '/hel'. Did you mean '/help'?`
+    // form verbatim: `Unknown command '/helo'. Did you mean '/help'?`
     let registry = Arc::new(default_registry());
     let dispatcher = Dispatcher::new(registry);
     let (mut ctx, mut rx) = make_ctx();
 
-    let result = dispatcher.dispatch(&mut ctx, "/hel");
+    let result = dispatcher.dispatch(&mut ctx, "/helo");
     assert!(result.is_ok(), "unknown command must still return Ok");
 
     let ev = rx.try_recv().expect("error event must be emitted");
     match ev {
         TuiEvent::Error(msg) => {
             assert_eq!(
-                msg, "Unknown command '/hel'. Did you mean '/help'?",
+                msg, "Unknown command '/helo'. Did you mean '/help'?",
                 "single-match form must match the AGS-804 spec verbatim"
             );
         }

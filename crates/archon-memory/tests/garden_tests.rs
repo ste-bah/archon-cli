@@ -368,3 +368,90 @@ fn garden_overflow_prune_skips_rules() {
     let rules = graph.search_memories(&filter).expect("search rules");
     assert_eq!(rules.len(), 2, "both rules must survive overflow pruning");
 }
+
+// ── 8. garden_leaves_the_task_board_untouched ────────────────
+
+/// A board item must survive a full consolidation pass byte for byte.
+///
+/// This is the reason the board is its own relation rather than a `memory_type`
+/// with tags. Everything in `memories` is subject to the garden: importance
+/// decay, staleness pruning, overflow pruning, and merging. An item recording
+/// work that must happen cannot be allowed to fade because nobody read it for
+/// thirty days, and "remember not to add it to `PRUNEABLE_TYPES`" is a rule
+/// someone eventually forgets. A separate relation makes it structural.
+///
+/// The config below is deliberately destructive -- everything stale, everything
+/// decayed, one memory of headroom -- so the assertion is that the garden ran,
+/// did real damage, and still could not reach the board.
+#[test]
+fn garden_leaves_the_task_board_untouched() {
+    use archon_memory::board::{BoardItemKind, BoardStatus, NewBoardItem};
+
+    let graph = MemoryGraph::in_memory().expect("create in-memory graph");
+    let config = GardenConfig {
+        staleness_days: 0,
+        staleness_importance_floor: 100.0,
+        importance_decay_per_day: 100.0,
+        max_memories: 1,
+        dedup_similarity_threshold: 0.1,
+        ..make_config()
+    };
+
+    let item = graph
+        .create_board_item(&NewBoardItem {
+            id: None,
+            run_id: "run-garden".into(),
+            kind: BoardItemKind::Issue,
+            title: "bedrock has no interception seam".into(),
+            evidence: "crates/archon-core/src/providers/bedrock.rs:212".into(),
+            acceptance: "a seam exists and is covered by a test".into(),
+            raised_by: "agent-a".into(),
+        })
+        .expect("create board item");
+    assert!(
+        graph
+            .claim_board_item(&item.id, "agent-b")
+            .expect("claim board item")
+            .applied
+    );
+    let before = graph.get_board_item(&item.id).expect("read before");
+
+    for i in 1..=8 {
+        graph
+            .store_memory(
+                &format!("Disposable fact {i} about something nobody rereads"),
+                &format!("fact-{i}"),
+                MemoryType::Fact,
+                0.1,
+                &[format!("tag-{i}")],
+                "test",
+                "/test",
+            )
+            .expect("store fact");
+    }
+    let memories_before = graph.memory_count().expect("count before");
+
+    consolidate(&graph, &config).expect("consolidate");
+
+    assert!(
+        graph.memory_count().expect("count after") < memories_before,
+        "the fixture is wrong if this config left the memory relation intact -- \
+         the point is that the garden ran hard and still missed the board"
+    );
+
+    let after = graph.get_board_item(&item.id).expect("read after");
+    assert_eq!(
+        after, before,
+        "consolidation must not decay, prune, merge, or otherwise touch a board item"
+    );
+    assert_eq!(after.status, BoardStatus::Claimed);
+    assert_eq!(after.claimed_by.as_deref(), Some("agent-b"));
+    assert_eq!(
+        graph
+            .list_board_items_by_run("run-garden", &[])
+            .expect("list")
+            .len(),
+        1,
+        "the item must still be reachable through the run index"
+    );
+}

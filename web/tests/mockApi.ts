@@ -27,6 +27,19 @@ import {
 } from "./mockFixtures";
 import { graphEdges, graphNodes } from "./mockGraph";
 
+const liveStreamFrame = {
+  events: [
+    {
+      cursor: 8,
+      eventType: "web.live.stream",
+      summary: "Streamed event",
+      createdAtMs: 2,
+    },
+  ],
+  nextCursor: 9,
+  compacted: false,
+};
+
 export async function mockApi(page: Page) {
   const chatMessages: Array<Record<string, unknown>> = [];
   const responses: Record<string, unknown> = {
@@ -101,6 +114,26 @@ export async function mockApi(page: Page) {
       ],
       nextCursor: 8,
       compacted: false,
+    },
+    "/api/agents/live": {
+      agents: [
+        {
+          id: "8c0f2a10-0000-4000-8000-000000000001",
+          kind: "background",
+          label: "8c0f2a10-0000-4000-8000-000000000001",
+          status: "running",
+          elapsedMs: 42000,
+        },
+        {
+          id: "a1b2c3d4",
+          kind: "task",
+          label: "Index the corpus",
+          status: "running",
+          elapsedMs: 9000,
+        },
+      ],
+      observedAtMs: 1,
+      attached: true,
     },
     "/api/auth/session": {
       authenticated: true,
@@ -397,6 +430,16 @@ export async function mockApi(page: Page) {
     }
     if (url.pathname === "/api/chat/history") {
       await json(route, chatHistory(chatMessages));
+      return;
+    }
+    if (url.pathname === "/api/live/stream") {
+      // One frame then end-of-stream: enough for the feed to render, and the
+      // client's bounded reconnect handles the close.
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `event: live-snapshot\ndata: ${JSON.stringify(liveStreamFrame)}\n\n`,
+      });
       return;
     }
     if (url.pathname === "/api/corpus/source") {

@@ -9,11 +9,12 @@ use cozo::DbInstance;
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-use archon_memory::embedding::{self, EmbeddingProvider};
+use archon_memory::embedding::EmbeddingProvider;
 
 use crate::chunker::{Chunker, Language};
-use crate::index_storage::{FileStore, PreparedChunk, ReplaceFileOutcome};
-use crate::language;
+use crate::embedding_pass;
+use crate::index_storage::{FileState, FileStore, ReplaceFileOutcome, skip_if_contended};
+use crate::language::{self, configured_excludes, configured_includes};
 use crate::metadata::{CodeChunk, IndexConfig, IndexStats};
 
 /// Which embedding backend to use for indexing.
@@ -23,7 +24,10 @@ pub enum EmbeddingProviderKind {
     Local,
     /// OpenAI text-embedding-3-small (1536-dim).
     OpenAI,
-    /// Deterministic mock for testing (generates fixed-size zero vectors).
+    /// Deterministic mock for testing: each chunk hashes to its own point on
+    /// the unit sphere. Reproducible, and non-degenerate so HNSW construction
+    /// has something to prune on — but it encodes no semantics, so it cannot
+    /// support an assertion about search *relevance*.
     Mock,
 }
 
@@ -44,27 +48,6 @@ impl Default for EmbeddingConfig {
     }
 }
 
-/// A deterministic embedding provider that returns zero vectors.
-struct MockEmbeddingProvider {
-    dim: usize,
-}
-
-impl EmbeddingProvider for MockEmbeddingProvider {
-    fn embed(
-        &self,
-        texts: &[String],
-    ) -> std::result::Result<Vec<Vec<f32>>, archon_memory::types::MemoryError> {
-        Ok(texts.iter().map(|_| vec![0.0; self.dim]).collect())
-    }
-
-    fn dimensions(&self) -> usize {
-        self.dim
-    }
-}
-
-/// Maximum chunks per embedding batch.
-const EMBED_BATCH_SIZE: usize = 64;
-
 /// Files embedded and persisted per group before the next group starts.
 ///
 /// This is the resume granularity: a cancel loses at most this many files'
@@ -73,11 +56,30 @@ const EMBED_BATCH_SIZE: usize = 64;
 /// full `EMBED_BATCH_SIZE` batches within a group rather than short ones.
 const PERSIST_GROUP_FILES: usize = 32;
 
+/// One stale file the walk found, holding only what the walk already knew.
+///
+/// Deliberately no content and no chunks: the walk visits the whole repository
+/// before a single group is embedded, so anything stored here is multiplied by
+/// the file count. Chunks are materialised one group at a time in
+/// [`Indexer::chunk_group`] instead, which is what bounds peak memory by
+/// `PERSIST_GROUP_FILES` rather than by repository size.
 struct PendingFile {
     language_name: String,
+    path: PathBuf,
+}
+
+/// A pending file with its chunks, alive only for the group being embedded.
+///
+/// `file_hash` is recomputed here rather than carried from the walk so that the
+/// hash written to `file_states` always describes the same bytes the chunks
+/// came from. The walk's hash answered a different question -- "is the stored
+/// copy stale?" -- and a file edited between the walk and its group would
+/// otherwise be recorded under a hash it no longer has, and never re-indexed.
+pub(crate) struct ChunkedFile<'a> {
+    pending: &'a PendingFile,
     file_path: String,
     file_hash: String,
-    chunks: Vec<CodeChunk>,
+    pub(crate) chunks: Vec<CodeChunk>,
 }
 
 /// Repository and single-file indexing: walk, chunk, embed, store in CozoDB HNSW.
@@ -130,7 +132,7 @@ impl Indexer {
         config: EmbeddingConfig,
         grammar_dir: Option<PathBuf>,
     ) -> Result<Self> {
-        let embedder = create_embedder(&config)?;
+        let embedder = embedding_pass::create_embedder(&config)?;
         Ok(Self {
             db,
             guard,
@@ -174,11 +176,15 @@ impl Indexer {
         let mut stats = IndexStats::default();
         let mut pending = Vec::new();
         let exclude = configured_excludes(config);
+        let include = configured_includes(config);
 
         for entry in WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|entry| !language::is_excluded(entry.path(), &exclude))
+            // Relative to `root`, never the absolute path: the exclusions are
+            // component names, so an absolute path lets the directories the
+            // checkout happens to live under veto the whole walk.
+            .filter_entry(|entry| !language::is_excluded_under_root(entry.path(), root, &exclude))
         {
             if is_cancelled(cancel) {
                 return Ok(stats);
@@ -191,28 +197,35 @@ impl Indexer {
             let Some(language_name) = language::detect_language(path) else {
                 continue;
             };
-            if !is_code_language(&language_name) {
+            if !language::is_code_language(&language_name) {
                 continue;
             }
+            if !language::is_included(path.strip_prefix(root).unwrap_or(path), &include) {
+                continue;
+            }
+            // Reading here is not wasted work even though the content is
+            // dropped again: the staleness check is a content hash, so the
+            // bytes have to be in hand to decide whether this file belongs in
+            // the work-list at all. Only the chunks are deferred.
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
-            let file_path = path.to_string_lossy().into_owned();
-            let file_hash = sha256_hex(&content);
-            if self
+            match self
                 .file_store()
-                .file_hash_matches(&file_path, &file_hash)?
+                .file_state(path.to_string_lossy().as_ref(), &sha256_hex(&content))?
             {
-                continue;
+                FileState::Current => continue,
+                // Counted, not silently dropped: the store never answered for
+                // this file, so the pass cannot claim to have covered it.
+                FileState::Contended => {
+                    stats.skipped_files += 1;
+                    continue;
+                }
+                FileState::Stale => {}
             }
-            let chunks =
-                self.chunker
-                    .chunk_file(path, &content, str_to_chunker_language(&language_name));
             pending.push(PendingFile {
                 language_name,
-                file_path,
-                file_hash,
-                chunks,
+                path: path.to_path_buf(),
             });
         }
 
@@ -227,15 +240,21 @@ impl Indexer {
             "LEANN indexing started"
         );
 
-        // Embed and persist in groups rather than embedding the whole
-        // repository and only then writing any of it.
+        // Chunk, embed and persist in groups rather than doing any one of those
+        // phases across the whole repository before starting the next.
         //
-        // The previous shape embedded every file first, so a cancel during the
+        // An earlier shape embedded every file first, so a cancel during the
         // embedding pass returned having written nothing -- the entire pass was
         // discarded and the next run started from zero. On a large corpus that
         // is an unbounded amount of work you can never bank, and because
         // `file_hash_matches` skips already-stored files at the top of the
         // walk, persisting as we go is exactly what makes a re-run resume.
+        //
+        // Chunking stayed all-up-front through that change and kept the cost
+        // grouping was meant to remove: every chunk of every changed file, with
+        // its full source text, resident before the first embedding call. Doing
+        // it inside the group loop makes peak memory a function of
+        // `PERSIST_GROUP_FILES`, not of how big the repository is.
         //
         // Groups rather than single files so the embedder keeps a batch worth
         // of work per call; `EMBED_BATCH_SIZE` still governs the model batch.
@@ -248,7 +267,19 @@ impl Indexer {
                 );
                 return Ok(stats);
             }
-            let Some(prepared) = self.prepare_repository_files(group, cancel)? else {
+            let Some(chunked) = self.chunk_group(group, cancel) else {
+                tracing::info!(
+                    files_indexed = stats.total_files,
+                    chunks_indexed = stats.total_chunks,
+                    "LEANN indexing cancelled during chunking; progress so far is persisted"
+                );
+                return Ok(stats);
+            };
+            let Some(prepared) =
+                embedding_pass::prepare_repository_files(&self.embedder, &chunked, &|| {
+                    is_cancelled(cancel)
+                })?
+            else {
                 tracing::info!(
                     files_indexed = stats.total_files,
                     chunks_indexed = stats.total_chunks,
@@ -256,7 +287,7 @@ impl Indexer {
                 );
                 return Ok(stats);
             };
-            for (file, chunks) in group.iter().zip(prepared) {
+            for (file, chunks) in chunked.iter().zip(prepared) {
                 if is_cancelled(cancel) {
                     return Ok(stats);
                 }
@@ -265,7 +296,10 @@ impl Indexer {
                     &file.file_hash,
                     &chunks,
                     || is_cancelled(cancel),
-                )?;
+                );
+                let Some(outcome) = skip_if_contended(&file.file_path, outcome, &mut stats)? else {
+                    continue;
+                };
                 if matches!(outcome, ReplaceFileOutcome::Cancelled) {
                     return Ok(stats);
                 }
@@ -274,7 +308,7 @@ impl Indexer {
                     stats.total_chunks += chunks.len();
                     *stats
                         .languages
-                        .entry(file.language_name.clone())
+                        .entry(file.pending.language_name.clone())
                         .or_insert(0) += 1;
                 }
             }
@@ -286,6 +320,16 @@ impl Indexer {
                 "LEANN indexing progress"
             );
         }
+        // Skips are reported here as well as warned about per file: a pass that
+        // lost four hundred files to a peer and still returned `Ok` otherwise
+        // looks exactly like a complete one, and the difference is a search
+        // corpus with holes in it.
+        tracing::info!(
+            files_indexed = stats.total_files,
+            chunks_indexed = stats.total_chunks,
+            skipped = stats.skipped_files,
+            "LEANN indexing finished"
+        );
         Ok(stats)
     }
 
@@ -315,11 +359,12 @@ impl Indexer {
     ) -> Result<Option<usize>> {
         let file_path = path.to_string_lossy();
         let file_hash = sha256_hex(content);
-        if self
-            .file_store()
-            .file_hash_matches(&file_path, &file_hash)?
-        {
-            return Ok(Some(0));
+        match self.file_store().file_state(&file_path, &file_hash)? {
+            FileState::Current => return Ok(Some(0)),
+            // Nothing was written, so the caller's next attempt still sees the
+            // file as stale. `None` is the existing "did no work" answer.
+            FileState::Contended => return Ok(None),
+            FileState::Stale => {}
         }
         self.prepare_and_commit(path, content, language_name, &file_path, &file_hash, cancel)
     }
@@ -339,7 +384,9 @@ impl Indexer {
         let chunks = self
             .chunker
             .chunk_file(path, content, str_to_chunker_language(language_name));
-        let Some(prepared) = self.prepare_chunks(chunks, cancel)? else {
+        let Some(prepared) =
+            embedding_pass::prepare_chunks(&self.embedder, chunks, &|| cancelled(cancel))?
+        else {
             return Ok(None);
         };
         if cancelled(cancel) {
@@ -347,122 +394,48 @@ impl Indexer {
         }
         let outcome =
             self.file_store()
-                .replace_file_with_cancel(file_path, file_hash, &prepared, || cancelled(cancel))?;
-        match outcome {
-            ReplaceFileOutcome::Committed => Ok(Some(prepared.len())),
-            ReplaceFileOutcome::Cancelled => Ok(None),
+                .replace_file_with_cancel(file_path, file_hash, &prepared, || cancelled(cancel));
+        // Single-file indexing has no walk to protect, but it shares the rule:
+        // a contended file is left stale for the next attempt rather than
+        // raised as a failure the caller cannot act on.
+        let mut ignored = IndexStats::default();
+        match skip_if_contended(file_path, outcome, &mut ignored)? {
+            Some(ReplaceFileOutcome::Committed) => Ok(Some(prepared.len())),
+            Some(ReplaceFileOutcome::Cancelled) | None => Ok(None),
         }
     }
 
-    fn prepare_repository_files(
+    /// Read and chunk one group's files. `None` means cancelled.
+    ///
+    /// A file that has vanished or become unreadable since the walk is dropped
+    /// from the group rather than failing the run: the walk's snapshot is
+    /// advisory by the time we get here, and a deleted file is not an error the
+    /// caller can do anything about.
+    fn chunk_group<'a>(
         &self,
-        files: &[PendingFile],
+        group: &'a [PendingFile],
         cancel: &AtomicBool,
-    ) -> Result<Option<Vec<Vec<PreparedChunk>>>> {
-        let mut prepared = files
-            .iter()
-            .map(|file| Vec::with_capacity(file.chunks.len()))
-            .collect::<Vec<_>>();
-        let mut batch = Vec::with_capacity(EMBED_BATCH_SIZE);
-
-        for (file_index, file) in files.iter().enumerate() {
-            for chunk in &file.chunks {
-                if is_cancelled(cancel) {
-                    return Ok(None);
-                }
-                batch.push((file_index, chunk));
-                if batch.len() == EMBED_BATCH_SIZE
-                    && self
-                        .embed_repository_batch(&mut prepared, &mut batch, cancel)?
-                        .is_none()
-                {
-                    return Ok(None);
-                }
+    ) -> Option<Vec<ChunkedFile<'a>>> {
+        let mut chunked = Vec::with_capacity(group.len());
+        for pending in group {
+            if is_cancelled(cancel) {
+                return None;
             }
-        }
-        if !batch.is_empty()
-            && self
-                .embed_repository_batch(&mut prepared, &mut batch, cancel)?
-                .is_none()
-        {
-            return Ok(None);
-        }
-        Ok(Some(prepared))
-    }
-
-    fn embed_repository_batch(
-        &self,
-        prepared: &mut [Vec<PreparedChunk>],
-        batch: &mut Vec<(usize, &CodeChunk)>,
-        cancel: &AtomicBool,
-    ) -> Result<Option<()>> {
-        if is_cancelled(cancel) {
-            return Ok(None);
-        }
-        let texts = batch
-            .iter()
-            .map(|(_, chunk)| chunk.metadata.chunk_content.clone())
-            .collect::<Vec<_>>();
-        let embeddings = self
-            .embedder
-            .embed(&texts)
-            .map_err(|error| anyhow::anyhow!("embedding failed: {error}"))?;
-        if embeddings.len() != batch.len() {
-            anyhow::bail!(
-                "embedding count mismatch: got {} for {} chunks",
-                embeddings.len(),
-                batch.len()
-            );
-        }
-        if is_cancelled(cancel) {
-            return Ok(None);
-        }
-        for ((file_index, chunk), embedding) in batch.drain(..).zip(embeddings) {
-            prepared[file_index].push(PreparedChunk {
-                chunk: chunk.clone(),
-                embedding,
+            let Ok(content) = std::fs::read_to_string(&pending.path) else {
+                continue;
+            };
+            chunked.push(ChunkedFile {
+                file_path: pending.path.to_string_lossy().into_owned(),
+                file_hash: sha256_hex(&content),
+                chunks: self.chunker.chunk_file(
+                    &pending.path,
+                    &content,
+                    str_to_chunker_language(&pending.language_name),
+                ),
+                pending,
             });
         }
-        Ok(Some(()))
-    }
-
-    fn prepare_chunks(
-        &self,
-        chunks: Vec<CodeChunk>,
-        cancel: Option<&AtomicBool>,
-    ) -> Result<Option<Vec<PreparedChunk>>> {
-        let mut prepared = Vec::with_capacity(chunks.len());
-        for batch in chunks.chunks(EMBED_BATCH_SIZE) {
-            if cancelled(cancel) {
-                return Ok(None);
-            }
-            let texts = batch
-                .iter()
-                .map(|chunk| chunk.metadata.chunk_content.clone())
-                .collect::<Vec<_>>();
-            let embeddings = self
-                .embedder
-                .embed(&texts)
-                .map_err(|error| anyhow::anyhow!("embedding failed: {error}"))?;
-            if embeddings.len() != batch.len() {
-                anyhow::bail!(
-                    "embedding count mismatch: got {} for {} chunks",
-                    embeddings.len(),
-                    batch.len()
-                );
-            }
-            if cancelled(cancel) {
-                return Ok(None);
-            }
-            prepared.extend(
-                batch
-                    .iter()
-                    .cloned()
-                    .zip(embeddings)
-                    .map(|(chunk, embedding)| PreparedChunk { chunk, embedding }),
-            );
-        }
-        Ok(Some(prepared))
+        Some(chunked)
     }
 
     fn file_store(&self) -> FileStore<'_> {
@@ -473,46 +446,6 @@ impl Indexer {
     fn remove_file_chunks(&self, file_path: &str) -> Result<()> {
         self.file_store().remove_file_chunks(file_path)
     }
-}
-
-fn create_embedder(config: &EmbeddingConfig) -> Result<Arc<dyn EmbeddingProvider>> {
-    match config.provider {
-        EmbeddingProviderKind::Mock => Ok(Arc::new(MockEmbeddingProvider {
-            dim: config.dimension,
-        })),
-        EmbeddingProviderKind::Local => embedding::create_provider(&embedding::EmbeddingConfig {
-            provider: embedding::EmbeddingProviderKind::Local,
-            ..Default::default()
-        })
-        .context("failed to create local embedding provider"),
-        EmbeddingProviderKind::OpenAI => embedding::create_provider(&embedding::EmbeddingConfig {
-            provider: embedding::EmbeddingProviderKind::OpenAI,
-            ..Default::default()
-        })
-        .context("failed to create OpenAI embedding provider"),
-    }
-}
-
-/// Caller patterns EXTEND the defaults; they do not replace them.
-///
-/// Replacing was a footgun with no upside: a caller naming three directories it
-/// cared about silently lost the other nine the defaults cover -- `.venv`,
-/// `dist`, `build`, `__pycache__`, `site-packages`, `.archon` and friends --
-/// and nothing reported the loss. Nobody passing `target` means "and please
-/// start indexing my virtualenv".
-///
-/// A caller that genuinely wants to index a defaulted directory can still do
-/// so, but it has to be a deliberate change here rather than a side effect of
-/// naming something unrelated.
-fn configured_excludes(config: &IndexConfig) -> Vec<String> {
-    let mut excludes = language::default_exclude_patterns();
-    for pattern in &config.exclude_patterns {
-        let normalized = language::normalize_exclude_pattern(pattern).to_string();
-        if !normalized.is_empty() && !excludes.contains(&normalized) {
-            excludes.push(normalized);
-        }
-    }
-    excludes
 }
 
 /// Compute SHA-256 hash of content as hex string.
@@ -531,40 +464,6 @@ fn str_to_chunker_language(language: &str) -> Language {
         "go" => Language::Go,
         _ => Language::Unknown,
     }
-}
-
-fn is_code_language(language: &str) -> bool {
-    matches!(
-        language,
-        "rust"
-            | "python"
-            | "typescript"
-            | "typescriptreact"
-            | "javascript"
-            | "javascriptreact"
-            | "go"
-            | "java"
-            | "c"
-            | "cpp"
-            | "ruby"
-            | "php"
-            | "swift"
-            | "kotlin"
-            | "scala"
-            | "csharp"
-            | "lua"
-            | "shell"
-            | "r"
-            | "dart"
-            | "elixir"
-            | "erlang"
-            | "haskell"
-            | "ocaml"
-            | "perl"
-            | "zig"
-            | "nim"
-            | "v"
-    )
 }
 
 fn cancelled(cancel: Option<&AtomicBool>) -> bool {

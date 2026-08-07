@@ -213,6 +213,27 @@ merged, because nothing at that distance can be distinguished from two genuinely
 different claims about the same subject. That is deliberate; see
 [consolidation bands](../architecture/learning-systems.md#consolidation-bands-not-a-threshold).
 
+### Consolidation reports `semantic_merged=0`, or the splash says the semantic pass is unavailable
+
+CozoDB admits one writer, so the first archon process to start owns the memory
+database and every process after it is a client over TCP. Before v1.6.0 the
+client had no vector-neighbour request to make, so a second instance skipped the
+semantic pass entirely and reported zero merges — indistinguishable from a pass
+that ran and found nothing.
+
+Two things changed. The report now carries the distinction, and the end-of-session
+splash says `semantic pass unavailable (second instance)` when it applies, so a
+zero is never ambiguous again. And as of v1.6.0 the request exists, so a second
+instance gets real results over the socket rather than skipping the pass.
+
+If you see the "unavailable" line on current versions, the second process could
+not reach the first one's server. Check that the memory server is up and that
+`memory.port` under the data directory points at a live process.
+
+If the pass runs and still merges nothing, the cause is one of the two in
+[Memory garden runs but merges nothing](#memory-garden-runs-but-merges-nothing)
+above, not this.
+
 ### A memory disappeared from recall but still exists
 
 Consolidation marks superseded memories rather than deleting them. They are

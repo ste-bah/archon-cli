@@ -26,6 +26,130 @@ export type WebLiveSnapshot = { events: Array<WebLiveEvent>, nextCursor: number,
 
 export type WebLiveCursorExpired = { cursorExpired: boolean, oldestAvailableCursor: number, recovery: string, };
 
+export type WebAgentActivity = { id: string, 
+/**
+ * Which registry this came from: `background` or `task`.
+ */
+kind: string, 
+/**
+ * Human label — the task description, or the runtime subagent id for
+ * background agents, whose registry carries no description. Pipeline
+ * agents read as `{session}-{ordinal}-{agent}`, which is legible; the
+ * other spawn paths mint UUIDs, which are not.
+ */
+label: string, status: string, elapsedMs: number, };
+
+export type WebAgentActivitySnapshot = { agents: Array<WebAgentActivity>, observedAtMs: number, 
+/**
+ * `false` when the server was started standalone, where both registries
+ * are empty by construction rather than because nothing is running.
+ */
+attached: boolean, };
+
+export type WebBoardRunList = { 
+/**
+ * Most recently touched first.
+ */
+runs: Array<WebBoardRun>, 
+/**
+ * `false` when there is no memory database yet, which is a different
+ * answer from a database holding an empty board and reads differently in
+ * the UI.
+ */
+storeAvailable: boolean, observedAtMs: number, };
+
+export type WebBoardRun = { runId: string, total: number, 
+/**
+ * Per-status counts, only for statuses the run actually has items in.
+ */
+counts: Array<WebBoardStatusCount>, 
+/**
+ * RFC 3339. The newest `updated_at` in the run, and the sort key.
+ */
+lastUpdatedAt: string, };
+
+export type WebBoardStatusCount = { status: string, count: number, };
+
+export type WebBoardItems = { runId: string, 
+/**
+ * Oldest first — the board is a queue, and the item raised first has been
+ * waiting longest.
+ */
+items: Array<WebBoardItem>, 
+/**
+ * The statuses that were filtered on, empty when all were requested.
+ */
+statuses: Array<string>, storeAvailable: boolean, observedAtMs: number, };
+
+export type WebBoardItem = { id: string, runId: string, 
+/**
+ * `issue` or `note`.
+ */
+kind: string, status: string, title: string, 
+/**
+ * File references and what was observed. Required at the store, so never
+ * empty on an item that exists.
+ */
+evidence: string, 
+/**
+ * What "done" means for this item.
+ */
+acceptance: string, raisedBy: string, 
+/**
+ * The agent currently holding the item, `null` when unclaimed.
+ */
+claimedBy: string | null, 
+/**
+ * Attempt counter, 0-based.
+ */
+round: number, createdAt: string, updatedAt: string, 
+/**
+ * Why the item was declined. Non-null only on a declined item, and the
+ * store refuses to record a decline without one.
+ */
+declineReason: string | null, };
+
+export type WebBoardHistory = { itemId: string, 
+/**
+ * Oldest first. Empty for an item that has never transitioned — claims and
+ * releases are not recorded, only decisions about the work.
+ */
+events: Array<WebBoardEvent>, storeAvailable: boolean, };
+
+export type WebBoardEvent = { itemId: string, 
+/**
+ * Per-item, 0-based.
+ */
+seq: number, at: string, fromStatus: string, toStatus: string, round: number, 
+/**
+ * Who held the item at the time, `null` when nobody did.
+ */
+actor: string | null, 
+/**
+ * What the transition recorded. Required for a decline, empty otherwise.
+ */
+note: string, };
+
+export type WebBoardActivity = { runId: string, 
+/**
+ * Newest first — the opposite of `WebBoardHistory`, which is one item's
+ * ladder read from the bottom. A feed is read from the top.
+ */
+events: Array<WebBoardEvent>, 
+/**
+ * The server-side cap, never exceeded by `events`.
+ */
+limit: number, 
+/**
+ * `true` when older transitions exist beyond `events`.
+ */
+truncated: boolean, 
+/**
+ * `false` when there is no memory database yet — a different answer from a
+ * database whose board has no history, and read differently in the UI.
+ */
+storeAvailable: boolean, observedAtMs: number, };
+
 export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
 
 export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };
@@ -144,6 +268,8 @@ export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: strin
 export type WorkflowApprovalView = { workflowHash: string, projectRoot: string, workflowName: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, externalRequirements: Array<string>, costWarning: string, rawScriptPath: string, compiledSpecPath: string, decision: string | null, decidedAt: string | null, decidedBy: string | null, };
 
 export type WorkflowAgentView = { stageId: string, itemId: string, status: string, promptPath: string | null, inputHash: string | null, promptHash: string | null, promptCreatedAt: string | null, provider: string | null, model: string | null, tokensIn: number, tokensOut: number, costUsd: number, artifactId: string | null, artifactPath: string | null, resultPreview: string | null, error: string | null, recentPublicToolCalls: Array<WorkflowToolCallPreview>, outputPath: string, };
+
+export type WorkflowToolCallPreview = { toolName: string, inputPreview: string | null, outputPreview: string | null, };
 
 export type WorkflowV2ResultView = { callId: string, status: string, summary: string, resultPath: string, artifactCount: number, branchCount: number, };
 

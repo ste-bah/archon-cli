@@ -129,6 +129,62 @@ fn blocking_write_lock_queues_behind_a_long_guarded_critical_section() {
     holder.join().unwrap();
 }
 
+/// `write_lock_wait` is what stops a batch writer starving. Issue #140.
+///
+/// The default acquire samples the lock once per retry attempt and sleeps the
+/// backoff in between, so against a peer that takes the lock back to back --
+/// which is exactly what indexing a repository does, once per file -- the loser
+/// almost never lands in a gap. Here the holder releases after 150ms, well
+/// inside the first 100ms-then-200ms backoff pair, and the two modes have to
+/// come out differently: fail-fast sees `unavailable` on its single sample,
+/// queueing polls at 1-25ms and gets in.
+#[test]
+fn a_waiting_guard_queues_where_a_fail_fast_guard_would_not() {
+    let temp = tempfile::tempdir().unwrap();
+    let lock_path = temp.path().join("queueing.lock");
+    let config = CozoGuardConfig::default()
+        .with_write_lock_path(&lock_path)
+        .with_write_lock_wait(Duration::from_secs(10));
+    let acquired = Arc::new(std::sync::Barrier::new(2));
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let holder_acquired = Arc::clone(&acquired);
+    let holder_released = Arc::clone(&released);
+    let holder_path = lock_path.clone();
+
+    // A raw hold, outside this crate's thread-local bookkeeping, so the waiter
+    // cannot mistake it for a lock it already owns.
+    let holder = std::thread::spawn(move || {
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&holder_path)
+            .unwrap();
+        let mut lock = fd_lock::RwLock::new(file);
+        let guard = lock.try_write().unwrap();
+        holder_acquired.wait();
+        std::thread::sleep(Duration::from_millis(150));
+        holder_released.store(true, std::sync::atomic::Ordering::SeqCst);
+        drop(guard);
+    });
+
+    acquired.wait();
+    let ran = run_guarded(
+        "queueing writer",
+        ScriptMutability::Mutable,
+        &config,
+        || Ok(released.load(std::sync::atomic::Ordering::SeqCst)),
+    )
+    .unwrap();
+
+    assert!(
+        ran,
+        "the queueing acquire returned while the holder still had the lock"
+    );
+    holder.join().unwrap();
+}
+
 #[test]
 fn blocking_write_lock_reports_a_stuck_holder_instead_of_hanging() {
     let temp = tempfile::tempdir().unwrap();

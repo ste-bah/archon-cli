@@ -27,6 +27,14 @@ tests/fixtures/agents/generated/** linguist-generated=true
 # grandfathered files as fresh offenders on Windows while Linux CI passes.
 scripts/check-file-sizes.allowlist text eol=lf
 
+# The banned-imports guard reads these as ERE regexes and as exact allowlist
+# lines. A CRLF checkout appends  to every pattern, which under WSL grep
+# becomes part of the expression and matches essentially every line -- 30228
+# hits against prose in a README. Git Bash tolerates it, so the failure only
+# shows up on one of the two shells a Windows dev might use.
+scripts/check-banned-imports.patterns text eol=lf
+scripts/check-banned-imports.allowlist text eol=lf
+
 # Golden-file fixtures are compared byte-for-byte, or parsed on literal "\n\n"
 # block boundaries, so their line endings must not vary by platform. Without
 # this they fail on a Windows checkout purely on \r\n while passing on macOS

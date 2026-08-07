@@ -1,0 +1,104 @@
+/* Task Board — the run-wide activity feed under the board.
+   The transition chips reuse `.bchip` from `board-card.css` and the status hues
+   from `board.css`. */
+
+/* ── recent activity ────────────────────────────────────────── */
+
+.bactivity {
+  /* The table scrolls inside its own box for the same reason the strip does. */
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--board-recess);
+  scrollbar-width: thin;
+}
+
+.bactivity table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.bactivity th {
+  position: sticky;
+  top: 0;
+  padding: 10px 14px;
+  color: var(--subtle);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.bactivity td {
+  padding: 10px 14px;
+  color: var(--muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  vertical-align: top;
+}
+
+.bactivity tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.bactivity tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.bactivity__item {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* The same prefix printed on every card, so a row here is traceable to a card
+   up there even when a status filter has hidden the card itself. */
+.bactivity td small {
+  color: var(--subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
+.bactivity__move {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--subtle);
+}
+
+.bactivity__note {
+  max-width: 34ch;
+  overflow-wrap: anywhere;
+}
+
+.bactivity__when {
+  white-space: nowrap;
+}
+
+.bactivity__none {
+  color: var(--subtle);
+  opacity: 0.7;
+}
+
+.bactivity__empty {
+  margin: 0;
+  padding: 26px 20px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--board-recess);
+}
+
+.bactivity__truncated {
+  margin: 10px 0 0;
+  color: var(--subtle);
+  font-size: 11px;
+}

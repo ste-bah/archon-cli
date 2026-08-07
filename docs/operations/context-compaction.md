@@ -53,7 +53,7 @@ command = "scripts/log-pre-compact.sh"
 command = "scripts/save-summary.sh"
 ```
 
-See [Hooks](../integrations/hooks.md) for the full event list.
+See [Hooks](../reference/hooks.md) for the full event list.
 
 ## What gets preserved
 
@@ -104,4 +104,4 @@ Shows:
 
 - [Cost, effort, fast mode](cost-effort.md) — tuning per-turn token use
 - [Configuration](../reference/config.md) — `[context]` section
-- [Hooks](../integrations/hooks.md) — `pre_compact` / `post_compact` events
+- [Hooks](../reference/hooks.md) — `pre_compact` / `post_compact` events

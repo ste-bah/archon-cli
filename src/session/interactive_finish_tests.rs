@@ -11,6 +11,7 @@ fn report() -> archon_memory::garden::GardenReport {
         total_memories_after: 10,
         duration_ms: 5,
         review_pairs: Vec::new(),
+        semantic_pass_unavailable: false,
     }
 }
 
@@ -89,6 +90,26 @@ fn pending_review_pairs_are_surfaced() {
         summary, "1 pair(s) awaiting review",
         "the panel entry is prefixed with \"Memory garden:\" by the splash builder,          so the summary itself must be the bare description"
     );
+}
+
+/// A pass that never ran is surfaced, even though it changed nothing.
+///
+/// This is the state every Archon process but the first is in: CozoDB admits
+/// one writer, so the rest read memory over TCP. Reported as an absence rather
+/// than a count, because the counts it would otherwise show are zeroes it never
+/// measured.
+#[test]
+fn an_unavailable_semantic_pass_is_surfaced() {
+    let unavailable = archon_memory::garden::GardenReport {
+        semantic_pass_unavailable: true,
+        ..report()
+    };
+    let summary = super::auto_consolidation_summary(&unavailable).expect("summary");
+    assert_eq!(summary, "semantic pass unavailable (second instance)");
+    // The splash column truncates past roughly fifty characters, and a notice
+    // clipped to "semantic pass unavailable (second inst..." says less than
+    // nothing.
+    assert!(summary.len() <= 50, "summary must fit the splash column");
 }
 
 #[tokio::test]

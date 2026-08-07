@@ -77,7 +77,8 @@ pub(crate) async fn learning_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    authed_json(&state, &headers, learning_summary(&state.paths))
+    let summary = learning_summary(&state.paths, state.handles.memory.as_deref());
+    authed_json(&state, &headers, summary)
 }
 
 pub(crate) async fn settings_handler(
@@ -94,7 +95,10 @@ fn authed_json<T: Serialize>(state: &AppState, headers: &HeaderMap, value: T) ->
     (StatusCode::OK, Json(value)).into_response()
 }
 
-fn learning_summary(paths: &WebRuntimePaths) -> LearningSummary {
+fn learning_summary(
+    paths: &WebRuntimePaths,
+    memory: Option<&dyn archon_memory::MemoryTrait>,
+) -> LearningSummary {
     let sessions = paths.session_activity_root.clone();
     let recent_sessions = recent_dir_names(&sessions, 12);
     LearningSummary {
@@ -112,7 +116,7 @@ fn learning_summary(paths: &WebRuntimePaths) -> LearningSummary {
             probe("reasoning quality", paths.reasoning_quality_root.clone()),
         ],
         signals: learning_signals(paths),
-        memories: memory_rows(&paths.memory_db, 8),
+        memories: memory_rows(&paths.memory_db, 8, memory),
         learning_events: ledger_rows(&paths.archon_home.join("learning"), "learning_event", 8),
         proposals: proposal_rows(&paths.archon_home, 8),
         trust_deltas: trust_rows(&paths.archon_home, 8),
@@ -173,7 +177,32 @@ fn signal(label: &str, kind: &str, path: PathBuf) -> LearningSignalItem {
     }
 }
 
-fn memory_rows(memory_db: &Path, limit: usize) -> Vec<LearningRowPreview> {
+fn memory_rows(
+    memory_db: &Path,
+    limit: usize,
+    memory: Option<&dyn archon_memory::MemoryTrait>,
+) -> Vec<LearningRowPreview> {
+    // Attached mode hands us the store the session already has open; opening a
+    // second sqlite connection to the same file per request is what standalone
+    // mode has to do, not what it should do when a handle is available.
+    if let Some(memory) = memory {
+        return memory
+            .list_recent(limit)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| LearningRowPreview {
+                label: if row.title.is_empty() {
+                    row.id.clone()
+                } else {
+                    row.title.clone()
+                },
+                kind: row.memory_type.to_string(),
+                status: "recorded".into(),
+                detail: row.content.chars().take(180).collect(),
+                path: display_path(memory_db),
+            })
+            .collect();
+    }
     if !memory_db.exists() {
         return Vec::new();
     }

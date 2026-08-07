@@ -72,6 +72,10 @@ pub struct EmbeddingConfig {
     /// Model name for the openai provider. `None` means text-embedding-3-small.
     /// The ARCHON_MEMORY_EMBEDDING_MODEL environment variable takes precedence.
     pub model: Option<String>,
+    /// Intra-op threads for the local provider's ONNX session. `None` takes the
+    /// default cap; the value is process-wide and fixed by the first provider
+    /// built, since memory and the LEANN index share one session.
+    pub intra_threads: Option<usize>,
 }
 
 impl Default for EmbeddingConfig {
@@ -81,6 +85,7 @@ impl Default for EmbeddingConfig {
             hybrid_alpha: 0.3,
             base_url: None,
             model: None,
+            intra_threads: None,
         }
     }
 }
@@ -136,14 +141,22 @@ pub fn create_provider(
                     }
                 }
             }
-            let provider = local::LocalEmbedding::new()?;
-            Ok(Arc::new(provider))
+            local_provider(config)
         }
-        EmbeddingProviderKind::Local => {
-            let provider = local::LocalEmbedding::new()?;
-            Ok(Arc::new(provider))
-        }
+        EmbeddingProviderKind::Local => local_provider(config),
     }
+}
+
+/// The process-wide local embedder, applying `config`'s thread cap if this is
+/// the first caller to express one.
+///
+/// Every local consumer routes through here -- memory and the LEANN code index
+/// alike -- so they share one ONNX session rather than loading BGE-base twice.
+fn local_provider(config: &EmbeddingConfig) -> Result<Arc<dyn EmbeddingProvider>, MemoryError> {
+    let intra_threads = local::configure_intra_threads(config.intra_threads);
+    let provider = local::shared()?;
+    tracing::debug!(intra_threads, "using the shared local embedding session");
+    Ok(provider)
 }
 
 /// Endpoint/model for the openai provider: environment wins, config falls back.

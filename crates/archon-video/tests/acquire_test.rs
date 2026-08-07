@@ -1,3 +1,5 @@
+// Used only by the `cfg(unix)` script writer below. See #136.
+#[cfg(unix)]
 use std::io::Write;
 
 use archon_policy::EffectivePolicy;
@@ -180,6 +182,9 @@ printf '%s\n' '{}'
     assert!(args.contains("-f best[height<=720][ext=mp4]/best[height<=720]"));
 }
 
+// Called only from `cfg(unix)` tests -- the script it writes is a shell
+// script. Dead on Windows, where `-D warnings` is a hard error. See #136.
+#[cfg(unix)]
 fn write_script(path: &std::path::Path, body: &str) {
     let mut file = std::fs::File::create(path).unwrap();
     file.write_all(body.as_bytes()).unwrap();

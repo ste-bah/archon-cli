@@ -242,7 +242,10 @@ impl CommandHandler for LoginHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    // `Mutex` guards only the `cfg(unix)` env-mutating tests. See #136.
+    use std::sync::Arc;
+    #[cfg(unix)]
+    use std::sync::Mutex;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::{CommandContext, RegistryBuilder};
@@ -253,16 +256,20 @@ mod tests {
     /// `Mutex<()>` suffices — poisoning is tolerated (tests inside
     /// `.lock()` may panic; the next test recovers). Mirrors the
     /// AGS-815 / B20 env-mutation serialisation pattern.
+    // Used only by `cfg(unix)` tests in this module. See #136.
+    #[cfg(unix)]
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// RAII guard that overrides an env var for the lifetime of a
     /// single test body and restores the prior value on drop.
     /// Not re-entrant. Acquire `ENV_LOCK` FIRST.
+    #[cfg(unix)]
     struct EnvGuard {
         key: &'static str,
         prev: Option<std::ffi::OsString>,
     }
 
+    #[cfg(unix)]
     impl EnvGuard {
         fn set(key: &'static str, value: &std::path::Path) -> Self {
             let prev = std::env::var_os(key);
@@ -278,6 +285,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             // SAFETY: same discipline as `EnvGuard::set` — ENV_LOCK is
