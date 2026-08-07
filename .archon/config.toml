@@ -785,6 +785,19 @@ max_checkpoints = 10
 
 
 # ----------------------------------------------------------------------------
+# [code_index] — Semantic code index (LEANN)
+# ----------------------------------------------------------------------------
+[code_index]
+# Build the repository index in the background at session start. Default OFF:
+# the build embeds every source file through a CPU-resident ONNX model that
+# claims one thread per logical core — measured at ~17 CPU-hours on a
+# 3,200-file repository, running even when nothing has asked for code context.
+# It resumes across runs, so a few sessions with this on will finish it. The
+# index is opened either way, so search works against whatever is stored.
+index_on_startup = false
+
+
+# ----------------------------------------------------------------------------
 # [tui] — Terminal UI
 # ----------------------------------------------------------------------------
 [tui]

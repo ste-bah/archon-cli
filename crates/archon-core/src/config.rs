@@ -62,6 +62,9 @@ pub struct ArchonConfig {
     pub logging: LoggingConfig,
     pub session: SessionConfig,
     pub checkpoint: CheckpointConfig,
+    /// Repository code index (LEANN).
+    #[serde(default)]
+    pub code_index: CodeIndexConfig,
     pub personality: archon_consciousness::personality::PersonalityProfile,
     pub consciousness: ConsciousnessConfig,
     pub tui: TuiConfig,

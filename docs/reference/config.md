@@ -49,6 +49,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[logging]`](#logging) — log rotation
 - [`[session]`](#session) — session persistence
 - [`[checkpoint]`](#checkpoint) — file snapshots
+- [`[code_index]`](#code_index) — repository code index
 - [`[tui]`](#tui) — terminal UI
 - [`[update]`](#update) — self-update channel
 - [`[remote]` / `[remote.ssh]`](#remote) — SSH remote agent
@@ -1231,6 +1232,22 @@ max_checkpoints = 10
 |---|---|---|
 | `enabled` | `true` | Snapshot every file the agent modifies, keyed by turn number. Enables `/restore`, `/rewind`, `/undo`. |
 | `max_checkpoints` | `10` | Per-file checkpoint retention. After 10, oldest is rotated. Raise for long sessions where you need deeper undo history. |
+
+---
+
+## `[code_index]`
+
+Semantic code index (LEANN) over the working directory, read by `/code`, the
+code-search tool, and the coding/research pipelines.
+
+```toml
+[code_index]
+index_on_startup = false
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `index_on_startup` | `false` | Build the index in the background when a session starts. **Default OFF.** The build embeds every source file through a CPU-resident BGE-base ONNX model that claims one thread per logical core: measured on a ~3,200-file Rust repository it is roughly seventeen CPU-hours — 12 to 20 of 32 cores for over an hour — and it runs whether or not anything asks for code context, including on an `archon web` with no client connected. It resumes across runs, so enabling it for a few sessions is enough to build the index once; two instances indexing the same repository at once will contend on `.archon/leann.db` and stall each other. The index is opened either way, so search keeps working against whatever is already stored. |
 
 ---
 

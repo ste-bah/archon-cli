@@ -32,6 +32,7 @@ mod interactive_learning_init;
 mod interactive_learning_init_tests;
 mod interactive_setup;
 mod interactive_ui;
+mod leann_startup;
 mod model_selection;
 mod modes;
 mod pipeline_adapter;

@@ -82,6 +82,26 @@ impl Default for CheckpointConfig {
     }
 }
 
+/// Repository code-index (LEANN) configuration.
+///
+/// `Default` is derived rather than written out: every field's correct default
+/// is its type's, and an explicit `impl` here would only restate `false`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeIndexConfig {
+    /// Build the repository code index in the background when a session starts.
+    ///
+    /// Default `false`, and deliberately so: the build embeds every code file
+    /// in the working directory through a CPU-resident BGE-base ONNX model
+    /// whose runtime claims one intra-op thread per logical core. Measured on
+    /// this repository it is ~3,200 files / ~25,000 chunks and roughly
+    /// seventeen CPU-hours — 12 to 20 of 32 cores for over an hour — on an
+    /// `archon web` that had never served a request. That is not a cost a
+    /// session may assume; the index handle is opened either way, so search
+    /// and the code pipelines keep working against whatever is already stored.
+    pub index_on_startup: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ConsciousnessConfig {
