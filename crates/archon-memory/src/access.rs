@@ -17,9 +17,12 @@ use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, Store
 
 mod board_impl;
 mod client_impl;
+mod configured;
 #[cfg(test)]
 mod tests;
 mod trait_impl;
+
+pub use configured::{EmbeddingSetup, MemoryOpenSpec, OpenedMemory, open_configured_memory};
 
 // ── MemoryAccess enum ──────────────────────────────────────────
 

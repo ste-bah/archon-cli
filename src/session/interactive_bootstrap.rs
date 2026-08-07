@@ -67,42 +67,23 @@ pub(super) async fn prepare(
             .map_err(|e| anyhow::anyhow!("failed to open session store: {e}"))?,
     );
 
-    let (memory_data_dir, memory_db_path) =
-        archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
-    let memory_access = archon_memory::open_memory_with_db_path(&memory_data_dir, &memory_db_path)
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!(
+    // Resolve, open through the election, attach the embedding provider — one
+    // body, shared with the other three entry points since #146
+    // (`archon_memory::open_configured_memory`). The TUI is the one caller that
+    // cannot degrade: `Bootstrap::memory` is what the rules engine, the
+    // injector and the memory tools are all built from, so a store that will not
+    // open is a session that cannot be assembled and must say so here.
+    let spec = config.memory.open_spec();
+    let memory_access = match archon_memory::open_configured_memory(&spec).await {
+        Ok(opened) => opened.access,
+        Err(e) => {
+            let (_, db_path) = spec.resolve_paths();
+            return Err(anyhow::anyhow!(
                 "failed to open persistent memory at {}: {e}",
-                memory_db_path.display()
-            )
-        })?;
-    if let Some(graph) = memory_access.graph() {
-        let embed_cfg = archon_memory::embedding::EmbeddingConfig {
-            provider: config.memory.embedding_provider,
-            hybrid_alpha: config.memory.hybrid_alpha,
-            base_url: config.memory.embedding_base_url.clone(),
-            model: config.memory.embedding_model.clone(),
-            intra_threads: config.memory.embedding_intra_threads,
-        };
-        match archon_memory::embedding::create_provider(&embed_cfg) {
-            Ok(provider) => {
-                if let Err(e) = graph.set_embedding_provider(provider) {
-                    tracing::warn!("failed to initialise embedding schema: {e}");
-                } else {
-                    graph.set_hybrid_alpha(embed_cfg.hybrid_alpha);
-                    tracing::info!(
-                        provider = %embed_cfg.provider,
-                        alpha = embed_cfg.hybrid_alpha,
-                        "semantic embedding provider active"
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!("embedding provider unavailable, using keyword-only search: {e}");
-            }
+                db_path.display()
+            ));
         }
-    }
+    };
     let memory_access = Arc::new(memory_access);
     // The board tools resolve this handle at call time. Installed from the same
     // `MemoryAccess` the rest of the session uses, so the claim CAS lands in

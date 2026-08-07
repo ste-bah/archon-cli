@@ -15,7 +15,8 @@ pub mod types;
 pub mod vector_search;
 
 pub use access::{
-    MemoryAccess, MemoryTrait, default_memory_data_dir, open_memory, open_memory_with_db_path,
+    EmbeddingSetup, MemoryAccess, MemoryOpenSpec, MemoryTrait, OpenedMemory,
+    default_memory_data_dir, open_configured_memory, open_memory, open_memory_with_db_path,
     resolve_memory_paths,
 };
 pub use board::{

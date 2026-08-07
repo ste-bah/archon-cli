@@ -5,6 +5,8 @@ mod generated_tuning;
 mod interfaces;
 mod io;
 mod learning;
+// Inherent impl on `MemoryConfig` only — nothing to re-export.
+mod memory_open;
 mod providers;
 mod runtime;
 mod sections;

@@ -29,6 +29,8 @@ pub(crate) mod agent_evolve_world_model;
 pub(crate) mod agent_slash;
 pub(crate) mod auth;
 pub(crate) mod background;
+// #146: the one open-and-install body behind every board-only entry point.
+pub(crate) mod board_access;
 pub(crate) mod bug;
 pub(crate) mod cancel;
 pub(crate) mod chat;
