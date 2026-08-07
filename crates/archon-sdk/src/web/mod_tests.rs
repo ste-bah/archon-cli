@@ -27,6 +27,7 @@ fn test_state(config: &WebConfig, token: Option<String>) -> AppState {
         ingest_jobs: ingest::new_job_store(),
         handles: WebRuntimeHandles::default(),
         agents: agents::WebAgentObserver::new(),
+        board: board::WebBoardStore::new(),
         attached: false,
     }
 }

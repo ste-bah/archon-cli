@@ -28,10 +28,13 @@ pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, &str, &s
 pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, &str, &str, &str, archon_memory::types::MemoryType, f64, &[alloc::string::String], &str, &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, &str, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::access::MemoryAccess
@@ -186,10 +189,40 @@ impl core::marker::Unpin for archon_memory::board::BoardStatus
 impl core::marker::UnsafeUnpin for archon_memory::board::BoardStatus
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardStatus
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardStatus
+pub struct archon_memory::board::BoardEvent
+pub archon_memory::board::BoardEvent::actor: core::option::Option<alloc::string::String>
+pub archon_memory::board::BoardEvent::at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub archon_memory::board::BoardEvent::from_status: archon_memory::board::BoardStatus
+pub archon_memory::board::BoardEvent::item_id: alloc::string::String
+pub archon_memory::board::BoardEvent::note: alloc::string::String
+pub archon_memory::board::BoardEvent::round: u32
+pub archon_memory::board::BoardEvent::run_id: alloc::string::String
+pub archon_memory::board::BoardEvent::seq: u32
+pub archon_memory::board::BoardEvent::to_status: archon_memory::board::BoardStatus
+impl core::clone::Clone for archon_memory::board::BoardEvent
+pub fn archon_memory::board::BoardEvent::clone(&self) -> archon_memory::board::BoardEvent
+impl core::cmp::Eq for archon_memory::board::BoardEvent
+impl core::cmp::PartialEq for archon_memory::board::BoardEvent
+pub fn archon_memory::board::BoardEvent::eq(&self, &archon_memory::board::BoardEvent) -> bool
+impl core::fmt::Debug for archon_memory::board::BoardEvent
+pub fn archon_memory::board::BoardEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for archon_memory::board::BoardEvent
+impl serde_core::ser::Serialize for archon_memory::board::BoardEvent
+pub fn archon_memory::board::BoardEvent::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for archon_memory::board::BoardEvent
+pub fn archon_memory::board::BoardEvent::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for archon_memory::board::BoardEvent
+impl core::marker::Send for archon_memory::board::BoardEvent
+impl core::marker::Sync for archon_memory::board::BoardEvent
+impl core::marker::Unpin for archon_memory::board::BoardEvent
+impl core::marker::UnsafeUnpin for archon_memory::board::BoardEvent
+impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardEvent
+impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardEvent
 pub struct archon_memory::board::BoardItem
 pub archon_memory::board::BoardItem::acceptance: alloc::string::String
 pub archon_memory::board::BoardItem::claimed_by: core::option::Option<alloc::string::String>
 pub archon_memory::board::BoardItem::created_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub archon_memory::board::BoardItem::decline_reason: core::option::Option<alloc::string::String>
 pub archon_memory::board::BoardItem::evidence: alloc::string::String
 pub archon_memory::board::BoardItem::id: alloc::string::String
 pub archon_memory::board::BoardItem::kind: archon_memory::board::BoardItemKind
@@ -218,6 +251,30 @@ impl core::marker::Unpin for archon_memory::board::BoardItem
 impl core::marker::UnsafeUnpin for archon_memory::board::BoardItem
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardItem
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardItem
+pub struct archon_memory::board::BoardRunSummary
+pub archon_memory::board::BoardRunSummary::counts: alloc::collections::btree::map::BTreeMap<alloc::string::String, u32>
+pub archon_memory::board::BoardRunSummary::last_updated_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub archon_memory::board::BoardRunSummary::run_id: alloc::string::String
+pub archon_memory::board::BoardRunSummary::total: u32
+impl core::clone::Clone for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::clone(&self) -> archon_memory::board::BoardRunSummary
+impl core::cmp::Eq for archon_memory::board::BoardRunSummary
+impl core::cmp::PartialEq for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::eq(&self, &archon_memory::board::BoardRunSummary) -> bool
+impl core::fmt::Debug for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for archon_memory::board::BoardRunSummary
+impl serde_core::ser::Serialize for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for archon_memory::board::BoardRunSummary
+impl core::marker::Send for archon_memory::board::BoardRunSummary
+impl core::marker::Sync for archon_memory::board::BoardRunSummary
+impl core::marker::Unpin for archon_memory::board::BoardRunSummary
+impl core::marker::UnsafeUnpin for archon_memory::board::BoardRunSummary
+impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardRunSummary
+impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardRunSummary
 pub struct archon_memory::board::BoardUpdate
 pub archon_memory::board::BoardUpdate::applied: bool
 pub archon_memory::board::BoardUpdate::item: archon_memory::board::BoardItem
@@ -264,31 +321,43 @@ impl core::marker::UnsafeUnpin for archon_memory::board::NewBoardItem
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::NewBoardItem
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::NewBoardItem
 pub trait archon_memory::board::BoardAccess: core::marker::Send + core::marker::Sync
+pub fn archon_memory::board::BoardAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::board::BoardAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::board::BoardAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::board::BoardAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub mod archon_memory::client
@@ -317,10 +386,13 @@ pub fn archon_memory::client::MemoryClient::store_memory_with_id(&self, &str, &s
 pub fn archon_memory::client::MemoryClient::store_memory_with_id_outcome(&self, &str, &str, &str, archon_memory::types::MemoryType, f64, &[alloc::string::String], &str, &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::update_memory(&self, &str, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::client::MemoryClient
@@ -608,7 +680,10 @@ pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, &str, f6
 pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, &str, &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::reconcile_importance_trend(&self, &str, f64) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
@@ -621,6 +696,7 @@ impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, &str, &str, archon_memory::types::RelType, core::option::Option<&str>, f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
@@ -661,10 +737,13 @@ pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, &str, &str
 pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, &str, &str, &str, archon_memory::types::MemoryType, f64, &[alloc::string::String], &str, &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, &str, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::graph::MemoryGraph
@@ -1136,10 +1215,13 @@ pub fn archon_memory::access::MemoryAccess::store_memory_with_id(&self, &str, &s
 pub fn archon_memory::access::MemoryAccess::store_memory_with_id_outcome(&self, &str, &str, &str, archon_memory::types::MemoryType, f64, &[alloc::string::String], &str, &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::update_memory(&self, &str, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::access::MemoryAccess
@@ -1244,6 +1326,7 @@ pub struct archon_memory::BoardItem
 pub archon_memory::BoardItem::acceptance: alloc::string::String
 pub archon_memory::BoardItem::claimed_by: core::option::Option<alloc::string::String>
 pub archon_memory::BoardItem::created_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub archon_memory::BoardItem::decline_reason: core::option::Option<alloc::string::String>
 pub archon_memory::BoardItem::evidence: alloc::string::String
 pub archon_memory::BoardItem::id: alloc::string::String
 pub archon_memory::BoardItem::kind: archon_memory::board::BoardItemKind
@@ -1272,6 +1355,30 @@ impl core::marker::Unpin for archon_memory::board::BoardItem
 impl core::marker::UnsafeUnpin for archon_memory::board::BoardItem
 impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardItem
 impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardItem
+pub struct archon_memory::BoardRunSummary
+pub archon_memory::BoardRunSummary::counts: alloc::collections::btree::map::BTreeMap<alloc::string::String, u32>
+pub archon_memory::BoardRunSummary::last_updated_at: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub archon_memory::BoardRunSummary::run_id: alloc::string::String
+pub archon_memory::BoardRunSummary::total: u32
+impl core::clone::Clone for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::clone(&self) -> archon_memory::board::BoardRunSummary
+impl core::cmp::Eq for archon_memory::board::BoardRunSummary
+impl core::cmp::PartialEq for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::eq(&self, &archon_memory::board::BoardRunSummary) -> bool
+impl core::fmt::Debug for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for archon_memory::board::BoardRunSummary
+impl serde_core::ser::Serialize for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for archon_memory::board::BoardRunSummary
+pub fn archon_memory::board::BoardRunSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for archon_memory::board::BoardRunSummary
+impl core::marker::Send for archon_memory::board::BoardRunSummary
+impl core::marker::Sync for archon_memory::board::BoardRunSummary
+impl core::marker::Unpin for archon_memory::board::BoardRunSummary
+impl core::marker::UnsafeUnpin for archon_memory::board::BoardRunSummary
+impl core::panic::unwind_safe::RefUnwindSafe for archon_memory::board::BoardRunSummary
+impl core::panic::unwind_safe::UnwindSafe for archon_memory::board::BoardRunSummary
 pub struct archon_memory::BoardUpdate
 pub archon_memory::BoardUpdate::applied: bool
 pub archon_memory::BoardUpdate::item: archon_memory::board::BoardItem
@@ -1330,7 +1437,10 @@ pub fn archon_memory::graph::MemoryGraph::apply_importance_delta(&self, &str, f6
 pub fn archon_memory::graph::MemoryGraph::has_importance_application(&self, &str, &str) -> core::result::Result<bool, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::reconcile_importance_trend(&self, &str, f64) -> core::result::Result<archon_memory::types::Memory, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
+impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
@@ -1343,6 +1453,7 @@ impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
 pub fn archon_memory::graph::MemoryGraph::create_relationship(&self, &str, &str, archon_memory::types::RelType, core::option::Option<&str>, f64) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::graph::MemoryGraph
@@ -1383,10 +1494,13 @@ pub fn archon_memory::graph::MemoryGraph::store_memory_with_id(&self, &str, &str
 pub fn archon_memory::graph::MemoryGraph::store_memory_with_id_outcome(&self, &str, &str, &str, archon_memory::types::MemoryType, f64, &[alloc::string::String], &str, &str) -> core::result::Result<archon_memory::types::StoreMemoryOutcome, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::update_memory(&self, &str, core::option::Option<&str>, core::option::Option<&[alloc::string::String]>) -> core::result::Result<(), archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl !core::marker::Freeze for archon_memory::graph::MemoryGraph
@@ -1520,31 +1634,43 @@ impl<'a> core::marker::UnsafeUnpin for archon_memory::types::StoreMemoryRequest<
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for archon_memory::types::StoreMemoryRequest<'a>
 pub trait archon_memory::BoardAccess: core::marker::Send + core::marker::Sync
+pub fn archon_memory::BoardAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::BoardAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::BoardAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::BoardAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::access::MemoryAccess
+pub fn archon_memory::access::MemoryAccess::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::access::MemoryAccess::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::access::MemoryAccess::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::client::MemoryClient
+pub fn archon_memory::client::MemoryClient::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::client::MemoryClient::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::client::MemoryClient::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 impl archon_memory::board::BoardAccess for archon_memory::graph::MemoryGraph
+pub fn archon_memory::graph::MemoryGraph::board_item_history(&self, &str) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardEvent>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::claim_board_item(&self, &str, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::create_board_item(&self, &archon_memory::board::NewBoardItem) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::decline_board_item(&self, &str, archon_memory::board::BoardStatus, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::get_board_item(&self, &str) -> core::result::Result<archon_memory::board::BoardItem, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::list_board_items_by_run(&self, &str, &[archon_memory::board::BoardStatus]) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardItem>, archon_memory::types::MemoryError>
+pub fn archon_memory::graph::MemoryGraph::list_board_runs(&self) -> core::result::Result<alloc::vec::Vec<archon_memory::board::BoardRunSummary>, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::release_board_claim(&self, &str) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub fn archon_memory::graph::MemoryGraph::set_board_item_status(&self, &str, archon_memory::board::BoardStatus, archon_memory::board::BoardStatus) -> core::result::Result<archon_memory::board::BoardUpdate, archon_memory::types::MemoryError>
 pub trait archon_memory::MemoryTrait: core::marker::Send + core::marker::Sync

@@ -1,0 +1,181 @@
+.board-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.board-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.board-metric {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.board-metric__icon {
+  color: var(--accent);
+}
+
+.board-list {
+  display: grid;
+  gap: 8px;
+}
+
+.board-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.board-row > div,
+.board-item header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.board-row--selectable {
+  width: 100%;
+  cursor: pointer;
+}
+
+.board-row--active {
+  border-color: var(--accent);
+}
+
+.board-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.board-count {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.board-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.board-filter,
+.board-item__actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.board-filter--active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.board-group {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.board-group__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.board-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.board-item header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.board-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Two columns so evidence and acceptance sit side by side: they are read
+   together — what was seen against what would settle it. */
+.board-item__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.board-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.board-field dt {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.board-field dd {
+  margin: 0;
+  /* Evidence carries file:line references that must not be truncated into
+     something a reader would have to guess at. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.board-history {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 10px 10px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.board-transition {
+  display: grid;
+  gap: 2px;
+}
+
+.board-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  opacity: 0.85;
+}

@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use cozo::{DataValue, ScriptMutability};
 use uuid::Uuid;
 
 use super::rows::{BOARD_COLUMNS, BOARD_PUT, row_values_to_item, row_values_to_update};
-use super::{BoardItem, BoardStatus, NewBoardItem};
+use super::{BoardItem, BoardRunSummary, BoardStatus, NewBoardItem};
 use crate::graph::MemoryGraph;
 use crate::graph::helpers::run_mutable;
 use crate::types::MemoryError;
@@ -171,5 +171,77 @@ impl MemoryGraph {
                 .then_with(|| left.id.cmp(&right.id))
         });
         self.with_decline_reasons_for_run(run_id, items)
+    }
+
+    /// Every run with items on the board, most recently touched first.
+    ///
+    /// Deliberately a scan and a fold in Rust, where every other read here goes
+    /// through `board_items:by_run`. The index is keyed by `run_id`, so it can
+    /// answer "which items are in this run" but not "which runs exist" — the
+    /// distinct keys are exactly what an index lookup needs supplied. Nothing on
+    /// the hot path calls this: the drain gate and the agents looking for work
+    /// all arrive holding a `run_id` already, and this exists for the reader who
+    /// does not. Paying a scan on a view that renders once per poll is the
+    /// cheaper mistake than carrying a second relation that every board write
+    /// would have to keep in step.
+    ///
+    /// `decline_reason` is not resolved here. A run summary is counts, and
+    /// filling reasons in would mean the history query for every declined item
+    /// in every run to populate a field this shape does not carry.
+    pub fn list_board_runs(&self) -> Result<Vec<BoardRunSummary>, MemoryError> {
+        let script = "?[run_id, status, updated_at] := *board_items{run_id, status, updated_at}";
+        let result = self
+            .db
+            .run_script(script, BTreeMap::new(), ScriptMutability::Immutable)
+            .map_err(db_err)?;
+
+        let mut runs: BTreeMap<String, BoardRunSummary> = BTreeMap::new();
+        for row in &result.rows {
+            let run_id = row
+                .first()
+                .and_then(DataValue::get_str)
+                .unwrap_or_default()
+                .to_string();
+            let status = row
+                .get(1)
+                .and_then(DataValue::get_str)
+                .unwrap_or_default()
+                .to_string();
+            // An unparseable status is still an item that exists, and dropping
+            // the row would understate the run. It is counted under whatever the
+            // column holds rather than discarded.
+            let updated_at = row
+                .get(2)
+                .and_then(DataValue::get_str)
+                .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+                .map(|stamp| stamp.with_timezone(&Utc))
+                .unwrap_or_else(Utc::now);
+
+            let summary = runs
+                .entry(run_id.clone())
+                .or_insert_with(|| BoardRunSummary {
+                    run_id,
+                    counts: BTreeMap::new(),
+                    total: 0,
+                    last_updated_at: updated_at,
+                });
+            *summary.counts.entry(status).or_insert(0) += 1;
+            summary.total += 1;
+            summary.last_updated_at = summary.last_updated_at.max(updated_at);
+        }
+
+        let mut runs: Vec<BoardRunSummary> = runs.into_values().collect();
+        // Most recently touched first: a reader arriving without a run_id wants
+        // the run something just happened in. `run_id` breaks ties so the order
+        // is total — two runs can share a timestamp at second resolution, and a
+        // list that reshuffles between polls reads as movement that did not
+        // happen.
+        runs.sort_by(|left, right| {
+            right
+                .last_updated_at
+                .cmp(&left.last_updated_at)
+                .then_with(|| left.run_id.cmp(&right.run_id))
+        });
+        Ok(runs)
     }
 }

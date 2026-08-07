@@ -22,8 +22,8 @@ use super::api::{EffectivePolicySummary, WebApiState};
 use super::live::WebLiveManager;
 use super::{
     AppState, WebConfig, WebRuntimeHandles, WebRuntimePaths, actions, agents, api, assets, auth,
-    chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live, metrics, pipelines,
-    server_shutdown, settings, uploads, workflows, world,
+    board, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live, metrics,
+    pipelines, server_shutdown, settings, uploads, workflows, world,
 };
 
 /// HTTP server that serves the embedded SPA.
@@ -168,6 +168,7 @@ impl WebServer {
             ingest_jobs: ingest::new_job_store(),
             handles: self.handles.clone(),
             agents: agents::WebAgentObserver::new(),
+            board: board::WebBoardStore::new(),
             attached: self.attached,
         };
 
@@ -231,6 +232,14 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/live/snapshot", get(live::snapshot_handler))
         .route("/api/live/stream", get(live::stream_handler))
         .route("/api/agents/live", get(agents::live_handler))
+        // Not gated on attached mode, unlike `/api/agents/live`: the board is
+        // rows in the memory database, not a process-global registry.
+        .route("/api/board/runs", get(board::runs_handler))
+        .route("/api/board/runs/{run_id}/items", get(board::items_handler))
+        .route(
+            "/api/board/items/{item_id}/history",
+            get(board::history_handler),
+        )
         .route(
             "/api/actions/evaluate",
             post(actions::evaluate_action_handler),

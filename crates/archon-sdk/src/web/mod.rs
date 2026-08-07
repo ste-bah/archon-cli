@@ -8,6 +8,7 @@ pub mod agents;
 pub mod api;
 pub mod assets;
 pub mod auth;
+pub mod board;
 pub mod chat;
 pub mod cognitive;
 pub mod corpus;
@@ -181,6 +182,10 @@ pub(crate) struct AppState {
     handles: WebRuntimeHandles,
     /// Elapsed-time bookkeeping for the live agent projection.
     agents: agents::WebAgentObserver,
+    /// Lazily-opened reader for the task board. Not in `handles`: the board is
+    /// reachable from any process that can open the database, so it does not
+    /// depend on the host passing anything in.
+    board: board::WebBoardStore,
     /// `true` when this server runs inside the session it reports on.
     attached: bool,
 }

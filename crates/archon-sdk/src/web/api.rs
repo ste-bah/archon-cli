@@ -333,6 +333,7 @@ pub fn generated_typescript() -> String {
     .chain([
         super::live::generated_typescript(),
         super::agents::generated_typescript(),
+        super::board::generated_typescript(),
         super::actions::generated_typescript(),
         super::auth::generated_typescript(),
         super::chat::generated_typescript(),

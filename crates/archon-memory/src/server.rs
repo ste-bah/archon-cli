@@ -374,6 +374,14 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
 
+        // Takes no parameters, and is on the wire regardless: a client that
+        // could not enumerate runs would have to be told one, which is exactly
+        // the handle a reader outside the run does not have.
+        "list_board_runs" => {
+            let runs = graph.list_board_runs().map_err(|e| e.to_string())?;
+            serde_json::to_value(runs).map_err(|e| e.to_string())
+        }
+
         "list_board_items_by_run" => {
             let run_id = str_param(params, "run_id")?;
             let statuses = board_status_array_param(params, "statuses")?;

@@ -18,6 +18,7 @@
 //! into `content` and then needed `drop_state_snapshots` filters retrofitted at
 //! three separate read paths.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use chrono::{DateTime, Utc};
@@ -199,6 +200,25 @@ pub struct NewBoardItem {
     pub raised_by: String,
 }
 
+/// One run that has items on the board.
+///
+/// Every other read here starts from a `run_id` the caller already has, because
+/// every writer does: an agent inherits its parent's. A reader that arrived
+/// from outside the run — a dashboard, an operator asking what is outstanding —
+/// has no such handle, and before this existed there was no way to obtain one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardRunSummary {
+    pub run_id: String,
+    /// How many items sit in each status, keyed by the same lowercase names the
+    /// `status` column and the RPC surface use. Statuses with no items are
+    /// absent rather than present as zero, so a caller reads presence directly.
+    pub counts: BTreeMap<String, u32>,
+    pub total: u32,
+    /// The newest `updated_at` across the run's items. What "most recently
+    /// touched" means for a run, and the key the list is ordered on.
+    pub last_updated_at: DateTime<Utc>,
+}
+
 /// The outcome of a conditional board write.
 ///
 /// `applied` comes from the same database transaction that decided it, not from
@@ -221,6 +241,12 @@ pub trait BoardAccess: Send + Sync {
     fn create_board_item(&self, item: &NewBoardItem) -> Result<BoardItem, MemoryError>;
 
     fn get_board_item(&self, id: &str) -> Result<BoardItem, MemoryError>;
+
+    /// Every run with items on the board, most recently touched first.
+    ///
+    /// The one board read that takes no `run_id`, and therefore the only entry
+    /// point for a reader that did not raise anything itself.
+    fn list_board_runs(&self) -> Result<Vec<BoardRunSummary>, MemoryError>;
 
     /// Items owned by `run_id`, oldest first. An empty `statuses` means all.
     fn list_board_items_by_run(

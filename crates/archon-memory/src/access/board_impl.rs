@@ -4,7 +4,9 @@
 //! and every process after the first reaches the graph over TCP because CozoDB
 //! admits one writer. A direct-only board would silently be a private board.
 
-use crate::board::{BoardAccess, BoardEvent, BoardItem, BoardStatus, BoardUpdate, NewBoardItem};
+use crate::board::{
+    BoardAccess, BoardEvent, BoardItem, BoardRunSummary, BoardStatus, BoardUpdate, NewBoardItem,
+};
 use crate::client::MemoryClient;
 use crate::graph::MemoryGraph;
 use crate::types::MemoryError;
@@ -21,6 +23,10 @@ impl BoardAccess for MemoryGraph {
 
     fn get_board_item(&self, id: &str) -> Result<BoardItem, MemoryError> {
         MemoryGraph::get_board_item(self, id)
+    }
+
+    fn list_board_runs(&self) -> Result<Vec<BoardRunSummary>, MemoryError> {
+        MemoryGraph::list_board_runs(self)
     }
 
     fn list_board_items_by_run(
@@ -78,6 +84,11 @@ impl BoardAccess for MemoryClient {
 
     fn get_board_item(&self, id: &str) -> Result<BoardItem, MemoryError> {
         let result = block_on_async(self.call("get_board_item", serde_json::json!({ "id": id })))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
+
+    fn list_board_runs(&self) -> Result<Vec<BoardRunSummary>, MemoryError> {
+        let result = block_on_async(self.call("list_board_runs", serde_json::json!({})))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
 
@@ -162,6 +173,13 @@ impl BoardAccess for MemoryAccess {
         match self {
             Self::Direct { graph, .. } => graph.get_board_item(id),
             Self::Remote(client) => client.get_board_item(id),
+        }
+    }
+
+    fn list_board_runs(&self) -> Result<Vec<BoardRunSummary>, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.list_board_runs(),
+            Self::Remote(client) => client.list_board_runs(),
         }
     }
 

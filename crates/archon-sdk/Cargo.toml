@@ -49,3 +49,6 @@ tower = { workspace = true, features = ["util"] }
 uuid = { workspace = true }
 # Building a BackgroundAgentHandle in tests needs a CancellationToken.
 tokio-util = { workspace = true }
+# The board endpoints read a real memory database, so their tests need a
+# throwaway one on disk: the store is opened by path, not injected.
+tempfile = { workspace = true }

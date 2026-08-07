@@ -28,6 +28,9 @@ import type {
   WorkflowRunDetail,
   WorkflowWebSummary,
   WebAgentActivitySnapshot,
+  WebBoardHistory,
+  WebBoardItems,
+  WebBoardRunList,
   WebKbCreateRequest,
   WebKbCreateResponse,
   WebLiveCursorExpired,
@@ -172,6 +175,20 @@ export const apiClient = {
       signal,
     ),
   agentsLive: () => getJson<WebAgentActivitySnapshot>("/api/agents/live"),
+  // The board is rows in the memory database rather than an in-process
+  // registry, so unlike `agentsLive` these answer in a standalone `archon web`
+  // as well as an attached one.
+  boardRuns: () => getJson<WebBoardRunList>("/api/board/runs"),
+  boardItems: (runId: string, statuses: string[]) =>
+    getJson<WebBoardItems>(
+      `/api/board/runs/${encodeURIComponent(runId)}/items${
+        statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : ""
+      }`,
+    ),
+  boardItemHistory: (itemId: string) =>
+    getJson<WebBoardHistory>(
+      `/api/board/items/${encodeURIComponent(itemId)}/history`,
+    ),
   authSession: () => getJson<WebAuthSession>("/api/auth/session"),
   uploadPolicy: () => getJson<WebUploadPolicy>("/api/uploads/policy"),
   uploadIntent: (request: WebUploadIntent) =>

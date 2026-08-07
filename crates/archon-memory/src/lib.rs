@@ -18,7 +18,9 @@ pub use access::{
     MemoryAccess, MemoryTrait, default_memory_data_dir, open_memory, open_memory_with_db_path,
     resolve_memory_paths,
 };
-pub use board::{BoardAccess, BoardItem, BoardItemKind, BoardStatus, BoardUpdate, NewBoardItem};
+pub use board::{
+    BoardAccess, BoardItem, BoardItemKind, BoardRunSummary, BoardStatus, BoardUpdate, NewBoardItem,
+};
 pub use graph::MemoryGraph;
 pub use injection::MemoryInjector;
 pub use types::{

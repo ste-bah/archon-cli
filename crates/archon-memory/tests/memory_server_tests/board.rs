@@ -1,4 +1,5 @@
 use archon_memory::board::{BoardAccess, BoardItemKind, BoardStatus, NewBoardItem};
+use std::collections::BTreeMap;
 
 use super::support::*;
 use super::*;
@@ -277,6 +278,82 @@ async fn remote_create_without_evidence_is_refused() {
             .list_board_items_by_run("run-empty", &[])
             .expect("direct list")
             .is_empty()
+    );
+
+    handle.abort();
+}
+
+/// Enumerating runs must give the same answer remotely as directly.
+///
+/// This is the read a caller makes when it holds no `run_id` at all, so a
+/// direct-only implementation would not surface as an error anywhere the caller
+/// could see: the remote client would get "unknown method" at best, and — had
+/// the method been left off the dispatch table while the client method existed —
+/// a board with no runs on it, reported as nothing to do.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_run_enumeration_matches_direct() {
+    let (_dir, port_file) = temp_port_file();
+    let (port, graph, handle) = start_test_server(port_file).await;
+    let access = remote(port).await;
+
+    assert!(
+        access.list_board_runs().expect("remote runs").is_empty(),
+        "an empty board must enumerate as no runs over the wire, not as an error"
+    );
+    assert_eq!(
+        access.list_board_runs().expect("remote runs"),
+        graph.list_board_runs().expect("direct runs")
+    );
+
+    let older = access
+        .create_board_item(&new_item("run-older", "raised first", "agent-a"))
+        .expect("create");
+    access
+        .create_board_item(&new_item("run-newer", "raised second", "agent-b"))
+        .expect("create");
+    access
+        .create_board_item(&new_item("run-newer", "raised third", "agent-b"))
+        .expect("create");
+    // A transition rewrites `updated_at`, which is what the ordering is keyed
+    // on, so touching the older run must move it back to the front.
+    access
+        .decline_board_item(&older.id, BoardStatus::Open, "already fixed upstream")
+        .expect("decline");
+
+    let remote_runs = access.list_board_runs().expect("remote runs");
+    assert_eq!(
+        remote_runs,
+        graph.list_board_runs().expect("direct runs"),
+        "remote and direct run enumeration must agree, order and counts included"
+    );
+
+    let ids: Vec<&str> = remote_runs.iter().map(|run| run.run_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["run-older", "run-newer"],
+        "most recently touched first"
+    );
+    assert_eq!(remote_runs[0].total, 1);
+    assert_eq!(
+        remote_runs[0].counts,
+        BTreeMap::from([("declined".to_string(), 1)]),
+        "a status with no items must be absent rather than present as zero"
+    );
+    assert_eq!(remote_runs[1].total, 2);
+    assert_eq!(
+        remote_runs[1].counts,
+        BTreeMap::from([("open".to_string(), 2)])
+    );
+
+    // The run list is only useful if what it names can then be opened, so the
+    // handoff from enumeration to the run-scoped read is part of the contract.
+    let items = access
+        .list_board_items_by_run(&remote_runs[0].run_id, &[])
+        .expect("remote items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].decline_reason.as_deref(),
+        Some("already fixed upstream")
     );
 
     handle.abort();

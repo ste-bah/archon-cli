@@ -3,6 +3,7 @@ import {
   Brain,
   BrainCircuit,
   ChartNoAxesCombined,
+  ClipboardList,
   Database,
   FileSearch,
   Gauge,
@@ -28,6 +29,12 @@ export const navItems: NavItem[] = [
     label: "Overview",
     detail: "Runtime status and system posture",
     icon: Activity,
+  },
+  {
+    path: "/board",
+    label: "Task Board",
+    detail: "Agent handoffs, claims, and declines",
+    icon: ClipboardList,
   },
   {
     path: "/chat",

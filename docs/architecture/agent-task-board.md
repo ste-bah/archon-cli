@@ -190,6 +190,85 @@ process after the first reaches memory over TCP — a direct-only board would
 silently be a private board. Claims resolve in the one process that owns the
 writer, which is what keeps the compare-and-set global rather than per-process.
 
+## Enumerating runs
+
+Every read described so far starts from a `run_id`, because every writer has
+one: a subagent inherits its parent's. A reader arriving from outside the run —
+a dashboard, an operator asking what is outstanding — has no such handle, and
+until `list_board_runs` there was no way to obtain one. It returns each distinct
+`run_id` with its per-status counts, a total, and the newest `updated_at` across
+the run, ordered most recently touched first.
+
+It is deliberately a relation scan folded in Rust, where every other read goes
+through `board_items:by_run`. That index is keyed by `run_id`, so it can answer
+"which items are in this run" but not "which runs exist" — the distinct keys are
+exactly what an index lookup needs supplied. Nothing on the hot path calls it:
+the drain gate and the agents looking for work all arrive holding a `run_id`
+already. Paying a scan on a view that renders once per poll is the cheaper
+mistake than a second relation every board write would have to keep in step.
+
+Statuses a run has no items in are **absent** from the counts rather than
+present as zero, so a caller reads presence directly.
+
+Like every other board operation it is on all three access paths and on the RPC
+dispatch table. A read that only worked in-process would not surface as an
+error: a second Archon process would see a board with no runs on it and report
+that there was nothing to do — which is the shape of issue #128, where one
+memory operation missing from the RPC surface read as an empty result.
+
+## The web read view
+
+`crates/archon-sdk/src/web/board.rs`, three read-only endpoints:
+
+| Route | Answers |
+|---|---|
+| `GET /api/board/runs` | every run with items, most recently touched first |
+| `GET /api/board/runs/{run_id}/items` | that run's items, oldest first; optional `?status=open,claimed` |
+| `GET /api/board/items/{item_id}/history` | one item's transitions, oldest first |
+
+An unrecognised name in `?status=` is a 400 rather than a silent empty result:
+ignoring it would answer with the whole board while the caller believed it had
+filtered. The page is `web/src/views/BoardPage.tsx`, polled with react-query —
+the board is a snapshot whose items change status in place, not an append-only
+log, so there is nothing to stream.
+
+**These are not gated on attached mode, and `/api/agents/live` is.** That
+endpoint reads `BACKGROUND_AGENTS` and `TASK_MANAGER`, which own `JoinHandle`s
+and cannot cross a process boundary, so it is meaningful only inside the session
+it reports on. The board is not a registry — it is rows in the memory database —
+so a standalone `archon web` shows the real board.
+
+Reaching it is the part that needs care. `inspect.rs` reuses
+`WebRuntimeHandles::memory`, the handle the host session already has open; the
+board cannot, because `BoardAccess` is deliberately off `MemoryTrait` and no
+`BoardAccess` can be recovered from an `Arc<dyn MemoryTrait>`. What it must not
+do instead is open the database itself: CozoDB admits one writer, and in
+attached mode the host holds it on that very file. `WebBoardStore` goes through
+`open_memory_with_db_path` — the same singleton election every other entry point
+uses, which reads `memory.port` and connects as a client when a server answers,
+and only otherwise takes `memory.lock`. `MemoryAccess` implements `BoardAccess`,
+which is what makes the elected handle directly usable. The result is `Direct`
+when the web server is the only process and `Remote` over TCP when a session
+owns the writer.
+
+Issue #134 was a direct `MemoryGraph::open` here, and the reason it survived
+review is worth recording: **it does not fail.** Measured on Windows with the
+sqlite backend, a raw second open of a database a live session holds returns in
+206ms from a genuinely separate OS process and reads correct rows — no hang, no
+error, no wrong answer. Nothing at the filesystem or CozoDB layer enforces the
+single-writer rule; the election is the only thing that does. So every
+behavioural test of these endpoints passes with the bug in place, and the
+regression guard has to assert which arm was elected rather than what came back
+(`the_store_connects_as_a_client_when_a_server_already_holds_the_writer`).
+
+The election result is cached for the life of the server; a failure is not,
+because the memory server can be down when the first request arrives and up a
+minute later. The database's absence is checked before the election, because
+`open_memory_with_db_path` creates what it cannot find and looking at a
+dashboard must not be what brings a memory database into existence — that case
+answers `storeAvailable: false`, which the page distinguishes from an empty
+board.
+
 ## A claim lasts as long as its holder
 
 A claim has no TTL. It is valid while the agent holding it is still executing,

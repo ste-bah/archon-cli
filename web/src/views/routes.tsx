@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router";
+import { BoardPage } from "./BoardPage";
 import { ChatPage } from "./ChatPage";
 import { CognitivePage } from "./CognitivePage";
 import { CorpusPage } from "./CorpusPage";
@@ -69,6 +70,10 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
     <Routes>
       <Route path="/" element={<DashboardPage {...props} />} />
       <Route path="/chat" element={<ChatPage uploadPolicy={props.uploadPolicy} />} />
+      {/* Takes no props: the board is read from the memory database by its own
+          polled queries rather than from the shell's summary fetches, so it
+          works the same whether the server is attached or standalone. */}
+      <Route path="/board" element={<BoardPage />} />
       <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
       <Route path="/ingest" element={<IngestPage ingest={props.ingest} />} />
       <Route

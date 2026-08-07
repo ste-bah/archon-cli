@@ -46,6 +46,90 @@ export type WebAgentActivitySnapshot = { agents: Array<WebAgentActivity>, observ
  */
 attached: boolean, };
 
+export type WebBoardRunList = { 
+/**
+ * Most recently touched first.
+ */
+runs: Array<WebBoardRun>, 
+/**
+ * `false` when there is no memory database yet, which is a different
+ * answer from a database holding an empty board and reads differently in
+ * the UI.
+ */
+storeAvailable: boolean, observedAtMs: number, };
+
+export type WebBoardRun = { runId: string, total: number, 
+/**
+ * Per-status counts, only for statuses the run actually has items in.
+ */
+counts: Array<WebBoardStatusCount>, 
+/**
+ * RFC 3339. The newest `updated_at` in the run, and the sort key.
+ */
+lastUpdatedAt: string, };
+
+export type WebBoardStatusCount = { status: string, count: number, };
+
+export type WebBoardItems = { runId: string, 
+/**
+ * Oldest first — the board is a queue, and the item raised first has been
+ * waiting longest.
+ */
+items: Array<WebBoardItem>, 
+/**
+ * The statuses that were filtered on, empty when all were requested.
+ */
+statuses: Array<string>, storeAvailable: boolean, observedAtMs: number, };
+
+export type WebBoardItem = { id: string, runId: string, 
+/**
+ * `issue` or `note`.
+ */
+kind: string, status: string, title: string, 
+/**
+ * File references and what was observed. Required at the store, so never
+ * empty on an item that exists.
+ */
+evidence: string, 
+/**
+ * What "done" means for this item.
+ */
+acceptance: string, raisedBy: string, 
+/**
+ * The agent currently holding the item, `null` when unclaimed.
+ */
+claimedBy: string | null, 
+/**
+ * Attempt counter, 0-based.
+ */
+round: number, createdAt: string, updatedAt: string, 
+/**
+ * Why the item was declined. Non-null only on a declined item, and the
+ * store refuses to record a decline without one.
+ */
+declineReason: string | null, };
+
+export type WebBoardHistory = { itemId: string, 
+/**
+ * Oldest first. Empty for an item that has never transitioned — claims and
+ * releases are not recorded, only decisions about the work.
+ */
+events: Array<WebBoardEvent>, storeAvailable: boolean, };
+
+export type WebBoardEvent = { itemId: string, 
+/**
+ * Per-item, 0-based.
+ */
+seq: number, at: string, fromStatus: string, toStatus: string, round: number, 
+/**
+ * Who held the item at the time, `null` when nobody did.
+ */
+actor: string | null, 
+/**
+ * What the transition recorded. Required for a decline, empty otherwise.
+ */
+note: string, };
+
 export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
 
 export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };
