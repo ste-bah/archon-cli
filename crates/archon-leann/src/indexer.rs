@@ -24,7 +24,10 @@ pub enum EmbeddingProviderKind {
     Local,
     /// OpenAI text-embedding-3-small (1536-dim).
     OpenAI,
-    /// Deterministic mock for testing (generates fixed-size zero vectors).
+    /// Deterministic mock for testing: each chunk hashes to its own point on
+    /// the unit sphere. Reproducible, and non-degenerate so HNSW construction
+    /// has something to prune on — but it encodes no semantics, so it cannot
+    /// support an assertion about search *relevance*.
     Mock,
 }
 
@@ -178,7 +181,10 @@ impl Indexer {
         for entry in WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|entry| !language::is_excluded(entry.path(), &exclude))
+            // Relative to `root`, never the absolute path: the exclusions are
+            // component names, so an absolute path lets the directories the
+            // checkout happens to live under veto the whole walk.
+            .filter_entry(|entry| !language::is_excluded_under_root(entry.path(), root, &exclude))
         {
             if is_cancelled(cancel) {
                 return Ok(stats);

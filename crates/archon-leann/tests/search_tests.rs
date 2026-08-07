@@ -4,9 +4,12 @@
 //! deduplication by file_path, language filter, path_pattern filter,
 //! and SearchResult field population.
 //!
-//! Because Mock embedder returns zero-vectors (causing NaN cosine distance),
-//! tests that need actual results use a `ConstantEmbeddingProvider` that
-//! returns a fixed non-zero vector for every input.
+//! Tests that need actual results use a `ConstantEmbeddingProvider` rather than
+//! the Mock one. Originally that was because Mock returned zero vectors and
+//! cosine distance between two of those is NaN (issue #145, since fixed); it is
+//! still the right choice, for a different reason: these tests insert chunk
+//! embeddings by hand and assert on the resulting ranking, so the *query* vector
+//! has to be one the test chose, not one derived from the query string.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

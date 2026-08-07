@@ -7,9 +7,11 @@
 //! downloads a model, while still driving the real `search_with_filter` and the
 //! real `SearchResult` → [`CodeHit`] mapping.
 //!
-//! The constant vector is non-zero deliberately: `archon-leann`'s built-in Mock
-//! provider returns zero vectors, which give NaN cosine distance in the HNSW
-//! index and make every search assertion meaningless.
+//! The constant vector is deliberate, but no longer because of zero vectors —
+//! the built-in Mock provider now derives a unit vector per text (#145). These
+//! tests need a query vector *they chose*, so that the expected neighbour is
+//! known in advance rather than being whatever the query string happens to hash
+//! to.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

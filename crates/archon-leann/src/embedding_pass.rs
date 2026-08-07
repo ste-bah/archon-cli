@@ -17,7 +17,24 @@ use crate::metadata::CodeChunk;
 /// Maximum chunks per embedding batch.
 pub(crate) const EMBED_BATCH_SIZE: usize = 64;
 
-/// A deterministic embedding provider that returns zero vectors.
+/// A deterministic embedding provider: each text hashes to a point on the unit
+/// sphere.
+///
+/// It used to return zero vectors, which is not a neutral choice (issue #145).
+/// Cosine distance between two zero vectors is `0/0` -- NaN -- so every pair of
+/// points is mutually equidistant and HNSW construction at `m = 50,
+/// ef_construction = 200` has nothing to prune on: each insert degenerates
+/// towards scanning the graph it has built so far. The cost is superlinear and
+/// was measured as such: 226 chunks took 59s and 454 took 206s, which puts a
+/// realistically sized corpus out of reach of any test that uses this provider,
+/// and pushes single transactions past the store's 60s budget.
+///
+/// The requirement is only that distinct chunks are not all equidistant, so a
+/// hash-seeded direction is enough and keeps the provider reproducible run to
+/// run and machine to machine -- which is what "deterministic" was for. Nothing
+/// here models semantics: two similar chunks land no closer than two unrelated
+/// ones, so this stays useless for asserting search *relevance*, exactly as the
+/// zero-vector version was.
 struct MockEmbeddingProvider {
     dim: usize,
 }
@@ -27,12 +44,63 @@ impl EmbeddingProvider for MockEmbeddingProvider {
         &self,
         texts: &[String],
     ) -> std::result::Result<Vec<Vec<f32>>, archon_memory::types::MemoryError> {
-        Ok(texts.iter().map(|_| vec![0.0; self.dim]).collect())
+        Ok(texts
+            .iter()
+            .map(|text| unit_vector_from_text(text, self.dim))
+            .collect())
     }
 
     fn dimensions(&self) -> usize {
         self.dim
     }
+}
+
+/// Hash `text` to a direction and normalise it onto the unit sphere.
+///
+/// Normalising is not cosmetic: cosine distance is undefined at the origin and
+/// numerically poor near it, and a unit vector is also what a real embedder
+/// hands back, so the stored rows look like production rows.
+///
+/// The all-zero draw is astronomically unlikely but not impossible, and it is
+/// precisely the degenerate case being fixed, so it falls back to a basis
+/// vector rather than dividing by zero.
+fn unit_vector_from_text(text: &str, dim: usize) -> Vec<f32> {
+    let mut state = fnv1a64(text.as_bytes());
+    let mut vector: Vec<f32> = (0..dim)
+        .map(|_| {
+            state = splitmix64(state);
+            // Top 24 bits, mapped to [-1, 1): the low bits of splitmix64 are the
+            // weakest, and f32 cannot hold more than 24 bits of mantissa anyway.
+            ((state >> 40) as f32 / (1u32 << 23) as f32) - 1.0
+        })
+        .collect();
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vector {
+            *value /= norm;
+        }
+    } else if let Some(first) = vector.first_mut() {
+        *first = 1.0;
+    }
+    vector
+}
+
+/// FNV-1a, for seeding only -- it just has to spread distinct texts apart.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
+/// SplitMix64: the standard finaliser, used here as the per-component stream.
+fn splitmix64(state: u64) -> u64 {
+    let mut z = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }
 
 pub(crate) fn create_embedder(config: &EmbeddingConfig) -> Result<Arc<dyn EmbeddingProvider>> {
