@@ -334,6 +334,10 @@ pub fn generated_typescript() -> String {
         super::live::generated_typescript(),
         super::agents::generated_typescript(),
         super::board::generated_typescript(),
+        // Separate module, so separate entry: `WebBoardActivity` is referenced
+        // by the generated client and a type that is declared nowhere fails
+        // `npm run typecheck` rather than anything in Rust.
+        super::board_activity::generated_typescript(),
         super::actions::generated_typescript(),
         super::auth::generated_typescript(),
         super::chat::generated_typescript(),

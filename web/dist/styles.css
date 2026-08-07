@@ -281,6 +281,21 @@ textarea {
   border-color: rgba(244, 196, 113, 0.65);
 }
 
+/* The two tinted pills carry near-white text, which is a dark-theme colour: on
+   the light theme's white panels they were a pill with nothing legible in it.
+   The hues are the same, taken down to a lightness that reads on white. */
+[data-theme="light"] .status-pill {
+  background: rgba(24, 32, 29, 0.03);
+}
+
+[data-theme="light"] .status-pill--good {
+  color: #0a6a49;
+}
+
+[data-theme="light"] .status-pill--warn {
+  color: #8a4f00;
+}
+
 .feature-list,
 .store-list {
   display: grid;

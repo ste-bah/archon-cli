@@ -1,181 +1,285 @@
-.board-layout {
+/* Task Board — page shell, header row and the stat strip.
+   The columns, cards and activity table live in `board/board.css`.
+
+   TWO SURFACE LEVELS ARE DECLARED HERE AND USED THROUGHOUT. The app's shared
+   tokens give one panel surface, which is enough for a list and not enough for
+   a board: a kanban card only reads as a card if the column behind it is
+   visibly recessed and the card is visibly raised off it. `--board-recess` and
+   `--board-raised` are that pair, per theme, because the direction reverses —
+   in dark the column is darker than the panel, in light it is darker too but
+   the card goes to pure white, and a single `color-mix` cannot express both
+   without the light theme collapsing to one shade. */
+
+.board-page {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* `minmax(0, 1fr)` and not `1fr`: a grid item defaults to `min-content`
+     width, which lets the eight-column strip push the whole page sideways.
+     This is what keeps the overflow inside the strip's own container. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+
+  --board-recess: #0f1313;
+  --board-raised: #1d2424;
+  --board-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.44), 0 6px 16px rgba(0, 0, 0, 0.26);
+  --board-card-shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.46), 0 12px 26px rgba(0, 0, 0, 0.34);
+  --board-tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 22px rgba(0, 0, 0, 0.18);
+  /* Ink is the status hue as text; tint is the same hue as a wash. Both shift
+     with the theme — a hue readable on #111 is unreadable on #fff. */
+  --ink-l: 72%;
+  --tint-a: 0.18;
+  --tint-a-strong: 0.3;
 }
 
-.board-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
+[data-theme="light"] .board-page {
+  --board-recess: #e9efec;
+  --board-raised: #ffffff;
+  --board-card-shadow: 0 1px 2px rgba(24, 32, 29, 0.08), 0 4px 12px rgba(24, 32, 29, 0.07);
+  --board-card-shadow-lift: 0 2px 4px rgba(24, 32, 29, 0.1), 0 10px 24px rgba(24, 32, 29, 0.12);
+  --board-tile-shadow: 0 1px 2px rgba(24, 32, 29, 0.06), 0 6px 18px rgba(24, 32, 29, 0.06);
+  --ink-l: 33%;
+  --tint-a: 0.13;
+  --tint-a-strong: 0.2;
 }
 
-.board-metric {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
+/* ── header row ─────────────────────────────────────────────── */
 
-.board-metric__icon {
-  color: var(--accent);
-}
-
-.board-list {
-  display: grid;
-  gap: 8px;
-}
-
-.board-row {
+.bhead {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  padding: 11px;
-  text-align: left;
-  color: var(--text);
+  gap: 20px;
+  padding: 20px 22px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
+  border-radius: 12px;
+  /* The same top-down accent wash the app body carries, so the board's first
+     surface belongs to the shell rather than starting a new one. */
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 120px),
+    var(--surface);
 }
 
-.board-row > div,
-.board-item header > div {
-  display: grid;
-  gap: 3px;
+.bhead__title {
   min-width: 0;
 }
 
-.board-row--selectable {
-  width: 100%;
-  cursor: pointer;
+.bhead__title h3 {
+  margin: 0;
+  font-size: 25px;
+  letter-spacing: -0.01em;
 }
 
-.board-row--active {
-  border-color: var(--accent);
+.bhead__title p {
+  margin: 6px 0 0;
+  max-width: 52ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.board-counts {
+.bhead__controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.bfield {
+  display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
-.board-count {
-  padding: 1px 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+.bfield > span {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.board-filters {
+.bselect {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
+  align-items: center;
 }
 
-.board-filter,
-.board-item__actions button {
-  min-height: 32px;
-  padding: 0 10px;
+.bselect select {
+  appearance: none;
+  min-height: 38px;
+  max-width: 320px;
+  padding: 0 34px 0 12px;
+  font: inherit;
+  font-size: 13px;
   color: var(--text);
+  background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface-2);
   cursor: pointer;
+  text-overflow: ellipsis;
 }
 
-.board-filter--active {
-  border-color: var(--accent);
-  color: var(--accent);
+.bselect select:hover:not(:disabled) {
+  border-color: var(--line-strong);
 }
 
-.board-group {
-  display: grid;
-  gap: 8px;
-  margin-top: 14px;
+.bselect select:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
-.board-group__heading {
+.bselect > svg {
+  position: absolute;
+  right: 11px;
+  color: var(--subtle);
+  pointer-events: none;
+}
+
+.bhead__actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-bottom: 1px;
 }
 
-.board-item {
+.bhead__refresh {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--muted);
+  background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface-2);
+  cursor: pointer;
 }
 
-.board-item header {
+.bhead__refresh:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.is-spinning {
+  animation: board-spin 900ms linear infinite;
+}
+
+@keyframes board-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning {
+    animation: none;
+  }
+}
+
+/* ── stat strip ─────────────────────────────────────────────── */
+
+.bstats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(186px, 1fr));
+  gap: 14px;
+}
+
+.bstat {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--board-tile-shadow);
 }
 
-.board-item__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Two columns so evidence and acceptance sit side by side: they are read
-   together — what was seen against what would settle it. */
-.board-item__fields {
+/* The tinted square is the only place each stat's hue appears at any weight.
+   Tinting the whole tile instead would give six competing backgrounds and make
+   the numbers — the thing being read — the least prominent part of the row. */
+.bstat__icon {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px 16px;
-  margin: 0;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: hsl(var(--sh) var(--ss) var(--ink-l));
+  background: hsl(var(--sh) var(--ss) 50% / var(--tint-a-strong));
 }
 
-.board-field {
+.bstat__body {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.board-field dt {
-  font-size: 0.78rem;
+.bstat__label {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
+  letter-spacing: 0.06em;
 }
 
-.board-field dd {
-  margin: 0;
-  /* Evidence carries file:line references that must not be truncated into
-     something a reader would have to guess at. */
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+.bstat__value {
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
-.board-history {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 10px 10px 24px;
-  border-top: 1px solid var(--line);
+.bstat__caption {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
-.board-transition {
-  display: grid;
-  gap: 2px;
+/* ── panels around the board ────────────────────────────────── */
+
+.panel--board {
+  /* Same reason as the grid track: without it the panel grows to fit the strip
+     and the horizontal scrollbar lands on the page instead of the strip. */
+  min-width: 0;
+  padding: 18px;
+  border-radius: 12px;
 }
 
-.board-empty {
+.board-section-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px;
+  gap: 9px;
+  color: var(--accent);
+}
+
+.board-section-title h3 {
+  color: var(--text);
+}
+
+.board-blank {
+  margin: 0;
+  padding: 30px 20px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
   border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  opacity: 0.85;
+  border-radius: 10px;
+  background: var(--board-recess);
+}
+
+@media (max-width: 980px) {
+  .bhead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bhead__controls {
+    width: 100%;
+  }
+
+  .bselect select {
+    max-width: none;
+    width: 100%;
+  }
 }

@@ -1,0 +1,200 @@
+/* Task Board — the status hues, the column strip, and one column.
+   The hues are declared here because every other board stylesheet consumes
+   them; the cards are in `board-card.css` and the feed in `board-activity.css`.
+   Page shell, header and stat strip are in `../BoardPage.css`. */
+
+/* ── status hues ────────────────────────────────────────────── */
+
+/* One hue per status, declared once and consumed by columns, chips and stat
+   tiles alike, so a status cannot be one colour on the board and a different
+   one in the activity feed.
+   `--sh`/`--ss` are hue and saturation only; lightness and alpha come from the
+   theme (`--ink-l`, `--tint-a`) so a single hue serves both themes.
+
+   THE GROUPING IS THE POINT. The five unfinished statuses run cool (blue,
+   violet, cyan) and then warm as they get stuck (amber, orange-red); the three
+   endings sit apart in green, lime and rose. `escalated` is deliberately NOT
+   green — it does not count as done — and the three endings are three
+   different colours because they are three different outcomes. */
+.bcol--open,
+.bchip--open,
+.bstat--open {
+  --sh: 210;
+  --ss: 58%;
+}
+
+.bcol--claimed,
+.bchip--claimed,
+.bstat--claimed {
+  --sh: 258;
+  --ss: 52%;
+}
+
+.bcol--in_review,
+.bchip--in_review,
+.bstat--in_review {
+  --sh: 190;
+  --ss: 60%;
+}
+
+.bcol--gaps_remain,
+.bchip--gaps_remain {
+  --sh: 42;
+  --ss: 72%;
+}
+
+.bcol--escalated,
+.bchip--escalated {
+  --sh: 16;
+  --ss: 76%;
+}
+
+.bcol--resolved,
+.bchip--resolved,
+.bstat--resolved {
+  --sh: 152;
+  --ss: 52%;
+}
+
+/* Yellow-green rather than another green. `promoted` and `resolved` are both
+   good endings, so they belong to the same family, but they are not the same
+   outcome — promoted means the item survived into the next run — and at hue 150
+   against 152 the two column headers were one colour in the light theme. */
+.bcol--promoted,
+.bchip--promoted {
+  --sh: 82;
+  --ss: 58%;
+}
+
+.bcol--declined,
+.bchip--declined,
+.bstat--declined {
+  --sh: 352;
+  --ss: 62%;
+}
+
+.bstat--total {
+  --sh: 168;
+  --ss: 38%;
+}
+
+/* ── the strip ──────────────────────────────────────────────── */
+
+.bstrip {
+  display: flex;
+  gap: 14px;
+  /* Eight columns will not fit any window. The scrollbar belongs here, on the
+     strip, and the `min-width: 0` chain from `.board-page` down through
+     `.panel--board` is what keeps it from escaping to the page body. */
+  overflow-x: auto;
+  overflow-y: visible;
+  /* Columns size to their own contents rather than stretching to match the
+     tallest — a status holding one card must not be nine cards tall. */
+  align-items: flex-start;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+}
+
+.bstrip::-webkit-scrollbar {
+  height: 9px;
+}
+
+.bstrip::-webkit-scrollbar-track {
+  background: var(--board-recess);
+  border-radius: 999px;
+}
+
+.bstrip::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+
+/* ── one column ─────────────────────────────────────────────── */
+
+.bcol {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 282px;
+  max-width: 282px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  /* Recessed relative to the panel, so the cards inside read as lifted off it
+     rather than as rows drawn on it. */
+  background: var(--board-recess);
+}
+
+.bcol__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  /* The hue at wash strength. Strong enough that eight columns are told apart
+     at a glance, light enough that the card stack stays the loudest thing. */
+  background: hsl(var(--sh) var(--ss) 50% / var(--tint-a));
+  color: hsl(var(--sh) var(--ss) var(--ink-l));
+}
+
+.bcol__glyph {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.bcol__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The count sits in a stronger tint of the column's own hue, so it reads as
+   part of the header rather than as a separate badge stuck onto it. */
+.bcol__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: hsl(var(--sh) var(--ss) 50% / var(--tint-a-strong));
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bcol__caption {
+  margin: 7px 10px 3px;
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.bcol__body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  /* A column that has collected forty cards must not push the activity feed
+     below the fold; past this height it scrolls on its own. The padding leaves
+     room for the card shadows, which `overflow` would otherwise clip. */
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.bcol__empty {
+  margin: 0;
+  padding: 18px 10px;
+  color: var(--subtle);
+  font-size: 12px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+}
+

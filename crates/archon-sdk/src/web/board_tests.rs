@@ -275,6 +275,72 @@ async fn an_item_with_no_transitions_has_an_empty_history() {
     assert!(history.events.is_empty(), "{body}");
 }
 
+/// The run feed carries the whole run, newest first, and stays inside its run.
+///
+/// The endpoint is the only place the `by_run` projection is observable to the
+/// dashboard, and the failure it guards against is silent: a feed that quietly
+/// included a neighbouring run would render as plausible activity attributed to
+/// the wrong work.
+#[tokio::test]
+async fn run_activity_returns_the_runs_transitions_newest_first() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut moved = String::new();
+    let db = seeded(dir.path(), |graph| {
+        moved = raise(graph, "run-feed", "went round the loop");
+        let elsewhere = raise(graph, "run-other", "not this run");
+        graph
+            .set_board_item_status(&moved, BoardStatus::Open, BoardStatus::Claimed)
+            .expect("claim");
+        graph
+            .decline_board_item(&moved, BoardStatus::Claimed, "handled upstream")
+            .expect("decline");
+        graph
+            .set_board_item_status(&elsewhere, BoardStatus::Open, BoardStatus::Claimed)
+            .expect("other run");
+    });
+
+    let (status, body) = get(state_for(&db, None), "/api/board/runs/run-feed/activity").await;
+    assert_eq!(status, StatusCode::OK);
+    let feed: crate::web::board_activity::WebBoardActivity =
+        serde_json::from_str(&body).expect("activity");
+    assert!(feed.store_available, "{body}");
+    assert_eq!(feed.run_id, "run-feed");
+    assert_eq!(feed.events.len(), 2, "{body}");
+    assert!(
+        feed.events.iter().all(|event| event.item_id == moved),
+        "another run's transitions must not appear: {body}"
+    );
+    assert_eq!(feed.events[0].to_status, "declined", "newest first: {body}");
+    assert_eq!(feed.events[0].note, "handled upstream");
+    // The cap has to be legible to the client, or a full page reads as a
+    // complete history rather than a truncated one.
+    assert!(feed.limit > 0, "{body}");
+    assert!(!feed.truncated, "{body}");
+
+    // A run nobody has heard of is an empty feed, not a 404: the dashboard polls
+    // the selected run, and a run can exist with nothing having happened in it.
+    let (status, body) = get(state_for(&db, None), "/api/board/runs/run-absent/activity").await;
+    assert_eq!(status, StatusCode::OK);
+    let empty: crate::web::board_activity::WebBoardActivity =
+        serde_json::from_str(&body).expect("activity");
+    assert!(empty.events.is_empty() && empty.store_available, "{body}");
+}
+
+/// With no database at all, the feed reports an unavailable store rather than an
+/// empty one — the same distinction the run list draws, and for the same reason.
+#[tokio::test]
+async fn run_activity_reports_a_missing_store_rather_than_an_empty_feed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = state_for(&dir.path().join("absent.db"), None);
+
+    let (status, body) = get(state, "/api/board/runs/run-any/activity").await;
+    assert_eq!(status, StatusCode::OK);
+    let feed: crate::web::board_activity::WebBoardActivity =
+        serde_json::from_str(&body).expect("activity");
+    assert!(!feed.store_available, "{body}");
+    assert!(feed.events.is_empty(), "{body}");
+}
+
 /// The attached case: a host session already owns the writer.
 ///
 /// This is the arrangement that was broken. CozoDB admits one writer, so when a
@@ -383,6 +449,7 @@ async fn board_endpoints_require_the_bearer_token_when_one_is_configured() {
     for uri in [
         "/api/board/runs",
         "/api/board/runs/run-guarded/items",
+        "/api/board/runs/run-guarded/activity",
         "/api/board/items/whatever/history",
     ] {
         let (status, _) = get(state_for(&db, Some(token.to_string())), uri).await;

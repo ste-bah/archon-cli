@@ -66,6 +66,10 @@ impl BoardAccess for MemoryGraph {
     fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
         MemoryGraph::board_item_history(self, id)
     }
+
+    fn board_run_activity(&self, run_id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        MemoryGraph::board_run_activity(self, run_id)
+    }
 }
 
 // ── MemoryClient impl ──────────────────────────────────────────
@@ -157,6 +161,14 @@ impl BoardAccess for MemoryClient {
             block_on_async(self.call("board_item_history", serde_json::json!({ "id": id })))?;
         serde_json::from_value(result).map_err(MemoryError::from)
     }
+
+    fn board_run_activity(&self, run_id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        let result = block_on_async(self.call(
+            "board_run_activity",
+            serde_json::json!({ "run_id": run_id }),
+        ))?;
+        serde_json::from_value(result).map_err(MemoryError::from)
+    }
 }
 
 // ── MemoryAccess impl ──────────────────────────────────────────
@@ -238,6 +250,13 @@ impl BoardAccess for MemoryAccess {
         match self {
             Self::Direct { graph, .. } => graph.board_item_history(id),
             Self::Remote(client) => client.board_item_history(id),
+        }
+    }
+
+    fn board_run_activity(&self, run_id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        match self {
+            Self::Direct { graph, .. } => graph.board_run_activity(run_id),
+            Self::Remote(client) => client.board_run_activity(run_id),
         }
     }
 }

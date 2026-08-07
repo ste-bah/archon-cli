@@ -359,4 +359,56 @@ async fn remote_run_enumeration_matches_direct() {
     handle.abort();
 }
 
+/// The run feed must cross the wire, for the reason #128 exists.
+///
+/// A memory operation implemented directly but left off the dispatch table does
+/// not fail loudly: the client method still compiles, the call still returns,
+/// and the second process reads the empty result as "this run has no history".
+/// The dashboard is almost always that second process -- the TUI holds the
+/// writer -- so a direct-only activity read would be an activity feed that is
+/// blank exactly when it matters.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_run_activity_matches_direct() {
+    let (_dir, port_file) = temp_port_file();
+    let (port, graph, handle) = start_test_server(port_file).await;
+    let access = remote(port).await;
+
+    assert!(
+        access
+            .board_run_activity("run-feed")
+            .expect("remote activity")
+            .is_empty(),
+        "a run with no history must answer as an empty feed over the wire"
+    );
+
+    let item = access
+        .create_board_item(&new_item("run-feed", "raised remotely", "agent-a"))
+        .expect("create");
+    access
+        .create_board_item(&new_item("run-other", "different run", "agent-b"))
+        .expect("create");
+    access
+        .set_board_item_status(&item.id, BoardStatus::Open, BoardStatus::Claimed)
+        .expect("claim transition");
+    access
+        .decline_board_item(&item.id, BoardStatus::Claimed, "already handled upstream")
+        .expect("decline");
+
+    let remote_feed = access.board_run_activity("run-feed").expect("remote feed");
+    assert_eq!(
+        remote_feed,
+        graph.board_run_activity("run-feed").expect("direct feed"),
+        "remote and direct feeds must agree, order and every column included"
+    );
+    assert_eq!(remote_feed.len(), 2, "feed: {remote_feed:?}");
+    assert_eq!(
+        remote_feed[0].to_status,
+        BoardStatus::Declined,
+        "newest first must survive serialisation"
+    );
+    assert_eq!(remote_feed[0].note, "already handled upstream");
+
+    handle.abort();
+}
+
 // ═══════════════════════════════════════════════════════════════

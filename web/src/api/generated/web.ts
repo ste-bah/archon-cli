@@ -130,6 +130,26 @@ actor: string | null,
  */
 note: string, };
 
+export type WebBoardActivity = { runId: string, 
+/**
+ * Newest first — the opposite of `WebBoardHistory`, which is one item's
+ * ladder read from the bottom. A feed is read from the top.
+ */
+events: Array<WebBoardEvent>, 
+/**
+ * The server-side cap, never exceeded by `events`.
+ */
+limit: number, 
+/**
+ * `true` when older transitions exist beyond `events`.
+ */
+truncated: boolean, 
+/**
+ * `false` when there is no memory database yet — a different answer from a
+ * database whose board has no history, and read differently in the UI.
+ */
+storeAvailable: boolean, observedAtMs: number, };
+
 export type WebActionRequest = { actionId: string, actionKind: string, dryRun: boolean, payloadSummary: string, confirmationToken: string | null, };
 
 export type WebActionAuditRow = { actionId: string, actionKind: string, allowed: boolean, dryRun: boolean, policyReason: string, createdAtMs: number, };

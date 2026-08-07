@@ -435,6 +435,18 @@ fn dispatch(graph: &MemoryGraph, method: &str, params: &Value) -> Result<Value, 
             serde_json::to_value(events).map_err(|e| e.to_string())
         }
 
+        // On the wire alongside `board_item_history` and not only in-process:
+        // the dashboard is usually the second process, so a direct-only run
+        // activity read would answer an empty list over TCP and be indexed as
+        // "this run has no history" — the exact shape of #128.
+        "board_run_activity" => {
+            let run_id = str_param(params, "run_id")?;
+            let events = graph
+                .board_run_activity(&run_id)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(events).map_err(|e| e.to_string())
+        }
+
         other => Err(format!("unknown method: {other}")),
     }
 }

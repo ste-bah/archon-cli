@@ -28,6 +28,7 @@ import type {
   WorkflowRunDetail,
   WorkflowWebSummary,
   WebAgentActivitySnapshot,
+  WebBoardActivity,
   WebBoardHistory,
   WebBoardItems,
   WebBoardRunList,
@@ -188,6 +189,12 @@ export const apiClient = {
   boardItemHistory: (itemId: string) =>
     getJson<WebBoardHistory>(
       `/api/board/items/${encodeURIComponent(itemId)}/history`,
+    ),
+  // Run-scoped and server-capped, so the caller takes what it is given rather
+  // than paging: the feed is only ever read from its recent end.
+  boardRunActivity: (runId: string) =>
+    getJson<WebBoardActivity>(
+      `/api/board/runs/${encodeURIComponent(runId)}/activity`,
     ),
   authSession: () => getJson<WebAuthSession>("/api/auth/session"),
   uploadPolicy: () => getJson<WebUploadPolicy>("/api/uploads/policy"),

@@ -1,0 +1,226 @@
+/* Task Board — one card and the chips on it.
+   The `--sh`/`--ss` status hues the chips read come from `board.css`. */
+
+/* ── one card ───────────────────────────────────────────────── */
+
+.bcard {
+  display: grid;
+  gap: 9px;
+  padding: 13px 13px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--board-raised);
+  box-shadow: var(--board-card-shadow);
+  transition:
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.bcard:hover {
+  box-shadow: var(--board-card-shadow-lift);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bcard {
+    transition: none;
+  }
+
+  .bcard:hover {
+    transform: none;
+  }
+}
+
+.bcard__top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bcard__history-toggle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--subtle);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bcard__history-toggle:hover,
+.bcard__history-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.bcard__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+
+/* The agent id in the accent, one step down in size: on a board written by
+   agents, who is holding a thing is the second question after what it is. */
+.bcard__owner {
+  margin: -4px 0 0;
+  color: var(--accent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.bcard__fields {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.bcard__fields dt {
+  color: var(--subtle);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.bcard__fields dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  /* Evidence carries file:line references, which must stay readable, but a card
+     is not where a paragraph is read — clamped here, whole in the DOM. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.bcard__decline {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-left: 2px solid hsl(352 62% 50% / 0.7);
+  background: hsl(352 62% 50% / var(--tint-a));
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bcard__decline strong {
+  display: block;
+  margin-bottom: 2px;
+  color: hsl(352 62% var(--ink-l));
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.bcard__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.bcard__when {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bcard__id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.bcard__history {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.bcard__history li {
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.bcard__history li > span {
+  color: var(--text);
+}
+
+.bcard__history small {
+  color: var(--subtle);
+}
+
+.bcard__history-note {
+  overflow-wrap: anywhere;
+}
+
+.bcard__history--empty {
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ── chips ──────────────────────────────────────────────────── */
+
+/* Tinted rather than solid: a chip is a label on a card, not a second heading,
+   and eight solid blocks on one screen would compete with the titles. */
+.bchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: hsl(var(--sh) var(--ss) var(--ink-l));
+  background: hsl(var(--sh) var(--ss) 50% / var(--tint-a));
+}
+
+/* `kind` stands where a kanban card would carry a priority. It is the real
+   distinction the board draws: an issue is work that must happen and the drain
+   gate counts it; a note is context and dies with the run. */
+.bchip--issue {
+  --sh: 24;
+  --ss: 74%;
+}
+
+.bchip--note {
+  --sh: 214;
+  --ss: 30%;
+}
+
+/* `round` stands where a progress bar would go. There is no percentage to
+   show; the attempt counter is the real number, and past zero it means the
+   item came back. */
+.bchip--round {
+  --sh: 268;
+  --ss: 40%;
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+

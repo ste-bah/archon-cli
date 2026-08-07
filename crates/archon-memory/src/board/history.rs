@@ -118,6 +118,50 @@ impl MemoryGraph {
         Ok(events)
     }
 
+    /// The run's transitions across every item, newest first, capped.
+    ///
+    /// Goes through `:by_run` rather than scanning `board_item_events`: the
+    /// index exists precisely because that relation is keyed on `item_id`, so
+    /// without it the question "what happened in this run" reads every other
+    /// run's history too. The base relation is joined back in for the columns
+    /// the index does not carry, the same shape [`Self::decline_reasons`] uses.
+    ///
+    /// Ordering and the cap are applied here rather than in Datalog. `at` is
+    /// stored as a string and only becomes comparable once parsed — a Cozo
+    /// `:order` on the raw column would sort RFC 3339 stamps written at
+    /// different UTC offsets into the wrong order, and a `:limit` on top of that
+    /// would then keep the wrong rows.
+    pub fn board_run_activity(&self, run_id: &str) -> Result<Vec<BoardEvent>, MemoryError> {
+        let params = BTreeMap::from([("run".to_string(), DataValue::from(run_id))]);
+        let script = format!(
+            "?[{EVENT_COLUMNS}] := *board_item_events:by_run{{run_id, item_id, seq}}, \
+             run_id = $run, \
+             *board_item_events{{item_id, seq, at, from_status, to_status, round, actor, note}}"
+        );
+        let result = self
+            .db
+            .run_script(&script, params, ScriptMutability::Immutable)
+            .map_err(db_err)?;
+        let mut events = result
+            .rows
+            .iter()
+            .map(|row| row_values_to_event(row))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Newest first, and totally ordered: transitions are serialised by the
+        // write guard but can land inside one clock tick, so `at` alone leaves
+        // ties that would reshuffle between polls and read as movement that did
+        // not happen. `seq` breaks them within an item and `item_id` across.
+        events.sort_by(|left, right| {
+            right
+                .at
+                .cmp(&left.at)
+                .then_with(|| right.seq.cmp(&left.seq))
+                .then_with(|| left.item_id.cmp(&right.item_id))
+        });
+        events.truncate(super::RUN_ACTIVITY_LIMIT);
+        Ok(events)
+    }
+
     /// Fill in `decline_reason` on an item that has one.
     ///
     /// A second query, and only for a declined item: every other status has no

@@ -1,24 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardList, FileText, History, StickyNote, TriangleAlert } from "lucide-react";
+import { Activity, LayoutGrid } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
-import type { WebBoardEvent, WebBoardItem, WebBoardRun } from "../api/generated/web";
+import type { WebBoardItem, WebBoardRun } from "../api/generated/web";
 import { StatusPill } from "../components/StatusPill";
+import { BoardActivity } from "./board/BoardActivity";
+import { BoardColumn } from "./board/BoardColumn";
+import { BoardHeader } from "./board/BoardHeader";
+import { BoardStats } from "./board/BoardStats";
+import { STATUS_ORDER } from "./board/statuses";
 import "./BoardPage.css";
-
-// Lifecycle order, not alphabetical: the board is read top to bottom as work
-// moving from raised to closed, and a reader scanning for what is outstanding
-// wants the unfinished statuses first.
-const STATUS_ORDER = [
-  "open",
-  "claimed",
-  "in_review",
-  "gaps_remain",
-  "escalated",
-  "resolved",
-  "promoted",
-  "declined",
-];
+// Split by concern rather than by convenience — the file-size guard is a hard
+// 500 lines and one board stylesheet had already passed it.
+import "./board/board.css";
+import "./board/board-card.css";
+import "./board/board-activity.css";
 
 export function BoardPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
@@ -26,8 +22,8 @@ export function BoardPage() {
   const [openHistoryFor, setOpenHistoryFor] = useState<string | undefined>();
 
   // A snapshot, not an event stream: statuses change in place on items that
-  // already exist, so there is nothing to append. Polled at the same cadence
-  // as the agent panel, slower while nothing is on the board.
+  // already exist, so there is nothing to append. Polled at the same cadence as
+  // the agent panel, slower while nothing is on the board.
   const runsQuery = useQuery({
     queryKey: ["board-runs"],
     queryFn: apiClient.boardRuns,
@@ -43,6 +39,16 @@ export function BoardPage() {
     refetchInterval: 5000,
   });
 
+  // The feed is not filtered with the columns: a status filter is a question
+  // about what is on the board now, and narrowing the history to match would
+  // hide the transitions that put things where they are.
+  const activityQuery = useQuery({
+    queryKey: ["board-activity", selectedRun?.runId],
+    queryFn: () => apiClient.boardRunActivity(selectedRun!.runId),
+    enabled: Boolean(selectedRun?.runId),
+    refetchInterval: 5000,
+  });
+
   useEffect(() => {
     if (!selectedRunId && runs[0]?.runId) {
       setSelectedRunId(runs[0].runId);
@@ -52,254 +58,95 @@ export function BoardPage() {
   const items = itemsQuery.data?.items ?? [];
   const grouped = groupByStatus(items);
   const storeAvailable = runsQuery.data?.storeAvailable ?? true;
-  const totals = runs.reduce(
-    (sum, run) => ({
-      items: sum.items + run.total,
-      open: sum.open + countOf(run, "open"),
-      declined: sum.declined + countOf(run, "declined"),
-    }),
-    { items: 0, open: 0, declined: 0 },
-  );
+  // A filter narrows the strip to the columns it names. Left at eight, seven of
+  // them would stand empty and the filter would look broken rather than applied.
+  const columns = statusFilter.length
+    ? STATUS_ORDER.filter((status) => statusFilter.includes(status))
+    : STATUS_ORDER;
 
   return (
-    <section className="board-layout">
-      <div className="panel panel--wide">
+    <section className="board-page">
+      <BoardHeader
+        runs={runs}
+        selectedRun={selectedRun}
+        onSelectRun={(runId) => {
+          setSelectedRunId(runId);
+          setOpenHistoryFor(undefined);
+        }}
+        statusFilter={statusFilter}
+        onStatusFilter={(statuses) => {
+          setStatusFilter(statuses);
+          setOpenHistoryFor(undefined);
+        }}
+        storeAvailable={storeAvailable}
+        refreshing={runsQuery.isFetching || itemsQuery.isFetching || activityQuery.isFetching}
+        onRefresh={() => {
+          void runsQuery.refetch();
+          void itemsQuery.refetch();
+          void activityQuery.refetch();
+        }}
+      />
+
+      <BoardStats run={selectedRun} />
+
+      <section className="panel panel--board">
         <div className="panel-heading">
-          <div>
-            <span className="eyebrow">Agent handoffs</span>
-            <h3>Task board</h3>
+          <div className="board-section-title">
+            <LayoutGrid size={16} aria-hidden="true" />
+            <h3>{selectedRun ? selectedRun.runId : "Board"}</h3>
           </div>
-          <StatusPill tone={storeAvailable ? "good" : "warn"}>
-            {storeAvailable ? `${runs.length} runs` : "no memory database"}
+          <StatusPill>
+            {items.length} {items.length === 1 ? "item" : "items"} shown
           </StatusPill>
         </div>
-        <div className="board-metrics">
-          <BoardMetric icon={<ClipboardList size={18} />} label="Runs" value={runs.length} detail="with items raised" />
-          <BoardMetric icon={<FileText size={18} />} label="Items" value={totals.items} detail="across every run" />
-          <BoardMetric icon={<StickyNote size={18} />} label="Open" value={totals.open} detail="nobody has claimed" />
-          <BoardMetric icon={<TriangleAlert size={18} />} label="Declined" value={totals.declined} detail="closed on an argument" />
-        </div>
-      </div>
 
-      <section className="panel">
-        <div className="panel-heading">
-          <h3>Runs</h3>
-          <StatusPill>{runs.length} tracked</StatusPill>
-        </div>
-        <div className="board-list">
-          {runs.length === 0 ? (
-            <EmptyRow>{emptyRunsMessage(storeAvailable, runsQuery.isLoading, runsQuery.isError)}</EmptyRow>
-          ) : (
-            runs.map((run) => (
-              <button
-                key={run.runId}
-                className={`board-row board-row--selectable${
-                  run.runId === selectedRun?.runId ? " board-row--active" : ""
-                }`}
-                onClick={() => {
-                  setSelectedRunId(run.runId);
-                  setStatusFilter([]);
-                  setOpenHistoryFor(undefined);
-                }}
-                type="button"
-              >
-                <div>
-                  <strong>{run.runId}</strong>
-                  <span>{run.total} items · updated {run.lastUpdatedAt}</span>
-                  <small className="board-counts">
-                    {orderedCounts(run).map((count) => (
-                      <span key={count.status} className="board-count">
-                        {count.status.replace("_", " ")} {count.count}
-                      </span>
-                    ))}
-                  </small>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <h3>Status filter</h3>
-          <StatusPill tone={statusFilter.length ? "good" : "muted"}>
-            {statusFilter.length ? `${statusFilter.length} selected` : "all statuses"}
-          </StatusPill>
-        </div>
-        <div className="board-filters" aria-label="Board status filters">
-          <button
-            className={`board-filter${statusFilter.length === 0 ? " board-filter--active" : ""}`}
-            onClick={() => setStatusFilter([])}
-            type="button"
-          >
-            all
-          </button>
-          {STATUS_ORDER.map((status) => (
-            <button
-              key={status}
-              className={`board-filter${statusFilter.includes(status) ? " board-filter--active" : ""}`}
-              onClick={() => setStatusFilter(toggle(statusFilter, status))}
-              type="button"
-            >
-              {status.replace("_", " ")}
-              {selectedRun ? ` ${countOf(selectedRun, status)}` : ""}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel panel--wide">
-        <div className="panel-heading">
-          <h3>{selectedRun ? `Items in ${selectedRun.runId}` : "Board items"}</h3>
-          <StatusPill>{items.length} shown</StatusPill>
-        </div>
-        {items.length === 0 ? (
-          <EmptyRow>{emptyItemsMessage(selectedRun, statusFilter, itemsQuery.isLoading, itemsQuery.isError)}</EmptyRow>
+        {runs.length === 0 || !selectedRun ? (
+          <p className="board-blank">
+            {emptyRunsMessage(storeAvailable, runsQuery.isLoading, runsQuery.isError)}
+          </p>
+        ) : items.length === 0 ? (
+          <p className="board-blank">
+            {emptyItemsMessage(selectedRun, statusFilter, itemsQuery.isLoading, itemsQuery.isError)}
+          </p>
         ) : (
-          STATUS_ORDER.filter((status) => grouped.has(status)).map((status) => (
-            <div key={status} className="board-group">
-              <div className="board-group__heading">
-                <StatusPill tone={statusTone(status)}>{status.replace("_", " ")}</StatusPill>
-                <span>{grouped.get(status)!.length} items</span>
-              </div>
-              <div className="board-list">
-                {grouped.get(status)!.map((item) => (
-                  <BoardItemCard
-                    key={item.id}
-                    item={item}
-                    historyOpen={openHistoryFor === item.id}
-                    onToggleHistory={() =>
-                      setOpenHistoryFor(openHistoryFor === item.id ? undefined : item.id)
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-          ))
+          // Eight columns will not fit any window, so the strip scrolls inside
+          // itself. The `min-width: 0` on the panel is what keeps that overflow
+          // here instead of handing the page a horizontal scrollbar.
+          <div className="bstrip" role="list" aria-label="Board columns by status">
+            {columns.map((status) => (
+              <BoardColumn
+                key={status}
+                status={status}
+                items={grouped.get(status) ?? []}
+                openHistoryFor={openHistoryFor}
+                onToggleHistory={(id) =>
+                  setOpenHistoryFor((current) => (current === id ? undefined : id))
+                }
+              />
+            ))}
+          </div>
         )}
       </section>
-    </section>
-  );
-}
 
-function BoardItemCard({
-  item,
-  historyOpen,
-  onToggleHistory,
-}: {
-  item: WebBoardItem;
-  historyOpen: boolean;
-  onToggleHistory: () => void;
-}) {
-  return (
-    <article className="board-item">
-      <header>
-        <div>
-          <strong>{item.title}</strong>
-          <span>
-            {item.kind} · raised by {item.raisedBy} · round {item.round}
-          </span>
+      <section className="panel panel--board">
+        <div className="panel-heading">
+          <div className="board-section-title">
+            <Activity size={16} aria-hidden="true" />
+            <h3>Recent activity</h3>
+          </div>
+          <StatusPill tone={activityQuery.data?.events.length ? "good" : "muted"}>
+            {activityQuery.data?.events.length ?? 0} recorded
+          </StatusPill>
         </div>
-        <div className="board-item__actions">
-          <StatusPill tone={statusTone(item.status)}>{item.status.replace("_", " ")}</StatusPill>
-          <button type="button" onClick={onToggleHistory} aria-label={`History for ${item.title}`}>
-            <History size={15} />
-          </button>
-        </div>
-      </header>
-      <dl className="board-item__fields">
-        <BoardField label="Evidence" value={item.evidence} />
-        <BoardField label="Acceptance" value={item.acceptance} />
-        <BoardField label="Claimed by" value={item.claimedBy ?? "unclaimed"} />
-        <BoardField label="Updated" value={item.updatedAt} />
-        {/* Only a declined item has one, and the store refuses to record a
-            decline without it, so its absence here would be a real loss. */}
-        {item.declineReason && <BoardField label="Declined because" value={item.declineReason} />}
-      </dl>
-      {historyOpen && <ItemHistory itemId={item.id} />}
-    </article>
-  );
-}
-
-function ItemHistory({ itemId }: { itemId: string }) {
-  const history = useQuery({
-    queryKey: ["board-history", itemId],
-    queryFn: () => apiClient.boardItemHistory(itemId),
-  });
-  const events = history.data?.events ?? [];
-  if (history.isLoading) {
-    return <div className="board-history">Loading transitions.</div>;
-  }
-  if (events.length === 0) {
-    return (
-      <div className="board-history">
-        No transitions recorded. Claims and releases are ownership churn and are
-        deliberately not part of an item's history.
-      </div>
-    );
-  }
-  return (
-    <ol className="board-history">
-      {events.map((event) => (
-        <li key={event.seq}>
-          <TransitionRow event={event} />
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function TransitionRow({ event }: { event: WebBoardEvent }) {
-  return (
-    <div className="board-transition">
-      <span>
-        {event.fromStatus.replace("_", " ")} → {event.toStatus.replace("_", " ")}
-      </span>
-      <span>
-        round {event.round} · {event.actor ?? "no actor"} · {event.at}
-      </span>
-      {event.note && <small>{event.note}</small>}
-    </div>
-  );
-}
-
-function BoardField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="board-field">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function BoardMetric({
-  icon,
-  label,
-  value,
-  detail,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-  detail: string;
-}) {
-  return (
-    <section className="board-metric" aria-label={label}>
-      <span className="board-metric__icon">{icon}</span>
-      <span className="metric-tile__label">{label}</span>
-      <strong>{value}</strong>
-      <span className="metric-tile__detail">{detail}</span>
+        <BoardActivity
+          activity={activityQuery.data}
+          items={items}
+          loading={activityQuery.isLoading}
+          failed={activityQuery.isError}
+          runSelected={Boolean(selectedRun)}
+        />
+      </section>
     </section>
-  );
-}
-
-function EmptyRow({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="board-empty">
-      <FileText size={18} aria-hidden="true" />
-      <span>{children}</span>
-    </div>
   );
 }
 
@@ -314,27 +161,6 @@ function groupByStatus(items: WebBoardItem[]) {
     }
   }
   return grouped;
-}
-
-function orderedCounts(run: WebBoardRun) {
-  return [...run.counts].sort(
-    (left, right) => statusRank(left.status) - statusRank(right.status),
-  );
-}
-
-function statusRank(status: string) {
-  const index = STATUS_ORDER.indexOf(status);
-  return index === -1 ? STATUS_ORDER.length : index;
-}
-
-function countOf(run: WebBoardRun, status: string) {
-  return run.counts.find((count) => count.status === status)?.count ?? 0;
-}
-
-function toggle(selected: string[], status: string) {
-  return selected.includes(status)
-    ? selected.filter((entry) => entry !== status)
-    : [...selected, status];
 }
 
 // An unavailable store and an empty board are different facts, and only the
@@ -353,7 +179,7 @@ function emptyRunsMessage(storeAvailable: boolean, loading: boolean, failed: boo
 }
 
 function emptyItemsMessage(
-  run: WebBoardRun | undefined,
+  run: WebBoardRun,
   statusFilter: string[],
   loading: boolean,
   failed: boolean,
@@ -364,21 +190,8 @@ function emptyItemsMessage(
   if (loading) {
     return "Loading items.";
   }
-  if (!run) {
-    return "Select a run to see its items.";
-  }
   if (statusFilter.length) {
     return `Nothing in ${run.runId} is ${statusFilter.join(" or ")}.`;
   }
   return `${run.runId} has no items.`;
-}
-
-function statusTone(status: string): "good" | "warn" | "muted" {
-  if (["resolved", "promoted"].includes(status)) {
-    return "good";
-  }
-  if (["gaps_remain", "escalated", "declined"].includes(status)) {
-    return "warn";
-  }
-  return "muted";
 }

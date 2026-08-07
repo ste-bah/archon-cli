@@ -9,6 +9,7 @@ pub mod api;
 pub mod assets;
 pub mod auth;
 pub mod board;
+pub mod board_activity;
 pub mod chat;
 pub mod cognitive;
 pub mod corpus;

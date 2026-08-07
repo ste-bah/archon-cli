@@ -186,3 +186,97 @@ fn the_standing_decline_reason_is_the_latest_one() {
         "the superseded decline must still be on the record"
     );
 }
+
+/// The run feed must be partitioned by run and ordered newest first.
+///
+/// The partition is the part worth pinning: `board_item_events` is keyed on
+/// `item_id`, so the run-scoped read goes through the `by_run` index, and an
+/// index join written slightly wrong returns every run's history while still
+/// looking plausible -- a feed carrying a neighbouring run's transitions is
+/// worse than no feed, because a reader cannot tell.
+#[test]
+fn run_activity_is_partitioned_and_newest_first() {
+    let graph = MemoryGraph::in_memory().expect("graph");
+    let mine = graph
+        .create_board_item(&new_item("run-mine", "raised here"))
+        .expect("create");
+    let also_mine = graph
+        .create_board_item(&new_item("run-mine", "also raised here"))
+        .expect("create");
+    let theirs = graph
+        .create_board_item(&new_item("run-theirs", "raised elsewhere"))
+        .expect("create");
+
+    graph
+        .set_board_item_status(&mine.id, BoardStatus::Open, BoardStatus::Claimed)
+        .expect("claim transition");
+    graph
+        .set_board_item_status(&mine.id, BoardStatus::Claimed, BoardStatus::InReview)
+        .expect("review transition");
+    graph
+        .decline_board_item(&also_mine.id, BoardStatus::Open, "covered by the sibling")
+        .expect("decline");
+    graph
+        .set_board_item_status(&theirs.id, BoardStatus::Open, BoardStatus::Claimed)
+        .expect("the other run's transition");
+
+    let feed = graph.board_run_activity("run-mine").expect("activity");
+    assert_eq!(feed.len(), 3, "only the asking run's transitions: {feed:?}");
+    assert!(
+        feed.iter().all(|event| event.run_id == "run-mine"),
+        "the by_run join must not leak another run's history: {feed:?}"
+    );
+    assert!(
+        !feed.iter().any(|event| event.item_id == theirs.id),
+        "an item from another run must not appear: {feed:?}"
+    );
+    // Newest first is the opposite of `board_item_history`, and it is what makes
+    // the feed readable from the top without the caller reversing it.
+    for pair in feed.windows(2) {
+        assert!(
+            (pair[0].at, pair[0].seq) >= (pair[1].at, pair[1].seq),
+            "the feed must be newest first: {feed:?}"
+        );
+    }
+
+    assert!(
+        graph
+            .board_run_activity("run-never-existed")
+            .expect("unknown run")
+            .is_empty(),
+        "a run with no history is an empty feed, not an error"
+    );
+}
+
+/// The cap lives in the operation, so a long-lived run cannot hand a poller an
+/// unbounded response. The rows kept must be the newest ones -- truncating the
+/// other end would leave a feed that never changes.
+#[test]
+fn run_activity_keeps_only_the_newest_rows_up_to_the_cap() {
+    let graph = MemoryGraph::in_memory().expect("graph");
+    let item = graph
+        .create_board_item(&new_item("run-busy", "flipped repeatedly"))
+        .expect("create");
+    // Two transitions per lap, so the total lands well past the cap.
+    let laps = super::RUN_ACTIVITY_LIMIT;
+    for _ in 0..laps {
+        graph
+            .set_board_item_status(&item.id, BoardStatus::Open, BoardStatus::Claimed)
+            .expect("out");
+        graph
+            .set_board_item_status(&item.id, BoardStatus::Claimed, BoardStatus::Open)
+            .expect("back");
+    }
+
+    let feed = graph.board_run_activity("run-busy").expect("activity");
+    assert_eq!(feed.len(), super::RUN_ACTIVITY_LIMIT);
+    let newest = (laps * 2 - 1) as u32;
+    assert_eq!(
+        feed[0].seq, newest,
+        "the cap must drop the oldest transitions, not the newest"
+    );
+    assert_eq!(
+        feed[super::RUN_ACTIVITY_LIMIT - 1].seq,
+        newest - (super::RUN_ACTIVITY_LIMIT as u32 - 1)
+    );
+}

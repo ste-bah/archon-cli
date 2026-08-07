@@ -22,8 +22,8 @@ use super::api::{EffectivePolicySummary, WebApiState};
 use super::live::WebLiveManager;
 use super::{
     AppState, WebConfig, WebRuntimeHandles, WebRuntimePaths, actions, agents, api, assets, auth,
-    board, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live, metrics,
-    pipelines, server_shutdown, settings, uploads, workflows, world,
+    board, board_activity, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live,
+    metrics, pipelines, server_shutdown, settings, uploads, workflows, world,
 };
 
 /// HTTP server that serves the embedded SPA.
@@ -236,6 +236,12 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         // rows in the memory database, not a process-global registry.
         .route("/api/board/runs", get(board::runs_handler))
         .route("/api/board/runs/{run_id}/items", get(board::items_handler))
+        // Run-scoped rather than per item: the feed is what happened across the
+        // run, and assembling it from item histories would be a query per row.
+        .route(
+            "/api/board/runs/{run_id}/activity",
+            get(board_activity::activity_handler),
+        )
         .route(
             "/api/board/items/{item_id}/history",
             get(board::history_handler),

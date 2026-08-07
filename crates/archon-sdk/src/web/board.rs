@@ -83,7 +83,7 @@ impl WebBoardStore {
     /// the election because `open_memory_with_db_path` creates what it cannot
     /// find. Looking at a dashboard must not be what brings a memory database
     /// into existence.
-    async fn resolve(
+    pub(super) async fn resolve(
         &self,
         paths: &WebRuntimePaths,
     ) -> Result<Option<Arc<dyn BoardAccess>>, String> {
@@ -382,7 +382,7 @@ pub(crate) async fn history_handler(
 /// calling thread with `thread::sleep`. Reads take the same guarded instance, so
 /// calling one directly from a handler could stall the executor the same way the
 /// memory server's dispatch would — which is why that also uses `spawn_blocking`.
-async fn blocking<T, F>(board: Arc<dyn BoardAccess>, work: F) -> Result<T, String>
+pub(super) async fn blocking<T, F>(board: Arc<dyn BoardAccess>, work: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce(&dyn BoardAccess) -> Result<T, MemoryError> + Send + 'static,
@@ -392,7 +392,7 @@ where
         .map_err(|error| format!("board read did not complete: {error}"))?
 }
 
-fn store_error(message: String) -> Response {
+pub(super) fn store_error(message: String) -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
 }
 
@@ -445,7 +445,7 @@ fn to_item(item: &BoardItem) -> WebBoardItem {
     }
 }
 
-fn to_event(event: &BoardEvent) -> WebBoardEvent {
+pub(super) fn to_event(event: &BoardEvent) -> WebBoardEvent {
     WebBoardEvent {
         item_id: event.item_id.clone(),
         seq: event.seq,

@@ -290,4 +290,23 @@ pub trait BoardAccess: Send + Sync {
 
     /// Every recorded transition for one item, oldest first.
     fn board_item_history(&self, id: &str) -> Result<Vec<BoardEvent>, MemoryError>;
+
+    /// The run's transitions across all of its items, newest first.
+    ///
+    /// The counterpart to [`Self::board_item_history`] for a reader who has a
+    /// run but not an item: asking "what just happened here" per item means one
+    /// query per row, and a poller would pay that on every tick.
+    ///
+    /// Truncated to the newest [`RUN_ACTIVITY_LIMIT`] transitions. A long-lived
+    /// run accumulates transitions without bound while the question this answers
+    /// is always about the recent end, so the cap is in the operation rather
+    /// than left to each caller to remember.
+    fn board_run_activity(&self, run_id: &str) -> Result<Vec<BoardEvent>, MemoryError>;
 }
+
+/// The most transitions [`BoardAccess::board_run_activity`] will ever return.
+///
+/// A constant rather than a caller-supplied limit: the cap exists to bound what
+/// crosses the RPC surface and what a dashboard renders, and a parameter would
+/// let either side ask for the unbounded answer the cap is here to prevent.
+pub const RUN_ACTIVITY_LIMIT: usize = 200;
