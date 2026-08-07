@@ -39,7 +39,8 @@ crates/archon-core/tests/hook_toml_tests.rs
 crates/archon-core/tests/hooks_tests.rs
 
 # --- archon-leann ---
-crates/archon-leann/src/indexer.rs
+# `indexer.rs` dropped below 500 when the embedding batch pass moved to
+# `embedding_pass.rs`; entry removed per the shrink rule above.
 crates/archon-leann/tests/chunker.rs
 
 # --- archon-llm ---

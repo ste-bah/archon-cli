@@ -48,6 +48,67 @@ pub fn detect_language(path: &Path) -> Option<String> {
     Some(lang.to_string())
 }
 
+/// Whether a detected language is source code the indexer should chunk.
+///
+/// [`detect_language`] also names markup and data formats (`markdown`, `json`,
+/// `yaml`, `toml`, `sql`) because other callers want them; the code index does
+/// not. Kept next to `detect_language` so the two lists are read together --
+/// adding an extension without adding it here silently indexes nothing.
+pub fn is_code_language(language: &str) -> bool {
+    matches!(
+        language,
+        "rust"
+            | "python"
+            | "typescript"
+            | "typescriptreact"
+            | "javascript"
+            | "javascriptreact"
+            | "go"
+            | "java"
+            | "c"
+            | "cpp"
+            | "ruby"
+            | "php"
+            | "swift"
+            | "kotlin"
+            | "scala"
+            | "csharp"
+            | "lua"
+            | "shell"
+            | "r"
+            | "dart"
+            | "elixir"
+            | "erlang"
+            | "haskell"
+            | "ocaml"
+            | "perl"
+            | "zig"
+            | "nim"
+            | "v"
+    )
+}
+
+/// Check whether a repository-relative path matches any include glob.
+///
+/// An empty pattern list includes everything, so a caller that never set
+/// `include_patterns` keeps the language check as its only filter.
+///
+/// Matching is on the relative path with `/` separators, because the patterns
+/// callers write (`**/*.rs`) are repo-relative and slash-spelled while the walk
+/// hands us absolute Windows paths. The bare file name is tried as well so a
+/// caller can write `*.rs` and mean it -- glob's `**/` needs a separator to
+/// match against, which a file at the repository root does not have.
+pub fn is_included(relative: &Path, patterns: &[glob::Pattern]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    let file_name = relative.file_name().and_then(|name| name.to_str());
+    patterns.iter().any(|pattern| {
+        pattern.matches(&normalized) || file_name.is_some_and(|n| pattern.matches(n))
+    })
+}
+
 /// Check if a path matches any of the given exclusion patterns.
 ///
 /// Performs component-based matching: if any path component equals one of the
