@@ -431,6 +431,10 @@ pub struct MemoryConfig {
     pub embedding_model: Option<String>,
     /// Keyword/vector blend factor for hybrid search (0.0 = pure vector, 1.0 = pure keyword).
     pub hybrid_alpha: f32,
+    /// Intra-op threads for the local embedder's ONNX session. None = a capped
+    /// default. Process-wide: memory and the LEANN code index share one session,
+    /// so this is not per-consumer.
+    pub embedding_intra_threads: Option<usize>,
     /// Memory garden consolidation settings.
     pub garden: archon_memory::garden::GardenConfig,
     /// Auto-capture settings (regex-based memory detection at turn boundary).
@@ -448,6 +452,7 @@ impl Default for MemoryConfig {
             embedding_base_url: None,
             embedding_model: None,
             hybrid_alpha: 0.3,
+            embedding_intra_threads: None,
             garden: archon_memory::garden::GardenConfig::default(),
             auto_capture: AutoCaptureConfig::default(),
             auto_extraction: AutoExtractionConfig::default(),

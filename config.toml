@@ -385,6 +385,14 @@ embedding_provider = "local"
 # Hybrid search blend: 0.0 = pure vector, 1.0 = pure keyword. 0.3 = 70% vec / 30% kw.
 hybrid_alpha = 0.3
 
+# Intra-op threads for the local embedder's ONNX session. Commented out = a
+# capped default (core count, at most 8). This is process-wide, not per-consumer:
+# memory and the LEANN code index share one BGE-base session, so the number here
+# is the total the embedder will claim. Raising it trades idle threads for
+# per-batch latency; BGE-base stops getting faster well before a large core
+# count, which is why the default caps rather than following the machine.
+# embedding_intra_threads = 4
+
 # --- Memory Garden (background consolidation) ---
 [memory.garden]
 auto_consolidate = true

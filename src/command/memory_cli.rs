@@ -65,6 +65,7 @@ async fn handle_reindex(all: bool, config: &ArchonConfig) -> Result<()> {
         hybrid_alpha: config.memory.hybrid_alpha,
         base_url: config.memory.embedding_base_url.clone(),
         model: config.memory.embedding_model.clone(),
+        intra_threads: config.memory.embedding_intra_threads,
     };
     let provider = archon_memory::embedding::create_provider(&embed_cfg)
         .context("failed to create embedding provider")?;

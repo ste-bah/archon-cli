@@ -70,19 +70,53 @@ impl<'a> FileStore<'a> {
         ))
     }
 
+    /// Is `file_path` already indexed at exactly `file_hash`?
+    ///
+    /// Guarded for the same reason the writes below are. `.archon/leann.db` is
+    /// per-working-directory, so two archon processes in one repository -- a
+    /// TUI session and a dashboard, or two terminals -- contend by
+    /// construction. This check runs first for *every* file in the walk, so an
+    /// unguarded SQLITE_BUSY here ended the whole pass before the guarded
+    /// writes ever got their turn to back off: the loser of the race abandoned
+    /// its index until the next session start.
+    ///
+    /// Immutable, so the guard retries without taking the write lock -- a read
+    /// has no reason to serialise against other readers.
+    ///
+    /// Exhausting the retry budget returns `true`, not `Err`. Both callers read
+    /// `true` as "already current, skip it", so a file that stays contended
+    /// past the budget costs that one file rather than the walk, and the next
+    /// pass picks it up again because nothing was written for it. Propagating
+    /// the error instead would reinstate exactly the abandon-everything
+    /// behaviour this guard exists to prevent.
     pub(super) fn file_hash_matches(&self, file_path: &str, file_hash: &str) -> Result<bool> {
         let mut params = BTreeMap::new();
         params.insert("fp".to_string(), DataValue::from(file_path));
         params.insert("fh".to_string(), DataValue::from(file_hash));
-        let result = self
-            .db
-            .run_script(
-                "?[file_path] := *file_states{file_path, file_hash}, file_path = $fp, file_hash = $fh",
-                params,
-                ScriptMutability::Immutable,
-            )
-            .map_err(|error| cozo_error("file state hash check query", error))?;
-        Ok(!result.rows.is_empty())
+        let result = archon_cozo::run_script_guarded(
+            self.db,
+            "?[file_path] := *file_states{file_path, file_hash}, file_path = $fp, file_hash = $fh",
+            params,
+            ScriptMutability::Immutable,
+            "leann index: file state hash check",
+            self.guard,
+        );
+        match result {
+            Ok(rows) => Ok(!rows.rows.is_empty()),
+            Err(error) => {
+                let message = format!("{error:#}");
+                if archon_cozo::is_retryable_cozo_error(&message) {
+                    tracing::warn!(
+                        file_path,
+                        error = %message,
+                        "LEANN index: file state check still busy after the retry budget; \
+                         skipping this file for this pass"
+                    );
+                    return Ok(true);
+                }
+                Err(anyhow::anyhow!("file state hash check query: {message}"))
+            }
+        }
     }
 
     /// Replace every chunk of `file_path` in one Cozo multi-transaction.
@@ -217,6 +251,53 @@ impl<'a> FileStore<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod file_hash_matches_tests {
+    use super::*;
+
+    fn store_db() -> DbInstance {
+        DbInstance::new("mem", "", Default::default()).expect("in-memory CozoDB")
+    }
+
+    #[test]
+    fn guarding_the_read_leaves_the_answer_unchanged() {
+        // The guard wraps the query; it must not alter what the query means.
+        let db = store_db();
+        let guard = archon_cozo::CozoGuardConfig::default();
+        let store = FileStore::new(&db, 8, &guard);
+        store.ensure_schema().expect("schema");
+
+        assert!(
+            !store.file_hash_matches("src/lib.rs", "abc").expect("read"),
+            "an unindexed file has no stored hash to match"
+        );
+
+        store
+            .replace_file_with_cancel("src/lib.rs", "abc", &[], || false)
+            .expect("write");
+
+        assert!(
+            store.file_hash_matches("src/lib.rs", "abc").expect("read"),
+            "the stored hash matches"
+        );
+        assert!(
+            !store.file_hash_matches("src/lib.rs", "def").expect("read"),
+            "a changed hash does not match"
+        );
+    }
+
+    #[test]
+    fn the_observed_busy_error_routes_to_skip_not_failure() {
+        // Verbatim from the issue #140 report. If Cozo ever reworded this, the
+        // skip branch would go unreachable and the walk would start aborting
+        // again on contention -- silently, because the symptom is a log line in
+        // a session file. Pin the string that has to keep classifying.
+        assert!(archon_cozo::is_retryable_cozo_error(
+            "file state hash check query: database is locked (code 5)"
+        ));
     }
 }
 

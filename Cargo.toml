@@ -55,7 +55,14 @@ jsonschema = "0.28"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
 dirs = "6"
-fastembed = { version = "4", default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
+# 5.x for `intra_threads`: 4.x hardcoded `available_parallelism()` per ONNX
+# session, so every embedder claimed one intra-op thread per core. `image-models`
+# is new in 5.x and gates the CLIP types archon-docs uses -- 4.x compiled them
+# unconditionally, so it has to be named now that defaults are off. The ort
+# binaries are fetched over rustls to match `hf-hub-rustls-tls`; plain
+# `ort-download-binaries` aliases to native-tls in 5.x, which would drag
+# openssl-sys into a build that currently has no use for it.
+fastembed = { version = "5", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls", "image-models"] }
 getrandom = { version = "0.3", features = ["std"] }
 urlencoding = "2"
 which = "7"

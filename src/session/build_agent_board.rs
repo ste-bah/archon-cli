@@ -80,6 +80,7 @@ fn configure_embeddings(access: &archon_memory::MemoryAccess, config: &ArchonCon
         hybrid_alpha: config.memory.hybrid_alpha,
         base_url: config.memory.embedding_base_url.clone(),
         model: config.memory.embedding_model.clone(),
+        intra_threads: config.memory.embedding_intra_threads,
     };
     match archon_memory::embedding::create_provider(&embed_cfg) {
         Ok(provider) => match graph.set_embedding_provider(provider) {
