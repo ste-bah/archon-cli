@@ -328,6 +328,51 @@ impl LifecycleDriver {
                 })
             }
             OrchestratorAction::FinalReport { narrative } => {
+                // The drain gate, on this path too.
+                //
+                // `run_final_gates` guards the v2 relay, and the orchestrated
+                // loop does not pass through it -- so a run under
+                // `ARCHON_ORCHESTRATED_LIFECYCLE=1` could report success with
+                // its board still holding open issues, which is the exact
+                // failure the gate exists to prevent.
+                //
+                // Refusing rather than failing the run is deliberate: the
+                // orchestrator is still in its loop and CAN resolve or decline
+                // the items, so it is told what is outstanding and given the
+                // chance. If it cannot, the action budget exhausts and the run
+                // ends at `orchestrated-budget-exhausted` without an accepted
+                // report, which is the honest outcome.
+                //
+                // A run with no board configured passes, and a board that
+                // cannot be READ refuses -- "unreachable" and "empty" are the
+                // same silence from here, and reading that silence as success
+                // is what the gate is for.
+                if let Some((run_id, board)) = self.board_drain.as_ref() {
+                    match board.drain_items_for_run(run_id) {
+                        Ok(items) => {
+                            let outcome =
+                                crate::v2::lifecycle_policy::drain_gate::evaluate(run_id, &items);
+                            if !outcome.passed() {
+                                return Ok(refusal(
+                                    ordinal,
+                                    "final_report",
+                                    &format!(
+                                        "run {run_id} still owns undrained board items;                                          resolve, promote or decline them (with a reason)                                          before the final report",
+                                    ),
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            return Ok(refusal(
+                                ordinal,
+                                "final_report",
+                                &format!(
+                                    "run {run_id} could not read its task board ({error});                                      a run whose completion cannot be checked has not been                                      shown to be complete",
+                                ),
+                            ));
+                        }
+                    }
+                }
                 self.orchestrated_terminal_checkpoint(
                     "orchestrated-final-report",
                     "orchestrated run final report",

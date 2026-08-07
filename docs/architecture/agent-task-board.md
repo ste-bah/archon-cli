@@ -300,25 +300,64 @@ Liveness is now a property of having been spawned. Two details make it hold:
 
 ## What is not built
 
-Stated plainly, because the storage layer reads as more complete than the
-feature is:
+Nothing structural. The three entries that stood here — a `round` that never
+advanced, a board unreachable from any agent with an explicit tool list, and a
+drain gate absent from the orchestrated lifecycle — are closed, and each is
+described below where the mechanism lives rather than as a caveat here.
 
-- **`round` has no mutator.** It is stored, decoded, and returned, and nothing
-  ever advances it. The review loop bounds its own rounds internally, so the
-  column is currently a place for an escalation ladder to record itself rather
-  than something any code reads.
-- **A subagent spawned with an explicit `allowed_tools` list cannot reach the
-  board.** `BoardRaise`, `BoardClaim`, `BoardList` and `BoardResolve` are in
-  `DEFAULT_TOOLS`, which applies only when neither the spawn request nor the
-  agent definition names any tools. Most pipeline agents name their tools, so
-  they are excluded. There is no always-allow counterpart to the denylist;
-  adding one is a policy change rather than a wiring fix.
-- **The drain gate runs only in the V2 lifecycle.** The v3 orchestrated path
-  (`ARCHON_ORCHESTRATED_LIFECYCLE=1`) has its own terminal report and does not
-  pass through `run_final_gates`, so neither the gate nor the third verdict
-  applies there.
+They were listed as limitations for longer than they should have been. Two of
+them meant the feature did not work in the case it was built for: **most
+pipeline agents name their tools**, so the board was missing from precisely the
+fan-outs it exists to coordinate, and an orchestrated run could report success
+over an undrained board. A list of known gaps is not a substitute for closing
+them.
 
-`--print` and `--headless` used to head that list. `install_board_access` had
+### `round` advances on a re-attempt
+
+It advances when an item leaves `gaps_remain` for a working status, because that
+is the only transition in the lifecycle that means *try again*. Every other
+transition carries the count forward.
+
+Incrementing on each move would make it a transition counter, which the event
+history already is, and would misreport a straight `open → claimed → resolved`
+item as three attempts. The rule is about the *pair*, so it is computed in Rust
+and passed in rather than stated twice in Datalog as a `%if` per transition.
+
+### The board tools are always offered
+
+`ALWAYS_ALLOWED` in `subagent_executor.rs` unions `BoardRaise`, `BoardClaim`,
+`BoardList` and `BoardResolve` into a subagent's tool set however that set was
+derived — from an explicit `allowed_tools`, from the agent definition, or from
+`DEFAULT_TOOLS`.
+
+The reasoning is that withholding the board does not restrict what an agent can
+**do**; it removes its ability to say what it found. A tool list is written to
+bound blast radius, and the board widens none — the four are `Safe`, run-scoped
+and non-mutating outside the board itself.
+
+`DENYLIST` still wins, so this is an always-*offer* set and not an override of a
+deliberate refusal.
+
+### The drain gate covers the orchestrated lifecycle
+
+The v3 path (`ARCHON_ORCHESTRATED_LIFECYCLE=1`, opt-in — the relay remains the
+default) does not pass through `run_final_gates`, so the gate is applied at its
+own terminal point: the `FinalReport` action now reads the board before the
+terminal checkpoint.
+
+It **refuses** rather than failing the run, which is the difference that matters.
+The orchestrator is still inside its action loop and can resolve, promote or
+decline the outstanding items, so it is told what is outstanding and given the
+chance. If it cannot, the action budget exhausts and the run ends at
+`orchestrated-budget-exhausted` with no accepted report — the honest outcome.
+
+A run with no board configured passes; a board that cannot be *read* refuses.
+"Unreachable" and "empty" are the same silence from here, and reading that
+silence as success is the whole reason the gate exists.
+
+## What used to be here
+
+`--print` and `--headless` headed that list. `install_board_access` had
 one caller, the TUI bootstrap, and `src/session/build_agent.rs` — which builds
 every non-interactive agent — never opened memory, so `BoardHandle::Global`
 resolved to nothing and every board call in those modes answered *"the task

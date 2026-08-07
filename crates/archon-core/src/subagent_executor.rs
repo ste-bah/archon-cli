@@ -215,11 +215,9 @@ impl AgentSubagentExecutor {
         // the board, so they widen no blast radius the way `Bash` or `Write`
         // (already here) do.
         //
-        // Note the limit: this list applies only when neither the request nor
-        // the agent definition names any tools. A subagent spawned WITH an
-        // `allowed_tools` list still cannot reach the board, and there is no
-        // always-allow set to fix that — only the `DENYLIST` above is
-        // unconditional.
+        // This list applies only when neither the request nor the agent
+        // definition names any tools. The board tools are additionally in
+        // `ALWAYS_ALLOWED` below, which is not subject to that.
         const DEFAULT_TOOLS: &[&str] = &[
             "Read",
             "Grep",
@@ -233,7 +231,20 @@ impl AgentSubagentExecutor {
             "BoardResolve",
         ];
 
-        let base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
+        // The board is how a subagent hands work back. Withholding it does not
+        // restrict what an agent can DO — it removes its ability to say what it
+        // found. So these are unioned in however `base_allowed` was derived.
+        //
+        // Without this, an agent spawned with an explicit `allowed_tools` list
+        // could not reach the board at all, and most pipeline agents name their
+        // tools. The feature was therefore absent from exactly the runs it was
+        // built for: fan-outs where several agents share one run.
+        //
+        // `DENYLIST` still wins, so this is an always-OFFER set rather than an
+        // override of a deliberate refusal.
+        const ALWAYS_ALLOWED: &[&str] = &["BoardRaise", "BoardClaim", "BoardList", "BoardResolve"];
+
+        let mut base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request
                 .allowed_tools
                 .iter()
@@ -249,6 +260,12 @@ impl AgentSubagentExecutor {
         } else {
             DEFAULT_TOOLS.to_vec()
         };
+
+        for name in ALWAYS_ALLOWED {
+            if !DENYLIST.contains(name) && !base_allowed.contains(name) {
+                base_allowed.push(name);
+            }
+        }
 
         let agent_deny: Vec<String> = agent_def
             .and_then(|d| d.disallowed_tools.as_ref())

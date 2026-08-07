@@ -244,18 +244,35 @@ impl MemoryGraph {
         note: &str,
         context: &str,
     ) -> Result<BoardUpdate, MemoryError> {
+        // A round is an ATTEMPT, so it advances exactly when work restarts:
+        // leaving `gaps_remain` for a working status. Review sending an item
+        // back is the only thing in the lifecycle that means "try again".
+        //
+        // Every other transition carries the count forward. Incrementing on
+        // each move would make `round` a transition counter, which is what the
+        // event history already is, and it would misreport a straight
+        // open -> claimed -> resolved item as three attempts.
+        //
+        // Computed here rather than in Datalog because the rule is about the
+        // pair, and a `%if` per transition would state it twice.
+        let bump = i64::from(
+            from == BoardStatus::GapsRemain
+                && matches!(to, BoardStatus::Open | BoardStatus::Claimed),
+        );
         let params = BTreeMap::from([
             ("from".to_string(), DataValue::from(from.to_string())),
             ("to".to_string(), DataValue::from(to.to_string())),
             ("note".to_string(), DataValue::from(note)),
+            ("bump".to_string(), DataValue::from(bump)),
         ]);
         let write_rule = format!(
             "?[{BOARD_COLUMNS}] :=
                 *board_items{{id, run_id, kind, status: prior_status, title, evidence,
-                    acceptance, raised_by, claimed_by, round, created_at}},
+                    acceptance, raised_by, claimed_by, round: prior_round, created_at}},
                 id = $id,
                 prior_status = $from,
                 status = $to,
+                round = prior_round + $bump,
                 updated_at = $now"
         );
         self.board_cas(
