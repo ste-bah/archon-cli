@@ -115,9 +115,19 @@ agents *this* session spawned rather than opening a second independent one. The
 agent panel lists what is running, and the board view shows what has been raised
 and what is blocked.
 
-`archon web` as a standalone command still works exactly as before. It is a
-separate process, and it shows you its own session, which is rarely what you want
-while agents are working.
+`archon web` as a standalone command still works, and the two surfaces differ in
+one specific way rather than wholesale:
+
+- **The board view works in both.** The board lives in the memory database, so
+  any process that can open it sees the same rows. A standalone `archon web`
+  shows the real board of whatever project it is pointed at.
+- **The agent panel only works attached.** It reads in-process registries
+  holding live `JoinHandle`s, which cannot cross a process boundary — so a
+  separate process could never report the agents in your session, no matter what
+  was recorded for it.
+
+So reach for `/web` when you want to watch agents work, and standalone
+`archon web` when you want to read the board without a session running.
 
 ## A worked example
 
