@@ -23,7 +23,7 @@ use super::live::WebLiveManager;
 use super::{
     AppState, WebConfig, WebRuntimeHandles, WebRuntimePaths, actions, agents, api, assets, auth,
     board, board_activity, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live,
-    metrics, pipelines, server_shutdown, settings, uploads, workflows, world,
+    metrics, pipelines, server_shutdown, settings, terminal, uploads, workflows, world,
 };
 
 /// HTTP server that serves the embedded SPA.
@@ -216,7 +216,20 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    // The terminal route is added or not added; there is no handler that
+    // refuses. See `terminal::is_available` for why the decision belongs here
+    // and not inside a handler — in short, a shell should not be a 403 away.
+    let terminal_route = if terminal::is_available(config, &state.api.policy()) {
+        tracing::warn!(
+            "web: terminal pane enabled (policy.web.allow_web_terminal, loopback bind); \
+             the browser can start an archon process on this host"
+        );
+        Some(Router::new().route("/api/terminal/ws", get(terminal::ws_handler)))
+    } else {
+        None
+    };
+
+    let router = Router::new()
         .route("/", get(index_handler))
         .route("/health", get(health_handler))
         .route("/api/status", get(api::status_handler))
@@ -280,9 +293,14 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
             "/api/settings/theme-profile",
             get(settings::theme_profile_handler).post(settings::save_theme_profile_handler),
         )
-        .route("/static/{*path}", get(static_handler))
-        .layer(cors)
-        .with_state(state)
+        .route("/static/{*path}", get(static_handler));
+
+    let router = match terminal_route {
+        Some(route) => router.merge(route),
+        None => router,
+    };
+
+    router.layer(cors).with_state(state)
 }
 
 pub(super) fn validate_bind_auth(

@@ -180,6 +180,7 @@ fn web_policy_summary() -> EffectivePolicySummary {
             allow_pipeline_controls: policy.web.allow_pipeline_controls,
             allow_model_training_actions: policy.web.allow_model_training_actions,
             allow_corpus_open_paths: policy.web.allow_corpus_open_paths,
+            allow_web_terminal: policy.web.allow_web_terminal,
         },
         subsystem: WebSubsystemPolicySummary {
             allow_behavior_proposal_actions: true,

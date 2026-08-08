@@ -182,6 +182,16 @@ pub struct WebPolicy {
     pub allow_pipeline_controls: bool,
     pub allow_model_training_actions: bool,
     pub allow_corpus_open_paths: bool,
+    /// Serve the browser terminal pane, which spawns a real `archon` process
+    /// under a PTY and pipes keystrokes into it.
+    ///
+    /// Deliberately not folded into `allow_mutating_actions`: every other web
+    /// action is a named, auditable operation the server performs on the
+    /// operator's behalf, whereas this one is arbitrary code execution under
+    /// the server's own credentials. Enabling document uploads must not hand
+    /// out a shell as a side effect, so this gets its own switch, defaulting
+    /// off, and the route is additionally refused on any non-loopback bind.
+    pub allow_web_terminal: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -41,6 +41,7 @@ axum.workspace = true
 cozo.workspace = true
 tower-http.workspace = true
 open.workspace = true
+portable-pty.workspace = true
 rust-embed = "8"
 
 [dev-dependencies]

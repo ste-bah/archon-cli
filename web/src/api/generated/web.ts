@@ -2,7 +2,13 @@ export type ApiStatus = { status: string, version: string, web: WebRuntimeStatus
 
 export type WebRuntimeStatus = { bindAddress: string, port: number, authRequired: boolean, maxBodyBytes: number, devMode: boolean, assetMode: string, };
 
-export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, workflows: boolean, metrics: boolean, };
+export type WebFeatureSummary = { chat: boolean, uploads: boolean, memoryLearning: boolean, worldModel: boolean, reasoningQuality: boolean, corpus: boolean, pipelines: boolean, workflows: boolean, metrics: boolean, 
+/**
+ * Whether the terminal WebSocket route was registered at all. The frontend
+ * hides the nav entry when this is false, because the route does not exist
+ * and every connection attempt would 404.
+ */
+terminal: boolean, };
 
 export type WebStoreStatus = { name: string, status: string, detail: string, };
 
@@ -14,7 +20,13 @@ export type FrontendStackSummary = { framework: string, bundler: string, generat
 
 export type EffectivePolicySummary = { web: WebPolicySummary, subsystem: WebSubsystemPolicySummary, actionGate: string, requiresConfirmation: Array<string>, };
 
-export type WebPolicySummary = { allowMutatingActions: boolean, allowFileUploads: boolean, allowPipelineControls: boolean, allowModelTrainingActions: boolean, allowCorpusOpenPaths: boolean, };
+export type WebPolicySummary = { allowMutatingActions: boolean, allowFileUploads: boolean, allowPipelineControls: boolean, allowModelTrainingActions: boolean, allowCorpusOpenPaths: boolean, 
+/**
+ * Mirrors `policy.web.allow_web_terminal`. Its own flag rather than a
+ * member of the mutation family: the terminal is arbitrary code execution,
+ * not a named action, so no other gate may imply it.
+ */
+allowWebTerminal: boolean, };
 
 export type WebSubsystemPolicySummary = { allowBehaviorProposalActions: boolean, allowModelBehaviorChanges: boolean, allowPipelineControls: boolean, allowCorpusOpenPaths: boolean, allowFileUploads: boolean, };
 

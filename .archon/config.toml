@@ -1055,3 +1055,4 @@ proposal_stale_days = 30
 #   allow_pipeline_controls = false       # pause/resume/cancel buttons require this plus allow_mutating_actions
 #   allow_model_training_actions = false  # model training/promotion requires this plus world_model behavior gate
 #   allow_corpus_open_paths = false       # filesystem-open actions require this plus allow_mutating_actions
+#   allow_web_terminal = false            # browser terminal pane; loopback-only and NOT implied by any other gate

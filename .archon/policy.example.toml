@@ -126,6 +126,14 @@ allow_pipeline_controls = false
 allow_model_training_actions = false
 allow_corpus_open_paths = false
 
+# allow_web_terminal stands outside the mutation family above, because it is not
+# a named action the server performs on your behalf. It serves a pane that runs
+# a real archon process under a pseudo-terminal, which is arbitrary code
+# execution on this host. It is additionally refused on any non-loopback bind,
+# including under unsafe_allow_unauthenticated_nonlocal_bind_for_cli, and when
+# it is off the route is not registered at all rather than returning 403.
+allow_web_terminal = false
+
 
 # ----------------------------------------------------------------------------
 # [policy.reasoning_quality] — Visible claim/evidence learning gates

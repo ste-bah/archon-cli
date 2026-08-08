@@ -1,0 +1,77 @@
+.terminal-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* The pane must own a fixed height, not grow with its content: xterm sizes
+     itself from the container, so a height driven by the terminal would feed
+     back into the fit addon and oscillate. */
+  height: calc(100vh - 180px);
+  min-height: 320px;
+}
+
+.terminal-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.terminal-page__header h2 {
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+}
+
+.terminal-page__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 0.78rem;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, var(--text));
+}
+
+.terminal-page__status[data-state="open"] {
+  color: var(--good, #4ade80);
+}
+
+.terminal-page__status[data-state="refused"] {
+  color: var(--warn, #fbbf24);
+}
+
+.terminal-page__status small {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.terminal-page__note {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted, var(--text));
+  opacity: 0.85;
+}
+
+.terminal-page__note code {
+  font-size: 0.78rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.terminal-page__surface {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgb(255 255 255 / 12%));
+  background: var(--surface);
+}
+
+/* xterm sets an explicit background on its viewport; the theme asks for
+   transparency so the workbench surface shows through, and this makes the
+   canvas honour it rather than compositing over an opaque default. */
+.terminal-page__surface .xterm .xterm-viewport {
+  background-color: transparent !important;
+}

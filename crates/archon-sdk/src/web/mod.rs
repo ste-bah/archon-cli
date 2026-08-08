@@ -24,6 +24,8 @@ pub mod pipelines;
 mod server;
 mod server_shutdown;
 pub mod settings;
+pub mod terminal;
+mod terminal_pty;
 pub mod uploads;
 pub mod workflows;
 pub mod world;

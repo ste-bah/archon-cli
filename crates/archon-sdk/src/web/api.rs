@@ -45,6 +45,10 @@ pub struct WebFeatureSummary {
     pub pipelines: bool,
     pub workflows: bool,
     pub metrics: bool,
+    /// Whether the terminal WebSocket route was registered at all. The frontend
+    /// hides the nav entry when this is false, because the route does not exist
+    /// and every connection attempt would 404.
+    pub terminal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -105,6 +109,10 @@ pub struct WebPolicySummary {
     pub allow_pipeline_controls: bool,
     pub allow_model_training_actions: bool,
     pub allow_corpus_open_paths: bool,
+    /// Mirrors `policy.web.allow_web_terminal`. Its own flag rather than a
+    /// member of the mutation family: the terminal is arbitrary code execution,
+    /// not a named action, so no other gate may imply it.
+    pub allow_web_terminal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -154,7 +162,7 @@ impl WebApiState {
                 dev_mode,
                 asset_mode: if dev_mode { "vite-dev" } else { "embedded" }.to_string(),
             },
-            features: WebFeatureSummary::foundation(&policy),
+            features: WebFeatureSummary::foundation(config, &policy),
             stores: WebStoreStatus::known_stores(&paths),
         };
 
@@ -196,7 +204,7 @@ impl WebApiState {
 }
 
 impl WebFeatureSummary {
-    fn foundation(policy: &EffectivePolicySummary) -> Self {
+    fn foundation(config: &WebConfig, policy: &EffectivePolicySummary) -> Self {
         Self {
             chat: true,
             uploads: policy.web.allow_mutating_actions
@@ -209,6 +217,9 @@ impl WebFeatureSummary {
             pipelines: true,
             workflows: true,
             metrics: true,
+            // Same predicate the router uses, called rather than restated, so
+            // the nav entry cannot disagree with whether the route exists.
+            terminal: super::terminal::is_available(config, policy),
         }
     }
 }
@@ -253,6 +264,7 @@ impl WebPolicySummary {
             allow_pipeline_controls: false,
             allow_model_training_actions: false,
             allow_corpus_open_paths: false,
+            allow_web_terminal: false,
         }
     }
 }

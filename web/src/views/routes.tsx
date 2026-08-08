@@ -40,6 +40,13 @@ const EvidenceGraphPage = lazy(() =>
   })),
 );
 
+// Lazy for the same reason as the graph renderer: xterm.js and its stylesheet
+// are dead weight in every session that never opens the pane, and most do not
+// — the route only exists when policy explicitly turns it on.
+const TerminalPage = lazy(() =>
+  import("./TerminalPage").then((module) => ({ default: module.TerminalPage })),
+);
+
 interface WorkbenchRoutesProps {
   status?: ApiStatus;
   config?: EffectiveConfigSummary;
@@ -74,6 +81,14 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
           polled queries rather than from the shell's summary fetches, so it
           works the same whether the server is attached or standalone. */}
       <Route path="/board" element={<BoardPage />} />
+      <Route
+        path="/terminal"
+        element={
+          <Suspense fallback={<p className="terminal-page__note">Loading terminal…</p>}>
+            <TerminalPage />
+          </Suspense>
+        }
+      />
       <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
       <Route path="/ingest" element={<IngestPage ingest={props.ingest} />} />
       <Route

@@ -103,6 +103,10 @@ semver = { version = "1", features = ["serde"] }
 russh = "0.62.5"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
+# Pseudo-terminal for the web workbench terminal pane: ConPTY on Windows,
+# openpty elsewhere, behind one API. A plain piped child is not enough — the
+# TUI refuses to start without a TTY and ratatui needs a real terminal size.
+portable-pty = "0.9"
 cpal = "0.15"
 hound = "3"
 rust-embed = "8"

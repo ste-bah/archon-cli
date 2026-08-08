@@ -16,8 +16,14 @@ export function AppShell({ status, theme, onThemeToggle, children }: AppShellPro
   // Attached to a running session the TUI owns the conversation, so the server
   // builds no chat backend and reports the lane as unavailable. Hide the tab
   // rather than offer a surface every submit would refuse.
+  // The terminal route is added to the router only when policy and the bind
+  // address both allow it, so when the feature is off the path genuinely does
+  // not exist and every connection would 404. Hide it for the same reason as
+  // chat: do not offer a lane the server has refused to open.
   const items = navItems.filter(
-    (item) => item.path !== "/chat" || status?.features.chat !== false,
+    (item) =>
+      (item.path !== "/chat" || status?.features.chat !== false) &&
+      (item.path !== "/terminal" || status?.features.terminal === true),
   );
   return (
     <div className="workbench-shell">

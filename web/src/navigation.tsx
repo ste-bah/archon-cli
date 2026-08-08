@@ -11,6 +11,7 @@ import {
   PackagePlus,
   Network,
   MessageSquare,
+  SquareTerminal,
   Workflow,
   Settings,
   type LucideIcon,
@@ -41,6 +42,12 @@ export const navItems: NavItem[] = [
     label: "Chat",
     detail: "Dynamic chat with attachments",
     icon: MessageSquare,
+  },
+  {
+    path: "/terminal",
+    label: "Terminal",
+    detail: "The real TUI in a new session",
+    icon: SquareTerminal,
   },
   {
     path: "/corpus",
