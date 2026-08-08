@@ -8,9 +8,68 @@ prose in a subagent's return value — loses everything the parent does not
 happen to quote forward, and gives no way for a second agent to take ownership
 of a finding without two agents doing the same work.
 
-This document covers the storage layer, which is what exists today. The rest of
-the design is [#125](https://github.com/ste-bah/archon-cli/issues/125); see
-[What is not built](#what-is-not-built).
+This document describes the board as built: the four tools agents use, the
+lifecycle an item moves through, the storage and concurrency design underneath,
+and the gate that stops a run being reported complete over an undrained board.
+
+## What an agent does with it
+
+Four tools, offered to every subagent. They are the whole surface — there is no
+separate API an agent reaches for.
+
+| Tool | What it does |
+|---|---|
+| `BoardRaise` | Records a finding. `kind` is `issue` (work that must happen) or `note` (context for whoever next touches the area). `title` and `evidence` are required; `acceptance` says what "done" means. |
+| `BoardList` | Lists this run's items, oldest first, optionally filtered by `status`. `open` items are unclaimed and available. |
+| `BoardClaim` | Takes ownership of an item by id. Exactly one caller wins a contested claim; the loser is told which agent holds it. |
+| `BoardResolve` | Closes an item as `resolved` or `declined`. A reason is required either way. |
+
+**`evidence` is required at the write, not encouraged.** Whoever claims the item
+cannot ask the raiser afterwards — that agent has finished. An item without
+file references means rediscovering the finding from scratch, which is the
+failure the board exists to prevent. The same reasoning makes `reason`
+mandatory on `BoardResolve`: an item that disappears without one cannot be
+distinguished from an item that was quietly dropped.
+
+`BoardList` sweeps dead claims before it answers, so a `claimed` item in the
+listing really does have a live owner. `BoardClaim` sweeps too, for the same
+reason — an item held by an agent that has since exited is available, and the
+claimant is the party who cares.
+
+### The tools reach every subagent
+
+`ALWAYS_ALLOWED` in `subagent_executor.rs` unions the four into a subagent's
+tool set however that set was derived — from an explicit `allowed_tools`, from
+the agent definition, or from `DEFAULT_TOOLS`.
+
+This matters because most pipeline agents name their tools explicitly, and a
+board absent from precisely the fan-outs it exists to coordinate would be a
+board that works only where it is not needed. Withholding it does not restrict
+what an agent can **do**; it removes its ability to say what it found. A tool
+list is written to bound blast radius, and the four widen none — they are
+`Safe`, run-scoped, and mutate nothing outside the board.
+
+`DENYLIST` still wins, so this is an always-*offer* set, not an override of a
+deliberate refusal.
+
+## The item lifecycle
+
+`status` moves through `open`, `claimed`, `in_review`, `gaps_remain`,
+`resolved`, `declined`, `promoted`, `escalated`.
+
+The ordinary path is `open → claimed → resolved`. `gaps_remain` is a reviewer
+saying the work is not finished, and sends the item back to `open` or `claimed`
+for another attempt. `promoted` means the item outlived the run and became a
+tracked issue; `escalated` hands it to the parent; `declined` closes it as work
+that should not happen.
+
+`round` counts re-attempts, not transitions. It advances when an item leaves
+`gaps_remain` for a working status, because that is the only move in the
+lifecycle that means *try again*; every other transition carries the count
+forward. Incrementing on each move would duplicate the event history and would
+report a straight `open → claimed → resolved` item as three attempts. The rule
+is about the *pair* of statuses, so it is computed in Rust and passed in rather
+than restated in Datalog as a `%if` per transition.
 
 ## Why it is not a `MemoryType`
 
@@ -69,8 +128,7 @@ outlives the run that raised it and must resolve, be promoted, or be declined; a
 note is context for whoever next touches the area. Conflated, the board fills
 with "looked at X, seemed fine" and the drain gate becomes noise.
 
-`status` moves through `open`, `claimed`, `in_review`, `gaps_remain`,
-`resolved`, `declined`, `promoted`, `escalated`.
+`status` and `round` are described in [The item lifecycle](#the-item-lifecycle).
 
 **`claimed_by` is nullable rather than an empty-string sentinel**, and this is
 load-bearing rather than stylistic. The claim precondition is `is_null(claimed_by)`.
@@ -298,128 +356,84 @@ Liveness is now a property of having been spawned. Two details make it hold:
 `TASK_MANAGER` is untouched by this and still owns task status, metadata and
 `/tasks`. It is simply no longer asked whether an agent is alive.
 
-## What is not built
+## The drain gate
 
-Nothing structural. The three entries that stood here — a `round` that never
-advanced, a board unreachable from any agent with an explicit tool list, and a
-drain gate absent from the orchestrated lifecycle — are closed, and each is
-described below where the mechanism lives rather than as a caveat here.
+A run is not complete while its board has outstanding items. The gate reads the
+board at the run's terminal point and refuses to accept a final report over
+anything still open.
 
-They were listed as limitations for longer than they should have been. Two of
-them meant the feature did not work in the case it was built for: **most
-pipeline agents name their tools**, so the board was missing from precisely the
-fan-outs it exists to coordinate, and an orchestrated run could report success
-over an undrained board. A list of known gaps is not a substitute for closing
-them.
+Where it sits depends on the lifecycle:
 
-### `round` advances on a re-attempt
+- The **relay path**, which is the default, applies it in `run_final_gates`.
+- The **orchestrated path** (`ARCHON_ORCHESTRATED_LIFECYCLE=1`, opt-in) does not
+  pass through `run_final_gates`, so the gate lives at its own terminal point:
+  the `FinalReport` action reads the board before the terminal checkpoint.
 
-It advances when an item leaves `gaps_remain` for a working status, because that
-is the only transition in the lifecycle that means *try again*. Every other
-transition carries the count forward.
-
-Incrementing on each move would make it a transition counter, which the event
-history already is, and would misreport a straight `open → claimed → resolved`
-item as three attempts. The rule is about the *pair*, so it is computed in Rust
-and passed in rather than stated twice in Datalog as a `%if` per transition.
-
-### The board tools are always offered
-
-`ALWAYS_ALLOWED` in `subagent_executor.rs` unions `BoardRaise`, `BoardClaim`,
-`BoardList` and `BoardResolve` into a subagent's tool set however that set was
-derived — from an explicit `allowed_tools`, from the agent definition, or from
-`DEFAULT_TOOLS`.
-
-The reasoning is that withholding the board does not restrict what an agent can
-**do**; it removes its ability to say what it found. A tool list is written to
-bound blast radius, and the board widens none — the four are `Safe`, run-scoped
-and non-mutating outside the board itself.
-
-`DENYLIST` still wins, so this is an always-*offer* set and not an override of a
-deliberate refusal.
-
-### The drain gate covers the orchestrated lifecycle
-
-The v3 path (`ARCHON_ORCHESTRATED_LIFECYCLE=1`, opt-in — the relay remains the
-default) does not pass through `run_final_gates`, so the gate is applied at its
-own terminal point: the `FinalReport` action now reads the board before the
-terminal checkpoint.
-
-It **refuses** rather than failing the run, which is the difference that matters.
-The orchestrator is still inside its action loop and can resolve, promote or
-decline the outstanding items, so it is told what is outstanding and given the
-chance. If it cannot, the action budget exhausts and the run ends at
+On the orchestrated path it **refuses** rather than failing the run, and that
+difference is the point. The orchestrator is still inside its action loop, so it
+is told what is outstanding and can resolve, promote or decline it. If it
+cannot, the action budget exhausts and the run ends at
 `orchestrated-budget-exhausted` with no accepted report — the honest outcome.
 
-A run with no board configured passes; a board that cannot be *read* refuses.
-"Unreachable" and "empty" are the same silence from here, and reading that
-silence as success is the whole reason the gate exists.
+**A board that cannot be read refuses; a run with no board configured passes.**
+"Unreachable" and "empty" are the same silence from the gate's position, and
+reading that silence as success is the whole reason the gate exists. A gate that
+reports a clean run because it could not see the board produces the same record
+an enforced run produces, which makes it worse than no gate at all.
 
-## What used to be here
+`process_board_drain` therefore always names a board rather than returning
+`Option`. A process without one gets `UnreachableBoardDrain`, whose read fails
+with the reason, and `LifecycleDriver` distinguishes the three cases: reads
+clean, cannot be read, none configured. The last exemption is right for
+`archon-workflow`, which has consumers with no memory at all, and wrong for this
+binary, where every production entry point installs a board and its absence
+means something broke.
 
-`--print` and `--headless` headed that list. `install_board_access` had
-one caller, the TUI bootstrap, and `src/session/build_agent.rs` — which builds
-every non-interactive agent — never opened memory, so `BoardHandle::Global`
-resolved to nothing and every board call in those modes answered *"the task
-board is unavailable: no memory service is open in this process"* (#137). The
-tools are in `DEFAULT_TOOLS`, so the model was offered them, tried them, and
-always failed.
+## Where the board is installed
 
-They now install the handle themselves, in `src/session/build_agent_board.rs`,
-from `config.memory.db_path` through the same singleton election. Both halves of
-that matter: a guessed default data dir would give the run a private board that
-accepts writes nobody reads, and a raw `MemoryGraph::open` would bypass the one
-thing that enforces CozoDB's single writer (see the #134 note above). So the
-board is reachable from every session surface — the TUI, `--print`,
-`--headless`, and a standalone `archon web`, which elects its own handle in
-`WebBoardStore`.
+`BoardHandle::Global` is resolved once per process, and every entry point that
+can run agents installs it. There are three sites, and which one runs is
+determined by how the process was invoked:
 
-## Where the board exists, and what happens where it does not
+| Entry point | Installed by |
+|---|---|
+| Interactive TUI | the TUI bootstrap |
+| `--print`, `--headless`, and every non-interactive session | `src/session/build_agent_board.rs`, from `config.memory.db_path` |
+| `archon workflow` (a subcommand, which builds no session) | `src/command/workflow_live_board.rs`, at the top of `run_live_cli_action` |
+| Standalone `archon web` | `WebBoardStore`, which elects its own handle |
 
-A standalone `archon workflow` was the last entry point without one, and it was
-the worst place to be missing it (#142). `archon workflow` is a subcommand:
-`main_modes::handle_subcommand_if_present` dispatches it and returns from `main`,
-so the process builds no session and neither install site above ever runs. The
-stage subagents' board tools reported the board as offline, which was merely
-useless — and the lifecycle's drain gate read `None` and **passed every run**,
-which was not. The gate exists to make "leave no gaps" enforceable; one that
-reports a clean run because it cannot see the board produces the exact record an
-enforced run produces, and is therefore worse than no gate.
+All of them go through the same singleton election, and both halves of that
+matter. A guessed default data dir would give the run a private board that
+accepts writes nobody reads. A raw `MemoryGraph::open` would bypass the one
+thing that enforces CozoDB's single writer — and, as the #134 note above
+records, would not fail while doing so.
 
-Both halves were fixed:
+The workflow site is deliberately in `run_live_cli_action` and not
+`run_live_action`, which the TUI also reaches: there the board is already
+installed from a `MemoryAccess` this process holds, and a second
+`open_memory_with_db_path` against a database it already owns is exactly the
+bypass the election prevents.
 
-- **`src/command/workflow_live_board.rs`** installs the handle at the top of
-  `run_live_cli_action`, before anything can run a stage, with the same
-  config-derived paths and the same election. Deliberately not in
-  `run_live_action`, which the TUI also reaches — there the board is already
-  installed from a `MemoryAccess` this process holds, and a second
-  `open_memory_with_db_path` against a database it already owns is precisely the
-  bypass the election prevents.
-- **`process_board_drain` no longer returns `Option`.** It always names a board,
-  and a process without one gets `UnreachableBoardDrain`, whose read fails with
-  the reason. `LifecycleDriver` distinguishes three cases — a board that reads
-  clean passes, a board that cannot be read fails, and no board configured
-  passes — and that last exemption is right for `archon-workflow`, which has
-  consumers with no memory at all, and wrong for this binary, where every
-  production entry point installs a board and its absence means something broke.
-
-The three `install_board_access` sites cannot race. `main` returns straight out
-of `handle_subcommand_if_present`, so a process running a workflow subcommand
+The three sites cannot race. `main` returns straight out of
+`handle_subcommand_if_present`, so a process running a workflow subcommand
 reaches neither `build_agent.rs` nor the interactive bootstrap; `main_modes`
 exits from the print and headless arms before the interactive path; and
 `run_live_cli_action` runs once per invocation. `workflow_live_board.rs` still
-resolves `BoardHandle::Global` before opening anything, because the *test* binary
-can reach all three from one process and a `OnceLock` that silently keeps the
-first handle would hide a second, unelected open rather than prevent it.
+resolves `BoardHandle::Global` before opening anything, because the *test*
+binary can reach all three from one process, and a `OnceLock` that silently kept
+the first handle would hide a second unelected open rather than prevent it.
 
-What has no board now is a bare subcommand other than `workflow`, a test binary
-that installed none, and a session or workflow whose memory would not open —
-logged once and left uninstalled, since a run does useful work without a board.
-For the tools that stays a truthful "unavailable" rather than a refusal to start.
-For a decomposed-PRD run it is no longer free: the run reaches the drain gate,
-the gate reports why it could not check, and the run ends `needs_review` instead
-of accepted. A run whose completion could not be checked has not been shown to be
-complete.
+### What has no board
+
+A bare subcommand other than `workflow`, a test binary that installed none, and
+a session or workflow whose memory would not open — logged once and left
+uninstalled, because a run does useful work without a board.
+
+For the tools that is a truthful "the task board is unavailable" rather than a
+refusal to start. For a decomposed-PRD run it is not free: the run reaches the
+drain gate, the gate reports why it could not check, and the run ends
+`needs_review` rather than accepted. A run whose completion could not be checked
+has not been shown to be complete.
 
 ## See also
 
