@@ -245,16 +245,42 @@ async fn fresh_worktree_cargo_build_generates_tree_sitter_outputs() {
     );
 }
 
+/// The tool must never run commands through the WSL launcher.
+///
+/// This replaces `bash_program_selection_prefers_path_discovery`, which asserted
+/// that a PATH hit wins over Git's `bash.exe`. That preference was the defect:
+/// on a default Git for Windows install PATH resolves `bash` to
+/// `C:\Windows\System32\bash.exe`, and the old test locked that choice in as
+/// intended behaviour. Selection now lives in `archon-shell`, which rejects the
+/// launcher; what is worth asserting here is the property the tool depends on,
+/// not which branch produced it.
+///
+/// `System32\bash.exe` does not fail on a Windows path — it runs the command in
+/// a filesystem namespace that cannot see the working directory and returns
+/// success with empty output, which is how eleven tests in this file failed
+/// while looking like assertion mismatches rather than a missing shell (#118).
 #[test]
-fn bash_program_selection_prefers_path_discovery() {
-    let bash = PathBuf::from("/usr/local/bin/bash");
-    let bash_exe = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
-    assert_eq!(
-        select_bash_program(Some(bash.clone()), Some(bash_exe.clone())),
-        bash
+fn bash_program_is_never_the_wsl_launcher() {
+    let program = BASH_PROGRAM.as_path();
+    let parent = program
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|dir| dir.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = program
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let is_launcher =
+        name == "bash.exe" && ["system32", "sysnative", "windowsapps"].contains(&parent.as_str());
+    assert!(
+        !is_launcher,
+        "the Bash tool resolved to the WSL launcher at {}",
+        program.display()
     );
-    assert_eq!(select_bash_program(None, Some(bash_exe.clone())), bash_exe);
-    assert_eq!(select_bash_program(None, None), PathBuf::from("bash"));
 }
 
 #[tokio::test]

@@ -63,6 +63,34 @@ pub fn resolve_posix_shell() -> &'static Path {
     &resolved().posix
 }
 
+/// `bash` specifically, never `sh` and never the WSL launcher.
+///
+/// For the one caller that cannot take whatever POSIX shell is best available:
+/// the Bash tool runs a compatibility prelude built on `builtin`, which is a
+/// bash builtin. On Linux `/bin/sh` is frequently dash, where `builtin` does not
+/// exist, so [`resolve_posix_shell`] — which prefers `sh` — would quietly change
+/// which interpreter that prelude runs under.
+///
+/// The Bash tool used to do its own bare `which("bash")` with neither of this
+/// crate's two rules, so on a default Git for Windows install (Git's `bin` is
+/// not on PATH) it selected `C:\Windows\System32\bash.exe` and ran every command
+/// in a filesystem namespace that cannot see the working directory. Commands
+/// returned empty output rather than failing, which is the worst shape a bug can
+/// take. That is #118 as originally reported.
+pub fn resolve_bash() -> &'static Path {
+    static BASH: LazyLock<PathBuf> = LazyLock::new(|| {
+        let is_windows = cfg!(windows);
+        let candidates = discover_candidates(is_windows);
+        candidates
+            .path_bash
+            .or(candidates.git_bash)
+            // Fails closed at spawn with "program not found" rather than
+            // running the caller's script under something that is not bash.
+            .unwrap_or_else(|| PathBuf::from("bash"))
+    });
+    &BASH
+}
+
 /// Every shell this machine offers, gathered before any choice is made.
 ///
 /// Discovery is split from selection so `best_posix_shell` stays pure and its

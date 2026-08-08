@@ -336,12 +336,18 @@ async fn profile_values_with_timeout(
     }
 }
 
+/// The shell used to source login profiles.
+///
+/// Was `which("sh").or(which("bash"))` — a bare PATH lookup. On a default Git
+/// for Windows install neither Git's `bin` nor its `usr\bin` is on PATH, so
+/// `sh` missed and `bash` resolved to the `System32` WSL launcher, which cannot
+/// read a Windows-path profile. Callers then saw `ResolutionError` where they
+/// expected `Missing`: not "no profile" but "looking for one broke" (#118).
+///
+/// `resolve_posix_shell`, not `resolve_bash`: sourcing a profile is POSIX by
+/// construction, so `sh` is preferred wherever one exists.
 fn profile_shell() -> PathBuf {
-    select_profile_shell(which::which("sh").ok(), which::which("bash").ok())
-}
-
-fn select_profile_shell(sh: Option<PathBuf>, bash: Option<PathBuf>) -> PathBuf {
-    sh.or(bash).unwrap_or_else(|| PathBuf::from("sh"))
+    archon_shell::resolve_posix_shell().to_path_buf()
 }
 
 fn profile_script(keys: &[String], profiles: &[String]) -> String {

@@ -26,12 +26,23 @@ pub use bash_env::sanitized_env;
 
 const DEFAULT_BASH_TIMEOUT_SECS: u64 = 600;
 
+/// The bash this tool runs commands with.
+///
+/// Delegated to `archon-shell` rather than resolved here. This was
+/// `which("bash").or(which("bash.exe"))`, a bare PATH lookup with no Windows
+/// rules at all, so on a default Git for Windows install — where Git's `bin` is
+/// not added to PATH — it selected `C:\Windows\System32\bash.exe`, the WSL
+/// launcher. That does not fail on a Windows path; it runs the command inside a
+/// Linux filesystem namespace that cannot see the working directory, so every
+/// command came back with empty output and success. Eleven tests in this crate
+/// failed on exactly that, and it is #118 as reported.
+///
+/// `archon-shell` already had the two rules that fix it — prefer the bash beside
+/// `git.exe`, never accept the WSL launcher — and had them under test. Calling
+/// its resolver keeps one implementation rather than a second copy that can
+/// drift.
 static BASH_PROGRAM: LazyLock<PathBuf> =
-    LazyLock::new(|| select_bash_program(which::which("bash").ok(), which::which("bash.exe").ok()));
-
-fn select_bash_program(bash: Option<PathBuf>, bash_exe: Option<PathBuf>) -> PathBuf {
-    bash.or(bash_exe).unwrap_or_else(|| PathBuf::from("bash"))
-}
+    LazyLock::new(|| archon_shell::resolve_bash().to_path_buf());
 
 const BASH_COMPAT_PRELUDE: &str = r#"
 printf() {

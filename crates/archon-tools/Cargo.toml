@@ -5,6 +5,10 @@ edition.workspace = true
 
 [dependencies]
 archon-permissions = { path = "../archon-permissions" }
+# Bash discovery for the Bash tool. A leaf crate — archon-core's hook executor
+# already depends on it — so this adds no cycle, and it means the tool and the
+# hooks resolve the same shell by the same rules (#118).
+archon-shell = { path = "../archon-shell" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-observability = { path = "../archon-observability" }

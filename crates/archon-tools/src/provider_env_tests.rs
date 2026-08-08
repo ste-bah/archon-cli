@@ -179,24 +179,56 @@ async fn profile_timeout_is_resolution_error_not_missing() {
     );
 }
 
+/// Sourcing a profile must never go through the WSL launcher.
+///
+/// These three tests replace `profile_shell_prefers_discovered_sh`,
+/// `profile_shell_uses_discovered_bash_when_sh_is_unavailable` and
+/// `profile_shell_falls_back_to_path_sh`, which exercised a local
+/// `select_profile_shell(sh, bash)` given hand-written paths. That helper is
+/// gone: selection now lives in `archon-shell`, which is where the precedence
+/// is tested against every candidate layout.
+///
+/// What those tests could not catch is the case that actually broke. They only
+/// ever passed Git-style paths in, so they were green while the real lookup —
+/// a bare `which("sh").or(which("bash"))` — resolved to
+/// `C:\Windows\System32\bash.exe` on any machine without Git's `bin` on PATH.
+/// Sourcing a Windows-path profile through WSL then failed, and callers saw
+/// `ResolutionError` where they expected `Missing` (#118).
 #[test]
-fn profile_shell_prefers_discovered_sh() {
-    let sh = PathBuf::from(r"C:\Program Files\Git\bin\sh.exe");
-    let bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+fn profile_shell_is_never_the_wsl_launcher() {
+    let shell = profile_shell();
+    let parent = shell
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|dir| dir.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = shell
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
 
-    assert_eq!(select_profile_shell(Some(sh.clone()), Some(bash)), sh);
+    let is_launcher =
+        name == "bash.exe" && ["system32", "sysnative", "windowsapps"].contains(&parent.as_str());
+    assert!(
+        !is_launcher,
+        "profile sourcing resolved to the WSL launcher at {}",
+        shell.display()
+    );
 }
 
+/// And it must never be `cmd`, which would misread a POSIX profile script
+/// rather than refuse it.
 #[test]
-fn profile_shell_uses_discovered_bash_when_sh_is_unavailable() {
-    let bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
-
-    assert_eq!(select_profile_shell(None, Some(bash.clone())), bash);
-}
-
-#[test]
-fn profile_shell_falls_back_to_path_sh() {
-    assert_eq!(select_profile_shell(None, None), PathBuf::from("sh"));
+fn profile_shell_is_a_posix_shell_not_cmd() {
+    let shell = profile_shell();
+    let name = shell
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert_ne!(name, "cmd", "profile sourcing must not run under cmd");
 }
 
 #[cfg(unix)]

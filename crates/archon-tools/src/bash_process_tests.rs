@@ -175,10 +175,21 @@ fn process_exists(pid: &str) -> bool {
         .unwrap_or(false)
 }
 
+// Both tests below repeat a format string to overflow the output limit. They
+// used `$(seq 1 N)` to generate the repetitions, which made them depend on
+// coreutils being on the shell's PATH. The Bash tool runs with a sanitized
+// environment, so on Windows — where `seq` lives in Git's `usr\bin` and is not
+// on the Windows PATH the tool passes through — the command exited 127 and
+// produced too little output to truncate. The failure read as "truncation
+// marker missing" rather than "seq not found".
+//
+// Brace expansion is a bash builtin, so the repetition count no longer depends
+// on anything outside the shell. Same counts, same expected output.
+
 #[tokio::test]
 async fn final_content_bound_truncates_valid_utf8_output() {
     let result =
-        execute_with_output_limit("printf 'abcdefghijklmnopqrstuvwxyz%.0s' $(seq 1 3)", 40).await;
+        execute_with_output_limit("printf 'abcdefghijklmnopqrstuvwxyz%.0s' {1..3}", 40).await;
 
     assert_within_output_limit(&result, 40);
     assert!(
@@ -190,7 +201,7 @@ async fn final_content_bound_truncates_valid_utf8_output() {
 
 #[tokio::test]
 async fn final_content_bound_handles_invalid_utf8_expansion() {
-    let result = execute_with_output_limit("printf '\\377%.0s' $(seq 1 64)", 40).await;
+    let result = execute_with_output_limit("printf '\\377%.0s' {1..64}", 40).await;
 
     assert_within_output_limit(&result, 40);
     assert!(

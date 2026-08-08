@@ -1042,6 +1042,7 @@ dependencies = [
  "archon-observability",
  "archon-permissions",
  "archon-policy",
+ "archon-shell",
  "async-lsp",
  "async-trait",
  "chrono",
