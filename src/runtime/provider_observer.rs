@@ -403,6 +403,28 @@ impl LlmProvider for ObservedLlmProvider {
         self.inner.models()
     }
 
+    /// Forward alias resolution to the wrapped provider.
+    ///
+    /// This wrapper is decoration, not policy: every method it does not forward
+    /// silently substitutes the trait default, and for `resolve_alias` that
+    /// default is `None` — "this provider has no bespoke substitution". The
+    /// wrapped provider always does have one. Both `CodexProvider` and
+    /// `AnthropicProvider` implement `resolve_alias` and are handed a config-built
+    /// alias map at construction; wrapping them here made that map unreachable.
+    ///
+    /// The failure was silent and looked like a config bug. `resolve_request_model`
+    /// falls back to `self.models().first()` for any recognised tier alias, so a
+    /// `Coder` stage resolving `sonnet` got the registry's first model — `gpt-5.5`
+    /// — while `[models.openai-codex] default` said otherwise, and editing that
+    /// config changed nothing because nothing read it. Measured on a live
+    /// workflow: 698 of 704 subagent requests took the fallback. The direct
+    /// session path was unaffected precisely because it is not wrapped, which is
+    /// what made this look like a subagent-specific problem rather than a
+    /// wrapper-specific one.
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        self.inner.resolve_alias(alias)
+    }
+
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         let observed = ObservedRequest::from_request(self.inner.name(), &request);
         let request_id = uuid::Uuid::new_v4().to_string();

@@ -350,3 +350,107 @@ async fn anthropic_clean_identity_records_rejected_spoof_event() {
     assert_eq!(events[0].reason_code.as_deref(), Some("clean_identity"));
     assert_eq!(events[0].raw_redacted_json["identity_status"], "clean");
 }
+
+/// A provider with a bespoke alias map, standing in for Codex/Anthropic.
+///
+/// `models()` deliberately returns a DIFFERENT id from the alias target so the
+/// two failure modes are distinguishable: a correct forward yields
+/// `aliased-model`, while a swallowed `resolve_alias` falls through to
+/// `resolve_request_model`'s `self.models().first()` and yields `first-model`.
+struct AliasingProvider;
+
+#[async_trait]
+impl LlmProvider for AliasingProvider {
+    fn name(&self) -> &str {
+        "aliasing-provider"
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![ModelInfo {
+            id: "first-model".into(),
+            display_name: "First Model".into(),
+            context_window: 100_000,
+        }]
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        match alias {
+            "sonnet" | "opus" => Some("aliased-model".to_string()),
+            _ => None,
+        }
+    }
+
+    async fn stream(&self, _request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Ok(rx)
+    }
+
+    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        Ok(LlmResponse {
+            content: Vec::new(),
+            usage: Usage::default(),
+            stop_reason: "end_turn".into(),
+        })
+    }
+
+    fn supports_feature(&self, _feature: ProviderFeature) -> bool {
+        false
+    }
+}
+
+/// The observer must forward `resolve_alias` to the provider it wraps.
+///
+/// It is decoration, not policy. Every trait method it fails to forward
+/// silently takes the default, and `resolve_alias`'s default is `None` —
+/// "no bespoke substitution" — which is wrong for every provider that has one.
+/// Wrapping then made the config-built alias map unreachable: a `Coder` stage
+/// resolving `sonnet` fell through to `models().first()` and ran on the
+/// registry's first model while `[models.openai-codex]` said otherwise.
+#[tokio::test]
+async fn observer_forwards_resolve_alias_to_the_wrapped_provider() {
+    let db = test_db();
+    let observed = ObservedLlmProvider::new(
+        Arc::new(AliasingProvider),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db),
+    )
+    .await;
+
+    assert_eq!(
+        observed.resolve_alias("sonnet").as_deref(),
+        Some("aliased-model"),
+        "wrapper must consult the inner provider's alias map, not the trait default"
+    );
+    // An unknown alias must stay unresolved rather than being invented here.
+    assert_eq!(observed.resolve_alias("nonexistent-tier"), None);
+}
+
+/// End-to-end through `resolve_request_model`, which is what callers actually use.
+///
+/// This is the assertion that fails without the forward: `sonnet` is a
+/// recognised tier alias, so the default path substitutes `models().first()`
+/// and the request silently leaves on the wrong model.
+#[tokio::test]
+async fn observer_resolves_tier_alias_through_the_inner_map_not_first_model() {
+    let db = test_db();
+    let observed = ObservedLlmProvider::new(
+        Arc::new(AliasingProvider),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db),
+    )
+    .await;
+
+    let mut request = LlmRequest {
+        model: "sonnet".into(),
+        ..LlmRequest::default()
+    };
+    observed.resolve_request_model(&mut request);
+
+    assert_eq!(
+        request.model, "aliased-model",
+        "a wrapped provider's tier alias must resolve through its own map; \
+         'first-model' here means resolve_alias was swallowed by the wrapper"
+    );
+}
