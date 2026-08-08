@@ -13,6 +13,7 @@ pub mod board_activity;
 pub mod chat;
 pub mod cognitive;
 pub mod corpus;
+pub mod docs_actions;
 pub mod evidence;
 pub mod ingest;
 mod ingest_jobs;

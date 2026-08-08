@@ -150,6 +150,7 @@ struct RawWebPolicy {
     allow_model_training_actions: Option<bool>,
     allow_corpus_open_paths: Option<bool>,
     allow_web_terminal: Option<bool>,
+    allow_document_deletion: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -326,6 +327,9 @@ fn apply_web(policy: &mut WebPolicy, raw: RawWebPolicy) {
     }
     if let Some(value) = raw.allow_web_terminal {
         policy.allow_web_terminal = value;
+    }
+    if let Some(value) = raw.allow_document_deletion {
+        policy.allow_document_deletion = value;
     }
 }
 

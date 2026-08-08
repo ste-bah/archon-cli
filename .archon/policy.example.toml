@@ -126,13 +126,22 @@ allow_pipeline_controls = false
 allow_model_training_actions = false
 allow_corpus_open_paths = false
 
-# allow_web_terminal stands outside the mutation family above, because it is not
-# a named action the server performs on your behalf. It serves a pane that runs
-# a real archon process under a pseudo-terminal, which is arbitrary code
-# execution on this host. It is additionally refused on any non-loopback bind,
-# including under unsafe_allow_unauthenticated_nonlocal_bind_for_cli, and when
-# it is off the route is not registered at all rather than returning 403.
+# Two flags that stand outside the mutation family above, because neither is a
+# named action the server performs on your behalf.
+#
+# allow_web_terminal serves a pane that runs a real archon process under a
+# pseudo-terminal, which is arbitrary code execution on this host. It is
+# additionally refused on any non-loopback bind, including under
+# unsafe_allow_unauthenticated_nonlocal_bind_for_cli, and when it is off the
+# route is not registered at all rather than returning 403.
+#
+# allow_document_deletion puts a delete button on documents in the Ingest tab.
+# It removes the document and everything derived from it - chunks, pages,
+# artifacts, raw vectors and the source registration - and none of it comes
+# back. Deliberately not implied by allow_file_uploads: an operator who wanted
+# drag-and-drop has not asked for a delete button on every row.
 allow_web_terminal = false
+allow_document_deletion = false
 
 
 # ----------------------------------------------------------------------------

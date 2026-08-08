@@ -12,6 +12,7 @@ interface MetricsPageProps {
 export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
   const [selected, setSelected] = useState<MetricSelection | undefined>();
   const stores = metrics?.stores ?? [];
+  const diskProbes = [...(metrics?.logs ?? []), ...(metrics?.budgets ?? [])];
   const performance = metrics?.performance ?? [];
   const queues = metrics?.queues ?? [];
   const events = metrics?.recentEvents ?? [];
@@ -94,6 +95,33 @@ export function MetricsPage({ metrics, liveCount = 0 }: MetricsPageProps) {
               item={item}
               onSelect={() => setSelected(selection(item.label, item.value, `${item.unit} · ${item.status}`))}
             />
+          ))}
+        </div>
+      </section>
+
+      {/* `logs` and `budgets` were fetched on every poll and rendered nowhere.
+          They answer "where does Archon write its logs and cost records, and
+          has it written any?" — which is the first thing asked when a run's
+          output cannot be found. */}
+      <section className="panel">
+        <div className="panel-heading">
+          <h3>Log and budget locations</h3>
+          <StatusPill>{diskProbes.length} paths</StatusPill>
+        </div>
+        <div className="metrics-list">
+          {diskProbes.map((probe) => (
+            <div key={probe.path} className="metrics-row">
+              <div>
+                <strong>{probe.label}</strong>
+                <span>{probe.path}</span>
+                <small>
+                  {probe.files} files · {formatBytes(probe.bytes)}
+                </small>
+              </div>
+              <StatusPill tone={probe.exists ? "good" : "muted"}>
+                {probe.exists ? "present" : "not created yet"}
+              </StatusPill>
+            </div>
           ))}
         </div>
       </section>

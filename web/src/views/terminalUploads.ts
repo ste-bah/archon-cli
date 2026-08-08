@@ -12,9 +12,12 @@
  * (`crates/archon-tui/src/event_loop/input.rs`). So the browser gains
  * drag-and-drop while the TUI learns nothing about the web, and the feature
  * cannot drift out of step with however attachments are handled next.
+ *
+ * The POST itself is [`uploadFiles`], shared with the Ingest tab's upload
+ * panel; only the "what to do with the returned path" part differs.
  */
 
-import type { WebUploadResponse } from "../api/generated/web";
+import { uploadFiles } from "./ingest/uploadClient";
 
 export interface UploadOutcome {
   /** Text to type into the terminal; empty when nothing was stored. */
@@ -24,46 +27,9 @@ export interface UploadOutcome {
 }
 
 export async function uploadDroppedFiles(files: File[]): Promise<UploadOutcome> {
-  if (files.length === 0) {
-    return { injection: "" };
+  const result = await uploadFiles(files);
+  if (result.error) {
+    return { injection: "", error: result.error };
   }
-
-  const body = new FormData();
-  for (const file of files) {
-    body.append("file", file, file.name);
-  }
-
-  let response: Response;
-  try {
-    response = await fetch("/api/uploads/file", {
-      method: "POST",
-      headers: authHeaders(),
-      body,
-    });
-  } catch (cause) {
-    return { injection: "", error: `upload failed: ${String(cause)}` };
-  }
-
-  if (!response.ok) {
-    // The handler answers 400 with a plain-text reason for anything malformed
-    // or over a limit; that text is more useful than the status code.
-    const reason = await response.text().catch(() => response.statusText);
-    return { injection: "", error: reason || `upload failed (${response.status})` };
-  }
-
-  const result = (await response.json()) as WebUploadResponse;
-  if (!result.accepted) {
-    return { injection: "", error: result.policyReason };
-  }
-
   return { injection: result.files.map((file) => `@${file.path} `).join("") };
-}
-
-/**
- * Mirrors `apiClient`'s scheme. Deliberately no `Content-Type`: the browser
- * must set it, because only it knows the multipart boundary.
- */
-function authHeaders(): HeadersInit {
-  const token = new URLSearchParams(window.location.search).get("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }

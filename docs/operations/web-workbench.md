@@ -120,6 +120,8 @@ action previews and policy gates rather than direct unchecked buttons.
 
 ### Overview
 
+![The Overview tab](../images/web/overview.png)
+
 The overview tab shows runtime posture:
 
 | Area | Shows |
@@ -132,74 +134,9 @@ The overview tab shows runtime posture:
 Use this as the first place to confirm that the browser is connected to the
 right Archon process and project directory.
 
-### Chat
-
-The chat tab is the browser entry point for web-session interaction. It records
-submitted messages locally under the Archon web ledger, restores recent saved
-turns when the page is opened again, and validates attachment metadata through
-the upload policy API. The full TUI agent turn loop remains the richer
-provider/tool execution surface.
-
-Current foundation behaviour:
-
-| Area | Shows |
-|---|---|
-| Conversation shell | prompt area, recent saved turns, pending assistant state, and local web-session responses |
-| Attachments | file picker, upload-intent validation, accepted attachment chips, and stored-upload status |
-| Auth state | whether the web session is loopback or token-protected |
-| History | last saved turns loaded from the web chat ledger, with a refresh control |
-
-When uploads are enabled by policy, attachment metadata is checked before the
-file is accepted. Uploads do not bypass normal tool, file, or policy gates.
-Submitted web-chat messages are appended to
-`~/.archon/web/chat.messages.jsonl` for auditability. The browser calls
-`GET /api/chat/history` on page load to restore the latest ledger rows and uses
-`POST /api/chat/submit` for new turns. A web turn has a bounded timeout; if the
-live session does not complete in time, Archon cancels the in-flight dispatcher
-turn and reports the failure in the transcript instead of leaving the composer
-stuck forever.
-
-### Corpus
-
-The corpus tab lets you interact with the material created by `/docs`, `archon
-docs ...`, `/kb`, and related document-ingest workflows.
-
-| Area | Shows |
-|---|---|
-| Roots | repository docs, `.archon/docs`, `.archon/docs/inbox`, `.archon/docs/images`, and other configured roots |
-| Source list | path, type, size, excerpts, match scores |
-| Preview | safe text preview for files inside allowed corpus roots |
-| Search | bounded ranked keyword search over source names, paths, and preview chunks |
-| Chunk hits | line start, excerpt, score, and embedding/index hint |
-
-The browser preview is read-only and rooted. It refuses paths outside the known
-corpus roots. Full ingestion still happens through the CLI/TUI:
-
-```bash
-archon docs ingest .archon/docs/inbox
-archon docs index --all
-archon docs search "known phrase" --mode hybrid
-```
-
-### Memory
-
-The memory tab surfaces learning and memory state that would otherwise require
-multiple slash commands.
-
-| Area | Shows |
-|---|---|
-| Signals | sessions, reasoning-quality store, self-calibration, proposal stores |
-| Memories | recent memory rows and rule-like records |
-| LearningEvents | governed learning events and correction-linked rows |
-| Behaviour proposals | pending proposal previews |
-| Trust deltas | self-trust and calibration rows |
-| Filters | graph-style filtering across memory, events, proposals, and trust rows |
-
-Buttons that inspect behaviour proposals use dry-run action previews. They do
-not apply behaviour changes unless policy and confirmation gates allow that
-action.
-
 ### Task Board
+
+![The Task Board tab](../images/web/task-board.png)
 
 The task board tab shows what agents have raised for each other: the
 `board_items` rows, as a board.
@@ -231,7 +168,175 @@ agents through `BoardRaise`, `BoardClaim` and `BoardResolve`. See
 [multi-agent handoffs](../cookbook/multi-agent-handoffs.md) for how agents use
 it.
 
+### Chat
+
+![The Chat tab](../images/web/chat.png)
+
+The chat tab is the browser entry point for web-session interaction. It records
+submitted messages locally under the Archon web ledger, restores recent saved
+turns when the page is opened again, and validates attachment metadata through
+the upload policy API. The full TUI agent turn loop remains the richer
+provider/tool execution surface.
+
+Current foundation behaviour:
+
+| Area | Shows |
+|---|---|
+| Conversation shell | prompt area, recent saved turns, pending assistant state, and local web-session responses |
+| Attachments | file picker, upload-intent validation, accepted attachment chips, and stored-upload status |
+| Auth state | whether the web session is loopback or token-protected |
+| History | last saved turns loaded from the web chat ledger, with a refresh control |
+
+When uploads are enabled by policy, attachment metadata is checked before the
+file is accepted. Uploads do not bypass normal tool, file, or policy gates.
+Submitted web-chat messages are appended to
+`~/.archon/web/chat.messages.jsonl` for auditability. The browser calls
+`GET /api/chat/history` on page load to restore the latest ledger rows and uses
+`POST /api/chat/submit` for new turns. A web turn has a bounded timeout; if the
+live session does not complete in time, Archon cancels the in-flight dispatcher
+turn and reports the failure in the transcript instead of leaving the composer
+stuck forever.
+
+### Terminal
+
+![The Terminal tab](../images/web/terminal.png)
+
+The real TUI, in the browser. The server spawns `archon` under a pseudo-terminal
+and streams its bytes to xterm.js over a WebSocket; keystrokes go back the same
+way. Because it is terminal emulation rather than a reimplementation, everything
+the TUI can do works here — slash commands, permission prompts, `/model`,
+`/agents` — and it needs no upkeep as the TUI changes.
+
+| Area | Shows |
+|---|---|
+| Pane | a live `archon` session, sized to the pane and resized through the PTY |
+| Status | connecting / connected / ended, with the close reason when one ends |
+| Drop target | drag a file anywhere on the pane to attach it |
+
+**It is a new session, not the one you launched the workbench from.** Archon does
+not own the terminal it was started in — your shell does — so there is no
+existing stream to join. Closing the tab kills the process.
+
+Dropping a file uploads it to a staging directory and types `@<path>` at the
+prompt, which is the TUI's own attachment convention (the same string the
+`/files` picker inserts). The upload obeys the normal upload policy.
+
+Two hard requirements, neither of them a default:
+
+- **Loopback only, unconditionally.** A non-loopback bind removes the route
+  outright, including under
+  `unsafe_allow_unauthenticated_nonlocal_bind_for_cli`. That flag exists to put
+  a read-only workbench on a trusted network, and must not silently become
+  remote code execution.
+- **Its own policy flag**, `policy.web.allow_web_terminal`, never
+  `allow_mutating_actions`. Ingesting a document and running arbitrary commands
+  are not the same risk.
+
+When either says no the route is not registered at all and the path 404s, rather
+than a handler returning 403 — a shell should not look like something one flag
+away from being unlocked. The nav entry is hidden in that case.
+
+### Corpus
+
+![The Corpus tab](../images/web/corpus.png)
+
+The corpus tab lets you interact with the material created by `/docs`, `archon
+docs ...`, `/kb`, and related document-ingest workflows.
+
+| Area | Shows |
+|---|---|
+| Roots | repository docs, `.archon/docs`, `.archon/docs/inbox`, `.archon/docs/images`, and other configured roots |
+| Source list | path, type, size, excerpts, match scores |
+| Preview | safe text preview for files inside allowed corpus roots |
+| Search | bounded ranked keyword search over source names, paths, and preview chunks |
+| Chunk hits | line start, excerpt, score, and embedding/index hint |
+
+The browser preview is read-only and rooted. It refuses paths outside the known
+corpus roots. Full ingestion still happens through the CLI/TUI:
+
+```bash
+archon docs ingest .archon/docs/inbox
+archon docs index --all
+archon docs search "known phrase" --mode hybrid
+```
+
+### Ingest
+
+![The Ingest tab](../images/web/ingest.png)
+
+Everything that puts material into the stores, and the controls for the queue
+that indexes it.
+
+| Area | Does |
+|---|---|
+| Upload | file picker and drop zone; stores the file and fills in its path |
+| Documents and KB sources | ingest a path or URL into the document store, a KB, or run the KB graph pass |
+| Video evidence | ingest video with frame, ASR and VLM options |
+| Create KB | name and scope a new knowledge base |
+| Store items | documents, videos and KBs, with a delete control on documents |
+| Recent ingest runs | status, command and output tail for each web-triggered run |
+| Semantic index | pending / leased / indexed / failed counts, plus pause, resume, cancel and retry-failed |
+
+Upload exists because ingest takes a path, which is fine when the file is on the
+machine running Archon and tedious when it is on the machine running the
+browser. It **produces** a path rather than being a second ingest route: the
+file is stored, the path is filled into the form, and the existing pipeline runs
+unchanged.
+
+**Deleting a document is permanent and has its own policy flag.**
+`policy.web.allow_document_deletion` is deliberately not implied by
+`allow_file_uploads` — an operator who wanted drag-and-drop has not asked for a
+delete button on every row. The confirmation names what goes (chunks, pages,
+artifacts) because a prompt that only asks "are you sure?" gives you nothing to
+be sure about. Deletion drops the source registration along with the derived
+evidence, which is what allows the same bytes to be ingested again afterwards; a
+delete that left that row behind would make the document vanish from every view
+while re-ingesting it reported `Skipped: 1 duplicates` forever.
+
+Pause and cancel also release the job's leases. A leased chunk whose owner has
+stopped is otherwise stranded: not pending, so no worker takes it, and not
+indexed, so nothing reports it missing.
+
+### Memory
+
+![The Memory tab](../images/web/memory.png)
+
+The memory tab surfaces learning and memory state that would otherwise require
+multiple slash commands.
+
+| Area | Shows |
+|---|---|
+| Signals | sessions, reasoning-quality store, self-calibration, proposal stores |
+| Memories | recent memory rows and rule-like records |
+| LearningEvents | governed learning events and correction-linked rows |
+| Behaviour proposals | pending proposal previews |
+| Trust deltas | self-trust and calibration rows |
+| Filters | graph-style filtering across memory, events, proposals, and trust rows |
+
+Buttons that inspect behaviour proposals use dry-run action previews. They do
+not apply behaviour changes unless policy and confirmation gates allow that
+action.
+
+### Cognitive
+
+![The Cognitive tab](../images/web/cognitive.png)
+
+The executive loop: situation classification, candidate plans, policy-gated
+scoring, and the decision and reflection ledgers it writes.
+
+| Area | Shows |
+|---|---|
+| Executive state | whether the loop is enabled, and its last tick |
+| Decisions | recent decision ledger rows |
+| Reflections | recent reflection rows |
+| Proposals | behaviour proposals awaiting approval |
+
+Read-only. Approving a proposal is a mutating action and goes through the
+behaviour-proposal gate.
+
 ### World
+
+![The World tab](../images/web/world-model.png)
 
 The world tab inspects the local world model and its reasoning-quality bridge.
 
@@ -249,7 +354,22 @@ Promotion and rollback controls are surfaced as dry-run action previews. The
 world model remains advisory unless subsystem policy allows behaviour-changing
 use.
 
+### JEPA
+
+![The JEPA tab](../images/web/jepa.png)
+
+The world model's training and promotion lifecycle, separate from the World tab
+because this is about *the model*, not its predictions.
+
+| Area | Shows |
+|---|---|
+| Candidates | trained candidates and their state (evaluate / shadow / promoted / rolled back) |
+| Eval gates | which gates a candidate passed or failed |
+| Accelerator parity | Metal and CUDA backend availability and agreement |
+
 ### Pipelines
+
+![The Pipelines tab](../images/web/pipelines.png)
 
 The pipeline tab is a control-room view for `/archon-code`, `/archon-research`,
 `/gametheory`, and declarative pipeline runs.
@@ -266,7 +386,25 @@ Pipeline buttons must go through the web action envelope and subsystem policy
 gates. The page is designed to make stage state and output visible before an
 operator acts.
 
+### Workflows
+
+![The Workflows tab](../images/web/workflows.png)
+
+Dynamic workflow runs — the `/workflow` planning, running and resume surface.
+
+| Area | Shows |
+|---|---|
+| Runs | recent workflow runs, most recent first |
+| Stages | per-run stage state and agent assignment |
+| Artifacts | what each stage produced |
+| Events | the run's event stream, tailed live |
+
+Pipeline-style controls (pause, resume, cancel) require
+`policy.web.allow_pipeline_controls` in addition to the global mutation gate.
+
 ### Metrics
+
+![The Metrics tab](../images/web/metrics.png)
 
 The metrics tab shows operational health.
 
@@ -285,6 +423,8 @@ shows that honestly as unavailable rather than guessing.
 
 ### Settings
 
+![The Settings tab](../images/web/settings.png)
+
 The settings tab is intentionally bounded.
 
 | Area | Shows |
@@ -299,6 +439,8 @@ The web UI does not provide a general policy editor. Policy remains TOML-based
 and reviewable in the normal config files.
 
 ### Evidence Graph
+
+![The Evidence Graph tab](../images/web/evidence.png)
 
 The evidence graph shows how major local data families relate. Source nodes
 and aggregate counts are derived from the local filesystem and scanned corpus

@@ -13,6 +13,9 @@ export function PipelinePage({ pipelines }: PipelinePageProps) {
   const runs = pipelines?.runs ?? [];
   const outputs = pipelines?.outputs ?? [];
   const liveEvents = pipelines?.liveEvents ?? [];
+  const definitions = pipelines?.definitions ?? [];
+  const artifactRoots = pipelines?.artifactRoots ?? [];
+  const recentSessions = pipelines?.recentSessions ?? [];
 
   return (
     <section className="pipeline-layout">
@@ -53,6 +56,90 @@ export function PipelinePage({ pipelines }: PipelinePageProps) {
           />
         </div>
       </div>
+
+      {/* The summary carries `definitions`, `artifactRoots` and
+          `recentSessions`, and none of them were rendered — so on a project
+          where no pipeline had run yet, every panel below was empty and the
+          page said nothing at all, while the payload already knew which
+          pipelines were configured and where their artifacts would land. That
+          is the state a first-time reader is most likely to be in. */}
+      <section className="panel panel--wide">
+        <div className="panel-heading">
+          <h3>Configured pipelines</h3>
+          <StatusPill tone={definitions.length > 0 ? "good" : "muted"}>
+            {definitions.length} definitions
+          </StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {definitions.length === 0 ? (
+            <div className="pipeline-empty">
+              <FileText size={18} aria-hidden="true" />
+              <span>No pipeline definitions found under .archon/agents.</span>
+            </div>
+          ) : (
+            definitions.map((definition) => (
+              <div key={definition.path} className="pipeline-row">
+                <div>
+                  <strong>{definition.label}</strong>
+                  <span>{definition.path}</span>
+                  <small>
+                    {definition.files} file(s) · {formatBytes(definition.bytes)}
+                  </small>
+                </div>
+                <StatusPill tone={definition.exists ? "good" : "warn"}>
+                  {definition.exists ? "present" : "missing"}
+                </StatusPill>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h3>Artifact roots</h3>
+          <StatusPill>{artifactRoots.length} roots</StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {artifactRoots.map((root) => (
+            <div key={root.path} className="pipeline-row">
+              <div>
+                <strong>{root.label}</strong>
+                <span>{root.path}</span>
+                <small>
+                  {root.files} file(s) · {formatBytes(root.bytes)}
+                </small>
+              </div>
+              <StatusPill tone={root.exists ? "good" : "muted"}>
+                {root.exists ? "present" : "not created yet"}
+              </StatusPill>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h3>Recent sessions</h3>
+          <StatusPill>{pipelines?.sessionCount ?? 0} total</StatusPill>
+        </div>
+        <div className="pipeline-list">
+          {recentSessions.length === 0 ? (
+            <div className="pipeline-empty">
+              <FileText size={18} aria-hidden="true" />
+              <span>No session activity ledgers yet.</span>
+            </div>
+          ) : (
+            recentSessions.map((sessionId) => (
+              <div key={sessionId} className="pipeline-row">
+                <div>
+                  <strong>{sessionId}</strong>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
 
       <section className="panel panel--wide">
         <div className="panel-heading">

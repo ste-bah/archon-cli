@@ -90,7 +90,16 @@ export function WorkbenchRoutes(props: WorkbenchRoutesProps) {
         }
       />
       <Route path="/corpus" element={<CorpusPage corpus={props.corpus} />} />
-      <Route path="/ingest" element={<IngestPage ingest={props.ingest} />} />
+      <Route
+        path="/ingest"
+        element={
+          <IngestPage
+            ingest={props.ingest}
+            policy={props.policy}
+            uploadPolicy={props.uploadPolicy}
+          />
+        }
+      />
       <Route
         path="/memory"
         element={<MemoryPage learning={props.learning} />}

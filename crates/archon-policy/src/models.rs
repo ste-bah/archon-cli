@@ -182,6 +182,15 @@ pub struct WebPolicy {
     pub allow_pipeline_controls: bool,
     pub allow_model_training_actions: bool,
     pub allow_corpus_open_paths: bool,
+    /// Permanently delete an ingested document, and everything derived from
+    /// it, from the browser.
+    ///
+    /// Separate from `allow_file_uploads` because adding a document and
+    /// destroying one are opposite risks. An operator who wants to drag PDFs
+    /// into the workbench has not thereby asked for a delete button on every
+    /// row, and the delete does not come back: chunks, pages, artifacts and
+    /// raw vectors all go, along with the source registration.
+    pub allow_document_deletion: bool,
     /// Serve the browser terminal pane, which spawns a real `archon` process
     /// under a PTY and pipes keystrokes into it.
     ///

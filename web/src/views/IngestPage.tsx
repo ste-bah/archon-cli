@@ -4,24 +4,32 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { StatusPill } from "../components/StatusPill";
 import type {
+  EffectivePolicySummary,
   WebIndexFailureItem,
   WebIndexJobItem,
   WebDocStoreItem,
   WebIngestJob,
   WebIngestSummary,
   WebKnowledgeBaseItem,
+  WebUploadPolicy,
   WebVideoStoreItem,
 } from "../api/generated/web";
+import { DeleteDocument } from "./ingest/DeleteDocument";
+import { IndexControls } from "./ingest/IndexControls";
+import { StoreProbes } from "./ingest/StoreProbes";
+import { UploadPanel } from "./ingest/UploadPanel";
 import "./IngestPage.css";
 
 interface IngestPageProps {
   ingest?: WebIngestSummary;
+  policy?: EffectivePolicySummary;
+  uploadPolicy?: WebUploadPolicy;
 }
 
 type ViewerTab = "documents" | "videos" | "kbs";
 type ViewerItem = WebDocStoreItem | WebVideoStoreItem | WebKnowledgeBaseItem;
 
-export function IngestPage({ ingest }: IngestPageProps) {
+export function IngestPage({ ingest, policy, uploadPolicy }: IngestPageProps) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState("docs");
   const [source, setSource] = useState("");
@@ -66,6 +74,19 @@ export function IngestPage({ ingest }: IngestPageProps) {
         </div>
         <p className="summary">{ingest?.policyReason ?? "Loading ingest policy."}</p>
       </div>
+
+      <StoreProbes stores={ingest?.stores ?? []} />
+
+      <UploadPanel
+        enabled={uploadPolicy?.enabled ?? false}
+        policyReason={uploadPolicy?.policyReason ?? "Loading upload policy."}
+        // The upload produces a path; ingest still runs through the same form
+        // and the same backend route it always did.
+        onUploaded={(path) => {
+          setTarget("docs");
+          setSource(path);
+        }}
+      />
 
       <div className="ingest-grid">
         <form
@@ -204,6 +225,12 @@ export function IngestPage({ ingest }: IngestPageProps) {
           items={items}
           selected={selected}
           onSelect={(item) => setSelectedKey(itemKey(item))}
+          deleteEnabled={policy?.web.allowDocumentDeletion ?? false}
+          deletePolicyReason={
+            policy?.web.allowDocumentDeletion
+              ? ""
+              : "Deleting from the browser requires policy.web.allow_document_deletion."
+          }
         />
         <Jobs jobs={ingest?.jobs ?? []} warnings={ingest?.warnings ?? []} />
       </div>
@@ -211,6 +238,7 @@ export function IngestPage({ ingest }: IngestPageProps) {
         queue={ingest?.indexQueue}
         jobs={ingest?.indexJobs ?? []}
         failures={ingest?.indexFailures ?? []}
+        controlsEnabled={ingest?.allowed ?? false}
       />
     </section>
   );
@@ -245,12 +273,16 @@ function Viewer({
   items,
   selected,
   onSelect,
+  deleteEnabled,
+  deletePolicyReason,
 }: {
   tab: ViewerTab;
   setTab: (tab: ViewerTab) => void;
   items: ViewerItem[];
   selected?: ViewerItem;
   onSelect: (item: ViewerItem) => void;
+  deleteEnabled: boolean;
+  deletePolicyReason: string;
 }) {
   return (
     <div className="panel ingest-viewer">
@@ -277,7 +309,20 @@ function Viewer({
             </button>
           ))}
         </div>
-        <pre className="ingest-detail">{selected ? JSON.stringify(selected, null, 2) : "No items yet."}</pre>
+        <div className="ingest-detail-column">
+          <pre className="ingest-detail">{selected ? JSON.stringify(selected, null, 2) : "No items yet."}</pre>
+          {selected && isDocItem(selected) ? (
+            <DeleteDocument
+              // Keyed by document so switching selection resets the confirm
+              // state; a primed "Yes, delete it" must not carry over to a
+              // different row.
+              key={selected.documentId}
+              document={selected}
+              enabled={deleteEnabled}
+              policyReason={deletePolicyReason}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -318,10 +363,12 @@ function IndexingPanel({
   queue,
   jobs,
   failures,
+  controlsEnabled,
 }: {
   queue?: WebIngestSummary["indexQueue"];
   jobs: WebIndexJobItem[];
   failures: WebIndexFailureItem[];
+  controlsEnabled: boolean;
 }) {
   const totalQueued = (queue?.pending ?? 0) + (queue?.leased ?? 0) + (queue?.failed ?? 0);
   return (
@@ -339,6 +386,11 @@ function IndexingPanel({
         <Metric icon={<Database size={18} />} label="indexed" value={queue?.indexed ?? 0} />
         <Metric icon={<RefreshCw size={18} />} label="failed" value={queue?.failed ?? 0} />
       </div>
+      <IndexControls
+        jobs={jobs}
+        failed={queue?.failed ?? 0}
+        enabled={controlsEnabled}
+      />
       <div className="ingest-index-grid">
         <IndexJobs jobs={jobs} />
         <IndexFailures failures={failures} />

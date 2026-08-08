@@ -31,13 +31,7 @@ impl OpenAiCompatEmbeddingProvider {
             });
         }
         let endpoint = embedding_endpoint(base_url);
-        let client =
-            Client::builder()
-                .timeout(timeout)
-                .build()
-                .map_err(|e| DocsError::Embedding {
-                    message: format!("OpenAI-compatible embedding client init failed: {e}"),
-                })?;
+        let client = build_blocking_client(timeout)?;
         Ok(Self {
             client,
             api_key,
@@ -46,7 +40,12 @@ impl OpenAiCompatEmbeddingProvider {
         })
     }
 
+    /// Embed one batch, hopping off the async runtime if there is one.
     fn request_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
+        off_runtime(|| self.request_batch_inner(texts))
+    }
+
+    fn request_batch_inner(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, DocsError> {
         let body = serde_json::json!({
             "model": self.model,
             "input": truncate_texts(texts),
@@ -142,6 +141,56 @@ fn embed_batches(
         all.extend(provider.request_batch(batch)?);
     }
     Ok(all)
+}
+
+/// Build the blocking HTTP client on a thread that is not inside a Tokio
+/// runtime.
+///
+/// `reqwest::blocking` creates and owns a private runtime, and creating one
+/// from inside another runtime's context is a documented misuse: the inner
+/// runtime's drop tries to block, the outer context forbids blocking, and the
+/// process aborts with
+///
+/// ```text
+/// Cannot drop a runtime in a context where blocking is not allowed.
+/// This happens when a runtime is dropped from within an asynchronous context.
+/// ```
+///
+/// Every caller reaches this from `#[tokio::main]` — `docs ingest`, `docs
+/// index`, `kb`, `reprocess`, `vector-migrate` and the web chat bridge all sit
+/// inside the runtime — so with an OpenAI-compatible embedding provider
+/// configured, `archon docs ingest` panicked before reading a single byte of
+/// the document. Handing the construction to a plain `std::thread` gives it a
+/// context with no runtime, which is the one thing `reqwest::blocking` asks
+/// for; the client itself is `Send` and works normally afterwards.
+fn build_blocking_client(timeout: Duration) -> Result<Client, DocsError> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || Client::builder().timeout(timeout).build())
+            .join()
+            .map_err(|_| DocsError::Embedding {
+                message: "OpenAI-compatible embedding client init thread panicked".into(),
+            })?
+            .map_err(|error| DocsError::Embedding {
+                message: format!("OpenAI-compatible embedding client init failed: {error}"),
+            })
+    })
+}
+
+/// Run a blocking request off the async runtime, for the same reason as
+/// [`build_blocking_client`].
+///
+/// `reqwest::blocking`'s `send` also refuses to run inside a runtime context,
+/// so a provider constructed successfully would still fail on first use when
+/// the caller is async. Only pay for the thread hop when there actually is a
+/// runtime: the indexing path already runs on worker threads, and that is the
+/// hot path.
+fn off_runtime<T: Send>(work: impl FnOnce() -> T + Send) -> T {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return work();
+    }
+    std::thread::scope(|scope| scope.spawn(work).join())
+        .unwrap_or_else(|_| panic!("embedding request thread panicked"))
 }
 
 fn embedding_endpoint(base_url: Option<String>) -> String {

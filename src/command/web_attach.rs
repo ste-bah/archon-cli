@@ -151,6 +151,7 @@ fn attached_policy(cwd: &std::path::Path) -> EffectivePolicySummary {
             allow_model_training_actions: policy.web.allow_model_training_actions,
             allow_corpus_open_paths: policy.web.allow_corpus_open_paths,
             allow_web_terminal: policy.web.allow_web_terminal,
+            allow_document_deletion: policy.web.allow_document_deletion,
         },
         subsystem: WebSubsystemPolicySummary {
             allow_behavior_proposal_actions: true,

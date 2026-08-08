@@ -34,6 +34,10 @@ import type {
   WebBoardRunList,
   WebKbCreateRequest,
   WebKbCreateResponse,
+  WebDocDeleteRequest,
+  WebDocDeleteResponse,
+  WebIndexControlRequest,
+  WebIndexControlResponse,
   WebLiveCursorExpired,
   WebLiveSnapshot,
   WebUploadIntent,
@@ -217,6 +221,10 @@ export const apiClient = {
     postJson<WebIngestRunResponse>("/api/ingest/run", request),
   createKnowledgeBase: (request: WebKbCreateRequest) =>
     postJson<WebKbCreateResponse>("/api/ingest/kb", request),
+  deleteDocument: (request: WebDocDeleteRequest) =>
+    postJson<WebDocDeleteResponse>("/api/docs/delete", request),
+  indexControl: (request: WebIndexControlRequest) =>
+    postJson<WebIndexControlResponse>("/api/index/control", request),
   learningSummary: () => getJson<LearningSummary>("/api/learning/summary"),
   cognitiveSummary: () => getJson<CognitiveWebSummary>("/api/cognitive/summary"),
   worldSummary: () => getJson<WorldInspectionSummary>("/api/world/summary"),

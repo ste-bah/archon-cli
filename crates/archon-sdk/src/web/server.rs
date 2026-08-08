@@ -22,9 +22,9 @@ use super::api::{EffectivePolicySummary, WebApiState};
 use super::live::WebLiveManager;
 use super::{
     AppState, WebConfig, WebRuntimeHandles, WebRuntimePaths, actions, agents, api, assets, auth,
-    board, board_activity, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live,
-    metrics, pipelines, server_shutdown, settings, terminal, uploads, uploads_receive, workflows,
-    world,
+    board, board_activity, chat, check_auth, cognitive, corpus, docs_actions, evidence, ingest,
+    inspect, live, metrics, pipelines, server_shutdown, settings, terminal, uploads,
+    uploads_receive, workflows, world,
 };
 
 /// HTTP server that serves the embedded SPA.
@@ -273,6 +273,11 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/ingest/summary", get(ingest::summary_handler))
         .route("/api/ingest/run", post(ingest::run_handler))
         .route("/api/ingest/kb", post(ingest::create_kb_handler))
+        .route("/api/docs/delete", post(docs_actions::delete_handler))
+        .route(
+            "/api/index/control",
+            post(docs_actions::index_control_handler),
+        )
         .route("/api/learning/summary", get(inspect::learning_handler))
         .route("/api/cognitive/summary", get(cognitive::summary_handler))
         .route("/api/world/summary", get(world::summary_handler))

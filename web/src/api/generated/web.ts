@@ -26,7 +26,13 @@ export type WebPolicySummary = { allowMutatingActions: boolean, allowFileUploads
  * member of the mutation family: the terminal is arbitrary code execution,
  * not a named action, so no other gate may imply it.
  */
-allowWebTerminal: boolean, };
+allowWebTerminal: boolean, 
+/**
+ * Mirrors `policy.web.allow_document_deletion`. Adding a document and
+ * permanently destroying one are opposite risks, so enabling uploads does
+ * not enable this.
+ */
+allowDocumentDeletion: boolean, };
 
 export type WebSubsystemPolicySummary = { allowBehaviorProposalActions: boolean, allowModelBehaviorChanges: boolean, allowPipelineControls: boolean, allowCorpusOpenPaths: boolean, allowFileUploads: boolean, };
 
@@ -194,6 +200,27 @@ export type WebUploadedFile = {
 path: string, fileName: string, sizeBytes: number, };
 
 export type WebUploadResponse = { accepted: boolean, policyReason: string, files: Array<WebUploadedFile>, };
+
+export type WebDocDeleteRequest = { documentId: string, 
+/**
+ * The browser has shown the operator what will be removed and they said
+ * yes. Without it the request is a dry run that reports the counts.
+ */
+confirmed: boolean, };
+
+export type WebDocDeleteResponse = { accepted: boolean, policyReason: string, documentId: string, sourcePath: string, chunks: number, pages: number, artifacts: number, vectors: number, };
+
+export type WebIndexControlRequest = { 
+/**
+ * `pause`, `resume`, `cancel` or `retryFailed`.
+ */
+action: string, 
+/**
+ * Required by every action except `retryFailed`.
+ */
+jobId: string | null, limit: number | null, };
+
+export type WebIndexControlResponse = { accepted: boolean, policyReason: string, detail: string, };
 
 export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, };
 export type CognitiveRowPreview = { id: string, label: string, status: string, detail: string, createdAt: string, };

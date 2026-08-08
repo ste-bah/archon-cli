@@ -357,7 +357,7 @@ fn kb_item(name: &str, scope: &str, path: &Path) -> WebKnowledgeBaseItem {
     }
 }
 
-fn open_docs_db(paths: &WebRuntimePaths) -> Result<Arc<DbInstance>> {
+pub(crate) fn open_docs_db(paths: &WebRuntimePaths) -> Result<Arc<DbInstance>> {
     archon_docs::acquire_docs_db(evidence_db_path(paths))
 }
 

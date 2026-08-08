@@ -113,6 +113,10 @@ pub struct WebPolicySummary {
     /// member of the mutation family: the terminal is arbitrary code execution,
     /// not a named action, so no other gate may imply it.
     pub allow_web_terminal: bool,
+    /// Mirrors `policy.web.allow_document_deletion`. Adding a document and
+    /// permanently destroying one are opposite risks, so enabling uploads does
+    /// not enable this.
+    pub allow_document_deletion: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -265,6 +269,7 @@ impl WebPolicySummary {
             allow_model_training_actions: false,
             allow_corpus_open_paths: false,
             allow_web_terminal: false,
+            allow_document_deletion: false,
         }
     }
 }
@@ -355,6 +360,7 @@ pub fn generated_typescript() -> String {
         super::chat::generated_typescript(),
         super::uploads::generated_typescript(),
         super::uploads_receive::generated_typescript(),
+        super::docs_actions::generated_typescript(),
         super::cognitive::generated_typescript(),
         super::corpus::generated_typescript(),
         super::ingest::generated_typescript(),
