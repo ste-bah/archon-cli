@@ -73,8 +73,33 @@ pub(crate) async fn build_subagent_pipeline_adapter(
     ))
 }
 
+/// Build the `AgentConfig` workflow subagents run under.
+///
+/// Every field here must come from `config`, not from `AgentConfig::default()`.
+/// The default is Anthropic-shaped — `model: "claude-sonnet-4-6"` — so a
+/// workflow on a Codex provider asked it for a model Codex cannot serve and got
+/// that provider's own fallback instead. The session path never had this
+/// problem because it calls `active_session_model`, whose whole purpose is
+/// stated by its test: `..._uses_configured_codex_default_when_claude_default_would_leak`.
+/// Measured before the fix: 698 of 704 subagent requests ran on the fallback
+/// while `[models.openai-codex]` said otherwise, and editing that config
+/// changed nothing because it was never read on this path.
+///
+/// `max_tokens`/`thinking_budget` and the permission rules were silently
+/// defaulted for the same reason: a struct-update from `default()` looks
+/// complete at the call site while quietly supplying values the operator never
+/// chose. `install_workflow_cli_subagent_executor` extends `permission_rules`
+/// with project MCP grants, so seeding it from config here is additive.
 fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str) -> AgentConfig {
     AgentConfig {
+        model: crate::session::active_session_model(config),
+        max_tokens: config.api.thinking_budget,
+        thinking_budget: config.api.thinking_budget,
+        permission_rules: archon_permissions::rules::RuleSet {
+            always_allow: config.permissions.always_allow.clone(),
+            always_deny: config.permissions.always_deny.clone(),
+            always_ask: config.permissions.always_ask.clone(),
+        },
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         max_tool_concurrency: config.tools.max_concurrency as usize,
