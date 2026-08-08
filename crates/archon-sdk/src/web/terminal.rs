@@ -129,6 +129,10 @@ pub(crate) async fn ws_handler(
 
 /// Bearer check for the upgrade, mirroring [`super::check_auth`] but reading
 /// the sub-protocol as well, because browsers cannot set request headers here.
+// Same shape and same allow as `check_auth`: the error arm is an axum
+// `Response`, which is large, and boxing it here would only move the allocation
+// to a path taken once per refused upgrade.
+#[allow(clippy::result_large_err)]
 fn authorize(state: &AppState, headers: &HeaderMap) -> Result<Option<String>, Response> {
     let Some(ref required) = state.token else {
         return Ok(None);
