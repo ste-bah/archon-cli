@@ -94,6 +94,12 @@ hello.txt
 !/docs/development/**
 !/docs/release-notes/
 !/docs/release-notes/**
+# Exception: screenshots referenced by the committed docs. Without this the
+# markdown ships with fifteen image links that 404, because `git add` skips
+# ignored paths silently and nothing warns that a tracked page points at an
+# untracked file.
+!/docs/images/
+!/docs/images/**
 
 # Local-only artifacts (not for VCS)
 # Must stay below the /docs/architecture/ re-includes above — last match wins.
