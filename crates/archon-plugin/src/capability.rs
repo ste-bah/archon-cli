@@ -196,6 +196,52 @@ mod tests {
         std::env::temp_dir().join(format!("archon-plugin-{name}-{unique}"))
     }
 
+    /// Point `link` at `target`, or report that this host will not allow it.
+    ///
+    /// Creating a symlink on Windows needs `SeCreateSymbolicLinkPrivilege`, which an ordinary
+    /// account does not hold unless Developer Mode is on. `expect("symlink")` therefore failed at
+    /// *setup* with `Os { code: 1314, .. "A required privilege is not held by the client." }` on
+    /// every unprivileged Windows machine, so `cargo test --workspace` was permanently red there
+    /// and the assertion these tests exist for never ran at all. GitHub's Windows runners are
+    /// administrators, so CI never saw it.
+    ///
+    /// Returning `false` rather than panicking keeps the suite honest on such a host. It is a skip
+    /// and not a pass: the caller prints why, so a green line is never mistaken for a checked one,
+    /// and on Linux, macOS and a privileged Windows the assertion runs exactly as before.
+    #[must_use]
+    fn try_symlink_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
+        #[cfg(unix)]
+        let result = std::os::unix::fs::symlink(target, link);
+        #[cfg(windows)]
+        let result = std::os::windows::fs::symlink_dir(target, link);
+
+        match result {
+            Ok(()) => true,
+            Err(error) if is_symlink_privilege_error(&error) => {
+                eprintln!(
+                    "SKIPPED: this host does not permit creating symlinks ({error}). \
+                     On Windows, enable Developer Mode or run as administrator to exercise \
+                     the symlink-escape checks."
+                );
+                false
+            }
+            Err(error) => panic!("symlink: {error}"),
+        }
+    }
+
+    /// Is this the "you may not create symlinks" refusal, as opposed to a real failure?
+    ///
+    /// Matched on the raw OS code, not `ErrorKind`. Windows reports
+    /// `ERROR_PRIVILEGE_NOT_HELD` (1314) as `ErrorKind::Uncategorized`, not `PermissionDenied`,
+    /// so a kind-based check silently fails to match and the test panics anyway — which is exactly
+    /// what happened to the first version of this helper.
+    fn is_symlink_privilege_error(error: &std::io::Error) -> bool {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            return true;
+        }
+        cfg!(windows) && error.raw_os_error() == Some(1314)
+    }
+
     #[test]
     fn checker_denies_read_through_symlink_escape() {
         let root = temp_path("read-root");
@@ -204,10 +250,11 @@ mod tests {
         std::fs::create_dir_all(&outside).expect("outside");
         std::fs::write(outside.join("secret.txt"), "nope").expect("secret");
 
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, root.join("link")).expect("symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, root.join("link")).expect("symlink");
+        if !try_symlink_dir(&outside, &root.join("link")) {
+            let _ = std::fs::remove_dir_all(root);
+            let _ = std::fs::remove_dir_all(outside);
+            return;
+        }
 
         let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![root.clone()])]);
         assert!(!checker.can_read_fs(&root.join("link/secret.txt")));
@@ -223,10 +270,11 @@ mod tests {
         std::fs::create_dir_all(&root).expect("root");
         std::fs::create_dir_all(&outside).expect("outside");
 
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, root.join("link")).expect("symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, root.join("link")).expect("symlink");
+        if !try_symlink_dir(&outside, &root.join("link")) {
+            let _ = std::fs::remove_dir_all(root);
+            let _ = std::fs::remove_dir_all(outside);
+            return;
+        }
 
         let checker = CapabilityChecker::new(vec![PluginCapability::WriteFs(vec![root.clone()])]);
         assert!(!checker.can_write_fs(&root.join("link/new.txt")));
