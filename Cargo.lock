@@ -1013,6 +1013,7 @@ dependencies = [
 name = "archon-shell"
 version = "1.6.1"
 dependencies = [
+ "tempfile",
  "which",
 ]
 
