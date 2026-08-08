@@ -342,6 +342,7 @@ pub(crate) async fn spawn_web_session(
             session_id: session_id.to_string(),
             session_store: Arc::clone(&session_store),
             cost_config: config.cost.clone(),
+            codex_models: config.models.openai_codex.clone(),
             memory: Arc::clone(&memory),
             garden_config: config.memory.garden.clone(),
             mcp_manager: mcp_manager.clone(),

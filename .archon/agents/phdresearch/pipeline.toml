@@ -1,4 +1,4 @@
-# Research Pipeline Manifest — 47-agent execution order
+﻿# Research Pipeline Manifest â€” 47-agent execution order
 # Source: crates/archon-pipeline/src/research/agents.rs RESEARCH_AGENTS array
 # Runtime execution order is currently compiled from the RESEARCH_AGENTS array.
 # Keep this manifest in sync until the pipeline loader becomes the authority.
@@ -7,14 +7,14 @@
 name = "phdresearch"
 version = "1.0"
 description = "47-agent PhD research pipeline with 8 phases"
-default_model = "claude-sonnet-4-20250514"
+default_model = "sonnet"
 context_window = 200000
 
 [defaults]
-model = "claude-sonnet-4-20250514"
+model = "sonnet"
 context_budget = 50000
 
-# ── Phase Definitions ────────────────────────────────────────────────────────
+# â”€â”€ Phase Definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[phases]]
 id = 1
@@ -56,7 +56,7 @@ id = 8
 name = "Final Assembly"
 tool_access = "full"
 
-# ── Phase 1: Foundation (6 agents) ───────────────────────────────────────────
+# â”€â”€ Phase 1: Foundation (6 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "step-back-analyzer"
@@ -82,7 +82,7 @@ phase = 1
 key = "dissertation-architect"
 phase = 1
 
-# ── Phase 2: Discovery (4 agents) ───────────────────────────────────────────
+# â”€â”€ Phase 2: Discovery (4 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "literature-mapper"
@@ -100,7 +100,7 @@ phase = 2
 key = "context-tier-manager"
 phase = 2
 
-# ── Phase 3: Architecture (4 agents) ────────────────────────────────────────
+# â”€â”€ Phase 3: Architecture (4 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "theoretical-framework-analyst"
@@ -118,7 +118,7 @@ phase = 3
 key = "risk-analyst"
 phase = 3
 
-# ── Phase 4: Synthesis (5 agents) ───────────────────────────────────────────
+# â”€â”€ Phase 4: Synthesis (5 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "evidence-synthesizer"
@@ -140,7 +140,7 @@ phase = 4
 key = "opportunity-identifier"
 phase = 4
 
-# ── Phase 5: Design (9 agents) ──────────────────────────────────────────────
+# â”€â”€ Phase 5: Design (9 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "method-designer"
@@ -178,7 +178,7 @@ phase = 5
 key = "methodology-writer"
 phase = 5
 
-# ── Phase 6: Writing (6 agents) ─────────────────────────────────────────────
+# â”€â”€ Phase 6: Writing (6 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "introduction-writer"
@@ -204,7 +204,7 @@ phase = 6
 key = "abstract-writer"
 phase = 6
 
-# ── Phase 7: Validation (12 agents) ─────────────────────────────────────────
+# â”€â”€ Phase 7: Validation (12 agents) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "systematic-reviewer"
@@ -254,7 +254,7 @@ phase = 7
 key = "file-length-manager"
 phase = 7
 
-# ── Phase 8: Final Assembly (1 agent) ───────────────────────────────────────
+# â”€â”€ Phase 8: Final Assembly (1 agent) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 [[agent]]
 key = "chapter-synthesizer"

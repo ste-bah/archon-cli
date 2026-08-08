@@ -141,6 +141,13 @@ right Archon process and project directory.
 The task board tab shows what agents have raised for each other: the
 `board_items` rows, as a board.
 
+**It is not a workflow progress view.** A running workflow does not populate it,
+and an empty board during a run is the normal case — items appear only when an
+agent chooses to hand a finding to another agent. Workflow stages and agents are
+on the **Workflows** tab. The board's connection to a workflow is the drain
+gate, which reads it once at the run's terminal point and refuses to accept a
+final report over anything outstanding; it is an enforcement point, not a feed.
+
 | Area | Shows |
 |---|---|
 | Run selector | every run with items, most recently touched first |
@@ -396,8 +403,32 @@ Dynamic workflow runs — the `/workflow` planning, running and resume surface.
 |---|---|
 | Runs | recent workflow runs, most recent first |
 | Stages | per-run stage state and agent assignment |
+| Generated calls | the calls the run's script produced |
+| Agent details | agents that have **finished** and written output — see below |
 | Artifacts | what each stage produced |
 | Events | the run's event stream, tailed live |
+
+**"Agent details" is not a live view, and the empty state is misleading.** It
+reads `<run>/agent-outputs/` from disk (`archon-workflow`'s `agent_views`), so an
+agent that is still running has written nothing and does not appear. Mid-run the
+panel says *"No agent records for this run"* while agents are visibly working in
+the TUI. Entries arrive as stages complete.
+
+For what is running **now**, use the Overview tab's agent panel. That reads the
+in-process registries and shows live agents, including workflow stage agents,
+whose ids carry the run — `wf-<run-id>-stage-<stage>-…`. The two panels answer
+different questions and neither is a substitute for the other:
+
+| Question | Panel | Source |
+|---|---|---|
+| What is running right now? | Overview → agents | `BACKGROUND_AGENTS` / `TASK_MANAGER`, in-process |
+| What did this run's agents produce? | Workflows → Agent details | `<run>/agent-outputs/` on disk |
+
+The Overview panel needs **attached mode** (`/web` from inside the session).
+A standalone `archon web` cannot read those registries at any price, so it shows
+nothing there — confirm which you have with
+`curl -s localhost:8421/api/agents/live`, whose `attached` field says so
+directly. `/api/status` does **not** carry that field.
 
 Pipeline-style controls (pause, resume, cancel) require
 `policy.web.allow_pipeline_controls` in addition to the global mutation gate.

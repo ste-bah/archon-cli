@@ -492,6 +492,7 @@ pub fn fixture_status_snapshot() -> crate::command::status::StatusSnapshot {
 pub fn fixture_model_snapshot() -> crate::command::model::ModelSnapshot {
     crate::command::model::ModelSnapshot {
         current_model: "claude-opus-4-7".to_string(),
+        codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
     }
 }
 

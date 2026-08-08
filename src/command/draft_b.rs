@@ -12,6 +12,7 @@ mod draft_handler_tests {
         if let Some(m) = model {
             b = b.with_model_snapshot(ModelSnapshot {
                 current_model: m.to_string(),
+                codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
             });
         }
         b = b.with_working_dir_opt(wd.map(PathBuf::from));

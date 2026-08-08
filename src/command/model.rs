@@ -41,6 +41,12 @@ pub(crate) struct ModelSnapshot {
     /// otherwise the configured default. Matches the shipped READ body's
     /// `if ov.is_empty() { default_model } else { ov }` selection.
     pub(crate) current_model: String,
+    /// `[models.openai-codex]`, so Codex aliases resolve from config.
+    ///
+    /// Carried on the snapshot for the same reason `current_model` is: the
+    /// handler is sync and cannot reach shared state, so anything it needs is
+    /// captured at the dispatch site where `.await` is legal.
+    pub(crate) codex_models: archon_core::config::OpenAiCodexModelsConfig,
 }
 
 /// Build a [`ModelSnapshot`] by awaiting the `model_override_shared`
@@ -58,7 +64,10 @@ pub(crate) async fn build_model_snapshot(slash_ctx: &SlashCommandContext) -> Mod
     } else {
         ov.clone()
     };
-    ModelSnapshot { current_model }
+    ModelSnapshot {
+        current_model,
+        codex_models: slash_ctx.codex_models.clone(),
+    }
     // Guard drops here — lock released before return.
 }
 
@@ -81,7 +90,7 @@ fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
 
 fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<String, String> {
     if looks_like_codex_model(&snap.current_model) {
-        resolve_codex_model_name(input)
+        resolve_codex_model_name(input, &snap.codex_models)
     } else if looks_like_anthropic_model(&snap.current_model) {
         archon_tools::validation::validate_model_name(input)
     } else {
@@ -112,13 +121,35 @@ fn validate_provider_model_name(input: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-fn resolve_codex_model_name(input: &str) -> Result<String, String> {
+/// Resolve a Codex alias or model ID, reading `[models.openai-codex]`.
+///
+/// This used to answer `default`/`opus`/`sonnet` with a literal `"gpt-5.5"`,
+/// `codex` with `"gpt-5.3-codex"` and `mini`/`haiku` with `"gpt-5.4-mini"`,
+/// ignoring config entirely — so setting `[models.openai-codex] default =
+/// "gpt-5.6-sol"` changed what the provider would have used but not what
+/// `/model default` selected, because the alias was rewritten to a literal ID
+/// here before the provider ever saw it.
+///
+/// `archon-tools`' `CODEX_KNOWN_SHORTCUTS` says the rule outright: those
+/// constants are compile-time fallbacks and "production code should call
+/// `resolve_codex_model(alias, &cfg)` instead". That resolver existed with no
+/// callers; this is now its caller.
+///
+/// The cross-provider tier names map as `to_alias_map` documents — `opus` and
+/// `sonnet` both to the frontier `default`, `haiku` to `mini` — so a tier name
+/// and its Codex equivalent cannot drift apart.
+fn resolve_codex_model_name(
+    input: &str,
+    cfg: &archon_core::config::OpenAiCodexModelsConfig,
+) -> Result<String, String> {
     let trimmed = input.trim();
     let lower = trimmed.to_ascii_lowercase();
     match lower.as_str() {
-        "default" | "opus" | "sonnet" => return Ok("gpt-5.5".to_string()),
-        "codex" => return Ok("gpt-5.3-codex".to_string()),
-        "mini" | "haiku" => return Ok("gpt-5.4-mini".to_string()),
+        "default" | "opus" | "sonnet" => {
+            return Ok(archon_core::config::resolve_codex_model("default", cfg));
+        }
+        "codex" => return Ok(archon_core::config::resolve_codex_model("codex", cfg)),
+        "mini" | "haiku" => return Ok(archon_core::config::resolve_codex_model("mini", cfg)),
         _ => {}
     }
 
@@ -252,233 +283,5 @@ impl CommandHandler for ModelHandler {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::command::test_support::*;
-
-    fn anthropic_snapshot(current_model: &str) -> ModelSnapshot {
-        ModelSnapshot {
-            current_model: current_model.to_string(),
-        }
-    }
-
-    fn codex_snapshot(current_model: &str) -> ModelSnapshot {
-        ModelSnapshot {
-            current_model: current_model.to_string(),
-        }
-    }
-
-    fn provider_snapshot(current_model: &str) -> ModelSnapshot {
-        ModelSnapshot {
-            current_model: current_model.to_string(),
-        }
-    }
-
-    #[test]
-    fn model_handler_description_matches() {
-        let h = ModelHandler;
-        let desc = h.description();
-        assert!(
-            !desc.is_empty(),
-            "ModelHandler description must be non-empty"
-        );
-        assert!(
-            desc.to_lowercase().contains("model"),
-            "ModelHandler description should reference 'model', got: {desc}"
-        );
-    }
-
-    #[test]
-    fn model_handler_aliases_are_m_and_switch_model() {
-        let h = ModelHandler;
-        assert_eq!(
-            h.aliases(),
-            &["m", "switch-model"],
-            "ModelHandler aliases must be [m, switch-model] per AGS-808 spec"
-        );
-    }
-
-    #[test]
-    fn model_handler_execute_no_args_emits_current_model_text() {
-        let snap = anthropic_snapshot("opus");
-        let (mut ctx, mut rx) = make_model_ctx(Some(snap));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &[])
-            .expect("ModelHandler::execute must return Ok with snapshot populated");
-
-        let ev = rx.try_recv().expect("must emit a TuiEvent");
-        match ev {
-            TuiEvent::TextDelta(msg) => {
-                assert!(
-                    msg.contains("Current model: opus"),
-                    "TextDelta must contain 'Current model: opus', got: {msg}"
-                );
-                assert!(
-                    msg.contains("Usage: /model <name>"),
-                    "TextDelta must contain the usage line, got: {msg}"
-                );
-                assert!(
-                    msg.contains("Shortcuts: opus, sonnet, haiku"),
-                    "TextDelta must contain shortcuts line, got: {msg}"
-                );
-            }
-            other => panic!("expected TuiEvent::TextDelta, got {other:?}"),
-        }
-        // READ path must NOT stash a CommandEffect (nothing to apply).
-        assert!(
-            ctx.pending_effect.is_none(),
-            "READ path must not produce a CommandEffect"
-        );
-    }
-
-    #[test]
-    fn model_handler_execute_no_args_without_snapshot_returns_err() {
-        let (mut ctx, _rx) = make_model_ctx(None);
-        let h = ModelHandler;
-        let result = h.execute(&mut ctx, &[]);
-        assert!(
-            result.is_err(),
-            "ModelHandler::execute must return Err when model_snapshot is None \
-             (defensive: builder bug should surface loudly)"
-        );
-        let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            err_msg.contains("model_snapshot") || err_msg.contains("build_command_context"),
-            "error must describe the missing snapshot, got: {err_msg}"
-        );
-    }
-
-    #[test]
-    fn model_handler_execute_with_valid_arg_sets_effect_and_emits_events() {
-        let (mut ctx, mut rx) = make_model_ctx(Some(anthropic_snapshot("claude-sonnet-4-6")));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &["opus".to_string()])
-            .expect("valid arg must produce Ok(())");
-
-        // validate_model_name("opus") resolves to "claude-opus-4-8"
-        // (see crates/archon-tools/src/validation.rs KNOWN_SHORTCUTS).
-        let expected = "claude-opus-4-8".to_string();
-        match ctx.pending_effect.as_ref() {
-            Some(CommandEffect::SetModelOverride(s)) => {
-                assert_eq!(
-                    s, &expected,
-                    "pending_effect must carry the resolved full model id"
-                );
-            }
-            // TASK-AGS-POST-6-BODIES-B04-DIFF: RunGitDiffStat belongs to
-            // /diff. The /model WRITE path must never stash it; this
-            // arm pins that boundary and keeps the match exhaustive.
-            Some(other) => panic!(
-                "unexpected CommandEffect variant for /model WRITE path: {:?}",
-                other
-            ),
-            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
-        }
-
-        // Collect events in emission order.
-        let mut events = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
-        // Expect at least ModelChanged + TextDelta ("Model switched...").
-        let mut saw_model_changed = false;
-        let mut saw_text_delta = false;
-        for ev in &events {
-            match ev {
-                TuiEvent::ModelChanged(s) => {
-                    assert_eq!(s, &expected);
-                    saw_model_changed = true;
-                }
-                TuiEvent::TextDelta(msg) if msg.contains("Model switched to claude-opus-4-8") => {
-                    saw_text_delta = true;
-                }
-                _ => {}
-            }
-        }
-        assert!(
-            saw_model_changed,
-            "WRITE path must emit TuiEvent::ModelChanged"
-        );
-        assert!(
-            saw_text_delta,
-            "WRITE path must emit TuiEvent::TextDelta with 'Model switched to ...'"
-        );
-    }
-
-    #[test]
-    fn model_handler_execute_with_invalid_arg_emits_error_no_effect() {
-        let (mut ctx, mut rx) = make_model_ctx(Some(anthropic_snapshot("claude-sonnet-4-6")));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &["definitely-not-a-model-xyz".to_string()])
-            .expect("invalid arg path still returns Ok(()) — error is emitted as event");
-
-        assert!(
-            ctx.pending_effect.is_none(),
-            "invalid WRITE must NOT stash an effect"
-        );
-
-        let ev = rx
-            .try_recv()
-            .expect("invalid arg must emit a TuiEvent::Error");
-        match ev {
-            TuiEvent::Error(msg) => {
-                assert!(
-                    !msg.is_empty(),
-                    "Error message must be non-empty, got empty"
-                );
-            }
-            other => panic!("expected TuiEvent::Error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn model_handler_execute_with_codex_literal_sets_effect_and_emits_events() {
-        let (mut ctx, mut rx) = make_model_ctx(Some(codex_snapshot("gpt-5.4")));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &["gpt-5.5".to_string()])
-            .expect("Codex literal must produce Ok(())");
-
-        let expected = "gpt-5.5".to_string();
-        match ctx.pending_effect.as_ref() {
-            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, &expected),
-            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
-            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
-        }
-
-        let events = drain_tui_events(&mut rx);
-        assert!(
-            events
-                .iter()
-                .any(|ev| matches!(ev, TuiEvent::ModelChanged(model) if model == &expected)),
-            "Codex literal must emit TuiEvent::ModelChanged({expected})"
-        );
-    }
-
-    #[test]
-    fn model_handler_execute_with_codex_alias_sets_effect() {
-        let (mut ctx, _rx) = make_model_ctx(Some(codex_snapshot("gpt-5.4")));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &["mini".to_string()])
-            .expect("Codex alias must produce Ok(())");
-
-        match ctx.pending_effect.as_ref() {
-            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "gpt-5.4-mini"),
-            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
-            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
-        }
-    }
-
-    #[test]
-    fn model_handler_execute_accepts_generic_provider_model_id() {
-        let (mut ctx, _rx) = make_model_ctx(Some(provider_snapshot("deepseek-v4-flash")));
-        let h = ModelHandler;
-        h.execute(&mut ctx, &["deepseek-v4-pro[1m]".to_string()])
-            .expect("generic provider model ids must be accepted");
-
-        match ctx.pending_effect.as_ref() {
-            Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "deepseek-v4-pro[1m]"),
-            Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
-            None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
-        }
-    }
-}
+#[path = "model_tests.rs"]
+mod tests;

@@ -129,7 +129,9 @@ async fn execute_tier1_agent(
         .unwrap_or_else(|| {
             (
                 agent_key.to_string(),
-                "claude-sonnet-4-6".to_string(),
+                // Tier alias — resolved per provider from config, so an agent
+                // with no definition does not get pinned to one release.
+                "sonnet".to_string(),
                 vec![
                     "Read".into(),
                     "Grep".into(),

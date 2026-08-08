@@ -32,6 +32,11 @@ pub(crate) struct SlashCommandContext {
     pub(crate) session_id: String,
     pub(crate) session_store: Arc<archon_session::storage::SessionStore>,
     pub(crate) cost_config: archon_core::config::CostConfig,
+    /// `[models.openai-codex]`, so `/model` resolves Codex aliases from config
+    /// rather than from a compile-time table. Carried as a slice for the same
+    /// reason as `cost_config`: the handler needs these three strings, not the
+    /// whole `ArchonConfig`.
+    pub(crate) codex_models: archon_core::config::OpenAiCodexModelsConfig,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,
     pub(crate) mcp_manager: McpServerManager,

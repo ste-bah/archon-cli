@@ -274,12 +274,17 @@ async fn execute_specialist_call(
             }
         },
         None => {
+            // Tier alias, not a model ID: the provider resolves it from
+            // `[models.anthropic]` at request time, so this fallback follows
+            // the operator's configured Sonnet instead of pinning an agent
+            // with no definition to whichever release was current when this
+            // line was written.
             tracing::warn!(
                 agent_key,
-                model = "claude-sonnet-4-6",
+                model = "sonnet",
                 "gametheory.agent.model_override"
             );
-            (agent_key, "claude-sonnet-4-6", String::new())
+            (agent_key, "sonnet", String::new())
         }
     };
     if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {

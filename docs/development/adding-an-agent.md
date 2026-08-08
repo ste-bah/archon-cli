@@ -28,7 +28,7 @@ capabilities:
 tags:
   - review
   - quality
-model: claude-opus-4-8
+model: opus
 effort: high
 ---
 
@@ -56,7 +56,13 @@ Recommended:
 - `permissions.default_mode` — agent's effective permission mode
 - `capabilities` — discovery/search metadata; it does not grant runtime tools
 - `tags` — runtime and discovery search tags
-- `model`, `effort` — overrides
+- `model`, `effort` — overrides. **Use a tier alias, not a model ID.** `opus`,
+  `sonnet` and `haiku` are resolved per provider from `[models.anthropic]` or
+  `[models.openai-codex]` at request time, so an agent follows whatever the
+  operator has configured and keeps working when a model is superseded. A
+  literal `claude-opus-4-8` pins that agent to one release of one provider and
+  has to be edited by hand in every agent file each time you upgrade. Every
+  agent shipped under `.archon/agents/` uses an alias.
 
 ## Loading
 
