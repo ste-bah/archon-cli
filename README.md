@@ -205,16 +205,25 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.6.0** — [release notes](docs/release-notes/v1.6.0.md)
+**Current release: v1.6.1** — [release notes](docs/release-notes/v1.6.1.md)
 
-Agents can hand work to each other: a durable task board with atomic claims that
-survive the memory garden, subagent identity so a write can be attributed, a
-self-check that reports an over-limit file back into the agent's own transcript,
-and a browser view of the board and of what is running. Also fixes consolidation
-silently reporting an unavailable semantic pass as a clean store on any second
-archon instance.
+The browser is a full archon surface, not an inspector beside one: a terminal
+pane running the real TUI, and upload, delete and index controls over the
+knowledge store. Fixes document ingest, which crashed before reading a byte on
+any OpenAI-compatible embedding provider, and a TUI that panicked on terminals
+under about 22 rows.
 
-> **Two things change on upgrade.** The repository code index no longer builds at
+Built on v1.6.0, which let agents hand work to each other: a durable task board
+with atomic claims that survive the memory garden, subagent identity so a write
+can be attributed, and a self-check that reports an over-limit file back into
+the agent's own transcript.
+
+> **Nothing is required on upgrade, and two older notes still apply.** The
+> browser terminal and the knowledge-store controls are off by default and need
+> explicit `[policy.web]` flags — see the
+> [release notes](docs/release-notes/v1.6.1.md#upgrade-notes).
+>
+> From v1.6.0: the repository code index no longer builds at
 > session start — it cost roughly seventeen CPU-hours on a 3,200-file repository,
 > on sessions that never asked for code context. Restore it with
 > `[code_index] index_on_startup = true`. And Intel macOS is no longer built:
