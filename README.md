@@ -205,25 +205,26 @@ archon-cli/
 
 ## Status
 
-- Current version: **v1.6.0** ([release notes](docs/release-notes/v1.6.0.md))
-- v1.6.0 lets agents hand work to each other: a durable task board with atomic claims that survive the memory garden, subagent identity so a write can be attributed, a self-check that reports a file over the line limit back into the agent's own transcript, and a browser view of the board and of what is running. Also fixes consolidation silently reporting an unavailable semantic pass as a clean store on any second archon instance. **One default changed**: the repository code index no longer builds at session start — it was costing roughly seventeen CPU-hours on a 3,200-file repository, on sessions that never asked for code context. Set `[code_index] index_on_startup = true` to restore it.
-- Stable release for local world-model advisory learning, first-class reasoning-quality events, provider runtime governance, Cozo-backed agent evolution, permission preflight, and sandbox routing
-- v1.5.0 gives every run one graph representation: the `TaskGraph` IR, an ambient trace, and synchronous guardrail admission. On top of it, `archon requirements trace` reports a four-level proof ladder (with `--falsify` to check a verifier actually depends on the code it claims to prove) and `archon workflow lint` runs four advisory analyses that can never fail a run. Adds the `/workflow-prd` and `/workflow-prd-spec` skills, and lets SONA tune the four generated-workflow limits plus the implementation-wave fan-out width, all fail-closed below five observations. **Two behaviour changes:** hooks now resolve a POSIX shell on Windows, and `ARCHON_DATA_DIR` means one directory.
-- v1.4.0 makes the JEPA world model actually learn: trainable encoders with stop-gradient and a live collapse gate, dense embedding input in place of hashed excerpt text, a pre-turn advisory hook in the live agent path, and an automatic candidate evaluate/shadow/promote/rollback lifecycle. Also adds the `archon draft` FCDP pipeline with provenance import.
-- v1.3.11 adds the governed Trading Lab substrate: strategy specs, Pine prototypes, data/backtest/paper/live gates, risk/audit controls, learning hooks, and detailed user/cookbook documentation.
-- v1.3.10 adds provider-neutral dynamic workflows: `/workflow` planning/running/resume controls, durable workflow bundles, live TUI activity rows, web workflow inspection, learning ledgers, sanitized events, reusable templates, and workflow docs.
-- v1.3.9 moves document embeddings out of the hot Cozo write path into a RocksDB raw-vector store, adds resumable legacy-vector migration, Rust-HNSW compaction, durable index-queue/daemon controls, and clearer vector-status diagnostics.
-- v1.3.8 adds the Cognitive Executive Loop: situation classification, candidate planning, policy-gated JEPA/world-model scoring, compact decision/reflection ledgers, autonomous cognitive ticks, an opt-in Rust daemon, CLI/TUI/web executive-state inspection, and Opus-tier alias support for `claude-opus-4-8`.
-- v1.3.7 adds policy-gated autonomous governed learning via `archon learning tick`, provider-resolved pipeline subagent activity, and refreshed self-learning documentation.
-- v1.3.6 adds governed video evidence capture fallbacks: caption-first YouTube ingest, frame-friendly `yt-dlp` format selection, optional OpenCV frame extraction fallback, and optional RapidOCR image/frame OCR.
-- v1.3.5 hardens governed video evidence ingest: YouTube acquisition feeds local media into ASR/frame paths, `whisper-cpp` JSON segments become timecoded chunks, frame extraction uses PNG output, and setup/docs cover video dependencies across supported OS families.
-- v1.3.4 adds DeepSeek provider parity for Anthropic-compatible sessions, generic non-Claude `/model` selection, DeepSeek context/catalog coverage, and provider-aware TUI/session cost display.
-- v1.3.3 adds governed video evidence ingest, transcript/frame evidence storage, `/video` parity, and policy-gated video summaries.
-- v1.3.2 finalizes the JEPA eval pipeline with quick/full modes, promotion-safe eval provenance, eval-run status commands, backend/cache deferral warnings, and source-size cleanup.
-- v1.3.1 adds JEPA world-model training/runtime, normal-session and pipeline guardrails, CUDA/MLX accelerator support, and fresh-setup cookbook docs.
-- v1.3.0 removes model-facing `max_turns`, hardens compaction persistence/request-pressure recovery, moves long-tail agent discovery behind `AgentCatalog`, and preserves accurate subagent/context status.
-- v1.2.9 corrects the autocompaction trigger to use the current message-list estimate (not cumulative token usage) and converts proactive compaction failures to a soft-fail that falls through to the same turn's normal provider call. Reactive compaction remains fatal.
-- v1.2.8 completes the auto-compaction PRD: provider-backed summaries, per-provider context windows, prompt budgeting, context warning/source UI, and provider-aware prompt-cache policy.
+**Current release: v1.6.0** — [release notes](docs/release-notes/v1.6.0.md)
+
+Agents can hand work to each other: a durable task board with atomic claims that
+survive the memory garden, subagent identity so a write can be attributed, a
+self-check that reports an over-limit file back into the agent's own transcript,
+and a browser view of the board and of what is running. Also fixes consolidation
+silently reporting an unavailable semantic pass as a clean store on any second
+archon instance.
+
+> **Two things change on upgrade.** The repository code index no longer builds at
+> session start — it cost roughly seventeen CPU-hours on a 3,200-file repository,
+> on sessions that never asked for code context. Restore it with
+> `[code_index] index_on_startup = true`. And Intel macOS is no longer built:
+> ONNX Runtime stopped publishing x64 macOS binaries and the Rust `ort` bindings
+> followed, so the embedding runtime cannot be linked there. Apple Silicon covers
+> every Mac still receiving macOS updates.
+
+Every release from v0.1.6 onward is indexed with a one-line summary in the
+[documentation map](docs/README.md#release-notes). This section carries the
+current release and what changes on upgrade — nothing a reader can look up.
 
 ## Contributing
 
