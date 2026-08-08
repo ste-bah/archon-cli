@@ -101,7 +101,9 @@ jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 hmac = "0.12"
 semver = { version = "1", features = ["serde"] }
 russh = "0.62.5"
-axum = { version = "0.8", features = ["ws"] }
+# "multipart" is for the workbench upload endpoint: a browser posts a dropped
+# file as multipart/form-data and there is no other wire format for it.
+axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["cors"] }
 # Pseudo-terminal for the web workbench terminal pane: ConPTY on Windows,
 # openpty elsewhere, behind one API. A plain piped child is not enough — the

@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import "./TerminalPage.css";
+import { uploadDroppedFiles } from "./terminalUploads";
 
 type ConnectionState = "connecting" | "open" | "closed" | "refused";
 
@@ -21,8 +22,11 @@ type ConnectionState = "connecting" | "open" | "closed" | "refused";
  */
 export function TerminalPage() {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<ConnectionState>("connecting");
   const [detail, setDetail] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
 
   useEffect(() => {
     const host = hostRef.current;
@@ -50,6 +54,7 @@ export function TerminalPage() {
       bearerProtocols(),
     );
     socket.binaryType = "arraybuffer";
+    socketRef.current = socket;
 
     const encoder = new TextEncoder();
 
@@ -109,8 +114,33 @@ export function TerminalPage() {
       // session when the connection ends, so an unmount must not leave one.
       socket.close();
       term.dispose();
+      socketRef.current = null;
     };
   }, []);
+
+  // Dropping a file types `@<path>` at the prompt rather than sending bytes:
+  // see terminalUploads.ts for why the round trip through the server is the
+  // whole mechanism.
+  const onDrop = async (event: React.DragEvent) => {
+    event.preventDefault();
+    setDragging(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length === 0) return;
+
+    setUploadNote(`uploading ${describe(files)}…`);
+    const { injection, error } = await uploadDroppedFiles(files);
+    if (error) {
+      setUploadNote(error);
+      return;
+    }
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setUploadNote("uploaded, but the terminal is not connected");
+      return;
+    }
+    socket.send(new TextEncoder().encode(injection));
+    setUploadNote(`attached ${describe(files)}`);
+  };
 
   return (
     <section className="terminal-page">
@@ -133,12 +163,34 @@ export function TerminalPage() {
       ) : (
         <p className="terminal-page__note">
           A new <code>archon</code> process, not the session you launched the
-          workbench from. Closing this tab ends it.
+          workbench from. Closing this tab ends it. Drop a file anywhere on the
+          pane to attach it.
+          {uploadNote ? <> — {uploadNote}</> : null}
         </p>
       )}
-      <div className="terminal-page__surface" ref={hostRef} />
+      <div
+        className={
+          dragging
+            ? "terminal-page__surface terminal-page__surface--dragging"
+            : "terminal-page__surface"
+        }
+        ref={hostRef}
+        onDragOver={(event) => {
+          // Without preventDefault the browser navigates to the dropped file,
+          // discarding the session.
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+      />
     </section>
   );
+}
+
+function describe(files: File[]): string {
+  const only = files.length === 1 ? files[0] : undefined;
+  return only ? only.name : `${files.length} files`;
 }
 
 function socketUrl(cols: number, rows: number): string {

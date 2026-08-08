@@ -23,7 +23,8 @@ use super::live::WebLiveManager;
 use super::{
     AppState, WebConfig, WebRuntimeHandles, WebRuntimePaths, actions, agents, api, assets, auth,
     board, board_activity, chat, check_auth, cognitive, corpus, evidence, ingest, inspect, live,
-    metrics, pipelines, server_shutdown, settings, terminal, uploads, workflows, world,
+    metrics, pipelines, server_shutdown, settings, terminal, uploads, uploads_receive, workflows,
+    world,
 };
 
 /// HTTP server that serves the embedded SPA.
@@ -265,6 +266,7 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         )
         .route("/api/uploads/policy", get(uploads::policy_handler))
         .route("/api/uploads/intent", post(uploads::intent_handler))
+        .route("/api/uploads/file", post(uploads_receive::receive_handler))
         .route("/api/corpus/summary", get(corpus::summary_handler))
         .route("/api/corpus/search", get(corpus::search_handler))
         .route("/api/corpus/source", get(corpus::preview_handler))

@@ -27,6 +27,7 @@ pub mod settings;
 pub mod terminal;
 mod terminal_pty;
 pub mod uploads;
+pub mod uploads_receive;
 pub mod workflows;
 pub mod world;
 mod world_jepa;

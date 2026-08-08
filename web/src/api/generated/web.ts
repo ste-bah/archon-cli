@@ -186,6 +186,15 @@ export type WebUploadIntent = { fileName: string, sizeBytes: number, mimeType: s
 
 export type WebUploadIntentResponse = { decision: WebActionDecision, accepted: boolean, };
 
+export type WebUploadedFile = { 
+/**
+ * Absolute path on the machine running the server. This is the point of
+ * the endpoint: it is what gets typed into the TUI.
+ */
+path: string, fileName: string, sizeBytes: number, };
+
+export type WebUploadResponse = { accepted: boolean, policyReason: string, files: Array<WebUploadedFile>, };
+
 export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, };
 export type CognitiveRowPreview = { id: string, label: string, status: string, detail: string, createdAt: string, };
 export type CognitiveTickPreview = { tickId: string, proposalsEvaluated: number, proposalsAutoApplied: number, proposalsDenied: number, errorCount: number, durationMs: number, createdAt: string, };

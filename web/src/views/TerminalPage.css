@@ -69,6 +69,11 @@
   background: var(--surface);
 }
 
+.terminal-page__surface--dragging {
+  border-color: var(--accent, #6ea8fe);
+  box-shadow: inset 0 0 0 1px var(--accent, #6ea8fe);
+}
+
 /* xterm sets an explicit background on its viewport; the theme asks for
    transparency so the workbench surface shows through, and this makes the
    canvas honour it rather than compositing over an opaque default. */
