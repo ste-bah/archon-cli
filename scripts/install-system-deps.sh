@@ -24,6 +24,7 @@
 #   sudo scripts/install-system-deps.sh --with-openshell
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
 #   sudo scripts/install-system-deps.sh --with-trading-tools
+#   sudo scripts/install-system-deps.sh --with-ocr
 #   scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 #
 # OpenShell extras follow NVIDIA's current support matrix: Debian/Ubuntu Linux
@@ -55,6 +56,7 @@ WITH_DOCKER=false
 WITH_OPENSHELL=false
 SETUP_OPENSHELL_GATEWAY=false
 WITH_TRADING_TOOLS=false
+WITH_OCR=false
 WITH_RUST=true
 
 while [ $# -gt 0 ]; do
@@ -65,6 +67,7 @@ while [ $# -gt 0 ]; do
         --with-docker)              WITH_DOCKER=true ;;
         --with-openshell)           WITH_OPENSHELL=true ;;
         --with-trading-tools)       WITH_TRADING_TOOLS=true ;;
+        --with-ocr)                 WITH_OCR=true ;;
         --setup-openshell-gateway|--start-openshell-gateway)
             WITH_OPENSHELL=true
             SETUP_OPENSHELL_GATEWAY=true
@@ -322,7 +325,7 @@ if [ "$CHECK_ONLY" = true ]; then
     if [ "$TESSERACT_UNPACKAGED" = false ]; then
         CHECK_BINS="$CHECK_BINS tesseract"
     elif ! command -v tesseract >/dev/null 2>&1; then
-        echo "install-system-deps.sh: note — tesseract is not packaged on $DISTRO_ID; image OCR needs the RapidOCR fallback (python3 -m pip install rapidocr opencv-python) or a source build" >&2
+        echo "install-system-deps.sh: note — tesseract is not packaged on $DISTRO_ID; image OCR needs the RapidOCR fallback (re-run with --with-ocr) or a source build" >&2
     fi
     for bin in $CHECK_BINS; do
         if ! command -v "$bin" >/dev/null 2>&1; then
@@ -485,6 +488,57 @@ install_macos_docker() {
     }
 }
 
+# ---------------------------------------------------------------------------
+# RapidOCR helper virtualenv
+# ---------------------------------------------------------------------------
+#
+# `~/.archon-marker-venv` is the path archon itself probes for a RapidOCR
+# interpreter (crates/archon-docs/src/ocr/rapid.rs), so creating it here is what
+# makes image OCR work with no environment variable and no config.
+#
+# It has to be a virtualenv rather than a `pip install --user`. Debian 12+,
+# Ubuntu 23.04+, Fedora 38+, Arch and Homebrew all ship an
+# externally-managed-environment marker (PEP 668), and pip refuses to touch the
+# system interpreter on those — the advice this script used to print,
+# `python3 -m pip install rapidocr opencv-python`, fails outright on every one
+# of them.
+MARKER_VENV="$RUST_HOME/.archon-marker-venv"
+
+install_marker_venv() {
+    if [ "$WITH_OCR" != true ]; then
+        return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "install-system-deps.sh: python3 not found; skipping the RapidOCR venv" >&2
+        return 0
+    fi
+
+    VENV_PY="$MARKER_VENV/bin/python"
+    if [ -x "$VENV_PY" ]; then
+        echo "install-system-deps.sh: RapidOCR venv already present at $MARKER_VENV"
+    else
+        # `python3 -m venv` is stdlib everywhere except Debian/Ubuntu, which
+        # split it into python3-venv; that package is already in
+        # PKG_TRADING_TOOLS there and is installed below when needed.
+        if ! run python3 -m venv "$MARKER_VENV"; then
+            echo "install-system-deps.sh: could not create $MARKER_VENV" >&2
+            echo "  On Debian/Ubuntu install the venv module first: sudo apt-get install -y python3-venv" >&2
+            return 0
+        fi
+    fi
+
+    run "$VENV_PY" -m pip install --upgrade pip
+    # opencv-python-headless rather than opencv-python: this venv never opens a
+    # window, and the GUI build pulls a long tail of X11/GTK shared libraries
+    # that are absent on servers and in containers.
+    run "$VENV_PY" -m pip install rapidocr opencv-python-headless
+
+    if [ -n "$RUST_USER" ] && [ "$DRY_RUN" = false ]; then
+        # Created under sudo, but owned by the person who will run archon.
+        run chown -R "$RUST_USER" "$MARKER_VENV"
+    fi
+}
+
 install_rustup() {
     if [ "$WITH_RUST" != true ]; then
         return 0
@@ -618,6 +672,7 @@ fi
 install_macos_docker
 install_amzn_extras
 install_rustup
+install_marker_venv
 install_openshell
 setup_openshell_gateway
 
@@ -658,6 +713,14 @@ if [ "$DRY_RUN" = false ]; then
             echo "  MISSING: $bin (post-install check failed)" >&2
         fi
     done
+    if [ "$WITH_OCR" = true ]; then
+        if [ -x "$MARKER_VENV/bin/python" ] \
+            && "$MARKER_VENV/bin/python" -c "import rapidocr" >/dev/null 2>&1; then
+            echo "  ok: rapidocr ($MARKER_VENV)"
+        else
+            echo "  MISSING: rapidocr venv at $MARKER_VENV (post-install check failed)" >&2
+        fi
+    fi
     if [ "$WITH_RUST" = true ]; then
         if have_cargo; then
             echo "  ok: cargo    ($RUST_HOME/.cargo/bin/cargo)"
@@ -675,7 +738,11 @@ if [ "$DRY_RUN" = false ]; then
     echo "  2. Build archon-cli: cargo build --release --bin archon"
     echo "  3. Initialise a project: ./scripts/archon-init.sh --target /path/to/project"
     echo "  4. For local video ASR, download a whisper.cpp model and set [policy.video.asr].model"
-    echo "     Optional RapidOCR/OpenCV fallback: python3 -m pip install rapidocr opencv-python"
+    if [ "$WITH_OCR" = true ]; then
+        echo "     RapidOCR image OCR is installed at $MARKER_VENV and needs no further configuration"
+    else
+        echo "     Optional RapidOCR image-OCR fallback: re-run this script with --with-ocr"
+    fi
     echo "     Optional Trading Lab tools: scripts/setup-trading-tools.sh --target /path/to/project"
     if [ "$WITH_DOCKER" = true ]; then
         echo "  5. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"

@@ -14,6 +14,7 @@
 #   scripts\install-system-deps.ps1 -Check         # verify deps, change nothing
 #   scripts\install-system-deps.ps1 -WithDocker
 #   scripts\install-system-deps.ps1 -WithTradingTools
+#   scripts\install-system-deps.ps1 -WithOcr        # RapidOCR image OCR
 #
 # Exit codes (matching install-system-deps.sh):
 #   0   success, or all deps present in -Check mode
@@ -26,7 +27,8 @@ param(
     [switch]$Check,
     [switch]$DryRun,
     [switch]$WithDocker,
-    [switch]$WithTradingTools
+    [switch]$WithTradingTools,
+    [switch]$WithOcr
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,6 +81,8 @@ if ($WithTradingTools)  {
     $Packages['OpenJS.NodeJS']       = @('node', 'npm')
     $Packages['Python.Python.3.12']  = @('python')
 }
+# RapidOCR needs an interpreter to build its virtualenv from.
+if ($WithOcr) { $Packages['Python.Python.3.12'] = @('python') }
 
 # poppler ships three binaries and the PDF pipeline needs all of them:
 #   pdftotext  - text-layer extraction
@@ -90,6 +94,7 @@ $RequiredBinaries = @(
 )
 if ($WithDocker)       { $RequiredBinaries += 'docker' }
 if ($WithTradingTools) { $RequiredBinaries += @('node', 'npm', 'python') }
+if ($WithOcr -and -not $WithTradingTools) { $RequiredBinaries += 'python' }
 
 # Whether the Perl on PATH can actually configure vendored OpenSSL.
 #
@@ -153,7 +158,7 @@ if ($Check) {
 # Install
 # ---------------------------------------------------------------------------
 Write-Host 'install-system-deps.ps1: installing Windows build and ingest dependencies'
-Write-Host "install-system-deps.ps1: docker=$WithDocker trading-tools=$WithTradingTools"
+Write-Host "install-system-deps.ps1: docker=$WithDocker trading-tools=$WithTradingTools ocr=$WithOcr"
 Write-Host ''
 
 $failed = @()
@@ -200,6 +205,45 @@ if ($failed.Count -gt 0) {
 }
 
 # ---------------------------------------------------------------------------
+# RapidOCR helper virtualenv
+# ---------------------------------------------------------------------------
+#
+# `$env:USERPROFILE\.archon-marker-venv` is the path archon itself probes for a
+# RapidOCR interpreter (crates/archon-docs/src/ocr/rapid.rs), so creating it
+# here is what makes image OCR work with no environment variable and no config.
+#
+# Note the layout difference from the POSIX installer: a virtualenv puts its
+# interpreter in Scripts\python.exe on Windows, not bin/python.
+$MarkerVenv = Join-Path $env:USERPROFILE '.archon-marker-venv'
+$MarkerPython = Join-Path $MarkerVenv 'Scripts\python.exe'
+
+if ($WithOcr) {
+    Write-Host ''
+    Write-Host 'install-system-deps.ps1: setting up the RapidOCR virtualenv'
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) {
+        Write-Host '  SKIPPED: python not on PATH yet - open a new shell and re-run with -WithOcr' -ForegroundColor Yellow
+    } else {
+        if (Test-Path $MarkerPython) {
+            Write-Host "  present: $MarkerVenv"
+        } else {
+            Write-Host "+ python -m venv $MarkerVenv"
+            & $py.Source -m venv $MarkerVenv
+        }
+        if (Test-Path $MarkerPython) {
+            Write-Host "+ $MarkerPython -m pip install --upgrade pip"
+            & $MarkerPython -m pip install --upgrade pip
+            # opencv-python-headless, not opencv-python: this venv never opens a
+            # window and the GUI build drags in a much larger dependency set.
+            Write-Host "+ $MarkerPython -m pip install rapidocr opencv-python-headless"
+            & $MarkerPython -m pip install rapidocr opencv-python-headless
+        } else {
+            Write-Host "  FAILED: could not create $MarkerVenv" -ForegroundColor Red
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Post-install verification
 # ---------------------------------------------------------------------------
 Write-Host ''
@@ -212,6 +256,21 @@ foreach ($bin in $RequiredBinaries) {
         Write-Host "  ok: $bin  ($($cmd.Source))"
     } else {
         Write-Host "  MISSING: $bin (post-install check failed; try a new shell)" -ForegroundColor Yellow
+    }
+}
+
+if ($WithOcr) {
+    $rapidOk = $false
+    if (Test-Path $MarkerPython) {
+        # A separate statement rather than an `if` condition: PowerShell cannot
+        # read $LASTEXITCODE inside the same expression that produced it.
+        & $MarkerPython -c 'import rapidocr' 2>$null
+        $rapidOk = ($LASTEXITCODE -eq 0)
+    }
+    if ($rapidOk) {
+        Write-Host "  ok: rapidocr  ($MarkerVenv)"
+    } else {
+        Write-Host "  MISSING: rapidocr venv at $MarkerVenv (post-install check failed)" -ForegroundColor Yellow
     }
 }
 
@@ -230,6 +289,11 @@ Write-Host '  2. Build archon-cli: cargo build --release --bin archon'
 Write-Host '     (rust-toolchain.toml pins the toolchain; rustup fetches it on first build)'
 Write-Host '  3. Initialise a project: scripts\archon-init.sh --target <path>   (via Git Bash or WSL)'
 Write-Host '  4. Verify: scripts\install-system-deps.ps1 -Check'
+if ($WithOcr) {
+    Write-Host "     RapidOCR image OCR is installed at $MarkerVenv and needs no further configuration"
+} else {
+    Write-Host '     Optional RapidOCR image-OCR fallback: re-run with -WithOcr'
+}
 if ($WithDocker) {
     Write-Host '  5. Enable Docker sandboxing with [sandbox].backend="docker" and [sandbox.docker].enabled=true'
 }

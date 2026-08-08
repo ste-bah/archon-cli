@@ -76,15 +76,45 @@ fn python_bin() -> String {
     {
         return value;
     }
-    // Standalone fallback: the conventional archon helper venv (created during setup) bundles
-    // rapidocr, so RapidOCR works with no env/config. Override with ARCHON_RAPIDOCR_PYTHON.
-    if let Some(home) = dirs::home_dir() {
-        let venv_py = home.join(".archon-marker-venv").join("bin").join("python");
-        if venv_py.exists() {
-            return venv_py.to_string_lossy().into_owned();
-        }
+    // Standalone fallback: the conventional archon helper venv bundles rapidocr, so RapidOCR
+    // works with no env or config once `install-system-deps` has created it. Override with
+    // ARCHON_RAPIDOCR_PYTHON.
+    if let Some(venv_py) = marker_venv_python() {
+        return venv_py;
     }
     "python3".into()
+}
+
+/// Interpreter inside `~/.archon-marker-venv`, if that venv exists.
+///
+/// A virtualenv puts its interpreter in `Scripts\python.exe` on Windows and `bin/python`
+/// everywhere else. This looked only for `bin/python`, so on Windows the fallback could never
+/// fire however the venv had been created, and RapidOCR silently fell through to whatever
+/// `python3` meant on PATH — usually nothing, or a system Python without rapidocr installed.
+/// `openbb_bin` in the binary crate already splits on `cfg!(windows)`; this now matches it.
+fn marker_venv_python() -> Option<String> {
+    venv_python(&dirs::home_dir()?.join(".archon-marker-venv"))
+}
+
+/// The interpreter inside `venv`, if one is there.
+///
+/// Split from [`marker_venv_python`] only so the layout rule can be tested without a home
+/// directory: everything interesting is in which subdirectory gets probed.
+fn venv_python(venv: &std::path::Path) -> Option<String> {
+    let candidates: [&[&str]; 2] = if cfg!(windows) {
+        [&["Scripts", "python.exe"], &["Scripts", "python"]]
+    } else {
+        [&["bin", "python3"], &["bin", "python"]]
+    };
+    candidates
+        .iter()
+        .map(|parts| {
+            parts
+                .iter()
+                .fold(venv.to_path_buf(), |path, part| path.join(part))
+        })
+        .find(|path| path.exists())
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn min_score() -> f32 {
@@ -236,6 +266,42 @@ print(json.dumps({"text": "\n".join(lines)}, ensure_ascii=False))
 mod tests {
     use super::*;
     use std::fs;
+
+    /// The venv layout differs by platform, and getting it wrong is silent: the
+    /// probe simply misses and RapidOCR falls through to whatever `python3` means
+    /// on PATH. This asserts the layout this platform actually uses, and that the
+    /// other platform's layout is not accepted.
+    #[test]
+    fn venv_python_is_found_at_the_layout_this_platform_uses() {
+        let root = std::env::temp_dir().join(format!("archon-venv-probe-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+
+        let (used, unused, exe) = if cfg!(windows) {
+            ("Scripts", "bin", "python.exe")
+        } else {
+            ("bin", "Scripts", "python3")
+        };
+
+        // Nothing there yet.
+        assert_eq!(venv_python(&root), None);
+
+        // The *other* platform's layout must not satisfy the probe.
+        fs::create_dir_all(root.join(unused)).unwrap();
+        fs::write(root.join(unused).join(exe), b"").unwrap();
+        assert_eq!(
+            venv_python(&root),
+            None,
+            "the {unused}/ layout must not be accepted on this platform"
+        );
+
+        // This platform's layout is.
+        fs::create_dir_all(root.join(used)).unwrap();
+        fs::write(root.join(used).join(exe), b"").unwrap();
+        let found = venv_python(&root).expect("interpreter should be found");
+        assert!(found.contains(used), "{found} should sit under {used}/");
+
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn rapidocr_env_defaults_to_tesseract_first_with_fallback() {
