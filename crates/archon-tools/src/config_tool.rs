@@ -22,6 +22,7 @@ static OVERLAY: LazyLock<Mutex<HashMap<String, String>>> =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeyType {
     Str,
+    Bool,
     U32,
     U64,
     U8,
@@ -82,7 +83,39 @@ fn key_registry() -> &'static HashMap<&'static str, KeyMeta> {
             "tools.bash_timeout",
             KeyMeta {
                 ty: KeyType::U64,
-                default: "120",
+                default: "3600",
+                read_only: false,
+            },
+        );
+        m.insert(
+            "tools.bash_timeout_floor",
+            KeyMeta {
+                ty: KeyType::U64,
+                default: "1800",
+                read_only: false,
+            },
+        );
+        m.insert(
+            "tools.cargo.build_jobs",
+            KeyMeta {
+                ty: KeyType::U32,
+                default: "0",
+                read_only: false,
+            },
+        );
+        m.insert(
+            "tools.cargo.incremental",
+            KeyMeta {
+                ty: KeyType::Bool,
+                default: "false",
+                read_only: false,
+            },
+        );
+        m.insert(
+            "tools.cargo.resource_class",
+            KeyMeta {
+                ty: KeyType::Str,
+                default: "constrained",
                 read_only: false,
             },
         );
@@ -152,6 +185,10 @@ fn suggest_keys(unknown: &str) -> Vec<&'static str> {
 fn validate_type(ty: KeyType, value: &str) -> Result<(), String> {
     match ty {
         KeyType::Str => Ok(()),
+        KeyType::Bool => value
+            .parse::<bool>()
+            .map(|_| ())
+            .map_err(|_| format!("expected true or false, got \"{value}\"")),
         KeyType::U32 => value
             .parse::<u32>()
             .map(|_| ())

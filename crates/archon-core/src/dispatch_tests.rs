@@ -53,6 +53,7 @@ fn provider_env_overlay_preserves_registered_bash_policy() {
         risky_commands: vec!["echo risky".to_string()],
         dangerous_commands: vec!["echo dangerous".to_string()],
         provider_env: None,
+        ..Default::default()
     }));
     let source = ProviderEnvSource::Policy(ProviderEnvPolicy::new(vec![
         "ARCHON_TEST_PROVIDER_KEY".to_string(),

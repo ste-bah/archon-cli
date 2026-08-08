@@ -308,16 +308,63 @@ Tool execution defaults.
 
 ```toml
 [tools]
-bash_timeout = 600
+bash_timeout = 3600
+bash_timeout_floor = 1800
 bash_max_output = 102400
 max_concurrency = 4
 ```
 
 | Field | Default | What / Why |
 |---|---|---|
-| `bash_timeout` | `600` (seconds, 10m) | Maximum timeout for `Bash` tool invocations. A shorter per-command `timeout` is honored; larger requests are clamped to this configured ceiling. Increase only for commands that legitimately need a longer hard limit. |
+| `bash_timeout` | `3600` (seconds, 1h) | Ceiling on how long a `Bash` invocation may run. Requests above it are clamped down. |
+| `bash_timeout_floor` | `1800` (seconds, 30m) | Floor below which the model's own `timeout` argument is ignored. Clamped to `bash_timeout` when larger, so a deliberately short ceiling still wins. |
 | `bash_max_output` | `102400` (bytes, ~100KB) | Maximum combined bytes of stdout and stderr captured per Bash call. Output beyond this is truncated. Raise if you're parsing large logs; lower to keep token spend down. |
 | `max_concurrency` | `4` | Maximum concurrent tool invocations the parent agent runs in parallel via `join_all`. Higher = faster multi-tool turns, more memory pressure. WSL2 tolerates 2-4; native machines can go higher. |
+
+### Why there is a floor
+
+The `timeout` argument on the Bash tool is chosen by the model, and it used to be
+honoured downwards without limit — `requested.min(configured)`. A model has no
+way to know how long a cold build of a large Rust workspace takes, so a guessed
+two minutes silently overrode a `bash_timeout` of an hour, or of 24 hours. The
+failure surfaced as an ordinary timeout, giving no sign that the limit had been
+picked by the model rather than by configuration.
+
+The floor makes that argument a request within a range. The model can still
+shorten a command, but only to `bash_timeout_floor`, and it can still extend one,
+but only to `bash_timeout`.
+
+---
+
+## `[tools.cargo]`
+
+Resource limits applied to `cargo` commands the agent runs. Each field maps to
+one environment variable, and each is applied only as a default — an explicit
+value already in the environment is left alone.
+
+```toml
+[tools.cargo]
+build_jobs = 0
+incremental = false
+resource_class = "constrained"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `build_jobs` | `0` (auto) | `CARGO_BUILD_JOBS`. `0` derives from the host: half the logical cores, minimum 1. |
+| `incremental` | `false` | `CARGO_INCREMENTAL`, applied to every command rather than only ones naming `cargo`, so indirect invocations through `make` or a shell script are covered. Off because agent builds are mostly cold, where incremental costs disk and time without paying it back. |
+| `resource_class` | `"constrained"` | `ARCHON_WORKFLOW_RESOURCE_CLASS`, an advisory label a command can read to tell how much of the machine it is entitled to. |
+
+`build_jobs` was previously a hardcoded `1` — a single-core build on every host,
+regardless of size. The intent was to stop parallel agents thrashing one machine,
+but agents are already serialised on the target directory, so in practice one
+build has the box to itself and was being held to one core for no benefit.
+
+Auto is *half* the cores rather than all of them because memory, not CPU, is what
+breaks these builds: this workspace links `aws-lc-sys`, `wasmtime` and `ort`, and
+concurrent `rustc` processes on those peak at gigabytes each. As a rough guide,
+allow ~2 GB of RAM per job — 8 on a 32 GB host, 5 on a 16 GB one. Set it
+explicitly when the machine has memory to spare.
 
 ### Subagent Turn Limits
 

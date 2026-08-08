@@ -233,12 +233,40 @@ personality_history_limit = 50
 # [tools] — Tool execution limits
 # ----------------------------------------------------------------------------
 [tools]
-# Seconds before a Bash command is killed
-bash_timeout = 600
+# Seconds before a Bash command is killed. This is the ceiling: the agent may
+# request less, but never more.
+bash_timeout = 3600
+# Seconds below which the agent's own `timeout` argument is ignored.
+#
+# That argument is chosen by the model, which cannot know how long a cold build
+# of a large workspace takes, so a guessed two minutes used to kill work this
+# ceiling had budgeted an hour for. Clamped to bash_timeout when larger, so a
+# deliberately short bash_timeout still wins.
+bash_timeout_floor = 1800
 # Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400
 # Max concurrent tool calls (1..=16)
 max_concurrency = 4
+
+# ----------------------------------------------------------------------------
+# [tools.cargo] — resource limits for cargo commands the agent runs
+# ----------------------------------------------------------------------------
+[tools.cargo]
+# CARGO_BUILD_JOBS for agent-run cargo commands. 0 = auto (half the logical
+# cores, minimum 1). Half rather than all because memory is the binding
+# constraint: this workspace links aws-lc-sys, wasmtime and ort, and concurrent
+# rustc processes on those peak at gigabytes each.
+#
+# Raise it if the machine has memory to spare — agents are already serialised on
+# the target directory, so one build usually has the box to itself. As a rough
+# guide, allow ~2 GB of RAM per job: 8 on a 32 GB host, 5 on a 16 GB host.
+build_jobs = 0
+# CARGO_INCREMENTAL. Off by default — agent builds are mostly cold, where
+# incremental costs disk and time without paying it back.
+incremental = false
+# ARCHON_WORKFLOW_RESOURCE_CLASS: advisory label a command can read to tell how
+# much of the machine it is entitled to. "constrained" | "full"
+resource_class = "constrained"
 
 
 # ----------------------------------------------------------------------------

@@ -16,9 +16,14 @@ fn test_ctx() -> ToolContext {
     }
 }
 
+/// Both bounds, because they are only meaningful as a pair: a floor above the
+/// ceiling would silently collapse to the ceiling and make the model's `timeout`
+/// argument a no-op everywhere.
 #[test]
-fn bash_default_timeout_is_ten_minutes() {
-    assert_eq!(BashTool::default().timeout_secs, 600);
+fn bash_default_timeout_bounds_are_one_hour_and_thirty_minutes() {
+    assert_eq!(BashTool::default().timeout_secs, 3600);
+    assert_eq!(BashTool::default().timeout_floor_secs, 1800);
+    assert!(BashTool::default().timeout_floor_secs < BashTool::default().timeout_secs);
 }
 
 #[cfg(not(target_os = "windows"))]

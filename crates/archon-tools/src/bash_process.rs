@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 use crate::cargo_target_env::CargoTargetDirLock;
 use crate::execution_deadline::{ExecutionDeadline, abort_pipe_tasks, join_pipe_tasks};
 
-use super::bash_env::ensure_env_default;
 use super::bash_output::{
     CapturedOutput, bounded_command_output, bounded_text, shared_output_budget,
     spawn_counted_pipe_capture, spawn_wrapped_child,
@@ -24,8 +23,16 @@ pub(super) async fn prepare_command(
     ctx: &ToolContext,
 ) -> Result<PreparedBashCommand, ToolResult> {
     let mut env_vars = sanitized_env();
-    ensure_env_default(&mut env_vars, "CARGO_INCREMENTAL", "0");
-    crate::workflow_resource_env::apply_workflow_resource_defaults(&mut env_vars, raw_command);
+    // `CARGO_INCREMENTAL=0` used to be set here, ahead of the resource defaults.
+    // Since `ensure_env_default` is first-wins, that made `[tools.cargo]
+    // incremental` unreachable, so the setting now lives entirely in
+    // `apply_workflow_resource_defaults` — which still applies it to every
+    // command, exactly as this line did.
+    crate::workflow_resource_env::apply_workflow_resource_defaults(
+        &mut env_vars,
+        raw_command,
+        &tool.cargo_limits,
+    );
     let provider_env = provider_env_overlay(tool.provider_env.as_ref()).await;
     if let Some(provider_env) = &provider_env {
         provider_env.apply_to_env(&mut env_vars);

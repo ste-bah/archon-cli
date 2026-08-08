@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::workflow_resource_env::CargoResourceLimits;
 
 #[path = "bash_output.rs"]
 mod bash_output;
@@ -21,10 +22,14 @@ use bash_process::{
 mod bash_process_tests;
 
 #[path = "bash_env.rs"]
-mod bash_env;
+pub(crate) mod bash_env;
 pub use bash_env::sanitized_env;
 
-const DEFAULT_BASH_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_BASH_TIMEOUT_SECS: u64 = 3600;
+
+/// Default floor, in seconds, under which a caller-supplied `timeout` cannot
+/// drag a command. Mirrors `tools.bash_timeout_floor`.
+const DEFAULT_BASH_TIMEOUT_FLOOR_SECS: u64 = 1800;
 
 /// The bash this tool runs commands with.
 ///
@@ -97,22 +102,28 @@ gtimeout() {
 #[derive(Clone)]
 pub struct BashTool {
     pub timeout_secs: u64,
+    /// Floor on the caller-supplied `timeout`, from `tools.bash_timeout_floor`.
+    pub timeout_floor_secs: u64,
     pub max_output_bytes: usize,
     pub safe_commands: Vec<String>,
     pub risky_commands: Vec<String>,
     pub dangerous_commands: Vec<String>,
     pub provider_env: Option<ProviderEnvSource>,
+    /// Resource defaults for agent-run `cargo` commands, from `[tools.cargo]`.
+    pub cargo_limits: CargoResourceLimits,
 }
 
 impl Default for BashTool {
     fn default() -> Self {
         Self {
             timeout_secs: DEFAULT_BASH_TIMEOUT_SECS,
+            timeout_floor_secs: DEFAULT_BASH_TIMEOUT_FLOOR_SECS,
             max_output_bytes: 102400,
             safe_commands: Vec::new(),
             risky_commands: Vec::new(),
             dangerous_commands: Vec::new(),
             provider_env: None,
+            cargo_limits: CargoResourceLimits::default(),
         }
     }
 }
@@ -154,7 +165,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in milliseconds. Values below the configured tools.bash_timeout shorten this command; larger values are clamped to that configured maximum."
+                    "description": "Optional timeout in milliseconds, clamped to the configured tools.bash_timeout_floor..tools.bash_timeout range. Shortening below the floor has no effect, so do not use this to make a build or test run fail fast."
                 }
             },
             "required": ["command"]
@@ -169,6 +180,7 @@ impl Tool for BashTool {
         let timeout_ms = effective_timeout_ms(
             input.get("timeout").and_then(|value| value.as_u64()),
             self.timeout_secs * 1000,
+            self.timeout_floor_secs * 1000,
         );
         let prepared = match prepare_command(self, raw_command, timeout_ms, ctx).await {
             Ok(prepared) => prepared,
@@ -220,8 +232,29 @@ fn redact_provider_env_output(
     provider_env.map_or(output.clone(), |env| env.redact_text(&output))
 }
 
-fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64) -> u64 {
-    requested_ms.unwrap_or(configured_ms).min(configured_ms)
+/// Resolve the timeout for one command from the caller's request and the
+/// configured bounds.
+///
+/// The caller's `timeout` used to be a ceiling with no floor —
+/// `requested.unwrap_or(configured).min(configured)` — so a model could shorten
+/// any command to an arbitrarily small value. That argument is model-supplied
+/// and a model has no way to know how long a cold build of a large Rust
+/// workspace takes, so a guessed two minutes killed work that `bash_timeout` had
+/// budgeted an hour for. Nothing in the failure told anyone the model had chosen
+/// the limit; it read as an ordinary timeout.
+///
+/// `floor_ms` is clamped to `configured_ms` first, so an operator who
+/// deliberately sets a short `bash_timeout` still gets it. When the floor meets
+/// or exceeds the ceiling the request is pinned to the ceiling — the argument
+/// stops having an effect, which is the correct reading of a configuration that
+/// leaves it no room.
+fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64, floor_ms: u64) -> u64 {
+    let Some(requested) = requested_ms else {
+        return configured_ms;
+    };
+    // `clamp` panics when min > max, so the floor is bounded by the ceiling
+    // before use rather than trusted to be ordered.
+    requested.clamp(floor_ms.min(configured_ms), configured_ms)
 }
 
 fn command_with_compat_prelude(command: &str) -> String {

@@ -55,7 +55,13 @@ where
         .collect()
 }
 
-pub(super) fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+/// Set `key` to `value` only if it is not already present.
+///
+/// Case-insensitive on purpose: Windows environment blocks carry `Path`, not
+/// `PATH`, and a case-sensitive check would append a second entry that shadows
+/// the first. `workflow_resource_env` shares this rather than keeping its own
+/// copy, so the resource defaults get the same Windows behaviour.
+pub(crate) fn ensure_env_default(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     if !env
         .iter()
         .any(|(existing, _)| existing.eq_ignore_ascii_case(key))

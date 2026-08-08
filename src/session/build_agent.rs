@@ -45,14 +45,7 @@ pub(super) async fn build_session_agent(
     board::install_session_board_access(config).await;
     let leann_index = super::init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
-    registry.replace(Box::new(archon_tools::bash::BashTool {
-        timeout_secs: config.tools.bash_timeout,
-        max_output_bytes: config.tools.bash_max_output,
-        safe_commands: config.permissions.safe_commands.clone(),
-        risky_commands: config.permissions.risky_commands.clone(),
-        dangerous_commands: config.permissions.dangerous_commands.clone(),
-        provider_env: None,
-    }));
+    registry.replace(Box::new(config.tools.bash_tool(&config.permissions)));
     apply_tool_filters(&mut registry, resolved_flags);
 
     let agent_registry_early = AgentRegistry::load(&working_dir);

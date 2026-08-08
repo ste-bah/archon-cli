@@ -92,14 +92,7 @@ async fn install_workflow_cli_subagent_executor(
     mut agent_config: AgentConfig,
 ) {
     let mut registry = create_default_registry(cwd.to_path_buf(), None);
-    registry.replace(Box::new(archon_tools::bash::BashTool {
-        timeout_secs: config.tools.bash_timeout,
-        max_output_bytes: config.tools.bash_max_output,
-        safe_commands: config.permissions.safe_commands.clone(),
-        risky_commands: config.permissions.risky_commands.clone(),
-        dangerous_commands: config.permissions.dangerous_commands.clone(),
-        provider_env: None,
-    }));
+    registry.replace(Box::new(config.tools.bash_tool(&config.permissions)));
     crate::command::workflow_mcp::install_project_tools(
         cwd,
         &mut registry,

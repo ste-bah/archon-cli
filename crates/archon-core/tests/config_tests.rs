@@ -20,9 +20,15 @@ fn empty_toml_produces_valid_defaults() {
     assert!(config.identity.custom.is_none());
 
     // ToolsConfig defaults
-    assert_eq!(config.tools.bash_timeout, 600);
+    assert_eq!(config.tools.bash_timeout, 3600);
+    assert_eq!(config.tools.bash_timeout_floor, 1800);
     assert_eq!(config.tools.bash_max_output, 102400);
     assert_eq!(config.tools.max_concurrency, 4);
+    // 0 is the "derive from the host" sentinel, so the default must stay 0
+    // rather than a number baked in at release time.
+    assert_eq!(config.tools.cargo.build_jobs, 0);
+    assert!(!config.tools.cargo.incremental);
+    assert_eq!(config.tools.cargo.resource_class, "constrained");
 
     // PermissionsConfig defaults
     assert_eq!(config.permissions.mode, "default");
@@ -107,7 +113,7 @@ max_retries = 5
 
     // Other sections keep full defaults
     assert_eq!(config.identity.mode, "clean");
-    assert_eq!(config.tools.bash_timeout, 600);
+    assert_eq!(config.tools.bash_timeout, 3600);
     assert_eq!(config.permissions.mode, "default");
 
     validate(&config).expect("partial config should pass validation");

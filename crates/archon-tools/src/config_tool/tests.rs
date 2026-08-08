@@ -152,7 +152,15 @@ fn get_config_value_helper() {
     clear_overlay();
     assert_eq!(
         get_config_value("tools.bash_timeout"),
-        Some("120".to_string()),
+        Some("3600".to_string()),
+    );
+    assert_eq!(
+        get_config_value("tools.bash_timeout_floor"),
+        Some("1800".to_string()),
+    );
+    assert_eq!(
+        get_config_value("tools.cargo.build_jobs"),
+        Some("0".to_string()),
     );
     assert!(get_config_value("nonexistent.key").is_none());
 }

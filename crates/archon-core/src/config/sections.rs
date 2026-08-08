@@ -235,23 +235,9 @@ impl Default for CustomIdentityConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ToolsConfig {
-    pub bash_timeout: u64,
-    pub bash_max_output: usize,
-    pub max_concurrency: u8,
-}
-
-impl Default for ToolsConfig {
-    fn default() -> Self {
-        Self {
-            bash_timeout: 600,
-            bash_max_output: 102400,
-            max_concurrency: 4,
-        }
-    }
-}
+// `ToolsConfig` and `CargoResourceConfig` live in `config/tools.rs` — they carry
+// enough documentation between them to push this file past the 500-line ceiling,
+// and the Bash-tool constructor belongs beside them rather than here.
 
 /// Subagent execution configuration.
 ///

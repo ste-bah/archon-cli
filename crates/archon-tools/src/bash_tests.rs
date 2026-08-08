@@ -29,6 +29,52 @@ fn ctx() -> ToolContext {
 /// otherwise clean. A genuinely hung shell still fails, just later. See #131.
 const SHELL_SPAWN_TIMEOUT_SECS: u64 = 15;
 
+// --- effective_timeout_ms ---------------------------------------------------
+//
+// The caller-supplied `timeout` is chosen by the model. It used to be honoured
+// downwards without limit, so a guessed two minutes killed builds that
+// `tools.bash_timeout` had budgeted an hour for, and the failure looked like an
+// ordinary timeout rather than a limit the model had picked for itself.
+
+/// The regression these tests exist for: a short request no longer wins.
+#[test]
+fn requested_timeout_cannot_go_below_the_floor() {
+    // 2 min requested, 30 min floor, 1 h ceiling.
+    assert_eq!(
+        effective_timeout_ms(Some(120_000), 3_600_000, 1_800_000),
+        1_800_000
+    );
+}
+
+#[test]
+fn requested_timeout_between_floor_and_ceiling_is_honoured() {
+    assert_eq!(
+        effective_timeout_ms(Some(2_400_000), 3_600_000, 1_800_000),
+        2_400_000
+    );
+}
+
+#[test]
+fn requested_timeout_above_the_ceiling_is_still_clamped_down() {
+    assert_eq!(
+        effective_timeout_ms(Some(7_200_000), 3_600_000, 1_800_000),
+        3_600_000
+    );
+}
+
+#[test]
+fn no_requested_timeout_uses_the_configured_ceiling() {
+    assert_eq!(effective_timeout_ms(None, 3_600_000, 1_800_000), 3_600_000);
+}
+
+/// An operator who sets a deliberately short `bash_timeout` keeps it: the
+/// ceiling always wins over the floor. Without the `.min` guard this input also
+/// panics, because `clamp` rejects min > max.
+#[test]
+fn floor_above_the_ceiling_collapses_to_the_ceiling() {
+    assert_eq!(effective_timeout_ms(Some(500), 30_000, 1_800_000), 30_000);
+}
+
 #[tokio::test]
 async fn printf_format_starting_with_dash_succeeds() {
     let tool = BashTool {
@@ -73,6 +119,7 @@ fn provider_env_source_preserves_bash_configuration() {
         risky_commands: vec!["echo risky".to_string()],
         dangerous_commands: vec!["echo dangerous".to_string()],
         provider_env: None,
+        ..Default::default()
     }
     .with_provider_env_source(ProviderEnvSource::Policy(ProviderEnvPolicy::new(vec![
         "ARCHON_TEST_PROVIDER_KEY".to_string(),

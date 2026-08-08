@@ -44,6 +44,22 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         ));
     }
 
+    // tools.bash_timeout_floor
+    if config.tools.bash_timeout_floor == 0 {
+        return Err(ConfigError::ValidationError(
+            "tools.bash_timeout_floor must be > 0".into(),
+        ));
+    }
+
+    // tools.cargo.build_jobs — 0 is the sentinel for "derive from the host", so
+    // only an implausibly large explicit value is rejected.
+    if config.tools.cargo.build_jobs > 1024 {
+        return Err(ConfigError::ValidationError(format!(
+            "tools.cargo.build_jobs must be 0 (auto) or 1..=1024, got {}",
+            config.tools.cargo.build_jobs
+        )));
+    }
+
     // tools.max_concurrency
     if !(1..=16).contains(&config.tools.max_concurrency) {
         return Err(ConfigError::ValidationError(format!(
