@@ -28,6 +28,7 @@ mod tool_transcript_tests;
 pub mod sandbox;
 pub mod splash;
 pub mod splash_compat;
+mod splash_image;
 pub mod status;
 pub mod theme;
 pub mod ultrathink;

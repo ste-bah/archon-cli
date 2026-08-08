@@ -4,14 +4,13 @@
 //! tips. The halfblock avatar renderer is retained for compatibility tests,
 //! but the startup screen now prefers text art so it stays crisp on WSL TTYs.
 
-use std::sync::OnceLock;
-
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
+use crate::splash_image::{get_avatar, render_halfblock_image};
 use crate::theme::{Theme, intj_theme};
 
 pub use crate::splash_compat::render_splash;
@@ -20,101 +19,6 @@ pub use crate::splash_compat::render_splash;
 #[doc(hidden)]
 pub fn test_render_halfblock_image(buf: &mut Buffer, area: Rect, img: &image::DynamicImage) {
     render_halfblock_image(buf, area, img);
-}
-
-// ---------------------------------------------------------------------------
-// Embedded avatar
-// ---------------------------------------------------------------------------
-
-const AVATAR_PNG: &[u8] = include_bytes!("../../../archon-avatar.png");
-
-// ---------------------------------------------------------------------------
-// Cached decoded image (decoded once, reused across frames)
-// ---------------------------------------------------------------------------
-
-static AVATAR_IMAGE: OnceLock<image::DynamicImage> = OnceLock::new();
-
-fn get_avatar() -> &'static image::DynamicImage {
-    AVATAR_IMAGE.get_or_init(|| {
-        image::load_from_memory(AVATAR_PNG)
-            .expect("archon-avatar.png must be a valid PNG at compile time")
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Halfblock image renderer
-// ---------------------------------------------------------------------------
-
-/// Render an image into a rectangular region using unicode halfblock characters.
-///
-/// Each terminal cell covers 2 vertical pixels: the top pixel becomes the
-/// foreground color, the bottom pixel becomes the background color, and the
-/// glyph is `▀` (U+2580 UPPER HALF BLOCK).
-fn render_halfblock_image(buf: &mut Buffer, area: Rect, img: &image::DynamicImage) {
-    let cell_w = area.width as u32;
-    let cell_h = area.height as u32;
-    if cell_w == 0 || cell_h == 0 {
-        return;
-    }
-
-    // Terminal area in pixels: each cell = 1px wide × 2px tall (halfblock).
-    let max_px_w = cell_w;
-    let max_px_h = cell_h * 2;
-
-    // Preserve source aspect ratio.
-    let (src_w, src_h) = (img.width(), img.height());
-    let scale_w = max_px_w as f64 / src_w as f64;
-    let scale_h = max_px_h as f64 / src_h as f64;
-    let scale = scale_w.min(scale_h);
-
-    let render_px_w = ((src_w as f64 * scale).round() as u32).max(1);
-    let render_px_h = ((src_h as f64 * scale).round() as u32).max(1);
-
-    // Center the rendered image within the area (letterbox / pillarbox).
-    let pad_px_x = (max_px_w - render_px_w) / 2;
-    let pad_px_y = (max_px_h - render_px_h) / 2;
-
-    let resized = img.resize_exact(
-        render_px_w,
-        render_px_h,
-        image::imageops::FilterType::Lanczos3,
-    );
-    let rgba = resized.to_rgba8();
-
-    // Render row by row — cells outside the image region fill with black.
-    for cell_row in 0..cell_h {
-        let row_y = area.y + cell_row as u16;
-        let mut spans = Vec::with_capacity(cell_w as usize);
-
-        let img_top_y = (cell_row * 2) as i64 - pad_px_y as i64;
-        let img_bot_y = img_top_y + 1;
-
-        for col in 0..cell_w {
-            let img_x = col as i64 - pad_px_x as i64;
-
-            let in_x = img_x >= 0 && (img_x as u32) < render_px_w;
-            let top_in = in_x && img_top_y >= 0 && (img_top_y as u32) < render_px_h;
-            let bot_in = in_x && img_bot_y >= 0 && (img_bot_y as u32) < render_px_h;
-
-            let fg = if top_in {
-                let p = rgba.get_pixel(img_x as u32, img_top_y as u32);
-                Color::Rgb(p[0], p[1], p[2])
-            } else {
-                Color::Black
-            };
-            let bg = if bot_in {
-                let p = rgba.get_pixel(img_x as u32, img_bot_y as u32);
-                Color::Rgb(p[0], p[1], p[2])
-            } else {
-                Color::Black
-            };
-            spans.push(Span::styled("▀", Style::default().fg(fg).bg(bg)));
-        }
-
-        let line = Line::from(spans);
-        let row_area = Rect::new(area.x, row_y, area.width, 1);
-        Paragraph::new(line).render(row_area, buf);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +184,10 @@ pub fn draw_splash(
 
     // ── Render into the frame ────────────────────────────────────
 
+    // Every render below goes through `row`/`cell`, which drop anything past
+    // the bottom of `area`. See their doc comments: the splash is a fixed-height
+    // composition and ratatui panics rather than clipping.
+
     // Top border
     let version = concat!("Archon v", env!("CARGO_PKG_VERSION"));
     let dashes_after = area.width.saturating_sub(5 + version.len() as u16 + 1);
@@ -288,21 +196,23 @@ pub fn draw_splash(
         pad = "─".repeat(dashes_after as usize)
     );
     let top_para = Paragraph::new(top_text).style(Style::default().fg(t.border_active));
-    let top_area = Rect::new(area.x, area.y, area.width, 1);
-    top_para.render(top_area, buf);
+    if let Some(rect) = row(area, area.y) {
+        top_para.render(rect, buf);
+    }
 
     // Blank + header
-    let row1_y = area.y + 1;
-    let blank1 = bordered_paragraph("", &t, area.width);
-    blank1.render(Rect::new(area.x, row1_y, area.width, 1), buf);
+    if let Some(rect) = row(area, area.y + 1) {
+        bordered_paragraph("", &t, area.width).render(rect, buf);
+    }
 
-    let row2_y = area.y + 2;
-    bordered_paragraph_line(&header_line, &t, area.width)
-        .render(Rect::new(area.x, row2_y, area.width, 1), buf);
+    if let Some(rect) = row(area, area.y + 2) {
+        bordered_paragraph_line(&header_line, &t, area.width).render(rect, buf);
+    }
 
     // Blank
-    let row3_y = area.y + 3;
-    bordered_paragraph("", &t, area.width).render(Rect::new(area.x, row3_y, area.width, 1), buf);
+    if let Some(rect) = row(area, area.y + 3) {
+        bordered_paragraph("", &t, area.width).render(rect, buf);
+    }
 
     // Image + activity section (rows 4-8)
     let image_area_top = area.y + 4;
@@ -324,9 +234,9 @@ pub fn draw_splash(
                 })
                 .unwrap_or_default();
 
+            let Some(rect) = row(area, row_y) else { break };
             let line = logo_activity_line(&t, area.width as usize, logo_str, &activity_str);
-            let para = Paragraph::new(line);
-            para.render(Rect::new(area.x, row_y, area.width, 1), buf);
+            Paragraph::new(line).render(rect, buf);
         }
     } else {
         let image_width = (half as u16).min(area.width.saturating_sub(2));
@@ -342,6 +252,9 @@ pub fn draw_splash(
             .take(image_area_height as usize)
         {
             let row_y = image_area_top + i as u16;
+            if row_y >= area.bottom() {
+                break;
+            }
             let right_rect = Rect::new(right_col_x, row_y, right_width, 1);
             let para = Paragraph::new(line.clone())
                 .style(Style::default().fg(t.muted))
@@ -353,7 +266,9 @@ pub fn draw_splash(
     // Right border for image/activity rows
     for i in 0..image_area_height {
         let row_y = image_area_top + i;
-        let border_rect = Rect::new(area.right().saturating_sub(1), row_y, 1, 1);
+        let Some(border_rect) = cell(area, area.right().saturating_sub(1), row_y) else {
+            break;
+        };
         Paragraph::new("│")
             .style(Style::default().fg(t.border_active))
             .render(border_rect, buf);
@@ -361,38 +276,68 @@ pub fn draw_splash(
 
     // Blank after image section
     let post_image_y = image_area_top + image_area_height;
-    bordered_paragraph("", &t, area.width)
-        .render(Rect::new(area.x, post_image_y, area.width, 1), buf);
+    if let Some(rect) = row(area, post_image_y) {
+        bordered_paragraph("", &t, area.width).render(rect, buf);
+    }
 
     // Model + Tips header
     let tips_header_y = post_image_y + 1;
-    bordered_paragraph_line(&tips_header_line, &t, area.width)
-        .render(Rect::new(area.x, tips_header_y, area.width, 1), buf);
+    if let Some(rect) = row(area, tips_header_y) {
+        bordered_paragraph_line(&tips_header_line, &t, area.width).render(rect, buf);
+    }
 
     // Tip lines
     for (i, tip_line) in tip_lines.iter().enumerate() {
-        let row_y = tips_header_y + 1 + i as u16;
-        bordered_paragraph_line(tip_line, &t, area.width)
-            .render(Rect::new(area.x, row_y, area.width, 1), buf);
+        let Some(rect) = row(area, tips_header_y + 1 + i as u16) else {
+            break;
+        };
+        bordered_paragraph_line(tip_line, &t, area.width).render(rect, buf);
     }
 
     // Blank
     let pre_bottom_y = tips_header_y + 1 + tip_lines.len() as u16;
-    bordered_paragraph("", &t, area.width)
-        .render(Rect::new(area.x, pre_bottom_y, area.width, 1), buf);
+    if let Some(rect) = row(area, pre_bottom_y) {
+        bordered_paragraph("", &t, area.width).render(rect, buf);
+    }
 
     // Bottom border
     let bottom_y = pre_bottom_y + 1;
-    let bottom_inner = "─".repeat(area.width.saturating_sub(2) as usize);
-    let bottom_text = format!("╰{bottom_inner}╯");
-    Paragraph::new(bottom_text)
-        .style(Style::default().fg(t.border_active))
-        .render(Rect::new(area.x, bottom_y, area.width, 1), buf);
+    if let Some(rect) = row(area, bottom_y) {
+        let bottom_inner = "─".repeat(area.width.saturating_sub(2) as usize);
+        Paragraph::new(format!("╰{bottom_inner}╯"))
+            .style(Style::default().fg(t.border_active))
+            .render(rect, buf);
+    }
 
     // Prompt hint
-    let prompt_y = bottom_y + 1;
-    Paragraph::new(Span::styled(" >", Style::default().fg(t.fg)))
-        .render(Rect::new(area.x, prompt_y, area.width, 1), buf);
+    if let Some(rect) = row(area, bottom_y + 1) {
+        Paragraph::new(Span::styled(" >", Style::default().fg(t.fg))).render(rect, buf);
+    }
+}
+
+/// A full-width one-row rect at `y`, or `None` when `y` is past the bottom of
+/// `area`.
+///
+/// The splash is a fixed-height composition — border, header, twelve rows of
+/// logo and activity, tips, bottom border, prompt — laid out at absolute
+/// offsets from `area.y`, and it does not shrink. On a terminal shorter than
+/// that composition the later offsets address rows outside the buffer, and
+/// ratatui's `Buffer` panics on an out-of-bounds index rather than clipping:
+/// `index outside of buffer: the area is Rect { .. height: 15 } but index is
+/// (0, 15)`.
+///
+/// Clipping here rather than laying the splash out dynamically is deliberate.
+/// The art has a fixed shape; a short terminal should lose the bottom of it,
+/// which is decoration, and keep the top, which names the version and the
+/// working directory. What it must not do is take the process down.
+fn row(area: Rect, y: u16) -> Option<Rect> {
+    (y < area.bottom()).then(|| Rect::new(area.x, y, area.width, 1))
+}
+
+/// One cell at `(x, y)`, or `None` when it falls outside `area`. Same reasoning
+/// as [`row`]; used for the right-hand border, which is drawn a cell at a time.
+fn cell(area: Rect, x: u16, y: u16) -> Option<Rect> {
+    (y < area.bottom() && x < area.right()).then(|| Rect::new(x, y, 1, 1))
 }
 
 // render_splash() is in splash_compat.rs — re-exported below for backward compat.
