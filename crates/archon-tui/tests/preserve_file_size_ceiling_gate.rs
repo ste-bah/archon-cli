@@ -6,7 +6,7 @@
 //! ERR-TUI-004 was the pre-fix pathology where `src/main.rs` grew to
 //! 5870 lines. SPEC-TUI-MODULARIZATION owns the positive refactor; this
 //! file owns the **standing size gate** that prevents any future PR from
-//! reintroducing a >=500-line .rs file in the TUI crate (or in the
+//! reintroducing a >500-line .rs file in the TUI crate (or in the
 //! legacy worktree-root `src/` tree that still carries transitional
 //! code during the migration).
 //!
@@ -47,8 +47,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Inclusive ceiling: any file with >= this many lines fails the gate.
+/// Exclusive ceiling: a file fails the gate only when it is *longer* than
+/// this. Exactly 500 lines passes.
+///
+/// This boundary is shared with the shell gates
+/// (`scripts/check-file-sizes.sh`, `scripts/check-tui-file-sizes.sh`,
+/// `scripts/ci/check-tui-file-sizes.sh`, `scripts/self-check-file.sh`), which
+/// all compare `-gt "$THRESHOLD"`, and with the spec they implement —
+/// `02-technical-spec.md` §955, "Every file ≤ 500 lines". This gate used to
+/// compare `>=` instead, which made a file of exactly 500 lines pass every
+/// local check and then fail CI here: two rules wearing the same number.
+/// [`offends`] is the single place the comparison lives now, and
+/// [`helpers::exactly_at_the_ceiling_passes`] pins it.
 const LINE_CEILING: usize = 500;
+
+/// Whether `line_count` breaches the ceiling.
+///
+/// One function so the boundary cannot drift between the walk and the tests.
+fn offends(line_count: usize) -> bool {
+    line_count > LINE_CEILING
+}
 
 /// Whitelist file, baked in at compile time.
 const WHITELIST_RAW: &str = include_str!("preserve_file_size_whitelist.txt");
@@ -198,7 +216,7 @@ fn preserve_file_size_ceiling_gate() {
                 continue;
             }
             let line_count = count_lines(&contents);
-            if line_count < LINE_CEILING {
+            if !offends(line_count) {
                 continue;
             }
             let rel = relativise(&root, &file);
@@ -216,7 +234,7 @@ fn preserve_file_size_ceiling_gate() {
         let joined = offenders.join("\n");
         panic!(
             "\nTASK-TUI-903 / ERR-TUI-004 preservation gate failed. \
-             {n} file(s) at or above the {ceiling}-line ceiling. \
+             {n} file(s) above the {ceiling}-line ceiling. \
              Split the file, or add it to \
              crates/archon-tui/tests/preserve_file_size_whitelist.txt \
              with a `# expires YYYY-MM-DD` comment (audited by TASK-TUI-905).\n\n{joined}\n",
@@ -237,6 +255,23 @@ fn preserve_file_size_ceiling_gate() {
 #[cfg(test)]
 mod helpers {
     use super::*;
+
+    /// The boundary itself, pinned in both directions.
+    ///
+    /// The gate previously treated exactly `LINE_CEILING` as an offender
+    /// while all four shell gates compared `-gt`. A file landing precisely on
+    /// 500 therefore passed every check a developer can run and failed only in
+    /// CI, with a message quoting the same number the local gates had just
+    /// approved. One file in the repo sits at exactly 500 lines today
+    /// (`crates/archon-trading/src/candle_backtest.rs`); it happens to fall
+    /// outside this gate's two walk roots, so the trap was armed rather than
+    /// sprung. The next 500-line file under `src/` would have sprung it.
+    #[test]
+    fn exactly_at_the_ceiling_passes() {
+        assert!(!offends(LINE_CEILING - 1));
+        assert!(!offends(LINE_CEILING));
+        assert!(offends(LINE_CEILING + 1));
+    }
 
     #[test]
     fn line_count_matches_wc_l_semantics() {
