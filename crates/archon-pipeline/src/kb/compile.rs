@@ -24,6 +24,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+// Providers routinely wrap JSON in a ```json fence even when asked for bare
+// JSON. The first run of this pass against a live provider did exactly that:
+// every parse failed, the fence markup was stored verbatim as the "summary",
+// and concept extraction returned nothing. That bug is what prompted the
+// consolidation — the stripper now lives in `archon_context::fenced`, shared
+// with the four other call sites that had each grown their own copy.
+use archon_context::fenced::json_payload;
 use archon_docs::models::{ProvenanceEdge, ProvenanceEdgeType, SourceDocument};
 use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
@@ -215,38 +222,6 @@ fn slugify(name: &str) -> String {
     } else {
         slug
     }
-}
-
-/// Pull the JSON payload out of a model response.
-///
-/// Providers routinely wrap JSON in a ```json fence even when asked for bare
-/// JSON. The first run of this pass against a live provider did exactly that:
-/// every parse failed, the fence markup was stored verbatim as the "summary",
-/// and concept extraction returned nothing. Stripping the fence costs four
-/// lines and is the difference between the pass working and not.
-fn json_payload(response: &str) -> &str {
-    let trimmed = response.trim();
-
-    // A fenced block, with or without a preamble ("Here you go:" happens).
-    if let Some(start) = trimmed.find("```") {
-        let rest = &trimmed[start + 3..];
-        // Drop the optional language tag that follows the opening fence.
-        let body = rest.split_once('\n').map_or(rest, |(_, body)| body);
-        return body.split_once("```").map_or(body, |(body, _)| body).trim();
-    }
-
-    // Unfenced but prefixed with prose: take the outermost JSON value.
-    if !trimmed.starts_with(['{', '[']) {
-        let open = trimmed.find(['{', '[']);
-        let close = trimmed.rfind(['}', ']']);
-        if let (Some(open), Some(close)) = (open, close)
-            && close > open
-        {
-            return trimmed[open..=close].trim();
-        }
-    }
-
-    trimmed
 }
 
 fn truncate_chars(text: &str, max: usize) -> String {

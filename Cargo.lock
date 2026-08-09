@@ -629,6 +629,7 @@ name = "archon-knowledge"
 version = "1.6.1"
 dependencies = [
  "anyhow",
+ "archon-context",
  "archon-cozo",
  "archon-docs",
  "chrono",
@@ -796,6 +797,7 @@ name = "archon-memory"
 version = "1.6.1"
 dependencies = [
  "anyhow",
+ "archon-context",
  "archon-cozo",
  "chrono",
  "cozo-ce",
@@ -856,6 +858,7 @@ name = "archon-pipeline"
 version = "1.6.1"
 dependencies = [
  "anyhow",
+ "archon-context",
  "archon-core",
  "archon-cozo",
  "archon-docs",

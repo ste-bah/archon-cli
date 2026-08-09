@@ -238,13 +238,11 @@ pub fn parse_extraction_response(json_str: &str) -> Result<Vec<ExtractedMemory>,
         Ok(v) => v,
         Err(_) => {
             // Maybe the LLM wrapped it in markdown fences — try stripping.
-            let stripped = json_str
-                .trim()
-                .trim_start_matches("```json")
-                .trim_start_matches("```")
-                .trim_end_matches("```")
-                .trim();
-            match serde_json::from_str(stripped) {
+            // Trimming the ends, which is what this used to do, only worked
+            // when the fence was the very first thing in the response; a
+            // "Here you go:" preamble left the prose in place and every
+            // extraction was silently dropped.
+            match serde_json::from_str(archon_context::fenced::json_payload(json_str)) {
                 Ok(v) => v,
                 // Graceful degradation: return empty vec, do not crash.
                 Err(_) => return Ok(Vec::new()),
