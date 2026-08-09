@@ -13,20 +13,58 @@ Current `archon kb --help` surface:
 | Command | Purpose | Important flags |
 |---|---|---|
 | `ingest <source>` | Ingest a file, URL, or directory into the KB | `--kb`, `--domain` alias |
-| `list` | List all nodes | `--kb` |
-| `search <query>` | Search nodes | `--limit`, `--mode exact|semantic|hybrid`, `--kb` |
+| `list` | List all chunks | `--kb` |
+| `search <query>` | Search chunks | `--limit`, `--mode exact|semantic|hybrid`, `--kb` |
+| `recall <query>` | Merged recall across memory, docs, knowledge and the code index | `--sources`, `--limit`, `--code-index`, `--mode`, `--kb` |
 | `process` | Extract structured intelligence from doc chunks | `--claims`, `--entities`, `--relations`, `--contradictions`, `--kb` |
+| `reprocess` | Re-run OCR/VLM/image enrichment for a bucket | `--kb`, `--defer-index` |
 | `claims` | List extracted claims | none |
 | `entities` | List extracted entities | none |
 | `relations` | List inferred relations | none |
 | `contradictions` | List detected contradictions | none |
 | `stats` | Show KB statistics | none |
 
+## LLM synthesis lives under `docs`
+
+Three capabilities operate on the same corpus but are LLM passes over documents
+rather than structured extraction, so they sit in the `docs` namespace. They are
+documented in full in [Document Intelligence](docs.md):
+
+| Command | Purpose |
+|---|---|
+| `archon docs compile` | Summarize each document, extract concept articles, cross-reference them, refresh a corpus index (REQ-KB-002) |
+| `archon docs answer` | Answer a question from retrieved evidence, with LLM synthesis and optional filing (REQ-KB-003 / REQ-DOCS-013–015) |
+| `archon docs export` | Dump the corpus to markdown, grouped by kind |
+
+All three read `doc_chunks` and write ordinary documents, so anything they
+produce is immediately visible to `kb search`, `kb recall` and `kb process`.
+A summary or filed answer inherits the `--kb` membership of what it came from,
+which keeps bucket-scoped search honest:
+
+```bash
+archon kb ingest ./research-pack --kb trading-elliott-wave
+archon docs compile --kb trading-elliott-wave
+archon kb search --kb trading-elliott-wave "wave 3 invalidation"   # matches summaries too
+archon kb process --kb trading-elliott-wave --claims --entities    # extracts from them too
+```
+
 ## Source of truth
 
 The expected persisted relations are claims, entities, relations, source-quality
 records, and contradictions. `archon kb process` should write those rows from
 real document chunks, and the list/search commands should read them back.
+
+Compilation output is not a separate graph. `docs compile` writes `doc_sources`
+and `doc_chunks` rows under an `archon-kb://` source path
+(`archon-kb://summary/<document-id>`, `archon-kb://concept/<slug>`,
+`archon-kb://index`), linked to their sources by `doc_provenance_edges`. Filed
+answers use `archon-kb://answer/<uuid>`. The compile pass keeps one relation of
+its own — `compile_state`, holding the `last_compiled_at` watermark.
+
+> **Note on `kb_nodes`.** `archon-pipeline::kb::ingest` writes a parallel
+> `kb_nodes` / `kb_edges` / `kb_content_hashes` / `kb_embeddings` graph. No CLI
+> command populates or reads it. It is retained pending a separate removal
+> decision and is not a supported second corpus — do not build against it.
 
 URL ingest uses the same governed document pipeline as local ingest for
 supported document media: plain text, Markdown, HTML, JSON, XML, YAML, TOML,
@@ -120,6 +158,9 @@ archon kb entities
 archon kb relations
 archon kb contradictions
 archon kb stats
+archon docs compile
+archon docs answer "what does the policy require?"
+archon docs export --out ./kb-dump
 ```
 
 Edge cases should include empty document stores, duplicate chunks, invalid

@@ -1,14 +1,15 @@
 //! The shapes the knowledge-base API exchanges with callers.
 //!
-//! Owns the request and result types for the four knowledge-base operations —
-//! ingest, compile, query, lint — plus the aggregate statistics. Pure data:
-//! nothing here reads a database or touches the filesystem, which is what lets
-//! the operation modules and their callers share a vocabulary without sharing
-//! a dependency.
+//! Owns the request and result types for the `kb_nodes` operations — ingest,
+//! lint — plus the aggregate statistics. Pure data: nothing here reads a
+//! database or touches the filesystem, which is what lets the operation modules
+//! and their callers share a vocabulary without sharing a dependency.
+//!
+//! Compile and query no longer appear here: they returned `kb_nodes` shapes,
+//! and both now work on documents, so they own their own result types in
+//! [`super::compile`] and [`super::query`].
 
 use serde::{Deserialize, Serialize};
-
-use super::KbNode;
 
 /// Source of content to ingest into the knowledge base.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -24,39 +25,6 @@ pub struct IngestResult {
     pub nodes_created: usize,
     pub chunks_processed: usize,
     pub errors: Vec<String>,
-}
-
-/// Result of a compile (synthesis) pass over ingested content.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct CompileResult {
-    pub articles_created: usize,
-    pub concepts_extracted: usize,
-}
-
-/// Options for querying the knowledge base.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QueryOptions {
-    pub max_results: usize,
-    pub min_relevance: f64,
-    pub domain_filter: Option<String>,
-}
-
-impl Default for QueryOptions {
-    fn default() -> Self {
-        Self {
-            max_results: 10,
-            min_relevance: 0.0,
-            domain_filter: None,
-        }
-    }
-}
-
-/// Result of a knowledge base query.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct QueryResult {
-    pub answer: String,
-    pub sources: Vec<KbNode>,
-    pub confidence: f64,
 }
 
 /// Result of a lint pass over the knowledge base.

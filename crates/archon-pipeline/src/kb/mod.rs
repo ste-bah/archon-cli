@@ -1,7 +1,21 @@
 //! Knowledge base — ingest, organize, and query external documents.
+//!
+//! # Two stores, mid-convergence
+//!
+//! [`compile`] and [`query`] operate on the document store `archon kb ingest`
+//! actually writes (`doc_sources` / `doc_chunks`, owned by `archon-docs`), which
+//! is what `PRD-ARCHON-DOCS-001` asked for under "Extend Carefully": the KB
+//! schema evolving into document artifact lineage rather than becoming a second
+//! unrelated store.
+//!
+//! [`ingest`] and the `kb_nodes` / `kb_edges` / `kb_content_hashes` /
+//! `kb_embeddings` relations it writes are the other half of that convergence
+//! and have no CLI caller. [`KnowledgeBase`] is their facade. Removing them is
+//! a separate decision; until it is taken they are dead weight, not a second
+//! supported path.
 
-mod answer_storage;
 pub mod compile;
+pub mod export;
 pub mod ingest;
 mod ingest_storage;
 #[cfg(test)]
@@ -9,18 +23,14 @@ mod ingest_storage_test_hooks;
 #[cfg(test)]
 mod ingest_storage_tests;
 pub mod lint;
-mod provenance_storage;
 pub mod query;
-mod query_search;
 #[cfg(test)]
 mod runtime_evidence_tests;
 pub mod schema;
 mod types;
 
 pub use schema::{KbEdge, KbEdgeType, KbNode, KbNodeType};
-pub use types::{
-    CompileResult, IngestResult, IngestSource, KbStats, LintResult, QueryOptions, QueryResult,
-};
+pub use types::{IngestResult, IngestSource, KbStats, LintResult};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -28,14 +38,15 @@ use std::sync::Arc;
 use anyhow::Result;
 use archon_docs::embed::LocalEmbeddingProvider;
 
-/// Knowledge base for external document management.
+/// Facade over the `kb_nodes` graph.
 ///
-/// Wraps a CozoDB instance and provides high-level operations for ingesting,
-/// compiling, querying, and maintaining a corpus of documents.
+/// Every method except [`KnowledgeBase::export`] reads or writes `kb_nodes` and
+/// has no CLI caller. `export` was repointed at the document store because a
+/// `kb_nodes` export would dump an empty tree on any database an operator
+/// actually built.
 pub struct KnowledgeBase {
     db: cozo::DbInstance,
     ingester: ingest::Ingester,
-    embedder: Option<Arc<dyn LocalEmbeddingProvider>>,
 }
 
 impl KnowledgeBase {
@@ -62,11 +73,7 @@ impl KnowledgeBase {
             Some(db_path) => ingest::Ingester::for_db_path(db.clone(), db_path)?,
             None => ingest::Ingester::new(db.clone())?,
         };
-        Ok(Self {
-            db,
-            ingester,
-            embedder: None,
-        })
+        Ok(Self { db, ingester })
     }
 
     pub fn with_embedder(
@@ -99,11 +106,7 @@ impl KnowledgeBase {
             )?,
             None => ingest::Ingester::with_embedder(db.clone(), Arc::clone(&embedder))?,
         };
-        Ok(Self {
-            db,
-            ingester,
-            embedder: Some(embedder),
-        })
+        Ok(Self { db, ingester })
     }
 
     /// Ingest content from the given source into the knowledge base.
@@ -111,80 +114,29 @@ impl KnowledgeBase {
         self.ingester.ingest(source, None).await
     }
 
-    /// Compile ingested raw content into synthesised articles and concepts.
+    /// Node IDs whose embedding vector is stored, in `kb_embeddings` order.
     ///
-    /// This convenience method returns a minimal `CompileResult`. For full
-    /// metrics and LLM-driven summaries use `compile_with_llm`.
-    pub async fn compile(&self) -> Result<CompileResult> {
-        Ok(CompileResult::default())
-    }
-
-    /// Compile with a caller-supplied LLM client, returning full metrics.
-    ///
-    /// Runs incremental LLM compilation: generates summaries, extracts
-    /// concepts, builds cross-references, and updates the index node.
-    pub async fn compile_with_llm(
-        &self,
-        llm: Box<dyn compile::KbLlmClient>,
-    ) -> Result<compile::CompileMetrics> {
-        let compiler = compile::Compiler::new(self.db.clone(), llm)?;
-        compiler.compile().await
-    }
-
-    /// Query the knowledge base with a natural-language question.
-    ///
-    /// Delegates to [`query::QueryEngine`] for search, context gathering,
-    /// and synthesis, then converts the result into the public [`QueryResult`].
-    pub async fn query(&self, question: &str, opts: &QueryOptions) -> Result<QueryResult> {
-        let mut engine = query::QueryEngine::new(self.db.clone());
-        if let Some(embedder) = &self.embedder {
-            engine = engine.with_embedder(Arc::clone(embedder));
+    /// The only remaining reader of the semantic index this facade's ingest
+    /// path writes. `compile` and `query` moved to the document store, so
+    /// without this the embedding-space migration machinery in
+    /// [`schema`] would have no observable behaviour at all.
+    pub async fn embedded_node_ids(&self) -> Result<Vec<String>> {
+        if !schema::kb_embedding_storage_exists(&self.db)? {
+            return Ok(Vec::new());
         }
-        let qa_opts = query::QaQueryOptions {
-            top_k: opts.max_results,
-            file_answer: false,
-            include_graph_context: true,
-            node_type_filter: None,
-        };
-        let result = engine.query(question, &qa_opts).await?;
-        Ok(QueryResult {
-            answer: result.answer,
-            sources: result
-                .sources
-                .iter()
-                .filter_map(|s| self.get_node_by_id(&s.node_id).ok().flatten())
-                .collect(),
-            confidence: if result.sources.is_empty() {
-                0.0
-            } else {
-                result
-                    .sources
-                    .iter()
-                    .map(|s| s.relevance_score)
-                    .sum::<f64>()
-                    / result.sources.len() as f64
-            },
-        })
-    }
-
-    /// Fetch a single node by its ID, returning `None` if not found.
-    fn get_node_by_id(&self, node_id: &str) -> Result<Option<KbNode>> {
-        let mut params = std::collections::BTreeMap::new();
-        params.insert("nid".to_string(), cozo::DataValue::from(node_id));
         let result = self
             .db
             .run_script(
-                "?[node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at] := \
-                 *kb_nodes{node_id, node_type, source, domain_tag, title, content, \
-                 content_hash, chunk_index, created_at, updated_at}, \
-                 node_id = $nid",
-                params,
+                "?[node_id] := *kb_embeddings{node_id} :order node_id",
+                Default::default(),
                 cozo::ScriptMutability::Immutable,
             )
-            .map_err(|e| anyhow::anyhow!("get_node failed: {}", e))?;
-
-        Ok(result.rows.first().map(|row| row_to_kb_node(row)))
+            .map_err(|e| anyhow::anyhow!("read kb_embeddings failed: {}", e))?;
+        Ok(result
+            .rows
+            .iter()
+            .filter_map(|row| row[0].get_str().map(ToString::to_string))
+            .collect())
     }
 
     /// Run lint checks over the knowledge base contents.
@@ -377,33 +329,15 @@ impl KnowledgeBase {
 
     /// Export the knowledge base to a directory of markdown files.
     ///
-    /// Creates subdirectories by node type (raw/, compiled/, concept/, answer/, index/)
-    /// with one markdown file per node containing frontmatter and content.
-    pub async fn export(&self, path: &Path) -> Result<()> {
-        let nodes = self.list().await?;
+    /// Delegates to [`export`], which reads the document store. Exporting
+    /// `kb_nodes` would dump an empty tree on any database an operator built.
+    pub async fn export(&self, path: &Path) -> Result<export::ExportSummary> {
+        export::export_to_directory(&self.db, path, &export::ExportOptions::default())
+    }
 
-        for node in &nodes {
-            let type_dir = path.join(node_type_dir(&node.node_type));
-            std::fs::create_dir_all(&type_dir)?;
-
-            let filename = format!("{}.md", sanitize_filename(&node.node_id));
-            let filepath = type_dir.join(filename);
-
-            let frontmatter = format!(
-                "---\nnode_id: {}\ntype: {:?}\nsource: {}\ndomain: {}\ncreated_at: {}\n---\n\n# {}\n\n{}",
-                node.node_id,
-                node.node_type,
-                node.source,
-                node.domain_tag,
-                node.created_at,
-                node.title,
-                node.content,
-            );
-
-            std::fs::write(filepath, frontmatter)?;
-        }
-
-        Ok(())
+    /// The handle this knowledge base was opened over.
+    pub fn db(&self) -> &cozo::DbInstance {
+        &self.db
     }
 }
 
@@ -436,27 +370,4 @@ fn str_to_node_type(s: &str) -> KbNodeType {
         "index" => KbNodeType::Index,
         _ => KbNodeType::Raw,
     }
-}
-
-fn node_type_dir(t: &KbNodeType) -> &'static str {
-    match t {
-        KbNodeType::Raw => "raw",
-        KbNodeType::Compiled => "compiled",
-        KbNodeType::Concept => "concepts",
-        KbNodeType::Answer => "answers",
-        KbNodeType::Index => "index",
-    }
-}
-
-/// Sanitize a string for use as a filename (replace non-alphanumeric with _).
-fn sanitize_filename(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

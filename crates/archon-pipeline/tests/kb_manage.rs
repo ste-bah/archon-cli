@@ -193,43 +193,40 @@ mod manage_tests {
         assert_eq!(count_nodes(&db), 0, "derived node should also be deleted");
     }
 
+    /// Export reads the document store, not `kb_nodes` — a `kb_nodes`-only
+    /// export would dump an empty tree on any database an operator built.
     #[tokio::test]
     async fn export_creates_directory_structure() {
         let db = mem_db();
+        archon_docs::schema::ensure_doc_schema(&db).unwrap();
         let kb = test_kb(db.clone());
 
-        insert_node(&db, "ex1", "raw", "/e.md", "Export Test", "Export content");
+        insert_node(&db, "ex1", "raw", "/e.md", "Export Test", "Ignored content");
+        archon_docs::ingest_text::ingest_text_source(&db, "/e.md", "text/plain", "Export content")
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
         let export_dir = tmp.path().join("export");
 
-        kb.export(&export_dir).await.expect("export");
+        let summary = kb.export(&export_dir).await.expect("export");
+        assert_eq!(summary.raw, 1);
 
-        // Should create the export directory
-        assert!(export_dir.exists(), "export dir should exist");
-
-        // Should have a raw/ subdirectory
         let raw_dir = export_dir.join("raw");
         assert!(raw_dir.exists(), "raw/ subdir should exist");
 
-        // Should have at least one file
         let files: Vec<_> = std::fs::read_dir(&raw_dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(
-            !files.is_empty(),
-            "raw/ should contain at least one exported file"
-        );
+        assert_eq!(files.len(), 1);
 
-        // File should contain the content
         let file_content = std::fs::read_to_string(files[0].path()).unwrap();
         assert!(
             file_content.contains("Export content"),
-            "exported file should contain node content"
+            "exported file should contain document content"
         );
         assert!(
-            file_content.contains("node_id:"),
+            file_content.contains("document_id:"),
             "exported file should have frontmatter"
         );
     }

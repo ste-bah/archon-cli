@@ -58,6 +58,8 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod docs;
+pub(crate) mod docs_answer;
+pub(crate) mod docs_compile;
 pub(crate) mod docs_delete;
 #[cfg(test)]
 pub(crate) mod docs_drift;
@@ -265,6 +267,8 @@ pub(crate) mod behaviour;
 #[cfg(test)]
 mod prd_pipeline_layout_tests;
 pub(crate) mod teleport;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_db;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub(crate) mod theme;

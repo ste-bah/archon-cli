@@ -23,7 +23,11 @@ pub(crate) fn open_db() -> Result<Arc<DbInstance>> {
     archon_docs::acquire_docs_db(docs_db_path())
 }
 
-pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
+pub async fn handle_docs_command(
+    action: DocsAction,
+    config: &archon_core::config::ArchonConfig,
+    env_vars: &archon_core::env_vars::ArchonEnvVars,
+) -> Result<()> {
     match action {
         DocsAction::Ingest { path, yes, jobs } => handle_ingest(&path, yes, jobs.as_deref()).await,
         DocsAction::Reprocess {
@@ -40,7 +44,34 @@ pub async fn handle_docs_command(action: DocsAction) -> Result<()> {
         DocsAction::Inspect { document_id } => handle_inspect(&document_id).await,
         DocsAction::Search { query, mode, debug } => handle_search(&query, &mode, debug).await,
         DocsAction::SearchImages { query, limit } => handle_search_images(&query, limit).await,
-        DocsAction::Answer { query } => handle_answer(&query).await,
+        DocsAction::Compile { kb, model } => {
+            crate::command::docs_compile::handle_compile(config, env_vars, kb, model).await
+        }
+        DocsAction::Export { out, kb } => {
+            crate::command::docs_compile::handle_export(out.as_deref(), kb)
+        }
+        DocsAction::Answer {
+            query,
+            no_synthesis,
+            file,
+            kb,
+            limit,
+            mode,
+            model,
+        } => {
+            crate::command::docs_answer::handle_answer(
+                config,
+                env_vars,
+                &query,
+                no_synthesis,
+                file,
+                kb,
+                limit,
+                &mode,
+                model,
+            )
+            .await
+        }
         DocsAction::Provenance { chunk_or_answer_id } => {
             handle_provenance(&chunk_or_answer_id).await
         }
@@ -888,7 +919,12 @@ async fn handle_search(query: &str, mode: &str, debug: bool) -> Result<()> {
     Ok(())
 }
 
-async fn handle_answer(query: &str) -> Result<()> {
+/// The extractive answer path (REQ-DOCS-013/014/015).
+///
+/// Kept as the fallback `docs_answer` uses when no LLM provider is configured:
+/// cited evidence with no model is still a usable answer, and removing it would
+/// have made the command fail outright on an unauthenticated machine.
+pub(crate) async fn handle_answer(query: &str) -> Result<()> {
     let db = open_db()?;
 
     match answer::answer(&db, query, 5) {

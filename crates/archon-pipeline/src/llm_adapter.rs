@@ -13,6 +13,8 @@ use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
 use tokio::sync::mpsc::Receiver;
 
+use crate::kb::compile::KbLlmClient;
+use crate::kb::query::QaSynthesizer;
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, ToolUseEntry};
 
 // ---------------------------------------------------------------------------
@@ -214,6 +216,63 @@ impl LlmClient for ProviderLlmAdapter {
             &request.session_id,
         )
         .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge-base adapters
+// ---------------------------------------------------------------------------
+
+/// Single-prompt completion over a resolved provider, for the knowledge-base
+/// passes.
+///
+/// `kb::compile` and `kb::query` take narrow abstract traits — a prompt in,
+/// text out — so their tests can run deterministically without a model. This is
+/// the one production implementation of both, and it lives here rather than in
+/// `archon-pipeline::kb` for the same reason [`ProviderLlmAdapter`] does: the
+/// knowledge-base modules should not know which provider is configured.
+pub struct KbProviderClient {
+    inner: ProviderLlmAdapter,
+    model: String,
+}
+
+impl KbProviderClient {
+    /// Wrap a resolved provider. `model` is an alias or concrete ID; the inner
+    /// adapter resolves it the same way every other pipeline call does.
+    pub fn new(provider: Arc<dyn LlmProvider>, model: impl Into<String>) -> Self {
+        Self {
+            inner: ProviderLlmAdapter::new(provider).with_origin("kb"),
+            model: model.into(),
+        }
+    }
+
+    async fn complete_text(&self, prompt: &str) -> Result<String> {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": prompt }],
+        })];
+        let response = self
+            .inner
+            .send_message(messages, Vec::new(), Vec::new(), &self.model)
+            .await?;
+        Ok(response.content)
+    }
+}
+
+#[async_trait]
+impl KbLlmClient for KbProviderClient {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        self.complete_text(prompt).await
+    }
+}
+
+#[async_trait]
+impl QaSynthesizer for KbProviderClient {
+    /// The engine has already assembled the instruction and the evidence into
+    /// `context`; the bare question is kept only for logging by other
+    /// implementations, so it is not re-sent here.
+    async fn synthesize(&self, _question: &str, context: &str) -> Result<String> {
+        self.complete_text(context).await
     }
 }
 

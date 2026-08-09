@@ -5,6 +5,11 @@
 # shipped hook config silently untracked.
 .archon/*
 !.archon/hooks.toml
+# The rule above contains a slash, so git anchors it to the repo root. A test or
+# CLI run started inside a crate directory creates its own `.archon/` there --
+# `crates/archon-pipeline/.archon/doc-vector-store/` turned up in a commit this
+# way -- and the anchored rule does not cover it.
+crates/*/.archon/
 artifacts/
 **/*.rs.bk
 

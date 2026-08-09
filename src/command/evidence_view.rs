@@ -25,7 +25,9 @@ const DOCS_SUBCOMMANDS: &[&str] = &[
     "chunks",
     "search",
     "search-images",
+    "compile",
     "answer",
+    "export",
     "provenance",
     "index",
     "index-status",
@@ -74,10 +76,10 @@ impl CommandHandler for DocsViewHandler {
             },
             // The mirror runs the CLI as a subprocess with no TTY, so anything needing
             // confirmation must carry its flag on the command line (`delete --yes`).
-            "ingest" | "reprocess" | "delete" | "search" | "search-images" | "answer" | "index"
-            | "index-retry-failed" | "index-pause" | "index-resume" | "index-cancel"
-            | "index-daemon" | "vector-status" | "vector-migrate" | "vector-compact"
-            | "verify-quote" | "verify-integrity" => {
+            "ingest" | "reprocess" | "delete" | "search" | "search-images" | "compile"
+            | "answer" | "export" | "index" | "index-retry-failed" | "index-pause"
+            | "index-resume" | "index-cancel" | "index-daemon" | "vector-status"
+            | "vector-migrate" | "vector-compact" | "verify-quote" | "verify-integrity" => {
                 crate::command::cli_mirror::spawn_cli_mirror(ctx, "docs", args)
             }
             "index-status" => emit_docs_db(ctx, render_docs_index_status),
