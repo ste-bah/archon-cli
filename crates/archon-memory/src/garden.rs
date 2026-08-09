@@ -62,6 +62,19 @@ fn default_semantic_review_max_distance() -> f64 {
     0.35
 }
 
+/// How many pending review-band pairs justify one automatic adjudication call.
+///
+/// The cost of adjudicating is one LLM round-trip regardless of batch size, so
+/// the question is how many judgements that round-trip has to buy. Ten amortises
+/// it; paying a session-start round-trip to settle two pairs does not.
+///
+/// It also sits below the adjudicator's own `MAX_PAIRS_PER_RUN` cap of 20, so a
+/// run that fires at the threshold clears the whole accumulated band in a single
+/// call instead of leaving a remainder that immediately re-triggers.
+fn default_auto_adjudicate_min_pairs() -> usize {
+    10
+}
+
 /// Configuration for the memory garden consolidation pass.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GardenConfig {
@@ -86,6 +99,29 @@ pub struct GardenConfig {
     /// equal to the merge distance to stop reporting them.
     #[serde(default = "default_semantic_review_max_distance")]
     pub semantic_review_max_distance: f64,
+    /// Judge the review band automatically once enough pairs have accumulated,
+    /// instead of waiting for someone to run `/garden` by hand.
+    ///
+    /// OFF by default, and the reason is startup latency: automatic
+    /// consolidation runs on the session-start path, and adjudication is an LLM
+    /// round-trip that would sit between launching Archon and being able to type.
+    /// Nothing else on that path calls a model. Left to accumulate the band is
+    /// merely untidy; enabled without asking, every opted-out user would pay for
+    /// tidiness they did not request, on the one path where waiting is most
+    /// obvious.
+    ///
+    /// `#[serde(default)]` rather than a named default function: an existing
+    /// config file that predates this field must read as "off", and `false` is
+    /// what `bool`'s `Default` already gives.
+    #[serde(default)]
+    pub auto_adjudicate_review_band: bool,
+    /// Pending review-band pairs required before automatic adjudication fires.
+    ///
+    /// The threshold is what keeps the setting above from meaning "an LLM call
+    /// on every session start": the band has to be worth the round-trip. Ignored
+    /// entirely when `auto_adjudicate_review_band` is false.
+    #[serde(default = "default_auto_adjudicate_min_pairs")]
+    pub auto_adjudicate_min_pairs: usize,
     pub staleness_days: u32,
     pub staleness_importance_floor: f64,
     pub importance_decay_per_day: f64,
@@ -101,6 +137,8 @@ impl Default for GardenConfig {
             dedup_similarity_threshold: 0.92,
             semantic_dedup_max_distance: default_semantic_dedup_max_distance(),
             semantic_review_max_distance: default_semantic_review_max_distance(),
+            auto_adjudicate_review_band: false,
+            auto_adjudicate_min_pairs: default_auto_adjudicate_min_pairs(),
             staleness_days: 30,
             staleness_importance_floor: 0.3,
             importance_decay_per_day: 0.01,
@@ -253,6 +291,25 @@ pub fn should_auto_consolidate(
     Ok(hours_elapsed >= i64::from(min_hours))
 }
 
+/// Whether this run's review band has earned an automatic adjudication call.
+///
+/// `pending_pairs` is [`GardenReport::review_pairs`] length from the pass that
+/// just ran, which is the whole accumulated band rather than a delta: the
+/// semantic phase re-derives it from the store every time, and the band writes
+/// nothing, so anything left unjudged is simply reported again.
+///
+/// A predicate rather than a call site condition because it is the whole policy
+/// this setting expresses, and a policy about spending money and mutating memory
+/// should be testable without a provider.
+pub fn should_auto_adjudicate(config: &GardenConfig, pending_pairs: usize) -> bool {
+    // An empty band is checked explicitly rather than left to the comparison:
+    // `auto_adjudicate_min_pairs = 0` is a legal way to say "always", and
+    // without this it would also mean "call the model about nothing".
+    config.auto_adjudicate_review_band
+        && pending_pairs > 0
+        && pending_pairs >= config.auto_adjudicate_min_pairs
+}
+
 fn get_memories_by_type(
     graph: &dyn MemoryTrait,
     memory_type: MemoryType,
@@ -271,3 +328,7 @@ mod semantic_dedup_tests;
 #[cfg(test)]
 #[path = "garden/retry_tests.rs"]
 mod retry_tests;
+
+#[cfg(test)]
+#[path = "garden/auto_adjudicate_tests.rs"]
+mod auto_adjudicate_tests;

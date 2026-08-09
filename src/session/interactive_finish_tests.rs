@@ -22,14 +22,14 @@ fn report() -> archon_memory::garden::GardenReport {
 /// skips is no more visible than the log line it replaced.
 #[test]
 fn a_no_op_consolidation_is_silent() {
-    assert!(super::auto_consolidation_summary(&report()).is_none());
+    assert!(super::auto_consolidation_summary(&report(), 0).is_none());
     // Importance decay alone is bookkeeping, not a change to what is
     // remembered, so it does not warrant interrupting a session start.
     let decayed = archon_memory::garden::GardenReport {
         importance_decayed: 12,
         ..report()
     };
-    assert!(super::auto_consolidation_summary(&decayed).is_none());
+    assert!(super::auto_consolidation_summary(&decayed, 0).is_none());
 }
 
 /// Anything that removed or altered a memory has to be reported.
@@ -66,9 +66,23 @@ fn destructive_outcomes_are_reported() {
         ),
     ] {
         assert!(
-            super::auto_consolidation_summary(&built).is_some(),
+            super::auto_consolidation_summary(&built, 0).is_some(),
             "{label} removals must be surfaced"
         );
+    }
+}
+
+fn pending(count: usize) -> archon_memory::garden::GardenReport {
+    archon_memory::garden::GardenReport {
+        review_pairs: (0..count)
+            .map(|i| archon_memory::garden::ReviewPair {
+                a_id: format!("a{i}"),
+                b_id: format!("b{i}"),
+                a_content: "one".into(),
+                b_content: "two".into(),
+            })
+            .collect(),
+        ..report()
     }
 }
 
@@ -76,20 +90,31 @@ fn destructive_outcomes_are_reported() {
 /// are the work `/garden` would do next, and the only prompt to run it.
 #[test]
 fn pending_review_pairs_are_surfaced() {
-    let pending = archon_memory::garden::GardenReport {
-        review_pairs: vec![archon_memory::garden::ReviewPair {
-            a_id: "a".into(),
-            b_id: "b".into(),
-            a_content: "one".into(),
-            b_content: "two".into(),
-        }],
-        ..report()
-    };
-    let summary = super::auto_consolidation_summary(&pending).expect("summary");
+    let summary = super::auto_consolidation_summary(&pending(1), 0).expect("summary");
     assert_eq!(
         summary, "1 pair(s) awaiting review",
         "the panel entry is prefixed with \"Memory garden:\" by the splash builder,          so the summary itself must be the bare description"
     );
+}
+
+/// Pairs the adjudicator settled are counted as settled, not as still pending.
+///
+/// The report is a snapshot taken before adjudication ran, so its
+/// `review_pairs` count is stale by the time this line is drawn. Showing it raw
+/// would tell the user work is outstanding that has already been done — and the
+/// panel exists precisely so the memory changes made behind their back are
+/// legible.
+#[test]
+fn adjudicated_pairs_are_reported_as_merged_and_removed_from_the_backlog() {
+    let summary = super::auto_consolidation_summary(&pending(7), 3).expect("summary");
+    assert_eq!(
+        summary,
+        "3 pair(s) merged after review, 4 pair(s) awaiting review"
+    );
+
+    // A band cleared completely leaves no backlog to mention.
+    let summary = super::auto_consolidation_summary(&pending(2), 2).expect("summary");
+    assert_eq!(summary, "2 pair(s) merged after review");
 }
 
 /// A pass that never ran is surfaced, even though it changed nothing.
@@ -104,7 +129,7 @@ fn an_unavailable_semantic_pass_is_surfaced() {
         semantic_pass_unavailable: true,
         ..report()
     };
-    let summary = super::auto_consolidation_summary(&unavailable).expect("summary");
+    let summary = super::auto_consolidation_summary(&unavailable, 0).expect("summary");
     assert_eq!(summary, "semantic pass unavailable (second instance)");
     // The splash column truncates past roughly fifty characters, and a notice
     // clipped to "semantic pass unavailable (second inst..." says less than
