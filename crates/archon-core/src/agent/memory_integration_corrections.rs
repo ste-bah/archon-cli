@@ -4,6 +4,10 @@
 //! file-size gate. That file now covers what a turn INJECTS; this one covers
 //! what a turn RECORDS afterwards.
 
+use archon_consciousness::correction_classifier::CorrectionClassification;
+use archon_consciousness::corrections::CorrectionType;
+
+use super::correction_intake::{ShadowCorrectionLabel, record_shadow_correction_label};
 use super::*;
 
 impl Agent {
@@ -13,8 +17,20 @@ impl Agent {
         user_input: &str,
         graph: &Arc<dyn MemoryTrait>,
     ) {
-        let Some(correction_type) = super::correction_intake::classify_correction(user_input)
-        else {
+        // R3 shadow pass. Runs BEFORE the early return and on every user turn,
+        // not only on the turns the heuristic accepts: the promotion gate needs
+        // >=100 adjudicated non-corrections as well as >=100 corrections, and a
+        // sample drawn only from what the heuristic already fires on can supply
+        // neither an unbiased negative population nor a single false positive.
+        //
+        // What it decides is recorded and nothing else. The heuristic below
+        // still owns every rule mutation, which is what the roadmap requires
+        // until the R3 gate passes.
+        let classification = super::correction_intake::shadow_classify(user_input);
+        let heuristic = super::correction_intake::classify_correction(user_input);
+
+        let Some(correction_type) = heuristic else {
+            self.record_correction_shadow_label(user_input, &classification, None, None);
             // No keyword match. NOT the end of it: the periodic extractor runs a
             // semantic pass over the same turns and routes anything this missed
             // back through `record_extracted_corrections`, so a correction
@@ -29,6 +45,11 @@ impl Agent {
             Ok(rules) => rules,
             Err(error) => {
                 tracing::warn!("rule lookup failed during correction handling: {error}");
+                // The heuristic still decided "correction" on this turn, and
+                // that decision is the measurement. Dropping the label here
+                // would quietly bias the corpus towards turns where storage
+                // happened to be healthy.
+                self.record_correction_shadow_label(user_input, &classification, heuristic, None);
                 return;
             }
         };
@@ -68,6 +89,16 @@ impl Agent {
                 .push(stored_content.clone());
         }
 
+        // Emitted here rather than at the top of the function so the label can
+        // carry the id of the correction that was actually written, which is
+        // what a later adjudication pass joins on.
+        self.record_correction_shadow_label(
+            user_input,
+            &classification,
+            heuristic,
+            correction.as_ref().map(|record| record.id.clone()),
+        );
+
         // Improve the record after the fact, never before it. The correction is
         // already stored above, so a failed or empty summary leaves the bounded
         // raw text in place rather than losing what the user said.
@@ -104,6 +135,60 @@ impl Agent {
             self.fire_after_learning_event_hook("UserCorrected", &payload)
                 .await;
         }
+    }
+
+    /// Persist one R3 shadow label: what the classifier decided, next to what
+    /// the heuristic decided and whether the heuristic mutated anything.
+    ///
+    /// Fails open. Telemetry and shadow analysis may degrade without taking the
+    /// foreground turn with them (roadmap global constraint), so every failure
+    /// path here warns and returns; none of them can stop a correction being
+    /// recorded, because the correction was already recorded before this ran.
+    ///
+    /// The write goes to the blocking pool: it is a SQLite insert plus a JSONL
+    /// append, and a measurement that is not allowed to change behaviour is
+    /// certainly not allowed to add latency to the turn that produced it.
+    fn record_correction_shadow_label(
+        &self,
+        user_input: &str,
+        classification: &CorrectionClassification,
+        heuristic: Option<CorrectionType>,
+        correction_id: Option<String>,
+    ) {
+        let Some(store) = self.cognitive_store.as_ref().map(Arc::clone) else {
+            // No cognitive store means no metric substrate to write into. Worth
+            // saying out loud: it is the difference between "the corpus is
+            // empty because nothing happened" and "the corpus is empty because
+            // nothing was listening".
+            tracing::debug!("no cognitive store; R3 correction shadow label not recorded");
+            return;
+        };
+
+        let label = ShadowCorrectionLabel {
+            session_id: self.config.session_id.clone(),
+            turn_number: self.turn_number,
+            task_class: self
+                .current_situation
+                .as_ref()
+                .map_or("unclassified", |situation| situation.kind.as_str())
+                .to_string(),
+            model_id: self.config.model.clone(),
+            classification: classification.clone(),
+            heuristic,
+            correction_id,
+            user_input_hash: super::correction_intake::user_input_hash(user_input),
+            observed_at: chrono::Utc::now(),
+        };
+
+        archon_observability::spawn_blocking_named("record-correction-shadow-label", move || {
+            let store = store
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match record_shadow_correction_label(&store, &label) {
+                Ok(outcome) => tracing::debug!(?outcome, "recorded R3 correction shadow label"),
+                Err(error) => tracing::warn!(%error, "R3 correction shadow label write failed"),
+            }
+        });
     }
 
     /// The conversation slice this extraction should examine.
