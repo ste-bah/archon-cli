@@ -50,16 +50,30 @@ use archon_memory::types::MemoryError;
 
 use super::{AppState, WebRuntimePaths, check_auth, live::now_ms};
 
-/// The board reader, elected on first use and shared afterwards.
+/// The board reader, elected on first use and held until it stops working.
 ///
-/// A `OnceCell` and not a `OnceLock`: the election is async, and it is the
-/// async-aware cell whose `get_or_try_init` stores only on success. A failed
-/// election must not be cached — the memory server can be down when the first
-/// request arrives and up a minute later, and a cell that recorded the failure
-/// would keep reporting an unreachable board for the life of the process. A
-/// success is cached for exactly the opposite reason: re-running the election
-/// per request would re-read the port file and reconnect on every poll, and in
-/// the `Direct` branch would try to take a lock this process already holds.
+/// Three rules, and the third is why this is a mutex over an `Option` rather
+/// than the `OnceCell` it used to be.
+///
+/// **A failed election is not cached.** The memory server can be down when the
+/// first request arrives and up a minute later, so a slot that recorded the
+/// failure would report an unreachable board for the life of the process. The
+/// `?` below leaves the slot empty, and the next request tries again.
+///
+/// **A successful election is cached.** Re-running it per request would re-read
+/// the port file and reconnect on every poll, and in the `Direct` branch would
+/// try to take a lock this process already holds.
+///
+/// **A cached election is dropped once it fails.** This is the case a
+/// write-once cell cannot express. The elected arm is `Remote` whenever another
+/// process owns the writer, and that server exits when its process does; the
+/// socket is then closed and every read fails with `IO error: Broken pipe`,
+/// forever, while a live server for the same database may be listening on a new
+/// port the whole time. Observed live: a web process holding a CLOSED socket to
+/// a server that had exited hours earlier, `memory.port` naming a healthy one,
+/// and every board request returning 500. So [`Self::invalidate`] clears the
+/// slot on a read failure and the next request re-elects — bounded, because it
+/// only happens after a request has already failed, never on the happy path.
 ///
 /// It holds the elected `MemoryAccess` rather than an `Arc<dyn BoardAccess>`
 /// because which arm was elected is the thing worth asserting: a second direct
@@ -69,7 +83,7 @@ use super::{AppState, WebRuntimePaths, check_auth, live::now_ms};
 /// test can pin it.
 #[derive(Clone, Default)]
 pub struct WebBoardStore {
-    opened: Arc<tokio::sync::OnceCell<Arc<MemoryAccess>>>,
+    opened: Arc<tokio::sync::Mutex<Option<Arc<MemoryAccess>>>>,
 }
 
 impl WebBoardStore {
@@ -87,15 +101,17 @@ impl WebBoardStore {
         &self,
         paths: &WebRuntimePaths,
     ) -> Result<Option<Arc<dyn BoardAccess>>, String> {
-        if let Some(access) = self.opened.get() {
+        let mut slot = self.opened.lock().await;
+        if let Some(access) = slot.as_ref() {
             return Ok(Some(Arc::clone(access) as Arc<dyn BoardAccess>));
         }
         if !paths.memory_db.exists() {
             return Ok(None);
         }
-        let access = self
-            .opened
-            .get_or_try_init(|| async {
+        // Still "store only on success": the `?` below leaves the slot empty on
+        // a failed election, so the next request tries again.
+        let access = {
+            let elect = async {
                 // The election coordinates on `memory.port` and `memory.lock` in
                 // the data directory, not on the database file. That directory
                 // is the database's parent in every case `resolve_memory_paths`
@@ -115,15 +131,27 @@ impl WebBoardStore {
                     .await
                     .map_err(|error| format!("board: could not reach memory: {error}"))?;
                 Ok::<Arc<MemoryAccess>, String>(Arc::new(access))
-            })
-            .await?;
-        Ok(Some(Arc::clone(access) as Arc<dyn BoardAccess>))
+            };
+            elect.await?
+        };
+        *slot = Some(Arc::clone(&access));
+        Ok(Some(access as Arc<dyn BoardAccess>))
+    }
+
+    /// Drop the cached election so the next request re-elects.
+    ///
+    /// Called when a board read fails. It cannot tell a dead connection from a
+    /// transient database error and does not try: re-electing after a failure
+    /// costs one port-file read, and guessing wrong in the other direction
+    /// costs every subsequent request.
+    pub(super) async fn invalidate(&self) {
+        *self.opened.lock().await = None;
     }
 
     /// Which arm the election returned, once it has run.
     #[cfg(test)]
-    fn elected(&self) -> Option<Arc<MemoryAccess>> {
-        self.opened.get().map(Arc::clone)
+    async fn elected(&self) -> Option<Arc<MemoryAccess>> {
+        self.opened.lock().await.as_ref().map(Arc::clone)
     }
 }
 
@@ -273,7 +301,13 @@ pub(crate) async fn runs_handler(State(state): State<AppState>, headers: HeaderM
             }),
         )
             .into_response(),
-        Err(error) => store_error(error),
+        Err(error) => {
+            // The read failed, which may mean the elected connection is dead.
+            // Drop it so the next request re-elects rather than reusing a
+            // handle that can never succeed again.
+            state.board.invalidate().await;
+            store_error(error)
+        }
     }
 }
 
@@ -333,7 +367,13 @@ pub(crate) async fn items_handler(
             }),
         )
             .into_response(),
-        Err(error) => store_error(error),
+        Err(error) => {
+            // The read failed, which may mean the elected connection is dead.
+            // Drop it so the next request re-elects rather than reusing a
+            // handle that can never succeed again.
+            state.board.invalidate().await;
+            store_error(error)
+        }
     }
 }
 
@@ -371,7 +411,13 @@ pub(crate) async fn history_handler(
             }),
         )
             .into_response(),
-        Err(error) => store_error(error),
+        Err(error) => {
+            // The read failed, which may mean the elected connection is dead.
+            // Drop it so the next request re-elects rather than reusing a
+            // handle that can never succeed again.
+            state.board.invalidate().await;
+            store_error(error)
+        }
     }
 }
 
