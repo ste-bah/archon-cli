@@ -71,7 +71,7 @@ impl LlmProvider for CompleteProvider {
     }
 }
 
-fn test_db() -> Arc<DbInstance> {
+fn test_db() -> crate::command::test_db::TestDb<std::sync::Arc<cozo::DbInstance>> {
     crate::command::test_support::registered_learning_test_db("test-observed-provider-events")
 }
 

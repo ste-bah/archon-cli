@@ -234,7 +234,7 @@ fn stable_memory_candidate_id(agent_type: &str, evidence_ids: &[String]) -> Stri
 mod tests {
     use super::*;
 
-    fn test_db() -> std::sync::Arc<DbInstance> {
+    fn test_db() -> crate::command::test_db::TestDb<std::sync::Arc<cozo::DbInstance>> {
         crate::command::test_support::registered_learning_test_db("test-agent-evolve-generate")
     }
 
