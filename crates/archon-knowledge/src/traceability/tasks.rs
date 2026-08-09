@@ -284,10 +284,23 @@ fn section_bullets(raw: &str, heading: &str) -> Vec<String> {
     for line in raw.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix('#') {
-            inside = rest
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case(heading);
+            let found = rest.trim_start_matches('#').trim();
+            // A heading that is a PREFIX of the requested one counts. Authors
+            // write `## Files Expected` where the contract says `## Files
+            // Expected to Change`, and an exact match silently yields zero
+            // bullets — so the task parses as owning NOTHING and every path it
+            // declared is invisible. Observed live: one generated spec in three
+            // used the short form, listing four real files that the traceability
+            // report then reported as "declares no paths".
+            //
+            // Prefix in this direction only, so `Files Forbidden…` can never
+            // satisfy a request for `Files Expected…`; the requested heading is
+            // always the longer, fully-qualified one.
+            inside = found.eq_ignore_ascii_case(heading)
+                || (!found.is_empty()
+                    && heading.len() > found.len()
+                    && heading.to_ascii_lowercase().starts_with(&found.to_ascii_lowercase())
+                    && heading.as_bytes().get(found.len()) == Some(&b' '));
             continue;
         }
         if !inside {
