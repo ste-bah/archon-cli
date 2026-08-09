@@ -22,7 +22,7 @@ use crate::ocr::local::LocalOcrProvider;
 use crate::ocr::provider::{self as ocr_provider, OcrProvider, OcrRequest};
 use crate::provenance::build_doc_lineage_edges;
 use crate::schema::ensure_doc_schema;
-use crate::store::{self, hash_exists_in_sources};
+use crate::store;
 
 use crate::embed;
 pub use crate::ingest_directory::{IngestResult, ingest_directory, ingest_directory_with_policy};
@@ -106,25 +106,35 @@ pub async fn ingest_file_with_policy(
 
     let content_hash = sha256_hex(&content_bytes);
 
-    // Check for duplicate by content hash
-    if hash_exists_in_sources(db, &content_hash).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })? {
-        // Return existing document_id so callers can link to it
-        let existing_id = store::get_doc_by_hash(db, &content_hash)
-            .map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?
-            .map(|d| d.document_id)
-            .unwrap_or_default();
+    // Claim the content hash. Registering the document is part of the same
+    // reservation, so a concurrent ingest of identical bytes deduplicates
+    // against it rather than minting a second document for the same hash.
+    let document_id = format!("doc-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let doc = SourceDocument {
+        document_id: document_id.clone(),
+        source_path: source_path.clone(),
+        media_type: media_type.to_string(),
+        content_hash: content_hash.clone(),
+        discovered_at: now.clone(),
+        status: DocumentStatus::Discovered,
+    };
+
+    let reservation =
+        store::reserve_doc_source_by_hash(db, &doc).map_err(|e| DocsError::Storage {
+            message: e.to_string(),
+        })?;
+
+    if let store::HashReservation::Duplicate(existing) = reservation {
         info!(
             path = %source_path,
             hash = %content_hash,
-            existing = %existing_id,
+            existing = %existing.document_id,
             "Skipping duplicate document"
         );
         return Ok(IngestFileResult {
-            document_id: existing_id,
+            document_id: existing.document_id,
             was_new: false,
             ocr_skipped: false,
             pipeline_failed: false,
@@ -140,23 +150,6 @@ pub async fn ingest_file_with_policy(
             pdf_coord: None,
         });
     }
-
-    // Register the source document
-    let document_id = format!("doc-{}", uuid::Uuid::new_v4());
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let doc = SourceDocument {
-        document_id: document_id.clone(),
-        source_path: source_path.clone(),
-        media_type: media_type.to_string(),
-        content_hash: content_hash.clone(),
-        discovered_at: now.clone(),
-        status: DocumentStatus::Discovered,
-    };
-
-    store::insert_doc_source(db, &doc).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
 
     // Create processing job
     let job = ProcessingJob {

@@ -29,22 +29,13 @@ pub fn ingest_text_source(
     ensure_doc_schema(db).map_err(storage)?;
 
     let content_hash = sha256_str(content);
-    if let Some(existing) = store::get_doc_by_hash(db, &content_hash).map_err(storage)? {
-        let chunks = store::list_chunks_for_doc(db, &existing.document_id).map_err(storage)?;
-        return Ok(IngestTextSourceResult {
-            document_id: existing.document_id,
-            was_new: false,
-            chunks_registered: chunks.len(),
-        });
-    }
-
     let document_id = format!("doc-{}", uuid::Uuid::new_v4());
     let artifact_id = format!("text-source-{document_id}");
     let page_id = format!("page-{document_id}-1");
     let started_at = chrono::Utc::now().to_rfc3339();
     let job_id = format!("job-{}", uuid::Uuid::new_v4());
 
-    store::insert_doc_source(
+    let reservation = store::reserve_doc_source_by_hash(
         db,
         &SourceDocument {
             document_id: document_id.clone(),
@@ -56,6 +47,15 @@ pub fn ingest_text_source(
         },
     )
     .map_err(storage)?;
+    if let store::HashReservation::Duplicate(existing) = reservation {
+        let chunks = store::list_chunks_for_doc(db, &existing.document_id).map_err(storage)?;
+        return Ok(IngestTextSourceResult {
+            document_id: existing.document_id,
+            was_new: false,
+            chunks_registered: chunks.len(),
+        });
+    }
+
     store::insert_processing_job(
         db,
         &ProcessingJob {
