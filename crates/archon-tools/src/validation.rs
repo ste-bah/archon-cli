@@ -29,17 +29,6 @@ pub const KNOWN_MODEL_IDS: &[&str] = &[
     "claude-haiku-4-5-20251001",
 ];
 
-/// Known shortcut names mapped to full OpenAI Codex model identifiers.
-///
-/// Compile-time fallbacks for the `openai-codex` provider. The canonical
-/// source of truth is `ArchonConfig::models.openai_codex`; production code
-/// should call `resolve_codex_model(alias, &cfg)` instead.
-pub const CODEX_KNOWN_SHORTCUTS: &[(&str, &str)] = &[
-    ("default", "gpt-5.5"),
-    ("codex", "gpt-5.3-codex"),
-    ("mini", "gpt-5.4-mini"),
-];
-
 // Resolver functions for these aliases live in `archon_core::config` next to
 // the `ModelsConfig` struct (cannot live here because `archon-tools` is below
 // `archon-core` in the workspace dependency order).

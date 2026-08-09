@@ -22,7 +22,7 @@ impl Tool for TaskGetTool {
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "The 8-character task ID"
+                    "description": "Task ID, the subagent ID it dispatched, or an unambiguous prefix of either"
                 }
             }
         })
@@ -34,7 +34,7 @@ impl Tool for TaskGetTool {
             _ => return ToolResult::error("missing required field: task_id"),
         };
 
-        match crate::task_manager::TASK_MANAGER.get_task(task_id) {
+        match crate::task_manager::TASK_MANAGER.resolve_task(task_id) {
             Some(info) => match serde_json::to_string_pretty(&info) {
                 Ok(s) => ToolResult::success(s),
                 Err(e) => ToolResult::error(format!("failed to serialize task info: {e}")),

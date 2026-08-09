@@ -161,10 +161,10 @@ fn validate_provider_model_name(input: &str) -> Result<String, String> {
 /// `/model default` selected, because the alias was rewritten to a literal ID
 /// here before the provider ever saw it.
 ///
-/// `archon-tools`' `CODEX_KNOWN_SHORTCUTS` says the rule outright: those
-/// constants are compile-time fallbacks and "production code should call
-/// `resolve_codex_model(alias, &cfg)` instead". That resolver existed with no
-/// callers; this is now its caller.
+/// `resolve_codex_model(alias, &cfg)` is the canonical resolver and existed
+/// with no callers; this is now its caller. The compile-time fallback table it
+/// replaced (`CODEX_KNOWN_SHORTCUTS`) has been deleted rather than left as a
+/// second, drifting copy of the same defaults.
 ///
 /// The cross-provider tier names map as `to_alias_map` documents — `opus` and
 /// `sonnet` both to the frontier `default`, `haiku` to `mini` — so a tier name

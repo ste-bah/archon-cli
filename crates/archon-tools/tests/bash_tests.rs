@@ -125,22 +125,70 @@ async fn bash_clamps_longer_requested_timeout_to_configured_maximum() {
     assert!(start.elapsed() < std::time::Duration::from_millis(1_500));
 }
 
+/// A requested timeout BELOW the floor is raised to it, not honoured.
+///
+/// This test previously asserted the opposite — that `timeout: 50` cut a
+/// `sleep 1` short — which was the behaviour before `tools.bash_timeout_floor`
+/// existed. The floor was added precisely because a model-chosen timeout was
+/// killing real builds: an agent would ask for 120s, a cold cargo compile
+/// needed longer, and the task was recorded as failing on a timeout it had
+/// selected for itself. Config is a floor now, not merely a ceiling, so the
+/// short request loses and `sleep 1` runs to completion.
+///
+/// Renamed rather than deleted: the scenario still matters, only the expected
+/// outcome inverted.
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn bash_honors_shorter_requested_timeout() {
+async fn bash_raises_a_requested_timeout_below_the_floor() {
     let tool = BashTool {
         timeout_secs: 2,
+        // Floor between the requested 50ms and the 2s ceiling, so the clamp is
+        // what decides the outcome rather than either bound alone.
+        timeout_floor_secs: 2,
+        max_output_bytes: 102400,
+        ..Default::default()
+    };
+    let result = tool
+        .execute(json!({ "command": "sleep 1", "timeout": 50 }), &test_ctx())
+        .await;
+
+    assert!(
+        !result.is_error,
+        "a 50ms request must be raised to the floor, letting `sleep 1` finish: {}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("timed out"),
+        "the command completed, so nothing timed out: {}",
+        result.content
+    );
+}
+
+/// The ceiling still binds: a request ABOVE it is clamped down, so the floor
+/// change did not turn the configured maximum into a suggestion.
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn bash_still_clamps_a_requested_timeout_above_the_ceiling() {
+    let tool = BashTool {
+        timeout_secs: 1,
+        timeout_floor_secs: 1,
         max_output_bytes: 102400,
         ..Default::default()
     };
     let start = std::time::Instant::now();
     let result = tool
-        .execute(json!({ "command": "sleep 1", "timeout": 50 }), &test_ctx())
+        .execute(
+            json!({ "command": "sleep 30", "timeout": 600_000 }),
+            &test_ctx(),
+        )
         .await;
 
-    assert!(result.is_error);
+    assert!(result.is_error, "the ceiling must still terminate it");
     assert!(result.content.contains("timed out"));
-    assert!(start.elapsed() < std::time::Duration::from_millis(500));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(10),
+        "it must stop at the 1s ceiling, not run the full sleep"
+    );
 }
 
 #[cfg(not(target_os = "windows"))]
