@@ -96,7 +96,13 @@ pub(crate) async fn activity_handler(
             }),
         )
             .into_response(),
-        Err(error) => store_error(error),
+        Err(error) => {
+            // The read failed, which may mean the elected connection is dead.
+            // Drop it so the next request re-elects rather than reusing a
+            // handle that can never succeed again.
+            state.board.invalidate().await;
+            store_error(error)
+        }
     }
 }
 

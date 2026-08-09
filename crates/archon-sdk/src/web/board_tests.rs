@@ -408,7 +408,7 @@ async fn the_store_connects_as_a_client_when_a_server_already_holds_the_writer()
     alone.resolve(&paths).await.expect("resolve").expect("some");
     assert!(
         matches!(
-            alone.elected().expect("elected").as_ref(),
+            alone.elected().await.expect("elected").as_ref(),
             archon_memory::access::MemoryAccess::Direct { .. }
         ),
         "with no server running the election should have opened the graph directly"
@@ -427,13 +427,57 @@ async fn the_store_connects_as_a_client_when_a_server_already_holds_the_writer()
         .expect("some");
     assert!(
         matches!(
-            alongside.elected().expect("elected").as_ref(),
+            alongside.elected().await.expect("elected").as_ref(),
             archon_memory::access::MemoryAccess::Remote(_)
         ),
         "a second process must reach the board over the socket, not open the database again"
     );
 
     drop(host);
+}
+
+/// A cached election survives a poll but not a failure.
+///
+/// The bug this pins: the elected arm is `Remote` whenever another process owns
+/// the writer, and that server dies with its process. A write-once cache then
+/// hands back the closed socket for the life of the web server, so every board
+/// request returns 500 even once a healthy server is listening again — which is
+/// exactly what was observed live, an 8-hour-old web process holding a CLOSED
+/// socket to a server that had long exited.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dead_election_is_dropped_so_the_next_request_re_elects() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = seeded(dir.path(), |graph| {
+        raise(graph, "run-recovered", "raised before the server died");
+    });
+    let paths = WebRuntimePaths::from_overrides(Some(&db.to_string_lossy()), None);
+
+    let store = WebBoardStore::new();
+    store.resolve(&paths).await.expect("resolve").expect("some");
+    let first = store.elected().await.expect("elected");
+
+    // A second resolve reuses the election rather than re-running it: that is
+    // the caching this fix must not have thrown away.
+    store.resolve(&paths).await.expect("resolve").expect("some");
+    assert!(
+        Arc::ptr_eq(&first, &store.elected().await.expect("elected")),
+        "a healthy election must be reused, not re-run on every poll"
+    );
+
+    // A read failed, so the handle is suspect and gets dropped.
+    store.invalidate().await;
+    assert!(
+        store.elected().await.is_none(),
+        "invalidate must clear the slot, or the next request reuses the dead handle"
+    );
+
+    // The next request elects again and the board is readable.
+    let board = store.resolve(&paths).await.expect("resolve").expect("some");
+    let runs = board.list_board_runs().expect("the re-elected handle reads");
+    assert!(
+        runs.iter().any(|run| run.run_id == "run-recovered"),
+        "re-electing must produce a handle that can actually read the board"
+    );
 }
 
 /// The board is a read of everything every agent in the session raised, so it
