@@ -152,7 +152,7 @@ Each command goes through the same persisted Cozo state as its `archon X` shell 
 | Command | Aliases | Description |
 |---|---|---|
 | `/cancel` | `stop`, `abort` | Cancel the in-flight task (fires cancel token + dispatcher abort) |
-| `/compact` | — | Trigger context compaction |
+| `/compact [auto\|force\|micro\|snip]` | — | Trigger context compaction. Bare `/compact` behaves like `/compact auto`: it only compacts at or above 60 % context usage and otherwise reports "below 60 %". `force` compacts regardless of usage, using `context.manual_compact_force_strategy` (default `micro`). `micro` summarizes the oldest ~30 % of turns. `snip` drops the oldest ~50 % of turns without an LLM summary |
 | `/export` | `save` | Export session transcript |
 | `/login` | — | Re-authenticate |
 | `/logout` | — | Sign out |

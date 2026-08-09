@@ -10,6 +10,8 @@ mod builder;
 mod effects;
 mod primary;
 #[cfg(test)]
+mod slash_ctx_fixture;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use builder::build_command_context;
