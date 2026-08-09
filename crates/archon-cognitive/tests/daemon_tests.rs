@@ -263,7 +263,16 @@ fn daemon_exits_when_archon_activity_has_gone_stale() {
     .unwrap();
 
     let mut cfg = config();
-    cfg.max_ticks_per_run = 0; // unbounded: only the idle rule may stop it
+    // Bounded, deliberately. `stopped_idle` is set ONLY by the idle rule, so
+    // the status still proves which path ended the run — while the tick cap
+    // guarantees the test terminates either way.
+    //
+    // The first version left this unbounded so "only the idle rule can stop
+    // it". That makes a regression HANG rather than fail: sabotaging the check
+    // while writing this left a test binary spinning at 39% CPU for two and a
+    // half hours before anyone noticed. A test whose failure mode is "runs
+    // forever" is worse than no test.
+    cfg.max_ticks_per_run = 50;
     cfg.interval_ms = 10;
     cfg.idle_exit_ms = 60_000;
 
@@ -271,7 +280,8 @@ fn daemon_exits_when_archon_activity_has_gone_stale() {
     let state = daemon.run_forever().unwrap();
     assert_eq!(
         state.status, "stopped_idle",
-        "an abandoned daemon must stop itself rather than run forever"
+        "an abandoned daemon must stop itself; `stopped` here means it ran to \
+         the tick cap instead and the idle rule never fired"
     );
 }
 
