@@ -263,9 +263,8 @@ mod tests {
         CompletionClaimKind, CompletionState, EvidenceKind, FalseCompletionIncident,
     };
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-completion-trust-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    fn test_db() -> crate::test_support::TestDb<DbInstance> {
+        crate::test_support::sqlite_test_db("test-completion-trust")
     }
 
     fn claim(id: &str, verified: bool) -> CompletionClaim {

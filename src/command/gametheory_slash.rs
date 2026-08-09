@@ -589,7 +589,7 @@ mod tests {
             );
 
             let stale_ctx_db = test_db();
-            let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
+            let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db.arc()).build();
             let args = vec!["status".to_string(), "gt-slash".to_string()];
             GameTheorySlashHandler.execute(&mut ctx, &args).unwrap();
             let events = drain_tui_events(&mut rx);
@@ -613,7 +613,7 @@ mod tests {
 
             runtime.block_on(async {
                 let stale_ctx_db = test_db();
-                let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db).build();
+                let (mut ctx, mut rx) = CtxBuilder::new().with_cozo_db(stale_ctx_db.arc()).build();
                 let classify_args = vec![
                     "classify-only".to_string(),
                     "Two".to_string(),
@@ -670,15 +670,8 @@ mod tests {
         });
     }
 
-    fn test_db() -> Arc<DbInstance> {
-        let path = format!("/tmp/test-gt-slash-{}.db", uuid::Uuid::new_v4());
-        archon_cozo::open_sqlite_guarded_instance(
-            &path,
-            "open game-theory slash test db",
-            archon_cozo::CozoGuardConfig::for_db_path(&path),
-        )
-        .unwrap()
-        .db_arc()
+    fn test_db() -> crate::command::test_db::TestDb<Arc<DbInstance>> {
+        crate::command::test_db::guarded_test_db("test-gt-slash", "open game-theory slash test db")
     }
 
     fn seed_gt_run(db: &DbInstance, run_id: &str, situation: &str, status: &str, cost: &str) {

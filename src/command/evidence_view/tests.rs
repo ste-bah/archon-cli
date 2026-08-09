@@ -163,10 +163,11 @@ where
         _ => None,
     };
     let previous = std::env::var_os(key);
-    let path = PathBuf::from(format!(
-        "/tmp/evidence-view-{key}-{}.db",
-        uuid::Uuid::new_v4()
-    ));
+    // A real temp dir, not `/tmp/…`: on Windows the latter resolves against
+    // the current drive root and the store is never cleaned up (issue #156).
+    // `dir` outlives `f`, so the file is present for the whole callback.
+    let dir = tempfile::tempdir().expect("create evidence-view test temp dir");
+    let path: PathBuf = dir.path().join(format!("evidence-view-{key}.db"));
     // SAFETY: ENV_LOCK serialises this module's environment mutation tests.
     unsafe {
         std::env::set_var(key, &path);
@@ -181,9 +182,14 @@ where
     }
 }
 
+/// The deliberately-stale handle parked in `ctx`: these tests assert the
+/// handler reads the env-configured store instead of this one, so nothing
+/// ever persists through it. In-memory therefore beats a temp file — no
+/// path, no cleanup, no leak (issue #156).
 fn test_docs_db() -> Arc<DbInstance> {
-    let path = format!("/tmp/test-docs-slash-{}.db", uuid::Uuid::new_v4());
-    test_docs_db_at(Path::new(&path))
+    let db = DbInstance::new("mem", "", "").expect("in-memory cozo db");
+    archon_docs::schema::ensure_doc_schema(&db).unwrap();
+    Arc::new(db)
 }
 
 fn test_docs_db_at(path: &Path) -> Arc<DbInstance> {
@@ -199,9 +205,11 @@ fn test_docs_db_at(path: &Path) -> Arc<DbInstance> {
     db
 }
 
+/// Stale `ctx` handle — see [`test_docs_db`].
 fn test_learning_db() -> Arc<DbInstance> {
-    let path = format!("/tmp/test-learning-slash-{}.db", uuid::Uuid::new_v4());
-    test_learning_db_at(Path::new(&path))
+    let db = DbInstance::new("mem", "", "").expect("in-memory cozo db");
+    archon_learning::schema::ensure_learning_schema(&db).unwrap();
+    Arc::new(db)
 }
 
 fn test_learning_db_at(path: &Path) -> Arc<DbInstance> {

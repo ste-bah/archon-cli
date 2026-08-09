@@ -23,6 +23,9 @@ pub mod runner;
 pub mod session;
 pub mod subagent_adapter;
 
+#[cfg(test)]
+mod test_support;
+
 // --- Phase 4: Declarative pipeline execution ---
 pub mod error;
 pub mod id;

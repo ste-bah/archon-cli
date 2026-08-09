@@ -940,9 +940,8 @@ fn parse_string_list(json: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-completion-store-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    fn test_db() -> crate::test_support::TestDb<DbInstance> {
+        crate::test_support::sqlite_test_db("test-completion-store")
     }
 
     fn make_claim(run_id: &str, kind: CompletionClaimKind, text: &str) -> CompletionClaim {

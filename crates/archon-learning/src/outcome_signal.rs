@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn test_db() -> std::sync::Arc<DbInstance> {
+    fn test_db() -> crate::cozo_guard::TestDb {
         let db = crate::cozo_guard::test_sqlite_db("test-outcome-signal");
         // Also create the legacy learn_events relation for consume tests.
         create_phase5_learn_events(&db);
