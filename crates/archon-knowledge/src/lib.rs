@@ -8,6 +8,10 @@ pub mod contradiction_scanner;
 pub mod entity_extractor;
 pub mod errors;
 pub mod hybrid_retriever;
+/// R7 unified recall: one query shape over memory, docs, the knowledge graph
+/// and the code index, with each store keeping its own database. Scores are
+/// explicitly uncalibrated — see [`recall::normalize`].
+pub mod recall;
 pub mod relation_inferer;
 pub mod schema;
 pub mod source_quality;

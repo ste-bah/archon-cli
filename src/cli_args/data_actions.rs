@@ -56,6 +56,33 @@ pub enum KbAction {
         #[arg(long)]
         kb: Option<String>,
     },
+    /// Recall across memory, docs, the knowledge graph and the code index at once
+    ///
+    /// Scores are UNCALIBRATED: they encode each store's own ranking and carry
+    /// no cross-store meaning. See `archon_knowledge::recall::normalize`.
+    Recall {
+        /// Search query
+        query: String,
+        /// Maximum merged results, split evenly as a per-source quota
+        #[arg(long, default_value = "10")]
+        limit: usize,
+        /// Comma-separated stores to consult: memory, docs, knowledge, code
+        #[arg(long, default_value = "memory,docs,knowledge,code")]
+        sources: String,
+        /// How long any one store may take before it is abandoned
+        #[arg(long, default_value = "5000")]
+        source_timeout_ms: u64,
+        /// Path to an already-built LEANN code index; without it the code
+        /// source is reported as not consulted rather than skipped silently
+        #[arg(long)]
+        code_index: Option<std::path::PathBuf>,
+        /// Retrieval mode for the knowledge graph source: exact, semantic, hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
+        /// Restrict the knowledge graph source to a named knowledge base
+        #[arg(long)]
+        kb: Option<String>,
+    },
     /// Extract claims, entities, relations, source quality and contradictions from doc chunks
     Process {
         /// Extract claims from document chunks

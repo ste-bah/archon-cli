@@ -44,6 +44,33 @@ pub async fn handle_kb_command(action: KbAction) -> Result<()> {
             mode,
             kb,
         } => search(&engine, &query, limit, &mode, kb.as_deref()).await,
+        KbAction::Recall {
+            query,
+            limit,
+            sources,
+            source_timeout_ms,
+            code_index,
+            mode,
+            kb,
+        } => {
+            let args = crate::command::kb_recall::RecallArgs {
+                limit,
+                sources: crate::command::kb_recall::parse_sources(&sources)?,
+                source_timeout: std::time::Duration::from_millis(source_timeout_ms),
+                code_index,
+                // The knowledge source reuses the exact option-building the
+                // `kb search` path uses, embedding provider warnings included,
+                // so the two verbs cannot disagree about what "hybrid" means.
+                knowledge_options: search_options_for_cli(
+                    &db,
+                    &query,
+                    limit,
+                    &mode,
+                    kb.as_deref(),
+                )?,
+            };
+            crate::command::kb_recall::handle_recall(Arc::clone(&db), &query, args).await
+        }
         KbAction::Process {
             claims,
             entities,
