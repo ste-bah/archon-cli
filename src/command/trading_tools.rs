@@ -79,12 +79,44 @@ pub(crate) fn run_setup_script(
     checked_text(output, "setup-trading-tools")
 }
 
+/// Resolve the project root that owns `.archon/trading-lab`.
+///
+/// The starting point is taken literally when it already looks like a project
+/// root; otherwise this walks up until it finds one. The walk exists because
+/// workflow branches execute inside `…/v2/worktrees/<branch>/`, and an agent
+/// following a task contract that says `--target .` resolved that to the
+/// worktree — which has no `trading-lab`. A live verification reported "the
+/// required Polygon dataset/version is absent under target '.'" for a dataset
+/// that was present, and the task was partly failed over a file that existed.
+///
+/// If no ancestor qualifies, the original path is returned unchanged so the
+/// caller still fails with a message about the path the operator actually gave,
+/// rather than about some ancestor they never mentioned.
 pub(crate) fn project_root(target: Option<&PathBuf>) -> Result<PathBuf> {
-    let root = match target {
+    let start = match target {
         Some(path) => path.clone(),
         None => std::env::current_dir().context("failed to resolve current directory")?,
     };
-    Ok(root)
+    Ok(resolve_trading_lab_root(&start))
+}
+
+/// True when `dir` is a project root — it owns the trading-lab data tree.
+fn owns_trading_lab(dir: &Path) -> bool {
+    dir.join(".archon/trading-lab").is_dir()
+}
+
+fn resolve_trading_lab_root(start: &Path) -> PathBuf {
+    if owns_trading_lab(start) {
+        return start.to_path_buf();
+    }
+    // `canonicalize` so a relative `.` inside a worktree still has ancestors to
+    // walk; fall back to the literal path when it does not yet exist on disk.
+    let absolute = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
+    absolute
+        .ancestors()
+        .find(|ancestor| owns_trading_lab(ancestor))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| start.to_path_buf())
 }
 
 pub(crate) fn tv_cli(project_root: &Path) -> PathBuf {

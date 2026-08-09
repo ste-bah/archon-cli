@@ -145,19 +145,7 @@ pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {
         } => {
             super::trading_data_provider::coverage(target.as_ref(), universe, *json, out.as_deref())
         }
-        TradingCliDataAction::VerifyArtifact { dataset_dir } => {
-            let record = TradingDataLake::verify_artifact_dir(dataset_dir).map_err(data_error)?;
-            write_or_render(
-                &json!({
-                    "status": "verified",
-                    "dataset_id": record.dataset_id,
-                    "version": record.version,
-                    "dataset_checksum": record.checksum,
-                    "validation_checksum": record.validation_checksum,
-                }),
-                None,
-            )
-        }
+        TradingCliDataAction::VerifyArtifact { dataset_dir } => verify_artifact(dataset_dir),
         TradingCliDataAction::VerifyCoverage { coverage, registry } => {
             let matrix =
                 TradingDataLake::verify_coverage_files(coverage, registry).map_err(data_error)?;
@@ -197,6 +185,68 @@ struct IngestInput<'a> {
     missing_bars: u64,
     optional: bool,
     out: Option<&'a Path>,
+}
+
+/// Verify an artifact, dispatching on what the path actually is.
+///
+/// The command previously assumed a dataset directory and called
+/// `verify_artifact_dir` unconditionally, so pointing it at `registry.json` —
+/// which two task contracts explicitly instruct — failed with "Not a directory".
+/// Task specs are not wrong to name the registry here; the command was simply
+/// narrower than its own name.
+fn verify_artifact(path: &Path) -> Result<String> {
+    if path.is_dir() {
+        return verify_dataset_dir(path);
+    }
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("registry.json") => verify_registry_file(path),
+        Some("manifest.json") => {
+            // A manifest names its own dataset directory; verifying the parent
+            // is what the caller meant.
+            let dataset_dir = path.parent().ok_or_else(|| {
+                anyhow!(
+                    "manifest.json has no parent dataset directory: {}",
+                    path.display()
+                )
+            })?;
+            verify_dataset_dir(dataset_dir)
+        }
+        _ => Err(anyhow!(
+            "verify-artifact does not know how to verify {}; supported: a dataset directory, \
+             its manifest.json, or a registry.json",
+            path.display()
+        )),
+    }
+}
+
+fn verify_dataset_dir(dataset_dir: &Path) -> Result<String> {
+    let record = TradingDataLake::verify_artifact_dir(dataset_dir).map_err(data_error)?;
+    write_or_render(
+        &json!({
+            "status": "verified",
+            "kind": "dataset",
+            "dataset_id": record.dataset_id,
+            "version": record.version,
+            "dataset_checksum": record.checksum,
+            "validation_checksum": record.validation_checksum,
+        }),
+        None,
+    )
+}
+
+/// Verify every dataset the registry claims, so a registry that lists a broken
+/// dataset fails rather than passing on its own well-formedness.
+fn verify_registry_file(registry_path: &Path) -> Result<String> {
+    let registry = TradingDataLake::verify_registry_file(registry_path).map_err(data_error)?;
+    write_or_render(
+        &json!({
+            "status": "verified",
+            "kind": "registry",
+            "schema_version": registry.schema_version,
+            "verified_datasets": registry.datasets.len(),
+        }),
+        None,
+    )
 }
 
 fn status(target: Option<&PathBuf>) -> Result<String> {

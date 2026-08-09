@@ -269,3 +269,137 @@ pub(super) fn outcome(
         completion_evidence: Vec::new(),
     }
 }
+
+/// A live run accepted TDL-001 with `tests 2/4`: two `archon trading data`
+/// commands exited 1 on a real registry checksum defect, and the verdict stayed
+/// `accepted`. Neither existing guard applied — the commands were present, so
+/// not "commandless", and they produced output, so not "zero-matched". Only the
+/// absence of a rule asking "did a test fail?" let it through.
+#[test]
+fn accepted_verification_with_a_failing_test_command_is_demoted() {
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::Accepted,
+        summary: "audit completed; findings recorded".to_string(),
+        ..WorkflowV2Result::default()
+    };
+    // A genuinely successful command, so the commandless backstop stays quiet.
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test -p archon-trading data_store_tests".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+    });
+    // The two that actually failed in the live run.
+    for command in [
+        "archon trading data status --target .",
+        "archon trading data list --target . --json",
+    ] {
+        result.commands_run.push(crate::WorkflowV2CommandRecord {
+            kind: crate::WorkflowV2CommandKind::Test,
+            command: command.to_string(),
+            status: crate::WorkflowV2CommandStatus::Failed,
+            exit_code: Some(1),
+            output_summary: "Failed closed on the live dataset checksum-chain mismatch".to_string(),
+        });
+    }
+    result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-001"] });
+
+    let result = result_from_fanout_report(
+        &fanout_call("verification-wave-1"),
+        report(vec![outcome(
+            "verify-TASK-TDL-001",
+            WorkflowV2Status::Accepted,
+            Some(result),
+            None,
+        )]),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+    assert_eq!(result.data["outcomes"][0]["status"], "needs_review");
+    let failed = &result.data["outcomes"][0]["result"]["data"]["failed_test_commands"];
+    assert_eq!(
+        failed.as_array().map(|items| items.len()),
+        Some(2),
+        "both failing commands must be named in the gap: {failed:#?}"
+    );
+}
+
+/// The new rule must not fire on a clean run — every test succeeded, so the
+/// acceptance stands. Without this, the guard could pass by demoting everything.
+#[test]
+fn accepted_verification_with_all_tests_passing_is_left_alone() {
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::Accepted,
+        summary: "all focused tests passed".to_string(),
+        ..WorkflowV2Result::default()
+    };
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test -p archon-trading data_store_tests".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+    });
+    result.task_coverage.push(crate::WorkflowV2TaskCoverage {
+        task_id: "TASK-TDL-001".to_string(),
+        status: crate::WorkflowV2TaskCoverageStatus::Accepted,
+        summary: "acceptance criteria proven by focused tests".to_string(),
+        evidence: vec![WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Test,
+            "focused verification evidence",
+        )],
+    });
+    result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-001"] });
+
+    let result = result_from_fanout_report(
+        &fanout_call("verification-wave-1"),
+        report(vec![outcome(
+            "verify-TASK-TDL-001",
+            WorkflowV2Status::Accepted,
+            Some(result),
+            None,
+        )]),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+}
+
+/// A failing command of a non-test kind must not demote: builds and inspections
+/// fail for reasons that are not verification verdicts, and treating them as
+/// such would block work the evidence does support.
+#[test]
+fn accepted_verification_with_a_failing_non_test_command_is_left_alone() {
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::Accepted,
+        summary: "tests passed; an inspection probe failed".to_string(),
+        ..WorkflowV2Result::default()
+    };
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test -p archon-trading data_store_tests".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+    });
+    result.commands_run.push(crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Inspect,
+        command: "command -v some-optional-tool".to_string(),
+        status: crate::WorkflowV2CommandStatus::Failed,
+        exit_code: Some(1),
+        output_summary: "not found".to_string(),
+    });
+    result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-001"] });
+
+    let result = result_from_fanout_report(
+        &fanout_call("verification-wave-1"),
+        report(vec![outcome(
+            "verify-TASK-TDL-001",
+            WorkflowV2Status::Accepted,
+            Some(result),
+            None,
+        )]),
+    );
+
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+}

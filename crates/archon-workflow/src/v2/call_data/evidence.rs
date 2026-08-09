@@ -26,21 +26,59 @@ pub(super) fn blocked_branch_result(outcome: &WorkflowV2BranchOutcome) -> Workfl
     result
 }
 
+/// Whether a branch error is about the shape of the agent's output.
+///
+/// Deliberately narrow: anything not recognisably a schema complaint is
+/// described by its own text rather than mislabelled. Over-matching here
+/// reinstates the bug — a transport error dressed up as a schema failure.
+fn error_looks_like_schema_failure(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    [
+        "schema repair",
+        "invalid structured output",
+        "unknown variant",
+        "missing field",
+        "expected one of",
+        "must be one json",
+    ]
+    .iter()
+    .any(|marker| lowered.contains(marker))
+}
+
 pub(super) fn failed_branch_error_result(
     outcome: &WorkflowV2BranchOutcome,
     error: &str,
 ) -> WorkflowV2Result {
+    // The summary used to assert "produced invalid structured output after
+    // repair" for EVERY failure reaching this function, including transport and
+    // notification-delivery errors that say nothing about output shape. A live
+    // branch killed by a dropped activity channel was labelled a schema failure,
+    // and the label was believed over the error sitting beside it. Name the
+    // schema case only when the error actually looks like one.
+    let schema_failure = error_looks_like_schema_failure(error);
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::Failed,
-        summary: format!(
-            "fanout branch '{}' produced invalid structured output after repair",
-            outcome.item_id
-        ),
+        summary: if schema_failure {
+            format!(
+                "fanout branch '{}' produced invalid structured output after repair",
+                outcome.item_id
+            )
+        } else {
+            format!(
+                "fanout branch '{}' failed before a usable result was produced: {}",
+                outcome.item_id,
+                truncate_for_result(error, 200)
+            )
+        },
         ..WorkflowV2Result::default()
     };
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Blocker,
-        "branch output was invalid or asked for confirmation; the branch outcome was retained as typed data for workflow.js",
+        if schema_failure {
+            "branch output was invalid or asked for confirmation; the branch outcome was retained as typed data for workflow.js"
+        } else {
+            "branch failed before producing output; the runtime error is recorded verbatim in the residual gap"
+        },
     ));
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!("invalid_branch_output_{}", sanitize_v2_id(&outcome.item_id)),

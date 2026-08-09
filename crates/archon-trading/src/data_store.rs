@@ -70,6 +70,23 @@ impl TradingDataLake {
         Ok(record)
     }
 
+    /// Verify a registry file and every dataset it registers.
+    ///
+    /// Structural validity of `registry.json` alone would be a weak claim: the
+    /// registry's job is to name datasets that hold up, so a registry listing a
+    /// broken dataset must fail. This walks each entry through the same
+    /// artifact verification a dataset directory gets.
+    pub fn verify_registry_file(
+        registry_path: &Path,
+    ) -> Result<PersistentDatasetRegistry, DataStoreError> {
+        let root = project_root_for_artifact(registry_path)?;
+        let registry: PersistentDatasetRegistry = read_json(registry_path)?;
+        for record in registry.datasets.values() {
+            verify_artifacts(&root, record)?;
+        }
+        Ok(registry)
+    }
+
     pub fn verify_coverage_files(
         coverage_path: &Path,
         registry_path: &Path,
