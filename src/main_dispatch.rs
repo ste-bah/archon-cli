@@ -59,7 +59,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::Meaning { .. }
         | Commands::Constellation { .. }
         | Commands::Memory { .. }
-        | Commands::Style { .. }) => handle_data_command(command, config).await,
+        | Commands::Style { .. }) => handle_data_command(command, config, env_vars).await,
         command @ (Commands::SelfCmd { .. }
         | Commands::Gametheory { .. }
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
@@ -281,10 +281,18 @@ async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf
     }
 }
 
-async fn handle_data_command(command: Commands, config: &ArchonConfig) -> Result<()> {
+async fn handle_data_command(
+    command: Commands,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+) -> Result<()> {
     match command {
         Commands::Kb { action } => crate::command::kb::handle_kb_command(action).await,
-        Commands::Docs { action } => crate::command::docs::handle_docs_command(action).await,
+        // `docs compile` and `docs answer` resolve an LLM provider, so this
+        // group needs the env vars the auth layer reads.
+        Commands::Docs { action } => {
+            crate::command::docs::handle_docs_command(action, config, env_vars).await
+        }
         Commands::Video { action } => crate::command::video::handle_video_command(action).await,
         Commands::Trading { action } => crate::command::trading::handle_trading_command(&action),
         Commands::Prov { action } => crate::command::prov::handle_prov_command(action).await,

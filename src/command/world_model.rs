@@ -15,6 +15,7 @@ mod labeling_runtime;
 mod predict;
 mod runtime;
 mod status;
+mod surprise_metric;
 mod trainer_runtime;
 
 pub(crate) use guard::{
@@ -35,6 +36,7 @@ pub(crate) use status::render_world_status;
 #[cfg(test)]
 pub(super) use status::render_world_status_with_stats;
 pub(crate) use status::{WorldInspectionRow, world_inspection_rows};
+pub(crate) use surprise_metric::{LatentSurpriseContext, record_latent_surprise};
 pub(crate) use trainer_runtime::{
     latest_daemon_trainer_event, run_daemon_trainer_tick_controlled_with_activity,
     schedule_dynamic_trainer_tick,
