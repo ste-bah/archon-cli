@@ -24,6 +24,8 @@ fn config() -> CognitiveDaemonConfig {
         stale_heartbeat_ms: 30_000,
         run_on_start: true,
         max_ticks_per_run: 1,
+        // Off for the existing tests, so their behaviour is unchanged.
+        idle_exit_ms: 0,
     }
 }
 
@@ -230,4 +232,105 @@ fn wait_for_job(root: &std::path::Path, name: &str) -> chrono::DateTime<chrono::
         std::thread::sleep(Duration::from_millis(100));
     }
     panic!("job {name} did not start");
+}
+
+/// The daemon `setsid()`s away from its launcher on purpose, so it outlives the
+/// session — that is what a daemon is for. What it lacked was any notion of
+/// being ABANDONED: `run_forever` had no exit but an explicit stop file, so a
+/// run that ended without one left it behind. One was found alive after 10h43m,
+/// reparented to init, still holding a deleted copy of a binary replaced three
+/// times since; four accumulated in a day.
+///
+/// The launcher already wrote an activity marker. Nothing read it. Now it does.
+#[test]
+fn daemon_exits_when_archon_activity_has_gone_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PersistentCognitiveStore::open(dir.path()).unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    paths.ensure_root().unwrap();
+
+    // An activity marker from well before the idle window.
+    let stale = chrono::Utc::now() - chrono::Duration::hours(3);
+    std::fs::write(
+        &paths.activity_path,
+        serde_json::to_vec(&serde_json::json!({
+            "pid": 1234,
+            "reason": "session turn",
+            "updated_at": stale,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut cfg = config();
+    cfg.max_ticks_per_run = 0; // unbounded: only the idle rule may stop it
+    cfg.interval_ms = 10;
+    cfg.idle_exit_ms = 60_000;
+
+    let mut daemon = CognitiveDaemon::new(dir.path(), cfg, store.db(), policy(true));
+    let state = daemon.run_forever().unwrap();
+    assert_eq!(
+        state.status, "stopped_idle",
+        "an abandoned daemon must stop itself rather than run forever"
+    );
+}
+
+/// A live session must keep its daemon. Without this the fix would trade an
+/// orphan problem for a daemon that dies under a user who is still working.
+#[test]
+fn daemon_keeps_running_while_archon_is_active() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PersistentCognitiveStore::open(dir.path()).unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    paths.ensure_root().unwrap();
+    std::fs::write(
+        &paths.activity_path,
+        serde_json::to_vec(&serde_json::json!({
+            "pid": 1234,
+            "reason": "session turn",
+            "updated_at": chrono::Utc::now(),
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut cfg = config();
+    cfg.interval_ms = 10;
+    cfg.idle_exit_ms = 60_000;
+    cfg.max_ticks_per_run = 1; // bounded so the test terminates
+
+    let mut daemon = CognitiveDaemon::new(dir.path(), cfg, store.db(), policy(true));
+    let state = daemon.run_forever().unwrap();
+    assert_ne!(
+        state.status, "stopped_idle",
+        "a fresh activity marker must not read as abandonment"
+    );
+}
+
+/// Fails CLOSED. A missing or unreadable marker means we cannot tell, and a
+/// transient filesystem problem must not look like abandonment and kill a
+/// daemon doing real work.
+#[test]
+fn an_unreadable_activity_marker_does_not_stop_the_daemon() {
+    for marker in [None, Some("not json at all"), Some("{\"updated_at\": 42}")] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PersistentCognitiveStore::open(dir.path()).unwrap();
+        let paths = DaemonPaths::new(dir.path());
+        paths.ensure_root().unwrap();
+        if let Some(body) = marker {
+            std::fs::write(&paths.activity_path, body).unwrap();
+        }
+
+        let mut cfg = config();
+        cfg.interval_ms = 10;
+        cfg.idle_exit_ms = 1; // would fire instantly if the marker parsed
+        cfg.max_ticks_per_run = 1;
+
+        let mut daemon = CognitiveDaemon::new(dir.path(), cfg, store.db(), policy(true));
+        let state = daemon.run_forever().unwrap();
+        assert_ne!(
+            state.status, "stopped_idle",
+            "unreadable marker {marker:?} must not be treated as abandonment"
+        );
+    }
 }

@@ -37,6 +37,8 @@ pub struct DaemonPaths {
     pub state_path: PathBuf,
     pub lock_path: PathBuf,
     pub stop_path: PathBuf,
+    /// Written by the launcher on session activity; read to detect abandonment.
+    pub activity_path: PathBuf,
 }
 
 impl Default for DaemonState {
@@ -94,6 +96,8 @@ impl DaemonPaths {
             state_path: root.join("cognitive-daemon-state.json"),
             lock_path: root.join("cognitive-daemon.lock"),
             stop_path: root.join("cognitive-daemon.stop"),
+            // Name matches ARCHON_ACTIVITY_FILE in the launcher, which writes it.
+            activity_path: root.join("archon-activity.json"),
             root,
         }
     }

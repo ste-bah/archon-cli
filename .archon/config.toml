@@ -530,6 +530,15 @@ interval_ms = 60000
 stale_heartbeat_ms = 120000
 run_on_start = true
 max_ticks_per_run = 0
+# Exit after this long with no archon activity. 0 disables.
+#
+# The daemon detaches from its launcher on purpose, so it outlives the session
+# that started it. Without this it outlived EVERYTHING: one was found alive
+# after 10h43m, reparented to init, still holding a deleted copy of a binary
+# that had been replaced three times, with four accumulated in a single day.
+# Two hours is long enough to survive a quiet session, short enough that an
+# abandoned daemon does not outlast the working day.
+idle_exit_ms = 7200000
 
 # --- GNN Enhancer (round-trip 1536 → 1024 → 1280 → 1536 graph attention) ---
 [learning.gnn]
