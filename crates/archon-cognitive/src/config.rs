@@ -82,6 +82,26 @@ pub struct CognitiveDaemonConfig {
     pub stale_heartbeat_ms: u64,
     pub run_on_start: bool,
     pub max_ticks_per_run: u64,
+    /// Exit after this long with no archon activity recorded. `0` disables.
+    ///
+    /// The daemon `setsid()`s away from its launcher on purpose, so it outlives
+    /// the session that started it — that is the point of a daemon. What was
+    /// missing is any notion of being ABANDONED: `run_forever` had no exit
+    /// condition but an explicit stop file, so every run that ended without one
+    /// left a daemon behind. One was found alive after 10h43m, reparented to
+    /// init, still holding a deleted copy of a binary that had been replaced
+    /// three times; four accumulated in a single day.
+    ///
+    /// The signal already existed and was simply never read: the launcher
+    /// writes `archon-activity.json` on session activity. This consumes it.
+    #[serde(default = "default_idle_exit_ms")]
+    pub idle_exit_ms: u64,
+}
+
+/// Two hours: long enough that a quiet session keeps its daemon, short enough
+/// that an abandoned one does not outlive the working day.
+fn default_idle_exit_ms() -> u64 {
+    7_200_000
 }
 
 impl Default for CognitiveDaemonConfig {
@@ -91,6 +111,7 @@ impl Default for CognitiveDaemonConfig {
             interval_ms: 60_000,
             stale_heartbeat_ms: 120_000,
             run_on_start: true,
+            idle_exit_ms: default_idle_exit_ms(),
             max_ticks_per_run: 0,
         }
     }

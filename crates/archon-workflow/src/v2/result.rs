@@ -104,7 +104,15 @@ impl WorkflowV2Evidence {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Evidence classification.
+///
+/// The `Other` arm existed from the start, but the derived deserializer could
+/// never reach it — an unrecognised kind aborted the whole result instead. A
+/// verification branch was lost to the word `build`, which is legal on
+/// `commands_run[].kind` and so an entirely reasonable thing for an agent to
+/// write here. Labelling is cosmetic, so unknown input lands on `Other` and the
+/// evidence survives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowV2EvidenceKind {
     #[serde(
@@ -122,6 +130,32 @@ pub enum WorkflowV2EvidenceKind {
     Blocker,
     Artifact,
     Other,
+}
+
+/// Coerce an evidence kind, defaulting to `Other` for anything unrecognised.
+fn evidence_kind_from_str(raw: &str) -> WorkflowV2EvidenceKind {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "inspection" | "inspect" | "task_file" | "task_files" | "source_file" | "source_files" => {
+            WorkflowV2EvidenceKind::Inspection
+        }
+        "implementation" => WorkflowV2EvidenceKind::Implementation,
+        "test" => WorkflowV2EvidenceKind::Test,
+        "review" => WorkflowV2EvidenceKind::Review,
+        "remediation" => WorkflowV2EvidenceKind::Remediation,
+        "blocker" => WorkflowV2EvidenceKind::Blocker,
+        "artifact" => WorkflowV2EvidenceKind::Artifact,
+        _ => WorkflowV2EvidenceKind::Other,
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowV2EvidenceKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(evidence_kind_from_str(&raw))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,11 +209,30 @@ fn command_kind_from_str(raw: &str) -> WorkflowV2CommandKind {
     }
 }
 
+/// Outcome of a single recorded command.
+///
+/// Aliases only — deliberately *not* the tolerant coercion the kind enums use.
+/// `invented_status_values_still_rejected` fixes that policy: a status we cannot
+/// read must fail loudly rather than be normalised, because normalising is how a
+/// schema slip becomes a false pass. What this enum lacked was the synonyms
+/// agents actually reach for; it had none at all, so a plain `"success"` — the
+/// word the sibling status enums already accept — destroyed the whole result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowV2CommandStatus {
+    #[serde(
+        alias = "success",
+        alias = "ok",
+        alias = "passed",
+        alias = "pass",
+        alias = "complete",
+        alias = "completed",
+        alias = "done"
+    )]
     Succeeded,
+    #[serde(alias = "failure", alias = "error", alias = "failed_closed")]
     Failed,
+    #[serde(alias = "skip", alias = "not_run", alias = "notrun")]
     Skipped,
 }
 
@@ -281,5 +334,79 @@ mod status_alias_tests {
     fn invented_status_values_still_rejected() {
         assert!(serde_json::from_str::<WorkflowV2Status>("\"invalid_evidence\"").is_err());
         assert!(serde_json::from_str::<WorkflowV2CommandStatus>("\"invalid_evidence\"").is_err());
+    }
+
+    /// `commands_run[].status` had no aliases at all, while both sibling status
+    /// enums accept `success`. An agent using one word for all three fields
+    /// therefore destroyed the result on the only field that had never been
+    /// taught the synonym.
+    #[test]
+    fn command_status_accepts_the_synonyms_its_siblings_already_take() {
+        for raw in ["\"success\"", "\"ok\"", "\"passed\"", "\"done\""] {
+            let parsed: WorkflowV2CommandStatus = serde_json::from_str(raw)
+                .unwrap_or_else(|error| panic!("{raw} must parse as succeeded: {error}"));
+            assert_eq!(parsed, WorkflowV2CommandStatus::Succeeded, "{raw}");
+        }
+        let failed: WorkflowV2CommandStatus = serde_json::from_str("\"error\"").unwrap();
+        assert_eq!(failed, WorkflowV2CommandStatus::Failed);
+        let skipped: WorkflowV2CommandStatus = serde_json::from_str("\"skip\"").unwrap();
+        assert_eq!(skipped, WorkflowV2CommandStatus::Skipped);
+    }
+
+    /// `build` is legal on `commands_run[].kind`, so agents reach for it on
+    /// evidence too. It used to abort the entire `WorkflowV2Result` — one word
+    /// cost a whole verification branch. Labelling is cosmetic, so it now lands
+    /// on `Other` and the evidence survives.
+    #[test]
+    fn unknown_evidence_kind_degrades_to_other_instead_of_killing_the_result() {
+        let kind: WorkflowV2EvidenceKind = serde_json::from_str("\"build\"")
+            .expect("`build` must not abort the result — it is legal on command kind");
+        assert_eq!(kind, WorkflowV2EvidenceKind::Other);
+
+        let invented: WorkflowV2EvidenceKind = serde_json::from_str("\"whatever_the_model_said\"")
+            .expect("an unknown evidence label must never abort the result");
+        assert_eq!(invented, WorkflowV2EvidenceKind::Other);
+    }
+
+    /// The tolerance above must not swallow the labels that carry meaning —
+    /// `blocker` in particular drives routing.
+    #[test]
+    fn known_evidence_kinds_still_parse_exactly() {
+        for (raw, expected) in [
+            ("\"blocker\"", WorkflowV2EvidenceKind::Blocker),
+            ("\"test\"", WorkflowV2EvidenceKind::Test),
+            ("\"artifact\"", WorkflowV2EvidenceKind::Artifact),
+            ("\"inspect\"", WorkflowV2EvidenceKind::Inspection),
+            ("\"remediation\"", WorkflowV2EvidenceKind::Remediation),
+        ] {
+            let parsed: WorkflowV2EvidenceKind = serde_json::from_str(raw).unwrap();
+            assert_eq!(parsed, expected, "{raw}");
+        }
+    }
+
+    /// A whole result carrying the exact shape that killed the live branch must
+    /// now parse — the enum fix is only worth anything at this level.
+    #[test]
+    fn result_with_build_evidence_kind_parses_end_to_end() {
+        let raw = serde_json::json!({
+            "status": "needs_review",
+            "summary": "verification ran",
+            "evidence": [{"kind": "build", "summary": "cargo build succeeded"}],
+            "commands_run": [{
+                "kind": "build",
+                "command": "cargo build",
+                "status": "success",
+                "exit_code": 0,
+                "output_summary": "ok"
+            }]
+        });
+        let parsed: WorkflowV2Result =
+            serde_json::from_value(raw).expect("the shape that killed the live branch must parse");
+        assert_eq!(parsed.evidence[0].kind, WorkflowV2EvidenceKind::Other);
+        assert_eq!(parsed.commands_run[0].kind, WorkflowV2CommandKind::Build);
+        assert_eq!(
+            parsed.commands_run[0].status,
+            WorkflowV2CommandStatus::Succeeded
+        );
     }
 }

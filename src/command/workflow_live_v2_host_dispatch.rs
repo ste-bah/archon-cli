@@ -242,7 +242,7 @@ async fn run_v2_agent_call_with_rejected_output_log(
             Ok(result)
         }
         Err(first_error) => {
-            save_rejected_write_output(v2_store, request, "first", &first, &first_error);
+            save_rejected_output(v2_store, request, "first", &first, &first_error);
             run_v2_agent_repair_with_rejected_output_log(
                 adapter,
                 client,
@@ -256,16 +256,26 @@ async fn run_v2_agent_call_with_rejected_output_log(
     }
 }
 
-pub(crate) fn save_rejected_write_output(
+/// Persist an agent body that was rejected, for ANY branch role.
+///
+/// This used to return early unless the request was write-capable, so a
+/// verification branch destroyed by schema repair left nothing behind: the run
+/// directory recorded rejected outputs for every `implement-*` branch and none
+/// for any `verification-wave-*`. When a live verification died on a single
+/// unrecognised enum value, the body that would have named it in one line was
+/// already gone, and the cause had to be reconstructed from the error string.
+///
+/// A read-only branch's body is worth exactly as much as a write branch's here:
+/// the artefact being diagnosed is the agent's OUTPUT, and whether the agent was
+/// allowed to change files says nothing about how useful its output is to read.
+/// The disk cost is bounded by the same repair cap either way.
+pub(crate) fn save_rejected_output(
     v2_store: Option<&WorkflowV2ResultStore>,
     request: &archon_workflow::WorkflowV2AgentRequest,
     attempt: &str,
     body: &str,
     error: &WorkflowV2AgentError,
 ) {
-    if !request.is_write_capable() {
-        return;
-    }
     let Some(store) = v2_store else {
         return;
     };
@@ -287,7 +297,7 @@ pub(crate) fn save_rejected_write_result(
     if !result_has_rejected_write_output(result) {
         return;
     }
-    save_rejected_write_output(
+    save_rejected_output(
         v2_store,
         request,
         attempt,

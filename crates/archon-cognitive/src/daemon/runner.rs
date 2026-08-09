@@ -67,6 +67,10 @@ impl<'a> CognitiveDaemon<'a> {
         if self.config.run_on_start {
             self.run_jobs(&mut state)?;
         }
+        // Recorded rather than written straight onto the state: the tail of this
+        // function stamps the final status unconditionally, so a status set
+        // inside the loop is overwritten before anyone can read it.
+        let mut stopped_idle = false;
         while self.should_continue(&state) {
             if !self.wait_interval() {
                 break;
@@ -76,9 +80,17 @@ impl<'a> CognitiveDaemon<'a> {
             if self.paths.stop_path.exists() {
                 break;
             }
+            if self.abandoned_by_archon() {
+                stopped_idle = true;
+                break;
+            }
             self.run_jobs(&mut state)?;
         }
-        state.status = "stopped".into();
+        state.status = if stopped_idle {
+            "stopped_idle".into()
+        } else {
+            "stopped".to_string()
+        };
         self.paths.clear_stop()?;
         self.paths.write_state(&state)?;
         Ok(state)
@@ -96,6 +108,33 @@ impl<'a> CognitiveDaemon<'a> {
             ));
         }
         Ok(())
+    }
+
+    /// Whether no archon session has reported activity within `idle_exit_ms`.
+    ///
+    /// Fails CLOSED — a missing, unreadable or unparseable marker returns false
+    /// and the daemon keeps running. Exiting on a read error would make a
+    /// transient filesystem problem look like abandonment and kill a daemon
+    /// that is doing useful work.
+    fn abandoned_by_archon(&self) -> bool {
+        let idle_exit_ms = self.config.idle_exit_ms;
+        if idle_exit_ms == 0 {
+            return false;
+        }
+        let Ok(raw) = std::fs::read_to_string(&self.paths.activity_path) else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return false;
+        };
+        let Some(updated_at) = value.get("updated_at").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        let Ok(updated_at) = updated_at.parse::<chrono::DateTime<chrono::Utc>>() else {
+            return false;
+        };
+        let idle_for = chrono::Utc::now().signed_duration_since(updated_at);
+        idle_for.num_milliseconds() > idle_exit_ms as i64
     }
 
     fn should_continue(&self, state: &DaemonState) -> bool {

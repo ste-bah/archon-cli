@@ -1,5 +1,5 @@
 use crate::spec_registry::{PromotionStatus, StrategySpec};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -11,7 +11,22 @@ pub enum InstrumentClass {
     Option,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Kind of data a dataset holds.
+///
+/// Read case-insensitively; still written in PascalCase.
+///
+/// Agents author `metadata.json` and `manifest.json` by hand, and `ohlcv` is a
+/// more natural spelling than `Ohlcv` for something the rest of the tree writes
+/// lowercase everywhere else — filenames, dataset ids, CLI arguments. Five
+/// artifacts on one installation used it, and because the registry is loaded as
+/// a unit, a single one of them made the WHOLE lake unreadable: `archon trading
+/// data status` and `list` both failed outright on a casing difference in one
+/// field of one file.
+///
+/// The variants themselves are a closed vocabulary and stay strict — an
+/// unrecognised *kind* is a real error and must still fail. Only case is
+/// forgiven, which cannot make one kind masquerade as another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum DataType {
     Ohlcv,
     CorporateActions,
@@ -24,6 +39,54 @@ pub enum DataType {
     News,
     Tick,
     OrderBook,
+}
+
+impl DataType {
+    /// All variants, in declaration order, for parsing and error text.
+    const ALL: &'static [(&'static str, DataType)] = &[
+        ("ohlcv", DataType::Ohlcv),
+        ("corporateactions", DataType::CorporateActions),
+        ("fundamentals", DataType::Fundamentals),
+        ("borrow", DataType::Borrow),
+        ("funding", DataType::Funding),
+        ("indexconstituents", DataType::IndexConstituents),
+        ("continuouscontract", DataType::ContinuousContract),
+        ("contractspecs", DataType::ContractSpecs),
+        ("news", DataType::News),
+        ("tick", DataType::Tick),
+        ("orderbook", DataType::OrderBook),
+    ];
+}
+
+impl<'de> Deserialize<'de> for DataType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        // Compare with separators stripped so `corporate_actions`,
+        // `corporate-actions` and `CorporateActions` all agree. This normalises
+        // spelling, not meaning: an unknown kind still errors below.
+        let normalized: String = raw
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        Self::ALL
+            .iter()
+            .find(|(name, _)| *name == normalized)
+            .map(|(_, variant)| *variant)
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "unknown data_type `{raw}`; expected one of: {}",
+                    Self::ALL
+                        .iter()
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

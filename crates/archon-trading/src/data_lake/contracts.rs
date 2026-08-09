@@ -65,11 +65,39 @@ impl ValidationReport {
         }
     }
 
+    /// Whether the report's verdict is supported by its own contents.
+    ///
+    /// The status rule is deliberately ONE-SIDED. It used to demand exact
+    /// equality with `status_from_checks`, which rejects a report for being more
+    /// pessimistic than its checks — and a dataset can fail for reasons that are
+    /// not expressible as a check at all: the provider was unavailable, the
+    /// fetch returned no bars, a credential was absent. Those records are
+    /// honest fail-closed evidence, and 16 of them on one installation made the
+    /// whole registry unloadable for being *too* careful.
+    ///
+    /// So: a status at least as severe as the checks derive is always
+    /// consistent. Only the optimistic direction is a contradiction — claiming
+    /// `Passed` while a check failed is the false-pass this contract exists to
+    /// prevent, and that still fails here.
     pub fn is_consistent(&self) -> bool {
         !self.content_sha256.trim().is_empty()
-            && self.status == Self::status_from_checks(&self.checks)
+            && !self.claims_better_than_its_checks()
             && (!self.production_eligible
                 || (self.status == ValidationStatus::Passed && self.native_interval))
+    }
+
+    /// True when the recorded status is more favourable than the checks support.
+    fn claims_better_than_its_checks(&self) -> bool {
+        Self::severity(self.status) < Self::severity(Self::status_from_checks(&self.checks))
+    }
+
+    /// Ordering over verdicts, worst last, so "at least as severe" is a compare.
+    fn severity(status: ValidationStatus) -> u8 {
+        match status {
+            ValidationStatus::Passed => 0,
+            ValidationStatus::Degraded => 1,
+            ValidationStatus::Failed => 2,
+        }
     }
 
     pub fn content_hash(normalized_sha256: &str, checks: &[ValidationCheck]) -> String {

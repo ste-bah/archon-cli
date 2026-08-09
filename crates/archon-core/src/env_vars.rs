@@ -26,6 +26,10 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     // Auth
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
+    // Honoured at runtime/llm.rs:150, where it outranks `[api].base_url`, and
+    // documented as such in config.toml — it was simply never allowlisted, so
+    // every CLI invocation warned about a variable the code deliberately reads.
+    "ANTHROPIC_BASE_URL",
     "ARCHON_API_KEY",
     "ARCHON_OAUTH_TOKEN",
     // Codex / ChatGPT subscription auth and compatibility posture

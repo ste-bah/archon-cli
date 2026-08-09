@@ -121,6 +121,20 @@ fn read_record_without_workflow_note_fields(
     serde_json::from_value(value).map_err(|err| DataStoreError::Json(err.to_string()))
 }
 
+/// Whether this dataset's metadata carries a quarantine marker.
+///
+/// Quarantine lives in the metadata, but registry status is DERIVED from the
+/// validation report — so a quarantined dataset whose validation.json still
+/// claimed `passed` was being stamped `Healthy` on every load. Thirty-three of
+/// them were, which is the latent false-success a quarantine exists to prevent:
+/// the operator marks a dataset untrustworthy and the next read promotes it
+/// back.
+pub(super) fn dataset_is_quarantined(root: &Path, record: &StoredDatasetRecord) -> bool {
+    read_dataset_metadata_with_quarantine(root, record)
+        .map(|read| read.quarantined)
+        .unwrap_or(false)
+}
+
 fn read_dataset_metadata_with_quarantine(
     root: &Path,
     record: &StoredDatasetRecord,
@@ -185,38 +199,94 @@ fn verify_checksum_chain(
     let metadata_sha256 = metadata_sha256(&artifacts.metadata)?;
     let validation_sha256 =
         ValidationReport::content_hash(&artifacts.normalized_sha256, &artifacts.validation.checks);
-    let checks = [
-        artifacts.metadata_was_quarantined || record == &artifacts.manifest,
-        record.dataset_id == artifacts.metadata.dataset_id,
-        record.version == artifacts.metadata.version,
-        artifacts.validation.dataset_id == record.dataset_id,
-        artifacts.validation.version == record.version,
-        artifacts.metadata_was_quarantined || record.checksum == artifacts.normalized_sha256,
-        artifacts.metadata_was_quarantined
-            || artifacts.metadata.checksum == artifacts.normalized_sha256,
-        artifacts.metadata_was_quarantined
-            || artifacts.metadata.checksums.normalized_sha256 == artifacts.normalized_sha256,
-        artifacts.metadata_was_quarantined || record.raw_checksum == artifacts.raw_sha256,
-        artifacts.metadata_was_quarantined
-            || artifacts.metadata.checksums.raw_sha256 == artifacts.raw_sha256,
-        artifacts.metadata_was_quarantined || record.metadata_checksum == metadata_sha256,
-        artifacts.metadata_was_quarantined
-            || artifacts.metadata.checksums.metadata_sha256 == metadata_sha256,
-        artifacts.metadata_was_quarantined || record.validation_checksum == validation_sha256,
-        artifacts.metadata_was_quarantined
-            || artifacts.validation.content_sha256 == validation_sha256,
+    // Each link is named so a failure says which one broke. The message used to
+    // carry only `dataset_id:version`, which told an operator — or a remediation
+    // agent — nothing about whether to look at the data, the metadata, the
+    // validation report or the manifest. Diagnosing one live mismatch meant
+    // hand-hashing every file to find that `ohlcv.jsonl` disagreed with all
+    // three recorded copies of its checksum.
+    let checks: [(&str, bool); 14] = [
+        (
+            "manifest record differs from manifest.json on disk",
+            artifacts.metadata_was_quarantined || record == &artifacts.manifest,
+        ),
+        (
+            "manifest.dataset_id != metadata.dataset_id",
+            record.dataset_id == artifacts.metadata.dataset_id,
+        ),
+        (
+            "manifest.version != metadata.version",
+            record.version == artifacts.metadata.version,
+        ),
+        (
+            "validation.dataset_id != manifest.dataset_id",
+            artifacts.validation.dataset_id == record.dataset_id,
+        ),
+        (
+            "validation.version != manifest.version",
+            artifacts.validation.version == record.version,
+        ),
+        (
+            "manifest.checksum != actual normalized data hash",
+            artifacts.metadata_was_quarantined || record.checksum == artifacts.normalized_sha256,
+        ),
+        (
+            "metadata.checksum != actual normalized data hash",
+            artifacts.metadata_was_quarantined
+                || artifacts.metadata.checksum == artifacts.normalized_sha256,
+        ),
+        (
+            "metadata.checksums.normalized_sha256 != actual normalized data hash",
+            artifacts.metadata_was_quarantined
+                || artifacts.metadata.checksums.normalized_sha256 == artifacts.normalized_sha256,
+        ),
+        (
+            "manifest.raw_checksum != actual raw hash",
+            artifacts.metadata_was_quarantined || record.raw_checksum == artifacts.raw_sha256,
+        ),
+        (
+            "metadata.checksums.raw_sha256 != actual raw hash",
+            artifacts.metadata_was_quarantined
+                || artifacts.metadata.checksums.raw_sha256 == artifacts.raw_sha256,
+        ),
+        (
+            "manifest.metadata_checksum != actual metadata hash",
+            artifacts.metadata_was_quarantined || record.metadata_checksum == metadata_sha256,
+        ),
+        (
+            "metadata.checksums.metadata_sha256 != actual metadata hash",
+            artifacts.metadata_was_quarantined
+                || artifacts.metadata.checksums.metadata_sha256 == metadata_sha256,
+        ),
+        (
+            "manifest.validation_checksum != recomputed validation hash",
+            artifacts.metadata_was_quarantined || record.validation_checksum == validation_sha256,
+        ),
+        (
+            "validation.content_sha256 != recomputed validation hash",
+            artifacts.metadata_was_quarantined
+                || artifacts.validation.content_sha256 == validation_sha256,
+        ),
     ];
-    if checks.into_iter().all(|valid| valid) {
+    let broken: Vec<&str> = checks
+        .into_iter()
+        .filter(|(_, valid)| !valid)
+        .map(|(label, _)| label)
+        .collect();
+    if broken.is_empty() {
         Ok(())
     } else {
-        Err(checksum_chain_mismatch(record))
+        Err(checksum_chain_mismatch(record, &broken))
     }
 }
 
-fn checksum_chain_mismatch(record: &StoredDatasetRecord) -> DataStoreError {
+fn checksum_chain_mismatch(record: &StoredDatasetRecord, broken: &[&str]) -> DataStoreError {
     DataStoreError::IncompleteArtifactContract(format!(
-        "checksum chain mismatch for {}:{}",
-        record.dataset_id, record.version
+        "checksum chain mismatch for {}:{} ({} of 14 links broken: {})",
+        record.dataset_id,
+        record.version,
+        broken.len(),
+        broken.join("; ")
     ))
 }
 

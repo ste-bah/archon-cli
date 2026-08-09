@@ -533,7 +533,9 @@ entry that classified as prose.
 2. Create `tasks/PRD-<NAME>/` and write one `TASK-<DOMAIN>-<NNN>-<slug>.md`
    per task, flat, in that directory.
 3. Keep each tool-call payload under 8,000 characters. Write one task file
-   per call rather than batching.
+   per call rather than batching. When the invoking skill supplies a fan-out
+   execution model, that model governs WHO writes each file and in what order;
+   this clause governs only the size and granularity of an individual write.
 4. After writing every file, run the two commands in §11.
 5. Print the list of paths created and the §11 summary. Do not print full task
    bodies into the conversation.
