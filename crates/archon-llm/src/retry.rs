@@ -44,6 +44,41 @@ use crate::streaming::StreamEvent;
 
 const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 
+/// Outcome of peeking at a freshly opened stream.
+enum StreamProbe {
+    /// The stream produced content (or ended cleanly); hand it to the caller
+    /// with the peeked events put back in front.
+    Usable(Receiver<StreamEvent>),
+    /// The stream errored before any content existed, so replaying the request
+    /// duplicates nothing.
+    FailedBeforeContent { error_type: String, message: String },
+}
+
+/// Whether a mid-stream error is worth another attempt.
+///
+/// Mirrors the response-status classifier the providers already use; a decode
+/// or connection fault mid-stream is the same transient class as one during
+/// the handshake, it simply surfaces later.
+fn stream_error_is_retryable(error_type: &str, message: &str) -> bool {
+    let hay = format!("{error_type} {message}").to_ascii_lowercase();
+    [
+        "http_error",
+        "decoding",
+        "connection reset",
+        "connection closed",
+        "connection refused",
+        "broken pipe",
+        "timed out",
+        "overloaded",
+        "rate limit",
+        "service unavailable",
+        "upstream connect",
+        "incomplete",
+    ]
+    .iter()
+    .any(|marker| hay.contains(marker))
+}
+
 /// Configuration for `RetryProvider`'s backoff loop.
 ///
 /// `max_attempts` is the *total* number of calls to `inner` per request,
@@ -149,6 +184,66 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
 
     pub fn supervisor(&self) -> Option<Arc<Mutex<ProviderRuntimeSupervisor>>> {
         self.supervisor.as_ref().map(Arc::clone)
+    }
+
+    /// Peek at a freshly opened stream until it either produces content or
+    /// fails.
+    ///
+    /// Everything consumed while peeking is replayed into a new channel ahead
+    /// of the rest of the stream, so the caller sees an identical sequence —
+    /// peeking must not cost the consumer the opening events.
+    ///
+    /// "Content" means anything the consumer can act on. Bookkeeping events
+    /// (MessageStart, ContentBlockStart) do not count: a stream that announces
+    /// a block and then dies has still produced nothing, and is the exact case
+    /// worth retrying.
+    async fn drain_until_content_or_error(mut rx: Receiver<StreamEvent>) -> StreamProbe {
+        let mut buffered: Vec<StreamEvent> = Vec::new();
+        loop {
+            match rx.recv().await {
+                Some(StreamEvent::Error {
+                    error_type,
+                    message,
+                }) if buffered.iter().all(|event| !Self::is_content(event)) => {
+                    return StreamProbe::FailedBeforeContent {
+                        error_type,
+                        message,
+                    };
+                }
+                Some(event) => {
+                    let is_content = Self::is_content(&event);
+                    buffered.push(event);
+                    if is_content {
+                        break;
+                    }
+                }
+                None => break, // clean end with no content — nothing to retry
+            }
+        }
+        let (tx, new_rx) = tokio::sync::mpsc::channel(64);
+        tokio::spawn(async move {
+            for event in buffered {
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+            while let Some(event) = rx.recv().await {
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+        });
+        StreamProbe::Usable(new_rx)
+    }
+
+    fn is_content(event: &StreamEvent) -> bool {
+        matches!(
+            event,
+            StreamEvent::TextDelta { .. }
+                | StreamEvent::InputJsonDelta { .. }
+                | StreamEvent::ContentBlockStop { .. }
+                | StreamEvent::MessageStop
+        )
     }
 
     /// Compute the sleep duration for retry `attempt` (0-indexed), honoring
@@ -323,14 +418,50 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         loop {
             match self.inner.stream(request.clone()).await {
                 Ok(rx) => {
-                    self.record_runtime_event(
-                        &request,
-                        ProviderRuntimeEventType::RequestSucceeded,
-                        ProviderRuntimeSeverity::Info,
-                        None,
-                        Some(attempt),
-                    );
-                    return Ok(rx);
+                    // `Ok(rx)` only means the stream OPENED. A transport failure
+                    // after that arrives as a StreamEvent::Error on the channel,
+                    // which this loop has already returned past and can never
+                    // see — so a long turn that dies mid-stream was never
+                    // retried by construction. A PRD decomposition died exactly
+                    // that way: one long turn, `error decoding response body`
+                    // partway through, whole run lost with nothing written.
+                    //
+                    // Retry only while the stream has produced NO content. Once
+                    // text or a tool call has been emitted the consumer has
+                    // acted on it, and replaying the request would duplicate
+                    // that work rather than recover it.
+                    match Self::drain_until_content_or_error(rx).await {
+                        StreamProbe::Usable(rx) => {
+                            self.record_runtime_event(
+                                &request,
+                                ProviderRuntimeEventType::RequestSucceeded,
+                                ProviderRuntimeSeverity::Info,
+                                None,
+                                Some(attempt),
+                            );
+                            return Ok(rx);
+                        }
+                        StreamProbe::FailedBeforeContent {
+                            error_type,
+                            message,
+                        } => {
+                            attempt += 1;
+                            if attempt >= max || !stream_error_is_retryable(&error_type, &message) {
+                                self.record_runtime_event(
+                                    &request,
+                                    ProviderRuntimeEventType::RequestFailed,
+                                    ProviderRuntimeSeverity::Error,
+                                    Some("stream_failed_before_content"),
+                                    Some(attempt),
+                                );
+                                return Err(LlmError::Http(format!(
+                                    "stream failed before producing content ({error_type}): {message}"
+                                )));
+                            }
+                            tokio::time::sleep(self.backoff_for_attempt(attempt - 1)).await;
+                            continue;
+                        }
+                    }
                 }
                 Err(err) => {
                     attempt += 1;

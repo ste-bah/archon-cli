@@ -13,6 +13,12 @@ pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_BUDGET_EXCEEDED: i32 = 2;
 /// Maximum turn count exceeded.
 pub const EXIT_MAX_TURNS: i32 = 3;
+/// A tool the run needed was denied by permission policy.
+///
+/// Distinct from `EXIT_ERROR` because the run did not fail — it was not
+/// permitted. The remedy is a permission mode or an allowlist entry, not a
+/// retry, and a caller scripting `-p` should be able to tell those apart.
+pub const EXIT_PERMISSION_DENIED: i32 = 4;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -159,6 +165,32 @@ pub async fn run_print_mode(
     // Close the event channel so the consumer task finishes
     agent.close_event_channel();
     let _ = event_handle.await;
+
+    // A denied tool is not a failed turn: `process_result` is Ok, the agent
+    // reports the denial in prose, and print mode used to exit 0 having done
+    // none of what was asked. Observed with `-p "/workflow-prd-spec ..."` —
+    // the skill was denied, nothing was written, and the exit code said
+    // success, which any script wrapping this would have believed.
+    //
+    // Keyed on the agent's typed denial log rather than on the message text,
+    // and checked BEFORE the error paths so a run that was blocked reports
+    // being blocked rather than whatever happened afterwards.
+    let denials = {
+        let log = agent.denial_log.lock().await;
+        log.recent(usize::MAX).to_vec()
+    };
+    if !denials.is_empty() {
+        let mut stderr = std::io::stderr();
+        let _ = writeln!(
+            stderr,
+            "Error: {} tool call(s) denied by permission policy; the request was not carried out.",
+            denials.len()
+        );
+        for entry in denials.iter().take(5) {
+            let _ = writeln!(stderr, "  - {}: {}", entry.tool_name, entry.reason);
+        }
+        return EXIT_PERMISSION_DENIED;
+    }
 
     // Check for agent errors
     if let Err(e) = process_result {

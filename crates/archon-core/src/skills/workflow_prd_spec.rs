@@ -106,6 +106,37 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
         "Use the workflow-prdtospec framework above to decompose the PRD at \
          `{prd_path}` into a workflow task directory.{id_note}\n\
          \n\
+         EXECUTION MODEL — fan out, do not write 22 files in one turn.\n\
+         Writing every spec inline makes one long turn whose failure loses ALL \
+         of the work: a decomposition died partway through and left nothing on \
+         disk, because a single stream break ends the only turn there was. Fan \
+         out instead, so a failure costs one spec and is re-queued.\n\
+         \n\
+         A. Read the PRD. Derive the FULL task list first — id, title, \
+            workstream, depends_on — and nothing else. No task bodies yet.\n\
+         B. Read `[subagent] max_concurrent` from the project's config.toml \
+            (`.archon/config.toml`, else the repo root copy; default 4 if \
+            absent). That number is the cap on agents in flight. Never exceed \
+            it — it exists because these agents compete for the same build \
+            lock and file tree.\n\
+         C. Queue one task per spec with TaskCreate. Each carries exactly one \
+            `TASK-<DOMAIN>-<NNN>-<slug>.md` to write, the PRD path, the \
+            requirement ids it claims, and the rules below. One file per \
+            agent: a subagent that writes two specs reintroduces the coupling \
+            this structure removes.\n\
+         D. Keep at most `max_concurrent` in flight. As each finishes, pull \
+            the next off the queue. Track them with TaskList/TaskGet, using \
+            the FULL task id returned by TaskCreate — a truncated id is not \
+            found.\n\
+         E. You are the ORCHESTRATOR: you do not write task bodies. As each \
+            task completes, verify its file exists, its `task_id:` matches \
+            its filename, and its required keys are present. A subagent that \
+            failed or wrote nothing is RE-QUEUED once; a second failure is \
+            reported as a blocked task, not silently dropped.\n\
+         F. Only when the queue is drained, run the §11 commands over the \
+            whole directory. Coverage is a property of the SET, so it is \
+            checked once at the end, never per agent.\n\
+         \n\
          OUTPUT LAYOUT:\n\
          1. Read the PRD with the Read tool before writing anything.\n\
          2. Write every task file FLAT into `{task_dir}/`, named \
