@@ -159,7 +159,8 @@ fn collect_agents(observer: &WebAgentObserver) -> Vec<WebAgentActivity> {
         })
     }));
 
-    agents.sort_by(|left, right| right.elapsed_ms.cmp(&left.elapsed_ms));
+    // Longest-running first, so `Reverse` rather than a bare key.
+    agents.sort_by_key(|agent| std::cmp::Reverse(agent.elapsed_ms));
     agents
 }
 
