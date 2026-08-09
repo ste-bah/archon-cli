@@ -169,6 +169,47 @@ const SCHEMA_RELATIONS: &[&str] = &[
             duration_ms: Int,
             created_at: String,
         }"#,
+    // R8 measurement foundation. `cognitive_metric_events` is append-only and
+    // is the source of truth for every derived metric; `fingerprint` lets a
+    // replayed write be told apart from a conflicting rewrite of the same id.
+    // The event-kind-specific identity columns from the roadmap schema live in
+    // `identities_json`, enforced per kind by `MetricEventKind`, rather than as
+    // seventy mostly-null columns.
+    r#":create cognitive_metric_events {
+            metric_event_id: String =>
+            idempotency_key: String,
+            fingerprint: String,
+            metric_name: String,
+            metric_definition_version: Int,
+            evaluation_dataset_version: String,
+            evaluation_window_id: String,
+            event_kind: String,
+            session_id: String,
+            turn_number: Int,
+            task_class: String,
+            model_id: String,
+            policy_version: String,
+            label_source: String,
+            outcome_status: String,
+            value: Float?,
+            numerator: Float?,
+            denominator: Float?,
+            identities_json: String,
+            evidence_refs_json: String,
+            created_at: String,
+        }"#,
+    r#":create cognitive_evaluation_windows {
+            evaluation_window_id: String =>
+            label: String,
+            started_at: String,
+            ended_at: String,
+            population_query_version: Int,
+            segmentation_keys_json: String,
+            cohort_role: String,
+            cohort_identity: String,
+            metric_definition_version: Int,
+            created_at: String,
+        }"#,
     SCHEMA_VERSION_RELATION,
 ];
 

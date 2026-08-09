@@ -12,6 +12,7 @@ mod executive_support;
 mod governed_apply_store;
 pub mod governed_autonomous_apply;
 pub mod inspection;
+pub mod metrics;
 pub mod policy_gate;
 mod reflection_store;
 pub mod reflection_writer;
@@ -44,6 +45,11 @@ pub use governed_autonomous_apply::{
 pub use inspection::{
     CognitiveInspection, CognitiveInspectionStatus, DecisionSummary, ProposalSummary,
     ReflectionSummary, TickSummary,
+};
+pub use metrics::{
+    CognitiveMetricEvent, CognitiveMetricSnapshot, CohortRole, DerivedMetric, EvaluationWindow,
+    METRIC_DEFINITION_VERSION, MetricCohort, MetricEventKind, MetricEventStore, MetricWriteOutcome,
+    WindowDeclaration,
 };
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
 pub use reflection_writer::{

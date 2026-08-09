@@ -74,6 +74,14 @@ export function CognitivePage({ cognitive }: CognitivePageProps) {
         )}
       </div>
 
+      <CognitiveRows
+        title={`Derived metrics (definition v${cognitive?.metricDefinitionVersion ?? 1}, ${
+          cognitive?.metricEventCount ?? 0
+        } events${
+          cognitive?.evaluationWindowId ? `, window ${cognitive.evaluationWindowId}` : ""
+        })`}
+        rows={cognitive?.metrics}
+      />
       <CognitiveRows title="Recent decisions" rows={cognitive?.decisions} />
       <CognitiveRows title="Reflections and lessons" rows={cognitive?.reflections} />
       <CognitiveRows title="Governed proposals" rows={cognitive?.proposals} />

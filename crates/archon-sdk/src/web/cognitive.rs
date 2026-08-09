@@ -25,11 +25,15 @@ pub struct CognitiveWebSummary {
     pub proposal_count: u64,
     pub apply_result_count: u64,
     pub self_model_fact_count: u64,
+    pub metric_event_count: u64,
+    pub metric_definition_version: i64,
+    pub evaluation_window_id: Option<String>,
     pub daemon: CognitiveDaemonPreview,
     pub latest_tick: Option<CognitiveTickPreview>,
     pub decisions: Vec<CognitiveRowPreview>,
     pub reflections: Vec<CognitiveRowPreview>,
     pub proposals: Vec<CognitiveRowPreview>,
+    pub metrics: Vec<CognitiveRowPreview>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -116,6 +120,14 @@ fn summary_for_root(cwd: &Path) -> CognitiveWebSummary {
         proposal_count: status.proposal_count as u64,
         apply_result_count: status.apply_result_count as u64,
         self_model_fact_count: status.self_model_fact_count as u64,
+        metric_event_count: status.metric_event_count as u64,
+        metric_definition_version: status.metrics.metric_definition_version,
+        evaluation_window_id: status
+            .metrics
+            .evaluation_window
+            .as_ref()
+            .map(|window| window.evaluation_window_id.clone()),
+        metrics: metric_rows(&status.metrics),
         daemon: daemon_preview(&root),
         latest_tick: status.latest_tick.map(|tick| CognitiveTickPreview {
             tick_id: tick.tick_id,
@@ -178,12 +190,48 @@ fn empty_summary(store: PathProbe) -> CognitiveWebSummary {
         proposal_count: 0,
         apply_result_count: 0,
         self_model_fact_count: 0,
+        metric_event_count: 0,
+        metric_definition_version: archon_cognitive::METRIC_DEFINITION_VERSION,
+        evaluation_window_id: None,
         daemon: daemon_preview_for_missing_store(),
         latest_tick: None,
         decisions: Vec::new(),
         reflections: Vec::new(),
         proposals: Vec::new(),
+        metrics: Vec::new(),
     }
+}
+
+/// Derived metrics reuse the generic row preview: the web view renders them
+/// exactly like the other read-only cognitive lists.
+fn metric_rows(snapshot: &archon_cognitive::CognitiveMetricSnapshot) -> Vec<CognitiveRowPreview> {
+    let created_at = snapshot
+        .evaluation_window
+        .as_ref()
+        .map(|window| window.ended_at.to_rfc3339())
+        .unwrap_or_default();
+    snapshot
+        .metrics
+        .iter()
+        .map(|metric| CognitiveRowPreview {
+            id: format!(
+                "{}@{}",
+                metric.metric_name,
+                metric.cohort.segmentation_key()
+            ),
+            label: metric.metric_name.clone(),
+            status: metric
+                .value
+                .map(|value| format!("{value:.4}"))
+                .unwrap_or_else(|| "undefined".to_string()),
+            detail: format!(
+                "cohort {} - n={}",
+                metric.cohort.segmentation_key(),
+                metric.sample_count
+            ),
+            created_at: created_at.clone(),
+        })
+        .collect()
 }
 
 fn daemon_preview(root: &Path) -> CognitiveDaemonPreview {

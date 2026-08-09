@@ -5,6 +5,7 @@ use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
 use crate::cozo_guard::{relation_count, run_script_guarded};
+use crate::metrics::{CognitiveMetricSnapshot, MetricEventStore};
 use crate::schema::ensure_cognitive_schema;
 use crate::self_model::SelfModelBriefing;
 use crate::self_model::SelfModelStore;
@@ -19,11 +20,15 @@ pub struct CognitiveInspectionStatus {
     pub proposal_count: usize,
     pub apply_result_count: usize,
     pub self_model_fact_count: usize,
+    pub metric_event_count: usize,
     pub latest_tick: Option<TickSummary>,
     pub recent_decisions: Vec<DecisionSummary>,
     pub recent_reflections: Vec<ReflectionSummary>,
     pub pending_proposals: Vec<ProposalSummary>,
     pub self_model: SelfModelBriefing,
+    /// Metrics recomputed from `cognitive_metric_events`, not accumulated
+    /// counters, so every surface reports the same recomputable numbers.
+    pub metrics: CognitiveMetricSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,12 +105,20 @@ impl<'a> CognitiveInspection<'a> {
             proposal_count: count(self.db, "governed_proposals", "proposal_id"),
             apply_result_count: count(self.db, "autonomous_apply_results", "apply_id"),
             self_model_fact_count: count(self.db, "self_model_facts", "fact_id"),
+            metric_event_count: count(self.db, "cognitive_metric_events", "metric_event_id"),
             latest_tick: self.latest_tick()?,
             recent_decisions: self.recent_decisions(5)?,
             recent_reflections: self.reflections(None, 5)?,
             pending_proposals: self.pending_proposals(5)?,
             self_model: SelfModelStore::new(self.db)?.export_briefing()?,
+            metrics: self.metrics()?,
         })
+    }
+
+    /// Snapshot for the most recently declared evaluation window, falling back
+    /// to the whole event history while no window exists yet.
+    pub fn metrics(&self) -> Result<CognitiveMetricSnapshot, CognitiveError> {
+        MetricEventStore::new(self.db, &self.ledger_dir)?.latest_snapshot()
     }
 
     pub fn inspect_decision(

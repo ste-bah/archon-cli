@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use archon_cognitive::self_model::SelfModelStore;
 use archon_cognitive::{
-    CognitiveInspection, CognitiveInspectionStatus, CognitiveTick, DecisionRecord,
-    PersistentCognitiveStore, ProposalSummary, ReflectionSummary, TickReport,
+    CognitiveInspection, CognitiveInspectionStatus, CognitiveMetricSnapshot, CognitiveTick,
+    DecisionRecord, PersistentCognitiveStore, ProposalSummary, ReflectionSummary, TickReport,
 };
 use archon_core::config::ArchonConfig;
 
@@ -156,7 +156,42 @@ fn print_status(status: &CognitiveInspectionStatus, json: bool) -> Result<()> {
         );
     }
     print_proposals(&status.pending_proposals);
+    print_metrics(&status.metrics, status.metric_event_count);
     Ok(())
+}
+
+fn print_metrics(snapshot: &CognitiveMetricSnapshot, event_count: usize) {
+    println!(
+        "Metric events: {event_count} (definition version {})",
+        snapshot.metric_definition_version
+    );
+    match &snapshot.evaluation_window {
+        Some(window) => println!(
+            "Evaluation window: {} [{} .. {}) role={} cohorts={}",
+            window.evaluation_window_id,
+            window.started_at,
+            window.ended_at,
+            window.cohort_role.as_str(),
+            snapshot.cohort_count
+        ),
+        None => println!("Evaluation window: none declared; deriving over full history"),
+    }
+    if snapshot.metrics.is_empty() {
+        return;
+    }
+    println!("Derived metrics (recomputed from raw events):");
+    for metric in &snapshot.metrics {
+        println!(
+            "- {} [{}] = {} (n={})",
+            metric.metric_name,
+            metric.cohort.segmentation_key(),
+            metric
+                .value
+                .map(|value| format!("{value:.4}"))
+                .unwrap_or_else(|| "undefined".to_string()),
+            metric.sample_count
+        );
+    }
 }
 
 fn print_tick(report: &TickReport, json: bool) -> Result<()> {
