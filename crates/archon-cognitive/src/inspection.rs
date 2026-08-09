@@ -73,7 +73,9 @@ pub struct TickSummary {
     pub proposals_evaluated: u64,
     pub proposals_auto_applied: u64,
     pub proposals_denied: u64,
-    pub self_model_updated: bool,
+    /// `None` when the tick recorded no self-model measurement at all, which is
+    /// currently every tick: see `CognitiveTick::refresh_self_model`.
+    pub self_model_updated: Option<bool>,
     pub error_count: usize,
     pub duration_ms: u64,
     pub created_at: DateTime<Utc>,
@@ -304,7 +306,8 @@ fn row_to_tick(row: &[DataValue]) -> TickSummary {
         proposals_evaluated: int_col(row, 1),
         proposals_auto_applied: int_col(row, 2),
         proposals_denied: int_col(row, 3),
-        self_model_updated: row[4].get_bool().unwrap_or(false),
+        // A null column means "not measured"; do not collapse it onto `false`.
+        self_model_updated: row[4].get_bool(),
         error_count: json_array_len(&str_col(row, 5)),
         duration_ms: int_col(row, 6),
         created_at: time_col(row, 7),

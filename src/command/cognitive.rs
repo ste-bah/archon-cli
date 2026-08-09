@@ -194,18 +194,31 @@ fn print_metrics(snapshot: &CognitiveMetricSnapshot, event_count: usize) {
     }
 }
 
+/// A tick step whose implementation does not exist yet reports nothing, and the
+/// operator is told that rather than shown a `0`/`false` they would read as a
+/// result.
+fn measured<T: std::fmt::Display>(value: Option<T>) -> String {
+    value.map_or_else(|| "not measured".to_string(), |value| value.to_string())
+}
+
 fn print_tick(report: &TickReport, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(report)?);
         return Ok(());
     }
     println!("Cognitive tick {}", report.tick_id);
-    println!("Dead letters replayed: {}", report.dead_letters_replayed);
+    println!(
+        "Dead letters replayed: {}",
+        measured(report.dead_letters_replayed)
+    );
     println!("Proposals evaluated: {}", report.proposals_evaluated);
     println!("Proposals generated: {}", report.proposals_generated);
     println!("Auto-applied: {}", report.proposals_auto_applied);
     println!("Denied: {}", report.proposals_denied);
-    println!("Self-model updated: {}", report.self_model_updated);
+    println!(
+        "Self-model updated: {}",
+        measured(report.self_model_updated)
+    );
     println!("Duration: {} ms", report.duration_ms);
     if !report.errors.is_empty() {
         println!("Errors:");

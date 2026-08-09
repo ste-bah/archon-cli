@@ -14,15 +14,24 @@ use crate::{
     CognitiveError, GovernedAutonomousApply, OutcomeSummary, ReflectionRecord, SituationKind,
 };
 
+/// Outcome of one autonomous tick.
+///
+/// Steps that have no implementation yet report `None` rather than a plausible
+/// zero/`true`, so a reader of the audit can tell "we looked and there was
+/// nothing" apart from "nobody ever looked".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TickReport {
     pub tick_id: String,
-    pub dead_letters_replayed: u64,
+    /// `None` means the replay step produced no measurement at all, which is
+    /// not the same claim as `Some(0)` ("there were no dead letters").
+    pub dead_letters_replayed: Option<u64>,
     pub proposals_evaluated: u64,
     pub proposals_auto_applied: u64,
     pub proposals_denied: u64,
     pub proposals_generated: u64,
-    pub self_model_updated: bool,
+    /// `None` means the self-model step produced no measurement at all, which
+    /// is not the same claim as `Some(false)` ("nothing needed updating").
+    pub self_model_updated: Option<bool>,
     pub errors: Vec<String>,
     pub duration_ms: u64,
     pub created_at: DateTime<Utc>,
@@ -61,8 +70,12 @@ impl<'a> CognitiveTick<'a> {
         self.finish(report, started)
     }
 
-    fn replay_dead_letters(&self, _errors: &mut Vec<String>) -> u64 {
-        0
+    /// Nothing replays dead letters yet, so there is no count to report.
+    ///
+    /// Reporting `0` here would be written to the audit as a measurement and
+    /// would be indistinguishable from a tick that inspected an empty queue.
+    fn replay_dead_letters(&self, _errors: &mut Vec<String>) -> Option<u64> {
+        None
     }
 
     fn inspect_pending_proposals(&self, errors: &mut Vec<String>) -> u64 {
@@ -98,8 +111,15 @@ impl<'a> CognitiveTick<'a> {
         generated
     }
 
-    fn refresh_self_model(&self, _errors: &mut Vec<String>) -> bool {
-        true
+    /// The self-model is never refreshed by a tick, so there is nothing to
+    /// report either way.
+    ///
+    /// `SelfModelStore::write_fact` has no production caller at all, so no tick
+    /// has ever changed a fact; the previous `true` was a fabricated success
+    /// that made `self_model_updated` carry no information. Deriving real
+    /// self-model updates from verified evidence is tracked separately.
+    fn refresh_self_model(&self, _errors: &mut Vec<String>) -> Option<bool> {
+        None
     }
 
     fn finish(
@@ -117,12 +137,12 @@ impl TickReport {
     pub fn empty() -> Self {
         Self {
             tick_id: Uuid::new_v4().to_string(),
-            dead_letters_replayed: 0,
+            dead_letters_replayed: None,
             proposals_evaluated: 0,
             proposals_auto_applied: 0,
             proposals_denied: 0,
             proposals_generated: 0,
-            self_model_updated: false,
+            self_model_updated: None,
             errors: Vec::new(),
             duration_ms: 0,
             created_at: Utc::now(),
