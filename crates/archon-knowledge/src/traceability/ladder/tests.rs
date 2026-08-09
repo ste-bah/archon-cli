@@ -20,6 +20,7 @@ fn binding(commands: &[&str]) -> TaskBinding {
         source_path: "tests/TASK-A.md".into(),
         implements: vec!["REQ-DL-001".into()],
         path_scopes: vec!["src/a.rs".into()],
+        required_tools: Vec::new(),
         focused_tests: commands
             .iter()
             .map(|c| FocusedTestEntry::Command((*c).to_string()))
