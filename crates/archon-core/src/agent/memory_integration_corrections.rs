@@ -12,11 +12,16 @@ use super::*;
 
 impl Agent {
     /// Detect correction patterns in user input and record via CorrectionTracker.
+    ///
+    /// Returns the R3 classifier's verdict on this turn. It is returned rather
+    /// than only written to the shadow corpus because the reflection trigger
+    /// needs a real per-correction confidence, and this is the only place that
+    /// computes one; the caller decides what the trigger may do with it.
     pub(super) async fn detect_and_record_correction(
         &mut self,
         user_input: &str,
         graph: &Arc<dyn MemoryTrait>,
-    ) {
+    ) -> CorrectionClassification {
         // R3 shadow pass. Runs BEFORE the early return and on every user turn,
         // not only on the turns the heuristic accepts: the promotion gate needs
         // >=100 adjudicated non-corrections as well as >=100 corrections, and a
@@ -35,7 +40,7 @@ impl Agent {
             // semantic pass over the same turns and routes anything this missed
             // back through `record_extracted_corrections`, so a correction
             // phrased outside these patterns is caught late rather than lost.
-            return;
+            return classification;
         };
 
         let tracker = CorrectionTracker::new(graph.as_ref());
@@ -50,7 +55,7 @@ impl Agent {
                 // would quietly bias the corpus towards turns where storage
                 // happened to be healthy.
                 self.record_correction_shadow_label(user_input, &classification, heuristic, None);
-                return;
+                return classification;
             }
         };
         let linked_rule_id = select_relevant_rule(user_input, &rules).map(|rule| rule.id.clone());
@@ -135,6 +140,8 @@ impl Agent {
             self.fire_after_learning_event_hook("UserCorrected", &payload)
                 .await;
         }
+
+        classification
     }
 
     /// Persist one R3 shadow label: what the classifier decided, next to what

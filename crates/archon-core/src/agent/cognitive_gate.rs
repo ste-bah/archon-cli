@@ -1,11 +1,13 @@
 use std::time::Duration;
 
+use archon_consciousness::correction_classifier::CorrectionClassification;
+
 use archon_cognitive::{
-    ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput, LiveTurnOutcome,
-    ReflectionWriter, ShadowComparison, ShadowTurnInput, ShadowTurnObserver, SituationClassifier,
-    ToolGateInput, ToolUseGate, ToolVerdict, TriggeredReflectInput, TurnSignals, WorldModelScorer,
-    direct_response_for, observed_action_from_tools, plan_runtime_advisory,
-    plan_runtime_advisory_with,
+    ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput, ExecutiveLoop,
+    LiveTurnOutcome, NoopActionExecutor, NoopLessonSink, ReflectionWriter, ShadowComparison,
+    ShadowTurnInput, ShadowTurnObserver, SituationClassifier, ToolGateInput, ToolUseGate,
+    ToolVerdict, TriggeredReflectInput, TurnSignals, WorldModelScorer, direct_response_for,
+    observed_action_from_tools,
 };
 
 use super::*;
@@ -28,17 +30,33 @@ impl Agent {
         self.current_situation = Some(situation);
     }
 
+    /// Plan this turn's advisory through [`ExecutiveLoop::run_advisory`].
+    ///
+    /// The loop is the single advisory implementation (issue #76 follow-up).
+    /// The store-less free functions that used to serve this call site had
+    /// drifted from it — they planned without the candidate store or the
+    /// self-model, and always reported `prediction_unavailable` — and the agent
+    /// now holds a cognitive store anyway, so they are gone.
+    ///
+    /// It runs on the agent's already-open store, off the async runtime, under
+    /// the configured pipeline budget. The budget used to be a post-hoc error
+    /// inside the planner that discarded work already done; as a timeout it
+    /// abandons a slow advisory instead, and the turn proceeds without a
+    /// reminder. `run_advisory` persists its own decision, so the turn no
+    /// longer detaches a second task to do it — which is also why an abandoned
+    /// advisory can still leave a decision row behind: the blocking task is not
+    /// cancelled, only stopped being waited on.
     pub(super) async fn run_cognitive_executive_advisory(&mut self) {
         self.cognitive_executive_reminder = None;
-        let (Some(config), Some(policy), Some(ledger_dir), Some(situation)) = (
+        let (Some(config), Some(policy), Some(ledger_dir), Some(store), Some(situation)) = (
             self.cognitive_config.clone(),
             self.cognitive_policy.clone(),
-            self.cognitive_ledger_dir.as_ref(),
+            self.cognitive_ledger_dir.clone(),
+            self.cognitive_store.clone(),
             self.current_situation.clone(),
         ) else {
             return;
         };
-        let ledger_dir = ledger_dir.clone();
         let input = ExecutiveAdvisoryInput {
             situation,
             working_dir: self.config.working_dir.clone(),
@@ -47,22 +65,41 @@ impl Agent {
         // With a backend injected the scorer may consult model predictions;
         // whether it actually does is decided by `world_model_state`, so a
         // shadow-only state still takes the heuristic path. Without a backend
-        // there is nothing to consult and we skip the generic entirely.
-        let planned = match self.cognitive_prediction_backend.clone() {
-            Some(backend) => plan_runtime_advisory_with(
-                &config,
-                policy,
-                input,
-                &WorldModelScorer::new(backend, true, true),
-            ),
-            None => plan_runtime_advisory(&config, policy, input),
-        };
+        // there is nothing to consult and the heuristic scorer stands in.
+        let backend = self.cognitive_prediction_backend.clone();
+        let budget_ms = config.max_pipeline_ms;
+        let planned =
+            bounded_cognitive_observation(budget_ms, "cognitive-executive-advisory", move || {
+                // The handle the agent already holds. Opening a second one per
+                // turn is the dominant cost of the whole advisory and would put
+                // it at the mercy of the budget on a loaded machine — which
+                // costs the prompt its reminder, not just a measurement.
+                let store = store
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match backend {
+                    Some(backend) => ExecutiveLoop::with_components(
+                        store.db(),
+                        config,
+                        Some(policy),
+                        &ledger_dir,
+                        WorldModelScorer::new(backend, true, true),
+                        NoopActionExecutor,
+                        NoopLessonSink,
+                    )?
+                    .run_advisory(input),
+                    None => ExecutiveLoop::new(store.db(), config, Some(policy), &ledger_dir)?
+                        .run_advisory(input),
+                }
+            })
+            .await;
         let outcome = match planned {
-            Ok(outcome) => outcome,
-            Err(error) => {
+            Some(Ok(outcome)) => outcome,
+            Some(Err(error)) => {
                 tracing::warn!(%error, "cognitive executive advisory planning failed");
                 return;
             }
+            None => return,
         };
         self.cognitive_executive_reminder = outcome.decision.as_ref().map(|decision| {
             format!(
@@ -74,26 +111,9 @@ impl Agent {
         tracing::debug!(
             stage = %outcome.snapshot.stage,
             selected_action = ?outcome.snapshot.selected_action,
+            degraded = ?outcome.snapshot.degraded,
             "cognitive executive advisory recorded"
         );
-        if let Some(decision) = outcome.decision {
-            archon_observability::spawn_blocking_named(
-                "persist-cognitive-executive-advisory",
-                move || match archon_cognitive::PersistentCognitiveStore::open(&ledger_dir) {
-                    Ok(store) => {
-                        let path = ledger_dir.join("cognitive-decisions.jsonl");
-                        if let Err(error) = archon_cognitive::DecisionStore::new(store.db(), path)
-                            .and_then(|decision_store| decision_store.record(&decision))
-                        {
-                            tracing::warn!(%error, "cognitive executive decision persistence failed");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "cognitive executive persistence store unavailable");
-                    }
-                },
-            );
-        }
     }
 
     /// Run the executive loop over this turn as a non-executing observer.
@@ -155,6 +175,7 @@ impl Agent {
         &mut self,
         user_input: &str,
         user_corrected: bool,
+        classification: Option<&CorrectionClassification>,
     ) {
         let (Some(config), Some(policy), Some(ledger_dir)) = (
             self.cognitive_config.clone(),
@@ -176,7 +197,7 @@ impl Agent {
             tool_failures,
             user_corrected,
         };
-        let correction_confidence = user_corrected.then_some(KEYWORD_CORRECTION_CONFIDENCE);
+        let correction_confidence = correction_trigger_confidence(user_corrected, classification);
         let model_id = self.active_model().await;
         let budget_ms = config.max_pipeline_ms;
 
@@ -309,14 +330,38 @@ impl Agent {
     }
 }
 
-/// Confidence assigned to a correction the keyword detector caught.
+/// How confident the reflection trigger may be that this turn was a correction.
 ///
-/// The keyword pass fires on explicit corrective phrasing, so a hit is a strong
-/// signal — but not a certainty, because the phrase can appear inside quoted
-/// text. Above [`archon_cognitive::HIGH_CONFIDENCE_CORRECTION_MIN`] so it
-/// triggers, below 1.0 because it is a heuristic. The semantic pass runs later
-/// and out of band, so it is deliberately not a reflection trigger.
-const KEYWORD_CORRECTION_CONFIDENCE: f32 = 0.9;
+/// This used to be the constant `0.9` for every corrected turn, because the
+/// per-correction confidence lived behind a classifier this crate did not yet
+/// call. It does now (`memory_integration_corrections.rs`), so the real number
+/// is threaded through and the constant is gone.
+///
+/// `None` unless the classifier positively asserted a correction. Two negatives
+/// must stay out, for different reasons:
+///
+/// * an `abstain.*` rationale is a *declined* answer, not a weak yes. Its
+///   confidence describes nothing, so passing it on would let the trigger read
+///   "I don't know" as a low-confidence correction;
+/// * a confident `is_correction: false` is an answer, and its confidence
+///   measures the strength of that *no*. Passing it through would make a
+///   classifier certain the user corrected nothing look exactly like one
+///   certain they did — the 0.9 constant's failure mode, inverted.
+///
+/// Gated on the live heuristic having recorded a correction as well. The
+/// classifier is shadow-only until its promotion gate passes (learning roadmap
+/// line 300), so its job here is to say how strong a correction the live path
+/// already accepted was, not to arm the trigger by itself.
+pub(super) fn correction_trigger_confidence(
+    user_corrected: bool,
+    classification: Option<&CorrectionClassification>,
+) -> Option<f32> {
+    let classification = classification.filter(|_| user_corrected)?;
+    if classification.abstained() || !classification.is_correction {
+        return None;
+    }
+    Some(classification.confidence)
+}
 
 /// Run a cognitive observation off the async runtime under a hard budget.
 ///

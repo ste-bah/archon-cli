@@ -58,17 +58,29 @@ fn production_constructors_use_shared_capacity() {
     }
 }
 
+/// Both consumers that drain an agent's event stream must do so through a
+/// bounded receiver, so a slow reader applies backpressure rather than letting
+/// the queue grow without limit.
+///
+/// The payload differs by consumer, which is why the type is paired with the
+/// path rather than assumed. `print_mode` drains `TimestampedEvent` directly;
+/// the IDE transport drains notifications already mapped for the wire, because
+/// routing everything through one channel is what keeps stdout single-writer
+/// (#26). Boundedness is the property under test — the payload type is not.
 #[test]
 fn print_and_ide_consumers_use_bounded_receivers() {
-    for path in [
-        "crates/archon-core/src/print_mode.rs",
-        "crates/archon-sdk/src/ide/stdio.rs",
+    for (path, payload) in [
+        ("crates/archon-core/src/print_mode.rs", "TimestampedEvent"),
+        ("crates/archon-sdk/src/ide/stdio.rs", "JRpcNotification"),
     ] {
         let src = read(path);
-        assert!(src.contains("mpsc::Receiver<TimestampedEvent>"), "{path}");
         assert!(
-            !src.contains("UnboundedReceiver<TimestampedEvent>"),
-            "{path}"
+            src.contains(&format!("mpsc::Receiver<{payload}>")),
+            "{path} must drain {payload} through a bounded receiver"
+        );
+        assert!(
+            !src.contains(&format!("UnboundedReceiver<{payload}>")),
+            "{path} must not drain {payload} through an unbounded receiver"
         );
     }
 }

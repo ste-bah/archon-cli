@@ -69,16 +69,20 @@ impl Agent {
         // contributed, and the reflection trigger below needs "was corrected
         // now", not "has been corrected since some earlier turn".
         let corrections_before = self.corrections_since_extraction.len();
-        if let Some(graph) = self.memory.clone() {
-            self.detect_and_record_correction(user_input, &graph).await;
-        }
+        // The classifier's verdict travels with the flag. `user_corrected` says
+        // the live path recorded a correction; the verdict says how sure the
+        // detector was, which is what the reflection trigger weighs.
+        let classification = match self.memory.clone() {
+            Some(graph) => Some(self.detect_and_record_correction(user_input, &graph).await),
+            None => None,
+        };
         let user_corrected = self.corrections_since_extraction.len() > corrections_before;
 
         // Issues #76 and #81: join this turn to the shadow plan recorded at
         // turn start, and reflect if the comparison, the tool failures, or the
         // correction tripped a trigger. Bounded and failure-tolerant: the turn
         // is already complete and nothing here can change it.
-        self.complete_cognitive_shadow_turn(user_input, user_corrected)
+        self.complete_cognitive_shadow_turn(user_input, user_corrected, classification.as_ref())
             .await;
 
         // GAP 5: Auto-memory extraction check

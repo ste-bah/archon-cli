@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use archon_cognitive::{
     ActionExecution, ActionExecutor, ActionOutcome, Candidate, CandidateActionKind,
-    CognitiveConfig, CognitiveError, CognitiveSurface, ExecutiveLoop, ExecutiveTurnInput,
-    ModelPrediction, OutcomeSummary, PlannedActionInput, PredictionBackend, PredictionDimensions,
-    RiskLevel, ScoreSource, Situation, SituationClassifier, VerificationVerdict, WorldModelScorer,
-    WorldModelState,
+    CognitiveConfig, CognitiveError, CognitiveSurface, DecisionStore, ExecutiveAdvisoryInput,
+    ExecutiveLoop, ExecutiveTurnInput, ModelPrediction, OutcomeSummary, PlannedActionInput,
+    PredictionBackend, PredictionDimensions, RiskLevel, ScoreSource, Situation,
+    SituationClassifier, VerificationVerdict, WorldModelScorer, WorldModelState,
 };
 use archon_policy::CognitivePolicy;
 use chrono::Utc;
@@ -317,6 +317,102 @@ fn run_turn_can_skip_storing_the_situation_it_classified() {
         .rows
         .len();
     assert_eq!(situations, 0);
+}
+
+/// `run_advisory` is now the only advisory implementation, so the properties
+/// the live turn depends on have to hold here: a plan and a contract are
+/// produced and persisted, and nothing is executed, verified or reflected on.
+#[test]
+fn run_advisory_records_a_plan_without_executing_anything() {
+    let db = DbInstance::new("mem", "", "").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let exec = executor(OutcomeSummary::Success);
+    let calls = exec.contracts.clone();
+    let loop_ = ExecutiveLoop::with_components(
+        &db,
+        config(),
+        Some(policy()),
+        temp.path(),
+        WorldModelScorer::heuristic_only(),
+        exec,
+        archon_cognitive::NoopLessonSink,
+    )
+    .unwrap();
+
+    let result = loop_
+        .run_advisory(ExecutiveAdvisoryInput {
+            situation: classify("fix the failing rust test"),
+            working_dir: temp.path().into(),
+            world_model_state: WorldModelState::default(),
+        })
+        .unwrap();
+
+    assert_eq!(result.snapshot.stage, "advisory");
+    assert!(
+        result
+            .snapshot
+            .degraded
+            .contains(&"advisory_only:no_action_executed".into())
+    );
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "an advisory reached the action executor"
+    );
+    assert!(result.snapshot.reflection_id.is_none());
+    assert_eq!(result.verification, VerificationVerdict::NotRun);
+    let decision = result.decision.expect("advisory decision");
+    assert!(decision.verification_contract.is_some());
+    // Persisted by the loop itself: the live caller no longer detaches a task
+    // to write what the loop already had in hand.
+    let stored = DecisionStore::new(&db, temp.path().join("cognitive-decisions.jsonl"))
+        .unwrap()
+        .get(&decision.decision_id)
+        .unwrap();
+    assert!(
+        stored.is_some(),
+        "run_advisory did not persist its decision"
+    );
+}
+
+/// The deleted free-function advisory pushed `prediction_unavailable` into its
+/// degraded list unconditionally, so a snapshot could not distinguish a plan
+/// scored by the model from one that fell back. That was the clearest sign the
+/// two advisory implementations had drifted.
+#[test]
+fn run_advisory_reports_prediction_availability_honestly() {
+    let db = DbInstance::new("mem", "", "").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let loop_ = ExecutiveLoop::with_components(
+        &db,
+        config(),
+        Some(policy()),
+        temp.path(),
+        WorldModelScorer::new(UsefulBackend, true, false),
+        executor(OutcomeSummary::Success),
+        archon_cognitive::NoopLessonSink,
+    )
+    .unwrap();
+
+    let result = loop_
+        .run_advisory(ExecutiveAdvisoryInput {
+            situation: classify("fix the failing rust test"),
+            working_dir: temp.path().into(),
+            world_model_state: WorldModelState {
+                active_model_id: Some("model-1".into()),
+                active_model_kind: Some(archon_cognitive::ModelKind::LatentTransition),
+                jepa_promoted: false,
+                shadow_only: false,
+            },
+        })
+        .unwrap();
+
+    assert!(result.snapshot.prediction_available);
+    assert!(
+        !result
+            .snapshot
+            .degraded
+            .contains(&"prediction_unavailable".into())
+    );
 }
 
 #[test]

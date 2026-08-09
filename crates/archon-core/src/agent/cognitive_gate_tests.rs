@@ -62,6 +62,12 @@ fn enable_executive_runtime(agent: &mut Agent, root: &std::path::Path) {
         enabled: true,
         record_decisions: true,
         record_reflections: true,
+        // The advisory and the shadow observer are both abandoned when they
+        // exceed this, and the default 500ms is wall-clock on a box running
+        // nine hundred other tests. These tests assert what the loop does, not
+        // how fast the machine is; `a_slow_observation_is_abandoned_at_its_budget`
+        // is where the budget itself is tested.
+        max_pipeline_ms: 5_000,
         ..CognitiveConfig::default()
     };
     let policy = archon_cognitive::CognitivePolicy {
@@ -101,24 +107,22 @@ async fn nontrivial_live_turn_records_executive_decision_without_claiming_execut
         .await
         .expect("process message");
 
-    let mut decisions = Vec::new();
-    for _ in 0..50 {
-        let store =
-            archon_cognitive::PersistentCognitiveStore::open(temp.path().join(".archon/cognitive"))
-                .expect("cognitive store");
-        decisions = DecisionStore::new(
-            store.db(),
-            temp.path()
-                .join(".archon/cognitive/cognitive-decisions.jsonl"),
-        )
-        .expect("decision store")
-        .list_for_session("cognitive-persist-test", 10)
-        .expect("executive decisions");
-        if !decisions.is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    // Read once, with no polling: `ExecutiveLoop::run_advisory` records the
+    // decision inside the bounded task the turn awaits, so by the time
+    // `process_message` returns the row is already there. The previous free
+    // function handed the decision to a detached task, which is why this used
+    // to need a retry loop.
+    let store =
+        archon_cognitive::PersistentCognitiveStore::open(temp.path().join(".archon/cognitive"))
+            .expect("cognitive store");
+    let decisions = DecisionStore::new(
+        store.db(),
+        temp.path()
+            .join(".archon/cognitive/cognitive-decisions.jsonl"),
+    )
+    .expect("decision store")
+    .list_for_session("cognitive-persist-test", 10)
+    .expect("executive decisions");
 
     assert_eq!(decisions.len(), 1);
     assert!(decisions[0].verification_contract.is_some());
@@ -238,6 +242,100 @@ async fn a_panicking_observation_does_not_propagate() {
     .await;
 
     assert!(result.is_none());
+}
+
+// ── reflection-trigger correction confidence ─────────────────
+
+use archon_consciousness::correction_classifier::{
+    CorrectionClassification, EXPLICIT_PHRASE_CONFIDENCE, RATIONALE_ABSTAIN_BELOW_THRESHOLD,
+    RATIONALE_ABSTAIN_NO_SIGNAL, RATIONALE_PROVIDER_JUDGED,
+};
+
+fn classification(
+    is_correction: bool,
+    confidence: f32,
+    rationale_code: &str,
+) -> CorrectionClassification {
+    CorrectionClassification {
+        is_correction,
+        correction_type: None,
+        confidence,
+        rationale_code: rationale_code.to_owned(),
+    }
+}
+
+/// The real classifier confidence reaches the trigger, replacing the constant
+/// `0.9` every corrected turn used to report.
+#[test]
+fn a_recorded_correction_carries_the_classifier_confidence() {
+    let explicit = classification(
+        true,
+        EXPLICIT_PHRASE_CONFIDENCE,
+        "explicit_phrase.factual_error",
+    );
+
+    let confidence = super::cognitive_gate::correction_trigger_confidence(true, Some(&explicit))
+        .expect("a recorded, positively classified correction has a confidence");
+
+    assert_eq!(confidence, EXPLICIT_PHRASE_CONFIDENCE);
+    assert_eq!(
+        archon_cognitive::reflection_trigger::evaluate(&archon_cognitive::TurnSignals {
+            correction_confidence: Some(confidence),
+            ..archon_cognitive::TurnSignals::new(archon_cognitive::SituationKind::CodeChange)
+        })
+        .map(|triggered| triggered.trigger),
+        Some(archon_cognitive::ReflectionTrigger::HighConfidenceCorrection),
+    );
+}
+
+/// An abstention declines to answer. Reporting its confidence would let the
+/// trigger read "I don't know" as a correction it happens to be unsure of.
+#[test]
+fn an_abstention_is_not_a_low_confidence_correction() {
+    let no_signal = classification(false, 0.0, RATIONALE_ABSTAIN_NO_SIGNAL);
+    let below = classification(false, 0.55, RATIONALE_ABSTAIN_BELOW_THRESHOLD);
+
+    assert_eq!(
+        super::cognitive_gate::correction_trigger_confidence(true, Some(&no_signal)),
+        None
+    );
+    assert_eq!(
+        super::cognitive_gate::correction_trigger_confidence(true, Some(&below)),
+        None
+    );
+}
+
+/// The failure the constant invited, inverted: a classifier certain the user
+/// corrected NOTHING carries a high confidence too, and passing it through
+/// would fire the strongest reflection trigger on a turn with no correction.
+#[test]
+fn a_confident_non_correction_never_arms_the_trigger() {
+    let confident_no = classification(false, 0.95, RATIONALE_PROVIDER_JUDGED);
+
+    assert_eq!(
+        super::cognitive_gate::correction_trigger_confidence(true, Some(&confident_no)),
+        None
+    );
+}
+
+/// The classifier is shadow-only until its promotion gate passes, so it grades
+/// a correction the live path recorded rather than declaring one itself.
+#[test]
+fn a_classification_the_live_path_did_not_record_stays_out() {
+    let explicit = classification(
+        true,
+        EXPLICIT_PHRASE_CONFIDENCE,
+        "explicit_phrase.factual_error",
+    );
+
+    assert_eq!(
+        super::cognitive_gate::correction_trigger_confidence(false, Some(&explicit)),
+        None
+    );
+    assert_eq!(
+        super::cognitive_gate::correction_trigger_confidence(true, None),
+        None
+    );
 }
 
 #[test]
