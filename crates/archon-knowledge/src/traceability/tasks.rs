@@ -68,6 +68,10 @@ pub enum FocusedTestEntry {
 /// declared, and the difference is exactly whether the first token is something
 /// a shell can execute. Extend this list when a real task declares a real
 /// runner that is missing; do not replace it with a guess.
+///
+/// A task's own `required_tools:` extends it for that task — see
+/// [`classify_focused_test`]. That is what keeps this list from having to
+/// anticipate every tool a generated spec might legitimately invoke.
 const KNOWN_RUNNERS: &[&str] = &[
     "archon", "bash", "cargo", "deno", "go", "gradle", "just", "make", "mvn", "node", "npm",
     "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
@@ -86,6 +90,15 @@ pub struct TaskBinding {
     /// of `## Files Expected to Change`. Used to scope semantic search: an
     /// anchor outside these paths is not this task's work.
     pub path_scopes: Vec<String>,
+    /// Tools the task declared it needs, from `required_tools:`.
+    ///
+    /// Load-bearing for classification, not documentation: a first token the
+    /// task itself declared as a required tool is an invocation it intends to
+    /// run, which is the same evidence [`KNOWN_RUNNERS`] supplies for the
+    /// common runners. `serde(default)` so bindings written before this field
+    /// still deserialise.
+    #[serde(default)]
+    pub required_tools: Vec<String>,
     /// Every `## Focused Tests` bullet, classified.
     pub focused_tests: Vec<FocusedTestEntry>,
     /// Commands that could actually be matched against a recorded run.
@@ -116,6 +129,14 @@ fn task_id_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"^\s*task_id:\s*(?P<id>\S+)\s*$").expect("task_id regex is a literal")
+    })
+}
+
+fn required_tools_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\s*required_tools:\s*(?P<body>.*)$")
+            .expect("required_tools regex is a literal")
     })
 }
 
@@ -154,6 +175,15 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
             binding.implements = parse_flow_sequence(caps["body"].trim(), source_path)?;
             continue;
         }
+        if let Some(caps) = required_tools_re().captures(line) {
+            // Parsed leniently, unlike `implements:`. A malformed tool list
+            // costs a little classification precision; refusing the whole task
+            // file over it would lose the requirement claims too, which are the
+            // thing traceability actually exists to read.
+            binding.required_tools =
+                parse_flow_sequence(caps["body"].trim(), source_path).unwrap_or_default();
+            continue;
+        }
         if let Some(caps) = typed_verifier_re().captures(line) {
             binding.verifier_commands.push(VerifierCommand {
                 command: normalize_command(&caps["cmd"]),
@@ -169,7 +199,7 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
     }
 
     binding.path_scopes = collect_path_scopes(raw);
-    binding.focused_tests = collect_focused_tests(raw);
+    binding.focused_tests = collect_focused_tests(raw, &binding.required_tools);
     for entry in &binding.focused_tests {
         if let FocusedTestEntry::Command(command) = entry {
             let declared = VerifierCommand {
@@ -257,20 +287,41 @@ fn looks_like_path(span: &str) -> bool {
     }
 }
 
-fn collect_focused_tests(raw: &str) -> Vec<FocusedTestEntry> {
+fn collect_focused_tests(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {
     section_bullets(raw, "focused tests")
         .into_iter()
-        .map(|bullet| classify_focused_test(&bullet))
+        .map(|bullet| classify_focused_test(&bullet, declared_tools))
         .collect()
 }
 
-fn classify_focused_test(bullet: &str) -> FocusedTestEntry {
+/// Classify one bullet against the common runners *and* the tools this task
+/// declared.
+///
+/// The declared-tools half is what stops a correct spec being read as prose.
+/// Observed live: five specs ran `lizard -l rust -C 15 -L 50 -a 5 …` to enforce
+/// the function-length and cyclomatic-complexity budgets their own acceptance
+/// criteria set, and every one of them declared `required_tools: [cargo, bash,
+/// lizard]`. `lizard` is not a common runner, so those five entries classified
+/// as prose and the complexity budget went unverified — while the file-size
+/// budget, which happened to run through `bash`, was enforced. The task had
+/// already said what it needed; nothing was reading it.
+///
+/// Extending per task rather than by growing [`KNOWN_RUNNERS`] is the point.
+/// The list cannot anticipate every tool a generated spec may legitimately
+/// invoke, and a spec naming a tool it also declares is exactly the evidence
+/// that the span is an invocation rather than a described CLI fragment. It also
+/// keeps tool names out of this engine, which must stay ignorant of any
+/// particular project's toolchain.
+fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTestEntry {
     for caps in backtick_re().captures_iter(bullet) {
         let span = normalize_command(&caps[1]);
         let Some(first) = span.split_whitespace().next() else {
             continue;
         };
-        if KNOWN_RUNNERS.contains(&first) {
+        let declared = declared_tools
+            .iter()
+            .any(|tool| tool.trim().eq_ignore_ascii_case(first));
+        if KNOWN_RUNNERS.contains(&first) || declared {
             return FocusedTestEntry::Command(span);
         }
     }

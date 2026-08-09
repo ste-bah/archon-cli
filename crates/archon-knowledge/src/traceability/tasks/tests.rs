@@ -127,3 +127,117 @@ fn sections_after_focused_tests_do_not_leak_in() {
         "adversarial-review bullet leaked into focused tests"
     );
 }
+
+/// A tool the task declared is a runner *for that task*.
+///
+/// The live failure: five generated specs enforced their own function-length
+/// and cyclomatic-complexity budgets with `lizard`, declared it in
+/// `required_tools`, and had every one of those entries classified as prose —
+/// so the complexity half of the guidance went unverified while the file-size
+/// half, which ran through `bash`, was enforced.
+#[test]
+fn a_declared_tool_counts_as_a_runner_for_that_task() {
+    let raw = "\
+# TASK-X
+
+```yaml
+task_id: TASK-X
+implements: [REQ-1]
+required_tools: [cargo, bash, lizard]
+```
+
+## Focused Tests
+
+- `lizard -l rust -C 15 -L 50 -a 5 src/a.rs`
+- `cargo test -p thing`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-X.md").expect("parses");
+    assert_eq!(binding.required_tools, vec!["cargo", "bash", "lizard"]);
+    assert!(
+        binding.prose_focused_tests().is_empty(),
+        "a declared tool must not be read as prose: {:?}",
+        binding.prose_focused_tests()
+    );
+    assert!(
+        binding
+            .verifier_commands
+            .iter()
+            .any(|verifier| verifier.command.starts_with("lizard ")),
+        "the declared-tool command must become a matchable verifier"
+    );
+}
+
+/// Declaring a tool does not make every backticked word a command. The span
+/// still has to *start* with the declared tool.
+#[test]
+fn a_declared_tool_mentioned_mid_sentence_is_still_prose() {
+    let raw = "\
+# TASK-Y
+
+```yaml
+task_id: TASK-Y
+implements: [REQ-2]
+required_tools: [lizard]
+```
+
+## Focused Tests
+
+- Review the `report.md lizard` summary by hand
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-Y.md").expect("parses");
+    assert_eq!(
+        binding.prose_focused_tests().len(),
+        1,
+        "only a leading declared tool makes a span an invocation"
+    );
+}
+
+/// An unknown tool that the task never declared stays prose — the classifier
+/// must not become a heuristic that accepts any first word.
+#[test]
+fn an_undeclared_unknown_runner_is_still_prose() {
+    let raw = "\
+# TASK-Z
+
+```yaml
+task_id: TASK-Z
+implements: [REQ-3]
+required_tools: [cargo]
+```
+
+## Focused Tests
+
+- `lizard -l rust src/a.rs`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-Z.md").expect("parses");
+    assert_eq!(
+        binding.prose_focused_tests().len(),
+        1,
+        "a tool the task never declared is not evidence of an invocation"
+    );
+}
+
+/// A malformed tool list must not fail the file: the requirement claims are the
+/// thing traceability exists to read, and losing them costs far more than a
+/// little classification precision.
+#[test]
+fn a_malformed_required_tools_list_does_not_fail_the_task() {
+    let raw = "\
+# TASK-W
+
+```yaml
+task_id: TASK-W
+implements: [REQ-4]
+required_tools:
+  - cargo
+  - lizard
+```
+
+## Focused Tests
+
+- `cargo test`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-W.md").expect("a bad tool list is tolerated");
+    assert_eq!(binding.implements, vec!["REQ-4"]);
+    assert!(binding.required_tools.is_empty());
+}
