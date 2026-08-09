@@ -10,7 +10,28 @@ export const COMMANDS = {
   FIX_ERROR: "archon.fixError",
   GENERATE_TESTS: "archon.generateTests",
   RECONNECT: "archon.reconnect",
+  SHOW_STATUS: "archon.showStatus",
+  SET_PERMISSION_MODE: "archon.setPermissionMode",
+  CANCEL: "archon.cancel",
 } as const;
+
+/**
+ * Permission modes offered by `Archon: Set Permission Mode`.
+ *
+ * These are the backend's own mode names — `archon/config` validates them with
+ * the same parser the permission gate uses, so a name that is not on this list
+ * is rejected rather than silently falling back to a default.
+ *
+ * `auto` is absent on purpose: in that mode the agent decides alone and never
+ * raises a prompt, so offering it from a window with an approval UI in it
+ * would just make the UI stop appearing.
+ */
+export const PERMISSION_MODES: readonly string[] = [
+  "default",
+  "acceptEdits",
+  "plan",
+  "dontAsk",
+];
 
 /** VS Code configuration keys (section: "archon"). */
 export const CONFIG_KEY_CONNECTION_MODE = "archon.connectionMode";

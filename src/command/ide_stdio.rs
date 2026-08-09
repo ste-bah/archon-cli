@@ -4,13 +4,13 @@
 //! to the IDE protocol handler, and lets the handler stream the turn back as
 //! `archon/textDelta` / `archon/turnComplete` notifications.
 //!
-//! Scope (issue #26, first slice): read-only chat. Tool execution and the IDE
-//! permission round-trip are later slices, and the agent is deliberately built
-//! without tools until they land — see `ide_session_flags`.
+//! Tools are live here. They are safe to enable because
+//! `IdeAgentRuntime::new` installs the agent's permission channel on the way
+//! in, so `request_tool_permission` blocks for a real answer from the editor
+//! instead of auto-approving — see `crates/archon-sdk/src/ide/runtime.rs`.
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use archon_core::cli_flags::ResolvedFlags;
@@ -18,7 +18,6 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_sdk::ide::handler::IdeProtocolHandler;
 use archon_sdk::ide::stdio::StdioTransport;
-use tokio::sync::Mutex;
 
 use crate::cli_args::Cli;
 use crate::session::BuiltAgent;
@@ -44,25 +43,19 @@ pub(crate) async fn handle_ide_stdio_command(
         agent,
         event_rx,
         sandbox_audit_drain,
+        permission_mode,
         ..
-    } = build_session_agent(
-        config,
-        &session_id,
-        cli,
-        env_vars,
-        &ide_session_flags(resolved_flags),
-        false,
-    )
-    .await
-    .map_err(|exit_code| anyhow::anyhow!("IDE session bootstrap failed (exit code {exit_code})"))?;
+    } = build_session_agent(config, &session_id, cli, env_vars, resolved_flags, false)
+        .await
+        .map_err(|exit_code| {
+            anyhow::anyhow!("IDE session bootstrap failed (exit code {exit_code})")
+        })?;
 
-    tracing::info!(%session_id, "IDE stdio mode: agent attached (text-only slice)");
+    let effective_mode = adopt_interactive_permission_mode(&permission_mode).await;
+    tracing::info!(%session_id, mode = %effective_mode, "IDE stdio mode: agent attached with tools");
 
-    let (handler, notifications) = IdeProtocolHandler::with_agent(
-        env!("CARGO_PKG_VERSION"),
-        Arc::new(Mutex::new(agent)),
-        event_rx,
-    );
+    let (handler, notifications, _agent) =
+        IdeProtocolHandler::with_agent(env!("CARGO_PKG_VERSION"), agent, event_rx);
     let mut transport = StdioTransport::new(handler);
     let loop_result = transport.run_with_events(notifications).await;
     let audit_result = sandbox_audit_drain.shutdown(AUDIT_DRAIN_TIMEOUT).await;
@@ -103,49 +96,52 @@ fn enter_workspace(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Narrow the session's resolved flags for an IDE stdio run.
+/// Upgrade an `auto` session to `default` for an IDE run, and report the mode
+/// the session will actually use.
 ///
-/// The empty whitelist is a safety requirement, not a preference. [`Agent`]
-/// auto-approves every permission request when its `permission_response_rx`
-/// is `None` (`archon-core/src/agent/permission_gate.rs`), and this slice has
-/// no IDE permission UI to supply one — so a tool-capable agent here would run
-/// Bash and Write without anybody being asked. An empty whitelist strips the
-/// registry *and* the tool schemas advertised to the model, so the model has
-/// nothing to call. Lift this only together with the permission round-trip.
+/// `auto` means "decide without me": on a `NeedsPermission` verdict the agent
+/// consults its [`AutoModeEvaluator`] and *denies* anything risky outright —
+/// `request_tool_permission` is never called, so no `archon/permissionRequest`
+/// is ever sent and the editor's approval UI can never appear. That is the
+/// right behaviour for a headless run and the wrong one for a window with a
+/// human in it, so an IDE session asks instead.
 ///
-/// [`Agent`]: archon_core::agent::Agent
-fn ide_session_flags(resolved_flags: &ResolvedFlags) -> ResolvedFlags {
-    let mut flags = resolved_flags.clone();
-    flags.tool_whitelist = Some(Vec::new());
-    flags
+/// Only `auto` is touched. `dontAsk` and `bypassPermissions` are deliberate
+/// statements that the user does not want to be asked, and honouring an
+/// explicit choice matters more than showing off the prompt.
+///
+/// [`AutoModeEvaluator`]: archon_permissions::auto::AutoModeEvaluator
+async fn adopt_interactive_permission_mode(permission_mode: &tokio::sync::Mutex<String>) -> String {
+    let mut mode = permission_mode.lock().await;
+    if *mode == "auto" {
+        tracing::info!("IDE stdio mode: permission mode auto -> default so the editor is asked");
+        "default".clone_into(&mut mode);
+    }
+    mode.clone()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn ide_sessions_advertise_no_tools() {
-        let flags = ide_session_flags(&ResolvedFlags::default());
+    #[tokio::test]
+    async fn an_auto_session_is_upgraded_so_the_editor_gets_asked() {
+        let mode = tokio::sync::Mutex::new("auto".to_string());
 
-        assert_eq!(
-            flags.tool_whitelist,
-            Some(Vec::new()),
-            "the IDE slice must not hand the model a tool it can auto-approve"
-        );
+        let effective = adopt_interactive_permission_mode(&mode).await;
+
+        assert_eq!(effective, "default");
+        assert_eq!(*mode.lock().await, "default");
     }
 
-    #[test]
-    fn narrowing_tools_leaves_the_rest_of_the_flags_alone() {
-        let resolved = ResolvedFlags {
-            model: Some("some-model".to_string()),
-            verbose: true,
-            ..ResolvedFlags::default()
-        };
+    #[tokio::test]
+    async fn an_explicit_choice_not_to_be_asked_is_left_alone() {
+        for chosen in ["dontAsk", "bypassPermissions", "plan", "acceptEdits"] {
+            let mode = tokio::sync::Mutex::new(chosen.to_string());
 
-        let flags = ide_session_flags(&resolved);
+            let effective = adopt_interactive_permission_mode(&mode).await;
 
-        assert_eq!(flags.model.as_deref(), Some("some-model"));
-        assert!(flags.verbose);
+            assert_eq!(effective, chosen, "{chosen} must survive an IDE session");
+        }
     }
 }

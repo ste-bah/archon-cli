@@ -1,17 +1,18 @@
-//! Agent runtime behind `archon/prompt` (issue #26, first slice: read-only chat).
+//! Agent runtime behind `archon/prompt` (issue #26).
 //!
 //! [`IdeAgentRuntime`] owns the live [`Agent`], the outbound notification
-//! queue, and the in-flight turn. It is a separate type from
-//! [`IdeProtocolHandler`](crate::ide::handler::IdeProtocolHandler) so the
+//! queue, the permission bridge, and the in-flight turn. It is a separate type
+//! from [`IdeProtocolHandler`](crate::ide::handler::IdeProtocolHandler) so the
 //! handler stays a pure JSON-RPC dispatcher: with no runtime attached the
 //! handler still answers every method with the correct protocol shape, which
 //! is what the synchronous `StdioTransport::run` loop and the protocol shape
 //! tests rely on.
 //!
-//! Scope note: this slice deliberately carries text only. Tool execution and
-//! the IDE permission round-trip are later slices, and the host must not
-//! attach a tool-capable agent until the permission channel exists — see
-//! [`IdeAgentRuntime::new`].
+//! [`IdeAgentRuntime::new`] takes the `Agent` **by value** and hands back a
+//! shared handle. That is the whole safety design for tools: the permission
+//! channel is installed on the way through, so there is no way to attach an
+//! agent to the IDE and forget it — and an agent without that channel
+//! auto-approves every tool it is asked to run.
 
 use std::sync::Arc;
 
@@ -20,8 +21,12 @@ use tokio_util::sync::CancellationToken;
 
 use archon_core::agent::{Agent, TimestampedEvent};
 
-use crate::ide::handler::event_to_notification;
-use crate::ide::protocol::{IdeError, IdePromptParams, JRpcErrorCode, JRpcNotification};
+use crate::ide::context_files::compose_prompt;
+use crate::ide::events::notification_for;
+use crate::ide::permission::PermissionBridge;
+use crate::ide::protocol::{
+    IdeError, IdePromptParams, IdeStatusResult, JRpcErrorCode, JRpcNotification,
+};
 
 /// Depth of the outbound notification queue.
 ///
@@ -31,26 +36,53 @@ use crate::ide::protocol::{IdeError, IdePromptParams, JRpcErrorCode, JRpcNotific
 /// would silently drop deltas mid-turn.
 pub const IDE_NOTIFICATION_CAPACITY: usize = archon_core::agent::AGENT_EVENT_CHANNEL_CAPACITY;
 
+/// Depth of the permission answer channel.
+///
+/// One. The agent asks one question at a time and blocks for the answer, so a
+/// deeper queue could only ever hold answers to questions nobody asked.
+const PERMISSION_CHANNEL_CAPACITY: usize = 1;
+
 /// A prompt turn the agent is currently driving.
 struct ActiveTurn {
     /// Cancels the turn. Also installed on the agent as its config-level
-    /// cancel token so later slices propagate it into tool contexts.
+    /// cancel token so tool contexts see it too.
     cancel: CancellationToken,
     /// Retained only to tell "still running" from "already finished"; a
     /// finished turn must not make the next `archon/prompt` look busy.
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Token and cost figures, refreshed from the agent after every turn.
+///
+/// `None` until the first turn ends. `archon/status` reports that absence
+/// explicitly rather than answering `0`, which would be a measurement the
+/// session never took.
+type StatusSlot = Arc<std::sync::Mutex<Option<TurnStatus>>>;
+
+#[derive(Clone, Copy)]
+struct TurnStatus {
+    input_tokens: u64,
+    output_tokens: u64,
+    cost: f64,
+}
+
 /// Live agent wired to the IDE protocol.
 pub struct IdeAgentRuntime {
     agent: Arc<Mutex<Agent>>,
     notifications: mpsc::Sender<JRpcNotification>,
+    permissions: Arc<PermissionBridge>,
     /// Session id stamped onto outbound notifications.
     ///
     /// A shared slot rather than a value because the event pump starts before
     /// the id exists: `archon/initialize` mints it, and the transport is
     /// already draining notifications by then.
     session_id: Arc<std::sync::Mutex<String>>,
+    status: StatusSlot,
+    /// Captured at construction, before the agent goes behind the lock, so
+    /// `archon/status` and `archon/config` can answer without waiting on a
+    /// turn that may be mid-stream.
+    model: String,
+    permission_mode: Arc<Mutex<String>>,
     active_turn: Option<ActiveTurn>,
 }
 
@@ -61,36 +93,49 @@ impl IdeAgentRuntime {
     /// `agent_events` must be the receiver paired with the sender the agent
     /// was constructed with, otherwise no deltas reach the IDE.
     ///
-    /// The caller is responsible for handing over an agent with **no tools**.
-    /// [`Agent`] auto-approves every permission request when its
-    /// `permission_response_rx` is `None` (see
-    /// `archon-core/src/agent/permission_gate.rs`), and this slice has no
-    /// permission round-trip, so a tool-capable agent here would run Bash and
-    /// Write with nobody ever asked.
+    /// The agent is taken by value so the permission channel can be installed
+    /// before anything can run against it, and returned behind the shared
+    /// handle the caller needs. This is why a tool-capable IDE session is safe
+    /// now and was not in the first slice: with `permission_response_rx` set,
+    /// `request_tool_permission` blocks for a real decision instead of logging
+    /// "no permission channel, auto-approved" and returning `true`
+    /// (`archon-core/src/agent/permission_gate.rs`).
     ///
-    /// Returns the runtime plus the notification receiver the transport
-    /// drains. The event pump is spawned here rather than by the caller so it
-    /// cannot be forgotten; that requires a Tokio runtime to be entered,
-    /// which every caller (the `ide-stdio` subcommand and the tests) is.
+    /// The event pump is spawned here rather than by the caller so it cannot
+    /// be forgotten; that requires a Tokio runtime to be entered, which every
+    /// caller (the `ide-stdio` subcommand and the tests) is.
     pub fn new(
-        agent: Arc<Mutex<Agent>>,
+        mut agent: Agent,
         agent_events: mpsc::Receiver<TimestampedEvent>,
-    ) -> (Self, mpsc::Receiver<JRpcNotification>) {
+    ) -> (Self, mpsc::Receiver<JRpcNotification>, Arc<Mutex<Agent>>) {
+        let (permission_tx, permission_rx) = mpsc::channel(PERMISSION_CHANNEL_CAPACITY);
+        agent.permission_response_rx = Some(Arc::new(Mutex::new(permission_rx)));
+        let model = agent.current_model().to_string();
+        let permission_mode = agent.permission_mode_handle();
+
+        let agent = Arc::new(Mutex::new(agent));
         let (tx, rx) = mpsc::channel(IDE_NOTIFICATION_CAPACITY);
         let session_id = Arc::new(std::sync::Mutex::new(String::new()));
+        let permissions = Arc::new(PermissionBridge::new(permission_tx));
         tokio::spawn(pump_agent_events(
             agent_events,
             tx.clone(),
             Arc::clone(&session_id),
+            Arc::clone(&permissions),
         ));
         (
             Self {
-                agent,
+                agent: Arc::clone(&agent),
                 notifications: tx,
+                permissions,
                 session_id,
+                status: Arc::new(std::sync::Mutex::new(None)),
+                model,
+                permission_mode,
                 active_turn: None,
             },
             rx,
+            agent,
         )
     }
 
@@ -121,9 +166,12 @@ impl IdeAgentRuntime {
 
         let cancel = CancellationToken::new();
         let task = tokio::spawn(run_turn(
-            Arc::clone(&self.agent),
-            self.notifications.clone(),
-            Arc::clone(&self.session_id),
+            TurnContext {
+                agent: Arc::clone(&self.agent),
+                notifications: self.notifications.clone(),
+                session_id: Arc::clone(&self.session_id),
+                status: Arc::clone(&self.status),
+            },
             compose_prompt(params),
             cancel.clone(),
         ));
@@ -144,28 +192,70 @@ impl IdeAgentRuntime {
             return false;
         }
         turn.cancel.cancel();
+        // A turn abandoned mid-permission leaves the agent blocked on the
+        // channel until its own timeout; retiring the request stops the IDE
+        // from answering a question that no longer has a listener.
+        self.permissions.close_request();
         true
+    }
+
+    /// Record what the connected client said it can do, from
+    /// `archon/initialize`.
+    ///
+    /// Only `tool_execution` matters here, and it is load-bearing: a client
+    /// with no allow/deny UI can never answer a permission prompt, so its
+    /// requests are refused immediately instead of hanging until the agent's
+    /// own timeout denies them anyway.
+    pub fn set_client_can_approve_tools(&self, can_approve: bool) {
+        self.permissions.set_client_can_answer(can_approve);
+    }
+
+    /// Deliver the user's answer to an outstanding `archon/permissionRequest`.
+    pub fn respond_to_permission(&self, request_id: &str, approved: bool) -> Result<(), String> {
+        self.permissions.respond(request_id, approved)
+    }
+
+    /// Session token and cost figures, or an explicit statement that there are
+    /// none yet.
+    pub fn status(&self) -> IdeStatusResult {
+        let measured = self.status.lock().ok().and_then(|slot| *slot);
+        match measured {
+            Some(status) => IdeStatusResult {
+                model: Some(self.model.clone()),
+                input_tokens: Some(status.input_tokens),
+                output_tokens: Some(status.output_tokens),
+                cost: Some(status.cost),
+                unavailable: None,
+            },
+            None => IdeStatusResult {
+                model: Some(self.model.clone()),
+                unavailable: Some(
+                    "no turn has completed in this session yet, so there is nothing measured to report"
+                        .to_string(),
+                ),
+                ..IdeStatusResult::default()
+            },
+        }
+    }
+
+    /// The model this session runs on.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Shared handle to the live permission mode, for `archon/config`.
+    pub fn permission_mode(&self) -> Arc<Mutex<String>> {
+        Arc::clone(&self.permission_mode)
     }
 }
 
-/// Build the text handed to the agent for one prompt.
-///
-/// Attached files are named rather than read: this slice has no tools, so the
-/// agent cannot open them. Naming them still beats dropping them silently —
-/// the model can say what it was given, and once tool execution lands the same
-/// paths become directly actionable.
-fn compose_prompt(params: &IdePromptParams) -> String {
-    let files = params.context_files.as_deref().unwrap_or(&[]);
-    if files.is_empty() {
-        return params.text.clone();
-    }
-    let mut out = params.text.clone();
-    out.push_str("\n\nFiles attached in the editor:");
-    for file in files {
-        out.push_str("\n- ");
-        out.push_str(file);
-    }
-    out
+/// The handles one turn task needs. Grouped so `run_turn` keeps a readable
+/// signature as the runtime grows.
+struct TurnContext {
+    agent: Arc<Mutex<Agent>>,
+    notifications: mpsc::Sender<JRpcNotification>,
+    session_id: Arc<std::sync::Mutex<String>>,
+    status: StatusSlot,
 }
 
 /// Forward agent events to the IDE until the agent's event channel closes.
@@ -173,10 +263,11 @@ async fn pump_agent_events(
     mut agent_events: mpsc::Receiver<TimestampedEvent>,
     notifications: mpsc::Sender<JRpcNotification>,
     session_id: Arc<std::sync::Mutex<String>>,
+    permissions: Arc<PermissionBridge>,
 ) {
     while let Some(event) = agent_events.recv().await {
         let session = current_session_id(&session_id);
-        let Some(notification) = event_to_notification(&session, &event.inner) else {
+        let Some(notification) = notification_for(&permissions, &session, &event.inner) else {
             continue;
         };
         if notifications.send(notification).await.is_err() {
@@ -189,14 +280,8 @@ async fn pump_agent_events(
 }
 
 /// Drive one `process_message` call to completion or cancellation.
-async fn run_turn(
-    agent: Arc<Mutex<Agent>>,
-    notifications: mpsc::Sender<JRpcNotification>,
-    session_id: Arc<std::sync::Mutex<String>>,
-    prompt: String,
-    cancel: CancellationToken,
-) {
-    let mut agent = agent.lock().await;
+async fn run_turn(ctx: TurnContext, prompt: String, cancel: CancellationToken) {
+    let mut agent = ctx.agent.lock().await;
     agent.set_cancel_token(Some(cancel.clone()));
     let outcome = tokio::select! {
         biased;
@@ -204,6 +289,22 @@ async fn run_turn(
         result = agent.process_message(&prompt) => Some(result),
     };
     agent.set_cancel_token(None);
+    // Read while the lock is still held: this is the one point where the
+    // figures are known to belong to a finished turn rather than a partial one.
+    let measured = {
+        let stats = agent.session_stats.lock().await;
+        TurnStatus {
+            input_tokens: stats.input_tokens,
+            output_tokens: stats.output_tokens,
+            cost: stats.session_cost,
+        }
+    };
+    // Published before the agent lock is released, so anything that observes
+    // the session as idle also observes the figures for the turn that just
+    // ended rather than the previous turn's.
+    if let Ok(mut slot) = ctx.status.lock() {
+        *slot = Some(measured);
+    }
     drop(agent);
 
     match outcome {
@@ -212,7 +313,7 @@ async fn run_turn(
         Some(Err(error)) => {
             // The agent emits no event for a failed turn, so without this the
             // IDE would sit on a half-rendered reply with no completion.
-            let session = current_session_id(&session_id);
+            let session = current_session_id(&ctx.session_id);
             tracing::error!(%error, "IDE prompt failed");
             let params = serde_json::to_value(IdeError {
                 session_id: Some(session),
@@ -220,7 +321,8 @@ async fn run_turn(
                 code: JRpcErrorCode::INTERNAL_ERROR,
             });
             if let Ok(params) = params {
-                let _ = notifications
+                let _ = ctx
+                    .notifications
                     .send(JRpcNotification {
                         jsonrpc: "2.0".to_string(),
                         method: "archon/error".to_string(),
@@ -251,30 +353,5 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Agent>();
         assert_send_sync::<Arc<Mutex<Agent>>>();
-    }
-
-    #[test]
-    fn attached_files_are_named_in_the_prompt() {
-        let params = IdePromptParams {
-            session_id: "s".to_string(),
-            text: "explain this".to_string(),
-            context_files: Some(vec!["src/main.rs".to_string()]),
-        };
-
-        let composed = compose_prompt(&params);
-
-        assert!(composed.starts_with("explain this"));
-        assert!(composed.contains("src/main.rs"));
-    }
-
-    #[test]
-    fn prompt_without_attachments_is_passed_through_verbatim() {
-        let params = IdePromptParams {
-            session_id: "s".to_string(),
-            text: "explain this".to_string(),
-            context_files: None,
-        };
-
-        assert_eq!(compose_prompt(&params), "explain this");
     }
 }

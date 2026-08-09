@@ -967,6 +967,7 @@ dependencies = [
  "archon-learning",
  "archon-llm",
  "archon-memory",
+ "archon-permissions",
  "archon-tools",
  "archon-workflow",
  "async-trait",

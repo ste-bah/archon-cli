@@ -15,6 +15,20 @@ import * as fs from "fs";
 /** Identifier used to persist the webview panel across VS Code restarts. */
 const VIEW_TYPE = "archonChat";
 
+/** A user's answer to one `archon/permissionRequest`. */
+export interface PermissionDecision {
+  requestId: string;
+  approved: boolean;
+}
+
+/** Shape of every message the webview is allowed to send back. */
+interface WebviewMessage {
+  type: string;
+  text?: string;
+  requestId?: string;
+  approved?: boolean;
+}
+
 export class ChatPanel {
   /** The active panel instance, or undefined if none is open. */
   static current: ChatPanel | undefined;
@@ -26,6 +40,14 @@ export class ChatPanel {
   /** Fired when the user sends a prompt from the webview. */
   readonly onDidReceivePrompt: vscode.Event<string>;
   private readonly _onDidReceivePromptEmitter: vscode.EventEmitter<string>;
+
+  /** Fired when the user answers a permission prompt in the webview. */
+  readonly onDidDecidePermission: vscode.Event<PermissionDecision>;
+  private readonly _onDidDecidePermissionEmitter: vscode.EventEmitter<PermissionDecision>;
+
+  /** Fired when the user asks to stop the in-flight turn. */
+  readonly onDidRequestCancel: vscode.Event<void>;
+  private readonly _onDidRequestCancelEmitter: vscode.EventEmitter<void>;
 
   // ── Static factory ─────────────────────────────────────────────────────────
 
@@ -72,13 +94,38 @@ export class ChatPanel {
 
     this._onDidReceivePromptEmitter = new vscode.EventEmitter<string>();
     this.onDidReceivePrompt = this._onDidReceivePromptEmitter.event;
+    this._onDidDecidePermissionEmitter =
+      new vscode.EventEmitter<PermissionDecision>();
+    this.onDidDecidePermission = this._onDidDecidePermissionEmitter.event;
+    this._onDidRequestCancelEmitter = new vscode.EventEmitter<void>();
+    this.onDidRequestCancel = this._onDidRequestCancelEmitter.event;
 
     this._panel.webview.html = this._buildHtml();
 
     this._panel.webview.onDidReceiveMessage(
-      (message: { type: string; text?: string }) => {
-        if (message.type === "prompt" && typeof message.text === "string") {
-          this._onDidReceivePromptEmitter.fire(message.text);
+      (message: WebviewMessage) => {
+        switch (message.type) {
+          case "prompt":
+            if (typeof message.text === "string") {
+              this._onDidReceivePromptEmitter.fire(message.text);
+            }
+            break;
+          case "permissionDecision":
+            if (
+              typeof message.requestId === "string" &&
+              typeof message.approved === "boolean"
+            ) {
+              this._onDidDecidePermissionEmitter.fire({
+                requestId: message.requestId,
+                approved: message.approved,
+              });
+            }
+            break;
+          case "cancel":
+            this._onDidRequestCancelEmitter.fire();
+            break;
+          default:
+            break;
         }
       },
       null,
@@ -109,6 +156,51 @@ export class ChatPanel {
     this.sendMessage({ type: "textDelta", text });
   }
 
+  /** Convenience helper: stream a thinking delta into the webview. */
+  appendThinkingDelta(text: string): void {
+    this.sendMessage({ type: "thinkingDelta", text });
+  }
+
+  /** Convenience helper: announce that the agent started a tool. */
+  showToolCall(toolUseId: string, name: string): void {
+    this.sendMessage({ type: "toolCall", toolUseId, name });
+  }
+
+  /** Convenience helper: render a finished tool call. */
+  showToolResult(
+    toolUseId: string,
+    name: string,
+    isError: boolean,
+    content: string
+  ): void {
+    this.sendMessage({ type: "toolResult", toolUseId, name, isError, content });
+  }
+
+  /** Convenience helper: raise the allow/deny prompt. */
+  requestPermission(
+    requestId: string,
+    action: string,
+    description: string
+  ): void {
+    this.sendMessage({
+      type: "permissionRequest",
+      requestId,
+      action,
+      description,
+    });
+  }
+
+  /**
+   * Convenience helper: take the allow/deny prompt down.
+   *
+   * Needed even when the user answered, because the agent can also stop
+   * waiting on its own (a timeout, or a cancelled turn), and buttons that no
+   * longer control anything must not stay on screen.
+   */
+  resolvePermission(action: string, granted: boolean, reason?: string): void {
+    this.sendMessage({ type: "permissionResolved", action, granted, reason });
+  }
+
   /** Convenience helper: signal turn completion to the webview. */
   notifyTurnComplete(tokensIn: number, tokensOut: number): void {
     this.sendMessage({ type: "turnComplete", tokensIn, tokensOut });
@@ -134,6 +226,8 @@ export class ChatPanel {
     ChatPanel.current = undefined;
     this._panel.dispose();
     this._onDidReceivePromptEmitter.dispose();
+    this._onDidDecidePermissionEmitter.dispose();
+    this._onDidRequestCancelEmitter.dispose();
     for (const d of this._disposables) {
       d.dispose();
     }

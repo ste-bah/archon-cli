@@ -35,6 +35,18 @@
       {
         "command": "archon.reconnect",
         "title": "Archon: Reconnect"
+      },
+      {
+        "command": "archon.showStatus",
+        "title": "Archon: Show Session Status"
+      },
+      {
+        "command": "archon.setPermissionMode",
+        "title": "Archon: Set Permission Mode"
+      },
+      {
+        "command": "archon.cancel",
+        "title": "Archon: Stop Current Turn"
       }
     ],
     "configuration": {

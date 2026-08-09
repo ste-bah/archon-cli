@@ -7,12 +7,20 @@
  */
 
 import * as assert from "assert";
-import { ConnectionMode, COMMANDS, CODE_ACTION_TITLES, CONFIG_KEY_CONNECTION_MODE } from "../src/constants";
+import {
+  ConnectionMode,
+  COMMANDS,
+  CODE_ACTION_TITLES,
+  CONFIG_KEY_CONNECTION_MODE,
+  PERMISSION_MODES,
+} from "../src/constants";
 import {
   formatStatusText,
   DEFAULT_WS_CONFIG,
   InitializeMessage,
+  PermissionResponseMessage,
   PromptMessage,
+  SessionStatus,
 } from "../src/types";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -156,6 +164,124 @@ test("archon_command_ids: COMMANDS object has at least 4 command ID strings", ()
       `Command "${cmd}" must be a string starting with "archon."`
     );
   }
+});
+
+// ── Test 12: permission_response_serialize ────────────────────────────────────
+
+test("permission_response_serialize: carries the requestId the backend correlates on", () => {
+  const msg: PermissionResponseMessage = {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "archon/permissionResponse",
+    params: { sessionId: "s", requestId: "perm-3", approved: false },
+  };
+  const parsed = JSON.parse(JSON.stringify(msg)) as Record<string, unknown>;
+  const params = parsed["params"] as Record<string, unknown>;
+  assert.strictEqual(parsed["method"], "archon/permissionResponse");
+  assert.strictEqual(params["requestId"], "perm-3");
+  assert.strictEqual(params["approved"], false);
+});
+
+// ── Test 13: capabilities_claim_an_approval_ui ────────────────────────────────
+
+test("capabilities_claim_an_approval_ui: initialize advertises toolExecution", () => {
+  // The backend reads this as "there is somebody here who can answer a
+  // permission prompt". Advertising false means every request is refused on
+  // arrival, so the chat panel's allow/deny buttons would never appear.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ConnectionManager } = require("../src/connection/manager") as typeof import("../src/connection/manager");
+  const source = require("fs").readFileSync(
+    require("path").join(__dirname, "..", "..", "src", "connection", "manager.ts"),
+    "utf8"
+  ) as string;
+  assert.ok(typeof ConnectionManager === "function");
+  assert.ok(
+    /toolExecution:\s*true/.test(source),
+    "DEFAULT_CAPABILITIES must advertise toolExecution: true"
+  );
+});
+
+// ── Test 14: permission_notification_dispatch ─────────────────────────────────
+
+test("permission_notification_dispatch: archon/permissionRequest reaches the callback", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ConnectionManager } = require("../src/connection/manager") as typeof import("../src/connection/manager");
+  const mgr = new ConnectionManager();
+  const seen: { requestId: string; action: string }[] = [];
+  mgr.onPermissionRequest = (request) => {
+    seen.push({ requestId: request.requestId, action: request.action });
+  };
+
+  // The private inbound path is the unit under test; there is no transport in
+  // a plain-Node test to push a frame through.
+  (mgr as unknown as { _handleMessage: (data: string) => void })._handleMessage(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "archon/permissionRequest",
+      params: {
+        sessionId: "s",
+        requestId: "perm-1",
+        action: "Bash",
+        description: "run a command",
+      },
+    })
+  );
+
+  assert.strictEqual(seen.length, 1, "permission request was dropped");
+  assert.strictEqual(seen[0]!.requestId, "perm-1");
+  assert.strictEqual(seen[0]!.action, "Bash");
+});
+
+// ── Test 15: permission_modes_exclude_auto ────────────────────────────────────
+
+test("permission_modes_exclude_auto: the mode picker never offers a mode that cannot prompt", () => {
+  assert.ok(PERMISSION_MODES.includes("default"));
+  assert.ok(
+    !PERMISSION_MODES.includes("auto"),
+    "auto never raises a permission prompt, so offering it hides the approval UI"
+  );
+  assert.ok(
+    !PERMISSION_MODES.includes("bypassPermissions"),
+    "bypassPermissions must not be a one-click option in the editor"
+  );
+});
+
+// ── Test 16: status_absence_is_representable ──────────────────────────────────
+
+test("status_absence_is_representable: SessionStatus can say 'no reading' without zeros", () => {
+  const status: SessionStatus = {
+    model: "claude-sonnet-4-6",
+    unavailable: "no turn has completed in this session yet",
+  };
+  assert.strictEqual(status.inputTokens, undefined);
+  assert.ok(status.unavailable && status.unavailable.length > 0);
+});
+
+// ── Test 17: webview_renders_the_permission_prompt ────────────────────────────
+
+test("webview_renders_the_permission_prompt: allow/deny buttons and their wiring exist", () => {
+  const fs = require("fs") as typeof import("fs");
+  const path = require("path") as typeof import("path");
+  const htmlPath = path.join(__dirname, "..", "..", "src", "chat", "webview.html");
+  const html = fs.readFileSync(htmlPath, "utf8");
+  assert.ok(html.includes('id="permission-allow"'), "missing Allow button");
+  assert.ok(html.includes('id="permission-deny"'), "missing Deny button");
+  assert.ok(
+    html.includes("permissionDecision"),
+    "buttons must post a permissionDecision back to the host"
+  );
+  assert.ok(
+    html.includes("case 'permissionRequest'"),
+    "webview must handle the permissionRequest message"
+  );
+  assert.ok(
+    html.includes("case 'toolCall'") && html.includes("case 'toolResult'"),
+    "webview must render tool activity"
+  );
+  assert.ok(
+    html.includes("case 'thinkingDelta'"),
+    "webview must render thinking deltas"
+  );
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────

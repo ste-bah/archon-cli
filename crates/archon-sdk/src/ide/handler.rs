@@ -3,28 +3,33 @@
 //! [`IdeProtocolHandler`] receives raw JSON-RPC request strings, dispatches
 //! to the appropriate method handler, and returns a JSON-RPC response string.
 //!
-//! `archon/prompt` and `archon/cancel` run against a live agent once an
-//! [`IdeAgentRuntime`] is attached (issue #26). Without one the handler is a
-//! protocol-only echo that still answers with the correct shapes — the mode
-//! the synchronous `StdioTransport::run` loop and the protocol shape tests
-//! use. `archon/toolResult` remains a stub: tool execution is a later slice.
+//! Every method that needs the agent runs against a live [`IdeAgentRuntime`]
+//! (issue #26). Without one the handler answers protocol-shape requests —
+//! `archon/initialize`, `archon/config` for process-level keys — and refuses
+//! the rest with an explicit error rather than a plausible-looking success.
+//! That refusal is the point: the mode with no agent used to answer
+//! `archon/prompt` with `{"queued": true}`, so `archon serve` looked like it
+//! had accepted a prompt it was never going to run.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use archon_core::agent::{Agent, AgentEvent, TimestampedEvent};
+use archon_core::agent::{Agent, TimestampedEvent};
 
+use crate::ide::config;
 use crate::ide::protocol::{
-    IdeCancelParams, IdeCapabilities, IdeConfigParams, IdeError, IdeInitializeParams,
-    IdeInitializeResult, IdePermissionRequest, IdePromptParams, IdeSession, IdeStatusParams,
-    IdeStatusResult, IdeTextDelta, IdeThinkingDelta, IdeToolCall, IdeToolResultParams,
-    IdeTurnComplete, JRpcErrorCode, JRpcNotification, error_response, parse_request,
-    success_response,
+    IdeCancelParams, IdeCapabilities, IdeConfigParams, IdeInitializeParams, IdeInitializeResult,
+    IdePermissionResponseParams, IdePromptParams, IdeSession, IdeStatusParams, IdeToolResultParams,
+    JRpcErrorCode, JRpcNotification, error_response, parse_request, success_response,
 };
 use crate::ide::runtime::IdeAgentRuntime;
+
+pub use crate::ide::events::event_to_notification;
+
+/// Message returned by every method that cannot work without an agent.
+const NO_AGENT: &str = "no agent is attached to this handler, so nothing can run; start the session with `archon ide-stdio`";
 
 // ── IdeProtocolHandler ────────────────────────────────────────────────────────
 
@@ -41,7 +46,7 @@ pub struct IdeProtocolHandler {
 
 impl IdeProtocolHandler {
     /// Create a new handler advertising `server_version`, with no agent
-    /// attached. Prompts are acknowledged but nothing runs.
+    /// attached. Prompts are refused.
     pub fn new(server_version: impl Into<String>) -> Self {
         Self {
             sessions: HashMap::new(),
@@ -53,15 +58,22 @@ impl IdeProtocolHandler {
     /// Create a handler that drives `agent` on `archon/prompt`.
     ///
     /// `agent_events` must be the receiver paired with the sender `agent` was
-    /// built with. Returns the handler plus the notification receiver the
-    /// transport drains; see [`IdeAgentRuntime::new`] for the tool-freedom
-    /// precondition on `agent`.
+    /// built with. Returns the handler, the notification receiver the
+    /// transport drains, and the shared agent handle.
+    ///
+    /// The agent is taken by value because [`IdeAgentRuntime::new`] installs
+    /// the permission channel on it before anything else can hold it — see
+    /// there for why that ordering is what makes tools safe to enable.
     pub fn with_agent(
         server_version: impl Into<String>,
-        agent: Arc<Mutex<Agent>>,
+        agent: Agent,
         agent_events: mpsc::Receiver<TimestampedEvent>,
-    ) -> (Self, mpsc::Receiver<JRpcNotification>) {
-        let (runtime, notifications) = IdeAgentRuntime::new(agent, agent_events);
+    ) -> (
+        Self,
+        mpsc::Receiver<JRpcNotification>,
+        std::sync::Arc<tokio::sync::Mutex<Agent>>,
+    ) {
+        let (runtime, notifications, agent) = IdeAgentRuntime::new(agent, agent_events);
         (
             Self {
                 sessions: HashMap::new(),
@@ -69,6 +81,7 @@ impl IdeProtocolHandler {
                 runtime: Some(runtime),
             },
             notifications,
+            agent,
         )
     }
 
@@ -88,6 +101,7 @@ impl IdeProtocolHandler {
             "archon/initialize" => self.handle_initialize(id, params),
             "archon/prompt" => self.handle_prompt(id, params),
             "archon/cancel" => self.handle_cancel(id, params),
+            "archon/permissionResponse" => self.handle_permission_response(id, params),
             "archon/toolResult" => self.handle_tool_result(id, params),
             "archon/status" => self.handle_status(id, params),
             "archon/config" => self.handle_config(id, params),
@@ -116,24 +130,28 @@ impl IdeProtocolHandler {
         let session_id = Uuid::new_v4().to_string();
         let session = IdeSession {
             session_id: session_id.clone(),
-            capabilities: IdeCapabilities {
-                inline_completion: init_params.capabilities.inline_completion,
-                tool_execution: init_params.capabilities.tool_execution,
-                diff: init_params.capabilities.diff,
-                terminal: init_params.capabilities.terminal,
-            },
+            capabilities: init_params.capabilities.clone(),
         };
         self.sessions.insert(session_id.clone(), session);
         // The event pump is already running and needs an id to stamp on
-        // outbound notifications; this is the moment one exists.
+        // outbound notifications; this is the moment one exists. The client's
+        // `toolExecution` capability lands here too, because it decides
+        // whether a permission prompt has anyone to answer it.
         if let Some(runtime) = &self.runtime {
             runtime.set_session_id(&session_id);
+            runtime.set_client_can_approve_tools(init_params.capabilities.tool_execution);
         }
 
         let result = IdeInitializeResult {
             session_id,
             server_version: self.server_version.clone(),
-            capabilities: IdeCapabilities::default(),
+            capabilities: IdeCapabilities {
+                // The server runs tools itself and asks before the dangerous
+                // ones; the other three are still client-side surfaces it has
+                // no part in.
+                tool_execution: self.runtime.is_some(),
+                ..IdeCapabilities::default()
+            },
         };
 
         match serde_json::to_value(&result) {
@@ -154,18 +172,12 @@ impl IdeProtocolHandler {
             }
         };
 
-        if !self.sessions.contains_key(&prompt_params.session_id) {
-            return error_response(
-                id,
-                JRpcErrorCode::INVALID_PARAMS,
-                &format!("unknown sessionId: {}", prompt_params.session_id),
-            );
+        if let Some(error) = self.reject_unknown_session(id, &prompt_params.session_id) {
+            return error;
         }
 
         let Some(runtime) = self.runtime.as_mut() else {
-            // Protocol-only mode: accept the prompt so the handshake and the
-            // transport tests keep working, but nothing runs.
-            return success_response(id, serde_json::json!({"queued": true}));
+            return error_response(id, JRpcErrorCode::INVALID_REQUEST, NO_AGENT);
         };
 
         match runtime.start_turn(&prompt_params) {
@@ -186,12 +198,8 @@ impl IdeProtocolHandler {
             }
         };
 
-        if !self.sessions.contains_key(&cancel_params.session_id) {
-            return error_response(
-                id,
-                JRpcErrorCode::INVALID_PARAMS,
-                &format!("unknown sessionId: {}", cancel_params.session_id),
-            );
+        if let Some(error) = self.reject_unknown_session(id, &cancel_params.session_id) {
+            return error;
         }
 
         // `false` means "there was nothing to stop", not "the request
@@ -203,8 +211,44 @@ impl IdeProtocolHandler {
         success_response(id, serde_json::json!({"cancelled": cancelled}))
     }
 
+    fn handle_permission_response(&mut self, id: u64, params: serde_json::Value) -> String {
+        let response: IdePermissionResponseParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return error_response(
+                    id,
+                    JRpcErrorCode::INVALID_PARAMS,
+                    &format!("invalid archon/permissionResponse params: {e}"),
+                );
+            }
+        };
+
+        if let Some(error) = self.reject_unknown_session(id, &response.session_id) {
+            return error;
+        }
+
+        let Some(runtime) = self.runtime.as_ref() else {
+            return error_response(id, JRpcErrorCode::INVALID_REQUEST, NO_AGENT);
+        };
+
+        // An answer nobody is waiting for is an error, not a quiet success:
+        // the user pressed a button and needs to know it did nothing.
+        match runtime.respond_to_permission(&response.request_id, response.approved) {
+            Ok(()) => success_response(id, serde_json::json!({"delivered": true})),
+            Err(reason) => error_response(id, JRpcErrorCode::INVALID_REQUEST, &reason),
+        }
+    }
+
+    /// `archon/toolResult` — explicitly unsupported.
+    ///
+    /// The method exists in the protocol for a client that executes tools on
+    /// the agent's behalf. Archon does not work that way: `Agent` dispatches
+    /// every tool in-process through its own registry and never waits on the
+    /// IDE for a result, so there is nothing for a result to be delivered to.
+    /// Answering `{"ok": true}` — which this did — told the client its result
+    /// had been consumed when it had been dropped on the floor.
     fn handle_tool_result(&mut self, id: u64, params: serde_json::Value) -> String {
-        let _tool_params: IdeToolResultParams = match serde_json::from_value(params) {
+        let tool_params: IdeToolResultParams = match serde_json::from_value(params) {
             Ok(p) => p,
             Err(e) => {
                 return error_response(
@@ -215,8 +259,15 @@ impl IdeProtocolHandler {
             }
         };
 
-        // Phase 6: forward result to the waiting agent turn.
-        success_response(id, serde_json::json!({"ok": true}))
+        error_response(
+            id,
+            JRpcErrorCode::INVALID_REQUEST,
+            &format!(
+                "archon/toolResult is not supported: Archon executes tools in-process, so no \
+                 result is expected from the client (dropped result for toolUseId {})",
+                tool_params.tool_use_id
+            ),
+        )
     }
 
     fn handle_status(&mut self, id: u64, params: serde_json::Value) -> String {
@@ -231,23 +282,15 @@ impl IdeProtocolHandler {
             }
         };
 
-        if !self.sessions.contains_key(&status_params.session_id) {
-            return error_response(
-                id,
-                JRpcErrorCode::INVALID_PARAMS,
-                &format!("unknown sessionId: {}", status_params.session_id),
-            );
+        if let Some(error) = self.reject_unknown_session(id, &status_params.session_id) {
+            return error;
         }
 
-        // Phase 6: pull real metrics from the agent loop.
-        let result = IdeStatusResult {
-            model: "claude-sonnet-4-6".to_string(),
-            input_tokens: 0,
-            output_tokens: 0,
-            cost: 0.0,
+        let Some(runtime) = self.runtime.as_ref() else {
+            return error_response(id, JRpcErrorCode::INVALID_REQUEST, NO_AGENT);
         };
 
-        match serde_json::to_value(&result) {
+        match serde_json::to_value(runtime.status()) {
             Ok(v) => success_response(id, v),
             Err(e) => error_response(id, JRpcErrorCode::INTERNAL_ERROR, &e.to_string()),
         }
@@ -265,98 +308,40 @@ impl IdeProtocolHandler {
             }
         };
 
-        if config_params.value.is_some() {
-            success_response(id, serde_json::json!({"ok": true}))
-        } else {
-            // Phase 6: look up real config values.
-            success_response(id, serde_json::json!({"value": null}))
+        let Some(key) = config_params.key.as_deref() else {
+            return error_response(
+                id,
+                JRpcErrorCode::INVALID_PARAMS,
+                &format!(
+                    "archon/config requires a key; known keys are {}",
+                    config::KNOWN_KEYS.join(", ")
+                ),
+            );
+        };
+
+        let runtime = self.runtime.as_ref();
+        let outcome = match config_params.value.as_ref() {
+            Some(value) => config::write(runtime, key, value)
+                .map(|()| serde_json::json!({"ok": true, "key": key})),
+            None => config::read(runtime, key).map(|value| serde_json::json!({"value": value})),
+        };
+
+        match outcome {
+            Ok(result) => success_response(id, result),
+            Err(reason) => error_response(id, JRpcErrorCode::INVALID_PARAMS, &reason),
         }
     }
-}
 
-/// Map an [`AgentEvent`] to an IDE notification, if applicable.
-///
-/// Returns `None` for events that have no IDE notification equivalent
-/// (e.g. `UserPromptReady`, `CompactionTriggered`, `PermissionGranted`/`Denied`).
-pub fn event_to_notification(session_id: &str, event: &AgentEvent) -> Option<JRpcNotification> {
-    let (method, params) = match event {
-        AgentEvent::TextDelta(text) => (
-            "archon/textDelta",
-            serde_json::to_value(IdeTextDelta {
-                session_id: session_id.to_string(),
-                text: text.clone(),
-            })
-            .ok()?,
-        ),
-        AgentEvent::ThinkingDelta(text) => (
-            "archon/thinkingDelta",
-            serde_json::to_value(IdeThinkingDelta {
-                session_id: session_id.to_string(),
-                thinking: text.clone(),
-            })
-            .ok()?,
-        ),
-        AgentEvent::ToolCallStarted { name, id } => (
-            "archon/toolCall",
-            serde_json::to_value(IdeToolCall {
-                session_id: session_id.to_string(),
-                tool_use_id: id.clone(),
-                name: name.clone(),
-                input: serde_json::Value::Null,
-            })
-            .ok()?,
-        ),
-        AgentEvent::PermissionRequired { tool, description } => (
-            "archon/permissionRequest",
-            serde_json::to_value(IdePermissionRequest {
-                session_id: session_id.to_string(),
-                action: tool.clone(),
-                description: description.clone(),
-            })
-            .ok()?,
-        ),
-        AgentEvent::TurnComplete {
-            input_tokens,
-            output_tokens,
-            ..
-        } => (
-            "archon/turnComplete",
-            serde_json::to_value(IdeTurnComplete {
-                session_id: session_id.to_string(),
-                input_tokens: *input_tokens,
-                output_tokens: *output_tokens,
-                cost: 0.0, // Cost calculation not available at this level
-            })
-            .ok()?,
-        ),
-        AgentEvent::Error(msg) => (
-            "archon/error",
-            serde_json::to_value(IdeError {
-                session_id: Some(session_id.to_string()),
-                message: msg.clone(),
-                code: JRpcErrorCode::INTERNAL_ERROR,
-            })
-            .ok()?,
-        ),
-        // Events without IDE notification equivalents
-        _ => return None,
-    };
-
-    Some(JRpcNotification {
-        jsonrpc: "2.0".to_string(),
-        method: method.to_string(),
-        params,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transient_thinking_has_no_ide_notification() {
-        let event = AgentEvent::TransientThinkingDelta("unapproved".into());
-
-        assert!(event_to_notification("session", &event).is_none());
+    /// Common guard: every session-scoped method must refuse an id it never
+    /// issued rather than acting on the one session it happens to have.
+    fn reject_unknown_session(&self, id: u64, session_id: &str) -> Option<String> {
+        if self.sessions.contains_key(session_id) {
+            return None;
+        }
+        Some(error_response(
+            id,
+            JRpcErrorCode::INVALID_PARAMS,
+            &format!("unknown sessionId: {session_id}"),
+        ))
     }
 }

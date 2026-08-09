@@ -1,267 +1,40 @@
 //! End-to-end tests for `archon/prompt` against a live agent (issue #26).
 //!
 //! Everything here runs on a scripted stub provider, so the assertions are
-//! about the wiring — which notifications the IDE sees, in what order, and
-//! what `archon/cancel` does to a stream mid-flight — not about any model.
+//! about the wiring — which notifications the IDE sees, in what order, what
+//! `archon/cancel` does to a stream mid-flight, and whether a tool actually
+//! runs — not about any model.
+
+mod ide_support;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{Mutex, mpsc};
-
-use archon_core::agent::{AGENT_EVENT_CHANNEL_CAPACITY, Agent, AgentConfig};
-use archon_core::agents::AgentRegistry;
-use archon_core::dispatch::ToolRegistry;
-use archon_llm::provider::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
-};
 use archon_llm::streaming::StreamEvent;
-use archon_llm::types::{ContentBlockType, Usage};
-use archon_sdk::ide::handler::IdeProtocolHandler;
-use archon_sdk::ide::protocol::JRpcNotification;
+use archon_llm::types::Usage;
 
-// ── Stub providers ───────────────────────────────────────────────────────────
-
-/// Replays one scripted turn and then closes the stream.
-struct ScriptedProvider {
-    events: std::sync::Mutex<Vec<StreamEvent>>,
-}
-
-/// Streams a prelude and then stalls forever, so a turn can be caught
-/// mid-stream and cancelled.
-struct StallingProvider {
-    prelude: std::sync::Mutex<Vec<StreamEvent>>,
-}
-
-fn message_start() -> StreamEvent {
-    StreamEvent::MessageStart {
-        id: "msg-ide".into(),
-        model: "stub".into(),
-        usage: Usage {
-            input_tokens: 11,
-            output_tokens: 0,
-            ..Usage::default()
-        },
-    }
-}
-
-fn text_block_start() -> StreamEvent {
-    StreamEvent::ContentBlockStart {
-        index: 0,
-        block_type: ContentBlockType::Text,
-        tool_use_id: None,
-        tool_name: None,
-    }
-}
-
-fn text_delta(text: &str) -> StreamEvent {
-    StreamEvent::TextDelta {
-        index: 0,
-        text: text.into(),
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for ScriptedProvider {
-    fn name(&self) -> &str {
-        "scripted"
-    }
-
-    fn models(&self) -> Vec<ModelInfo> {
-        vec![]
-    }
-
-    fn supports_feature(&self, _: ProviderFeature) -> bool {
-        false
-    }
-
-    async fn stream(&self, _request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
-        let events: Vec<StreamEvent> = self.events.lock().expect("script lock").drain(..).collect();
-        let (tx, rx) = mpsc::channel(events.len() + 1);
-        for event in events {
-            let _ = tx.send(event).await;
-        }
-        // Dropping `tx` here closes the stream, which is how the agent loop
-        // learns the round is over.
-        Ok(rx)
-    }
-
-    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        unimplemented!("IDE slice 1 only streams")
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for StallingProvider {
-    fn name(&self) -> &str {
-        "stalling"
-    }
-
-    fn models(&self) -> Vec<ModelInfo> {
-        vec![]
-    }
-
-    fn supports_feature(&self, _: ProviderFeature) -> bool {
-        false
-    }
-
-    async fn stream(&self, _request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
-        let prelude: Vec<StreamEvent> = self
-            .prelude
-            .lock()
-            .expect("prelude lock")
-            .drain(..)
-            .collect();
-        let (tx, rx) = mpsc::channel(prelude.len() + 1);
-        tokio::spawn(async move {
-            for event in prelude {
-                if tx.send(event).await.is_err() {
-                    return;
-                }
-            }
-            // Hold the sender open so the turn never finishes on its own.
-            // Resolves when the agent drops the receiver, which is exactly
-            // what cancellation does — so this task cannot outlive the test.
-            tx.closed().await;
-        });
-        Ok(rx)
-    }
-
-    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        unimplemented!("IDE slice 1 only streams")
-    }
-}
-
-// ── Harness ──────────────────────────────────────────────────────────────────
-
-struct Harness {
-    handler: IdeProtocolHandler,
-    notifications: mpsc::Receiver<JRpcNotification>,
-    agent: Arc<Mutex<Agent>>,
-    session_id: String,
-    next_id: u64,
-}
-
-impl Harness {
-    /// Build a handler wired to a live agent and complete the handshake.
-    ///
-    /// The tool registry is empty on purpose: this slice has no permission
-    /// round-trip, and an agent with `permission_response_rx == None`
-    /// auto-approves everything it is asked to run.
-    fn start(provider: Arc<dyn LlmProvider>) -> Self {
-        let (event_tx, event_rx) = mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-        let agent = Arc::new(Mutex::new(Agent::new(
-            provider,
-            ToolRegistry::new(),
-            AgentConfig::default(),
-            event_tx,
-            Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-                &std::env::temp_dir(),
-            ))),
-        )));
-        let (handler, notifications) =
-            IdeProtocolHandler::with_agent("test", Arc::clone(&agent), event_rx);
-
-        let mut harness = Self {
-            handler,
-            notifications,
-            agent,
-            session_id: String::new(),
-            next_id: 1,
-        };
-        harness.session_id = harness.initialize();
-        harness
-    }
-
-    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let id = self.next_id;
-        self.next_id += 1;
-        let raw = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        })
-        .to_string();
-        serde_json::from_str(&self.handler.handle(&raw)).expect("response is valid JSON")
-    }
-
-    fn initialize(&mut self) -> String {
-        let response = self.request(
-            "archon/initialize",
-            serde_json::json!({
-                "clientInfo": {"name": "test", "version": "1.0"},
-                "capabilities": {
-                    "inlineCompletion": false,
-                    "toolExecution": false,
-                    "diff": false,
-                    "terminal": false,
-                },
-            }),
-        );
-        response["result"]["sessionId"]
-            .as_str()
-            .expect("initialize returns a sessionId")
-            .to_string()
-    }
-
-    fn prompt(&mut self, text: &str) -> serde_json::Value {
-        self.request(
-            "archon/prompt",
-            serde_json::json!({"sessionId": self.session_id, "text": text}),
-        )
-    }
-
-    fn cancel(&mut self) -> serde_json::Value {
-        self.request(
-            "archon/cancel",
-            serde_json::json!({"sessionId": self.session_id}),
-        )
-    }
-
-    /// Next notification, or a test failure if the stream goes quiet.
-    async fn next_notification(&mut self) -> JRpcNotification {
-        tokio::time::timeout(Duration::from_secs(10), self.notifications.recv())
-            .await
-            .expect("timed out waiting for a notification")
-            .expect("notification channel closed early")
-    }
-
-    /// Wait until nothing holds the agent lock — i.e. the turn task has
-    /// actually let go, rather than merely having been asked to.
-    async fn wait_for_idle_agent(&self) {
-        for _ in 0..500 {
-            if self.agent.try_lock().is_ok() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("cancelled turn never released the agent");
-    }
-}
-
-// ── Tests ────────────────────────────────────────────────────────────────────
+use ide_support::{
+    Harness, ScriptedProvider, StallingProvider, message_start, text_block_start, text_delta,
+};
 
 #[tokio::test]
 async fn prompt_streams_text_deltas_in_order_then_completes() {
-    let provider = Arc::new(ScriptedProvider {
-        events: std::sync::Mutex::new(vec![
-            message_start(),
-            text_block_start(),
-            text_delta("Hello"),
-            text_delta(", world"),
-            StreamEvent::ContentBlockStop { index: 0 },
-            StreamEvent::MessageDelta {
-                stop_reason: Some("end_turn".into()),
-                usage: Some(Usage {
-                    input_tokens: 11,
-                    output_tokens: 7,
-                    ..Usage::default()
-                }),
-            },
-            StreamEvent::MessageStop,
-        ]),
-    });
+    let provider = Arc::new(ScriptedProvider::new(vec![vec![
+        message_start(),
+        text_block_start(),
+        text_delta("Hello"),
+        text_delta(", world"),
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: Some(Usage {
+                input_tokens: 11,
+                output_tokens: 7,
+                ..Usage::default()
+            }),
+        },
+        StreamEvent::MessageStop,
+    ]]));
     let mut harness = Harness::start(provider);
 
     let response = harness.prompt("summarise the module I have open");
@@ -294,14 +67,12 @@ async fn prompt_streams_text_deltas_in_order_then_completes() {
 
 #[tokio::test]
 async fn cancel_stops_an_in_flight_stream() {
-    let provider = Arc::new(StallingProvider {
-        prelude: std::sync::Mutex::new(vec![
-            message_start(),
-            text_block_start(),
-            text_delta("thinking about"),
-            text_delta(" your question"),
-        ]),
-    });
+    let provider = Arc::new(StallingProvider::new(vec![
+        message_start(),
+        text_block_start(),
+        text_delta("thinking about"),
+        text_delta(" your question"),
+    ]));
     let mut harness = Harness::start(provider);
 
     harness.prompt("walk me through this file");
@@ -330,9 +101,7 @@ async fn cancel_stops_an_in_flight_stream() {
 
 #[tokio::test]
 async fn cancelling_an_idle_session_reports_nothing_to_cancel() {
-    let provider = Arc::new(ScriptedProvider {
-        events: std::sync::Mutex::new(Vec::new()),
-    });
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
     let mut harness = Harness::start(provider);
 
     let response = harness.cancel();
@@ -342,13 +111,11 @@ async fn cancelling_an_idle_session_reports_nothing_to_cancel() {
 
 #[tokio::test]
 async fn a_second_prompt_is_refused_while_a_turn_is_in_flight() {
-    let provider = Arc::new(StallingProvider {
-        prelude: std::sync::Mutex::new(vec![
-            message_start(),
-            text_block_start(),
-            text_delta("working"),
-        ]),
-    });
+    let provider = Arc::new(StallingProvider::new(vec![
+        message_start(),
+        text_block_start(),
+        text_delta("working"),
+    ]));
     let mut harness = Harness::start(provider);
 
     harness.prompt("first question");
@@ -371,9 +138,7 @@ async fn a_second_prompt_is_refused_while_a_turn_is_in_flight() {
 
 #[tokio::test]
 async fn prompt_for_an_unknown_session_never_reaches_the_agent() {
-    let provider = Arc::new(ScriptedProvider {
-        events: std::sync::Mutex::new(Vec::new()),
-    });
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
     let mut harness = Harness::start(provider);
 
     let response = harness.request(
@@ -385,5 +150,159 @@ async fn prompt_for_an_unknown_session_never_reaches_the_agent() {
     assert!(
         harness.agent.try_lock().is_ok(),
         "no turn should have begun"
+    );
+}
+
+// ── Protocol-only mode ───────────────────────────────────────────────────────
+
+/// The stub this replaces answered `{"queued": true}` with nothing behind it,
+/// which is exactly how `archon serve` came to look like it had accepted a
+/// prompt it was never going to run.
+#[test]
+fn a_handler_with_no_agent_refuses_a_prompt_instead_of_pretending_to_queue_it() {
+    let mut handler = archon_sdk::ide::handler::IdeProtocolHandler::new("test");
+    let session_id = ide_support::initialize(&mut handler, true);
+
+    let response: serde_json::Value = serde_json::from_str(
+        &handler.handle(
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "archon/prompt",
+                "params": {"sessionId": session_id, "text": "hi"},
+            })
+            .to_string(),
+        ),
+    )
+    .expect("valid JSON");
+
+    assert!(response.get("result").is_none(), "{response}");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("no agent is attached")),
+        "{response}"
+    );
+}
+
+// ── archon/status ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn status_reports_an_absence_before_the_first_turn_rather_than_zeros() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let mut harness = Harness::start(provider);
+
+    let status = harness.status();
+
+    assert!(
+        status["result"].get("inputTokens").is_none(),
+        "a session that has run nothing has no token reading: {status}"
+    );
+    assert!(
+        status["result"]["unavailable"]
+            .as_str()
+            .is_some_and(|why| why.contains("no turn has completed")),
+        "{status}"
+    );
+    assert!(status["result"]["model"].as_str().is_some(), "{status}");
+}
+
+#[tokio::test]
+async fn status_reports_measured_tokens_once_a_turn_has_run() {
+    let provider = Arc::new(ScriptedProvider::new(vec![vec![
+        message_start(),
+        text_block_start(),
+        text_delta("done"),
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: Some(Usage {
+                input_tokens: 11,
+                output_tokens: 7,
+                ..Usage::default()
+            }),
+        },
+        StreamEvent::MessageStop,
+    ]]));
+    let mut harness = Harness::start(provider);
+
+    // Not a greeting: `try_complete_trivial_cognitive_turn` answers those
+    // without calling the provider at all, so the turn would legitimately
+    // report no tokens and the assertion below would be testing nothing.
+    harness.prompt("walk me through the module I have open");
+    harness.drain_until("archon/turnComplete").await;
+    harness.wait_for_idle_agent().await;
+
+    let status = harness.status();
+
+    assert!(
+        status["result"].get("unavailable").is_none(),
+        "a completed turn is a measurement: {status}"
+    );
+    assert_eq!(status["result"]["inputTokens"], 11, "{status}");
+    assert_eq!(status["result"]["outputTokens"], 7, "{status}");
+}
+
+// ── archon/toolResult and archon/config ──────────────────────────────────────
+
+#[tokio::test]
+async fn tool_result_is_refused_rather_than_acknowledged() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let mut harness = Harness::start(provider);
+
+    let response = harness.request(
+        "archon/toolResult",
+        serde_json::json!({
+            "sessionId": harness.session_id,
+            "toolUseId": "tool-1",
+            "result": "42",
+            "isError": false,
+        }),
+    );
+
+    assert!(response.get("result").is_none(), "{response}");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("not supported")),
+        "{response}"
+    );
+}
+
+#[tokio::test]
+async fn config_round_trips_the_permission_mode_the_gate_actually_reads() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let mut harness = Harness::start(provider);
+
+    let written = harness.request(
+        "archon/config",
+        serde_json::json!({"key": "permissionMode", "value": "plan"}),
+    );
+    assert_eq!(written["result"]["ok"], true, "{written}");
+
+    let read = harness.request(
+        "archon/config",
+        serde_json::json!({"key": "permissionMode"}),
+    );
+    assert_eq!(read["result"]["value"], "plan", "{read}");
+
+    // The write landed on the agent's own handle, not a copy beside it.
+    let live = harness.agent.lock().await.permission_mode_handle();
+    assert_eq!(*live.lock().await, "plan");
+}
+
+#[tokio::test]
+async fn config_refuses_a_key_it_does_not_know() {
+    let provider = Arc::new(ScriptedProvider::new(vec![]));
+    let mut harness = Harness::start(provider);
+
+    let response = harness.request("archon/config", serde_json::json!({"key": "permisionMode"}));
+
+    assert!(response.get("result").is_none(), "{response}");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown config key")),
+        "{response}"
     );
 }

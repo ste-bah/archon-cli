@@ -16,6 +16,11 @@ import {
   WsConnectionConfig,
   DEFAULT_WS_CONFIG,
   IdeCapabilities,
+  PermissionRequest,
+  PermissionResolved,
+  SessionStatus,
+  ToolCall,
+  ToolCallComplete,
 } from "../types";
 
 /** Token-usage summary delivered when a turn finishes. */
@@ -24,10 +29,17 @@ export interface TurnTokens {
   out: number;
 }
 
-/** Default capabilities advertised by the VS Code extension during initialize. */
+/**
+ * Default capabilities advertised by the VS Code extension during initialize.
+ *
+ * `toolExecution` is load-bearing rather than cosmetic: the backend reads it
+ * as "this client has an allow/deny UI". A client that advertises `false` has
+ * every permission request refused immediately, because there would be nobody
+ * to answer it. The chat panel renders that UI, so this is `true`.
+ */
 const DEFAULT_CAPABILITIES: IdeCapabilities = {
   inlineCompletion: false,
-  toolExecution: false,
+  toolExecution: true,
   diff: false,
   terminal: false,
 };
@@ -49,7 +61,15 @@ export class ConnectionManager {
 
   // Public event callbacks
   public onTextDelta: ((text: string) => void) | null = null;
+  public onThinkingDelta: ((text: string) => void) | null = null;
+  public onToolCall: ((call: ToolCall) => void) | null = null;
+  public onToolCallComplete: ((result: ToolCallComplete) => void) | null = null;
+  public onPermissionRequest: ((request: PermissionRequest) => void) | null =
+    null;
+  public onPermissionResolved: ((resolved: PermissionResolved) => void) | null =
+    null;
   public onTurnComplete: ((tokens: TurnTokens) => void) | null = null;
+  public onError: ((message: string) => void) | null = null;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -183,14 +203,62 @@ export class ConnectionManager {
     contextFiles?: string[]
   ): Promise<void> {
     const effectiveSessionId = this._sessionId ?? sessionId;
-    const id = this._nextId++;
-    const payload = JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      method: "archon/prompt",
-      params: { sessionId: effectiveSessionId, text, contextFiles },
+    // Awaited, not fired and forgotten: the backend rejects a prompt while
+    // another turn is in flight, and swallowing that leaves the panel spinning
+    // on a turn that was never accepted.
+    await this._sendRequest(this._nextId++, "archon/prompt", {
+      sessionId: effectiveSessionId,
+      text,
+      contextFiles,
     });
-    this._send(payload);
+  }
+
+  /**
+   * Answer an `archon/permissionRequest`.
+   *
+   * Rejects if the backend refuses the answer — a stale `requestId`, or one
+   * the agent is no longer waiting on. That surfaces as an error in the panel
+   * rather than as a button that silently did nothing.
+   */
+  async sendPermissionResponse(
+    requestId: string,
+    approved: boolean
+  ): Promise<void> {
+    await this._sendRequest(this._nextId++, "archon/permissionResponse", {
+      sessionId: this._sessionId,
+      requestId,
+      approved,
+    });
+  }
+
+  /** Cancel the in-flight turn. Resolves to whether one was actually running. */
+  async cancel(): Promise<boolean> {
+    const result = (await this._sendRequest(
+      this._nextId++,
+      "archon/cancel",
+      { sessionId: this._sessionId }
+    )) as { cancelled?: boolean } | undefined;
+    return result?.cancelled === true;
+  }
+
+  /** Fetch session token and cost figures. */
+  async getStatus(): Promise<SessionStatus> {
+    return (await this._sendRequest(this._nextId++, "archon/status", {
+      sessionId: this._sessionId,
+    })) as SessionStatus;
+  }
+
+  /** Read one `archon/config` key. */
+  async getConfig(key: string): Promise<unknown> {
+    const result = (await this._sendRequest(this._nextId++, "archon/config", {
+      key,
+    })) as { value?: unknown } | undefined;
+    return result?.value;
+  }
+
+  /** Write one `archon/config` key. */
+  async setConfig(key: string, value: unknown): Promise<void> {
+    await this._sendRequest(this._nextId++, "archon/config", { key, value });
   }
 
   /** Close the underlying transport and reset state to idle. */
@@ -320,8 +388,44 @@ export class ConnectionManager {
   ): void {
     switch (method) {
       case "archon/textDelta": {
-        const text = typeof params["text"] === "string" ? params["text"] : "";
-        this.onTextDelta?.(text);
+        this.onTextDelta?.(str(params["text"]));
+        break;
+      }
+      case "archon/thinkingDelta": {
+        this.onThinkingDelta?.(str(params["thinking"]));
+        break;
+      }
+      case "archon/toolCall": {
+        this.onToolCall?.({
+          toolUseId: str(params["toolUseId"]),
+          name: str(params["name"]),
+        });
+        break;
+      }
+      case "archon/toolCallComplete": {
+        this.onToolCallComplete?.({
+          toolUseId: str(params["toolUseId"]),
+          name: str(params["name"]),
+          isError: params["isError"] === true,
+          content: str(params["content"]),
+        });
+        break;
+      }
+      case "archon/permissionRequest": {
+        this.onPermissionRequest?.({
+          requestId: str(params["requestId"]),
+          action: str(params["action"]),
+          description: str(params["description"]),
+        });
+        break;
+      }
+      case "archon/permissionResolved": {
+        this.onPermissionResolved?.({
+          action: str(params["action"]),
+          granted: params["granted"] === true,
+          reason:
+            typeof params["reason"] === "string" ? params["reason"] : undefined,
+        });
         break;
       }
       case "archon/turnComplete": {
@@ -334,8 +438,17 @@ export class ConnectionManager {
         this.onTurnComplete?.({ in: inputTokens, out: outputTokens });
         break;
       }
+      case "archon/error": {
+        this.onError?.(str(params["message"]));
+        break;
+      }
       default:
         break;
     }
   }
+}
+
+/** Coerce an untrusted JSON field to a string without throwing. */
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
