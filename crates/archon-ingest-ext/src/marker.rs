@@ -115,18 +115,20 @@ pub fn parse_marker_json(root: &Value) -> Vec<Block> {
         let mut page = cur_page;
         if bt == "Page"
             && let Some(id) = node.get("id").and_then(Value::as_str)
-                && let Some(caps) = page_re.captures(id)
-                    && let Ok(n) = caps[1].parse::<u32>() {
-                        page = n + 1;
-                    }
+            && let Some(caps) = page_re.captures(id)
+            && let Ok(n) = caps[1].parse::<u32>()
+        {
+            page = n + 1;
+        }
 
         // Emit text-bearing blocks with a bbox (Table blocks become [TABLE] chunks).
         if let Some(block_type) = block_type_from_str(bt) {
             let html = node.get("html").and_then(Value::as_str).unwrap_or("");
             if let Some(bbox) = node.get("bbox").and_then(parse_bbox)
-                && let Some(block) = build_block(block_type, html, bbox, page) {
-                    blocks.push(block);
-                }
+                && let Some(block) = build_block(block_type, html, bbox, page)
+            {
+                blocks.push(block);
+            }
         }
 
         // Push children reversed so they pop (and emit) in document order.
@@ -168,15 +170,17 @@ pub fn parse_marker_figures(root: &Value) -> Vec<FigureRegion> {
         let mut page = cur_page;
         if bt == "Page"
             && let Some(id) = node.get("id").and_then(Value::as_str)
-                && let Some(caps) = page_re.captures(id)
-                    && let Ok(n) = caps[1].parse::<u32>() {
-                        page = n + 1;
-                    }
+            && let Some(caps) = page_re.captures(id)
+            && let Ok(n) = caps[1].parse::<u32>()
+        {
+            page = n + 1;
+        }
 
         if is_figure_block(bt)
-            && let Some(bbox) = node.get("bbox").and_then(parse_bbox) {
-                figures.push(FigureRegion { page, bbox });
-            }
+            && let Some(bbox) = node.get("bbox").and_then(parse_bbox)
+        {
+            figures.push(FigureRegion { page, bbox });
+        }
 
         if let Some(children) = node.get("children").and_then(Value::as_array) {
             for child in children.iter().rev() {

@@ -141,7 +141,17 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             yields no anchors and the task's requirements cannot promote. Do \
             not write \"Likely anchors: ...\" hedges and do not repeat the \
             same list across tasks — identical lists make every task appear \
-            to write every file.\n\
+            to write every file. The list must also be SUFFICIENT for the \
+            task's own acceptance criteria: if a criterion requires changing \
+            behaviour that lives in a file, that file belongs here, including \
+            the file DEFINING a type or function the criterion names rather \
+            than only the callers that use it. The runtime enforces this list \
+            as a hard write boundary, so a task whose criteria reach past it \
+            is unsatisfiable by construction — the agent respects the \
+            boundary, closes what it can, reports that finishing needs \
+            ownership it was not granted, and spends its whole remediation \
+            budget failing. Before writing this section, read each acceptance \
+            criterion back and name the file it changes.\n\
          3. `implements: [REQ-...]` is always declared, as a single-line flow \
             sequence. Use `implements: []` for an audit or review task — that \
             is a claim, and omitting the key is refused. Every cited ID must \

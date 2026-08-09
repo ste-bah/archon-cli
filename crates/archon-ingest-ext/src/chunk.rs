@@ -208,11 +208,12 @@ fn merge_undersized(chunks: Vec<ChunkOut>, min: usize) -> Vec<ChunkOut> {
     while let Some(cur) = iter.next() {
         if est_tokens(&cur.text) < min
             && let Some(next) = iter.peek()
-                && next.page_start <= cur.page_end + 1 {
-                    let next = iter.next().expect("peeked");
-                    out.push(merge_two(cur, next));
-                    continue; // skip BOTH; never re-evaluate the merged chunk
-                }
+            && next.page_start <= cur.page_end + 1
+        {
+            let next = iter.next().expect("peeked");
+            out.push(merge_two(cur, next));
+            continue; // skip BOTH; never re-evaluate the merged chunk
+        }
         out.push(cur);
     }
     out
