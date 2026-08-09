@@ -116,8 +116,17 @@ fn raise_on(
         Ok(stored) => {
             // Claim failure is not fatal: the item is on the board either way,
             // which is the point. It stays `open` and the sweep leaves it alone.
+            // Warned, not whispered. An unclaimed item renders as "raised,
+            // nobody holding it" while an agent is in fact working on it, and
+            // at debug level nobody ever learns why. Observed live on a repair
+            // task that sat `Open` for the rest of the run.
             if let Err(error) = board.claim_board_item(&stored.id, subagent_id) {
-                tracing::debug!(%error, item = %stored.id, "mirrored item raised but not claimed");
+                tracing::warn!(
+                    %error,
+                    item = %stored.id,
+                    "board item raised but the claim failed; it will read as unheld \
+                     while its agent works"
+                );
             }
             Some(stored.id)
         }
@@ -129,6 +138,9 @@ fn raise_on(
 }
 
 /// Close out a mirrored item once its subagent reaches a terminal state.
+///
+/// Note what "completed" can and cannot mean here: the runtime observed the
+/// subagent's process exit, nothing more. See the `Completed` arm.
 ///
 /// The transition is a compare-and-set from `claimed`, so an item a human or
 /// another agent has already moved on (resolved it by hand, escalated it) is
@@ -144,8 +156,17 @@ fn close_on(handle: &BoardHandle, item_id: &str, outcome: DelegatedOutcome) {
     };
 
     let result = match outcome {
+        // `InReview`, not `Resolved`: all the runtime knows is that the
+        // subagent's process exited successfully. It did not check that the
+        // work exists. Observed live — a spec writer failed three times in a
+        // row, each attempt returning a confident completion having written no
+        // file, and the board showed two green `Resolved` cards for a task the
+        // run itself reported as blocked. `Resolved` reads as "closed by doing
+        // the work" and must be reserved for a closure something actually
+        // verified; "work done, being checked" is exactly what a self-reported
+        // completion is.
         DelegatedOutcome::Completed => {
-            board.set_board_item_status(item_id, BoardStatus::Claimed, BoardStatus::Resolved)
+            board.set_board_item_status(item_id, BoardStatus::Claimed, BoardStatus::InReview)
         }
         // Escalated rather than declined: the work was not refused on a
         // judgement, it failed, and somebody has to decide what happens next.
@@ -253,15 +274,22 @@ mod tests {
         assert_eq!(access.get_board_item(&id).expect("item").run_id, "run-42");
     }
 
+    /// A completion the runtime did not verify closes to `in_review`, never
+    /// `resolved`. The distinction is the whole point: `resolved` asserts the
+    /// work was done, and all that was observed is a process exiting.
     #[test]
-    fn completing_the_task_resolves_the_item() {
+    fn completing_the_task_sends_the_item_for_review_not_resolution() {
         let (handle, access) = board();
         let id = raise(&handle, "sess-abc", "agent-1");
 
         close_on(&handle, &id, DelegatedOutcome::Completed);
 
         let item = access.get_board_item(&id).expect("item");
-        assert_eq!(item.status, BoardStatus::Resolved);
+        assert_eq!(
+            item.status,
+            BoardStatus::InReview,
+            "a self-reported completion is not evidence the work exists"
+        );
     }
 
     /// Failure escalates rather than resolving — the work did not get done, and
@@ -308,7 +336,7 @@ mod tests {
         assert_eq!(
             access.get_board_item(&id).expect("item").status,
             BoardStatus::Declined,
-            "the runtime must not resolve an item a human already closed"
+            "the runtime must not reopen or advance an item a human already closed"
         );
     }
 

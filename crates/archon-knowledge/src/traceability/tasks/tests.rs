@@ -316,3 +316,66 @@ fn a_longer_word_sharing_a_stem_does_not_match() {
     assert!(headings_match("focused tests and evidence", "focused tests"));
     assert!(headings_match("files expected", "files expected to change"));
 }
+
+/// A fenced block of commands is read, not ignored.
+///
+/// The live damage: a self-check counted prose entries, an agent un-bulleted to
+/// drive the count to zero, and six of fifteen specs lost every command.
+#[test]
+fn commands_in_a_fenced_block_under_focused_tests_are_read() {
+    let raw = "\
+# TASK-F-001
+
+```yaml
+task_id: TASK-F-001
+implements: [REQ-1]
+required_tools: [cargo, lizard]
+```
+
+## Focused Tests
+
+```bash
+cargo test -p thing
+lizard -l rust -C 15 src/a.rs
+# a comment, not a command
+```
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-F-001.md").expect("parses");
+    let commands: Vec<&str> = binding
+        .focused_tests
+        .iter()
+        .filter_map(|entry| match entry {
+            FocusedTestEntry::Command(command) => Some(command.as_str()),
+            FocusedTestEntry::Prose(_) => None,
+        })
+        .collect();
+    assert_eq!(commands.len(), 2, "{commands:?}");
+    assert!(commands.iter().any(|c| c.starts_with("cargo ")), "{commands:?}");
+    assert!(commands.iter().any(|c| c.starts_with("lizard ")), "{commands:?}");
+}
+
+/// A fenced block elsewhere in the document is not a focused test.
+#[test]
+fn a_fenced_block_outside_focused_tests_is_ignored() {
+    let raw = "\
+# TASK-F-002
+
+```yaml
+task_id: TASK-F-002
+implements: [REQ-1]
+required_tools: [cargo]
+```
+
+## Notes
+
+```bash
+cargo bench
+```
+
+## Focused Tests
+
+- `cargo test -p thing`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-F-002.md").expect("parses");
+    assert_eq!(binding.focused_tests.len(), 1, "{:?}", binding.focused_tests);
+}

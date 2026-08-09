@@ -27,6 +27,7 @@
 //! than a guess at which was meant.
 
 mod coverage;
+mod declarations;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -99,6 +100,11 @@ pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     };
     let mut out = render::report(&graph, &describe(source))?;
     out.push_str(&coverage::section(tasks_root.as_deref()));
+    // Fifth section, and like coverage it is not a graph analysis: it asks
+    // whether each task's frontmatter accounts for the commands that task
+    // declares it will run. Advisory for the same reason the others are —
+    // reported so the author can settle it, never raised.
+    out.push_str(&declarations::section(tasks_root.as_deref()));
     Ok(out)
 }
 

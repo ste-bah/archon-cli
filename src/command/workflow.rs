@@ -121,6 +121,20 @@ pub(crate) async fn handle_workflow_command(
     // or mutates a run — and an advisory read-only analysis is none of those.
     // Adding a variant would put a milestone 4 concept inside the thin
     // provider-neutral crate for no gain.
+    if let WorkflowAction::SyncCapabilities { tasks, dry_run } = action {
+        // Same disposition as lint: derived from the task files, reported to
+        // stdout, and it touches nothing but the manifest it names.
+        let tasks_root = if tasks.is_absolute() {
+            tasks.clone()
+        } else {
+            cwd.join(tasks)
+        };
+        let sync = crate::command::workflow_capabilities::sync_capabilities(
+            &cwd, &tasks_root, *dry_run,
+        )?;
+        print!("{}", sync.render());
+        return Ok(());
+    }
     if let WorkflowAction::Lint {
         tasks,
         spec_file,
@@ -287,6 +301,12 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::Lint { .. } => {
             return Err(anyhow!(
                 "workflow lint is handled before action conversion and must not reach it"
+            ));
+        }
+        WorkflowAction::SyncCapabilities { .. } => {
+            return Err(anyhow!(
+                "workflow sync-capabilities is handled before action conversion and must \
+                 not reach it"
             ));
         }
     };
