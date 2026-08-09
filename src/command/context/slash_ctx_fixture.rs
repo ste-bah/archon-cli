@@ -106,6 +106,7 @@ pub(super) fn build_test_slash_context(
         session_store,
         cost_config: archon_core::config::CostConfig::default(),
         codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
+        anthropic_models: archon_core::config::AnthropicModelsConfig::default(),
         memory: Arc::clone(&memory),
         garden_config: archon_memory::garden::GardenConfig::default(),
         mcp_manager: archon_mcp::lifecycle::McpServerManager::new(),
