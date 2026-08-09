@@ -62,11 +62,3 @@ src/cli_args/tests.rs                            # expires 2026-06-30  # v1.3.1 
 # --- PRD-008 audit-remediation (commits f63b0e6, b274114; merged 2026-05-18) ---
 src/command/behaviour.rs                         # expires 2026-06-30  # PRD-008 governed rollback/apply/correction CLI surface; split is allowlist-shrinks follow-up
 src/command/world_model/ingest_files.rs          # expires 2026-06-30  # PRD-008 world-model ingest path; split is allowlist-shrinks follow-up
-
-# --- alias forwarding through the observability wrapper (b9ec249a9, merged 2026-08-09) ---
-# 521 lines, 21 over. The obvious seam -- persistence recorder vs provider
-# wrapper -- was tried and reverted: `provider_observer_stream.rs` reaches the
-# recorder's private `persist`, and the `#[path]`-included test modules resolve
-# names against this file's scope, so moving the impl cascades through five
-# sibling modules. The split needs whoever owns this module, not a merge.
-src/runtime/provider_observer.rs                 # expires 2026-09-15  # observability wrapper + persistence recorder; split cascades through the #[path] siblings
