@@ -241,3 +241,78 @@ required_tools:
     assert_eq!(binding.implements, vec!["REQ-4"]);
     assert!(binding.required_tools.is_empty());
 }
+
+/// Headings go wrong in both directions and both used to yield zero bullets.
+#[test]
+fn a_heading_longer_than_the_requested_one_still_matches() {
+    let raw = "\
+# TASK-H
+
+```yaml
+task_id: TASK-H
+implements: [REQ-1]
+```
+
+## Focused Tests and Evidence
+
+- `cargo test -p thing`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-H.md").expect("parses");
+    assert_eq!(
+        binding.focused_tests.len(),
+        1,
+        "`## Focused Tests and Evidence` must answer a request for `focused tests`"
+    );
+}
+
+/// The short-form case the first fix covered must keep working.
+#[test]
+fn a_heading_shorter_than_the_requested_one_still_matches() {
+    let raw = "\
+# TASK-S
+
+```yaml
+task_id: TASK-S
+implements: [REQ-1]
+```
+
+## Files Expected
+
+- `crates/a/src/lib.rs`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-S.md").expect("parses");
+    assert_eq!(binding.path_scopes, vec!["crates/a/src/lib.rs"]);
+}
+
+/// A whole-word boundary, not a substring match: a different section that
+/// merely shares an opening word must not be absorbed.
+#[test]
+fn a_sibling_section_sharing_a_word_does_not_match() {
+    let raw = "\
+# TASK-F
+
+```yaml
+task_id: TASK-F
+implements: [REQ-1]
+```
+
+## Files Forbidden to Change
+
+- `crates/secret/src/lib.rs`
+";
+    let binding = parse_task_binding(raw, "tasks/TASK-F.md").expect("parses");
+    assert!(
+        binding.path_scopes.is_empty(),
+        "`Files Forbidden…` must never satisfy a request for `Files Expected…`"
+    );
+}
+
+/// The boundary must be a word boundary, so a longer word cannot match on its
+/// stem.
+#[test]
+fn a_longer_word_sharing_a_stem_does_not_match() {
+    assert!(!headings_match("focused testing", "focused tests"));
+    assert!(!headings_match("focused tests", "focused testing"));
+    assert!(headings_match("focused tests and evidence", "focused tests"));
+    assert!(headings_match("files expected", "files expected to change"));
+}
