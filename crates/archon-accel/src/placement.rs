@@ -269,10 +269,10 @@ fn decide_one(
     overrides: &DeviceOverrides,
 ) -> Placement {
     // Explicit Marker device override wins (the user knows their box); still OOM-guarded.
-    if c.kind == ConsumerKind::Marker {
-        if let Some(forced) = overrides.force_marker_device {
-            return Placement::forced(c.kind, forced, gpu.map(|(_, i)| i));
-        }
+    if c.kind == ConsumerKind::Marker
+        && let Some(forced) = overrides.force_marker_device
+    {
+        return Placement::forced(c.kind, forced, gpu.map(|(_, i)| i));
     }
     if !c.prefers_gpu {
         return Placement::cpu(c.kind, "CPU-only this round (GPU EP is opt-in, PR-C2)");

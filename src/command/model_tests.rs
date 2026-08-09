@@ -11,6 +11,7 @@ fn snapshot(current_model: &str) -> ModelSnapshot {
     ModelSnapshot {
         current_model: current_model.to_string(),
         codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
+        anthropic_models: archon_core::config::AnthropicModelsConfig::default(),
     }
 }
 
@@ -107,9 +108,11 @@ fn model_handler_execute_with_valid_arg_sets_effect_and_emits_events() {
     h.execute(&mut ctx, &["opus".to_string()])
         .expect("valid arg must produce Ok(())");
 
-    // validate_model_name("opus") resolves to "claude-opus-4-8"
-    // (see crates/archon-tools/src/validation.rs KNOWN_SHORTCUTS).
-    let expected = "claude-opus-4-8".to_string();
+    // `opus` resolves through `[models.anthropic]`, not through
+    // `KNOWN_SHORTCUTS`. This asserted the literal `claude-opus-4-8` and broke
+    // when the alias began reading config — the literal was a second copy of a
+    // default, which is the drift the change removed.
+    let expected = archon_core::config::AnthropicModelsConfig::default().opus;
     match ctx.pending_effect.as_ref() {
         Some(CommandEffect::SetModelOverride(s)) => {
             assert_eq!(
@@ -141,7 +144,7 @@ fn model_handler_execute_with_valid_arg_sets_effect_and_emits_events() {
                 assert_eq!(s, &expected);
                 saw_model_changed = true;
             }
-            TuiEvent::TextDelta(msg) if msg.contains("Model switched to claude-opus-4-8") => {
+            TuiEvent::TextDelta(msg) if msg.contains(&format!("Model switched to {expected}")) => {
                 saw_text_delta = true;
             }
             _ => {}
@@ -197,6 +200,63 @@ fn codex_aliases_resolve_from_config_not_a_hardcoded_id() {
         resolve_codex_model_name("gpt-5.4", &cfg).unwrap(),
         "gpt-5.4"
     );
+}
+
+/// Anthropic aliases come from `[models.anthropic]`, not from a literal.
+///
+/// The mirror of `codex_aliases_resolve_from_config_not_a_hardcoded_id`, and
+/// the same defect: `opus`/`sonnet`/`haiku` resolved through
+/// `archon_tools::validation::KNOWN_SHORTCUTS`, whose own doc comment names
+/// `resolve_anthropic_model(alias, &cfg)` as the correct route — a resolver
+/// that had no callers. Configured values sharing no prefix with the old
+/// constants, so a stale implementation cannot coincidentally pass.
+#[test]
+fn anthropic_aliases_resolve_from_config_not_a_hardcoded_id() {
+    let cfg = archon_core::config::AnthropicModelsConfig {
+        opus: "claude-opus-9".into(),
+        sonnet: "claude-sonnet-9".into(),
+        haiku: "claude-haiku-9".into(),
+    };
+
+    assert_eq!(
+        resolve_anthropic_model_name("opus", &cfg).unwrap(),
+        "claude-opus-9"
+    );
+    assert_eq!(
+        resolve_anthropic_model_name("sonnet", &cfg).unwrap(),
+        "claude-sonnet-9"
+    );
+    assert_eq!(
+        resolve_anthropic_model_name("haiku", &cfg).unwrap(),
+        "claude-haiku-9"
+    );
+
+    // A literal ID still passes through validation untouched.
+    assert_eq!(
+        resolve_anthropic_model_name("claude-opus-4-8", &cfg).unwrap(),
+        "claude-opus-4-8"
+    );
+    // And a typo still gets the did-you-mean path rather than being accepted.
+    assert!(resolve_anthropic_model_name("definitely-not-a-model", &cfg).is_err());
+}
+
+/// End-to-end through the handler: `/model opus` must select what config says.
+#[test]
+fn model_handler_anthropic_alias_uses_configured_model() {
+    let (mut ctx, _rx) = make_model_ctx(Some(anthropic_snapshot("claude-sonnet-4-6")));
+    let h = ModelHandler;
+    h.execute(&mut ctx, &["opus".to_string()])
+        .expect("Anthropic alias must produce Ok(())");
+
+    let expected = archon_core::config::AnthropicModelsConfig::default().opus;
+    match ctx.pending_effect.as_ref() {
+        Some(CommandEffect::SetModelOverride(s)) => assert_eq!(
+            s, &expected,
+            "/model opus must select [models.anthropic].opus, not a compile-time literal"
+        ),
+        Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
+        None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
+    }
 }
 
 #[test]
@@ -255,8 +315,15 @@ fn model_handler_execute_with_codex_alias_sets_effect() {
     h.execute(&mut ctx, &["mini".to_string()])
         .expect("Codex alias must produce Ok(())");
 
+    // Asserted against the configured value rather than a literal. This test
+    // pinned `gpt-5.4-mini` and broke when the Codex model defaults began
+    // sourcing from the shipped config.toml — the literal was a second copy of
+    // a default, which is the exact drift that change removed. Resolving the
+    // alias the same way production does keeps the test about the alias
+    // mechanism instead of about which model happens to be current.
+    let expected = archon_core::config::OpenAiCodexModelsConfig::default().mini;
     match ctx.pending_effect.as_ref() {
-        Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "gpt-5.4-mini"),
+        Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, &expected),
         Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
         None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
     }

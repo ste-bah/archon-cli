@@ -17,7 +17,7 @@ pub(super) async fn run_v2_agent_repair_with_rejected_output_log(
             Ok(result)
         }
         Err(repair_error) if repair_error.differs_from(&first_error) => {
-            save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
+            save_rejected_output(v2_store, request, "repair", &repaired, &repair_error);
             run_v2_agent_second_repair(
                 adapter,
                 client,
@@ -30,7 +30,7 @@ pub(super) async fn run_v2_agent_repair_with_rejected_output_log(
             .await
         }
         Err(repair_error) => {
-            save_rejected_write_output(v2_store, request, "repair", &repaired, &repair_error);
+            save_rejected_output(v2_store, request, "repair", &repaired, &repair_error);
             Err(repair_exhausted_error(first_error, repair_error))
         }
     }
@@ -53,7 +53,7 @@ async fn run_v2_agent_second_repair(
             Ok(result)
         }
         Err(last_error) => {
-            save_rejected_write_output(v2_store, request, "second_repair", &second, &last_error);
+            save_rejected_output(v2_store, request, "second_repair", &second, &last_error);
             Err(repair_exhausted_error(first_error, last_error))
         }
     }

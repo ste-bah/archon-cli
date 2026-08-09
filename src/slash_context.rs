@@ -37,6 +37,7 @@ pub(crate) struct SlashCommandContext {
     /// reason as `cost_config`: the handler needs these three strings, not the
     /// whole `ArchonConfig`.
     pub(crate) codex_models: archon_core::config::OpenAiCodexModelsConfig,
+    pub(crate) anthropic_models: archon_core::config::AnthropicModelsConfig,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,
     pub(crate) mcp_manager: McpServerManager,

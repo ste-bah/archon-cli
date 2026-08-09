@@ -57,6 +57,15 @@ pub fn normalize_focused_verification_outcome(
         ) {
             demote_zero_test_acceptance(outcome);
         }
+        // Ordered last of the three: a failing test is the most specific signal
+        // and carries the most actionable gap text, so it should win the verdict
+        // if more than one rule applies.
+        if matches!(
+            outcome.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
+            demote_failed_test_acceptance(outcome);
+        }
         return;
     }
     if !should_accept_duplicate_pass {
@@ -142,6 +151,61 @@ fn demote_commandless_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     data.insert(
         "verification_failure_class".to_string(),
         serde_json::json!("retryable_verification_shape_issue"),
+    );
+    result.data = serde_json::Value::Object(data);
+    outcome.status = WorkflowV2Status::NeedsReview;
+    outcome.failure_kind = Some(BranchFailureKind::Semantic);
+}
+
+/// Demote an accepted/noop outcome that recorded a FAILING test command.
+///
+/// The two guards either side of this one look for shapes of *absence* — no
+/// command ran, or the commands that ran matched nothing. Neither asks the
+/// simpler question: did a test actually fail? A live run was accepted with
+/// `tests 2/4`, both failures being `archon trading data` commands exiting 1 on
+/// a real registry defect, because a failing command is neither "absent" nor
+/// "zero-matched" and so matched no existing rule.
+///
+/// Anomaly detection fails open on every state nobody anticipated; this asserts
+/// the positive instead — no `Test` command may be left failing under an
+/// accepted verdict.
+fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
+    let Some(result) = outcome.result.as_mut() else {
+        return;
+    };
+    let failed: Vec<String> = result
+        .commands_run
+        .iter()
+        .filter(|command| command.kind == crate::WorkflowV2CommandKind::Test)
+        .filter(|command| command.status == crate::WorkflowV2CommandStatus::Failed)
+        .map(|command| command.command.clone())
+        .collect();
+    if failed.is_empty() {
+        return;
+    }
+    let listed = failed.join("; ");
+    result.status = WorkflowV2Status::NeedsReview;
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "failed_test_command_verification".to_string(),
+        description: format!(
+            "{} test command(s) in this verification failed, so the accepted verdict is not \
+             supported by its own evidence: {listed}",
+            failed.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "accepted verification demoted: recorded test commands failed",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "failed_test_commands".to_string(),
+        serde_json::json!(failed),
+    );
+    data.insert(
+        "verification_failure_class".to_string(),
+        serde_json::json!("actionable_verification_failure"),
     );
     result.data = serde_json::Value::Object(data);
     outcome.status = WorkflowV2Status::NeedsReview;

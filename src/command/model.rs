@@ -47,6 +47,8 @@ pub(crate) struct ModelSnapshot {
     /// handler is sync and cannot reach shared state, so anything it needs is
     /// captured at the dispatch site where `.await` is legal.
     pub(crate) codex_models: archon_core::config::OpenAiCodexModelsConfig,
+    /// `[models.anthropic]`, for the same reason and by the same route.
+    pub(crate) anthropic_models: archon_core::config::AnthropicModelsConfig,
 }
 
 /// Build a [`ModelSnapshot`] by awaiting the `model_override_shared`
@@ -67,6 +69,7 @@ pub(crate) async fn build_model_snapshot(slash_ctx: &SlashCommandContext) -> Mod
     ModelSnapshot {
         current_model,
         codex_models: slash_ctx.codex_models.clone(),
+        anthropic_models: slash_ctx.anthropic_models.clone(),
     }
     // Guard drops here — lock released before return.
 }
@@ -92,10 +95,38 @@ fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<Strin
     if looks_like_codex_model(&snap.current_model) {
         resolve_codex_model_name(input, &snap.codex_models)
     } else if looks_like_anthropic_model(&snap.current_model) {
-        archon_tools::validation::validate_model_name(input)
+        resolve_anthropic_model_name(input, &snap.anthropic_models)
     } else {
         validate_provider_model_name(input)
     }
+}
+
+/// Resolve an Anthropic alias or model ID, reading `[models.anthropic]`.
+///
+/// The exact defect the Codex resolver above was written to fix, left standing
+/// on the other provider: `opus`/`sonnet`/`haiku` came back from
+/// `archon_tools::validation::KNOWN_SHORTCUTS`, a compile-time table whose own
+/// doc comment says "the canonical source of truth is `ArchonConfig::models`;
+/// production code should call `resolve_anthropic_model(alias, &cfg)` instead
+/// of reading this constant directly". Nothing did — the resolver had no
+/// callers at all. So `/model opus` selected `claude-opus-4-8` while
+/// `[models.anthropic] opus` said `claude-opus-5`, and silently, because a
+/// valid model ID came back either way.
+///
+/// Literal IDs still go through `validate_model_name`, which keeps its
+/// did-you-mean suggestions for typos. Only the alias arm changes.
+fn resolve_anthropic_model_name(
+    input: &str,
+    cfg: &archon_core::config::AnthropicModelsConfig,
+) -> Result<String, String> {
+    let resolved = archon_core::config::resolve_anthropic_model(input, cfg);
+    // `resolve_anthropic_model` passes unknown input straight through, so a
+    // changed value means an alias matched. Anything else is a literal ID or a
+    // typo, and validation still owns that decision.
+    if resolved != input.trim() {
+        return Ok(resolved);
+    }
+    archon_tools::validation::validate_model_name(input)
 }
 
 fn looks_like_codex_model(model: &str) -> bool {
@@ -130,10 +161,10 @@ fn validate_provider_model_name(input: &str) -> Result<String, String> {
 /// `/model default` selected, because the alias was rewritten to a literal ID
 /// here before the provider ever saw it.
 ///
-/// `archon-tools`' `CODEX_KNOWN_SHORTCUTS` says the rule outright: those
-/// constants are compile-time fallbacks and "production code should call
-/// `resolve_codex_model(alias, &cfg)` instead". That resolver existed with no
-/// callers; this is now its caller.
+/// `resolve_codex_model(alias, &cfg)` is the canonical resolver and existed
+/// with no callers; this is now its caller. The compile-time fallback table it
+/// replaced (`CODEX_KNOWN_SHORTCUTS`) has been deleted rather than left as a
+/// second, drifting copy of the same defaults.
 ///
 /// The cross-provider tier names map as `to_alias_map` documents — `opus` and
 /// `sonnet` both to the frontier `default`, `haiku` to `mini` — so a tier name

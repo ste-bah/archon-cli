@@ -70,6 +70,23 @@ impl TradingDataLake {
         Ok(record)
     }
 
+    /// Verify a registry file and every dataset it registers.
+    ///
+    /// Structural validity of `registry.json` alone would be a weak claim: the
+    /// registry's job is to name datasets that hold up, so a registry listing a
+    /// broken dataset must fail. This walks each entry through the same
+    /// artifact verification a dataset directory gets.
+    pub fn verify_registry_file(
+        registry_path: &Path,
+    ) -> Result<PersistentDatasetRegistry, DataStoreError> {
+        let root = project_root_for_artifact(registry_path)?;
+        let registry: PersistentDatasetRegistry = read_json(registry_path)?;
+        for record in registry.datasets.values() {
+            verify_artifacts(&root, record)?;
+        }
+        Ok(registry)
+    }
+
     pub fn verify_coverage_files(
         coverage_path: &Path,
         registry_path: &Path,
@@ -402,8 +419,13 @@ impl TradingDataLake {
             verify_artifacts(&self.root, record)?;
             let validation =
                 read_json::<ValidationReport>(&self.root.join(&record.validation_path));
+            // A quarantined dataset can never be production-eligible, whatever
+            // its validation report says. Status is derived here rather than
+            // stored, so without this a quarantine is silently undone by the
+            // next read.
+            let quarantined = dataset_is_quarantined(&self.root, record);
             let production_eligible =
-                registry_record_allows_production(record, validation.as_ref());
+                !quarantined && registry_record_allows_production(record, validation.as_ref());
             let status = if production_eligible {
                 DatasetStatus::Healthy
             } else {
