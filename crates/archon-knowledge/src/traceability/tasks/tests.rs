@@ -313,6 +313,9 @@ implements: [REQ-1]
 fn a_longer_word_sharing_a_stem_does_not_match() {
     assert!(!headings_match("focused testing", "focused tests"));
     assert!(!headings_match("focused tests", "focused testing"));
-    assert!(headings_match("focused tests and evidence", "focused tests"));
+    assert!(headings_match(
+        "focused tests and evidence",
+        "focused tests"
+    ));
     assert!(headings_match("files expected", "files expected to change"));
 }

@@ -217,8 +217,15 @@ mod tests {
     }
 
     fn raise(handle: &BoardHandle, session: &str, agent: &str) -> String {
-        raise_on(handle, session, agent, "Build the parser", "the brief", "parent")
-            .expect("mirroring onto a reachable board succeeds")
+        raise_on(
+            handle,
+            session,
+            agent,
+            "Build the parser",
+            "the brief",
+            "parent",
+        )
+        .expect("mirroring onto a reachable board succeeds")
     }
 
     /// The whole point: dispatching work puts a *claimed* item on the run's
@@ -300,7 +307,11 @@ mod tests {
         let (handle, access) = board();
         let id = raise(&handle, "sess-abc", "agent-1");
         access
-            .decline_board_item(&id, BoardStatus::Claimed, "superseded by a different approach")
+            .decline_board_item(
+                &id,
+                BoardStatus::Claimed,
+                "superseded by a different approach",
+            )
             .expect("declining a claimed item");
 
         close_on(&handle, &id, DelegatedOutcome::Completed);
@@ -328,7 +339,10 @@ mod tests {
 
     #[test]
     fn title_is_the_first_non_empty_line() {
-        assert_eq!(summarise("\n\n  Build the parser  \nmore\n"), "Build the parser");
+        assert_eq!(
+            summarise("\n\n  Build the parser  \nmore\n"),
+            "Build the parser"
+        );
     }
 
     #[test]
@@ -339,7 +353,11 @@ mod tests {
     #[test]
     fn long_title_is_cut_to_the_limit() {
         let title = summarise(&"a".repeat(TITLE_LIMIT + 50));
-        assert_eq!(title.chars().count(), TITLE_LIMIT + 1, "limit plus the ellipsis");
+        assert_eq!(
+            title.chars().count(),
+            TITLE_LIMIT + 1,
+            "limit plus the ellipsis"
+        );
     }
 
     /// The cut must land on a character boundary — slicing bytes would panic.
@@ -358,8 +376,13 @@ mod tests {
         // Safe regardless of install order: this asserts the *absence* of a
         // panic and a `None`-or-`Some` outcome, and the global may legitimately
         // be installed by another test in the same binary.
-        let raised =
-            raise_delegated_task("session-1", "agent-1", "do the thing", "the brief", "parent");
+        let raised = raise_delegated_task(
+            "session-1",
+            "agent-1",
+            "do the thing",
+            "the brief",
+            "parent",
+        );
         if raised.is_none() {
             // The unreachable-board path also has to be a no-op, not a panic.
             close_delegated_task("agent-1", DelegatedOutcome::Completed);

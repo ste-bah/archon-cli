@@ -205,23 +205,29 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.6.1** — [release notes](docs/release-notes/v1.6.1.md)
+**Current release: v1.7.0** — [release notes](docs/release-notes/v1.7.0.md)
 
-The browser is a full archon surface, not an inspector beside one: a terminal
-pane running the real TUI, and upload, delete and index controls over the
-knowledge store. Fixes document ingest, which crashed before reading a byte on
-any OpenAI-compatible embedding provider, and a TUI that panicked on terminals
-under about 22 rows.
+Four subsystems that had been built, tested and never called are now wired and
+producing data — the executive loop runs as a shadow observer on every turn,
+reflection triggers on real signals, the self-model has a writer, and an
+abstaining correction classifier accumulates the labels its own promotion gate
+needs. The knowledge base gained `docs compile`, `docs answer` and `docs export`,
+the last two of which had been implemented since April with no command to reach
+them. VSCode can execute tools behind a permission prompt that actually refuses.
 
-Built on v1.6.0, which let agents hand work to each other: a durable task board
-with atomic claims that survive the memory garden, subagent identity so a write
-can be attributed, and a self-check that reports an over-limit file back into
-the agent's own transcript.
+Also closes a content-hash race in the shipping ingest path: a bare read followed
+by an unguarded write, so two processes could create two documents for one hash.
 
-> **Nothing is required on upgrade, and two older notes still apply.** The
-> browser terminal and the knowledge-store controls are off by default and need
-> explicit `[policy.web]` flags — see the
-> [release notes](docs/release-notes/v1.6.1.md#upgrade-notes).
+Built on v1.6.1, which made the browser a full archon surface — a terminal pane
+running the real TUI, plus upload, delete and index controls over the knowledge
+store.
+
+> **On upgrade: the cognitive schema migrates on first open**, and history for
+> two `cognitive_tick_audit` columns is set to null — under the old code those
+> were hardcoded, so every stored value was a fabrication rather than a
+> measurement. The Bash tool's `timeout` argument also gains a floor, since a
+> model-chosen two minutes could previously override a configured hour. See the
+> [release notes](docs/release-notes/v1.7.0.md#upgrade-notes).
 >
 > From v1.6.0: the repository code index no longer builds at
 > session start — it cost roughly seventeen CPU-hours on a 3,200-file repository,
