@@ -30,6 +30,9 @@ serde_json.workspace = true
 ts-rs.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+# `archon/cancel` stops an in-flight prompt through the agent's own
+# CancellationToken, so the IDE runtime needs the same token type.
+tokio-util.workspace = true
 futures-util.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true

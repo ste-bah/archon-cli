@@ -12,9 +12,8 @@ use std::io::{BufRead, Write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use archon_core::agent::TimestampedEvent;
-
-use crate::ide::handler::{IdeProtocolHandler, event_to_notification};
+use crate::ide::handler::IdeProtocolHandler;
+use crate::ide::protocol::JRpcNotification;
 
 /// Stdio transport: reads JSON-RPC requests line-by-line, writes responses.
 pub struct StdioTransport {
@@ -51,16 +50,20 @@ impl StdioTransport {
     }
 
     /// Run an async stdio loop that handles both incoming requests and outgoing
-    /// agent event notifications.
+    /// notifications pushed by the handler's agent runtime.
     ///
-    /// - `event_rx`: receives `AgentEvent`s from the agent loop
-    /// - `session_id`: the active session ID for notification routing
+    /// - `notifications`: the receiver returned by
+    ///   [`IdeProtocolHandler::with_agent`]
     ///
-    /// The loop terminates when stdin reaches EOF or the event channel closes.
+    /// Notifications arrive already addressed and serialised rather than as
+    /// raw agent events, so this loop is the only writer to stdout: two tasks
+    /// writing JSON lines concurrently would interleave mid-frame.
+    ///
+    /// The loop terminates when stdin reaches EOF or the notification channel
+    /// closes.
     pub async fn run_with_events(
         &mut self,
-        mut event_rx: mpsc::Receiver<TimestampedEvent>,
-        session_id: &str,
+        mut notifications: mpsc::Receiver<JRpcNotification>,
     ) -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
@@ -86,16 +89,15 @@ impl StdioTransport {
                         Err(e) => return Err(e.into()),
                     }
                 }
-                // Outgoing agent event → IDE notification
-                event = event_rx.recv() => {
-                    match event {
-                        Some(evt) => {
-                            if let Some(notification) = event_to_notification(session_id, &evt.inner)
-                                && let Ok(json) = serde_json::to_string(&notification) {
-                                    stdout.write_all(json.as_bytes()).await?;
-                                    stdout.write_all(b"\n").await?;
-                                    stdout.flush().await?;
-                                }
+                // Outgoing IDE notification
+                notification = notifications.recv() => {
+                    match notification {
+                        Some(notification) => {
+                            if let Ok(json) = serde_json::to_string(&notification) {
+                                stdout.write_all(json.as_bytes()).await?;
+                                stdout.write_all(b"\n").await?;
+                                stdout.flush().await?;
+                            }
                         }
                         None => break, // Channel closed
                     }

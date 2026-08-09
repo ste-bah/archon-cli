@@ -17,7 +17,7 @@ pub(crate) mod active_session;
 mod activity;
 mod agent_ledger;
 mod btw;
-mod build_agent;
+pub(crate) mod build_agent;
 mod build_prompt;
 mod cognitive_daemon_startup;
 mod cognitive_store;
@@ -53,18 +53,18 @@ fn anthropic_model_env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
-/// Result of [`build_session_agent`] — a fully constructed Agent plus
-/// the event receiver, resolved agent definition, and channel metrics.
+/// Result of [`build_agent::build_session_agent`] — a fully constructed Agent
+/// plus the event receiver, resolved agent definition, and channel metrics.
 #[allow(dead_code)]
-struct BuiltAgent {
-    agent: Agent,
-    event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
-    agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
-    metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
-    selected_provider: String,
-    selected_model: String,
-    permission_mode: Arc<tokio::sync::Mutex<String>>,
-    sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
+pub(crate) struct BuiltAgent {
+    pub(crate) agent: Agent,
+    pub(crate) event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
+    pub(crate) agent_def: Option<archon_core::agents::definition::CustomAgentDefinition>,
+    pub(crate) metrics: std::sync::Arc<archon_tui::observability::ChannelMetrics>,
+    pub(crate) selected_provider: String,
+    pub(crate) selected_model: String,
+    pub(crate) permission_mode: Arc<tokio::sync::Mutex<String>>,
+    pub(crate) sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrain,
 }
 
 pub(super) fn is_codex_session(config: &archon_core::config::ArchonConfig) -> bool {

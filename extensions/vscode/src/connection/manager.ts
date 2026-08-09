@@ -109,17 +109,30 @@ export class ConnectionManager {
    *
    * @param binaryPath - Path to the `archon` executable.
    * @param mode - Must be ConnectionMode.Stdio (validated at call site).
+   * @param workspaceRoot - Project root the agent should work in. Passed both
+   *   as the child's cwd and as `--workspace`: the backend resolves project
+   *   configuration from its cwd but its working directory from the flag, so
+   *   sending only one of the two leaves the two halves disagreeing.
    */
-  async connectStdio(binaryPath: string, _mode: ConnectionMode): Promise<void> {
+  async connectStdio(
+    binaryPath: string,
+    _mode: ConnectionMode,
+    workspaceRoot?: string
+  ): Promise<void> {
     this._state = "connecting";
 
     // Dynamic require keeps the `child_process` import out of webview bundles.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { spawn } = require("child_process") as typeof import("child_process");
 
+    const args = workspaceRoot
+      ? ["ide-stdio", "--workspace", workspaceRoot]
+      : ["ide-stdio"];
+
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(binaryPath, ["ide-stdio"], {
+      const child = spawn(binaryPath, args, {
         stdio: ["pipe", "pipe", "inherit"],
+        cwd: workspaceRoot,
       });
       this._child = child;
 

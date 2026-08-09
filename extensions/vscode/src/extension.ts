@@ -220,7 +220,14 @@ async function connectFromConfig(): Promise<void> {
     await connectionManager.connect(wsConfig);
   } else {
     const binaryPath = config.get<string>(CONFIG_KEY_BINARY_PATH, "archon");
-    await connectionManager.connectStdio(binaryPath, ConnectionMode.Stdio);
+    // First folder only: the backend is a single-workspace process, and a
+    // multi-root window has no one right answer to give it.
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    await connectionManager.connectStdio(
+      binaryPath,
+      ConnectionMode.Stdio,
+      workspaceRoot
+    );
   }
 }
 

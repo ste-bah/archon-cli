@@ -28,7 +28,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::Remote { .. }
         | Commands::Serve { .. }
         | Commands::Team { .. }
-        | Commands::IdeStdio
+        | Commands::IdeStdio { .. }
         | Commands::Web { .. }) => {
             handle_runtime_command(command, cli, config, env_vars, resolved_flags).await
         }
@@ -137,7 +137,16 @@ async fn handle_runtime_command(
         Commands::Team { action } => {
             crate::command::team::handle_team_command(&action, config, env_vars).await
         }
-        Commands::IdeStdio => crate::command::ide_stdio::handle_ide_stdio_command().await,
+        Commands::IdeStdio { workspace } => {
+            crate::command::ide_stdio::handle_ide_stdio_command(
+                workspace,
+                cli,
+                config,
+                env_vars,
+                resolved_flags,
+            )
+            .await
+        }
         Commands::Web {
             port,
             bind_address,

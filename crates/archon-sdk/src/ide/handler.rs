@@ -2,14 +2,20 @@
 //!
 //! [`IdeProtocolHandler`] receives raw JSON-RPC request strings, dispatches
 //! to the appropriate method handler, and returns a JSON-RPC response string.
-//! Phase 6 will wire the prompt/cancel/toolResult methods to the real agent
-//! loop; for now they return the correct protocol-level shapes.
+//!
+//! `archon/prompt` and `archon/cancel` run against a live agent once an
+//! [`IdeAgentRuntime`] is attached (issue #26). Without one the handler is a
+//! protocol-only echo that still answers with the correct shapes — the mode
+//! the synchronous `StdioTransport::run` loop and the protocol shape tests
+//! use. `archon/toolResult` remains a stub: tool execution is a later slice.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{Agent, AgentEvent, TimestampedEvent};
 
 use crate::ide::protocol::{
     IdeCancelParams, IdeCapabilities, IdeConfigParams, IdeError, IdeInitializeParams,
@@ -18,6 +24,7 @@ use crate::ide::protocol::{
     IdeTurnComplete, JRpcErrorCode, JRpcNotification, error_response, parse_request,
     success_response,
 };
+use crate::ide::runtime::IdeAgentRuntime;
 
 // ── IdeProtocolHandler ────────────────────────────────────────────────────────
 
@@ -28,15 +35,41 @@ use crate::ide::protocol::{
 pub struct IdeProtocolHandler {
     sessions: HashMap<String, IdeSession>,
     server_version: String,
+    /// Agent driving `archon/prompt`. `None` keeps the handler protocol-only.
+    runtime: Option<IdeAgentRuntime>,
 }
 
 impl IdeProtocolHandler {
-    /// Create a new handler advertising `server_version`.
+    /// Create a new handler advertising `server_version`, with no agent
+    /// attached. Prompts are acknowledged but nothing runs.
     pub fn new(server_version: impl Into<String>) -> Self {
         Self {
             sessions: HashMap::new(),
             server_version: server_version.into(),
+            runtime: None,
         }
+    }
+
+    /// Create a handler that drives `agent` on `archon/prompt`.
+    ///
+    /// `agent_events` must be the receiver paired with the sender `agent` was
+    /// built with. Returns the handler plus the notification receiver the
+    /// transport drains; see [`IdeAgentRuntime::new`] for the tool-freedom
+    /// precondition on `agent`.
+    pub fn with_agent(
+        server_version: impl Into<String>,
+        agent: Arc<Mutex<Agent>>,
+        agent_events: mpsc::Receiver<TimestampedEvent>,
+    ) -> (Self, mpsc::Receiver<JRpcNotification>) {
+        let (runtime, notifications) = IdeAgentRuntime::new(agent, agent_events);
+        (
+            Self {
+                sessions: HashMap::new(),
+                server_version: server_version.into(),
+                runtime: Some(runtime),
+            },
+            notifications,
+        )
     }
 
     /// Handle a raw JSON-RPC request string and return a JSON-RPC response string.
@@ -91,6 +124,11 @@ impl IdeProtocolHandler {
             },
         };
         self.sessions.insert(session_id.clone(), session);
+        // The event pump is already running and needs an id to stamp on
+        // outbound notifications; this is the moment one exists.
+        if let Some(runtime) = &self.runtime {
+            runtime.set_session_id(&session_id);
+        }
 
         let result = IdeInitializeResult {
             session_id,
@@ -124,8 +162,16 @@ impl IdeProtocolHandler {
             );
         }
 
-        // Phase 6: enqueue prompt to agent loop.
-        success_response(id, serde_json::json!({"queued": true}))
+        let Some(runtime) = self.runtime.as_mut() else {
+            // Protocol-only mode: accept the prompt so the handshake and the
+            // transport tests keep working, but nothing runs.
+            return success_response(id, serde_json::json!({"queued": true}));
+        };
+
+        match runtime.start_turn(&prompt_params) {
+            Ok(()) => success_response(id, serde_json::json!({"queued": true})),
+            Err(reason) => error_response(id, JRpcErrorCode::INVALID_REQUEST, &reason),
+        }
     }
 
     fn handle_cancel(&mut self, id: u64, params: serde_json::Value) -> String {
@@ -140,7 +186,20 @@ impl IdeProtocolHandler {
             }
         };
 
-        let cancelled = self.sessions.contains_key(&cancel_params.session_id);
+        if !self.sessions.contains_key(&cancel_params.session_id) {
+            return error_response(
+                id,
+                JRpcErrorCode::INVALID_PARAMS,
+                &format!("unknown sessionId: {}", cancel_params.session_id),
+            );
+        }
+
+        // `false` means "there was nothing to stop", not "the request
+        // failed" — cancelling an idle session is a no-op, not an error.
+        let cancelled = match self.runtime.as_mut() {
+            Some(runtime) => runtime.cancel_turn(),
+            None => false,
+        };
         success_response(id, serde_json::json!({"cancelled": cancelled}))
     }
 

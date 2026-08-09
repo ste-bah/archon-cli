@@ -34,7 +34,11 @@ pub struct FlagInput {
 }
 
 /// Resolved flag values after file reads and validation.
-#[derive(Debug, Default)]
+///
+/// `Clone` so a host can derive a variant for one surface without re-running
+/// resolution — the IDE stdio mode takes the session's flags and narrows the
+/// tool whitelist, for example.
+#[derive(Debug, Default, Clone)]
 pub struct ResolvedFlags {
     /// If set, replaces the entire system prompt.
     pub system_prompt_override: Option<String>,
