@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -46,15 +46,16 @@ const RESERVED_HEADERS: &[&str] = &[
 /// Codex tier alias map — provider-owned model identifiers indexed by tier
 /// keyword.
 ///
-/// Defaults match `archon_core::config::OpenAiCodexModelsConfig::default()`.
 /// The binary should populate from operator config and pass via
-/// `CodexProvider::with_alias_map(..)`.
+/// `CodexProvider::with_alias_map(..)`; `default()` is the fallback for callers
+/// that cannot (e.g. `build_llm_provider`, which takes the flat `LlmConfig` and
+/// so has no `[models.openai-codex]` slice to read).
 ///
-/// Tier mapping (per OpenAI's Codex models reference):
-/// - `opus`   → `gpt-5.4` (frontier flagship for tools/agentic)
-/// - `sonnet` → `gpt-5.5` (newest general-purpose default)
-/// - `haiku`  → `gpt-5.4-mini` (efficient/subagent variant)
-/// - `codex`  → `gpt-5.3-codex` (codex-specific software engineering)
+/// Tier mapping, identical to `OpenAiCodexModelsConfig::to_alias_map()`:
+/// - `opus`   → template `default` (frontier flagship)
+/// - `sonnet` → template `default` (same model for now)
+/// - `haiku`  → template `mini` (efficient/subagent variant)
+/// - `codex`  → template `codex` (codex-specific software engineering)
 #[derive(Debug, Clone)]
 pub struct CodexAliasMap {
     pub opus: String,
@@ -63,15 +64,86 @@ pub struct CodexAliasMap {
     pub codex: String,
 }
 
+/// `[models.openai-codex]` from the shipped `config.toml`.
+///
+/// `archon-llm` sits below `archon-core` in the workspace dependency order, so it
+/// cannot call `OpenAiCodexModelsConfig::default()`. It embeds the same
+/// workspace-root file instead: one source of truth, reached independently,
+/// without inverting the dependency graph. `codex_defaults_track_the_template`
+/// pins the two readings together.
+fn template_codex_model(key: &str) -> String {
+    static TEMPLATE: LazyLock<toml::Value> = LazyLock::new(|| {
+        include_str!("../../../../../config.toml")
+            .parse::<toml::Value>()
+            .expect("shipped config.toml must be valid TOML")
+    });
+    TEMPLATE
+        .get("models")
+        .and_then(|models| models.get("openai-codex"))
+        .and_then(|slice| slice.get(key))
+        .and_then(toml::Value::as_str)
+        .unwrap_or_else(|| panic!("shipped config.toml is missing models.openai-codex.{key}"))
+        .to_string()
+}
+
 impl Default for CodexAliasMap {
     fn default() -> Self {
         Self {
-            opus: "gpt-5.4".into(),
-            sonnet: "gpt-5.5".into(),
-            haiku: "gpt-5.4-mini".into(),
-            codex: "gpt-5.3-codex".into(),
+            opus: template_codex_model("default"),
+            sonnet: template_codex_model("default"),
+            haiku: template_codex_model("mini"),
+            codex: template_codex_model("codex"),
         }
     }
+}
+
+/// Codex model ids whose display name and context window are known here.
+///
+/// Not a default-selection table — `models()` leads with the configured alias
+/// map and appends these so enumeration stays complete.
+///
+/// Nor is it the primary context-window source: `context_window::for_model`
+/// checks the user and bundled catalogs (`resources/context.toml`) first and
+/// only falls through to provider metadata. Adding an id here is not how a model
+/// gets an accurate window — the catalog is.
+const CODEX_KNOWN_MODELS: &[(&str, &str, u32)] = &[
+    ("gpt-5.5", "GPT-5.5", 1_050_000),
+    ("gpt-5.4", "GPT-5.4", 1_050_000),
+    ("gpt-5.4-mini", "GPT-5.4 Mini", 400_000),
+    ("gpt-5.3-codex", "GPT-5.3 Codex", 400_000),
+];
+
+/// Context window assumed for a configured id absent from `CODEX_KNOWN_MODELS`.
+///
+/// Reached only when neither context catalog knows the id either, since those
+/// are consulted first — so this is a last resort, not the usual path. It is
+/// deliberately the smaller of the two known windows: under-promising truncates
+/// a request, where over-promising has the API reject it outright.
+/// `[api].context_window_override` raises it.
+const CODEX_UNKNOWN_CONTEXT_WINDOW: u32 = 400_000;
+
+fn codex_model_info(id: &str) -> ModelInfo {
+    match CODEX_KNOWN_MODELS.iter().find(|(known, _, _)| *known == id) {
+        Some((_, display_name, context_window)) => ModelInfo {
+            id: id.to_string(),
+            display_name: (*display_name).to_string(),
+            context_window: *context_window,
+        },
+        None => ModelInfo {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            context_window: CODEX_UNKNOWN_CONTEXT_WINDOW,
+        },
+    }
+}
+
+/// Append `id` unless it is empty or already listed, preserving first-seen order
+/// — which is what makes `models().first()` the configured model.
+fn push_unique_model(models: &mut Vec<ModelInfo>, id: &str) {
+    if id.is_empty() || models.iter().any(|model| model.id == id) {
+        return;
+    }
+    models.push(codex_model_info(id));
 }
 
 pub struct CodexProvider {
@@ -288,28 +360,34 @@ impl LlmProvider for CodexProvider {
     }
 
     fn models(&self) -> Vec<ModelInfo> {
-        vec![
-            ModelInfo {
-                id: "gpt-5.5".into(),
-                display_name: "GPT-5.5".into(),
-                context_window: 1_050_000,
-            },
-            ModelInfo {
-                id: "gpt-5.4".into(),
-                display_name: "GPT-5.4".into(),
-                context_window: 1_050_000,
-            },
-            ModelInfo {
-                id: "gpt-5.4-mini".into(),
-                display_name: "GPT-5.4 Mini".into(),
-                context_window: 400_000,
-            },
-            ModelInfo {
-                id: "gpt-5.3-codex".into(),
-                display_name: "GPT-5.3 Codex".into(),
-                context_window: 400_000,
-            },
-        ]
+        // Configured models first, then the known catalog.
+        //
+        // The head of this list is load-bearing, not merely informational:
+        // `resolve_request_model` falls back to `models().first()` when a request
+        // carries no model, so whatever leads here *is* the effective default. A
+        // hardcoded list therefore does not just go stale, it overrides config —
+        // this one led with `gpt-5.5` while `[models.openai-codex]` said
+        // `gpt-5.6-sol`.
+        //
+        // Enumerating every configured id also matters, though less acutely:
+        // `context_window::for_model` consults the user and bundled catalogs
+        // first and only then looks the id up here, so a missing id costs a
+        // window only for a model no catalog knows either.
+        //
+        // The known catalog still follows so enumeration never loses an id.
+        let mut models: Vec<ModelInfo> = Vec::new();
+        for id in [
+            &self.aliases.opus,
+            &self.aliases.sonnet,
+            &self.aliases.codex,
+            &self.aliases.haiku,
+        ] {
+            push_unique_model(&mut models, id);
+        }
+        for (id, _, _) in CODEX_KNOWN_MODELS {
+            push_unique_model(&mut models, id);
+        }
+        models
     }
 
     fn resolve_alias(&self, alias: &str) -> Option<String> {

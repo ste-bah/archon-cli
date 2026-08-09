@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,9 +19,10 @@ pub struct ProvidersConfig {
 // At runtime the alias is resolved against this config; literal model
 // identifiers pass through unchanged.
 //
-// Bumping a default Anthropic or Codex model requires editing exactly one
-// entry here. Operators can override per-installation by setting these in
-// `~/.config/archon/config.toml` or the project-local layer.
+// Bumping a default Anthropic or Codex model is a one-line edit to
+// `[models.*]` in the workspace-root `config.toml`; the `Default` impls below
+// read that file, so no Rust change is needed. Operators override
+// per-installation in `~/.config/archon/config.toml` or the project-local layer.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -39,12 +41,67 @@ pub struct AnthropicModelsConfig {
     pub haiku: String,
 }
 
+/// The shipped `config.toml`, parsed once as an untyped value tree.
+///
+/// This is the single source of truth for default model ids. `write_example_config()`
+/// hands operators the same file, so the template and the compiled-in defaults
+/// cannot drift — previously they did: the template said `claude-opus-5` and
+/// `gpt-5.6-sol` while these impls still said `claude-opus-4-8` and `gpt-5.5`,
+/// so any installation that omitted a `[models.*]` key silently got a stale model.
+///
+/// Parsed as `toml::Value`, deliberately *not* as `ArchonConfig`: the config
+/// structs are `#[serde(default)]`, so deserialising into them would re-enter the
+/// very `Default` impls defined below. An untyped tree has no serde involvement
+/// and therefore no cycle.
+static SHIPPED_TEMPLATE: LazyLock<toml::Value> = LazyLock::new(|| {
+    include_str!("../../../../config.toml")
+        .parse::<toml::Value>()
+        .expect("shipped config.toml must be valid TOML")
+});
+
+/// Read `models.<provider>.<key>` from the shipped template.
+///
+/// Panics if the key is absent. The template is embedded at compile time, so a
+/// missing key is a build-artifact defect that either always fires or never
+/// does — `template_defaults_cover_every_model_key` pins every key this function
+/// is called with, so a gap fails CI rather than reaching an operator.
+fn template_model(provider: &str, key: &str) -> String {
+    SHIPPED_TEMPLATE
+        .get("models")
+        .and_then(|models| models.get(provider))
+        .and_then(|slice| slice.get(key))
+        .and_then(toml::Value::as_str)
+        .unwrap_or_else(|| panic!("shipped config.toml is missing models.{provider}.{key}"))
+        .to_string()
+}
+
+/// Read a string array at `providers.<provider>.<key>` from the shipped template.
+///
+/// Same contract as `template_model`: absent or non-string entries are a
+/// build-artifact defect, pinned by the drift suite rather than tolerated.
+fn template_provider_list(provider: &str, key: &str) -> Vec<String> {
+    SHIPPED_TEMPLATE
+        .get("providers")
+        .and_then(|providers| providers.get(provider))
+        .and_then(|slice| slice.get(key))
+        .and_then(toml::Value::as_array)
+        .unwrap_or_else(|| panic!("shipped config.toml is missing providers.{provider}.{key}"))
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .unwrap_or_else(|| panic!("providers.{provider}.{key} must contain only strings"))
+                .to_string()
+        })
+        .collect()
+}
+
 impl Default for AnthropicModelsConfig {
     fn default() -> Self {
         Self {
-            opus: "claude-opus-4-8".into(),
-            sonnet: "claude-sonnet-4-6".into(),
-            haiku: "claude-haiku-4-5-20251001".into(),
+            opus: template_model("anthropic", "opus"),
+            sonnet: template_model("anthropic", "sonnet"),
+            haiku: template_model("anthropic", "haiku"),
         }
     }
 }
@@ -74,17 +131,13 @@ pub struct OpenAiCodexModelsConfig {
 
 impl Default for OpenAiCodexModelsConfig {
     fn default() -> Self {
-        // Per OpenAI's Codex models reference (https://developers.openai.com/codex/models):
-        // - default: gpt-5.5 is the newest/frontier model; gpt-5.4 is the
-        //   documented fallback. Operators can override to gpt-5.4 here if
-        //   they cannot reach 5.5 yet.
-        // - codex: gpt-5.3-codex is the current codex-specific model for
-        //   complex software engineering.
-        // - mini: gpt-5.4-mini is the efficient/subagent variant.
+        // Sourced from `[models.openai-codex]` in the shipped config.toml, which
+        // carries the rationale for each choice. Bumping a default Codex model is
+        // a template edit; no Rust change is needed.
         Self {
-            default: "gpt-5.5".into(),
-            codex: "gpt-5.3-codex".into(),
-            mini: "gpt-5.4-mini".into(),
+            default: template_model("openai-codex", "default"),
+            codex: template_model("openai-codex", "codex"),
+            mini: template_model("openai-codex", "mini"),
         }
     }
 }
@@ -95,7 +148,7 @@ impl OpenAiCodexModelsConfig {
     /// Tier mapping for cross-provider neutrality:
     /// - `opus` tier (smartest) → `default` (frontier flagship)
     /// - `sonnet` tier (smart) → `default` (frontier flagship — same model
-    ///   for now; can be split if Codex adds a smartest tier above gpt-5.5)
+    ///   for now; can be split if Codex adds a tier above the flagship)
     /// - `haiku` tier (fast) → `mini`
     pub fn to_alias_map(&self) -> archon_llm::providers::codex::CodexAliasMap {
         archon_llm::providers::codex::CodexAliasMap {
@@ -167,7 +220,14 @@ impl Default for CodexProviderConfig {
             app_server_command: "codex".into(),
             app_server_args: vec!["app-server".into()],
             app_server_discovery_timeout_ms: 2_500,
-            app_server_model_catalog: vec!["gpt-5.5".into(), "gpt-5.4".into()],
+            // Sourced from the template, which lists the full catalog. The
+            // hardcoded pair this replaced had gone stale: it offered only
+            // gpt-5.5/gpt-5.4, so an operator who omitted the key got an
+            // app-server catalog containing none of the 5.6 models.
+            app_server_model_catalog: template_provider_list(
+                "openai-codex",
+                "app_server_model_catalog",
+            ),
             spoof: CodexSpoofPartialConfig::default(),
             manifest: CodexManifestConfig::default(),
         }
