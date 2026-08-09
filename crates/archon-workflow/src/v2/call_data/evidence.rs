@@ -101,13 +101,13 @@ pub(super) fn failed_branch_error_result(
     // whereas a transport failure produced no verdict whether or not the agent
     // had started. Requiring evidence of work here would refuse the refund in
     // exactly the case it is most clearly owed — the call that never landed.
-    if crate::v2::lifecycle_driver::is_transport_failure_text(error) {
-        if let Some(object) = data.as_object_mut() {
-            object.insert(
-                "transport_failure_no_verdict".to_string(),
-                serde_json::Value::Bool(true),
-            );
-        }
+    if crate::v2::lifecycle_driver::is_transport_failure_text(error)
+        && let Some(object) = data.as_object_mut()
+    {
+        object.insert(
+            "transport_failure_no_verdict".to_string(),
+            serde_json::Value::Bool(true),
+        );
     }
     result.data = data;
     result
