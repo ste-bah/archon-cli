@@ -13,6 +13,7 @@ mod draft_handler_tests {
             b = b.with_model_snapshot(ModelSnapshot {
                 current_model: m.to_string(),
                 codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
+                anthropic_models: archon_core::config::AnthropicModelsConfig::default(),
             });
         }
         b = b.with_working_dir_opt(wd.map(PathBuf::from));
