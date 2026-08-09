@@ -19,18 +19,29 @@
 //! What this engine adds over `docs answer` — which is extractive and
 //! discards its text — is LLM synthesis through [`QaSynthesizer`] and the
 //! filing step.
+//!
+//! # Streaming
+//!
+//! [`QueryEngine::query_streaming`] is [`QueryEngine::query`] with an
+//! [`AnswerStreamSink`] attached. It exists because synthesis is ~99% of the
+//! command's wall clock, so a caller that can show text early should. Filing,
+//! citations and the returned result are identical either way — see
+//! [`AnswerStreamSink`].
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use archon_docs::models::{ProvenanceEdge, ProvenanceEdgeType};
-use archon_docs::retrieval::{SearchMode, SearchResult};
+use archon_docs::retrieval::SearchResult;
 use cozo::DbInstance;
-use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::compile::{CONCEPT_SOURCE_PREFIX, SUMMARY_SOURCE_PREFIX};
+
+#[path = "query_types.rs"]
+mod query_types;
+pub use query_types::*;
 
 /// `source_path` prefix for an answer filed back into the knowledge base.
 pub const ANSWER_SOURCE_PREFIX: &str = "archon-kb://answer/";
@@ -46,94 +57,57 @@ const ANSWER_RANK_PENALTY: f64 = 0.9;
 /// Characters of a chunk quoted in a citation.
 const CITATION_SNIPPET_CHARS: usize = 200;
 
-/// Options for a Q&A query.
-#[derive(Clone, Debug)]
-pub struct QaQueryOptions {
-    pub top_k: usize,
-    /// Store the answer as a searchable document.
-    pub file_answer: bool,
-    /// Include summaries and concept articles derived from the cited documents.
-    pub include_derived_context: bool,
-    pub mode: SearchMode,
-    /// Restrict retrieval to one named knowledge base.
-    pub kb: Option<String>,
-}
+/// What REQ-DOCS-015 requires the engine to say when retrieval found nothing.
+const INSUFFICIENT_CONTEXT: &str =
+    "Insufficient context in the knowledge base to answer this question.";
 
-impl Default for QaQueryOptions {
-    fn default() -> Self {
-        Self {
-            top_k: 10,
-            file_answer: false,
-            include_derived_context: true,
-            mode: SearchMode::Hybrid,
-            kb: None,
-        }
+/// Receives an answer in the order the model produces it.
+///
+/// Measured on a live `archon docs answer`: 9.6s end to end, 9ms of it
+/// retrieval. The model round trip is the whole cost and streaming does not
+/// shorten it — what it buys is the operator seeing text within a second
+/// instead of watching a blank terminal for ten. Implementations write to a
+/// terminal, so they own their own flushing; nothing downstream does it.
+pub trait AnswerStreamSink: Send {
+    /// Called once, after retrieval and before any answer text, carrying the
+    /// non-fatal retrieval notes.
+    ///
+    /// They are handed over here rather than read off the returned
+    /// [`QaQueryResult`] because by the time that value exists the answer has
+    /// already been printed, and a warning about the evidence belongs above the
+    /// answer it qualifies, not below it.
+    fn on_retrieved(&mut self, warnings: &[String]) -> Result<()> {
+        let _ = warnings;
+        Ok(())
     }
-}
 
-/// A scored chunk from retrieval.
-#[derive(Clone, Debug)]
-pub struct ScoredChunk {
-    pub chunk_id: String,
-    pub document_id: String,
-    pub source_path: String,
-    pub content: String,
-    pub score: f64,
-}
-
-/// Context assembled around the retrieved chunks.
-#[derive(Clone, Debug, Default)]
-pub struct AnswerContext {
-    pub primary: Vec<ScoredChunk>,
-    /// Compiled summaries of the documents the primary chunks came from.
-    pub summaries: Vec<String>,
-    /// Concept articles linked to those documents.
-    pub concepts: Vec<String>,
-}
-
-/// A synthesized answer with source citations.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SynthesizedAnswer {
-    pub answer_text: String,
-    pub source_citations: Vec<SourceCitation>,
-}
-
-/// Citation referencing a retrieved chunk.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceCitation {
-    pub chunk_id: String,
-    pub document_id: String,
-    pub quote: String,
-    pub relevance: f64,
-}
-
-/// Full result of a Q&A query.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QaQueryResult {
-    pub answer: String,
-    pub sources: Vec<QaSource>,
-    /// Document ID the answer was filed as, when `file_answer` was set.
-    pub filed_document_id: Option<String>,
-    pub search_duration_ms: u64,
-    pub synthesis_duration_ms: u64,
-    /// Non-fatal notes from retrieval (e.g. "no embedding provider").
-    pub warnings: Vec<String>,
-}
-
-/// Source info in a query result.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QaSource {
-    pub chunk_id: String,
-    pub document_id: String,
-    pub source_path: String,
-    pub relevance_score: f64,
-    pub quote: String,
+    /// Called for each fragment of answer text, in order.
+    fn on_token(&mut self, text: &str) -> Result<()>;
 }
 
 /// Trait for LLM-based answer synthesis.
 #[async_trait::async_trait]
 pub trait QaSynthesizer: Send + Sync {
     async fn synthesize(&self, question: &str, context: &str) -> Result<String>;
+
+    /// Synthesize while handing each fragment to `sink` as it arrives, and
+    /// return the complete text.
+    ///
+    /// The default bridges to [`Self::synthesize`] and emits the finished
+    /// answer as one fragment, so an implementation with no incremental API
+    /// stays correct without changes — it simply does not stream. An override
+    /// MUST return everything it emitted: the return value, not the sink, is
+    /// what gets filed.
+    async fn synthesize_streaming(
+        &self,
+        question: &str,
+        context: &str,
+        sink: &mut dyn AnswerStreamSink,
+    ) -> Result<String> {
+        let answer = self.synthesize(question, context).await?;
+        sink.on_token(&answer)?;
+        Ok(answer)
+    }
 }
 
 pub struct QueryEngine {
@@ -159,14 +133,46 @@ impl QueryEngine {
 
     /// Full Q&A flow: retrieve, gather context, synthesize, optionally file.
     pub async fn query(&self, question: &str, opts: &QaQueryOptions) -> Result<QaQueryResult> {
+        self.run_query(question, opts, None).await
+    }
+
+    /// As [`Self::query`], but hands the answer to `sink` as it is produced.
+    ///
+    /// Nothing else differs: the same [`QaQueryResult`] comes back and, with
+    /// `file_answer`, the same complete answer is filed with the same
+    /// provenance. Streaming changes when the operator sees the text, not what
+    /// the engine does with it.
+    pub async fn query_streaming(
+        &self,
+        question: &str,
+        opts: &QaQueryOptions,
+        sink: &mut dyn AnswerStreamSink,
+    ) -> Result<QaQueryResult> {
+        self.run_query(question, opts, Some(sink)).await
+    }
+
+    async fn run_query(
+        &self,
+        question: &str,
+        opts: &QaQueryOptions,
+        mut sink: Option<&mut dyn AnswerStreamSink>,
+    ) -> Result<QaQueryResult> {
         let search_start = Instant::now();
         let (chunks, warnings) = self.retrieve(question, opts)?;
         let search_duration_ms = search_start.elapsed().as_millis() as u64;
+        if let Some(sink) = sink.as_deref_mut() {
+            sink.on_retrieved(&warnings)?;
+        }
 
         if chunks.is_empty() {
+            // Pushed through the sink as well: a streaming caller prints what
+            // it is given, so skipping it here would leave a blank body where
+            // the "no evidence" line belongs.
+            if let Some(sink) = sink.as_deref_mut() {
+                sink.on_token(INSUFFICIENT_CONTEXT)?;
+            }
             return Ok(QaQueryResult {
-                answer: "Insufficient context in the knowledge base to answer this question."
-                    .into(),
+                answer: INSUFFICIENT_CONTEXT.into(),
                 sources: vec![],
                 filed_document_id: None,
                 search_duration_ms,
@@ -178,7 +184,7 @@ impl QueryEngine {
         let context = self.gather_context(chunks, opts.include_derived_context)?;
 
         let synth_start = Instant::now();
-        let synthesized = self.synthesize_answer(question, &context).await?;
+        let synthesized = self.synthesize_into(question, &context, sink).await?;
         let synthesis_duration_ms = synth_start.elapsed().as_millis() as u64;
 
         let filed_document_id = if opts.file_answer {
@@ -351,6 +357,15 @@ impl QueryEngine {
         question: &str,
         context: &AnswerContext,
     ) -> Result<SynthesizedAnswer> {
+        self.synthesize_into(question, context, None).await
+    }
+
+    async fn synthesize_into(
+        &self,
+        question: &str,
+        context: &AnswerContext,
+        sink: Option<&mut dyn AnswerStreamSink>,
+    ) -> Result<SynthesizedAnswer> {
         let formatted = format_context(context);
         let citations = context
             .primary
@@ -363,20 +378,31 @@ impl QueryEngine {
             })
             .collect();
 
-        let answer_text = match &self.synthesizer {
-            Some(synth) => {
-                let prompt = format!(
-                    "Answer the following question using ONLY the provided context. \
-                     Cite your sources by chunk ID. If the context is insufficient, say so.\n\n\
-                     Question: {question}\n\nContext:\n{formatted}"
-                );
-                synth.synthesize(question, &prompt).await?
+        let answer_text = match (&self.synthesizer, sink) {
+            (Some(synth), Some(sink)) => {
+                synth
+                    .synthesize_streaming(question, &synthesis_prompt(question, &formatted), sink)
+                    .await?
             }
-            None => format!(
-                "Based on {} knowledge base source(s):\n\n{}",
-                context.primary.len(),
-                formatted
-            ),
+            (Some(synth), None) => {
+                synth
+                    .synthesize(question, &synthesis_prompt(question, &formatted))
+                    .await?
+            }
+            // No model: the extractive fallback is assembled locally, so there
+            // is nothing to stream — it is emitted in one piece so a streaming
+            // caller still gets a body.
+            (None, sink) => {
+                let text = format!(
+                    "Based on {} knowledge base source(s):\n\n{}",
+                    context.primary.len(),
+                    formatted
+                );
+                if let Some(sink) = sink {
+                    sink.on_token(&text)?;
+                }
+                text
+            }
         };
 
         Ok(SynthesizedAnswer {
@@ -446,6 +472,14 @@ impl QueryEngine {
         }
         Ok(stored.document_id)
     }
+}
+
+fn synthesis_prompt(question: &str, formatted_context: &str) -> String {
+    format!(
+        "Answer the following question using ONLY the provided context. \
+         Cite your sources by chunk ID. If the context is insufficient, say so.\n\n\
+         Question: {question}\n\nContext:\n{formatted_context}"
+    )
 }
 
 fn format_context(context: &AnswerContext) -> String {

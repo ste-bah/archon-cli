@@ -128,6 +128,24 @@ This is a multiplier, not an ordering guarantee — an answer that restates the
 question and lists its citations can match more query terms than its source and
 still come out on top.
 
+### The synthesized answer streams
+
+A synthesized answer prints token by token as the model produces it. Retrieval
+is a rounding error next to the model round trip — measured on a live run, 9ms
+of a 9.6s command — so the total is unchanged; what changes is that text starts
+appearing in well under a second instead of after ten seconds of blank
+terminal. Retrieval notes print above the answer, citations below it, and the
+complete answer is what `--file` stores, exactly as before.
+
+The command reports `Retrieval Nms, first token Nms, total Nms`. NFR-KB-003's
+5-second budget is checked against the time to the first token, not the total:
+with a streamed answer the first token is when the operator stops waiting, and
+a warning that fires on every healthy run is one nobody reads.
+
+The extractive path (no provider, or `--no-synthesis`) does not stream. It has
+no model round trip to hide, so it prints its answer in one go and reports
+`Retrieval Nms, synthesis Nms`.
+
 ```bash
 archon docs answer "what is the retention window?"
 archon docs answer "what is the retention window?" --file --kb trading-elliott-wave

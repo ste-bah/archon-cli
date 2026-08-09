@@ -21,6 +21,60 @@ impl QaSynthesizer for EchoSynthesizer {
     }
 }
 
+/// Fragments a real model would emit as separate deltas.
+const FRAGMENTS: [&str; 3] = ["Retention ", "is ", "thirty days."];
+
+/// Stands in for a provider stream: emits [`FRAGMENTS`] one at a time and
+/// returns the joined text, which is the contract every streaming synthesizer
+/// has to honour.
+struct StreamingSynthesizer;
+
+#[async_trait::async_trait]
+impl QaSynthesizer for StreamingSynthesizer {
+    async fn synthesize(&self, _question: &str, _context: &str) -> Result<String> {
+        Ok(FRAGMENTS.concat())
+    }
+
+    async fn synthesize_streaming(
+        &self,
+        _question: &str,
+        _context: &str,
+        sink: &mut dyn AnswerStreamSink,
+    ) -> Result<String> {
+        for fragment in FRAGMENTS {
+            sink.on_token(fragment)?;
+        }
+        Ok(FRAGMENTS.concat())
+    }
+}
+
+/// Records what the engine pushed, and in what order.
+#[derive(Default)]
+struct RecordingSink {
+    events: Vec<String>,
+}
+
+impl RecordingSink {
+    fn tokens(&self) -> Vec<&str> {
+        self.events
+            .iter()
+            .filter_map(|event| event.strip_prefix("token:"))
+            .collect()
+    }
+}
+
+impl AnswerStreamSink for RecordingSink {
+    fn on_retrieved(&mut self, warnings: &[String]) -> Result<()> {
+        self.events.push(format!("retrieved:{}", warnings.len()));
+        Ok(())
+    }
+
+    fn on_token(&mut self, text: &str) -> Result<()> {
+        self.events.push(format!("token:{text}"));
+        Ok(())
+    }
+}
+
 /// `Arc` rather than a bare instance: the engine holds the shared handle so the
 /// guard-config registration survives (see [`QueryEngine`]).
 fn docs_db() -> Arc<DbInstance> {
@@ -258,6 +312,121 @@ async fn derived_context_can_be_switched_off() {
 
     assert!(context.summaries.is_empty());
     assert!(context.concepts.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn streamed_fragments_reach_the_sink_in_order_after_the_retrieval_notes() {
+    let db = docs_db();
+    ingest(&db, "policy.txt", "Retention is thirty days.");
+    let engine = QueryEngine::new(db).with_synthesizer(Box::new(StreamingSynthesizer));
+    let mut sink = RecordingSink::default();
+
+    let result = engine
+        .query_streaming("retention", &exact_options(), &mut sink)
+        .await
+        .unwrap();
+
+    // Retrieval notes first: they qualify the answer, so a terminal has to be
+    // able to print them above it.
+    assert_eq!(sink.events[0], "retrieved:0", "{:?}", sink.events);
+    assert_eq!(sink.tokens(), FRAGMENTS, "{:?}", sink.events);
+    // The returned answer is the whole thing, not the last fragment.
+    assert_eq!(result.answer, "Retention is thirty days.");
+}
+
+/// The regression that would matter most: a streamed answer that never gets
+/// filed. Filing must see the complete text, not a fragment.
+#[tokio::test]
+async fn a_streamed_answer_is_filed_complete_with_provenance() {
+    let db = docs_db();
+    ingest(&db, "policy.txt", "Retention is thirty days.");
+    let engine = QueryEngine::new(Arc::clone(&db)).with_synthesizer(Box::new(StreamingSynthesizer));
+    let mut sink = RecordingSink::default();
+
+    let result = engine
+        .query_streaming(
+            "retention",
+            &QaQueryOptions {
+                file_answer: true,
+                ..exact_options()
+            },
+            &mut sink,
+        )
+        .await
+        .unwrap();
+
+    let filed = result.filed_document_id.expect("streamed answer filed");
+    let body = archon_docs::store::list_chunks_for_doc(&db, &filed)
+        .unwrap()
+        .iter()
+        .map(|chunk| chunk.content.clone())
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(body.contains("Retention is thirty days."), "{body}");
+
+    let edges = archon_docs::store::list_provenance_from(&db, &filed).unwrap();
+    let cited = result.sources[0].chunk_id.clone();
+    assert!(
+        edges.iter().any(|edge| edge.to_artifact_id == cited),
+        "{edges:?}"
+    );
+}
+
+/// A synthesizer with no incremental API keeps working: the default bridge
+/// hands its finished answer over as a single fragment.
+#[tokio::test]
+async fn a_synthesizer_without_streaming_support_still_delivers_its_answer() {
+    let db = docs_db();
+    ingest(&db, "policy.txt", "Retention is thirty days.");
+    let engine = QueryEngine::new(db).with_synthesizer(Box::new(EchoSynthesizer));
+    let mut sink = RecordingSink::default();
+
+    let result = engine
+        .query_streaming("retention", &exact_options(), &mut sink)
+        .await
+        .unwrap();
+
+    assert_eq!(sink.tokens(), vec![result.answer.as_str()]);
+    assert!(result.answer.starts_with("ANSWER(retention)"));
+}
+
+/// The extractive in-engine fallback (no synthesizer at all) has nothing to
+/// stream, but a streaming caller must still get a body to print.
+#[tokio::test]
+async fn without_a_synthesizer_the_streamed_body_is_the_retrieved_context() {
+    let db = docs_db();
+    ingest(&db, "policy.txt", "Retention is thirty days.");
+    let engine = QueryEngine::new(db);
+    let mut sink = RecordingSink::default();
+
+    let result = engine
+        .query_streaming("retention", &exact_options(), &mut sink)
+        .await
+        .unwrap();
+
+    assert_eq!(sink.tokens(), vec![result.answer.as_str()]);
+    assert!(result.answer.contains("thirty days"));
+}
+
+/// REQ-DOCS-015 over the streaming path: the "no evidence" line is a body, so
+/// it goes through the sink like any other.
+#[tokio::test]
+async fn an_empty_corpus_streams_the_insufficient_context_line() {
+    let db = docs_db();
+    let engine = QueryEngine::new(db).with_synthesizer(Box::new(StreamingSynthesizer));
+    let mut sink = RecordingSink::default();
+
+    let result = engine
+        .query_streaming("anything", &exact_options(), &mut sink)
+        .await
+        .unwrap();
+
+    assert_eq!(sink.tokens(), vec![result.answer.as_str()]);
+    assert!(result.answer.contains("Insufficient context"));
 }
 
 #[test]
