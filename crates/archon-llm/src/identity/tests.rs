@@ -118,6 +118,7 @@ mod beta_validation_cache_tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial(validated_betas_cache)]
     fn test_load_cached_validated_betas_returns_none_when_missing() {
         // When the cache file doesn't exist, should return None gracefully.
         // We test this by checking a path that won't exist (temp path).
@@ -132,6 +133,7 @@ mod beta_validation_cache_tests {
     }
 
     #[test]
+    #[serial_test::serial(validated_betas_cache)]
     fn test_save_and_load_validated_betas_round_trip() {
         let betas = vec![
             "claude-code-20250219".to_string(),
@@ -196,6 +198,7 @@ mod beta_validation_cache_tests {
         assert_eq!(load_beta_cache_file(&path), None);
     }
 
+    #[serial_test::serial(validated_betas_cache)]
     #[tokio::test]
     async fn test_resolve_and_validate_betas_uses_config_betas_if_provided() {
         use crate::anthropic::AnthropicClient;
@@ -218,6 +221,7 @@ mod beta_validation_cache_tests {
         assert_eq!(result, config_betas);
     }
 
+    #[serial_test::serial(validated_betas_cache)]
     #[tokio::test]
     async fn test_resolve_and_validate_betas_falls_back_to_defaults_when_no_discovery() {
         use crate::anthropic::AnthropicClient;
