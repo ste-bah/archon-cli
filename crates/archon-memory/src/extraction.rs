@@ -176,6 +176,7 @@ pub fn should_extract(
 ///    [`MAX_EXTRACTED_CONTENT_CHARS`] now rejects those, but a rejected
 ///    extraction is still a wasted call and a lost memory -- better not to ask
 ///    for one.
+///
 /// `already_recorded` lists corrections the fast keyword detector already
 /// captured for these turns. They are shown to the model so it reports only the
 /// ones that pass missed: both detectors write to the same place, so a
@@ -315,7 +316,7 @@ pub fn store_extracted(
         if graph
             .search_memories(&by_hash)?
             .iter()
-            .any(|existing| existing.tags.iter().any(|tag| *tag == hash_tag))
+            .any(|existing| existing.tags.contains(&hash_tag))
         {
             continue;
         }

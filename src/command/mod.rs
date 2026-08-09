@@ -127,6 +127,7 @@ pub(crate) mod pipeline_rewind;
 pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
+pub(crate) mod pipeline_support_result;
 pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod provider_gate;
 pub(crate) mod workflow_mcp;
