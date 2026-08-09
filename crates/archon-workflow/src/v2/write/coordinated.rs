@@ -1,18 +1,21 @@
 use super::*;
 
 pub(super) async fn run_coordinated_v2_write_fanout(
-    task: &str,
-    target_repository_root: Option<&str>,
-    execution: &WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    dispatch: &dyn WorkflowAgentDispatch,
-    v2_store: &WorkflowV2ResultStore,
-    store_for_control: &crate::WorkflowStore,
-    run_id: &str,
+    ctx: WriteFanoutContext<'_>,
     branches: Vec<crate::WorkflowV2FanoutItem>,
     plan: WorkflowV2WritePlan,
     reused_results: Vec<WorkflowV2Result>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
+    let WriteFanoutContext {
+        task,
+        target_repository_root,
+        execution,
+        adapter,
+        dispatch,
+        v2_store,
+        store_for_control,
+        run_id,
+    } = ctx;
     let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let mut results = Vec::new();
     let mut peak_parallelism = 0usize;

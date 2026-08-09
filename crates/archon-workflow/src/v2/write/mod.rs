@@ -54,12 +54,39 @@ use crate::write_coordinator::{
     WorkspaceStatus, WriteCoordinatorConfig, with_repo_lock,
 };
 
+/// The eight values every isolation mode needs end to end: what to run, where it
+/// may write, who dispatches it, and where results and run control live.
+///
+/// They travelled as an identical eight-argument prefix through serial,
+/// coordinated and worktree fan-out alike — and are already the first eight
+/// fields of [`WorktreePlanRunContext`] and [`WorktreeWaveRunContext`]. Naming
+/// the group makes the three mode entry points read as "this context, run this
+/// plan" and puts them on the same context-struct idiom the wave and branch
+/// layers below them already use.
+#[derive(Clone)]
+pub(super) struct WriteFanoutContext<'a> {
+    pub(super) task: &'a str,
+    pub(super) target_repository_root: Option<&'a str>,
+    pub(super) execution: &'a WorkflowV2CallExecution,
+    pub(super) adapter: WorkflowV2AgentAdapter,
+    pub(super) dispatch: &'a dyn WorkflowAgentDispatch,
+    pub(super) v2_store: &'a WorkflowV2ResultStore,
+    pub(super) store_for_control: &'a WorkflowStore,
+    pub(super) run_id: &'a str,
+}
+
 /// Run one write-capable fan-out call to completion.
 ///
 /// `branches` are the fan-out items the caller built. They arrive already
 /// derived because the builder is shared with read-only fan-out and resolves
 /// stored source expressions against the result store — host policy about
 /// where items come from, not a decision this layer makes.
+// Twelve arguments: this is the host's entry point into the write layer, called
+// from `src/command/workflow_live_v2*.rs`, and every argument is an independent
+// host-supplied input. The shared eight are grouped into `WriteFanoutContext`
+// for everything BELOW this line; the boundary itself keeps the flat signature
+// its callers are written against.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_write_capable_v2_fanout(
     task: &str,
     target_repository_root: Option<&str>,
@@ -119,56 +146,25 @@ pub async fn run_write_capable_v2_fanout(
     ) {
         return Ok(result);
     }
+    let ctx = WriteFanoutContext {
+        task,
+        target_repository_root,
+        execution: &execution,
+        adapter,
+        dispatch,
+        v2_store,
+        store_for_control,
+        run_id,
+    };
     match (execution.call.write_mode, workspace_boundary_supported) {
         (Some(WorkflowV2WriteMode::Coordinated), true) => {
-            run_coordinated_v2_write_fanout(
-                task,
-                target_repository_root,
-                &execution,
-                adapter,
-                dispatch,
-                v2_store,
-                store_for_control,
-                run_id,
-                branches,
-                plan,
-                reused_results,
-            )
-            .await
+            run_coordinated_v2_write_fanout(ctx, branches, plan, reused_results).await
         }
         (Some(WorkflowV2WriteMode::Worktree), true) => {
-            run_worktree_v2_write_fanout(
-                task,
-                target_repository_root,
-                &execution,
-                adapter,
-                dispatch,
-                v2_store,
-                store_for_control,
-                run_id,
-                branches,
-                plan,
-                reused_results,
-            )
-            .await
+            run_worktree_v2_write_fanout(ctx, branches, plan, reused_results).await
         }
         (Some(WorkflowV2WriteMode::Serial), _) => {
-            run_serial_v2_write_fanout(
-                task,
-                target_repository_root,
-                &execution,
-                adapter,
-                dispatch,
-                v2_store,
-                store_for_control,
-                run_id,
-                branches,
-                write_items,
-                plan,
-                None,
-                reused_results,
-            )
-            .await
+            run_serial_v2_write_fanout(ctx, branches, write_items, plan, None, reused_results).await
         }
         (_, false) => Err(WorkflowError::SpecInvalid(
             "write-capable fanout requested coordinated/worktree isolation, but workspace boundary support is unavailable; workflow.js must choose an explicit safe mode or ask the user"

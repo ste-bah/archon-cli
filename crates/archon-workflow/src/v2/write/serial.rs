@@ -1,20 +1,23 @@
 use super::*;
 
 pub(super) async fn run_serial_v2_write_fanout(
-    task: &str,
-    target_repository_root: Option<&str>,
-    execution: &WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    dispatch: &dyn WorkflowAgentDispatch,
-    v2_store: &WorkflowV2ResultStore,
-    store_for_control: &crate::WorkflowStore,
-    run_id: &str,
+    ctx: WriteFanoutContext<'_>,
     branches: Vec<crate::WorkflowV2FanoutItem>,
     write_items: Vec<WorkflowV2WriteItem>,
     plan: WorkflowV2WritePlan,
     fallback_reason: Option<String>,
     reused_results: Vec<WorkflowV2Result>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
+    let WriteFanoutContext {
+        task,
+        target_repository_root,
+        execution,
+        adapter,
+        dispatch,
+        v2_store,
+        store_for_control,
+        run_id,
+    } = ctx;
     let mut branch_results = Vec::new();
     for branch in branches {
         let branch_id = branch.id.clone();

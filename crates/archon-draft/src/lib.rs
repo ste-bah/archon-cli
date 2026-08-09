@@ -257,27 +257,27 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
     let mut hard = Vec::new();
     let mut adv = Vec::new();
     for (name, spec) in &cfg.tier1_per_section {
-        if let Some(v) = get(name) {
-            if v < spec.band.0 || v > spec.band.1 {
-                hard.push(format!(
-                    "T1 {name}: {v:.3} outside [{:.3},{:.3}]",
-                    spec.band.0, spec.band.1
-                ));
-            }
+        if let Some(v) = get(name)
+            && (v < spec.band.0 || v > spec.band.1)
+        {
+            hard.push(format!(
+                "T1 {name}: {v:.3} outside [{:.3},{:.3}]",
+                spec.band.0, spec.band.1
+            ));
         }
     }
     for (name, spec) in &cfg.tier2_chapter {
-        if let Some(v) = get(name) {
-            if v < spec.band.0 || v > spec.band.1 {
-                let msg = format!(
-                    "T2 {name}: {v:.3} outside [{:.3},{:.3}]",
-                    spec.band.0, spec.band.1
-                );
-                if chapter_scale {
-                    hard.push(msg);
-                } else {
-                    adv.push(format!("{msg} [measured at unreliable scale — advisory]"));
-                }
+        if let Some(v) = get(name)
+            && (v < spec.band.0 || v > spec.band.1)
+        {
+            let msg = format!(
+                "T2 {name}: {v:.3} outside [{:.3},{:.3}]",
+                spec.band.0, spec.band.1
+            );
+            if chapter_scale {
+                hard.push(msg);
+            } else {
+                adv.push(format!("{msg} [measured at unreliable scale — advisory]"));
             }
         }
     }
@@ -294,10 +294,10 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
             // labels derived from Tier-2 metrics gate only at chapter scale
             let t2_label = cfg.tier2_labels.iter().any(|t| t == k);
             if t2_label && !chapter_scale {
-                if let serde_json::Value::String(s) = wv {
-                    if gv != s {
-                        adv.push(format!("label {k}: got '{gv}', want '{s}' [T2-derived label — advisory at section scale]"));
-                    }
+                if let serde_json::Value::String(s) = wv
+                    && gv != s
+                {
+                    adv.push(format!("label {k}: got '{gv}', want '{s}' [T2-derived label — advisory at section scale]"));
                 }
                 continue;
             }
@@ -308,11 +308,10 @@ pub fn ga_compare(metrics: &serde_json::Value, cfg: &GateConfig, chapter_scale: 
                     }
                 }
                 serde_json::Value::Object(o) => {
-                    if let Some(acc) = o.get("accept").and_then(|a| a.as_array()) {
-                        if !acc.iter().any(|a| a.as_str() == Some(gv)) {
-                            label_failures
-                                .push(format!("label {k}: got '{gv}', want one of {acc:?}"));
-                        }
+                    if let Some(acc) = o.get("accept").and_then(|a| a.as_array())
+                        && !acc.iter().any(|a| a.as_str() == Some(gv))
+                    {
+                        label_failures.push(format!("label {k}: got '{gv}', want one of {acc:?}"));
                     }
                 }
                 _ => {}

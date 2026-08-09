@@ -25,38 +25,18 @@ pub(super) struct WorktreeFanoutSetup {
 }
 
 pub(super) async fn run_worktree_v2_write_fanout(
-    task: &str,
-    target_repository_root: Option<&str>,
-    execution: &WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    dispatch: &dyn WorkflowAgentDispatch,
-    v2_store: &WorkflowV2ResultStore,
-    store_for_control: &crate::WorkflowStore,
-    run_id: &str,
+    ctx: WriteFanoutContext<'_>,
     branches: Vec<crate::WorkflowV2FanoutItem>,
     plan: WorkflowV2WritePlan,
     reused_results: Vec<WorkflowV2Result>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
-    let setup = worktree_fanout_setup(target_repository_root, v2_store)?;
-    let artifacts = run_worktree_plan_waves(
-        worktree_plan_context(
-            task,
-            target_repository_root,
-            execution,
-            adapter,
-            dispatch,
-            v2_store,
-            store_for_control,
-            run_id,
-            &setup,
-        ),
-        &plan,
-        &branches,
-    )
-    .await?;
+    let setup = worktree_fanout_setup(ctx.target_repository_root, ctx.v2_store)?;
+    let call = &ctx.execution.call;
+    let artifacts =
+        run_worktree_plan_waves(worktree_plan_context(&ctx, &setup), &plan, &branches).await?;
 
     Ok(worktree_fanout_result(
-        &execution.call,
+        call,
         &plan,
         &setup.run_root,
         reused_results,

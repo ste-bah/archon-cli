@@ -336,6 +336,12 @@ impl LifecycleDriver {
         Ok(false)
     }
 
+    // Eight with `&self`: a one-shot repair call with heterogeneous inputs — three
+    // distinct item slices, the wave value, the completed-id set, the iteration
+    // counter and the evidence sink. They share no lifetime or meaning beyond this
+    // single call site, so a parameter struct would exist only to be destructured
+    // back into the same eight bindings.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn repair_wave_completion_evidence(
         &self,
         ready_items: &[serde_json::Value],
