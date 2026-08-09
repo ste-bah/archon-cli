@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::board::{DelegatedOutcome, close_delegated_task};
+
 // ---------------------------------------------------------------------------
 // Global TaskManager instance
 // ---------------------------------------------------------------------------
@@ -80,6 +82,14 @@ pub struct TaskInfo {
     /// deserialise.
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// The board item mirroring this task, when it is mirrored.
+    ///
+    /// Set by the dispatch path once the item exists, and read back when the
+    /// task reaches a terminal state so the item can be closed out. `None` is
+    /// the normal case for a task that dispatched no subagent, and also for
+    /// any process with no memory service open — mirroring is best-effort.
+    #[serde(default)]
+    pub board_item_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +137,7 @@ impl TaskManager {
             output: String::new(),
             cost: 0.0,
             agent_id: None,
+            board_item_id: None,
         };
 
         if let Ok(mut tasks) = self.tasks.lock() {
@@ -310,6 +321,14 @@ impl TaskManager {
 
     /// Set the status of a task. Invalid transitions are silently ignored.
     pub fn set_status(&self, id: &str, status: TaskStatus) {
+        // What the board has to be told, decided under the lock and acted on
+        // after it. A board write goes to storage, and holding the task map
+        // across it would serialise every other task's status update behind a
+        // database round-trip. Deciding here also means the mirror fires only
+        // on a transition that was actually applied — an invalid transition
+        // returns early and must not close an item out.
+        let mut mirror = None;
+
         if let Ok(mut tasks) = self.tasks.lock()
             && let Some(info) = tasks.get_mut(id)
         {
@@ -322,7 +341,32 @@ impl TaskManager {
                 || status == TaskStatus::Stopped
             {
                 info.completed_at = Some(Utc::now());
+                if let Some(item) = info.board_item_id.clone() {
+                    let outcome = match status {
+                        TaskStatus::Completed => DelegatedOutcome::Completed,
+                        TaskStatus::Stopped => DelegatedOutcome::Stopped,
+                        _ => DelegatedOutcome::Failed,
+                    };
+                    mirror = Some((item, outcome));
+                }
             }
+        }
+
+        if let Some((item, outcome)) = mirror {
+            close_delegated_task(&item, outcome);
+        }
+    }
+
+    /// Record the board item mirroring this task.
+    ///
+    /// Separate from [`Self::set_agent_id`] because the two can fail
+    /// independently: a task always has a subagent id once it dispatches one,
+    /// but it only has a board item if the board was reachable.
+    pub fn set_board_item_id(&self, id: &str, board_item_id: &str) {
+        if let Ok(mut tasks) = self.tasks.lock()
+            && let Some(info) = tasks.get_mut(id)
+        {
+            info.board_item_id = Some(board_item_id.to_string());
         }
     }
 

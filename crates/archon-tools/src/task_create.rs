@@ -175,6 +175,23 @@ impl Tool for TaskCreateTool {
         // (`agent_tool::run`), which is what the board claim leases read.
         crate::task_manager::TASK_MANAGER.set_agent_id(&task_id, &subagent_id);
 
+        // Mirror the dispatch onto the run's task board, so delegated work is
+        // visible to anyone watching the run rather than only to `/tasks` in
+        // this process. Best-effort by design: `raise_delegated_task` returns
+        // `None` when no memory service is open, which is the normal case for
+        // most test registries, and dispatch carries on either way. The item is
+        // closed out from `TASK_MANAGER::set_status`, which every terminal
+        // transition below already goes through.
+        if let Some(item_id) = crate::board::raise_delegated_task(
+            &ctx.session_id,
+            &subagent_id,
+            &full_desc,
+            prompt,
+            &crate::board::caller_id(ctx),
+        ) {
+            crate::task_manager::TASK_MANAGER.set_board_item_id(&task_id, &item_id);
+        }
+
         // Nested ToolContext: inherit caller's ctx, flip nested=true.
         let nested_ctx = ToolContext {
             nested: true,

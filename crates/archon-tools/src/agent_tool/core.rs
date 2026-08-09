@@ -9,8 +9,9 @@ use uuid::Uuid;
 use super::failure::classify_failure_prefix;
 use super::request::AgentToolError;
 use super::request::{expected_target_files, validate_and_build};
-use super::run::run_subagent;
+use super::run::run_subagent_with_completion;
 use crate::agent_mutation_guard::{snapshot_expected_targets, verify_expected_mutations};
+use crate::board::DelegatedOutcome;
 use crate::background_agents::{
     AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
 };
@@ -99,6 +100,20 @@ impl AgentTool {
         input: &serde_json::Value,
     ) -> Result<SubagentRequest, AgentToolError> {
         validate_and_build(input)
+    }
+}
+
+/// How a subagent outcome closes its mirrored board item, if it closes it.
+///
+/// `None` for `AutoBackgrounded`: the runner is still executing and the item is
+/// still genuinely claimed. The completion channel delivers the real outcome
+/// later, and that is what closes it.
+fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
+    match outcome {
+        SubagentOutcome::Completed(_) => Some(DelegatedOutcome::Completed),
+        SubagentOutcome::Failed(_) => Some(DelegatedOutcome::Failed),
+        SubagentOutcome::Cancelled => Some(DelegatedOutcome::Stopped),
+        SubagentOutcome::AutoBackgrounded => None,
     }
 }
 
@@ -234,11 +249,57 @@ impl Tool for AgentTool {
             .clone()
             .unwrap_or_else(|| "default".to_string());
 
+        // Mirror the dispatch onto the run's task board. `TaskCreate` does the
+        // same from its own dispatch path; both are needed, because `Agent` and
+        // `TaskCreate` are separate spawn paths and only `TaskCreate` records a
+        // `TASK_MANAGER` entry. Mirroring in one and not the other would make
+        // the board's coverage depend on which of two interchangeable tools the
+        // model happened to pick.
+        //
+        // Best-effort: `None` when no memory service is open, and the subagent
+        // runs regardless.
+        let board_item = crate::board::raise_delegated_task(
+            &ctx.session_id,
+            &subagent_id,
+            &format!("[{subagent_type}] {}", request.prompt),
+            &request.prompt,
+            &crate::board::caller_id(ctx),
+        );
+
+        // An auto-backgrounded run returns `AutoBackgrounded` to the closure
+        // below while the runner keeps going, so that closure never sees the
+        // real outcome and cannot close the item — it would sit claimed until
+        // the lease sweep eventually reopened it, which reads as "given back"
+        // for work that actually succeeded.
+        //
+        // `run_subagent_with_completion` is the existing answer to exactly this
+        // (`TaskCreate` already uses it): the runner sends its true outcome here
+        // once it finishes. On every non-auto-background path the sender is
+        // dropped instead, the receiver errors, and this task exits having done
+        // nothing — the closure below has already closed the item.
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        if let Some(item) = board_item.clone() {
+            archon_observability::spawn_named("agent-tool-board-close", async move {
+                let Ok(outcome) = completion_rx.await else {
+                    return;
+                };
+                if let Some(closing) = board_outcome(&outcome) {
+                    crate::board::close_delegated_task(&item, closing);
+                }
+            });
+        }
+
         let join = archon_observability::spawn_named(
             format!("subagent-runner:{subagent_type}"),
             async move {
-                let outcome =
-                    run_subagent(sid_spawn.clone(), request, cancel_child, ctx_clone).await;
+                let outcome = run_subagent_with_completion(
+                    sid_spawn.clone(),
+                    request,
+                    cancel_child,
+                    ctx_clone,
+                    completion_tx,
+                )
+                .await;
                 let (final_status, payload) = match &outcome {
                     SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
                     SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
@@ -256,6 +317,22 @@ impl Tool for AgentTool {
                         (AgentStatus::Failed, Err("subagent cancelled".into()))
                     }
                 };
+                // Close the mirrored board item here rather than at either call
+                // site, because this closure is the one place both the
+                // foreground and background paths converge on a terminal
+                // outcome.
+                //
+                // `AutoBackgrounded` is deliberately not closed: the runner is
+                // still executing and the item is still genuinely claimed. It
+                // is closed by whoever observes the real terminal outcome, and
+                // failing that the lease sweep reopens it once the holder is
+                // gone.
+                if let Some(item) = &board_item
+                    && let Some(closing) = board_outcome(&outcome)
+                {
+                    crate::board::close_delegated_task(item, closing);
+                }
+
                 *status_child
                     .lock()
                     .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
