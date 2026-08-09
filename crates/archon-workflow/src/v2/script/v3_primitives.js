@@ -396,9 +396,41 @@ function __archonPrimitives(w) {
   // (invalid_write_branch_output_<item>) that could never match across
   // attempts and would read as perpetual churn. Choosing the source removes
   // the normalisation problem instead of solving it.
+  // Caller options may only WIDEN this budget, never neuter it.
+  //
+  // The authoring prompt shows `remediationBudget()` bare and says outright "Do
+  // not replace this with a fixed bound". A generated script did exactly that —
+  // `{ baseAttempts: 3, hardCap: 3, maxSchemaRefunds: 0 }` — which sets
+  // `ceiling === funded`, making the progress check below unreachable and
+  // turning a progress-following budget into a flat count of three.
+  //
+  // Measured over the run that produced it: the tasks that plateaued stopped at
+  // three either way, so the cap bought nothing there; the one task whose gap
+  // set was still shrinking (gaps turning over every round, severity falling to
+  // none above medium) was cut at exactly three and recorded as failed. The cap
+  // cost a completion and saved nothing.
+  //
+  // Prompt text could not prevent that, and this is the standing lesson from
+  // routing: an invariant carried by prompt compliance is not an invariant. So
+  // the floor is enforced here, where the script cannot reach it.
   const remediationBudget = (opts = {}) => {
+    // Diagnostics only, and deliberately guarded: the prelude's own tests
+    // extract this function into a standalone module where `log` is not in
+    // scope. An override notice must never be able to throw.
+    const note = (message) => {
+      if (typeof log === "function") log(message);
+    };
     const base = Math.max(1, Number(opts.baseAttempts) || 3);
-    const hardCap = Math.max(base, Number(opts.hardCap) || 6);
+    const DEFAULT_HARD_CAP = 6;
+    const requestedHardCap = Number(opts.hardCap) || 0;
+    const hardCap = Math.max(base, DEFAULT_HARD_CAP, requestedHardCap);
+    if (requestedHardCap > 0 && requestedHardCap < hardCap) {
+      note(
+        "remediationBudget: ignoring hardCap=" + requestedHardCap +
+        " (below the " + DEFAULT_HARD_CAP + "-attempt floor); a fixed bound disables the " +
+        "progress check that funds converging tasks"
+      );
+    }
     // An attempt whose schema repair failed while its patch nonetheless LANDED
     // produced real work and no verdict. Charging it to the task discards work
     // that is already on disk — the third shape of "an attempt burned by
@@ -414,9 +446,21 @@ function __archonPrimitives(w) {
     // repair already retries under its own cap, so an unbounded exemption
     // trades a burned attempt for a hung task — strictly worse. An agent that
     // emits garbage and lands a patch every single time must still run out.
-    const maxSchemaRefunds = Number.isFinite(Number(opts.maxSchemaRefunds))
-      ? Math.max(0, Number(opts.maxSchemaRefunds))
-      : 1;
+    // Floored at one for the same reason as `hardCap`: a generated script set
+    // this to 0, switching the refund off entirely. Zero is not a defensible
+    // choice — it charges the task for an attempt that produced work and no
+    // verdict — and the bound below (once per task) is what keeps it safe, so
+    // there is nothing for a caller to protect by lowering it. Raising it is
+    // still permitted.
+    const requestedRefunds = Number(opts.maxSchemaRefunds) || 0;
+    const maxSchemaRefunds = Math.max(1, requestedRefunds);
+    if (opts.maxSchemaRefunds !== undefined && requestedRefunds < maxSchemaRefunds) {
+      note(
+        "remediationBudget: ignoring maxSchemaRefunds=" + requestedRefunds +
+        " (floored at 1); an attempt whose schema repair failed while its patch " +
+        "landed produced real work and must not be charged to the task"
+      );
+    }
     let schemaRefunds = 0;
     // Keyed on the host's TYPED marker, never on prose. The host sets it only
     // where the worktree was compared against the declared baseline; a bare

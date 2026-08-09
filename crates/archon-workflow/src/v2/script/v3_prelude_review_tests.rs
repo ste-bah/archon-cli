@@ -402,4 +402,68 @@ console.log([b.shouldContinue(1, {none}), b.shouldContinue(3, {none})].join(",")
         );
         assert_eq!(run_budget_js(&driver), "true,false");
     }
+
+    /// The exact call a generated script emitted, against an explicit
+    /// instruction not to. `hardCap: 3` makes `ceiling === funded`, so the
+    /// progress check never runs and a converging task is cut at three.
+    /// Enforced here because prompt text demonstrably did not prevent it.
+    #[test]
+    fn a_script_supplied_fixed_bound_cannot_disable_the_progress_check() {
+        // Gap set shrinks every attempt: 3 -> 2 -> 1 of the baseline remain.
+        let a1 = envelope(&["gap-a", "gap-b", "gap-c"]);
+        let a2 = envelope(&["gap-a", "gap-b"]);
+        let a3 = envelope(&["gap-a"]);
+        let a4 = envelope(&[]);
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 3, hardCap: 3, maxSchemaRefunds: 0 }});
+b.shouldContinue(1, {a1}); b.shouldContinue(2, {a2}); b.shouldContinue(3, {a3});
+console.log(b.shouldContinue(4, {a4}));"#
+        );
+        // Attempt 4 must be funded: the diagnosis is still closing, and the
+        // floor keeps the ceiling at 6 regardless of the requested 3.
+        assert_eq!(run_budget_js(&driver), "true");
+    }
+
+    /// The floor must not turn into "never stop". A plateau still ends the
+    /// budget — widening the ceiling only funds attempts that are converging.
+    #[test]
+    fn the_hard_cap_floor_still_stops_on_a_plateau() {
+        let a1 = envelope(&["gap-a", "gap-b"]);
+        let flat = envelope(&["gap-a", "gap-b"]);
+        let driver = format!(
+            r#"const b = remediationBudget({{ hardCap: 3 }});
+b.shouldContinue(1, {a1}); b.shouldContinue(2, {flat}); b.shouldContinue(3, {flat});
+console.log(b.shouldContinue(4, {flat}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "false");
+    }
+
+    /// `maxSchemaRefunds: 0` switched off a refund whose safety argument is the
+    /// once-per-task bound, not the ability to disable it. Floored at 1.
+    #[test]
+    fn a_script_cannot_switch_off_the_schema_refund() {
+        let none = envelope(&[]);
+        let landed = schema_landed_envelope();
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 2, hardCap: 2, maxSchemaRefunds: 0 }});
+b.shouldContinue(1, {none}, {landed});
+console.log(b.shouldContinue(2, {none}, {landed}));"#
+        );
+        // Without the floor this is false at the flat bound; the refund funds it.
+        assert_eq!(run_budget_js(&driver), "true");
+    }
+
+    /// Widening is still the caller's to do — the floor is a floor, not a pin.
+    #[test]
+    fn a_script_may_still_widen_the_budget() {
+        let a1 = envelope(&["gap-a", "gap-b", "gap-c"]);
+        let a2 = envelope(&["gap-a", "gap-b"]);
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 8 }});
+b.shouldContinue(1, {a1});
+console.log(b.shouldContinue(7, {a2}));"#
+        );
+        // Inside a caller-widened base window, funded without needing progress.
+        assert_eq!(run_budget_js(&driver), "true");
+    }
 }
