@@ -403,3 +403,47 @@ fn accepted_verification_with_a_failing_non_test_command_is_left_alone() {
 
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
 }
+
+/// A live remediation round was spent on a three-minute provider outage and
+/// charged to the task in full. The host now marks the outcome so the prelude's
+/// refund can forgive the attempt — the transport failure says nothing about
+/// the work, which is the same reasoning that already forgives a schema failure
+/// whose patch landed.
+#[test]
+fn a_transport_branch_failure_is_marked_refundable() {
+    let result = result_from_fanout_report(
+        &fanout_call("verification-wave-1"),
+        report(vec![failed_error_outcome(
+            "verify-TASK-TDL-020",
+            "workflow stage failed: agent transport failed: server_is_overloaded",
+        )]),
+    );
+
+    let items = result.data["items"].as_array().expect("items");
+    assert_eq!(
+        items[0]["data"]["transport_failure_no_verdict"], true,
+        "a transport failure must carry the refund marker: {items:#?}"
+    );
+}
+
+/// The marker must be specific to transport. An ordinary rejection — a real
+/// verdict on the work — has to keep costing the attempt it should, or the
+/// refund becomes a general amnesty.
+#[test]
+fn an_ordinary_branch_failure_is_not_marked_refundable() {
+    let result = result_from_fanout_report(
+        &fanout_call("verification-wave-1"),
+        report(vec![failed_error_outcome(
+            "verify-TASK-TDL-020",
+            "agent result failed validation: workflow result summary is required",
+        )]),
+    );
+
+    let items = result.data["items"].as_array().expect("items");
+    assert!(
+        items[0]["data"]
+            .get("transport_failure_no_verdict")
+            .is_none(),
+        "a genuine rejection must not be refundable: {items:#?}"
+    );
+}

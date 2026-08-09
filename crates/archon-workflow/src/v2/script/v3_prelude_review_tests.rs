@@ -466,4 +466,59 @@ console.log(b.shouldContinue(7, {a2}));"#
         // Inside a caller-widened base window, funded without needing progress.
         assert_eq!(run_budget_js(&driver), "true");
     }
+
+    /// The envelope the host produces when a branch died to a provider or
+    /// transport failure before any verdict existed.
+    fn transport_failure_envelope() -> String {
+        r#"{"result":{"data":{"transport_failure_no_verdict":true},"residual_gaps":[]}}"#
+            .to_string()
+    }
+
+    /// A three-minute provider outage burned a real remediation round in a live
+    /// run. It says nothing about the work, so it must not be charged to the
+    /// task — the same reasoning that already forgives a schema failure whose
+    /// patch landed.
+    #[test]
+    fn a_transport_failure_buys_one_extra_attempt() {
+        let none = envelope(&[]);
+        let transport = transport_failure_envelope();
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 2, hardCap: 2 }});
+b.shouldContinue(1, {none}, {transport});
+console.log(b.shouldContinue(2, {none}, {transport}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "true");
+    }
+
+    /// The two reasons draw from ONE pool. A task that hits both must not
+    /// collect two refunds — the bound's whole safety argument is that it is a
+    /// single forgiveness per task, however the attempt was burned.
+    #[test]
+    fn schema_and_transport_refunds_share_one_pool() {
+        let none = envelope(&[]);
+        let landed = schema_landed_envelope();
+        let transport = transport_failure_envelope();
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 2, hardCap: 2 }});
+b.shouldContinue(1, {none}, {landed});
+b.shouldContinue(2, {none}, {transport});
+console.log(b.shouldContinue(3, {none}, {transport}));"#
+        );
+        // Attempt 2 is funded by the single refund; attempt 3 must not be.
+        assert_eq!(run_budget_js(&driver), "false");
+    }
+
+    /// An envelope carrying neither marker earns nothing, so an ordinary
+    /// rejection still costs the attempt it should.
+    #[test]
+    fn an_ordinary_failure_earns_no_transport_refund() {
+        let none = envelope(&[]);
+        let plain = r#"{"result":{"data":{"branch_error_from_runtime":true},"residual_gaps":[]}}"#;
+        let driver = format!(
+            r#"const b = remediationBudget({{ baseAttempts: 2, hardCap: 2 }});
+b.shouldContinue(1, {none}, {plain});
+console.log(b.shouldContinue(2, {none}, {plain}));"#
+        );
+        assert_eq!(run_budget_js(&driver), "false");
+    }
 }

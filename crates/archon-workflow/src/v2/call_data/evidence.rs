@@ -85,12 +85,31 @@ pub(super) fn failed_branch_error_result(
         description: truncate_for_result(error, 500),
         severity: Some("blocking".to_string()),
     });
-    result.data = serde_json::json!({
+    let mut data = serde_json::json!({
         "branch_id": outcome.item_id,
         "role": outcome.role,
         "branch_error_from_runtime": true,
         "error": truncate_for_result(error, 2_000),
     });
+    // A transport failure says nothing about the work — the same reasoning that
+    // already refunds an attempt whose schema repair failed while its patch
+    // landed. One live remediation round was spent on a three-minute provider
+    // outage, charged to the task in full.
+    //
+    // Unlike the schema case this carries NO patch-landed condition, and the
+    // difference is deliberate: a schema failure with no patch produced nothing,
+    // whereas a transport failure produced no verdict whether or not the agent
+    // had started. Requiring evidence of work here would refuse the refund in
+    // exactly the case it is most clearly owed — the call that never landed.
+    if crate::v2::lifecycle_driver::is_transport_failure_text(error) {
+        if let Some(object) = data.as_object_mut() {
+            object.insert(
+                "transport_failure_no_verdict".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+    }
+    result.data = data;
     result
 }
 

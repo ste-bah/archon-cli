@@ -255,8 +255,15 @@ fn model_handler_execute_with_codex_alias_sets_effect() {
     h.execute(&mut ctx, &["mini".to_string()])
         .expect("Codex alias must produce Ok(())");
 
+    // Asserted against the configured value rather than a literal. This test
+    // pinned `gpt-5.4-mini` and broke when the Codex model defaults began
+    // sourcing from the shipped config.toml — the literal was a second copy of
+    // a default, which is the exact drift that change removed. Resolving the
+    // alias the same way production does keeps the test about the alias
+    // mechanism instead of about which model happens to be current.
+    let expected = archon_core::config::OpenAiCodexModelsConfig::default().mini;
     match ctx.pending_effect.as_ref() {
-        Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, "gpt-5.4-mini"),
+        Some(CommandEffect::SetModelOverride(s)) => assert_eq!(s, &expected),
         Some(other) => panic!("unexpected CommandEffect variant: {other:?}"),
         None => panic!("WRITE path must stash a CommandEffect::SetModelOverride"),
     }

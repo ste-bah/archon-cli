@@ -462,16 +462,30 @@ function __archonPrimitives(w) {
       );
     }
     let schemaRefunds = 0;
-    // Keyed on the host's TYPED marker, never on prose. The host sets it only
-    // where the worktree was compared against the declared baseline; a bare
-    // "files changed" test would count stray tool output as landed work and
-    // refund an attempt that produced none.
+    // Keyed on the host's TYPED markers, never on prose. The host sets each only
+    // where it can prove the condition; a bare "files changed" test would count
+    // stray tool output as landed work and refund an attempt that produced none.
+    //
+    // Two qualifying reasons, ONE shared pool. Both are instances of the same
+    // idea — an attempt burned by something that says nothing about the work:
+    //
+    //   schema_repair_patch_landed    schema repair failed, patch landed anyway
+    //   transport_failure_no_verdict  provider/transport died before a verdict
+    //
+    // Separate pools would let a task that fails both ways draw two refunds,
+    // quietly doubling a bound whose whole safety argument is that it is one.
+    // Sharing keeps the guarantee "at most `maxSchemaRefunds` burned attempts
+    // are forgiven per task" true regardless of how they were burned.
+    const REFUND_MARKERS = [
+      '"schema_repair_patch_landed":true',
+      '"transport_failure_no_verdict":true',
+    ];
     const schemaRefundable = (...envs) => {
       for (const env of envs) {
         if (!env) continue;
         let blob = "";
         try { blob = JSON.stringify(env); } catch (_) { continue; }
-        if (blob.indexOf('"schema_repair_patch_landed":true') >= 0) return true;
+        if (REFUND_MARKERS.some((marker) => blob.indexOf(marker) >= 0)) return true;
       }
       return false;
     };
