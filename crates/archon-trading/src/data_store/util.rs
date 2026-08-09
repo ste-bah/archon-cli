@@ -121,6 +121,20 @@ fn read_record_without_workflow_note_fields(
     serde_json::from_value(value).map_err(|err| DataStoreError::Json(err.to_string()))
 }
 
+/// Whether this dataset's metadata carries a quarantine marker.
+///
+/// Quarantine lives in the metadata, but registry status is DERIVED from the
+/// validation report — so a quarantined dataset whose validation.json still
+/// claimed `passed` was being stamped `Healthy` on every load. Thirty-three of
+/// them were, which is the latent false-success a quarantine exists to prevent:
+/// the operator marks a dataset untrustworthy and the next read promotes it
+/// back.
+pub(super) fn dataset_is_quarantined(root: &Path, record: &StoredDatasetRecord) -> bool {
+    read_dataset_metadata_with_quarantine(root, record)
+        .map(|read| read.quarantined)
+        .unwrap_or(false)
+}
+
 fn read_dataset_metadata_with_quarantine(
     root: &Path,
     record: &StoredDatasetRecord,
