@@ -25,6 +25,7 @@ use std::sync::{Arc, OnceLock};
 use archon_memory::board::BoardAccess;
 
 mod leases;
+mod mirror;
 mod tools;
 mod tools_lifecycle;
 
@@ -36,6 +37,7 @@ mod board_tool_tests;
 mod leases_tests;
 
 pub use leases::{HolderLiveness, ReleasedClaim, holder_liveness, release_dead_claims};
+pub use mirror::{DelegatedOutcome, close_delegated_task, raise_delegated_task};
 pub use tools::{BoardListTool, BoardRaiseTool};
 pub use tools_lifecycle::{BoardClaimTool, BoardResolveTool};
 
