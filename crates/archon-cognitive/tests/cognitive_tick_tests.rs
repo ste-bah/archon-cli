@@ -8,6 +8,7 @@ fn policy(allow_tick: bool) -> CognitivePolicy {
         enabled: true,
         allow_autonomous_tick: allow_tick,
         allow_autonomous_low_risk_apply: true,
+        allow_self_model_updates: true,
         max_autonomous_risk: "Low".into(),
         ..CognitivePolicy::default()
     }
@@ -51,7 +52,8 @@ fn count(db: &DbInstance, relation: &str, key: &str) -> usize {
 #[test]
 fn disabled_tick_fails_closed_and_writes_audit() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(false))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(false)), dir.path()).unwrap();
 
     let report = tick.tick().unwrap();
 
@@ -62,70 +64,120 @@ fn disabled_tick_fails_closed_and_writes_audit() {
 #[test]
 fn enabled_tick_records_compact_audit() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(true))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(true)), dir.path()).unwrap();
 
     let report = tick.tick().unwrap();
 
-    assert!(report.errors.is_empty());
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     assert_eq!(count(&db, "cognitive_tick_audit", "tick_id"), 1);
 }
 
-/// The self-model step performs no work, so a tick must not claim it did.
-/// `Some(true)` here would be the fabricated success that made this field
-/// carry no information on every tick ever recorded.
+/// The self-model step now runs, so it must report what it found: `false` for
+/// "it ran and nothing had enough evidence to change", never `true` and never
+/// a placeholder fact.
 #[test]
-fn tick_does_not_claim_the_self_model_was_updated() {
+fn tick_reports_the_self_model_ran_and_changed_nothing() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(true))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(true)), dir.path()).unwrap();
+
+    let report = tick.tick().unwrap();
+
+    assert_eq!(report.self_model_updated, Some(false));
+    assert_eq!(
+        audit_column(&db, "self_model_updated"),
+        cozo::DataValue::Bool(false)
+    );
+    // No evidence means no fact, not a placeholder fact at neutral confidence.
+    assert_eq!(count(&db, "self_model_facts", "fact_id"), 0);
+}
+
+/// Policy is the only remaining reason the self-model step reports nothing, and
+/// it must stay distinguishable from "ran and found nothing".
+#[test]
+fn tick_reports_self_model_as_unmeasured_when_policy_withholds_updates() {
+    let db = DbInstance::new("mem", "", "").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut denied = policy(true);
+    denied.allow_self_model_updates = false;
+    let tick = CognitiveTick::new(&db, Some(denied), dir.path()).unwrap();
 
     let report = tick.tick().unwrap();
 
     assert_eq!(report.self_model_updated, None);
-    assert_ne!(report.self_model_updated, Some(true));
-    assert_eq!(
-        audit_column(&db, "self_model_updated"),
-        cozo::DataValue::Null
+    assert!(
+        report
+            .errors
+            .contains(&"self_model_updates_not_permitted_by_policy".into())
     );
-    // Nothing wrote a self-model fact, which is why there is nothing to report.
-    assert_eq!(count(&db, "self_model_facts", "fact_id"), 0);
 }
 
-/// Dead-letter replay is unimplemented, so its result must stay distinguishable
-/// from a tick that really did inspect an empty queue and measured zero.
+/// `Some(0)` is now a measurement: the ledger and the relation agree.
 #[test]
-fn tick_reports_dead_letter_replay_as_unmeasured_not_zero() {
+fn tick_measures_an_empty_dead_letter_queue_as_zero() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(true))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(true)), dir.path()).unwrap();
 
     let report = tick.tick().unwrap();
 
-    assert_eq!(report.dead_letters_replayed, None);
-    assert_ne!(report.dead_letters_replayed, Some(0));
+    assert_eq!(report.dead_letters_replayed, Some(0));
     assert_eq!(
         audit_column(&db, "dead_letters_replayed"),
-        cozo::DataValue::Null
+        cozo::DataValue::from(0)
     );
 }
 
-/// The JSON surface consumers read must carry the same distinction; a serialised
-/// `0`/`false` would put the fabrication straight back.
+/// A reflection whose Cozo write failed still reaches the ledger. That is the
+/// dead-letter queue, and the tick must actually drain it.
 #[test]
-fn tick_report_json_marks_unmeasured_steps_as_null() {
+fn tick_replays_ledgered_reflections_missing_from_the_relation() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(true))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    archon_cognitive::ensure_cognitive_schema(&db).unwrap();
+    let orphan = serde_json::json!({
+        "reflection_id": "orphan-1",
+        "session_id": "session-1",
+        "turn_number": 4,
+        "decision_id": "decision-1",
+        "situation_kind": "code_change",
+        "attempted": "goal:code_change:run_tests",
+        "worked": "",
+        "failed": "mismatch:repeated_tool_failure:observed_inspect_files",
+        "lesson": "code_change: repeated tool failure should stop retrying",
+        "should_propose": false,
+        "proposed_rule_id": serde_json::Value::Null,
+        "outcome": "failure",
+        "created_at": Utc::now().to_rfc3339(),
+    });
+    // The same record twice: the ledger is append-only, so a retried write
+    // leaves a duplicate that must still count once.
+    std::fs::write(
+        dir.path().join("cognitive-reflections.jsonl"),
+        format!("{orphan}\n{orphan}\n"),
+    )
+    .unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(true)), dir.path()).unwrap();
 
     let report = tick.tick().unwrap();
-    let json: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&report).unwrap()).unwrap();
 
-    assert!(json["self_model_updated"].is_null());
-    assert!(json["dead_letters_replayed"].is_null());
+    assert_eq!(report.dead_letters_replayed, Some(1));
+    assert_eq!(count(&db, "cognitive_reflections", "reflection_id"), 1);
+
+    // A second tick finds the relation already caught up.
+    let again = CognitiveTick::new(&db, Some(policy(true)), dir.path())
+        .unwrap()
+        .tick()
+        .unwrap();
+    assert_eq!(again.dead_letters_replayed, Some(0));
 }
 
 #[test]
 fn tick_generates_one_proposal_per_repeated_lesson() {
     let db = DbInstance::new("mem", "", "").unwrap();
-    let tick = CognitiveTick::new(&db, Some(policy(true))).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let tick = CognitiveTick::new(&db, Some(policy(true)), dir.path()).unwrap();
     for id in ["r1", "r2", "r3"] {
         insert_reflection(
             &db,

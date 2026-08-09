@@ -26,11 +26,12 @@ impl<'a> CognitiveDaemon<'a> {
         db: &'a DbInstance,
         policy: CognitivePolicy,
     ) -> Self {
+        let root = root.as_ref().to_path_buf();
         Self {
-            paths: DaemonPaths::new(root),
+            paths: DaemonPaths::new(&root),
             config,
             policy: policy.clone(),
-            jobs: vec![Box::new(CognitiveTickJob::new(db, policy))],
+            jobs: vec![Box::new(CognitiveTickJob::new(db, policy, &root))],
         }
     }
 

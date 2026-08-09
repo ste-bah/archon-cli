@@ -53,7 +53,10 @@ fn inspection_status_summarizes_safe_cognitive_state() {
             3,
         ))
         .unwrap();
-    CognitiveTick::new(&db, None).unwrap().tick().unwrap();
+    CognitiveTick::new(&db, None, dir.path())
+        .unwrap()
+        .tick()
+        .unwrap();
 
     let status = CognitiveInspection::new(&db, dir.path())
         .unwrap()

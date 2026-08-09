@@ -9,6 +9,7 @@
 mod codec;
 pub mod definitions;
 pub mod derive;
+pub mod emit;
 pub mod event;
 pub mod event_store;
 pub mod window;
@@ -18,6 +19,7 @@ pub use definitions::{
     METRIC_DEFINITION_VERSION, MetricAggregation, MetricDefinition, metric_definitions,
 };
 pub use derive::{CognitiveMetricSnapshot, DerivedMetric, by_cohort, derive_snapshot};
+pub use emit::{MetricEmitter, UNWINDOWED_EVALUATION_WINDOW, policy_version, runtime_cohort};
 pub use event::{CognitiveMetricEvent, METRIC_EVENT_SCHEMA_VERSION, MetricEventKind};
 pub use event_store::{MetricEventStore, MetricWriteOutcome};
 pub use window::{CohortRole, EvaluationWindow, MetricCohort};

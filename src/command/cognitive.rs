@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use archon_cognitive::self_model::SelfModelStore;
 use archon_cognitive::{
     CognitiveInspection, CognitiveInspectionStatus, CognitiveMetricSnapshot, CognitiveTick,
-    DecisionRecord, PersistentCognitiveStore, ProposalSummary, ReflectionSummary, TickReport,
+    DecisionRecord, PersistentCognitiveStore, ProposalSummary, ReflectionSummary, ShadowSummary,
+    TickReport,
 };
 use archon_core::config::ArchonConfig;
 
@@ -26,7 +27,8 @@ pub(crate) async fn handle_cognitive_command(
             let policy = archon_policy::load_effective_policy(&cwd)
                 .map(|policy| policy.cognitive)
                 .unwrap_or_default();
-            let report = CognitiveTick::new(bundle.store.db(), Some(policy))?.tick()?;
+            let report =
+                CognitiveTick::new(bundle.store.db(), Some(policy), &bundle.ledger_dir)?.tick()?;
             process_deferred_world_model_retry();
             print_tick(&report, *json)
         }
@@ -145,6 +147,10 @@ fn print_status(status: &CognitiveInspectionStatus, json: bool) -> Result<()> {
     println!("Governed proposals: {}", status.proposal_count);
     println!("Apply results: {}", status.apply_result_count);
     println!("Self-model facts: {}", status.self_model_fact_count);
+    print_shadow(
+        status.shadow_decision_count,
+        &status.recent_shadow_decisions,
+    );
     if let Some(tick) = &status.latest_tick {
         println!(
             "Latest tick: {} proposals={} applied={} denied={} errors={}",
@@ -158,6 +164,29 @@ fn print_status(status: &CognitiveInspectionStatus, json: bool) -> Result<()> {
     print_proposals(&status.pending_proposals);
     print_metrics(&status.metrics, status.metric_event_count);
     Ok(())
+}
+
+/// Shadow plans are reported separately from executive decisions and never
+/// folded into them: nothing here was executed, and an operator reading one
+/// number for both would be reading a count of work that did not happen.
+fn print_shadow(count: usize, recent: &[ShadowSummary]) {
+    println!("Shadow executive plans (not executed): {count}");
+    for shadow in recent {
+        println!(
+            "- {} turn={} {} -> shadow={} live={} agreed={} surprise={}",
+            shadow.shadow_decision_id,
+            shadow.turn_number,
+            shadow.situation_kind,
+            shadow.shadow_action,
+            if shadow.live_action.is_empty() {
+                "pending"
+            } else {
+                shadow.live_action.as_str()
+            },
+            measured(shadow.agreed),
+            measured(shadow.surprise.map(|value| format!("{value:.2}"))),
+        );
+    }
 }
 
 fn print_metrics(snapshot: &CognitiveMetricSnapshot, event_count: usize) {
@@ -194,9 +223,13 @@ fn print_metrics(snapshot: &CognitiveMetricSnapshot, event_count: usize) {
     }
 }
 
-/// A tick step whose implementation does not exist yet reports nothing, and the
-/// operator is told that rather than shown a `0`/`false` they would read as a
-/// result.
+/// A tick step that could not run reports nothing, and the operator is told
+/// that rather than shown a `0`/`false` they would read as a result.
+///
+/// Both steps now measure: `0` dead letters means the ledger and the relation
+/// agree, and `false` for the self-model means the refresh ran and found
+/// nothing to change. "not measured" is reserved for a step that was withheld
+/// by policy or failed outright.
 fn measured<T: std::fmt::Display>(value: Option<T>) -> String {
     value.map_or_else(|| "not measured".to_string(), |value| value.to_string())
 }

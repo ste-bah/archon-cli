@@ -29,7 +29,11 @@ macro_rules! tick_audit_spec {
 /// 2: `cognitive_tick_audit.dead_letters_replayed` and `.self_model_updated`
 /// became nullable so a tick step that measured nothing stops being recorded as
 /// a measured zero/success.
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+///
+/// 3: `cognitive_shadow_decisions` and `cognitive_reflection_evidence` were
+/// added so the shadow executive loop and the triggered reflection writer have
+/// somewhere to land that is distinguishable from live decisions.
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
     for script in SCHEMA_RELATIONS {
@@ -213,6 +217,44 @@ const SCHEMA_RELATIONS: &[&str] = &[
             numerator: Float?,
             denominator: Float?,
             identities_json: String,
+            evidence_refs_json: String,
+            created_at: String,
+        }"#,
+    // Shadow observations of the executive loop, kept in their own relation
+    // rather than mixed into `cognitive_decisions`: a shadow row is a
+    // counterfactual nobody executed, and a reader that cannot tell it apart
+    // from a live decision would count it as one.
+    //
+    // `agreed` and `surprise` are nullable because they only exist once the
+    // real turn has finished; a row that was never joined must stay
+    // distinguishable from one that was joined and agreed.
+    r#":create cognitive_shadow_decisions {
+            shadow_decision_id: String =>
+            session_id: String,
+            turn_number: Int,
+            decision_id: String,
+            situation_id: String,
+            situation_kind: String,
+            selected_action: String,
+            candidate_id: String,
+            candidate_rank: Int,
+            degraded_json: String,
+            joined: Bool,
+            live_action: String,
+            live_outcome_status: String,
+            agreed: Bool?,
+            surprise: Float?,
+            created_at: String,
+            joined_at: String,
+        }"#,
+    // Provenance for a triggered reflection: which trigger fired, how confident
+    // the trigger was, and which records back it. Held apart from
+    // `cognitive_reflections` so the existing relation needs no migration, and
+    // so evidence refs stay a list of identifiers rather than prose.
+    r#":create cognitive_reflection_evidence {
+            reflection_id: String =>
+            trigger: String,
+            confidence: Float,
             evidence_refs_json: String,
             created_at: String,
         }"#,

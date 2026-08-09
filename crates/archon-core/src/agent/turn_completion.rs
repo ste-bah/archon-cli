@@ -63,9 +63,23 @@ impl Agent {
         // Detect user corrections and record them in the memory graph.
         // The handle is cloned rather than borrowed because recording now also
         // buffers what it captured, so the call needs `&mut self`.
+        //
+        // The buffer length is sampled either side of the call because it is
+        // cumulative until the next extraction: the delta is what this turn
+        // contributed, and the reflection trigger below needs "was corrected
+        // now", not "has been corrected since some earlier turn".
+        let corrections_before = self.corrections_since_extraction.len();
         if let Some(graph) = self.memory.clone() {
             self.detect_and_record_correction(user_input, &graph).await;
         }
+        let user_corrected = self.corrections_since_extraction.len() > corrections_before;
+
+        // Issues #76 and #81: join this turn to the shadow plan recorded at
+        // turn start, and reflect if the comparison, the tool failures, or the
+        // correction tripped a trigger. Bounded and failure-tolerant: the turn
+        // is already complete and nothing here can change it.
+        self.complete_cognitive_shadow_turn(user_input, user_corrected)
+            .await;
 
         // GAP 5: Auto-memory extraction check
         self.extraction_state.record_turn();

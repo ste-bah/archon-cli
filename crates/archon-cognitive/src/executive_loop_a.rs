@@ -6,6 +6,13 @@ pub struct ExecutiveTurnInput {
     pub surface: crate::CognitiveSurface,
     pub working_dir: PathBuf,
     pub world_model_state: WorldModelState,
+    /// Whether the loop should persist the situation it classified.
+    ///
+    /// `false` for a shadow run alongside a live turn that already stored its
+    /// own classification of the same text: two rows per turn would double
+    /// every situation count an operator reads, while adding nothing — the two
+    /// classifications come from the same deterministic classifier.
+    pub record_situation: bool,
 }
 
 #[derive(Debug, Clone)]

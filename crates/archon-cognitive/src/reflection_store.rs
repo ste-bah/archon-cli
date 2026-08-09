@@ -19,6 +19,40 @@ pub(crate) fn query_reflection_lessons(db: &DbInstance) -> Result<Vec<String>, C
     query_reflection_lessons_current(db).or_else(|_| query_reflection_lessons_legacy(db))
 }
 
+/// Record why a reflection was written and what backs it.
+///
+/// Split from `cognitive_reflections` so the existing relation needs no
+/// migration, and so evidence stays a list of identifiers: the column is
+/// written from an already-validated `Vec<String>` of refs, never from prose.
+pub(crate) fn put_reflection_evidence(
+    db: &DbInstance,
+    reflection_id: &str,
+    trigger: &str,
+    confidence: f32,
+    evidence_refs: &[String],
+    created_at: &str,
+) -> Result<(), CognitiveError> {
+    let mut params = BTreeMap::new();
+    params.insert("reflection_id".into(), DataValue::from(reflection_id));
+    params.insert("trigger".into(), DataValue::from(trigger));
+    params.insert("confidence".into(), DataValue::from(f64::from(confidence)));
+    params.insert(
+        "evidence_refs_json".into(),
+        DataValue::from(serde_json::to_string(evidence_refs)?.as_str()),
+    );
+    params.insert("created_at".into(), DataValue::from(created_at));
+    run_script_guarded(
+        db,
+        "?[reflection_id, trigger, confidence, evidence_refs_json, created_at] <- \
+         [[$reflection_id, $trigger, $confidence, $evidence_refs_json, $created_at]]
+         :put cognitive_reflection_evidence { reflection_id => trigger, confidence, evidence_refs_json, created_at }",
+        params,
+        ScriptMutability::Mutable,
+        "put cognitive reflection evidence",
+    )?;
+    Ok(())
+}
+
 pub(crate) fn append_ledger(
     dir: &Path,
     reflection: &ReflectionRecord,

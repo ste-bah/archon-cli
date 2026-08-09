@@ -91,6 +91,7 @@ fn turn(text: &str, dir: PathBuf) -> ExecutiveTurnInput {
         surface: CognitiveSurface::Cli,
         working_dir: dir,
         world_model_state: WorldModelState::default(),
+        record_situation: true,
     }
 }
 
@@ -282,6 +283,40 @@ fn snapshot_has_no_raw_text() {
 
     assert!(!json.contains("hyperspecific_SECRET_word"));
     assert!(result.snapshot.prediction_available);
+}
+
+/// A shadow run sits alongside a live turn that already stored its own
+/// classification. Storing a second row would double every situation count an
+/// operator reads while adding nothing.
+#[test]
+fn run_turn_can_skip_storing_the_situation_it_classified() {
+    let db = DbInstance::new("mem", "", "").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let loop_ = ExecutiveLoop::with_components(
+        &db,
+        config(),
+        Some(policy()),
+        temp.path(),
+        WorldModelScorer::heuristic_only(),
+        executor(OutcomeSummary::Success),
+        archon_cognitive::NoopLessonSink,
+    )
+    .unwrap();
+    let mut input = turn("fix the failing rust test", temp.path().into());
+    input.record_situation = false;
+
+    loop_.run_turn(input).unwrap();
+
+    let situations = db
+        .run_script(
+            "?[situation_id] := *cognitive_situations{situation_id}",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .unwrap()
+        .rows
+        .len();
+    assert_eq!(situations, 0);
 }
 
 #[test]

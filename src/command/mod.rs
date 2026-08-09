@@ -96,6 +96,10 @@ pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
+/// `kb recall` — the R7 unified recall facade's live call site.
+pub(crate) mod kb_recall;
+/// Real memory/docs/code-index stores behind `archon-knowledge`'s recall ports.
+pub(crate) mod kb_recall_sources;
 pub(crate) mod kb_reprocess;
 pub(crate) mod kb_url;
 pub(crate) mod learning;

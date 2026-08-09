@@ -7,7 +7,10 @@
 use crate::metrics::event::MetricEventKind;
 
 /// Version of the definition table below. Change a formula, change this.
-pub const METRIC_DEFINITION_VERSION: i64 = 1;
+///
+/// 2: added the shadow-executive and self-model-fact definitions, which had no
+/// entries while nothing emitted their events.
+pub const METRIC_DEFINITION_VERSION: i64 = 2;
 
 /// How a metric collapses its eligible events into one number.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -173,6 +176,54 @@ pub fn metric_definitions() -> &'static [MetricDefinition] {
             aggregation: MetricAggregation::OutcomeRate {
                 positive: UNKNOWN_OUTCOMES,
             },
+        },
+        // Shadow executive loop. The agreement rate is the whole point of
+        // running a planner nobody executes: it says how often the loop would
+        // have chosen what the live agent actually did. It is deliberately not
+        // a success measure — a no-op executor never succeeds at anything.
+        MetricDefinition {
+            name: "shadow_action_agreement_rate",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::ShadowDecisionCompared,
+            identity_filter: None,
+            aggregation: MetricAggregation::IdentityRate {
+                key: "agreed",
+                positive: "true",
+            },
+        },
+        // Surprise measured against the live turn rather than a model, so it
+        // exists before any world model is validated. Mean and p95 together:
+        // a rising tail is the signal a mean hides.
+        MetricDefinition {
+            name: "shadow_surprise_mean",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::ShadowDecisionCompared,
+            identity_filter: None,
+            aggregation: MetricAggregation::Mean,
+        },
+        MetricDefinition {
+            name: "shadow_surprise_p95",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::ShadowDecisionCompared,
+            identity_filter: None,
+            aggregation: MetricAggregation::Percentile { percentile: 95 },
+        },
+        // Self-model writes. `value` is the fact's post-update confidence, so
+        // the mean says where the self-model currently sits rather than how
+        // often it was touched; the count says the latter.
+        MetricDefinition {
+            name: "self_model_fact_update_count",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::SelfModelFactUpdated,
+            identity_filter: None,
+            aggregation: MetricAggregation::Count,
+        },
+        MetricDefinition {
+            name: "self_model_fact_confidence_mean",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::SelfModelFactUpdated,
+            identity_filter: None,
+            aggregation: MetricAggregation::Mean,
         },
         MetricDefinition {
             name: "latent_surprise_mean",
