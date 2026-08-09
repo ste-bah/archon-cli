@@ -113,24 +113,20 @@ pub fn parse_marker_json(root: &Value) -> Vec<Block> {
 
         // Track the current page from `Page` blocks (0-indexed id → 1-indexed page).
         let mut page = cur_page;
-        if bt == "Page" {
-            if let Some(id) = node.get("id").and_then(Value::as_str) {
-                if let Some(caps) = page_re.captures(id) {
-                    if let Ok(n) = caps[1].parse::<u32>() {
+        if bt == "Page"
+            && let Some(id) = node.get("id").and_then(Value::as_str)
+                && let Some(caps) = page_re.captures(id)
+                    && let Ok(n) = caps[1].parse::<u32>() {
                         page = n + 1;
                     }
-                }
-            }
-        }
 
         // Emit text-bearing blocks with a bbox (Table blocks become [TABLE] chunks).
         if let Some(block_type) = block_type_from_str(bt) {
             let html = node.get("html").and_then(Value::as_str).unwrap_or("");
-            if let Some(bbox) = node.get("bbox").and_then(parse_bbox) {
-                if let Some(block) = build_block(block_type, html, bbox, page) {
+            if let Some(bbox) = node.get("bbox").and_then(parse_bbox)
+                && let Some(block) = build_block(block_type, html, bbox, page) {
                     blocks.push(block);
                 }
-            }
         }
 
         // Push children reversed so they pop (and emit) in document order.
@@ -170,21 +166,17 @@ pub fn parse_marker_figures(root: &Value) -> Vec<FigureRegion> {
         let bt = node.get("block_type").and_then(Value::as_str).unwrap_or("");
 
         let mut page = cur_page;
-        if bt == "Page" {
-            if let Some(id) = node.get("id").and_then(Value::as_str) {
-                if let Some(caps) = page_re.captures(id) {
-                    if let Ok(n) = caps[1].parse::<u32>() {
+        if bt == "Page"
+            && let Some(id) = node.get("id").and_then(Value::as_str)
+                && let Some(caps) = page_re.captures(id)
+                    && let Ok(n) = caps[1].parse::<u32>() {
                         page = n + 1;
                     }
-                }
-            }
-        }
 
-        if is_figure_block(bt) {
-            if let Some(bbox) = node.get("bbox").and_then(parse_bbox) {
+        if is_figure_block(bt)
+            && let Some(bbox) = node.get("bbox").and_then(parse_bbox) {
                 figures.push(FigureRegion { page, bbox });
             }
-        }
 
         if let Some(children) = node.get("children").and_then(Value::as_array) {
             for child in children.iter().rev() {
