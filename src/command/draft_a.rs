@@ -39,6 +39,14 @@ pub(crate) async fn handle_draft_command(
     let section_id = pack.meta.section_id.clone();
     let model_for_import = model.clone();
     let chain_path = workdir.join("provenance.jsonl");
+    // The provenance store path is resolved once, here at the command boundary, and
+    // threaded into the import below as an explicit argument. Resolving it several
+    // frames down left tests no way to point the import at a temporary store except
+    // by mutating the process environment, which races the rest of the suite (#166).
+    // The `ARCHON_PROV_DB_PATH` / `ARCHON_KB_DB_PATH` overrides behave as before.
+    let prov_db_path = crate::command::store_paths::evidence_db_path(
+        crate::command::store_paths::PROV_DB_ENV_KEYS,
+    );
     // Quote (id, verbatim text) pairs for post-run corpus-source linkage — captured before the
     // bank moves into the blocking task.
     let quote_texts: Vec<(String, String)> = bank
@@ -74,6 +82,7 @@ pub(crate) async fn handle_draft_command(
     // failure must not fail a completed draft). Once imported, `archon prov trace|export|
     // verify <artifact-id>` work on the FCDP artifacts.
     match import_provenance_to_store(
+        &prov_db_path,
         &chain_path,
         &section_id,
         &model_for_import,
@@ -169,7 +178,11 @@ fn clean_quote(text: &str) -> String {
 /// self-contained verify. Corpus linkage is content-verified and best-effort: only quotes that
 /// survive verbatim into the final draft AND resolve into the corpus are linked; an unresolved
 /// quote (corpus absent, index cold) simply produces no edge.
+///
+/// `db_path` is the provenance store to write into, resolved by the caller at the command
+/// boundary rather than read from the environment here.
 fn import_provenance_to_store(
+    db_path: &Path,
     chain_path: &Path,
     section_id: &str,
     model: &str,
@@ -184,11 +197,7 @@ fn import_provenance_to_store(
         return Ok(None);
     }
 
-    let db_path = crate::command::store_paths::evidence_db_path(&[
-        "ARCHON_PROV_DB_PATH",
-        "ARCHON_KB_DB_PATH",
-    ]);
-    let db = crate::command::store_paths::open_sqlite_db(&db_path, "provenance")?;
+    let db = crate::command::store_paths::open_sqlite_db(db_path, "provenance")?;
     archon_provenance::store::ensure_schema(&db)?;
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -439,4 +448,3 @@ impl CommandHandler for DraftHandler {
         "Draft an FCDP dissertation section with the current model"
     }
 }
-

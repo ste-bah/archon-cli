@@ -5,6 +5,7 @@
 //! `.archon` directory and only split stores when an explicit override is
 //! provided.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -15,6 +16,15 @@ pub(crate) const EVIDENCE_DB_ENV: &str = "ARCHON_EVIDENCE_DB_PATH";
 pub(crate) const LEARNING_DB_ENV: &str = "ARCHON_LEARNING_DB_PATH";
 pub(crate) const SESSION_DB_ENV: &str = "ARCHON_SESSION_DB_PATH";
 
+/// Store-path override keys for the provenance store, most specific first.
+///
+/// Shared by `command::prov` and the `archon draft` provenance import so the two
+/// cannot disagree about which store `archon prov trace` reads back.
+pub(crate) const PROV_DB_ENV_KEYS: &[&str] = &["ARCHON_PROV_DB_PATH", "ARCHON_KB_DB_PATH"];
+
+/// Store-path override key for the knowledge base.
+pub(crate) const KB_DB_ENV_KEYS: &[&str] = &["ARCHON_KB_DB_PATH"];
+
 #[cfg(test)]
 pub(crate) static DOCS_DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
@@ -24,14 +34,31 @@ pub(crate) fn project_archon_dir_for(cwd: &Path) -> PathBuf {
     cwd.join(".archon")
 }
 
-pub(crate) fn evidence_db_path_for_dir(cwd: &Path, overrides: &[&str]) -> PathBuf {
+/// Resolves a store path from `overrides` (most specific first), then the shared
+/// evidence key, then the project default under `cwd`.
+///
+/// `lookup` supplies each key's value. Production callers pass the process
+/// environment; taking it as an argument lets the precedence rule be exercised
+/// with explicit inputs instead of by mutating process-global state, which in a
+/// binary whose tests share one process is a data race (#166).
+pub(crate) fn evidence_db_path_with(
+    cwd: &Path,
+    overrides: &[&str],
+    lookup: impl Fn(&str) -> Option<OsString>,
+) -> PathBuf {
     overrides
         .iter()
         .copied()
         .chain(std::iter::once(EVIDENCE_DB_ENV))
-        .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
+        .find_map(|key| lookup(key).filter(|value| !value.is_empty()))
         .map(PathBuf::from)
         .unwrap_or_else(|| project_archon_dir_for(cwd).join("archon-data.db"))
+}
+
+pub(crate) fn evidence_db_path_for_dir(cwd: &Path, overrides: &[&str]) -> PathBuf {
+    // Closure rather than `std::env::var_os` directly: the generic function item is not
+    // higher-ranked over the key lifetime, so it does not satisfy `Fn(&str)`.
+    evidence_db_path_with(cwd, overrides, |key: &str| std::env::var_os(key))
 }
 
 pub(crate) fn evidence_db_path(overrides: &[&str]) -> PathBuf {

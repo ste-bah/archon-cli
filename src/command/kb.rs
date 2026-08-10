@@ -10,11 +10,7 @@ use crate::cli_args::KbAction;
 use crate::command::kb_ingest_output::{print_directory_result, print_file_result};
 
 fn kb_db_path() -> PathBuf {
-    crate::command::store_paths::evidence_db_path(&["ARCHON_KB_DB_PATH"])
-}
-
-fn open_db() -> Result<Arc<DbInstance>> {
-    open_db_at(&kb_db_path())
+    crate::command::store_paths::evidence_db_path(crate::command::store_paths::KB_DB_ENV_KEYS)
 }
 
 fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
@@ -23,8 +19,19 @@ fn open_db_at(path: &Path) -> Result<Arc<DbInstance>> {
     Ok(db)
 }
 
+/// CLI entry point: resolves the store path from the environment once, here at the
+/// command boundary, then runs the action against it.
 pub async fn handle_kb_command(action: KbAction) -> Result<()> {
-    let db = open_db()?;
+    handle_kb_command_at(&kb_db_path(), action).await
+}
+
+/// `handle_kb_command` with the store supplied explicitly.
+///
+/// Tests use this instead of publishing a temporary path through `ARCHON_KB_DB_PATH`:
+/// every test in the `archon` bin target shares one process and they run concurrently,
+/// so mutating that variable raced the rest of the suite (#166).
+pub(crate) async fn handle_kb_command_at(db_path: &Path, action: KbAction) -> Result<()> {
+    let db = open_db_at(db_path)?;
     let engine = archon_knowledge::KnowledgeEngine::from_shared(Arc::clone(&db))?;
     let policy = load_policy();
 

@@ -85,14 +85,8 @@ async fn kb_stats_default_subcommand_works() {
 async fn run_kb_with_temp_store(action: cli_args::KbAction) -> Result<()> {
     let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("kb.db");
-    // Tests run with --test-threads=1 in this workstream, so mutating this
-    // process environment cannot race another KB test.
-    unsafe {
-        std::env::set_var("ARCHON_KB_DB_PATH", &db_path);
-    }
-    let result = crate::command::kb::handle_kb_command(action).await;
-    unsafe {
-        std::env::remove_var("ARCHON_KB_DB_PATH");
-    }
-    result
+    // The temporary store is passed as an argument. This used to go through
+    // `ARCHON_KB_DB_PATH` under a comment claiming `--test-threads=1`; nothing pins
+    // the thread count, and these tests share a process with the whole bin target (#166).
+    crate::command::kb::handle_kb_command_at(&db_path, action).await
 }
