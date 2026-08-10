@@ -5,6 +5,12 @@
 
 use super::*;
 
+// The wave-silence invariant and its cover — a pure predicate over the wave
+// result, so it lives beside the wave rather than in the shared outcome
+// helpers it deliberately does not change.
+#[path = "implementation_wave_gate.rs"]
+mod wave_gate;
+
 impl LifecycleDriver {
     pub(crate) async fn run_implementation_wave(
         &self,
@@ -29,6 +35,31 @@ impl LifecycleDriver {
             "readyImplementationItems": ready_implementation_items,
             "result": wave,
         }));
+
+        // Before anything is credited: a wave that left no trace did not
+        // implement anything, and crediting it — or remediating it as though it
+        // had partly worked — is how #163's run reached remediation with an
+        // empty worktree and an unchanged repository. A wave of declared
+        // no-ops passes here; a wave of silence does not.
+        if wave_gate::wave_left_no_trace(&wave) {
+            return self
+                .final_report(
+                    &format!("blocked-silent-implementation-wave-{wave_index}"),
+                    None,
+                    "blocked",
+                    serde_json::json!({
+                        "taskUniverse": self.task_universe,
+                        "readyImplementationItems": ready_implementation_items,
+                        "wave": wave,
+                        "implementationEvidence": evidence.implementation,
+                        "repair_attempts": evidence.repair_attempts,
+                    }),
+                    prompts::BLOCKED_SILENT_IMPLEMENTATION_WAVE_TASK,
+                )
+                .await
+                .map(|()| wave.clone());
+        }
+
         implementation_candidate_ids.extend(support::matching_accepted_ids(
             &contract,
             ready_implementation_items,
