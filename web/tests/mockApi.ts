@@ -40,7 +40,23 @@ const liveStreamFrame = {
   compacted: false,
 };
 
-export async function mockApi(page: Page) {
+export interface MockApiOptions {
+  /**
+   * Frame served on `/api/live/stream`.
+   *
+   * The snapshot hands the client `nextCursor: 8`, so an event at cursor 8 or
+   * above is one that arrived while this client was listening — which is what
+   * makes it drive a refetch rather than count as backlog.
+   */
+  liveStreamFrame?: {
+    events: Array<{ cursor: number; eventType: string; summary: string; createdAtMs: number }>;
+    nextCursor: number;
+    compacted: boolean;
+  };
+}
+
+export async function mockApi(page: Page, options: MockApiOptions = {}) {
+  const streamFrame = options.liveStreamFrame ?? liveStreamFrame;
   const chatMessages: Array<Record<string, unknown>> = [];
   const responses: Record<string, unknown> = {
     "/api/status": {
@@ -438,7 +454,7 @@ export async function mockApi(page: Page) {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `event: live-snapshot\ndata: ${JSON.stringify(liveStreamFrame)}\n\n`,
+        body: `event: live-snapshot\ndata: ${JSON.stringify(streamFrame)}\n\n`,
       });
       return;
     }

@@ -176,6 +176,62 @@ test("memory, world, corpus, and settings buttons perform visible actions", asyn
   assertNoErrors();
 });
 
+test("a live event refetches the surfaces it maps to, and only those", async ({ page }) => {
+  // Cursor 8 is at the snapshot's `nextCursor`, so the client treats it as an
+  // event that arrived while it was watching rather than as backlog.
+  await mockApi(page, {
+    liveStreamFrame: {
+      events: [
+        {
+          cursor: 8,
+          eventType: "web.chat.completed",
+          summary: "web chat turn msg-1 completed",
+          createdAtMs: 2,
+        },
+      ],
+      nextCursor: 9,
+      compacted: false,
+    },
+  });
+  // `/api/cognitive/summary` is deliberately absent: this mock does not serve
+  // it, and the client's `retry: 1` would inflate its count on its own. The
+  // other two surfaces a completed chat turn maps to are enough to prove the
+  // wiring, and the mapping itself is covered in `liveQueryInvalidation.test`.
+  const requests = countApiRequests(page, [
+    "/api/metrics/summary",
+    "/api/learning/summary",
+    "/api/pipelines/summary",
+    "/api/world/summary",
+  ]);
+
+  await page.goto("./#/metrics");
+  await expect(page.getByRole("heading", { name: "Performance metrics" })).toBeVisible();
+  await expect.poll(() => requests["/api/metrics/summary"]).toBe(1);
+
+  // A completed chat turn writes the metrics and learning stores, so both
+  // refetch off the event with no timer involved.
+  await expect
+    .poll(() => requests["/api/metrics/summary"], { timeout: 10_000 })
+    .toBeGreaterThan(1);
+  await expect.poll(() => requests["/api/learning/summary"]).toBeGreaterThan(1);
+
+  // Pipelines and world are written by other processes the event says nothing
+  // about. They must stay at their single page-load fetch.
+  expect(requests["/api/pipelines/summary"]).toBe(1);
+  expect(requests["/api/world/summary"]).toBe(1);
+});
+
+function countApiRequests(page: Page, paths: string[]) {
+  const counts: Record<string, number> = Object.fromEntries(paths.map((path) => [path, 0]));
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname in counts) {
+      counts[pathname] = (counts[pathname] ?? 0) + 1;
+    }
+  });
+  return counts;
+}
+
 function watchBrowserErrors(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
