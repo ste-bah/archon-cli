@@ -12,6 +12,8 @@ fn report() -> archon_memory::garden::GardenReport {
         duration_ms: 5,
         review_pairs: Vec::new(),
         semantic_pass_unavailable: false,
+        budget_exhausted: false,
+        retirement_candidates: Vec::new(),
     }
 }
 

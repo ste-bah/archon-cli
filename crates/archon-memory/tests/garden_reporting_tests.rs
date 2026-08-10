@@ -32,6 +32,10 @@ fn make_config() -> GardenConfig {
         importance_decay_per_day: 0.01,
         max_memories: 5000,
         briefing_limit: 15,
+        // These tests exercise the interactive pass, which is unscheduled and
+        // unbounded. Spread from the defaults so the shipped off-by-default
+        // scheduler state is what they run against.
+        ..GardenConfig::default()
     }
 }
 
@@ -264,6 +268,8 @@ fn garden_report_format() {
         duration_ms: 342,
         review_pairs: Vec::new(),
         semantic_pass_unavailable: false,
+        budget_exhausted: false,
+        retirement_candidates: Vec::new(),
     };
     let formatted = report.format();
     assert!(

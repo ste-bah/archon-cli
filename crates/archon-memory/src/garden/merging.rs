@@ -10,6 +10,7 @@ use std::collections::HashSet;
 
 use tracing::warn;
 
+use super::super::budget::BudgetLedger;
 use super::super::{PRUNEABLE_TYPES, get_memories_by_type};
 use crate::access::MemoryTrait;
 use crate::types::{MemoryError, RelType, SUPERSEDED_TAG};
@@ -126,6 +127,7 @@ pub(crate) fn phase_semantic_dedup(
     merge_distance: f64,
     review_distance: f64,
     merge_budget: usize,
+    ledger: &mut BudgetLedger,
 ) -> Result<(Option<usize>, Vec<crate::garden::ReviewPair>), MemoryError> {
     let mut merged = 0usize;
     let mut review: Vec<crate::garden::ReviewPair> = Vec::new();
@@ -201,6 +203,16 @@ pub(crate) fn phase_semantic_dedup(
                 if superseded_ids.contains(&survivor.id) {
                     continue;
                 }
+                // Claimed before the merge starts, never part-way through it.
+                // `merge_duplicate` is three writes -- the survivor's tags, the
+                // `Supersedes` edge, the victim's marker -- and a stop between
+                // them is the one partial state this pass can leave that the
+                // next run does not simply redo. Refusal returns what has
+                // already been merged, plus the review band found so far, which
+                // costs nothing because it writes nothing.
+                if !ledger.take_reversible() {
+                    return Ok((Some(merged), review));
+                }
                 if merge_duplicate(graph, survivor, victim) {
                     superseded_ids.insert(victim.id.clone());
                     merged += 1;
@@ -251,6 +263,7 @@ pub(crate) fn apply_adjudicated_merges(
 pub(crate) fn phase_dedup(
     graph: &dyn MemoryTrait,
     similarity_threshold: f32,
+    ledger: &mut BudgetLedger,
 ) -> Result<usize, MemoryError> {
     let mut merged = 0;
     let mut deleted_ids: HashSet<String> = HashSet::new();
@@ -279,6 +292,11 @@ pub(crate) fn phase_dedup(
                     continue;
                 }
                 let (survivor, victim) = pick_survivor(&memories[i], &memories[j]);
+                // See `phase_semantic_dedup`: claimed at the unit boundary so a
+                // refusal never lands inside a merge.
+                if !ledger.take_reversible() {
+                    return Ok(merged);
+                }
                 if merge_duplicate(graph, survivor, victim) {
                     deleted_ids.insert(victim.id.clone());
                     merged += 1;
@@ -289,7 +307,10 @@ pub(crate) fn phase_dedup(
     Ok(merged)
 }
 
-pub(crate) fn phase_fragment_merge(graph: &dyn MemoryTrait) -> Result<usize, MemoryError> {
+pub(crate) fn phase_fragment_merge(
+    graph: &dyn MemoryTrait,
+    ledger: &mut BudgetLedger,
+) -> Result<usize, MemoryError> {
     let mut merged = 0;
     let mut deleted_ids: HashSet<String> = HashSet::new();
     for mt in &PRUNEABLE_TYPES {
@@ -337,6 +358,12 @@ pub(crate) fn phase_fragment_merge(graph: &dyn MemoryTrait) -> Result<usize, Mem
                 } else {
                     (rel, mem)
                 };
+                // Claimed before the concatenation, which is the destructive
+                // half: it rewrites the survivor's content. A refusal here
+                // leaves both rows exactly as they were.
+                if !ledger.take_reversible() {
+                    return Ok(merged);
+                }
                 let combined = format!("{} | {}", survivor.content, victim.content);
                 let merged_tags = merge_tags(survivor, victim);
                 if let Err(e) =

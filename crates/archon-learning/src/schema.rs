@@ -32,6 +32,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_profile_versions(db)?;
     ensure_agent_shadow_evaluations(db)?;
     ensure_memory_promotion_candidates(db)?;
+    ensure_memory_retirement_proposals(db)?;
     ensure_permission_runtime_events(db)?;
     ensure_provider_auth_profiles(db)?;
     ensure_provider_rate_limit_windows(db)?;
@@ -294,6 +295,29 @@ fn ensure_memory_promotion_candidates(db: &DbInstance) -> Result<()> {
             evidence_quality: Float default 0.0,
             evidence_ids_json: String default "[]",
             proposal_required: Bool default true,
+            created_at: String,
+        }"#,
+    )
+}
+
+/// Memories a background consolidation pass proposed retiring, and did not.
+///
+/// `status` defaults to `Pending` at the storage layer as well as in code: a row
+/// that somehow arrives without one must read as undecided, never as consent.
+fn ensure_memory_retirement_proposals(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create memory_retirement_proposals {
+            proposal_id: String =>
+            memory_id: String,
+            memory_title: String default "",
+            excerpt: String default "",
+            memory_type: String default "fact",
+            importance: Float default 0.0,
+            reason_kind: String,
+            reason_detail: String default "",
+            run_id: String default "",
+            status: String default "Pending",
             created_at: String,
         }"#,
     )

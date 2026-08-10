@@ -13,11 +13,24 @@ use crate::access::MemoryTrait;
 use crate::types::{Memory, MemoryError, MemoryType, SearchFilter};
 
 mod adjudication;
+mod budget;
 mod phases;
 mod reporting;
+mod retirement;
+mod run_lock;
+mod scheduling;
 
 pub use adjudication::{Adjudication, ReviewPair, apply_adjudicated_merges};
+pub use budget::{BudgetLedger, GardenBudget};
 pub use reporting::{format_garden_stats, generate_briefing};
+pub use retirement::{PrunePolicy, RetirementCandidate, RetirementReason};
+pub use run_lock::{
+    GARDEN_RUN_LOCK_FILE, RunLockOutcome, log_declined, log_unavailable, run_lock_path,
+    with_run_lock,
+};
+pub use scheduling::{
+    GardenRunPolicy, ScheduledRun, run_scheduled_consolidation, should_run_scheduled,
+};
 
 use phases::{
     DEDUP_MERGE_BUDGET, phase_dedup, phase_fragment_merge, phase_importance_decay,
@@ -127,6 +140,85 @@ pub struct GardenConfig {
     pub importance_decay_per_day: f64,
     pub max_memories: usize,
     pub briefing_limit: usize,
+    /// Run consolidation on a timer, without anyone asking for it.
+    ///
+    /// OFF by default, and this is the knob that most needs to stay off. Every
+    /// other automatic path in the garden is attached to something a person did
+    /// -- they launched Archon, or typed `/garden` -- and its results land where
+    /// they are looking. A timer detaches consolidation from any of that: it
+    /// decays and merges a user's stored memories at an hour they did not
+    /// choose, and reports to a log.
+    ///
+    /// A scheduled pass is deliberately weaker than the manual one. It cannot
+    /// delete a memory at all -- pruning becomes a [`RetirementCandidate`] for
+    /// review -- and it stops at a fixed work and time ceiling. It is a
+    /// maintenance pass, not an autonomous curator.
+    ///
+    /// `#[serde(default)]` rather than a named function: a config file written
+    /// before this field existed must read as "off", and `false` is what `bool`
+    /// already gives.
+    #[serde(default)]
+    pub scheduled_consolidation: bool,
+    /// Hours between scheduled passes. Ignored when the above is false.
+    #[serde(default = "default_scheduled_interval_hours")]
+    pub scheduled_interval_hours: u32,
+    /// Most reversible mutations one scheduled pass may make.
+    ///
+    /// Decays plus merges, counted together, because what is being bounded is
+    /// round trips to the store and the store cannot tell them apart. Every
+    /// Archon process after the first reaches memory over TCP, so these are
+    /// sockets rather than function calls.
+    #[serde(default = "default_scheduled_max_reversible_ops")]
+    pub scheduled_max_reversible_ops: usize,
+    /// Most retirement candidates one scheduled pass may propose for review.
+    #[serde(default = "default_scheduled_max_retirement_candidates")]
+    pub scheduled_max_retirement_candidates: usize,
+    /// Wall-clock ceiling on one scheduled pass, in seconds.
+    ///
+    /// Nothing is cancelled when it expires; the pass stops taking on new work
+    /// at the next unit boundary, which is the only kind of stopping that leaves
+    /// the store consistent.
+    #[serde(default = "default_scheduled_max_seconds")]
+    pub scheduled_max_seconds: u64,
+}
+
+/// Once a day, matching `min_hours_between_runs`.
+///
+/// Consolidation is maintenance, not a reaction to anything. Running it more
+/// often spends round trips to reach the same fixed point sooner, and running it
+/// less lets the review band and the decay bill accumulate.
+fn default_scheduled_interval_hours() -> u32 {
+    24
+}
+
+/// Enough to finish an ordinary store, small enough to be survivable.
+///
+/// Sized against the phases' own caps: dedup already stops at
+/// `DEDUP_MERGE_BUDGET` (50) and fragment merge at 20, so a pass that merges
+/// everything it is allowed to still leaves most of this for decay, which is one
+/// write per memory that has aged a day. A store of a few hundred rows finishes
+/// inside it; a store far larger stops early and says so, rather than spending
+/// an unbounded night on it.
+fn default_scheduled_max_reversible_ops() -> usize {
+    500
+}
+
+/// A review pile a person could actually work through.
+///
+/// Refusing to propose past this costs nothing: the memories are untouched
+/// either way, and the next pass re-derives the same candidates from the same
+/// store.
+fn default_scheduled_max_retirement_candidates() -> usize {
+    100
+}
+
+/// Five minutes.
+///
+/// Long enough for a large store over TCP, short enough that a pathological run
+/// -- a store that grew unexpectedly, a slow socket -- is bounded rather than
+/// left going.
+fn default_scheduled_max_seconds() -> u64 {
+    300
 }
 
 impl Default for GardenConfig {
@@ -144,6 +236,11 @@ impl Default for GardenConfig {
             importance_decay_per_day: 0.01,
             max_memories: 5000,
             briefing_limit: 15,
+            scheduled_consolidation: false,
+            scheduled_interval_hours: default_scheduled_interval_hours(),
+            scheduled_max_reversible_ops: default_scheduled_max_reversible_ops(),
+            scheduled_max_retirement_candidates: default_scheduled_max_retirement_candidates(),
+            scheduled_max_seconds: default_scheduled_max_seconds(),
         }
     }
 }
@@ -177,6 +274,24 @@ pub struct GardenReport {
     /// the same claim they were already making.
     #[serde(default)]
     pub semantic_pass_unavailable: bool,
+    /// The pass stopped at its work or time ceiling with candidates left.
+    ///
+    /// Distinct from having finished, and the distinction matters: a store that
+    /// exhausts its budget on every pass never reaches a fixed point, and the
+    /// counts alone cannot say so -- "10 merged" reads identically whether ten
+    /// was all there was or the first ten of four hundred.
+    ///
+    /// Always `false` for the interactive paths, which run unbounded.
+    #[serde(default)]
+    pub budget_exhausted: bool,
+    /// Memories this pass declined to delete, offered for review.
+    ///
+    /// Empty for a pass running under [`PrunePolicy::Delete`], which prunes
+    /// directly and reports the count in `stale_pruned` / `overflow_pruned`.
+    /// Populated instead of those counts for a scheduled pass, which never
+    /// deletes. The memories named here are still live and untouched.
+    #[serde(default)]
+    pub retirement_candidates: Vec<RetirementCandidate>,
 }
 
 // ── public API ───────────────────────────────────────────────
@@ -190,10 +305,29 @@ pub fn consolidate(
 }
 
 /// Run or retry one logical consolidation pass using stable mutation provenance.
+///
+/// Unbounded, and permitted to delete: this is the path a person started and is
+/// watching, and it behaves exactly as it always has.
 pub fn consolidate_with_run_id(
     graph: &dyn MemoryTrait,
     config: &GardenConfig,
     run_id: &str,
+) -> Result<GardenReport, MemoryError> {
+    consolidate_with_policy(graph, config, run_id, GardenRunPolicy::interactive())
+}
+
+/// Run one consolidation pass under an explicit work ceiling and prune policy.
+///
+/// The policy is a parameter rather than a mode flag because the two callers
+/// want genuinely different behaviour, not the same behaviour with a switch:
+/// `/garden` deletes what it decides to delete, and a scheduled pass may not
+/// delete at all. Making that explicit at the call site means a reader of either
+/// one can see which they are looking at.
+pub fn consolidate_with_policy(
+    graph: &dyn MemoryTrait,
+    config: &GardenConfig,
+    run_id: &str,
+    policy: GardenRunPolicy,
 ) -> Result<GardenReport, MemoryError> {
     if run_id.is_empty() {
         return Err(MemoryError::Database(
@@ -201,23 +335,38 @@ pub fn consolidate_with_run_id(
         ));
     }
     let start = Instant::now();
+    let mut ledger = BudgetLedger::new(policy.budget);
+    let mut retirement_candidates: Vec<RetirementCandidate> = Vec::new();
     let total_before = graph.memory_count()?;
 
     // Read BEFORE `phase_record_timestamp` overwrites it at the end of this run.
     let previous_run = read_last_run(graph)?;
 
-    let importance_decayed =
-        phase_importance_decay(graph, config.importance_decay_per_day, run_id, previous_run)?;
+    let importance_decayed = phase_importance_decay(
+        graph,
+        config.importance_decay_per_day,
+        run_id,
+        previous_run,
+        &mut ledger,
+    )?;
     info!(importance_decayed, "phase 1: importance decay complete");
 
-    let stale_pruned = phase_staleness_prune(
+    let stale = phase_staleness_prune(
         graph,
         config.staleness_days,
         config.staleness_importance_floor,
+        policy.prune,
+        &mut ledger,
     )?;
-    info!(stale_pruned, "phase 2: staleness prune complete");
+    let stale_pruned = stale.pruned;
+    retirement_candidates.extend(stale.candidates);
+    info!(
+        stale_pruned,
+        proposed = retirement_candidates.len(),
+        "phase 2: staleness prune complete"
+    );
 
-    let lexical_merged = phase_dedup(graph, config.dedup_similarity_threshold)?;
+    let lexical_merged = phase_dedup(graph, config.dedup_similarity_threshold, &mut ledger)?;
     // Semantic pass second, and with the remaining budget: the lexical pass is
     // free and exact, so let it take the easy cases before spending vector
     // lookups. A store with no vector search reports `None` here, and the
@@ -227,6 +376,7 @@ pub fn consolidate_with_run_id(
         config.semantic_dedup_max_distance,
         config.semantic_review_max_distance,
         DEDUP_MERGE_BUDGET.saturating_sub(lexical_merged),
+        &mut ledger,
     )?;
     let semantic_pass_unavailable = semantic_merged.is_none();
     let duplicates_merged = lexical_merged + semantic_merged.unwrap_or(0);
@@ -241,12 +391,17 @@ pub fn consolidate_with_run_id(
         "phase 3: deduplication complete"
     );
 
-    let fragments_merged = phase_fragment_merge(graph)?;
+    let fragments_merged = phase_fragment_merge(graph, &mut ledger)?;
     info!(fragments_merged, "phase 4: fragment merge complete");
 
-    let overflow_pruned = phase_overflow_prune(graph, config.max_memories)?;
+    let overflow = phase_overflow_prune(graph, config.max_memories, policy.prune, &mut ledger)?;
+    let overflow_pruned = overflow.pruned;
+    retirement_candidates.extend(overflow.candidates);
     info!(overflow_pruned, "phase 5: overflow prune complete");
 
+    // Recorded even when the budget stopped this pass short. The timestamp's
+    // only reader is the decay bill, and skipping it would make the next pass
+    // charge this pass's span a second time -- see `phase_record_timestamp`.
     phase_record_timestamp(graph)?;
     info!("phase 6: timestamp recorded");
 
@@ -264,7 +419,21 @@ pub fn consolidate_with_run_id(
         duration_ms,
         review_pairs,
         semantic_pass_unavailable,
+        budget_exhausted: ledger.exhausted(),
+        retirement_candidates,
     };
+    if report.budget_exhausted {
+        // WARN, not info. One exhausted pass is unremarkable; every pass
+        // exhausting means the store never reaches a fixed point, and the counts
+        // in the report cannot distinguish the two.
+        warn!(
+            reversible_ops = ledger.spent_reversible(),
+            deletions = ledger.spent_deletions(),
+            proposals = ledger.spent_proposals(),
+            duration_ms,
+            "garden: consolidation stopped at its work budget with candidates remaining"
+        );
+    }
     info!(?report, semantic_pass_unavailable, "consolidation complete");
     Ok(report)
 }

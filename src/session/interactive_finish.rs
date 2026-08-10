@@ -296,6 +296,25 @@ pub(super) async fn finish(
             Ok(false) => tracing::debug!("garden: skipping — last run too recent"),
             Err(e) => tracing::warn!("garden: failed to check last run: {e}"),
         }
+        // Unattended consolidation, if it has been switched on. OFF by default,
+        // so this returns `None` and costs nothing on every ordinary launch.
+        //
+        // Started here rather than folded into the block above because it is not
+        // part of the startup pass: it is a timer that outlives this function,
+        // and what it eventually runs is a deliberately weaker pass than the one
+        // that just ran -- bounded, single-run-locked, and unable to delete a
+        // memory at all. Dropping the handle detaches the task.
+        let (data_dir, _) =
+            archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
+        let _garden_scheduler = super::garden_scheduler::spawn_garden_scheduler(
+            super::garden_scheduler::GardenSchedulerSpec {
+                garden: config.memory.garden.clone(),
+                memory: Arc::clone(&memory),
+                data_dir,
+                learning_db: governed_learning_db.clone(),
+            },
+        );
+
         match archon_memory::garden::generate_briefing(
             memory.as_ref(),
             config.memory.garden.briefing_limit,

@@ -23,6 +23,7 @@ mod cognitive_daemon_startup;
 mod cognitive_store;
 mod config_watcher;
 mod event_forwarder;
+mod garden_scheduler;
 mod gnn_auto_trainer_seed;
 mod interactive_agent;
 mod interactive_bootstrap;
