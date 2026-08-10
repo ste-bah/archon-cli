@@ -16,6 +16,15 @@ use crate::tasks::models::{
 use crate::tasks::queue::TaskQueue;
 use crate::tasks::store::TaskStateStore;
 
+/// Cadence at which a running task's resource usage is sampled, when the
+/// caller does not override it via [`TaskExecutor::with_sample_interval`].
+///
+/// A task that finishes before the first tick records no usage at all, so the
+/// interval is part of the executor's observable contract rather than an
+/// implementation detail — hence it is resolved at construction and carried on
+/// the executor, not read from a constant buried inside the sampler loop.
+pub const DEFAULT_RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_millis(500);
+
 /// Handle used to cancel a running task. Holds the cancellation token
 /// and the JoinHandle for the spawned task so it can be aborted after
 /// a grace period.
@@ -49,6 +58,7 @@ pub struct TaskExecutor {
     tasks: Arc<DashMap<TaskId, Task>>,
     metrics: Arc<MetricsRegistry>,
     poll_interval: Duration,
+    sample_interval: Duration,
     shutdown: CancellationToken,
     cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
 }
@@ -75,6 +85,7 @@ impl TaskExecutor {
             tasks,
             metrics,
             poll_interval,
+            sample_interval: DEFAULT_RESOURCE_SAMPLE_INTERVAL,
             shutdown,
             cancel_handles: Arc::new(DashMap::new()),
         }
@@ -104,9 +115,21 @@ impl TaskExecutor {
             tasks,
             metrics,
             poll_interval,
+            sample_interval: DEFAULT_RESOURCE_SAMPLE_INTERVAL,
             shutdown,
             cancel_handles,
         }
+    }
+
+    /// Override the resource-sampling cadence, which otherwise defaults to
+    /// [`DEFAULT_RESOURCE_SAMPLE_INTERVAL`].
+    ///
+    /// Sampling is driven by `tokio::time`, so a caller running on a paused
+    /// clock controls exactly how many ticks land inside a task's lifetime.
+    #[must_use]
+    pub fn with_sample_interval(mut self, sample_interval: Duration) -> Self {
+        self.sample_interval = sample_interval;
+        self
     }
 
     /// Access the shared cancel handles map.
@@ -152,6 +175,7 @@ impl TaskExecutor {
                     let metrics = self.metrics.clone();
                     let agent_name = agent.clone();
                     let cancel_handles = self.cancel_handles.clone();
+                    let sample_interval = self.sample_interval;
 
                     let handle = tokio::spawn(async move {
                         Self::run_task(
@@ -166,6 +190,7 @@ impl TaskExecutor {
                             tasks,
                             metrics,
                             cancel_handles,
+                            sample_interval,
                         )
                         .await;
                     });
@@ -200,6 +225,7 @@ impl TaskExecutor {
         tasks: Arc<DashMap<TaskId, Task>>,
         metrics: Arc<MetricsRegistry>,
         cancel_handles: Arc<DashMap<TaskId, Arc<CancelHandle>>>,
+        sample_interval: Duration,
     ) {
         // Helper to get next seq for this task.
         let next_seq = |counters: &DashMap<TaskId, AtomicU64>| -> u64 {
@@ -252,7 +278,7 @@ impl TaskExecutor {
             let mut sys = sysinfo::System::new();
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                    _ = tokio::time::sleep(sample_interval) => {}
                     _ = sampler_cancel.cancelled() => { break; }
                 }
                 sys.refresh_cpu_usage();

@@ -361,17 +361,37 @@ async fn test_executor_persists_terminal_state() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// The executor samples a task's resource usage while that task runs.
+///
+/// Driven on a paused clock (#169). The previous form slept a flat 1500ms of
+/// wall clock and required the 500ms sampler to be scheduled inside the mock
+/// agent's 600ms window — a 100ms margin, i.e. a sampling *rate* no machine is
+/// obliged to deliver. Under CPU contention the sampler thread was descheduled,
+/// the task finished and cancelled the sampler before its first tick, and
+/// `resource_usage` stayed `None`.
+///
+/// `start_paused` removes the wall clock entirely: virtual time only advances
+/// when the runtime has no work left to do, and then only as far as the nearest
+/// timer deadline. The sampler's tick at `SAMPLE_INTERVAL` and the agent's
+/// completion at `AGENT_DELAY` are both registered before either can fire, so
+/// the earlier deadline wins by construction on any machine at any load.
+#[tokio::test(start_paused = true)]
 async fn test_executor_samples_resource_usage() {
+    /// Strictly less than `AGENT_DELAY`, so exactly one tick lands inside the
+    /// task's lifetime. Injected rather than inherited from
+    /// `DEFAULT_RESOURCE_SAMPLE_INTERVAL` so the relationship this test depends
+    /// on is stated here instead of split across two files.
+    const SAMPLE_INTERVAL: Duration = Duration::from_millis(500);
+    const AGENT_DELAY: Duration = Duration::from_millis(600);
+
     let config = QueueConfig {
         max_concurrent: 10,
         queue_capacity: 100,
         burst_capacity: 0,
         burst_threshold: Duration::from_secs(30),
     };
-    // Single task with 600ms delay so the resource sampler (500ms interval) fires at least once.
     let (harness, task_ids) = setup_harness(config, "test-agent", 1).await;
-    let mock = Arc::new(MockAgentExecutor::new(Duration::from_millis(600)));
+    let mock = Arc::new(MockAgentExecutor::new(AGENT_DELAY));
 
     let task_id = task_ids[0];
 
@@ -386,18 +406,37 @@ async fn test_executor_samples_resource_usage() {
         harness.metrics.clone(),
         Duration::from_millis(10),
         shutdown.clone(),
-    );
+    )
+    .with_sample_interval(SAMPLE_INTERVAL);
 
     let handle = tokio::spawn(async move {
         executor.run(vec!["test-agent".to_string()]).await;
     });
 
-    // Wait for task to complete (600ms agent delay + sampler overhead).
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Wait on the task reaching its terminal state rather than on a duration.
+    // The executor persists that state only after awaiting the sampler's join
+    // handle, so `Finished` is itself the evidence that sampling both started
+    // and stopped. The timeout is virtual: it fires on logical non-progress,
+    // never on a slow machine.
+    let settled = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(snapshot) = harness.store.get_snapshot(task_id)
+                && snapshot.state == TaskState::Finished
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        settled.is_ok(),
+        "task never reached Finished; the sampler may not have stopped"
+    );
+
     shutdown.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
-    // Check that resource_usage was populated.
     let task = harness
         .tasks
         .get(&task_id)
@@ -405,7 +444,7 @@ async fn test_executor_samples_resource_usage() {
     let usage = task
         .resource_usage
         .as_ref()
-        .expect("resource_usage should be Some");
+        .expect("sampler tick at 500ms precedes agent completion at 600ms on the driven clock");
     assert!(
         usage.rss_bytes > 0,
         "expected rss_bytes > 0, got {}",

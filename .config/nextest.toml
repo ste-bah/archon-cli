@@ -107,11 +107,14 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # The cost is ~85s against ~70s, a fifth of the wall clock on this subset, and
 # only on a machine wide enough for the cap to bite.
 #
-# One failure seen in those runs is NOT fixed here and is deliberately not in the
-# group: `archon-core::task_executor::test_executor_samples_resource_usage`
-# sleeps a flat 1500ms waiting for an in-process 500ms sampler. It spawns
-# nothing, so this cap is the wrong instrument; it happened to stop failing only
-# because the machine got quieter. It needs its own fix.
+# One failure seen in those runs is deliberately not in the group:
+# `archon-core::task_executor::test_executor_samples_resource_usage` slept a flat
+# 1500ms waiting for an in-process 500ms sampler. It spawns nothing, so this cap
+# was the wrong instrument; it would have stopped failing only because the
+# machine got quieter. It got its own fix instead (#169) — the test now runs on a
+# paused tokio clock and consults no wall clock at all, so it cannot be made to
+# fail by load. Do not add it here: membership would re-couple a test with no
+# process and no wall-clock dependency to a cap that exists for both.
 #
 # GOTCHA: profile overrides do not inherit. CI runs `cargo nextest run
 # --workspace --no-fail-fast` with no `--profile` and no `NEXTEST_PROFILE`
