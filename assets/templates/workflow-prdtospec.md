@@ -153,7 +153,7 @@ see §6.
 | `blocks` | See §4. |
 | `implements` | See §3. |
 | `required_env_keys` | Environment variable names. Unioned with `.archon/project.json`. |
-| `required_tools` | Tool names. Unioned with the project manifest's `required_tools` and every `tool_bundles` entry. |
+| `required_tools` | Tool names, scoped to this task alone — nothing is merged in from the project manifest. Every name here must be *invoked* during the run: an accepted result must show a real invocation of each, and a task that declares any tool may not report a no-op. Declare what this task actually runs, nothing more. |
 | `deliverable_contracts` | See §5. |
 
 ## 3. `implements:` — the requirement claim

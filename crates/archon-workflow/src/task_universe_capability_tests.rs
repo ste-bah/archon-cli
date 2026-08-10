@@ -105,7 +105,9 @@ deliverable_contracts:
     );
     assert_eq!(
         task.required_tools,
-        vec!["fetch_demo".to_string(), "project_probe".to_string()]
+        vec!["fetch_demo".to_string()],
+        "the manifest's tools must not reach a task: a declared tool must be \
+         exercised, so hoisting one obliges every task to invoke it"
     );
     assert_eq!(task.deliverable_contracts.len(), 1);
     let contract = &task.deliverable_contracts[0];
@@ -131,5 +133,61 @@ deliverable_contracts:
     assert_eq!(
         contract.validation_failed_values,
         vec!["failed".to_string()]
+    );
+}
+
+/// #163 failure 3. A task that declares no tools must be handed none.
+///
+/// `required_tools` carries an invocation obligation: an accepted branch must
+/// show a real invocation of every declared tool, and a task with any tool
+/// declared may not declare a no-op. `sync-capabilities` used to hoist the
+/// ambient toolchain into the manifest and this merge unioned it onto every
+/// task, so a task with nothing to run under `python3` still had to run it —
+/// accepted was unreachable and noop was forbidden. Environment keys, which are
+/// proven rather than exercised, still merge: that half is the reason the
+/// manifest exists.
+#[test]
+fn a_task_declaring_no_tools_is_not_given_the_projects_tools() {
+    let project = tempfile::tempdir().expect("project");
+    let archon = project.path().join(".archon");
+    let tasks = project.path().join("tasks/PRD-DEMO");
+    fs::create_dir_all(&archon).expect("archon dir");
+    fs::create_dir_all(&tasks).expect("tasks dir");
+    fs::write(
+        archon.join("project.json"),
+        serde_json::json!({
+            "required_env_keys": ["PROJECT_TOKEN"],
+            "required_tools": ["archon", "bash", "cargo", "python3"],
+            "tool_bundles": { "lake": ["duckdb"] }
+        })
+        .to_string(),
+    )
+    .expect("project manifest");
+    fs::write(
+        tasks.join("TASK-DEMO-001-audit.md"),
+        "# Audit\n\n```yaml\ntask_id: TASK-DEMO-001\ntitle: Audit\n\
+         complexity: small\nstatus: ready\ndepends_on: []\nblocks: []\n\
+         implements: []\nrequired_env_keys: []\nrequired_tools: []\n\
+         deliverable_contracts: []\n```\n",
+    )
+    .expect("task");
+
+    let universe = extract_task_universe_for_generated_run(&format!(
+        "Implement the decomposed PRD task files at {}",
+        tasks.display()
+    ))
+    .expect("extract")
+    .expect("universe");
+    let task = &universe.tasks[0];
+
+    assert!(
+        task.required_tools.is_empty(),
+        "a task that declares no tools must owe no invocations; got {:?}",
+        task.required_tools
+    );
+    assert_eq!(
+        task.required_env_keys,
+        vec!["PROJECT_TOKEN".to_string()],
+        "environment keys are proven, not exercised, and still merge"
     );
 }

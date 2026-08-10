@@ -478,11 +478,12 @@ pub enum WorkflowAction {
     },
     /// Derive `.archon/project.json` from a decomposed task set
     ///
-    /// Unions the tools and environment keys the tasks declare — and the
-    /// runners their focused tests actually invoke — into the project
+    /// Unions the environment keys the tasks declare into the project
     /// capability manifest the runtime merges into every task. Only ever adds:
     /// a project accumulates PRDs, and replacing the manifest would strip what
-    /// an earlier decomposition put there.
+    /// an earlier decomposition put there. Tools are deliberately not carried
+    /// — a declared tool must be invoked for a branch to be accepted, so a
+    /// project-level tool obliges every task to run it.
     SyncCapabilities {
         /// Directory of decomposed-PRD TASK-*.md files to derive from
         #[arg(long, value_name = "DIR")]

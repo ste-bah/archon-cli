@@ -241,10 +241,14 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             `no PRD found beside {task_dir}/; skipped` because the PRD lives \
             under `prds/`. That is expected, not an error.\n\
          3. Run `archon workflow sync-capabilities --tasks {task_dir}/`. This \
-            unions the ambient toolchain and the environment keys this PRD \
-            needs into `.archon/project.json`, which the runtime merges into \
-            every task. It only ever adds, so it cannot strip what an earlier \
-            PRD's decomposition left there.\n\
+            unions the environment keys this PRD needs into \
+            `.archon/project.json`, which the runtime merges into every task. \
+            It only ever adds, so it cannot strip what an earlier PRD's \
+            decomposition left there. Tools are NOT carried there and never \
+            should be: every name in a task's `required_tools` must be \
+            actually invoked for that task's branch to be accepted, so a tool \
+            declared at project level obliges every task to run it. Declare a \
+            tool in the one task that invokes it.\n\
          4. Print the paths created plus: task count, requirements claimed \
             against requirements the PRD defines, any unclaimed requirement, \
             any cited ID the PRD does not define, and every focused-test entry \

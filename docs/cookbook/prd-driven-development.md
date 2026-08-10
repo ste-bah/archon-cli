@@ -322,11 +322,16 @@ What this task format requires that `prdtospec` does not:
   told the host it needs nothing and the host believes it. Nothing verified this
   for a long time and the result varied by run: of the task sets in the
   reference project, one 15-task set declared everything correctly, the next had
-  2 of 15 under-declaring, and an older 22-task set was wrong in all 22. See
-  [Project capabilities](#project-capabilities) for the manifest that carries
-  what every task needs, and run `archon workflow lint --tasks <dir>` — its
-  `## declared capabilities` section names any task whose commands use a runner
-  the task never declared.
+  2 of 15 under-declaring, and an older 22-task set was wrong in all 22. Run
+  `archon workflow lint --tasks <dir>` — its `## declared capabilities` section
+  names any task whose commands use a runner the task never declared. Fix it in
+  that task: `required_tools` is per-task by design and nothing widens it, for
+  the reason in [Project capabilities](#project-capabilities).
+
+  Over-declaring is not the safe direction either. Every name in
+  `required_tools` must be *invoked* for a branch to be accepted, and a task
+  that declares a tool may not report a no-op, so a tool the task has no work
+  for makes both outcomes unreachable.
 - **A `task_id` equal to the id in the filename.** A mismatch is refused naming
   both.
 - **`## Focused Tests` as runnable commands.** A bullet counts only when it
@@ -393,23 +398,33 @@ third by construction — but only if you spell the path with forward slashes.
 
 ### Project capabilities
 
-`.archon/project.json` declares what the **project** needs rather than what any
-one task needs, and the runtime unions it into every task before planning:
+`.archon/project.json` declares the **environment keys** the project needs
+rather than what any one task needs, and the runtime unions them into every task
+before planning:
 
 ```json
 {
   "schema_version": "archon.project.capabilities.v1",
-  "required_env_keys": ["POLYGON_API_KEY", "OPENBB_API_URL"],
-  "required_tools": ["cargo", "bash"],
-  "tool_bundles": {}
+  "required_env_keys": ["POLYGON_API_KEY", "OPENBB_API_URL"]
 }
 ```
 
-It is the right home for the ambient toolchain every task assumes and for the
-credentials a provider reads, because those are properties of the environment
-rather than of a task. Anything here is granted to every task, so keep
-task-specific tools — MCP tool names in particular — in the task that needs
-them; hoisting those defeats per-task scoping.
+It is the right home for the credentials a provider reads, because those are
+properties of the environment rather than of a task, and because an environment
+key is *proven*: the branch reports it checked, and a key nothing uses costs a
+proof-of-checking and never a failure.
+
+**Tools are not carried here, and a manifest's `required_tools` and
+`tool_bundles` are read by nothing.** A tool is *exercised*, not proven: an
+accepted result must show a real invocation of every tool the task declares, and
+a task that declares any tool may not report a no-op. Hoisting a tool to project
+level therefore imposes that obligation on every task. It did, once — the
+manifest carried `archon`, `bash`, `cargo`, `python3`, every task inherited all
+four, and every branch was trapped between an acceptance it could not earn and a
+no-op it was not allowed to declare. A clean 15-task run produced one file. Keep
+every tool — ambient runners and MCP tool names alike — in the task that invokes
+it. A manifest written by an older build keeps its tool keys untouched, and
+`sync-capabilities` names them as inert rather than deleting them.
 
 Keep it current with:
 
@@ -417,12 +432,11 @@ Keep it current with:
 archon workflow sync-capabilities --tasks tasks/PRD-<NAME>/
 ```
 
-That unions the environment keys the tasks declare and the runners their focused
-tests actually invoke into the manifest. It **only ever adds** — a project
-accumulates PRDs, and replacing the manifest would strip what an earlier
-decomposition put there. `--dry-run` reports without writing. A manifest that no
-longer parses is an error rather than something to overwrite, so a hand edit is
-never lost silently.
+That unions the environment keys the tasks declare into the manifest. It **only
+ever adds** — a project accumulates PRDs, and replacing the manifest would strip
+what an earlier decomposition put there. `--dry-run` reports without writing. A
+manifest that no longer parses is an error rather than something to overwrite,
+so a hand edit is never lost silently.
 
 The decomposition skill runs this after writing a task set, so a PRD that
 introduces a new tool or credential updates the manifest as part of being
