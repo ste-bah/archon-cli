@@ -284,6 +284,153 @@ test("webview_renders_the_permission_prompt: allow/deny buttons and their wiring
   );
 });
 
+// ── Test 18: stdio_spawn_hides_the_console_window ─────────────────────────────
+
+test("stdio_spawn_hides_the_console_window: connectStdio spawns with windowsHide", () => {
+  // On Windows, spawning a console-subsystem binary without `windowsHide` pops
+  // a conhost window on every connect and reconnect. It renders blank — the
+  // process speaks JSON-RPC over stdio, not a TUI — so it reads as a hung
+  // Archon, and closing it kills the extension backend. The flag is a no-op on
+  // other platforms, so nothing but this test stops a refactor from dropping
+  // it on a machine where the symptom is invisible. (#159)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ConnectionManager } = require("../src/connection/manager") as typeof import("../src/connection/manager");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const childProcess = require("child_process") as typeof import("child_process");
+
+  const spawnSlot = childProcess as unknown as { spawn: unknown };
+  const realSpawn = spawnSlot.spawn;
+
+  let capturedOptions: Record<string, unknown> | undefined;
+
+  // Reports the spawn as failed the moment the manager subscribes to "error",
+  // so connectStdio rejects instead of hanging on an initialize handshake that
+  // no real process is there to answer.
+  const fakeChild = {
+    stdout: { on: (): void => {} },
+    stdin: { write: (): void => {}, destroyed: true },
+    on(event: string, handler: (arg: unknown) => void): unknown {
+      if (event === "error") {
+        handler(new Error("spawn intercepted by test"));
+      }
+      return this;
+    },
+    kill: (): void => {},
+  };
+
+  spawnSlot.spawn = (
+    _binary: string,
+    _args: string[],
+    options: Record<string, unknown>
+  ): unknown => {
+    capturedOptions = options;
+    return fakeChild;
+  };
+
+  try {
+    // spawn() runs synchronously inside connectStdio's promise executor, so
+    // capturedOptions is populated by the time this expression returns.
+    void new ConnectionManager()
+      .connectStdio("archon", ConnectionMode.Stdio, "archon-test-workspace")
+      .catch(() => undefined);
+  } finally {
+    spawnSlot.spawn = realSpawn;
+  }
+
+  assert.ok(
+    capturedOptions !== undefined,
+    "connectStdio never called child_process.spawn"
+  );
+  const options = capturedOptions as Record<string, unknown>;
+  assert.strictEqual(
+    options["windowsHide"],
+    true,
+    "stdio spawn must pass windowsHide: true, or every connect flashes a console window that steals focus from VS Code (#159)"
+  );
+});
+
+// ── Test 19: stdio_stderr_reaches_the_log_sink ────────────────────────────────
+
+test("stdio_stderr_reaches_the_log_sink: backend stderr is piped to onBackendLog", () => {
+  // Second half of #159: with windowsHide there is no console, so inheriting
+  // stderr would throw away every backend diagnostic and leave a crashed
+  // backend showing as nothing but "Archon: error". stderr must be piped and
+  // routed to the sink the activation side points at its output channel.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ConnectionManager } = require("../src/connection/manager") as typeof import("../src/connection/manager");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const childProcess = require("child_process") as typeof import("child_process");
+
+  const spawnSlot = childProcess as unknown as { spawn: unknown };
+  const realSpawn = spawnSlot.spawn;
+
+  let capturedStdio: unknown;
+  let stderrDataHandler: ((chunk: Buffer) => void) | undefined;
+
+  const fakeChild = {
+    stdout: { on: (): void => {} },
+    stderr: {
+      on(event: string, handler: (chunk: Buffer) => void): void {
+        if (event === "data") {
+          stderrDataHandler = handler;
+        }
+      },
+    },
+    stdin: { write: (): void => {}, destroyed: true },
+    on(event: string, handler: (arg: unknown) => void): unknown {
+      // As in test 18: fail the spawn so connectStdio rejects rather than
+      // hanging. The stderr handler is registered before this fires.
+      if (event === "error") {
+        handler(new Error("spawn intercepted by test"));
+      }
+      return this;
+    },
+    kill: (): void => {},
+  };
+
+  spawnSlot.spawn = (
+    _binary: string,
+    _args: string[],
+    options: Record<string, unknown>
+  ): unknown => {
+    capturedStdio = options["stdio"];
+    return fakeChild;
+  };
+
+  const manager = new ConnectionManager();
+  const logged: string[] = [];
+  manager.onBackendLog = (text) => logged.push(text);
+
+  try {
+    void manager
+      .connectStdio("archon", ConnectionMode.Stdio, "archon-test-workspace")
+      .catch(() => undefined);
+  } finally {
+    spawnSlot.spawn = realSpawn;
+  }
+
+  // stderr must be piped — "inherit" sends it to a console that does not exist.
+  assert.ok(Array.isArray(capturedStdio), "spawn was given no stdio array");
+  assert.strictEqual(
+    (capturedStdio as unknown[])[2],
+    "pipe",
+    "stderr must be piped, not inherited: windowsHide leaves no console for inherited output (#159)"
+  );
+
+  // And the piped data must actually reach the sink.
+  assert.ok(
+    stderrDataHandler !== undefined,
+    "connectStdio never subscribed to child stderr"
+  );
+  const emit = stderrDataHandler as (chunk: Buffer) => void;
+  emit(Buffer.from("panicked at 'backend exploded'\n", "utf8"));
+
+  assert.ok(
+    logged.some((line) => line.includes("panicked at 'backend exploded'")),
+    `backend stderr never reached onBackendLog; got ${JSON.stringify(logged)}`
+  );
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

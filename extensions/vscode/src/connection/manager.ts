@@ -71,6 +71,23 @@ export class ConnectionManager {
   public onTurnComplete: ((tokens: TurnTokens) => void) | null = null;
   public onError: ((message: string) => void) | null = null;
 
+  /**
+   * Diagnostic output from the stdio backend: the child's stderr verbatim,
+   * plus one line when the process exits.
+   *
+   * This is a callback rather than a direct write to a VS Code output channel
+   * because this module must stay loadable outside the extension host — it is
+   * required directly by the plain-Node test suite, where `vscode` does not
+   * resolve, and it is kept free of host-only imports for the same bundling
+   * reason as the dynamic `child_process` require below. The activation side
+   * owns the channel and points this at it.
+   *
+   * Left unset, backend diagnostics are discarded: `windowsHide` means there
+   * is no console for them to land in, so an unrouted sink is how a crashed
+   * backend becomes an unexplained "Archon: error" in the status bar.
+   */
+  public onBackendLog: ((text: string) => void) | null = null;
+
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /** Returns the current connection state. */
@@ -151,8 +168,18 @@ export class ConnectionManager {
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn(binaryPath, args, {
-        stdio: ["pipe", "pipe", "inherit"],
+        // stderr is piped rather than inherited: with `windowsHide` there is no
+        // console for inherited output to appear in, and the extension host has
+        // none either, so inheriting would discard every backend diagnostic.
+        stdio: ["pipe", "pipe", "pipe"],
         cwd: workspaceRoot,
+        // Windows attaches a console to a console-subsystem child by default.
+        // The backend speaks JSON-RPC over stdio and paints nothing, so that
+        // console shows up as a blank window that steals foreground from VS
+        // Code on every connect and reconnect — and closing it, which is the
+        // obvious thing to do with a window that looks hung, kills the
+        // extension's backend. Ignored on other platforms.
+        windowsHide: true,
       });
       this._child = child;
 
@@ -168,15 +195,27 @@ export class ConnectionManager {
         }
       });
 
+      child.stderr?.on("data", (chunk: Buffer) => {
+        this.onBackendLog?.(chunk.toString("utf8"));
+      });
+
       child.on("error", (err: Error) => {
         this._state = "error";
         reject(new Error(`Archon: failed to spawn binary — ${err.message}`));
       });
 
-      child.on("exit", () => {
+      child.on("exit", (code: number | null, signal: string | null) => {
         if (this._state === "connected") {
           this._state = "idle";
         }
+        // Killing the backend is the one failure with nothing to print: a
+        // process terminated from outside writes no stderr on its way out, so
+        // without this line the channel is silent about the most likely cause.
+        this.onBackendLog?.(
+          `\n[archon] backend process exited (${
+            signal !== null ? `signal ${signal}` : `code ${code ?? "unknown"}`
+          })\n`
+        );
         this._rejectAllPending(new Error("Archon: process exited"));
       });
 
