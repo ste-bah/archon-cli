@@ -38,6 +38,8 @@ No behavior-changing roadmap slice may be promoted until findings 9, 11, 17, and
 
 Record R0 closure as immutable evidence references to the relevant test runs, runtime source-of-truth inspections, reviews, and commits. Re-evaluate this gate immediately before each slice starts; do not infer closure from this roadmap.
 
+That record is `docs/development/r0-entry-gate.evidence`. It names, per finding, the pushed closure commit, the source anchors that must remain present, the defect signatures that must remain absent, the live call site, and the behavioural and source-of-truth tests. `scripts/check-r0-entry-gate.sh` re-verifies every one of those statements and prints an explicit R0 PASS/FAIL; it runs as the `r0-entry-gate` job in `.github/workflows/ci.yml` (with `fetch-depth: 0` and `--require-commits`, so commit ancestry is actually checked) and as step 2b of `scripts/ci-gate.sh`. Re-evaluating the gate before a slice starts means running that script, not re-reading this paragraph. As of 2026-08-10 it reports PASS for findings 9, 11, 17, 40–43 and for slice-1 shadow containment; the implementation deviations behind findings 40, 41, 42 and 43 are recorded in the evidence file and are material to how R2/R3 must source lesson provenance.
+
 ## Measurement schema (R8 foundation)
 
 Add one append-only `cognitive_metric_events` relation and JSONL mirror. Event fields:
