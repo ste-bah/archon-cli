@@ -1,107 +1,123 @@
-//! Tests for KB LLM Compilation (TASK-PIPE-D09).
+//! Tests for KB LLM compilation (REQ-KB-002 / TASK-PIPE-D09).
 //!
-//! Validates: no-op on empty KB, summary generation, concept extraction,
-//! provenance edges, incremental compilation, LLM failure resilience,
-//! index node creation, and CompileMetrics accuracy.
+//! Validates: no-op on an empty corpus, summary generation, concept extraction,
+//! provenance edges, incremental compilation, LLM failure resilience, index
+//! refresh, `--kb` scoping and `CompileMetrics` accuracy.
+//!
+//! Every test drives a real `archon-docs` corpus with a stub `KbLlmClient`, so
+//! nothing here needs a live model or an embedding provider.
 
-use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use cozo::{DataValue, DbInstance, ScriptMutability};
+use cozo::DbInstance;
 
-use archon_pipeline::kb::compile::{Compiler, KbLlmClient};
-use archon_pipeline::kb::schema::ensure_kb_schema;
+use archon_pipeline::kb::compile::{
+    CONCEPT_SOURCE_PREFIX, Compiler, INDEX_SOURCE_PATH, KbLlmClient, SUMMARY_SOURCE_PREFIX,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn mem_db() -> DbInstance {
-    DbInstance::new("mem", "", Default::default()).expect("in-memory CozoDB")
+fn docs_db() -> Arc<DbInstance> {
+    let db = DbInstance::new("mem", "", Default::default()).expect("in-memory CozoDB");
+    archon_docs::schema::ensure_doc_schema(&db).expect("docs schema");
+    Arc::new(db)
 }
 
-fn now_secs() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64()
+/// Ingest through the shipping text path — the same call `archon kb ingest`
+/// reaches for a URL or text source.
+fn ingest(db: &DbInstance, path: &str, content: &str) -> String {
+    archon_docs::ingest_text::ingest_text_source(db, path, "text/plain", content)
+        .expect("ingest")
+        .document_id
 }
 
-/// Insert a raw node directly into the database.
-fn insert_raw_node(db: &DbInstance, node_id: &str, title: &str, content: &str) {
-    let ts = now_secs();
-    let mut params = BTreeMap::new();
-    params.insert("nid".to_string(), DataValue::from(node_id));
-    params.insert("title".to_string(), DataValue::from(title));
-    params.insert("content".to_string(), DataValue::from(content));
-    params.insert("ts".to_string(), DataValue::from(ts));
-
-    db.run_script(
-        "?[node_id, node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at] \
-         <- [[$nid, 'raw', 'test', 'default', $title, $content, 'abc123', 0, $ts, $ts]] \
-         :put kb_nodes { node_id => node_type, source, domain_tag, title, content, content_hash, chunk_index, created_at, updated_at }",
-        params,
-        ScriptMutability::Mutable,
-    )
-    .expect("insert raw node");
+fn documents_with_prefix(db: &DbInstance, prefix: &str) -> Vec<String> {
+    archon_docs::store::list_doc_sources(db)
+        .expect("list doc sources")
+        .into_iter()
+        .filter(|doc| doc.source_path.starts_with(prefix))
+        .map(|doc| doc.document_id)
+        .collect()
 }
 
-/// Count nodes of a given type.
-fn count_nodes_of_type(db: &DbInstance, node_type: &str) -> usize {
-    let mut params = BTreeMap::new();
-    params.insert("nt".to_string(), DataValue::from(node_type));
-    let result = db
-        .run_script(
-            "?[count(node_id)] := *kb_nodes{node_id, node_type}, node_type = $nt",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .expect("count query");
-    result.rows[0][0].get_int().unwrap_or(0) as usize
-}
-
-/// Count all edges of a given type.
-fn count_edges_of_type(db: &DbInstance, edge_type: &str) -> usize {
-    let mut params = BTreeMap::new();
-    params.insert("et".to_string(), DataValue::from(edge_type));
-    let result = db
-        .run_script(
-            "?[count(edge_id)] := *kb_edges{edge_id, edge_type}, edge_type = $et",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .expect("count edges query");
-    result.rows[0][0].get_int().unwrap_or(0) as usize
+fn document_text(db: &DbInstance, document_id: &str) -> String {
+    let mut chunks = archon_docs::store::list_chunks_for_doc(db, document_id).expect("chunks");
+    chunks.sort_by_key(|chunk| chunk.chunk_index);
+    chunks
+        .iter()
+        .map(|chunk| chunk.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 // ---------------------------------------------------------------------------
-// Mock LLM clients
+// Stub LLM clients
 // ---------------------------------------------------------------------------
 
-/// Mock that always returns a valid summary JSON response.
+/// Returns a well-formed response for each of the three prompt kinds.
 struct MockSummaryLlm;
 
 #[async_trait::async_trait]
 impl KbLlmClient for MockSummaryLlm {
     async fn complete(&self, prompt: &str) -> Result<String> {
-        if prompt.contains("concepts")
-            || prompt.contains("Concepts")
-            || prompt.contains("Extract key concepts")
-        {
-            // Concept extraction response
-            Ok(r#"[{"name": "TestConcept", "explanation": "A concept for testing.", "source_nodes": []}]"#.to_string())
-        } else if prompt.contains("relationship") || prompt.contains("relationships") {
-            // Cross-reference response
-            Ok(r#"[]"#.to_string())
+        if prompt.starts_with("Extract key concepts") {
+            Ok(
+                r#"[{"name": "TestConcept", "explanation": "A concept for testing.", "source_documents": []}]"#
+                    .to_string(),
+            )
+        } else if prompt.starts_with("Given these concepts") {
+            Ok("[]".to_string())
         } else {
-            // Summary response
             Ok(r#"{"summary": "This is a test summary."}"#.to_string())
         }
     }
 }
 
-/// Mock that returns invalid (non-JSON) responses.
+/// Cites every document it is shown, so concept provenance can be asserted.
+struct CitingConceptLlm;
+
+#[async_trait::async_trait]
+impl KbLlmClient for CitingConceptLlm {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        if prompt.starts_with("Extract key concepts") {
+            let ids: Vec<String> = prompt
+                .lines()
+                .filter_map(|line| line.split("(ID: ").nth(1))
+                .filter_map(|rest| rest.split(')').next())
+                .map(|id| format!("\"{id}\""))
+                .collect();
+            Ok(format!(
+                r#"[{{"name": "Alpha", "explanation": "First.", "source_documents": [{}]}},
+                    {{"name": "Beta", "explanation": "Second.", "source_documents": [{}]}}]"#,
+                ids.join(", "),
+                ids.join(", ")
+            ))
+        } else if prompt.starts_with("Given these concepts") {
+            Ok(
+                r#"[{"source": "Alpha", "target": "Beta", "relationship": "relates to"}]"#
+                    .to_string(),
+            )
+        } else {
+            Ok(r#"{"summary": "Cited summary."}"#.to_string())
+        }
+    }
+}
+
+/// Wraps its JSON in a markdown fence, the way real providers do.
+struct FencedJsonLlm;
+
+#[async_trait::async_trait]
+impl KbLlmClient for FencedJsonLlm {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        let inner = MockSummaryLlm.complete(prompt).await?;
+        Ok(format!("Here you go:\n\n```json\n{inner}\n```\n"))
+    }
+}
+
+/// Never returns JSON.
 struct BadJsonLlm;
 
 #[async_trait::async_trait]
@@ -111,234 +127,274 @@ impl KbLlmClient for BadJsonLlm {
     }
 }
 
+/// Fails every call.
+struct FailingLlm;
+
+#[async_trait::async_trait]
+impl KbLlmClient for FailingLlm {
+    async fn complete(&self, _prompt: &str) -> Result<String> {
+        anyhow::bail!("provider unavailable")
+    }
+}
+
+/// Records the prompts it was sent.
+struct RecordingLlm {
+    prompts: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl KbLlmClient for RecordingLlm {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        self.prompts.lock().unwrap().push(prompt.to_string());
+        MockSummaryLlm.complete(prompt).await
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-mod compile_tests {
-    use super::*;
+#[tokio::test]
+async fn an_empty_corpus_compiles_to_zero_without_calling_the_model() {
+    let db = docs_db();
+    let compiler = Compiler::new(db, Box::new(FailingLlm)).expect("compiler");
 
-    fn setup_db() -> DbInstance {
-        let db = mem_db();
-        ensure_kb_schema(&db).unwrap();
-        db
+    let metrics = compiler.compile().await.expect("compile");
+
+    assert_eq!(metrics.summaries_generated, 0);
+    assert_eq!(metrics.concepts_extracted, 0);
+    assert_eq!(metrics.edges_created, 0);
+    assert!(!metrics.index_updated);
+}
+
+/// The headline acceptance: content ingested the shipping way is compiled, and
+/// the output lands in the same store the search commands read.
+#[tokio::test]
+async fn documents_from_the_shipping_ingest_path_are_summarised_into_the_same_store() {
+    let db = docs_db();
+    let source = ingest(&db, "policy.txt", "Retention of telemetry is thirty days.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm)).expect("compiler");
+
+    let metrics = compiler.compile().await.expect("compile");
+
+    assert_eq!(metrics.summaries_generated, 1);
+    let summaries = documents_with_prefix(&db, SUMMARY_SOURCE_PREFIX);
+    assert_eq!(summaries.len(), 1);
+    assert!(document_text(&db, &summaries[0]).contains("This is a test summary."));
+
+    // The summary is linked back to the document it came from.
+    let edges = archon_docs::store::list_provenance_from(&db, &summaries[0]).expect("edges");
+    assert!(edges.iter().any(|edge| edge.to_artifact_id == source));
+}
+
+#[tokio::test]
+async fn concepts_are_stored_as_documents_and_linked_to_their_sources() {
+    let db = docs_db();
+    let first = ingest(&db, "a.txt", "Alpha content about retention.");
+    let second = ingest(&db, "b.txt", "Beta content about retention.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(CitingConceptLlm)).expect("compiler");
+
+    let metrics = compiler.compile().await.expect("compile");
+
+    assert_eq!(metrics.concepts_extracted, 2);
+    let concepts = documents_with_prefix(&db, CONCEPT_SOURCE_PREFIX);
+    assert_eq!(concepts.len(), 2);
+    for concept in &concepts {
+        let targets: Vec<String> = archon_docs::store::list_provenance_from(&db, concept)
+            .expect("edges")
+            .into_iter()
+            .map(|edge| edge.to_artifact_id)
+            .collect();
+        assert!(targets.contains(&first), "{targets:?}");
+        assert!(targets.contains(&second), "{targets:?}");
     }
+}
 
-    // Test 1: Compile with no raw nodes is a no-op
-    #[tokio::test]
-    async fn compile_empty_kb_returns_zeros() {
-        let db = setup_db();
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        let metrics = compiler.compile().await.expect("compile");
+#[tokio::test]
+async fn cross_references_link_concept_documents_to_each_other() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    ingest(&db, "b.txt", "Beta content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(CitingConceptLlm)).expect("compiler");
 
-        assert_eq!(metrics.summaries_generated, 0, "no summaries for empty KB");
-        assert_eq!(metrics.concepts_extracted, 0, "no concepts for empty KB");
-        assert_eq!(metrics.edges_created, 0, "no edges for empty KB");
-        assert!(!metrics.index_updated, "index not updated for empty KB");
-    }
+    compiler.compile().await.expect("compile");
 
-    // Test 2: Compile produces summaries for raw nodes
-    #[tokio::test]
-    async fn compile_generates_summaries_for_raw_nodes() {
-        let db = setup_db();
-        insert_raw_node(
-            &db,
-            "node-001",
-            "Test Document",
-            "This is test content for the document.",
-        );
-        insert_raw_node(
-            &db,
-            "node-002",
-            "Another Doc",
-            "More content for another document.",
-        );
+    let concepts = documents_with_prefix(&db, CONCEPT_SOURCE_PREFIX);
+    let cites: Vec<_> = concepts
+        .iter()
+        .flat_map(|c| archon_docs::store::list_provenance_from(&db, c).expect("edges"))
+        .filter(|edge| {
+            matches!(
+                edge.edge_type,
+                archon_docs::models::ProvenanceEdgeType::Cites
+            )
+        })
+        .collect();
+    assert_eq!(cites.len(), 1, "{cites:?}");
+    assert!(concepts.contains(&cites[0].to_artifact_id));
+}
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        let metrics = compiler.compile().await.expect("compile");
+#[tokio::test]
+async fn the_index_document_is_refreshed_and_never_duplicated() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm)).expect("compiler");
+    compiler.compile().await.expect("first compile");
 
-        assert_eq!(
-            metrics.summaries_generated, 2,
-            "should generate 2 summaries"
-        );
-        assert!(metrics.duration_secs >= 0.0);
+    ingest(&db, "b.txt", "Beta content.");
+    let metrics = compiler.compile().await.expect("second compile");
 
-        // Compiled nodes should exist
-        let compiled_count = count_nodes_of_type(&db, "compiled");
-        assert_eq!(compiled_count, 2, "should have 2 compiled nodes");
-    }
+    assert!(metrics.index_updated);
+    let indexes = documents_with_prefix(&db, INDEX_SOURCE_PATH);
+    assert_eq!(indexes.len(), 1);
+    let text = document_text(&db, &indexes[0]);
+    assert!(text.contains("Source documents: 2"), "{text}");
+    assert!(text.contains("Compiled summaries: 2"), "{text}");
+}
 
-    // Test 3: Compile extracts concepts
-    #[tokio::test]
-    async fn compile_extracts_concepts() {
-        let db = setup_db();
-        insert_raw_node(
-            &db,
-            "node-c01",
-            "Concept Doc",
-            "This document discusses important concepts.",
-        );
+/// The watermark: a second run with nothing new does no work, and a third run
+/// picks up only what arrived since.
+#[tokio::test]
+async fn compilation_is_incremental_across_runs() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm)).expect("compiler");
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        let metrics = compiler.compile().await.expect("compile");
+    let first = compiler.compile().await.expect("first compile");
+    assert_eq!(first.summaries_generated, 1);
 
-        assert!(
-            metrics.concepts_extracted >= 1,
-            "should extract at least 1 concept, got {}",
-            metrics.concepts_extracted
-        );
+    let second = compiler.compile().await.expect("second compile");
+    assert_eq!(second.summaries_generated, 0);
 
-        let concept_count = count_nodes_of_type(&db, "concept");
-        assert!(
-            concept_count >= 1,
-            "should have concept nodes in DB, got {}",
-            concept_count
-        );
-    }
+    ingest(&db, "b.txt", "Beta content.");
+    let third = compiler.compile().await.expect("third compile");
+    assert_eq!(third.summaries_generated, 1);
+}
 
-    // Test 4: Compile creates provenance edges from compiled nodes to source raw nodes
-    #[tokio::test]
-    async fn compile_creates_provenance_edges() {
-        let db = setup_db();
-        insert_raw_node(&db, "node-p01", "Provenance Doc", "Content to compile.");
+/// Without this the second run summarises the first run's summaries and the
+/// corpus grows without bound.
+#[tokio::test]
+async fn the_pass_never_compiles_its_own_output() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm)).expect("compiler");
+    compiler.compile().await.expect("first compile");
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        compiler.compile().await.expect("compile");
+    // Reset the watermark so every document is a candidate again; only the
+    // derived-source filter can keep the summaries out now.
+    let reset = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm)).expect("compiler");
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let recording = Compiler::new(
+        Arc::clone(&db),
+        Box::new(RecordingLlm {
+            prompts: Arc::clone(&prompts),
+        }),
+    )
+    .expect("compiler");
+    drop(reset);
+    recording.compile().await.expect("re-compile");
 
-        let provenance_count = count_edges_of_type(&db, "Provenance");
-        assert!(
-            provenance_count >= 1,
-            "should have >= 1 provenance edge, got {}",
-            provenance_count
-        );
-    }
+    let seen = prompts.lock().unwrap().clone();
+    assert!(
+        !seen.iter().any(|p| p.contains("This is a test summary.")),
+        "a summary was fed back into the compiler: {seen:?}"
+    );
+}
 
-    // Test 5: Incremental compilation — only processes nodes added after last compile
-    #[tokio::test]
-    async fn incremental_compile_only_processes_new_nodes() {
-        let db = setup_db();
-        insert_raw_node(&db, "node-i01", "First Doc", "Content of first document.");
+/// Regression: the first live run stored the fence markup as the summary and
+/// extracted zero concepts, because every parse hit the ``` prefix.
+#[tokio::test]
+async fn json_wrapped_in_a_markdown_fence_is_still_parsed() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(FencedJsonLlm)).expect("compiler");
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
+    let metrics = compiler.compile().await.expect("compile");
 
-        // First compile
-        let metrics1 = compiler.compile().await.expect("first compile");
-        assert_eq!(metrics1.summaries_generated, 1, "first compile: 1 summary");
+    assert_eq!(metrics.summaries_generated, 1);
+    assert_eq!(metrics.concepts_extracted, 1);
+    let summaries = documents_with_prefix(&db, SUMMARY_SOURCE_PREFIX);
+    let text = document_text(&db, &summaries[0]);
+    assert!(text.contains("This is a test summary."), "{text}");
+    assert!(
+        !text.contains("```"),
+        "fence markup leaked into the summary: {text}"
+    );
+}
 
-        // Second compile with no new nodes — should be no-op
-        let metrics2 = compiler.compile().await.expect("second compile");
-        assert_eq!(
-            metrics2.summaries_generated, 0,
-            "second compile: no new summaries, already compiled"
-        );
+#[tokio::test]
+async fn a_non_json_response_is_kept_as_the_summary_rather_than_discarded() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(BadJsonLlm)).expect("compiler");
 
-        // Add a new node with a slightly later timestamp
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        insert_raw_node(&db, "node-i02", "Second Doc", "Content of second document.");
+    let metrics = compiler.compile().await.expect("compile");
 
-        // Third compile should only process the new node
-        let metrics3 = compiler.compile().await.expect("third compile");
-        assert_eq!(
-            metrics3.summaries_generated, 1,
-            "third compile: only 1 new summary"
-        );
-    }
+    assert_eq!(metrics.summaries_generated, 1);
+    let summaries = documents_with_prefix(&db, SUMMARY_SOURCE_PREFIX);
+    assert!(document_text(&db, &summaries[0]).contains("not valid json at all"));
+}
 
-    // Test 6: LLM parse failure is logged and skipped (not fatal)
-    #[tokio::test]
-    async fn llm_parse_failure_is_not_fatal() {
-        let db = setup_db();
-        insert_raw_node(&db, "node-b01", "Bad JSON Doc", "Some content.");
+/// One failing document must not abandon the rest of the batch.
+#[tokio::test]
+async fn a_provider_failure_is_survivable_and_reported_as_zero_summaries() {
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(FailingLlm)).expect("compiler");
 
-        let compiler = Compiler::new(db.clone(), Box::new(BadJsonLlm)).unwrap();
-        // Should not panic or return an error — just log and continue
-        let result = compiler.compile().await;
-        assert!(
-            result.is_ok(),
-            "compile should succeed even when LLM returns bad JSON"
-        );
+    let metrics = compiler.compile().await.expect("compile must not error");
 
-        // The compiled node should still be created (using raw response as fallback)
-        let compiled_count = count_nodes_of_type(&db, "compiled");
-        assert!(
-            compiled_count >= 1,
-            "should still create compiled node with fallback content"
-        );
-    }
+    assert_eq!(metrics.summaries_generated, 0);
+    assert!(documents_with_prefix(&db, SUMMARY_SOURCE_PREFIX).is_empty());
+}
 
-    // Test 7: Index node created/updated after compile
-    #[tokio::test]
-    async fn compile_creates_index_node() {
-        let db = setup_db();
-        insert_raw_node(&db, "node-ix01", "Index Doc", "Content for index.");
+#[tokio::test]
+async fn a_kb_filter_restricts_compilation_and_the_summary_joins_that_kb() {
+    let db = docs_db();
+    let inside = ingest(&db, "inside.txt", "Inside content.");
+    ingest(&db, "outside.txt", "Outside content.");
+    archon_docs::store::assign_document_to_kb(&db, "team", &inside).expect("assign");
+    let compiler = Compiler::new(Arc::clone(&db), Box::new(MockSummaryLlm))
+        .expect("compiler")
+        .with_kb(Some("team".into()));
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        let metrics = compiler.compile().await.expect("compile");
+    let metrics = compiler.compile().await.expect("compile");
 
-        assert!(
-            metrics.index_updated,
-            "index should be updated after compile"
-        );
+    assert_eq!(metrics.summaries_generated, 1);
+    let members = archon_docs::store::list_kb_document_ids(&db, "team").expect("members");
+    let summaries = documents_with_prefix(&db, SUMMARY_SOURCE_PREFIX);
+    assert_eq!(summaries.len(), 1);
+    assert!(
+        members.contains(&summaries[0]),
+        "the summary must be searchable under --kb team"
+    );
+}
 
-        let index_count = count_nodes_of_type(&db, "index");
-        assert_eq!(index_count, 1, "should have exactly 1 index node");
-    }
+#[tokio::test]
+async fn progress_is_reported_once_per_document() {
+    use archon_pipeline::kb::compile::{CompilePhase, CompileProgress};
 
-    // Test 8: CompileResult has correct counts
-    #[tokio::test]
-    async fn compile_metrics_counts_are_accurate() {
-        let db = setup_db();
-        insert_raw_node(&db, "node-m01", "Metrics Doc 1", "Content one.");
-        insert_raw_node(&db, "node-m02", "Metrics Doc 2", "Content two.");
-        insert_raw_node(&db, "node-m03", "Metrics Doc 3", "Content three.");
+    let db = docs_db();
+    ingest(&db, "a.txt", "Alpha content.");
+    ingest(&db, "b.txt", "Beta content.");
+    let seen: Arc<Mutex<Vec<CompileProgress>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    let compiler = Compiler::new(db, Box::new(MockSummaryLlm))
+        .expect("compiler")
+        .with_progress(Arc::new(move |event| sink.lock().unwrap().push(event)));
 
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-        let metrics = compiler.compile().await.expect("compile");
+    compiler.compile().await.expect("compile");
 
-        assert_eq!(
-            metrics.summaries_generated, 3,
-            "should generate 3 summaries"
-        );
-        assert!(
-            metrics.edges_created >= 3,
-            "should have >= 3 provenance edges (one per compiled node)"
-        );
-        assert!(
-            metrics.duration_secs >= 0.0,
-            "duration should be non-negative"
-        );
-    }
-
-    // Test 9: compile_document produces correct DocumentCompilation
-    #[tokio::test]
-    async fn compile_document_returns_correct_structure() {
-        use archon_pipeline::kb::KbNodeType;
-        use archon_pipeline::kb::schema::KbNode;
-
-        let db = setup_db();
-        let compiler = Compiler::new(db.clone(), Box::new(MockSummaryLlm)).unwrap();
-
-        let node = KbNode {
-            node_id: "node-d01".to_string(),
-            node_type: KbNodeType::Raw,
-            source: "test".to_string(),
-            domain_tag: "default".to_string(),
-            title: "Test Node".to_string(),
-            content: "Test content here.".to_string(),
-            content_hash: "abc".to_string(),
-            chunk_index: 0,
-            created_at: now_secs(),
-            updated_at: now_secs(),
-        };
-
-        let result = compiler
-            .compile_document(&node)
-            .await
-            .expect("compile_document");
-        assert!(
-            !result.node_id.is_empty(),
-            "compiled node_id should not be empty"
-        );
-        assert!(!result.summary.is_empty(), "summary should not be empty");
-    }
+    let events = seen.lock().unwrap();
+    let summarized = events
+        .iter()
+        .filter(|e| e.phase == CompilePhase::DocumentSummarized)
+        .count();
+    assert_eq!(summarized, 2);
+    assert!(events.iter().any(|e| e.phase == CompilePhase::IndexUpdated));
+    assert!(
+        events
+            .iter()
+            .any(|e| e.phase == CompilePhase::DocumentsSelected && e.document_total == 2)
+    );
 }

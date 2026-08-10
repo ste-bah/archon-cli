@@ -13,6 +13,11 @@ fn make_config() -> GardenConfig {
         // no neighbours regardless; the value only has to be present.
         semantic_dedup_max_distance: 0.15,
         semantic_review_max_distance: 0.35,
+        // Consolidation itself never adjudicates; the caller does, after the
+        // report comes back. Held at the shipped default so these tests keep
+        // exercising the shipped shape.
+        auto_adjudicate_review_band: false,
+        auto_adjudicate_min_pairs: 10,
         staleness_days: 30,
         staleness_importance_floor: 0.3,
         importance_decay_per_day: 0.01,

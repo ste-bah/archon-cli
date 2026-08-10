@@ -1,31 +1,25 @@
 use super::*;
 
 pub(crate) async fn run_one_worktree_branch(
-    task: &str,
-    target_repository_root: Option<String>,
-    execution: &WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    dispatch: &dyn WorkflowAgentDispatch,
-    store_for_control: &crate::WorkflowStore,
-    run_id: &str,
-    run_root: &Path,
-    canonical_root: &Path,
-    v2_store: &WorkflowV2ResultStore,
-    cfg: &WriteCoordinatorConfig,
+    ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
 ) -> crate::WorkflowResult<CompletedWorktreeBranch> {
-    let branch =
-        prepare_worktree_branch_execution(execution, store_for_control, run_id, &prepared)?;
+    let branch = prepare_worktree_branch_execution(
+        ctx.execution,
+        ctx.store_for_control,
+        ctx.run_id,
+        &prepared,
+    )?;
     let mut result = run_worktree_branch_agent(
-        task,
-        target_repository_root,
-        dispatch,
-        v2_store,
-        adapter,
+        ctx.task,
+        ctx.target_repository_root.map(str::to_string),
+        ctx.dispatch,
+        ctx.v2_store,
+        ctx.adapter,
         &branch,
     )
     .await?;
-    poll_v2_run_control(store_for_control, run_id, &branch.id)?;
+    poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
     // replace `*result` wholesale on rejection — an ownership or size-policy
@@ -34,18 +28,18 @@ pub(crate) async fn run_one_worktree_branch(
     // whichever result object comes out the far end.
     let landed = worktree_patch_landed(&prepared);
     let schema_repair_failed = is_schema_repair_failure_result(&result);
-    validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, v2_store)?;
+    validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, ctx.v2_store)?;
     let (manifest, pre_hashes) = capture_worktree_branch_manifest(
-        run_root,
-        run_id,
-        execution,
-        cfg,
-        v2_store,
+        ctx.run_root,
+        ctx.run_id,
+        ctx.execution,
+        ctx.cfg,
+        ctx.v2_store,
         &mut result,
         &prepared,
     )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
-    let _ = canonical_root;
+    let _ = ctx.canonical_root;
     Ok(completed_worktree_branch(
         branch, result, manifest, pre_hashes,
     ))

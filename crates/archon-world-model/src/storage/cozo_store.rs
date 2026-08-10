@@ -211,9 +211,32 @@ mod tests {
 
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/archon-world-model-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    /// A sqlite-backed test store whose files live in a self-deleting
+    /// temp directory.
+    ///
+    /// The store used to be opened at a `format!("/tmp/…")` path. On Windows
+    /// `/tmp` is not a temp directory — it resolves against the current drive
+    /// root — so every run left an orphaned `.db` in e.g. `F:\tmp\`. Owning a
+    /// [`tempfile::TempDir`] fixes both the portability bug and the leak: the
+    /// directory is removed when `TestDb` drops, which is necessarily after
+    /// the last use of the `DbInstance` it wraps.
+    struct TestDb {
+        db: DbInstance,
+        _dir: tempfile::TempDir,
+    }
+
+    impl std::ops::Deref for TestDb {
+        type Target = DbInstance;
+
+        fn deref(&self) -> &Self::Target {
+            &self.db
+        }
+    }
+
+    fn test_db() -> TestDb {
+        let dir = tempfile::tempdir().expect("create world-model test temp dir");
+        let db = DbInstance::new("sqlite", dir.path().join("world-model.db"), "").unwrap();
+        TestDb { db, _dir: dir }
     }
 
     #[test]

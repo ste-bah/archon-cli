@@ -17,9 +17,19 @@ fn archon_config_defaults_codex_provider_enabled() {
         cfg.providers.openai_codex.app_server_discovery_timeout_ms,
         2_500
     );
+    // Sourced from the template rather than hardcoded in Rust, so this pins the
+    // template's list. The pair that used to live here went stale and left an
+    // operator who omitted the key with a catalog containing no 5.6 model at
+    // all; the leading 5.6 entries below are the regression this guards.
     assert_eq!(
         cfg.providers.openai_codex.app_server_model_catalog,
-        vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+        vec![
+            "gpt-5.6-sol".to_string(),
+            "gpt-5.6-terra".to_string(),
+            "gpt-5.6-luna".to_string(),
+            "gpt-5.5".to_string(),
+            "gpt-5.4".to_string(),
+        ]
     );
     assert_eq!(cfg.providers.openai_codex.manifest.ttl_seconds, 21_600);
 }

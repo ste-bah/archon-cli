@@ -216,16 +216,12 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
 
 /// The first fenced ```` ```yaml ```` block, or the whole document when there is
 /// none — a task written as bare front matter still parses.
+///
+/// The tag filter matters here in a way it does not for the JSON callers: a
+/// task file is a whole markdown document and may open with a ```` ```bash ````
+/// example, so "the first fenced block" would be the wrong block.
 fn yaml_block(raw: &str) -> &str {
-    let Some(open) = raw.find("```yaml") else {
-        return raw;
-    };
-    let after = open + "```yaml".len();
-    let rest = &raw[after..];
-    match rest.find("```") {
-        Some(close) => &rest[..close],
-        None => rest,
-    }
+    archon_context::fenced::fenced_block_tagged(raw, "yaml").map_or(raw, |block| block.body)
 }
 
 /// `[A, B]` → `["A", "B"]`; `[]` → `[]`. Anything else is an error.

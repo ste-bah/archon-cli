@@ -8,13 +8,18 @@ use archon_llm::runtime::{
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::Usage;
 use async_trait::async_trait;
-use cozo::DbInstance;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
-use super::learning_store;
+// The `#[path]`-included test modules resolve names against this scope, so these
+// stay for them even though the wrapper itself now reaches persistence only
+// through `recorder`.
+#[cfg(test)]
 use super::provider_event_record::provider_event_record;
-use super::provider_limit_windows;
+#[cfg(test)]
+use cozo::DbInstance;
+#[cfg(test)]
+use recorder::run_provider_persistence_async_with;
 
 #[path = "provider_observer_errors.rs"]
 mod errors;
@@ -22,127 +27,21 @@ mod errors;
 mod identity_events;
 #[path = "provider_observer_runtime.rs"]
 mod observer_runtime;
+#[path = "provider_observer_recorder.rs"]
+mod recorder;
 #[path = "provider_observer_stream.rs"]
 mod stream;
 #[path = "provider_observer_usage.rs"]
 mod usage;
+pub(crate) use recorder::ProviderRuntimeEventRecorder;
+
 use errors::{error_kind, error_message, error_metadata, error_severity, limit_event_type};
 use observer_runtime::record_agent_provider_incident_sync;
 pub(crate) use observer_runtime::{record_provider_fallback, runtime_mode_for_provider_name};
 
+use usage::ObservedRequest;
 #[cfg(test)]
 use usage::context_input_tokens;
-use usage::{ObservedRequest, logical_call_usage};
-
-#[derive(Clone)]
-pub(crate) struct ProviderRuntimeEventRecorder {
-    db: Option<Arc<DbInstance>>,
-}
-
-impl ProviderRuntimeEventRecorder {
-    pub(crate) async fn default_learning_store() -> Self {
-        let acquired = run_provider_persistence_async_with(
-            "acquire provider runtime event store",
-            learning_store::acquire_default,
-        )
-        .await;
-        match acquired {
-            Some(Ok(db)) => Self { db: Some(db) },
-            Some(Err(error)) => {
-                tracing::warn!(%error, "provider runtime event store unavailable");
-                Self { db: None }
-            }
-            None => Self { db: None },
-        }
-    }
-
-    #[cfg(test)]
-    fn with_db(db: Arc<DbInstance>) -> Self {
-        Self { db: Some(db) }
-    }
-
-    fn record_sync(&self, event: ProviderRuntimeEvent) -> Option<String> {
-        let event_id = event.event_id.clone();
-        let Some(db) = &self.db else {
-            return None;
-        };
-        let record = provider_event_record(event);
-        if let Err(error) =
-            archon_learning::runtime_events::insert_provider_runtime_event(db, &record)
-        {
-            tracing::warn!(
-                %error,
-                provider = %record.provider_id,
-                event_type = %record.event_type,
-                "provider runtime event persistence failed"
-            );
-            return None;
-        }
-        Some(event_id)
-    }
-
-    async fn persist<T>(
-        &self,
-        context: &'static str,
-        persist: impl FnOnce(Self) -> T + Send + 'static,
-    ) -> Option<T>
-    where
-        T: Send + 'static,
-    {
-        let recorder = self.clone();
-        run_provider_persistence_async_with(context, move || persist(recorder)).await
-    }
-
-    pub(super) fn record_call_usage_sync(
-        &self,
-        request_id: &str,
-        request: &ObservedRequest,
-        usage: Option<&Usage>,
-        status: &str,
-    ) {
-        let Some(db) = &self.db else {
-            return;
-        };
-        let record = logical_call_usage(request_id, request, usage, status);
-        if let Err(error) = archon_learning::llm_call_usage::insert_llm_call_usage(db, &record) {
-            tracing::warn!(%error, request_id, "logical call usage persistence failed");
-        }
-    }
-    async fn record(&self, event: ProviderRuntimeEvent) -> Option<String> {
-        self.persist("record provider runtime event", move |recorder| {
-            recorder.record_sync(event)
-        })
-        .await
-        .flatten()
-    }
-
-    fn record_limit_window_sync(
-        &self,
-        provider_id: &str,
-        model_id: Option<&str>,
-        error: &LlmError,
-    ) {
-        provider_limit_windows::record_limit_window(self.db.as_ref(), provider_id, model_id, error);
-    }
-}
-
-async fn run_provider_persistence_async_with<T>(
-    context: &'static str,
-    persist: impl FnOnce() -> T + Send + 'static,
-) -> Option<T>
-where
-    T: Send + 'static,
-{
-    match archon_tui::observability::spawn_blocking_named("provider-runtime-persistence", persist)
-        .await
-    {
-        Ok(value) => Some(value),
-        Err(error) => {
-            tracing::warn!(%error, %context, "provider runtime persistence task failed");
-            None
-        }
-    }
-}
 
 pub(crate) async fn observe_llm_provider_with_profile(
     provider: Arc<dyn LlmProvider>,

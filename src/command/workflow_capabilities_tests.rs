@@ -40,7 +40,10 @@ fn a_runner_used_but_not_declared_still_reaches_the_manifest() {
     let sync = sync_capabilities(dir.path(), &dir.path().join("tasks"), false).expect("sync");
     assert!(sync.created);
     assert_eq!(sync.added_tools, vec!["cargo".to_string()]);
-    assert_eq!(manifest(dir.path())["required_tools"], serde_json::json!(["cargo"]));
+    assert_eq!(
+        manifest(dir.path())["required_tools"],
+        serde_json::json!(["cargo"])
+    );
 }
 
 /// A tool a task declares but never invokes stays with that task. Hoisting it
@@ -95,10 +98,21 @@ fn an_existing_capability_is_never_removed() {
     sync_capabilities(dir.path(), &dir.path().join("tasks"), false).expect("sync");
 
     let m = manifest(dir.path());
-    let tools: Vec<&str> = m["required_tools"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
-    assert!(tools.contains(&"node"), "kept the earlier PRD's tool: {tools:?}");
+    let tools: Vec<&str> = m["required_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        tools.contains(&"node"),
+        "kept the earlier PRD's tool: {tools:?}"
+    );
     assert!(tools.contains(&"cargo"), "added this PRD's tool: {tools:?}");
-    assert_eq!(m["required_env_keys"], serde_json::json!(["OPENBB_API_URL"]));
+    assert_eq!(
+        m["required_env_keys"],
+        serde_json::json!(["OPENBB_API_URL"])
+    );
 }
 
 /// Re-running a decomposition must not keep reporting changes it did not make.
@@ -141,7 +155,10 @@ fn a_malformed_manifest_is_refused_not_overwritten() {
     fs::write(dir.path().join(".archon/project.json"), "{ not json").expect("seed");
     let error = sync_capabilities(dir.path(), &dir.path().join("tasks"), false)
         .expect_err("a malformed manifest must be an error");
-    assert!(format!("{error:#}").contains("refusing to overwrite"), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("refusing to overwrite"),
+        "{error:#}"
+    );
     assert_eq!(
         fs::read_to_string(dir.path().join(".archon/project.json")).expect("read"),
         "{ not json"

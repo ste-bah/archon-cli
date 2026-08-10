@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.6.1"
+version = "1.7.0"
 edition = "2024"
 # 1.88 is the floor because the tree uses let-chains (`if cond && let Some(x) =
 # ...`), which are unstable in edition 2024 before then: 1.86 and 1.87 both
@@ -106,7 +106,7 @@ russh = "0.62.5"
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["cors"] }
 # Pseudo-terminal for the web workbench terminal pane: ConPTY on Windows,
-# openpty elsewhere, behind one API. A plain piped child is not enough — the
+# openpty elsewhere, behind one API. A plain piped child is not enough ??? the
 # TUI refuses to start without a TTY and ratatui needs a real terminal size.
 portable-pty = "0.9"
 cpal = "0.15"
@@ -129,7 +129,7 @@ rust-rocksdb = { version = "0.34.0", default-features = false }
 # TASK-AGS-OBS-901 (Stage 10): promoted from archon-tui/Cargo.toml direct pins
 # so archon-observability (new owning crate for ChannelMetrics) and archon-tui
 # stay version-aligned per the OBS-900 dependency-discipline rule. Values match
-# the pre-LIFT archon-tui pins bit-for-bit — no version bump hidden in this LIFT.
+# the pre-LIFT archon-tui pins bit-for-bit ??? no version bump hidden in this LIFT.
 hdrhistogram = "7.5"
 parking_lot = "0.12"
 process-wrap = { version = "=9.0.0", features = ["tokio1"] }
@@ -141,7 +141,7 @@ unicode-width = "0.2"
 # - wiremock:         HTTP mocking for provider tests (REQ-FOR-D6)
 # - serial_test:      serialize tests touching .archon/ or global state (REQ-FOR-D6)
 # - criterion:        bench harness (REQ-FOR-D4)
-# - tempfile:         scoped temp dirs (REQ-FOR-D6) — moved here from above
+# - tempfile:         scoped temp dirs (REQ-FOR-D6) ??? moved here from above
 # - pretty_assertions: diff-friendly assertions (REQ-FOR-D6)
 # - rstest:           parameterized tests (REQ-FOR-D6)
 insta = { version = "1.40", features = ["yaml", "json"] }
@@ -151,7 +151,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.12"
 pretty_assertions = "1.4"
 rstest = "0.22"
-# zip: dev-only — builds minimal .xlsx fixtures for spreadsheet-ingest tests
+# zip: dev-only ??? builds minimal .xlsx fixtures for spreadsheet-ingest tests
 # (stored entries only, so no compression features needed).
 zip = { version = "8", default-features = false }
 
@@ -270,7 +270,7 @@ codegen-units = 1
 
 # Keep linker memory + disk usage bounded on CI. The workspace has a
 # massive native dep tree (tree-sitter, ort, russh, libgit2, aws-lc-sys,
-# onnxruntime, wasmtime, …) and rust-lld SIGBUSes on Ubuntu CI when
+# onnxruntime, wasmtime, ???) and rust-lld SIGBUSes on Ubuntu CI when
 # parallelFor'ing DWARF from every rlib, even at line-tables-only. The
 # fix: strip debuginfo from ALL third-party deps. Our own crates keep
 # line-tables-only so backtraces still resolve to archon-* source.

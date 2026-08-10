@@ -128,6 +128,83 @@ async fn manual_compact_reports_summary_failure_without_synthetic_fallback() {
     assert_eq!(agent.state.messages.len(), 6);
 }
 
+/// AC#4 deviation guard, half one: bare `/compact` stays thresholded.
+///
+/// The issue asked for bare `/compact` to compact at any usage; the
+/// shipped decision kept it backward-compatible with `/compact auto`
+/// (docs/reference/config.md `manual_compact_force_strategy`). Nothing
+/// exercised `compact(None)` before, so the thresholded branch — and
+/// the status line that has to point the user at `/compact force` —
+/// were both untested.
+#[tokio::test]
+async fn bare_compact_below_threshold_reports_force_escape_hatch() {
+    let captured = Arc::new(Mutex::new(None));
+    let mut agent = test_agent_with_provider(Arc::new(CapturingSummaryProvider {
+        captured: Arc::clone(&captured),
+    }));
+    // Six tiny messages against the default context window is far below
+    // the 60 % `select_strategy` floor.
+    agent.state.messages = (0..6)
+        .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
+        .collect();
+
+    let outcome = agent.compact(None).await;
+
+    assert!(
+        matches!(outcome, ManualCompactOutcome::BelowThreshold { .. }),
+        "bare /compact must stay thresholded; got {outcome:?}"
+    );
+    assert!(
+        outcome.status().contains("/compact force"),
+        "the below-threshold status must name the escape hatch; got {:?}",
+        outcome.status()
+    );
+    assert_eq!(
+        agent.state.messages.len(),
+        6,
+        "below-threshold /compact must not touch the conversation"
+    );
+    assert!(
+        captured.lock().expect("capture lock").is_none(),
+        "below-threshold /compact must not call the summary provider"
+    );
+}
+
+/// AC#4 deviation guard, half two: `/compact force` compacts anyway.
+///
+/// Same conversation as the test above — identical usage ratio, so the
+/// only variable is the subcommand.
+#[tokio::test]
+async fn forced_compact_below_threshold_compacts_anyway() {
+    let captured = Arc::new(Mutex::new(None));
+    let mut agent = test_agent_with_provider(Arc::new(CapturingSummaryProvider {
+        captured: Arc::clone(&captured),
+    }));
+    agent.state.messages = (0..6)
+        .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
+        .collect();
+    assert_eq!(
+        agent.config.context.manual_compact_force_strategy, "micro",
+        "fixture assumes the shipped default force strategy"
+    );
+
+    let outcome = agent.compact(Some("force")).await;
+
+    assert!(
+        matches!(outcome, ManualCompactOutcome::Compacted { .. }),
+        "/compact force must compact below threshold; got {outcome:?}"
+    );
+    assert!(
+        outcome.status().contains("micro"),
+        "forced compaction should report the configured strategy; got {:?}",
+        outcome.status()
+    );
+    assert!(
+        captured.lock().expect("capture lock").is_some(),
+        "/compact force must reach the summary provider"
+    );
+}
+
 #[tokio::test]
 async fn manual_compact_path_pre_trims_huge_history() {
     let captured = Arc::new(Mutex::new(None));

@@ -29,19 +29,13 @@ fn on_agent_complete_works_with_sona_none() {
     integration.on_agent_complete("test-agent", 0.95, "completed successfully");
 }
 
-fn test_event_db() -> Arc<DbInstance> {
-    let path = format!(
-        "/tmp/test-user-correction-event-{}.db",
-        uuid::Uuid::new_v4()
-    );
-    let db = archon_cozo::open_sqlite_guarded_instance(
-        &path,
+fn test_event_db() -> crate::test_support::TestDb<archon_cozo::GuardedDbInstance> {
+    let db = crate::test_support::guarded_test_db(
+        "test-user-correction-event",
         "open pipeline integration test event store",
-        archon_cozo::CozoGuardConfig::for_db_path(&path),
-    )
-    .unwrap();
+    );
     archon_learning::schema::ensure_learning_schema(&db).unwrap();
-    db.db_arc()
+    db
 }
 
 #[test]
@@ -49,7 +43,7 @@ fn record_user_correction_event_writes_to_store() {
     let db = test_event_db();
     let integration =
         LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
-            .with_event_store(Arc::clone(&db));
+            .with_event_store(db.db_arc());
 
     integration.record_user_correction_event(UserCorrectionEventPayload {
         correction_type: "ApproachCorrection".into(),
@@ -58,7 +52,7 @@ fn record_user_correction_event_writes_to_store() {
         session_context: "turn:7".into(),
     });
 
-    let events = archon_learning::store::list_all_learning_events(db.as_ref()).unwrap();
+    let events = archon_learning::store::list_all_learning_events(db.db()).unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(
         events[0].event_type,
@@ -70,7 +64,7 @@ fn record_user_correction_event_writes_to_store() {
     assert_eq!(events[0].signal["user_input_excerpt"], "use this instead");
 
     let proposals =
-        archon_learning::store::list_behaviour_proposals(db.as_ref(), Some("Pending")).unwrap();
+        archon_learning::store::list_behaviour_proposals(db.db(), Some("Pending")).unwrap();
     assert!(proposals.is_empty());
 }
 
@@ -79,7 +73,7 @@ fn correction_cluster_persists_policy_evaluated_pending_proposal() {
     let db = test_event_db();
     let integration =
         LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
-            .with_event_store(Arc::clone(&db));
+            .with_event_store(db.db_arc());
 
     for _ in 0..3 {
         integration.record_user_correction_event(UserCorrectionEventPayload {
@@ -91,11 +85,11 @@ fn correction_cluster_persists_policy_evaluated_pending_proposal() {
     }
 
     let proposals =
-        archon_learning::store::list_behaviour_proposals(db.as_ref(), Some("Pending")).unwrap();
+        archon_learning::store::list_behaviour_proposals(db.db(), Some("Pending")).unwrap();
     assert_eq!(proposals.len(), 1);
     assert_eq!(proposals[0].current_version, "none");
     let policy_rows = archon_learning::store::list_policy_decisions_for_proposal(
-        db.as_ref(),
+        db.db(),
         &proposals[0].proposal_id,
     )
     .unwrap();

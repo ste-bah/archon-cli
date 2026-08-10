@@ -31,7 +31,17 @@ async fn display_initial_resume_history(
 /// throttle elapses, and a line on every launch saying "nothing happened" is
 /// noise people learn to skip — which would defeat the point of showing it at
 /// all.
-fn auto_consolidation_summary(report: &archon_memory::garden::GardenReport) -> Option<String> {
+///
+/// `review_merges` is how many review-band pairs the adjudicator folded away
+/// after the report was produced, or zero when it did not run. Taken as an
+/// argument rather than read off the report because the report is a snapshot of
+/// the consolidation pass and the adjudication happens afterwards -- reporting
+/// the raw `review_pairs` count next to merges that already resolved some of
+/// them would overstate what is still outstanding.
+fn auto_consolidation_summary(
+    report: &archon_memory::garden::GardenReport,
+    review_merges: usize,
+) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if report.duplicates_merged > 0 {
         parts.push(format!("{} duplicate(s) merged", report.duplicates_merged));
@@ -45,11 +55,12 @@ fn auto_consolidation_summary(report: &archon_memory::garden::GardenReport) -> O
     if report.overflow_pruned > 0 {
         parts.push(format!("{} pruned for overflow", report.overflow_pruned));
     }
-    if !report.review_pairs.is_empty() {
-        parts.push(format!(
-            "{} pair(s) awaiting review",
-            report.review_pairs.len()
-        ));
+    if review_merges > 0 {
+        parts.push(format!("{review_merges} pair(s) merged after review"));
+    }
+    let still_pending = report.review_pairs.len().saturating_sub(review_merges);
+    if still_pending > 0 {
+        parts.push(format!("{still_pending} pair(s) awaiting review"));
     }
     // Reported even on an otherwise silent run, because it is the one outcome
     // the counts above cannot express: zero duplicates merged by a pass that
@@ -137,6 +148,10 @@ pub(super) async fn finish(
     config_path: PathBuf,
     working_dir: PathBuf,
     memory: Arc<dyn MemoryTrait>,
+    // Only used to judge the memory-garden review band, and only when that is
+    // switched on. `Agent` holds its own provider privately, so the one path
+    // here that needs to ask a model needs it handed in.
+    llm_client: Arc<dyn archon_pipeline::runner::LlmClient>,
     hook_registry: Arc<archon_core::hooks::HookRegistry>,
     governed_learning_db: Option<Arc<cozo::DbInstance>>,
     session_store: Arc<archon_session::storage::SessionStore>,
@@ -225,6 +240,22 @@ pub(super) async fn finish(
                     session_id,
                 ) {
                     Ok(report) => {
+                        // The review band is everything distance could not
+                        // settle, and it writes nothing -- so without this it is
+                        // resolved only when somebody happens to type `/garden`,
+                        // and otherwise grows forever. Opt-in and threshold-gated
+                        // because the resolution is an LLM round-trip on the
+                        // session-start path; the policy lives in
+                        // `maybe_adjudicate_review_band`.
+                        let review_merges =
+                            crate::command::garden_adjudicate::maybe_adjudicate_review_band(
+                                &config.memory.garden,
+                                Arc::clone(&llm_client),
+                                Arc::clone(&memory),
+                                report.review_pairs.clone(),
+                                agent_model_for_ledger.clone(),
+                            )
+                            .await;
                         tracing::info!(
                             decayed = report.importance_decayed,
                             pruned = report.stale_pruned,
@@ -235,6 +266,7 @@ pub(super) async fn finish(
                             after = report.total_memories_after,
                             ms = report.duration_ms,
                             review_pairs = report.review_pairs.len(),
+                            review_merges,
                             semantic_pass_unavailable = report.semantic_pass_unavailable,
                             "garden: consolidation complete"
                         );
@@ -243,7 +275,7 @@ pub(super) async fn finish(
                         // its only record was a log line nobody reads -- a
                         // process that quietly reshapes your memory is one whose
                         // mistakes are indistinguishable from it working.
-                        garden_summary = auto_consolidation_summary(&report);
+                        garden_summary = auto_consolidation_summary(&report, review_merges);
                     }
                     Err(e) => tracing::warn!("garden: consolidation failed: {e}"),
                 }

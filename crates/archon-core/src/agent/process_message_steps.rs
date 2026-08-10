@@ -56,6 +56,11 @@ impl Agent {
         self.state.add_user_message(user_input);
         self.classify_cognitive_situation(user_input);
         self.run_cognitive_executive_advisory().await;
+        // Issue #76: the full executive loop runs here as a shadow observer,
+        // before the LLM request, so its plan is on record ahead of the live
+        // turn instead of being reconstructed afterwards. It executes nothing
+        // and is bounded by the cognitive pipeline budget.
+        self.run_cognitive_shadow_observation(user_input).await;
         self.spawn_auto_extraction();
     }
 

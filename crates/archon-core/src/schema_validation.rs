@@ -2,6 +2,13 @@
 //!
 //! Provides helpers to extract JSON from assistant text (which may be wrapped
 //! in markdown code blocks) and validate it against a user-supplied JSON schema.
+//!
+//! The fence-stripping itself lives in [`archon_context::fenced`] — five copies
+//! of it had accumulated across the workspace, and this one could not host the
+//! shared version because `archon-core` depends on `archon-memory`, which is
+//! one of the callers.
+
+use archon_context::fenced::{fenced_block_tagged, first_fenced_block};
 
 /// Validate a JSON string against a JSON schema.
 ///
@@ -45,42 +52,23 @@ pub fn extract_json(text: &str) -> Option<String> {
         return Some(trimmed.to_string());
     }
 
-    // Strategy 2: Extract from ```json ... ``` block
-    if let Some(extracted) = extract_from_fenced_block(trimmed, "```json")
-        && serde_json::from_str::<serde_json::Value>(&extracted).is_ok()
+    // Strategies 2 and 3: a ```json block, then any fenced block. The tagged
+    // one is tried first because a response can carry several blocks and the
+    // tagged one is the answer; the untagged pass then covers a bare fence.
+    for block in [
+        fenced_block_tagged(trimmed, "json"),
+        first_fenced_block(trimmed),
+    ]
+    .into_iter()
+    .flatten()
     {
-        return Some(extracted);
-    }
-
-    // Strategy 3: Extract from ``` ... ``` block (no language tag)
-    if let Some(extracted) = extract_from_fenced_block(trimmed, "```")
-        && serde_json::from_str::<serde_json::Value>(&extracted).is_ok()
-    {
-        return Some(extracted);
+        let body = block.body.trim();
+        if !body.is_empty() && serde_json::from_str::<serde_json::Value>(body).is_ok() {
+            return Some(body.to_string());
+        }
     }
 
     None
-}
-
-/// Extract content between the first occurrence of `open_fence` and the next
-/// closing `` ``` ``.
-fn extract_from_fenced_block(text: &str, open_fence: &str) -> Option<String> {
-    let start_idx = text.find(open_fence)?;
-    let after_fence = &text[start_idx + open_fence.len()..];
-
-    // Skip to the next newline (the fence line itself may have trailing text)
-    let content_start = after_fence.find('\n').map(|i| i + 1)?;
-    let content = &after_fence[content_start..];
-
-    // Find closing fence
-    let end_idx = content.find("```")?;
-    let extracted = content[..end_idx].trim().to_string();
-
-    if extracted.is_empty() {
-        None
-    } else {
-        Some(extracted)
-    }
 }
 
 #[cfg(test)]

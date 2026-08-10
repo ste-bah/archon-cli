@@ -227,24 +227,19 @@ fn parse_tier1_fingerprint(
     now: &str,
     content: &str,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
-    let trimmed = content.trim();
-    let json_str = if let Some(start) = trimmed.find("```json") {
-        let inner = &trimmed[start + 7..];
-        if let Some(end) = inner.find("```") {
-            &inner[..end]
-        } else {
-            inner
-        }
-    } else if let Some(start) = trimmed.find('{') {
-        &trimmed[start..]
-    } else {
+    // The classifier is told to emit bare JSON and routinely fences it anyway.
+    // This used to look only for a ```json fence and otherwise slice from the
+    // first `{` to the end of the response, so a bare ``` fence left the
+    // closing backticks attached and failed to parse every time.
+    let json_str = archon_context::fenced::json_payload(content);
+    if !json_str.contains('{') {
         return Err(GameTheoryError::FingerprintParse {
             message: "LLM response did not contain JSON".into(),
         });
-    };
+    }
 
     let parsed: serde_json::Value =
-        serde_json::from_str(json_str.trim()).map_err(|e| GameTheoryError::FingerprintParse {
+        serde_json::from_str(json_str).map_err(|e| GameTheoryError::FingerprintParse {
             message: e.to_string(),
         })?;
 

@@ -91,6 +91,9 @@ impl Agent {
     ///
     /// `subcommand` selects the strategy:
     /// - `None` or `Some("auto")` — pick strategy automatically via `select_strategy`
+    ///   (returns `BelowThreshold` under 60 % context usage)
+    /// - `Some("force")` — compact regardless of usage, using
+    ///   `context.manual_compact_force_strategy` (default `micro`)
     /// - `Some("micro")` — microcompact (summarize oldest 30 %)
     /// - `Some("snip")` — snip oldest turns without summarization
     pub async fn compact(&mut self, subcommand: Option<&str>) -> ManualCompactOutcome {
@@ -172,7 +175,7 @@ impl Agent {
             Some(s) => s,
             None => {
                 return ManualCompactOutcome::BelowThreshold {
-                    status: "Context usage is below 60 %; no compaction needed.".into(),
+                    status: "Context usage is below 60 %; no compaction needed. Use /compact force to compact anyway.".into(),
                 };
             }
         };

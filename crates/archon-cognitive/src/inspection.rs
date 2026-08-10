@@ -5,6 +5,7 @@ use cozo::{DataValue, DbInstance, ScriptMutability};
 use serde::{Deserialize, Serialize};
 
 use crate::cozo_guard::{relation_count, run_script_guarded};
+use crate::metrics::{CognitiveMetricSnapshot, MetricEventStore};
 use crate::schema::ensure_cognitive_schema;
 use crate::self_model::SelfModelBriefing;
 use crate::self_model::SelfModelStore;
@@ -19,11 +20,20 @@ pub struct CognitiveInspectionStatus {
     pub proposal_count: usize,
     pub apply_result_count: usize,
     pub self_model_fact_count: usize,
+    pub metric_event_count: usize,
+    /// Plans the shadow executive loop recorded but never executed. Counted
+    /// separately from `executive_decision_count` on purpose: conflating them
+    /// would report work nobody did as work the agent was advised on.
+    pub shadow_decision_count: usize,
     pub latest_tick: Option<TickSummary>,
     pub recent_decisions: Vec<DecisionSummary>,
     pub recent_reflections: Vec<ReflectionSummary>,
+    pub recent_shadow_decisions: Vec<ShadowSummary>,
     pub pending_proposals: Vec<ProposalSummary>,
     pub self_model: SelfModelBriefing,
+    /// Metrics recomputed from `cognitive_metric_events`, not accumulated
+    /// counters, so every surface reports the same recomputable numbers.
+    pub metrics: CognitiveMetricSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +60,24 @@ pub struct ReflectionSummary {
     pub created_at: DateTime<Utc>,
 }
 
+/// One shadow plan and, once the turn finished, how it compared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowSummary {
+    pub shadow_decision_id: String,
+    pub session_id: String,
+    pub turn_number: u64,
+    pub decision_id: String,
+    pub situation_kind: String,
+    pub shadow_action: String,
+    pub live_action: String,
+    pub joined: bool,
+    /// `None` until the turn is joined, and also when the live action class was
+    /// not observable — never collapsed onto `false`.
+    pub agreed: Option<bool>,
+    pub surprise: Option<f64>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProposalSummary {
     pub proposal_id: String,
@@ -68,7 +96,9 @@ pub struct TickSummary {
     pub proposals_evaluated: u64,
     pub proposals_auto_applied: u64,
     pub proposals_denied: u64,
-    pub self_model_updated: bool,
+    /// `None` when the tick recorded no self-model measurement at all, which is
+    /// currently every tick: see `CognitiveTick::refresh_self_model`.
+    pub self_model_updated: Option<bool>,
     pub error_count: usize,
     pub duration_ms: u64,
     pub created_at: DateTime<Utc>,
@@ -100,12 +130,26 @@ impl<'a> CognitiveInspection<'a> {
             proposal_count: count(self.db, "governed_proposals", "proposal_id"),
             apply_result_count: count(self.db, "autonomous_apply_results", "apply_id"),
             self_model_fact_count: count(self.db, "self_model_facts", "fact_id"),
+            metric_event_count: count(self.db, "cognitive_metric_events", "metric_event_id"),
+            shadow_decision_count: count(
+                self.db,
+                "cognitive_shadow_decisions",
+                "shadow_decision_id",
+            ),
             latest_tick: self.latest_tick()?,
             recent_decisions: self.recent_decisions(5)?,
             recent_reflections: self.reflections(None, 5)?,
+            recent_shadow_decisions: self.shadow_decisions(5)?,
             pending_proposals: self.pending_proposals(5)?,
             self_model: SelfModelStore::new(self.db)?.export_briefing()?,
+            metrics: self.metrics()?,
         })
+    }
+
+    /// Snapshot for the most recently declared evaluation window, falling back
+    /// to the whole event history while no window exists yet.
+    pub fn metrics(&self) -> Result<CognitiveMetricSnapshot, CognitiveError> {
+        MetricEventStore::new(self.db, &self.ledger_dir)?.latest_snapshot()
     }
 
     pub fn inspect_decision(
@@ -170,6 +214,22 @@ impl<'a> CognitiveInspection<'a> {
             .iter()
             .map(|row| row_to_reflection_summary(row))
             .collect();
+        values.sort_by_key(|value| std::cmp::Reverse(value.created_at));
+        values.truncate(limit);
+        Ok(values)
+    }
+
+    /// Most recent shadow plans, newest first.
+    pub fn shadow_decisions(&self, limit: usize) -> Result<Vec<ShadowSummary>, CognitiveError> {
+        let rows = run_script_guarded(
+            self.db,
+            "?[shadow_decision_id, session_id, turn_number, decision_id, situation_kind, selected_action, live_action, joined, agreed, surprise, created_at] := \
+             *cognitive_shadow_decisions{shadow_decision_id, session_id, turn_number, decision_id, situation_kind, selected_action, live_action, joined, agreed, surprise, created_at}",
+            Default::default(),
+            ScriptMutability::Immutable,
+            "query cognitive shadow decisions",
+        )?;
+        let mut values: Vec<_> = rows.rows.iter().map(|row| row_to_shadow(row)).collect();
         values.sort_by_key(|value| std::cmp::Reverse(value.created_at));
         values.truncate(limit);
         Ok(values)
@@ -285,13 +345,32 @@ fn row_to_reflection_summary(row: &[DataValue]) -> ReflectionSummary {
     }
 }
 
+fn row_to_shadow(row: &[DataValue]) -> ShadowSummary {
+    ShadowSummary {
+        shadow_decision_id: str_col(row, 0),
+        session_id: str_col(row, 1),
+        turn_number: int_col(row, 2),
+        decision_id: str_col(row, 3),
+        situation_kind: str_col(row, 4),
+        shadow_action: str_col(row, 5),
+        live_action: str_col(row, 6),
+        joined: row[7].get_bool().unwrap_or(false),
+        // Null columns mean "not joined" or "not observable"; do not collapse
+        // either onto `false`/`0.0`.
+        agreed: row[8].get_bool(),
+        surprise: row[9].get_float(),
+        created_at: time_col(row, 10),
+    }
+}
+
 fn row_to_tick(row: &[DataValue]) -> TickSummary {
     TickSummary {
         tick_id: str_col(row, 0),
         proposals_evaluated: int_col(row, 1),
         proposals_auto_applied: int_col(row, 2),
         proposals_denied: int_col(row, 3),
-        self_model_updated: row[4].get_bool().unwrap_or(false),
+        // A null column means "not measured"; do not collapse it onto `false`.
+        self_model_updated: row[4].get_bool(),
         error_count: json_array_len(&str_col(row, 5)),
         duration_ms: int_col(row, 6),
         created_at: time_col(row, 7),

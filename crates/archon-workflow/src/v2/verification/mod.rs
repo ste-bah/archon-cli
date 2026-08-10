@@ -16,11 +16,10 @@
 //! is a type this crate owns; nothing here touches CLI state, config layering,
 //! or the terminal.
 
+mod contracts;
 mod failure_class;
 mod normalize;
 mod signals;
 
-pub use normalize::{
-    enforce_declared_contracts, normalize_focused_verification_outcome,
-    stamp_focused_verification_input,
-};
+pub use contracts::enforce_declared_contracts;
+pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};

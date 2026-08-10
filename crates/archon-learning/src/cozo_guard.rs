@@ -28,10 +28,57 @@ pub async fn open_sqlite_guarded_async(
     Ok(archon_cozo::GuardedDbInstance::new(db, config).db_arc())
 }
 
+/// A sqlite-backed learning store for tests, plus the temp directory that
+/// holds its files.
+///
+/// These stores used to be opened at a `format!("/tmp/…")` path. On Windows
+/// `/tmp` is not a temp directory — it resolves against the current drive
+/// root — so every run left an orphaned `.db` (and its
+/// `.archon-cozo-write.lock` sibling) in e.g. `F:\tmp\`. Owning a
+/// [`tempfile::TempDir`] fixes both the portability bug and the leak.
+///
+/// The `Deref` impl means existing call sites that only ever borrow the
+/// handle (`&db`, `db.run_script(..)`) need no change; the guard must simply
+/// stay bound for the lifetime of the test, which a `let db = …;` already
+/// does.
 #[cfg(test)]
-pub(crate) fn test_sqlite_db(prefix: &str) -> std::sync::Arc<DbInstance> {
-    let path = format!("/tmp/{prefix}-{}.db", uuid::Uuid::new_v4());
-    let db = open_sqlite_guarded(&path, "open test learning store").unwrap();
+pub(crate) struct TestDb {
+    db: std::sync::Arc<DbInstance>,
+    _dir: tempfile::TempDir,
+}
+
+#[cfg(test)]
+impl TestDb {
+    /// Clone the shared handle for the (few) call sites that need to move an
+    /// `Arc` into a context outliving the borrow. The `TestDb` itself must
+    /// still outlive that clone, or the backing files vanish underneath it.
+    #[allow(dead_code)]
+    pub(crate) fn arc(&self) -> std::sync::Arc<DbInstance> {
+        std::sync::Arc::clone(&self.db)
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestDb {
+    type Target = DbInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.db
+    }
+}
+
+/// Open a guarded sqlite store in a fresh temp directory, schema not applied.
+#[cfg(test)]
+pub(crate) fn test_sqlite_db_bare(prefix: &str) -> TestDb {
+    let dir = tempfile::tempdir().expect("create learning test temp dir");
+    let path = dir.path().join(format!("{prefix}.db"));
+    let db = open_sqlite_guarded(&path.to_string_lossy(), "open test learning store").unwrap();
+    TestDb { db, _dir: dir }
+}
+
+#[cfg(test)]
+pub(crate) fn test_sqlite_db(prefix: &str) -> TestDb {
+    let db = test_sqlite_db_bare(prefix);
     crate::schema::ensure_learning_schema(&db).unwrap();
     db
 }

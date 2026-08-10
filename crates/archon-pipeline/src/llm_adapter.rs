@@ -13,7 +13,14 @@ use archon_llm::provider::{LlmProvider, LlmRequest};
 use archon_llm::streaming::StreamEvent;
 use tokio::sync::mpsc::Receiver;
 
+use crate::kb::compile::KbLlmClient;
+use crate::kb::query::{AnswerStreamSink, QaSynthesizer};
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, ToolUseEntry};
+
+/// Callback handed each text delta as it leaves the provider stream.
+///
+/// `Send` because it is held across the `await` inside the stream loop.
+type TextDeltaSink<'a> = &'a mut (dyn FnMut(&str) -> Result<()> + Send);
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -108,6 +115,7 @@ impl ProviderLlmAdapter {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_with_scope(
         &self,
         messages: Vec<serde_json::Value>,
@@ -116,6 +124,7 @@ impl ProviderLlmAdapter {
         model: &str,
         run_id: &str,
         session_id: &str,
+        on_text: Option<TextDeltaSink<'_>>,
     ) -> Result<LlmResponse> {
         let effective_model = self.model_for_provider(model);
         let request = LlmRequest {
@@ -135,7 +144,7 @@ impl ProviderLlmAdapter {
             Err(e) => return Err(anyhow::anyhow!("LLM API error: {e}")),
         };
 
-        collect_stream(rx).await
+        collect_stream_into(rx, on_text).await
     }
 
     fn model_for_provider(&self, requested: &str) -> String {
@@ -192,6 +201,7 @@ impl LlmClient for ProviderLlmAdapter {
             model,
             &self.run_id,
             &self.session_id,
+            None,
         )
         .await
     }
@@ -212,12 +222,111 @@ impl LlmClient for ProviderLlmAdapter {
             &model,
             &request.session_id,
             &request.session_id,
+            None,
         )
         .await
     }
 }
 
-async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
+// ---------------------------------------------------------------------------
+// Knowledge-base adapters
+// ---------------------------------------------------------------------------
+
+/// Single-prompt completion over a resolved provider, for the knowledge-base
+/// passes.
+///
+/// `kb::compile` and `kb::query` take narrow abstract traits — a prompt in,
+/// text out — so their tests can run deterministically without a model. This is
+/// the one production implementation of both, and it lives here rather than in
+/// `archon-pipeline::kb` for the same reason [`ProviderLlmAdapter`] does: the
+/// knowledge-base modules should not know which provider is configured.
+pub struct KbProviderClient {
+    inner: ProviderLlmAdapter,
+    model: String,
+}
+
+impl KbProviderClient {
+    /// Wrap a resolved provider. `model` is an alias or concrete ID; the inner
+    /// adapter resolves it the same way every other pipeline call does.
+    pub fn new(provider: Arc<dyn LlmProvider>, model: impl Into<String>) -> Self {
+        Self {
+            inner: ProviderLlmAdapter::new(provider).with_origin("kb"),
+            model: model.into(),
+        }
+    }
+
+    /// One prompt in, complete text out, with every delta handed to `on_text`
+    /// first when one is supplied.
+    async fn complete_text(
+        &self,
+        prompt: &str,
+        on_text: Option<TextDeltaSink<'_>>,
+    ) -> Result<String> {
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": prompt }],
+        })];
+        let response = self
+            .inner
+            .send_with_scope(
+                messages,
+                Vec::new(),
+                Vec::new(),
+                &self.model,
+                &self.inner.run_id,
+                &self.inner.session_id,
+                on_text,
+            )
+            .await?;
+        Ok(response.content)
+    }
+}
+
+#[async_trait]
+impl KbLlmClient for KbProviderClient {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        self.complete_text(prompt, None).await
+    }
+}
+
+#[async_trait]
+impl QaSynthesizer for KbProviderClient {
+    /// The engine has already assembled the instruction and the evidence into
+    /// `context`; the bare question is kept only for logging by other
+    /// implementations, so it is not re-sent here.
+    async fn synthesize(&self, _question: &str, context: &str) -> Result<String> {
+        self.complete_text(context, None).await
+    }
+
+    /// Streaming costs one callback here, not a second transport: every
+    /// provider already delivers `StreamEvent`s and the non-streaming path
+    /// differs only in that it throws the deltas away until the stream ends.
+    async fn synthesize_streaming(
+        &self,
+        _question: &str,
+        context: &str,
+        sink: &mut dyn AnswerStreamSink,
+    ) -> Result<String> {
+        let mut forward = |text: &str| sink.on_token(text);
+        self.complete_text(context, Some(&mut forward)).await
+    }
+}
+
+async fn collect_stream(rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
+    collect_stream_into(rx, None).await
+}
+
+/// Drain a provider stream into a complete [`LlmResponse`], optionally handing
+/// each text delta to `on_text` on the way past.
+///
+/// One loop understands `StreamEvent` for the whole pipeline. Streaming callers
+/// get their tokens from the callback rather than from a parallel consumer,
+/// because a `Receiver` has a single consumer and a second one would have to
+/// re-implement error classification and usage accounting to match.
+async fn collect_stream_into(
+    mut rx: Receiver<StreamEvent>,
+    mut on_text: Option<TextDeltaSink<'_>>,
+) -> Result<LlmResponse> {
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_uses: Vec<ToolUseEntry> = Vec::new();
     let mut usage = archon_llm::usage::UsageAccumulator::default();
@@ -248,6 +357,9 @@ async fn collect_stream(mut rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
                 }
             }
             StreamEvent::TextDelta { text, .. } => {
+                if let Some(on_text) = on_text.as_deref_mut() {
+                    on_text(&text)?;
+                }
                 text_parts.push(text);
             }
             StreamEvent::InputJsonDelta {

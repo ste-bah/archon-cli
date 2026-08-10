@@ -127,16 +127,30 @@ fn test_insert_and_readback_provenance_edge() {
 }
 
 #[test]
-fn test_hash_exists_and_get_by_hash() {
+fn test_reserve_by_hash_registers_then_reports_the_duplicate() {
     let db = test_db();
     crate::schema::ensure_doc_schema(&db).unwrap();
-    let doc = test_doc("hash-doc");
-    insert_doc_source(&db, &doc).unwrap();
-    assert!(hash_exists_in_sources(&db, "abc123").unwrap());
-    assert!(!hash_exists_in_sources(&db, "nonexistent").unwrap());
 
-    let found = get_doc_by_hash(&db, "abc123").unwrap().unwrap();
-    assert_eq!(found.document_id, "hash-doc");
+    let first = test_doc("hash-doc");
+    assert!(matches!(
+        reserve_doc_source_by_hash(&db, &first).unwrap(),
+        HashReservation::Registered
+    ));
+    assert_eq!(
+        get_doc_by_hash(&db, "abc123").unwrap().unwrap().document_id,
+        "hash-doc"
+    );
+
+    // A second document carrying the same hash must not be written, and the
+    // caller must be handed the owner so it can link to it.
+    let second = test_doc("hash-doc-again");
+    let HashReservation::Duplicate(existing) = reserve_doc_source_by_hash(&db, &second).unwrap()
+    else {
+        panic!("second reservation of one content hash must report a duplicate");
+    };
+    assert_eq!(existing.document_id, "hash-doc");
+    assert_eq!(list_doc_sources(&db).unwrap().len(), 1);
+    assert!(get_doc_source(&db, "hash-doc-again").unwrap().is_none());
 }
 
 #[test]

@@ -141,6 +141,11 @@ pub async fn handle_remote_command(
         {
             srv_cfg.token = Some(tok.trim().to_string());
         }
+        // Handshake-only on purpose: `/ws/ide` is request/response with no way
+        // to push a frame, so an agent behind it could run a turn that the
+        // client would never see. `IdeProtocolHandler::new` refuses every
+        // agent-backed method explicitly rather than pretending to queue it —
+        // the IDE extension's agent transport is `archon ide-stdio`.
         let ide_proto = IdeProtocolHandler::new(env!("CARGO_PKG_VERSION"));
         let ide_handler: IdeHandlerFn = Arc::new(Mutex::new(Box::new({
             let mut h = ide_proto;

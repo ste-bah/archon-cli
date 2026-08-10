@@ -41,7 +41,9 @@ where
             surface: input.surface,
         });
         let mut degraded = Vec::new();
-        store_situation(self.db, &situation, &mut degraded);
+        if input.record_situation {
+            store_situation(self.db, &situation, &mut degraded);
+        }
         if situation.kind.is_trivial() {
             return Ok(direct_outcome(&situation, "direct_answer", degraded));
         }

@@ -14,7 +14,7 @@ use crate::ingest::{
 };
 use crate::models::{DocumentStatus, ProcessingJob, SourceDocument};
 use crate::schema::ensure_doc_schema;
-use crate::store::{self, hash_exists_in_sources};
+use crate::store;
 
 pub async fn ingest_bytes_source_with_policy(
     db: &DbInstance,
@@ -32,19 +32,31 @@ pub async fn ingest_bytes_source_with_policy(
     }
 
     let content_hash = sha256_hex(content_bytes);
-    if hash_exists_in_sources(db, &content_hash).map_err(storage)? {
-        let existing_id = store::get_doc_by_hash(db, &content_hash)
-            .map_err(storage)?
-            .map(|d| d.document_id)
-            .unwrap_or_default();
+    let document_id = format!("doc-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let reservation = store::reserve_doc_source_by_hash(
+        db,
+        &SourceDocument {
+            document_id: document_id.clone(),
+            source_path: source_path.to_string(),
+            media_type: media_type.to_string(),
+            content_hash: content_hash.clone(),
+            discovered_at: now.clone(),
+            status: DocumentStatus::Discovered,
+        },
+    )
+    .map_err(storage)?;
+
+    if let store::HashReservation::Duplicate(existing) = reservation {
         info!(
             source = %source_path,
             hash = %content_hash,
-            existing = %existing_id,
+            existing = %existing.document_id,
             "Skipping duplicate byte source"
         );
         return Ok(IngestFileResult {
-            document_id: existing_id,
+            document_id: existing.document_id,
             was_new: false,
             ocr_skipped: false,
             pipeline_failed: false,
@@ -60,21 +72,6 @@ pub async fn ingest_bytes_source_with_policy(
             pdf_coord: None,
         });
     }
-
-    let document_id = format!("doc-{}", uuid::Uuid::new_v4());
-    let now = chrono::Utc::now().to_rfc3339();
-    store::insert_doc_source(
-        db,
-        &SourceDocument {
-            document_id: document_id.clone(),
-            source_path: source_path.to_string(),
-            media_type: media_type.to_string(),
-            content_hash,
-            discovered_at: now.clone(),
-            status: DocumentStatus::Discovered,
-        },
-    )
-    .map_err(storage)?;
 
     store::insert_processing_job(
         db,

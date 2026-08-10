@@ -17,6 +17,12 @@
 //!    wrong verdict is undone by removing a tag.
 //! 3. It defaults to NOT merging. An unparseable answer, a failed call, or any
 //!    uncertainty leaves both memories intact. Silence must never destroy.
+//!
+//! `/garden` adjudicates unconditionally. Automatic session-start consolidation
+//! goes through [`maybe_adjudicate_review_band`] instead, which is opt-in and
+//! waits for the band to be worth a round-trip -- without it the review band has
+//! no automatic resolution at all and grows for as long as nobody types
+//! `/garden`.
 
 use std::sync::Arc;
 
@@ -29,6 +35,15 @@ use archon_memory::garden::{Adjudication, ReviewPair};
 /// this has probably found a systemic problem rather than a set of duplicates,
 /// and should be looked at before it reshapes the graph.
 const MAX_PAIRS_PER_RUN: usize = 20;
+
+/// Longest an automatic adjudication may hold up a session start.
+///
+/// Only the automatic path is bounded. `/garden` spawns its adjudication and
+/// returns, so a stalled provider there costs nothing; on the session-start path
+/// the same stall sits between launching Archon and being able to type. Abandoning
+/// the call loses nothing either: the band writes nothing, so the pairs are
+/// re-derived and offered again by the next consolidation.
+const STARTUP_ADJUDICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// Ask whether each pair states the same thing.
 ///
@@ -178,6 +193,46 @@ pub(crate) async fn adjudicate_and_apply(
         }
         Err(error) => {
             tracing::warn!(%error, "applying adjudicated merges failed");
+            0
+        }
+    }
+}
+
+/// Judge the review band on the automatic session-start path, if configured to.
+///
+/// Returns how many pairs were merged; zero whenever the trigger did not fire,
+/// which is the default. Separate from [`adjudicate_and_apply`] so the policy —
+/// opted in, and only once the band is worth a round-trip — lives beside the
+/// cost it authorises rather than inside the session bootstrap.
+pub(crate) async fn maybe_adjudicate_review_band(
+    garden: &archon_memory::garden::GardenConfig,
+    client: Arc<dyn archon_pipeline::runner::LlmClient>,
+    memory: Arc<dyn MemoryTrait>,
+    pairs: Vec<ReviewPair>,
+    model: String,
+) -> usize {
+    if !archon_memory::garden::should_auto_adjudicate(garden, pairs.len()) {
+        return 0;
+    }
+    let pending = pairs.len();
+    tracing::info!(
+        pending,
+        threshold = garden.auto_adjudicate_min_pairs,
+        "garden: review band reached the automatic adjudication threshold"
+    );
+    match tokio::time::timeout(
+        STARTUP_ADJUDICATION_TIMEOUT,
+        adjudicate_and_apply(client, memory, pairs, model),
+    )
+    .await
+    {
+        Ok(merged) => merged,
+        Err(_) => {
+            tracing::warn!(
+                pending,
+                timeout_secs = STARTUP_ADJUDICATION_TIMEOUT.as_secs(),
+                "garden: automatic adjudication timed out; nothing merged"
+            );
             0
         }
     }

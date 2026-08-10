@@ -231,14 +231,42 @@ subject, opposite instruction. So distance is banded:
 | Band | Action |
 |---|---|
 | `< semantic_dedup_max_distance` (0.15) | merge; loser marked superseded |
-| up to `semantic_review_max_distance` (0.35) | linked with `RelatedTo`, nothing merged |
+| up to `semantic_review_max_distance` (0.35) | reported as a `ReviewPair`; **nothing written** |
 | beyond | ignored |
 
-The middle band is reported, not acted on. `/garden` then judges it in the
-background: the pairs go to the configured model, which answers `SAME` or
-`DIFFERENT` per pair, and only `SAME` verdicts are merged — through the same
-path as the automatic passes, so survivor selection and supersession are
+The middle band writes nothing at all — no edge, no tag, no importance change.
+That is load-bearing, not incidental. It originally recorded a `RelatedTo` edge
+to mark the pair for later adjudication, and `phase_fragment_merge` runs
+immediately afterwards and selects its candidates with `get_related_memories`:
+every "probably related, decide nothing" edge became a hard delete one phase
+later, and 13 memories were destroyed on a real store by pairs this band had
+deliberately spared. A band that exists to withhold a decision cannot leave
+behind anything another phase reads as a decision. Pinned by
+`the_review_band_records_no_relationship` in
+`crates/archon-memory/src/garden/semantic_dedup_tests.rs`.
+
+The pairs come back to the caller in `GardenReport::review_pairs` and are judged
+there, because `archon-memory` is a leaf crate with no provider access and
+consolidation is synchronous. The pairs go to the configured model, which answers
+`SAME` or `DIFFERENT` per pair, and only `SAME` verdicts are merged — through the
+same path as the automatic passes, so survivor selection and supersession are
 identical.
+
+Because the band writes nothing, leaving it unjudged is safe but not
+self-correcting: the pairs are re-derived from the store on every run and simply
+reported again, so a band nobody adjudicates grows for as long as nobody judges
+it. Two things do:
+
+- `/garden` always does, in the background — the command was explicitly asked for,
+  so its cost is not a surprise.
+- Automatic session-start consolidation does only when
+  `[memory.garden] auto_adjudicate_review_band` is on **and** at least
+  `auto_adjudicate_min_pairs` (10) are pending. It is off by default because that
+  path runs before the user has typed anything and nothing else on it calls a
+  model; the threshold is what keeps "on" from meaning a round-trip per launch.
+  Whatever it merges is reported in the startup panel alongside the rest of the
+  pass, and the call is abandoned after 45s so a stalled provider cannot wedge a
+  session start.
 
 Three properties keep a model acceptable in a path that supersedes memories:
 

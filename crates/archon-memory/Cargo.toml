@@ -5,6 +5,9 @@ edition.workspace = true
 
 [dependencies]
 archon-cozo = { path = "../archon-cozo" }
+# Shared markdown-fence stripper for LLM responses. `archon-context` is a leaf
+# in the archon graph, so this edge cannot cycle back through `archon-memory`.
+archon-context = { path = "../archon-context" }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

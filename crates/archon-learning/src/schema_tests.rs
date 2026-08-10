@@ -1,8 +1,7 @@
 use super::*;
 
-fn test_db() -> std::sync::Arc<DbInstance> {
-    let path = format!("/tmp/test-learning-schema-{}.db", uuid::Uuid::new_v4());
-    crate::cozo_guard::open_sqlite_guarded(&path, "open test learning schema").unwrap()
+fn test_db() -> crate::cozo_guard::TestDb {
+    crate::cozo_guard::test_sqlite_db_bare("test-learning-schema")
 }
 
 #[test]

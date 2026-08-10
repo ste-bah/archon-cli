@@ -389,9 +389,8 @@ mod tests {
     use crate::models::{CompletionClaimKind, CompletionState, VerificationGateResult};
     use cozo::DbInstance;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-evidence-resolver-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    fn test_db() -> crate::test_support::TestDb<DbInstance> {
+        crate::test_support::sqlite_test_db("test-evidence-resolver")
     }
 
     #[test]

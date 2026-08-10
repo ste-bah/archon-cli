@@ -1,4 +1,11 @@
-//! Persisted production-path evidence for KB ingest, retrieval, and provenance.
+//! Persisted evidence for the `kb_nodes` ingest path and its semantic index.
+//!
+//! This used to also drive `Compiler` and `QueryEngine`. Both now work on the
+//! document store, so what is left here is exactly the surface that
+//! [`super::ingest`] still owns and nothing in the CLI reaches: node rows,
+//! content-hash ownership, embedding rows and the HNSW index. It is kept
+//! deliberately — it is the only proof that the orphaned half still behaves
+//! while the decision to remove it is outstanding.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -8,10 +15,7 @@ use archon_docs::embed::LocalEmbeddingProvider;
 use archon_docs::errors::DocsError;
 use cozo::{DbInstance, ScriptMutability};
 
-use super::compile::{Compiler, KbLlmClient};
 use super::ingest::Ingester;
-use super::query::{QueryEngine, ScoredKbNode};
-use super::query_search::candidate_limit_for_tests;
 use super::schema::ensure_kb_schema;
 
 struct EvidenceEmbedder;
@@ -34,19 +38,6 @@ impl LocalEmbeddingProvider for EvidenceEmbedder {
     }
 }
 
-struct EvidenceLlm;
-
-#[async_trait::async_trait]
-impl KbLlmClient for EvidenceLlm {
-    async fn complete(&self, prompt: &str) -> anyhow::Result<String> {
-        Ok(if prompt.starts_with("Summarize") {
-            r#"{"summary":"compiled evidence summary"}"#.into()
-        } else {
-            "[]".into()
-        })
-    }
-}
-
 #[tokio::test]
 async fn persisted_kb_runtime_evidence() {
     let started = Instant::now();
@@ -54,10 +45,9 @@ async fn persisted_kb_runtime_evidence() {
     let path = temp.path().join("issue90-kb.sqlite");
     let path = path.to_string_lossy().into_owned();
     let ingested = populate_persisted_kb(&path, temp.path()).await;
-    let results = query_reopened_kb(&path);
     let physical = read_physical_state(&path);
-    assert_evidence(ingested, &path, &results, &physical);
-    print_evidence(&results, &physical, started.elapsed().as_millis());
+    assert_evidence(ingested, &physical);
+    print_evidence(&physical, started.elapsed().as_millis());
 }
 
 async fn populate_persisted_kb(path: &str, fixture_dir: &std::path::Path) -> usize {
@@ -65,12 +55,7 @@ async fn populate_persisted_kb(path: &str, fixture_dir: &std::path::Path) -> usi
     ensure_kb_schema(&db).expect("create KB schema");
     let ingester = Ingester::with_embedder(db.clone(), Arc::new(EvidenceEmbedder))
         .expect("configure deterministic embedder");
-    let ingested = ingest_evidence_files(&ingester, fixture_dir).await;
-    let compiler = Compiler::new(db, Box::new(EvidenceLlm)).expect("create compiler");
-    let metrics = compiler.compile().await.expect("production compile");
-    assert_eq!(metrics.summaries_generated, ingested);
-    assert_eq!(metrics.edges_created, ingested);
-    ingested
+    ingest_evidence_files(&ingester, fixture_dir).await
 }
 
 async fn ingest_evidence_files(ingester: &Ingester, fixture_dir: &std::path::Path) -> usize {
@@ -103,31 +88,11 @@ fn evidence_chunks() -> Vec<(String, String)> {
         .collect()
 }
 
-fn query_reopened_kb(path: &str) -> Vec<ScoredKbNode> {
-    let db = sqlite_db(path);
-    let lexical = QueryEngine::new(db.clone())
-        .search_nodes("mixedcase", 2, None)
-        .expect("production mixed-case lexical retrieval");
-    assert_eq!(lexical.len(), 2);
-    assert!(
-        lexical
-            .iter()
-            .all(|row| row.node.content.contains("MiXeDCase"))
-    );
-    let semantic = QueryEngine::new(db)
-        .with_embedder(Arc::new(EvidenceEmbedder))
-        .search_nodes("semantic query", 2, None)
-        .expect("production semantic retrieval");
-    assert_eq!(semantic.len(), 2);
-    semantic
-}
-
 struct PhysicalState {
     nodes: usize,
     embeddings: usize,
     hashes: usize,
     hnsw: bool,
-    provenance: usize,
 }
 
 fn read_physical_state(path: &str) -> PhysicalState {
@@ -137,66 +102,25 @@ fn read_physical_state(path: &str) -> PhysicalState {
         embeddings: count_rows(&db, "kb_embeddings", "node_id"),
         hashes: count_rows(&db, "kb_content_hashes", "content_hash"),
         hnsw: has_semantic_index(&db),
-        provenance: count_provenance(&db),
     };
     assert_exact_raw_ownership(&db);
-    assert_exact_provenance(&db);
     assert_no_orphans(&db);
     state
 }
 
-fn assert_evidence(ingested: usize, path: &str, results: &[ScoredKbNode], state: &PhysicalState) {
+fn assert_evidence(ingested: usize, state: &PhysicalState) {
     assert_eq!(ingested, 9);
-    assert_eq!(results.len(), 2);
-    assert_eq!(result_ids(results), result_ids(&query_reopened_kb(path)));
-    assert!(
-        results
-            .iter()
-            .any(|row| row.node.content == "semantic target")
-    );
-    assert!(
-        result_scores(results)
-            .iter()
-            .all(|score| score.is_finite() && (0.0..=1.0).contains(score))
-    );
-    assert!(
-        result_scores(results)
-            .iter()
-            .any(|score| (0.5..1.0).contains(score))
-    );
-    assert_eq!(state.nodes, 19);
-    assert_eq!(state.embeddings, 19);
+    assert_eq!(state.nodes, 9);
+    assert_eq!(state.embeddings, 9);
     assert_eq!(state.hashes, 9);
     assert!(state.hnsw);
-    assert_eq!(state.provenance, 9);
 }
 
-fn print_evidence(results: &[ScoredKbNode], state: &PhysicalState, elapsed_ms: u128) {
-    assert_eq!(
-        candidate_limit_for_tests(2).expect("exact candidate bound"),
-        6
-    );
+fn print_evidence(state: &PhysicalState, elapsed_ms: u128) {
     println!(
-        "EVIDENCE kb_runtime nodes={} embeddings={} hashes={} hnsw={} limit=2 candidate_bound=3x_limit candidate_limit=6 filtered_semantic_ranking=exact result_ids={:?} scores={:?} provenance={} elapsed_ms={elapsed_ms}",
-        state.nodes,
-        state.embeddings,
-        state.hashes,
-        state.hnsw,
-        result_ids(results),
-        result_scores(results),
-        state.provenance,
+        "EVIDENCE kb_runtime nodes={} embeddings={} hashes={} hnsw={} elapsed_ms={elapsed_ms}",
+        state.nodes, state.embeddings, state.hashes, state.hnsw,
     );
-}
-
-fn result_ids(results: &[ScoredKbNode]) -> Vec<&str> {
-    results
-        .iter()
-        .map(|row| row.node.node_id.as_str())
-        .collect()
-}
-
-fn result_scores(results: &[ScoredKbNode]) -> Vec<f64> {
-    results.iter().map(|row| row.score).collect()
 }
 
 fn vector_for(text: &str) -> Vec<f32> {
@@ -222,17 +146,6 @@ fn count_rows(db: &DbInstance, relation: &str, key: &str) -> usize {
     result.rows[0][0].get_int().unwrap_or_default() as usize
 }
 
-fn count_provenance(db: &DbInstance) -> usize {
-    let rows = db
-        .run_script(
-            "?[count(edge_id)] := *kb_edges{edge_id, edge_type}, edge_type = 'Provenance'",
-            BTreeMap::new(),
-            ScriptMutability::Immutable,
-        )
-        .expect("count persisted provenance");
-    rows.rows[0][0].get_int().unwrap_or_default() as usize
-}
-
 fn assert_exact_raw_ownership(db: &DbInstance) {
     let expected: BTreeSet<_> = evidence_chunks()
         .into_iter()
@@ -250,29 +163,6 @@ fn assert_exact_raw_ownership(db: &DbInstance) {
         actual
             .iter()
             .all(|(hash, _, content)| expected.contains(&(hash.clone(), content.clone())))
-    );
-}
-
-fn assert_exact_provenance(db: &DbInstance) {
-    let expected: BTreeSet<_> = evidence_chunks()
-        .into_iter()
-        .map(|(_, content)| content_hash(&content))
-        .collect();
-    let actual: BTreeSet<_> = query_string_pairs(
-        db,
-        "?[compiled, hash, edge_type] := *kb_edges{source_node_id: compiled, target_node_id, edge_type}, \
-         *kb_nodes{node_id: compiled, node_type: compiled_type}, compiled_type = 'compiled', \
-         *kb_nodes{node_id: target_node_id, content_hash: hash, node_type: target_type}, \
-         edge_type = 'Provenance', target_type = 'raw'",
-    )
-    .into_iter()
-    .map(|(_, hash, edge_type)| (hash, edge_type))
-    .collect();
-    assert_eq!(actual.len(), expected.len());
-    assert!(
-        actual
-            .iter()
-            .all(|(hash, edge_type)| expected.contains(hash) && edge_type == "Provenance")
     );
 }
 
@@ -304,14 +194,6 @@ fn assert_no_orphans(db: &DbInstance) {
         (
             "?[node] := *kb_nodes{node_id: node, node_type}, node_type = 'raw', not *kb_content_hashes{content_hash, node_id: node}",
             "raw nodes must have hash owners",
-        ),
-        (
-            "?[edge] := *kb_edges{edge_id: edge, source_node_id}, not *kb_nodes{node_id: source_node_id}",
-            "edges must have source nodes",
-        ),
-        (
-            "?[edge] := *kb_edges{edge_id: edge, target_node_id}, not *kb_nodes{node_id: target_node_id}",
-            "edges must have target nodes",
         ),
     ] {
         let rows = db

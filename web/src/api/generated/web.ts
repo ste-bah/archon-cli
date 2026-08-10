@@ -222,7 +222,7 @@ jobId: string | null, limit: number | null, };
 
 export type WebIndexControlResponse = { accepted: boolean, policyReason: string, detail: string, };
 
-export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, };
+export type CognitiveWebSummary = { store: PathProbe, storePresent: boolean, situationCount: number, toolDecisionCount: number, executiveDecisionCount: number, reflectionCount: number, proposalCount: number, applyResultCount: number, selfModelFactCount: number, metricEventCount: number, metricDefinitionVersion: number, evaluationWindowId: string | null, daemon: CognitiveDaemonPreview, latestTick: CognitiveTickPreview | null, decisions: Array<CognitiveRowPreview>, reflections: Array<CognitiveRowPreview>, proposals: Array<CognitiveRowPreview>, metrics: Array<CognitiveRowPreview>, };
 export type CognitiveRowPreview = { id: string, label: string, status: string, detail: string, createdAt: string, };
 export type CognitiveTickPreview = { tickId: string, proposalsEvaluated: number, proposalsAutoApplied: number, proposalsDenied: number, errorCount: number, durationMs: number, createdAt: string, };
 export type CognitiveDaemonPreview = { running: boolean, stale: boolean, stopRequested: boolean, ticksRun: number, pid: number | null, lastHeartbeatAt: string | null, };

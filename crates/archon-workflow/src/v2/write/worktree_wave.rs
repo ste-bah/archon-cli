@@ -33,26 +33,21 @@ pub(super) struct WorktreePlanRunContext<'a> {
 }
 
 pub(super) fn worktree_plan_context<'a>(
-    task: &'a str,
-    target_repository_root: Option<&'a str>,
-    execution: &'a WorkflowV2CallExecution,
-    adapter: WorkflowV2AgentAdapter,
-    dispatch: &'a dyn WorkflowAgentDispatch,
-    v2_store: &'a WorkflowV2ResultStore,
-    store_for_control: &'a crate::WorkflowStore,
-    run_id: &'a str,
+    ctx: &WriteFanoutContext<'a>,
     setup: &'a WorktreeFanoutSetup,
 ) -> WorktreePlanRunContext<'a> {
-    let max_parallelism = dispatch.fanout_parallelism(execution.call.options.max_parallelism);
+    let max_parallelism = ctx
+        .dispatch
+        .fanout_parallelism(ctx.execution.call.options.max_parallelism);
     WorktreePlanRunContext {
-        task,
-        target_repository_root,
-        execution,
-        adapter,
-        dispatch,
-        v2_store,
-        store_for_control,
-        run_id,
+        task: ctx.task,
+        target_repository_root: ctx.target_repository_root,
+        execution: ctx.execution,
+        adapter: ctx.adapter.clone(),
+        dispatch: ctx.dispatch,
+        v2_store: ctx.v2_store,
+        store_for_control: ctx.store_for_control,
+        run_id: ctx.run_id,
         setup,
         semaphore: Arc::new(Semaphore::new(max_parallelism)),
         active: Arc::new(AtomicUsize::new(0)),
@@ -225,22 +220,11 @@ pub(super) async fn worktree_branch_job(
     poll_v2_run_control(ctx.store_for_control, ctx.run_id, &prepared.branch.id)?;
     let now_active = ctx.active.fetch_add(1, Ordering::SeqCst) + 1;
     record_write_peak(&ctx.peak, now_active);
-    let result = run_one_worktree_branch(
-        ctx.task,
-        ctx.target_repository_root.map(str::to_string),
-        ctx.execution,
-        ctx.adapter,
-        ctx.dispatch,
-        ctx.store_for_control,
-        ctx.run_id,
-        ctx.run_root,
-        ctx.canonical_root,
-        ctx.v2_store,
-        ctx.cfg,
-        prepared,
-    )
-    .await;
-    ctx.active.fetch_sub(1, Ordering::SeqCst);
+    // Same `Arc`, held across the move of `ctx` into the branch runner so the
+    // active-count decrement below still lands on the shared counter.
+    let active = ctx.active.clone();
+    let result = run_one_worktree_branch(ctx, prepared).await;
+    active.fetch_sub(1, Ordering::SeqCst);
     result
 }
 

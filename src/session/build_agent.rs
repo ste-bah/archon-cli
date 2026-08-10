@@ -25,7 +25,7 @@ pub(super) use agent_definition::{
 };
 use provider::{resolve_identity_and_api_client, resolve_session_provider};
 
-pub(super) async fn build_session_agent(
+pub(crate) async fn build_session_agent(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
     cli: &Cli,

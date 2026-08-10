@@ -81,17 +81,61 @@ pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
         .collect())
 }
 
-pub fn hash_exists_in_sources(db: &DbInstance, content_hash: &str) -> Result<bool> {
-    let mut params = BTreeMap::new();
-    params.insert("ch".into(), DataValue::from(content_hash));
-    let result = db
-        .run_script(
-            "?[document_id] := *doc_sources{document_id, content_hash}, content_hash = $ch",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("hash check failed: {e}"))?;
-    Ok(!result.rows.is_empty())
+/// Outcome of [`reserve_doc_source_by_hash`].
+#[derive(Clone, Debug)]
+pub enum HashReservation {
+    /// Nothing owned the hash, so the caller's document was registered.
+    Registered,
+    /// Another document already owned the hash; nothing was written.
+    Duplicate(Box<SourceDocument>),
+}
+
+/// Claim `doc`'s content hash, registering `doc` only if no document owns it yet.
+///
+/// `doc_sources` is keyed on `document_id`, and every ingest mints a fresh UUID,
+/// so the relation itself enforces nothing about `content_hash`. Dedup is
+/// therefore a read followed by a write, and it only holds if nothing can write
+/// between the two. Callers must not open-code that pair — this is the one place
+/// the window exists, so it is the one place that closes it.
+pub fn reserve_doc_source_by_hash(
+    db: &DbInstance,
+    doc: &SourceDocument,
+) -> Result<HashReservation> {
+    with_reservation_lock_held(db, || {
+        if let Some(existing) = get_doc_by_hash(db, &doc.content_hash)? {
+            return Ok(HashReservation::Duplicate(Box::new(existing)));
+        }
+        #[cfg(test)]
+        super::hash_reservation_test_hooks::wait_before_reservation(&doc.content_hash);
+        insert_doc_source(db, doc)?;
+        Ok(HashReservation::Registered)
+    })
+}
+
+const RESERVATION_CONTEXT: &str = "reserve document content hash";
+
+/// Run `reserve` with exclusive access to the backing database.
+///
+/// The blocking write-lock variant, not the fail-fast one: losing this race is
+/// not recoverable by retrying, because the whole point is that the read and the
+/// write must not be interleaved. It is re-entrant, so a reservation nested
+/// inside an already-guarded mutable operation on the same database runs inline
+/// rather than blocking on the lock its own thread holds.
+///
+/// An in-memory store has no lock path and needs none — nothing outside the
+/// process can reach it. A file-backed store that was opened without a guard
+/// config has no path either, but that is a mistake rather than a case to
+/// tolerate, and `bound_guard_config` already rejects it here for the same
+/// reason every `:put` in this crate does.
+fn with_reservation_lock_held<T>(
+    db: &DbInstance,
+    reserve: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let config = archon_cozo::bound_guard_config(db, RESERVATION_CONTEXT)?;
+    match config.write_lock_path.as_deref() {
+        Some(path) => archon_cozo::with_write_lock_blocking(path, RESERVATION_CONTEXT, reserve),
+        None => reserve(),
+    }
 }
 
 /// Look up an existing document by content hash (for duplicate reporting).

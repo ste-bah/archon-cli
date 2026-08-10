@@ -5,7 +5,7 @@ use cozo::DbInstance;
 
 use crate::executive_support::*;
 use crate::self_model::{MemoryContext, SelfModelProfile, SelfModelStore};
-use crate::world_model_scoring::{NoopPredictionBackend, PredictionBackend};
+use crate::world_model_scoring::NoopPredictionBackend;
 use crate::{
     Candidate, CandidatePlanner, ClassifyInput, CognitiveConfig, CognitiveError, DecisionRecord,
     ExecutiveStateSnapshot, LessonSink, NoopLessonSink, OutcomeSummary, PolicyGate, ReflectInput,

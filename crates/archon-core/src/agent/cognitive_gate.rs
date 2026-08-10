@@ -1,7 +1,13 @@
+use std::time::Duration;
+
+use archon_consciousness::correction_classifier::CorrectionClassification;
+
 use archon_cognitive::{
-    ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput,
-    SituationClassifier, ToolGateInput, ToolUseGate, ToolVerdict, WorldModelScorer,
-    direct_response_for, plan_runtime_advisory, plan_runtime_advisory_with,
+    ClassifyInput, CognitiveDecision, CognitiveSurface, ExecutiveAdvisoryInput, ExecutiveLoop,
+    LiveTurnOutcome, NoopActionExecutor, NoopLessonSink, ReflectionWriter, ShadowComparison,
+    ShadowTurnInput, ShadowTurnObserver, SituationClassifier, ToolGateInput, ToolUseGate,
+    ToolVerdict, TriggeredReflectInput, TurnSignals, WorldModelScorer, direct_response_for,
+    observed_action_from_tools,
 };
 
 use super::*;
@@ -24,17 +30,33 @@ impl Agent {
         self.current_situation = Some(situation);
     }
 
+    /// Plan this turn's advisory through [`ExecutiveLoop::run_advisory`].
+    ///
+    /// The loop is the single advisory implementation (issue #76 follow-up).
+    /// The store-less free functions that used to serve this call site had
+    /// drifted from it — they planned without the candidate store or the
+    /// self-model, and always reported `prediction_unavailable` — and the agent
+    /// now holds a cognitive store anyway, so they are gone.
+    ///
+    /// It runs on the agent's already-open store, off the async runtime, under
+    /// the configured pipeline budget. The budget used to be a post-hoc error
+    /// inside the planner that discarded work already done; as a timeout it
+    /// abandons a slow advisory instead, and the turn proceeds without a
+    /// reminder. `run_advisory` persists its own decision, so the turn no
+    /// longer detaches a second task to do it — which is also why an abandoned
+    /// advisory can still leave a decision row behind: the blocking task is not
+    /// cancelled, only stopped being waited on.
     pub(super) async fn run_cognitive_executive_advisory(&mut self) {
         self.cognitive_executive_reminder = None;
-        let (Some(config), Some(policy), Some(ledger_dir), Some(situation)) = (
+        let (Some(config), Some(policy), Some(ledger_dir), Some(store), Some(situation)) = (
             self.cognitive_config.clone(),
             self.cognitive_policy.clone(),
-            self.cognitive_ledger_dir.as_ref(),
+            self.cognitive_ledger_dir.clone(),
+            self.cognitive_store.clone(),
             self.current_situation.clone(),
         ) else {
             return;
         };
-        let ledger_dir = ledger_dir.clone();
         let input = ExecutiveAdvisoryInput {
             situation,
             working_dir: self.config.working_dir.clone(),
@@ -43,22 +65,41 @@ impl Agent {
         // With a backend injected the scorer may consult model predictions;
         // whether it actually does is decided by `world_model_state`, so a
         // shadow-only state still takes the heuristic path. Without a backend
-        // there is nothing to consult and we skip the generic entirely.
-        let planned = match self.cognitive_prediction_backend.clone() {
-            Some(backend) => plan_runtime_advisory_with(
-                &config,
-                policy,
-                input,
-                &WorldModelScorer::new(backend, true, true),
-            ),
-            None => plan_runtime_advisory(&config, policy, input),
-        };
+        // there is nothing to consult and the heuristic scorer stands in.
+        let backend = self.cognitive_prediction_backend.clone();
+        let budget_ms = config.max_pipeline_ms;
+        let planned =
+            bounded_cognitive_observation(budget_ms, "cognitive-executive-advisory", move || {
+                // The handle the agent already holds. Opening a second one per
+                // turn is the dominant cost of the whole advisory and would put
+                // it at the mercy of the budget on a loaded machine — which
+                // costs the prompt its reminder, not just a measurement.
+                let store = store
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match backend {
+                    Some(backend) => ExecutiveLoop::with_components(
+                        store.db(),
+                        config,
+                        Some(policy),
+                        &ledger_dir,
+                        WorldModelScorer::new(backend, true, true),
+                        NoopActionExecutor,
+                        NoopLessonSink,
+                    )?
+                    .run_advisory(input),
+                    None => ExecutiveLoop::new(store.db(), config, Some(policy), &ledger_dir)?
+                        .run_advisory(input),
+                }
+            })
+            .await;
         let outcome = match planned {
-            Ok(outcome) => outcome,
-            Err(error) => {
+            Some(Ok(outcome)) => outcome,
+            Some(Err(error)) => {
                 tracing::warn!(%error, "cognitive executive advisory planning failed");
                 return;
             }
+            None => return,
         };
         self.cognitive_executive_reminder = outcome.decision.as_ref().map(|decision| {
             format!(
@@ -70,25 +111,131 @@ impl Agent {
         tracing::debug!(
             stage = %outcome.snapshot.stage,
             selected_action = ?outcome.snapshot.selected_action,
+            degraded = ?outcome.snapshot.degraded,
             "cognitive executive advisory recorded"
         );
-        if let Some(decision) = outcome.decision {
-            archon_observability::spawn_blocking_named(
-                "persist-cognitive-executive-advisory",
-                move || match archon_cognitive::PersistentCognitiveStore::open(&ledger_dir) {
-                    Ok(store) => {
-                        let path = ledger_dir.join("cognitive-decisions.jsonl");
-                        if let Err(error) = archon_cognitive::DecisionStore::new(store.db(), path)
-                            .and_then(|decision_store| decision_store.record(&decision))
-                        {
-                            tracing::warn!(%error, "cognitive executive decision persistence failed");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "cognitive executive persistence store unavailable");
-                    }
+    }
+
+    /// Run the executive loop over this turn as a non-executing observer.
+    ///
+    /// This is the live call site for `ExecutiveLoop` (issue #76). It runs
+    /// before the LLM request so the shadow plan is persisted *before* the live
+    /// turn executes, which is what makes the later comparison a prediction
+    /// rather than a rationalisation.
+    ///
+    /// Observationally inert by construction: it takes no action, writes only
+    /// to the shadow relation and its own ledger, and is bounded by the
+    /// configured pipeline budget. If it is slow, panics, or fails, the turn
+    /// proceeds exactly as it would have without it.
+    pub(super) async fn run_cognitive_shadow_observation(&mut self, user_input: &str) {
+        let (Some(config), Some(policy), Some(ledger_dir)) = (
+            self.cognitive_config.clone(),
+            self.cognitive_policy.clone(),
+            self.cognitive_ledger_dir.clone(),
+        ) else {
+            return;
+        };
+        let input = ShadowTurnInput {
+            user_text: user_input.to_owned(),
+            session_id: self.config.session_id.clone(),
+            turn_number: self.turn_number,
+            surface: CognitiveSurface::Tui,
+            working_dir: self.config.working_dir.clone(),
+            world_model_state: self.cognitive_world_model_state.clone(),
+            model_id: self.active_model().await,
+        };
+        let budget_ms = config.max_pipeline_ms;
+        let observed = bounded_cognitive_observation(budget_ms, "cognitive-shadow-observe", {
+            let ledger_dir = ledger_dir.clone();
+            move || {
+                let store = archon_cognitive::PersistentCognitiveStore::open(&ledger_dir)?;
+                ShadowTurnObserver::new(store.db(), &ledger_dir, config, Some(policy))
+                    .observe(input)
+            }
+        })
+        .await;
+        match observed {
+            Some(Ok(Some(observation))) => tracing::debug!(
+                shadow_decision_id = %observation.shadow_decision_id,
+                situation = observation.situation_kind.as_str(),
+                selected_action = ?observation.selected_action,
+                "cognitive shadow observation recorded"
+            ),
+            Some(Ok(None)) => tracing::debug!("cognitive shadow observer had nothing to plan"),
+            Some(Err(error)) => tracing::warn!(%error, "cognitive shadow observation failed"),
+            None => {}
+        }
+    }
+
+    /// Join the finished turn to its shadow plan and reflect if a trigger fired.
+    ///
+    /// The label comes from what the live turn actually did; the no-op shadow
+    /// executor contributes nothing to it.
+    pub(super) async fn complete_cognitive_shadow_turn(
+        &mut self,
+        user_input: &str,
+        user_corrected: bool,
+        classification: Option<&CorrectionClassification>,
+    ) {
+        let (Some(config), Some(policy), Some(ledger_dir)) = (
+            self.cognitive_config.clone(),
+            self.cognitive_policy.clone(),
+            self.cognitive_ledger_dir.clone(),
+        ) else {
+            return;
+        };
+        let Some(situation_kind) = self.current_situation.as_ref().map(|s| s.kind) else {
+            return;
+        };
+        let (tool_names, tool_failures) = turn_tool_activity(&self.state.messages, user_input);
+        let session_id = self.config.session_id.clone();
+        let turn_number = self.turn_number;
+        let live = LiveTurnOutcome {
+            live_action_id: format!("{session_id}:{turn_number}"),
+            observed_action: observed_action_from_tools(&tool_names),
+            completed: true,
+            tool_failures,
+            user_corrected,
+        };
+        let correction_confidence = correction_trigger_confidence(user_corrected, classification);
+        let model_id = self.active_model().await;
+        let budget_ms = config.max_pipeline_ms;
+
+        let joined = bounded_cognitive_observation(budget_ms, "cognitive-shadow-join", move || {
+            let store = archon_cognitive::PersistentCognitiveStore::open(&ledger_dir)?;
+            let observer =
+                ShadowTurnObserver::new(store.db(), &ledger_dir, config.clone(), Some(policy));
+            let comparison = observer.join(&session_id, turn_number, &live, &model_id)?;
+            write_triggered_reflection(
+                &store,
+                &ledger_dir,
+                &config,
+                &session_id,
+                turn_number,
+                TurnSignals {
+                    situation_kind,
+                    shadow_surprise: comparison.as_ref().and_then(|value| value.surprise),
+                    tool_failures,
+                    correction_confidence,
+                    completed: true,
                 },
-            );
+                comparison.as_ref(),
+                live.observed_action,
+            )?;
+            Ok::<_, archon_cognitive::CognitiveError>(comparison)
+        })
+        .await;
+        match joined {
+            Some(Ok(Some(comparison))) => tracing::debug!(
+                shadow_decision_id = %comparison.shadow_decision_id,
+                agreed = ?comparison.agreed,
+                surprise = ?comparison.surprise,
+                metric_recorded = comparison.metric_recorded,
+                "cognitive shadow turn joined to live outcome"
+            ),
+            Some(Ok(None)) => tracing::debug!("no shadow plan to join for this turn"),
+            Some(Err(error)) => tracing::warn!(%error, "cognitive shadow join failed"),
+            None => {}
         }
     }
 
@@ -181,4 +328,156 @@ impl Agent {
             tracing::warn!(error = %err, "cognitive decision persistence failed");
         }
     }
+}
+
+/// How confident the reflection trigger may be that this turn was a correction.
+///
+/// This used to be the constant `0.9` for every corrected turn, because the
+/// per-correction confidence lived behind a classifier this crate did not yet
+/// call. It does now (`memory_integration_corrections.rs`), so the real number
+/// is threaded through and the constant is gone.
+///
+/// `None` unless the classifier positively asserted a correction. Two negatives
+/// must stay out, for different reasons:
+///
+/// * an `abstain.*` rationale is a *declined* answer, not a weak yes. Its
+///   confidence describes nothing, so passing it on would let the trigger read
+///   "I don't know" as a low-confidence correction;
+/// * a confident `is_correction: false` is an answer, and its confidence
+///   measures the strength of that *no*. Passing it through would make a
+///   classifier certain the user corrected nothing look exactly like one
+///   certain they did — the 0.9 constant's failure mode, inverted.
+///
+/// Gated on the live heuristic having recorded a correction as well. The
+/// classifier is shadow-only until its promotion gate passes (learning roadmap
+/// line 300), so its job here is to say how strong a correction the live path
+/// already accepted was, not to arm the trigger by itself.
+pub(super) fn correction_trigger_confidence(
+    user_corrected: bool,
+    classification: Option<&CorrectionClassification>,
+) -> Option<f32> {
+    let classification = classification.filter(|_| user_corrected)?;
+    if classification.abstained() || !classification.is_correction {
+        return None;
+    }
+    Some(classification.confidence)
+}
+
+/// Run a cognitive observation off the async runtime under a hard budget.
+///
+/// Returns `None` when the budget was exceeded or the task panicked. Neither
+/// is treated as an error worth failing the turn over: the whole point of a
+/// shadow observer is that the user cannot tell whether it ran. The task is not
+/// cancelled on timeout — it only writes shadow rows — but the caller stops
+/// waiting for it.
+pub(super) async fn bounded_cognitive_observation<T, F>(
+    budget_ms: u64,
+    name: &'static str,
+    task: F,
+) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let bounded = tokio::time::timeout(
+        Duration::from_millis(budget_ms),
+        archon_observability::spawn_blocking_named(name, task),
+    )
+    .await;
+    match bounded {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, name, "cognitive observation task failed");
+            None
+        }
+        Err(_) => {
+            tracing::warn!(
+                name,
+                budget_ms,
+                "cognitive observation exceeded its budget; turn continues without it"
+            );
+            None
+        }
+    }
+}
+
+/// Tool names called during this turn, and how many of their results failed.
+///
+/// The turn starts at the last user message carrying exactly `user_input`,
+/// which `begin_process_turn` appended, so no per-turn index has to be carried
+/// on the agent. Falls back to the whole conversation only when that message
+/// cannot be found, which would otherwise silently report zero activity.
+pub(super) fn turn_tool_activity(
+    messages: &[serde_json::Value],
+    user_input: &str,
+) -> (Vec<String>, u32) {
+    let start = messages
+        .iter()
+        .rposition(|message| {
+            message["role"] == "user" && message["content"].as_str() == Some(user_input)
+        })
+        .unwrap_or(0);
+    let mut tool_names = Vec::new();
+    let mut failures = 0;
+    for message in &messages[start..] {
+        let Some(blocks) = message["content"].as_array() else {
+            continue;
+        };
+        for block in blocks {
+            match block["type"].as_str() {
+                Some("tool_use") => {
+                    if let Some(name) = block["name"].as_str() {
+                        tool_names.push(name.to_string());
+                    }
+                }
+                Some("tool_result") if block["is_error"] == true => failures += 1,
+                _ => {}
+            }
+        }
+    }
+    (tool_names, failures)
+}
+
+/// Write a reflection when the turn tripped a trigger, and nothing otherwise.
+///
+/// Only ids and enums cross into the writer, so the persisted record cannot
+/// contain the turn's text or the model's reasoning.
+#[allow(clippy::too_many_arguments)]
+fn write_triggered_reflection(
+    store: &archon_cognitive::PersistentCognitiveStore,
+    ledger_dir: &std::path::Path,
+    config: &archon_cognitive::CognitiveConfig,
+    session_id: &str,
+    turn_number: u64,
+    signals: TurnSignals,
+    comparison: Option<&ShadowComparison>,
+    observed_action: Option<archon_cognitive::CandidateActionKind>,
+) -> Result<(), archon_cognitive::CognitiveError> {
+    let Some(triggered) = archon_cognitive::reflection_trigger::evaluate(&signals) else {
+        return Ok(());
+    };
+    // Without a shadow plan there is no decision id to anchor the reflection
+    // to, and a reflection with no decision is not auditable. Skip rather than
+    // mint a synthetic anchor.
+    let Some(comparison) = comparison else {
+        return Ok(());
+    };
+    let writer = ReflectionWriter::new(store.db(), ledger_dir, config.record_reflections)?;
+    let outcome = writer.reflect_triggered(TriggeredReflectInput {
+        decision_id: comparison.decision_id.clone(),
+        session_id: session_id.to_owned(),
+        turn_number,
+        situation_kind: signals.situation_kind,
+        goal_action: comparison.shadow_action,
+        observed_action,
+        trigger: triggered,
+        evidence_refs: vec![
+            format!("shadow_decision:{}", comparison.shadow_decision_id),
+            format!("cognitive_decision:{}", comparison.decision_id),
+        ],
+    })?;
+    for note in outcome.degraded {
+        tracing::warn!(note, "triggered reflection degraded");
+    }
+    Ok(())
 }

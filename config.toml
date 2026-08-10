@@ -435,10 +435,20 @@ dedup_similarity_threshold = 0.92
 # restatements of one instruction span 0.09-0.35 while genuinely distinct claims
 # start at 0.32, so no single cut separates them.
 #   <= semantic_dedup_max_distance   -> merged, loser marked superseded
-#   <= semantic_review_max_distance  -> counted and left alone, for `/garden` to
-#                                       adjudicate; nothing is written
+#   <= semantic_review_max_distance  -> counted and left alone, for an
+#                                       adjudicator to settle; nothing is written
 semantic_dedup_max_distance = 0.15
 semantic_review_max_distance = 0.35
+# Have the review band judged automatically at session start instead of only
+# when you run `/garden`. OFF because adjudication is an LLM round-trip and
+# automatic consolidation runs on the session-start path -- it would sit between
+# launching Archon and being able to type, and nothing else on that path calls a
+# model. Left off, the band simply accumulates and `/garden` clears it.
+auto_adjudicate_review_band = false
+# Pending pairs required before that fires, so enabling it does not mean a call
+# on every launch. Below the adjudicator's 20-pair-per-run cap, so a run that
+# fires at the threshold clears the whole band in one call.
+auto_adjudicate_min_pairs = 10
 # Days after which low-importance memories are pruned
 staleness_days = 30
 staleness_importance_floor = 0.3

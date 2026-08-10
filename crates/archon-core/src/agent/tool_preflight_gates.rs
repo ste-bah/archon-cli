@@ -12,7 +12,7 @@ impl Agent {
         tool: &PendingToolCall,
     ) -> Option<(String, PermissionDecision, Arc<dyn Tool>, serde_json::Value)> {
         let perm_mode = self.config.permission_mode.lock().await.clone();
-        let description = format!("use {}", tool.name);
+        let description = describe_tool_intent(&tool.name, &tool.input_json);
         let checker_decision = self.permission_checker_decision(
             &perm_mode,
             &tool.name,
@@ -341,6 +341,49 @@ impl Agent {
             tracing::info!(tool = %tool.name, "[Hook Status] {}", msg);
         }
     }
+}
+
+/// Longest argument excerpt carried into a permission prompt.
+pub(super) const INTENT_EXCERPT_LIMIT: usize = 160;
+
+/// Describe what a tool is about to do, for the human being asked to approve it.
+///
+/// This used to be `format!("use {}", tool.name)`, which produced prompts like
+/// "Tool 'Bash' wants to: use Bash" — approving a shell command without being
+/// shown the command. The argument that decides whether the call is safe is the
+/// one worth naming, so the primary argument is quoted here, bounded and on one
+/// line. Anything unrecognised falls back to the bare name rather than dumping
+/// a whole JSON blob into a dialog.
+pub(super) fn describe_tool_intent(name: &str, input_json: &str) -> String {
+    let Ok(input) = serde_json::from_str::<serde_json::Value>(input_json) else {
+        return format!("use {name}");
+    };
+    // The verb matters: the checker renders this as "Tool 'X' wants to: {this}",
+    // so it has to read as an action rather than repeat the tool name.
+    let (verb, field) = match name {
+        "Bash" | "PowerShell" => ("run", "command"),
+        "Write" => ("write", "file_path"),
+        "Edit" | "NotebookEdit" => ("edit", "file_path"),
+        "Read" => ("read", "file_path"),
+        "WebFetch" => ("fetch", "url"),
+        "Glob" | "Grep" => ("search for", "pattern"),
+        _ => return format!("use {name}"),
+    };
+    match input.get(field).and_then(|value| value.as_str()) {
+        Some(value) => format!("{verb} `{}`", excerpt(value)),
+        None => format!("use {name}"),
+    }
+}
+
+/// One bounded, single-line excerpt of an argument.
+fn excerpt(value: &str) -> String {
+    let flattened = value.replace(['\n', '\r'], " ");
+    let trimmed = flattened.trim();
+    if trimmed.chars().count() <= INTENT_EXCERPT_LIMIT {
+        return trimmed.to_string();
+    }
+    let head: String = trimmed.chars().take(INTENT_EXCERPT_LIMIT).collect();
+    format!("{head}…")
 }
 
 pub(super) fn file_path_for_tool(

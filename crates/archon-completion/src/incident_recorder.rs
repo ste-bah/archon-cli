@@ -168,18 +168,17 @@ fn workspace_id_for_run(db: &DbInstance, run_id: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> archon_cozo::GuardedDbInstance {
-        let path = std::env::temp_dir().join(format!(
-            "test-incident-recorder-{}.db",
-            uuid::Uuid::new_v4()
-        ));
-        let path_text = path.to_string_lossy();
-        let db = archon_cozo::open_sqlite_guarded_instance(
-            &path_text,
-            "open incident recorder test db",
-            archon_cozo::CozoGuardConfig::for_db_path(&path),
-        )
-        .unwrap();
+    fn test_db() -> crate::test_support::TestDb<archon_cozo::GuardedDbInstance> {
+        // Previously `std::env::temp_dir().join(...)`: the right directory,
+        // but nothing ever removed the file or its write-lock sibling.
+        let db = crate::test_support::TestDb::open("test-incident-recorder", |path| {
+            archon_cozo::open_sqlite_guarded_instance(
+                &path.to_string_lossy(),
+                "open incident recorder test db",
+                archon_cozo::CozoGuardConfig::for_db_path(path),
+            )
+            .unwrap()
+        });
         crate::schema::ensure_completion_schema(&db).unwrap();
         archon_learning::schema::ensure_learning_schema(&db).unwrap();
         db

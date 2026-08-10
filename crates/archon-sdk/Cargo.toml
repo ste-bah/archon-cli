@@ -22,6 +22,9 @@ archon-cozo = { path = "../archon-cozo" }
 # The attached (in-process) web server reads the host's already-open memory
 # store instead of opening a second connection to the same database file.
 archon-memory = { path = "../archon-memory" }
+# `archon/config` validates a permission mode before writing it into the
+# handle the agent's gate reads, so it needs the same parser the gate uses.
+archon-permissions = { path = "../archon-permissions" }
 archon-tools = { path = "../archon-tools" }
 archon-workflow = { path = "../archon-workflow" }
 
@@ -30,6 +33,9 @@ serde_json.workspace = true
 ts-rs.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+# `archon/cancel` stops an in-flight prompt through the agent's own
+# CancellationToken, so the IDE runtime needs the same token type.
+tokio-util.workspace = true
 futures-util.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true

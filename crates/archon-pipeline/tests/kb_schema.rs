@@ -1,5 +1,5 @@
 use archon_pipeline::kb::schema::{KB_NODES_SCHEMA, KbEdgeType, KbNodeType, ensure_kb_schema};
-use archon_pipeline::kb::{IngestSource, KnowledgeBase, QueryOptions};
+use archon_pipeline::kb::{IngestSource, KnowledgeBase};
 use cozo::{DbInstance, ScriptMutability};
 use std::path::PathBuf;
 
@@ -342,7 +342,10 @@ async fn test_knowledge_base_api_surface() {
     let db = mem_db();
     let kb = KnowledgeBase::new(db).unwrap();
 
-    // All 9 methods should be callable and return Ok for supported inputs.
+    // Every remaining method should be callable and return Ok for supported
+    // inputs. `compile` and `query` are gone from this facade: both now work on
+    // the document store and are reached through `archon docs compile` /
+    // `archon docs answer`, not through the `kb_nodes` handle.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("api-surface.txt");
     std::fs::write(&path, "API surface content.").unwrap();
@@ -350,11 +353,8 @@ async fn test_knowledge_base_api_surface() {
     assert_eq!(ingest_result.nodes_created, 1);
     assert_eq!(ingest_result.chunks_processed, 1);
 
-    let compile_result = kb.compile().await;
-    assert!(compile_result.is_ok());
-
-    let query_result = kb.query("test question", &QueryOptions::default()).await;
-    assert!(query_result.is_ok());
+    let embedded = kb.embedded_node_ids().await;
+    assert!(embedded.is_ok());
 
     let lint_result = kb.lint().await;
     assert!(lint_result.is_ok());
@@ -387,12 +387,4 @@ fn test_ingest_source_variants() {
         let json = serde_json::to_string(source).unwrap();
         let _back: IngestSource = serde_json::from_str(&json).unwrap();
     }
-}
-
-#[test]
-fn test_query_options_default() {
-    let opts = QueryOptions::default();
-    assert_eq!(opts.max_results, 10);
-    assert!((opts.min_relevance - 0.0).abs() < f64::EPSILON);
-    assert!(opts.domain_filter.is_none());
 }

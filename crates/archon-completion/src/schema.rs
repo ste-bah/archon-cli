@@ -172,9 +172,8 @@ fn ensure_agent_model_trust_scores(db: &DbInstance) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-completion-schema-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    fn test_db() -> crate::test_support::TestDb<DbInstance> {
+        crate::test_support::sqlite_test_db("test-completion-schema")
     }
 
     #[test]

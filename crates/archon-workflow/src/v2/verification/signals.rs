@@ -99,7 +99,7 @@ fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
 
 #[cfg(test)]
 mod declared_contract_enforcement_tests {
-    use super::super::normalize::{
+    use super::super::contracts::{
         ContractVerification, demote_failed_contract, enforce_declared_contracts,
         run_contract_verifier, stamp_passed_contracts, verdict_failure, verifier_verdicts,
     };

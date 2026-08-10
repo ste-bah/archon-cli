@@ -277,6 +277,8 @@ pub enum CognitiveError {
     Schema(String),
     #[error("cognitive store error: {0}")]
     Store(String),
+    #[error("cognitive metric error: {0}")]
+    Metric(String),
     #[error("cognitive serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }

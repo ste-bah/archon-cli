@@ -32,7 +32,7 @@ pub(super) async fn handle_completed_turn(
         Some(PostTurnAction::PersistSession { guardrail }) => {
             persist_session_messages(agent, session_store, active_session).await;
             if let Some(guardrail) = guardrail {
-                maybe_spawn_guardrail_repair(
+                let guardrail_outcome = maybe_spawn_guardrail_repair(
                     outcome,
                     config,
                     input_tui_tx,
@@ -40,6 +40,13 @@ pub(super) async fn handle_completed_turn(
                     adapter,
                     queue,
                     *guardrail,
+                )
+                .await;
+                record_turn_latent_surprise(
+                    agent,
+                    active_session,
+                    &cmd_ctx.working_dir,
+                    guardrail_outcome,
                 )
                 .await;
             }
@@ -109,7 +116,7 @@ async fn maybe_spawn_guardrail_repair(
     adapter: &Arc<crate::agent_handle::AgentHandle>,
     queue: &mut VecDeque<PostTurnAction>,
     guardrail: crate::command::world_model::RuntimeGuardrailRecord,
-) {
+) -> Option<archon_world_model::WorldGuardrailOutcome> {
     let (completed, spawn_repair) = turn_completion_state(&outcome);
     let guardrail_outcome =
         crate::command::world_model::record_guardrail_turn_outcome(config, &guardrail, completed);
@@ -131,7 +138,7 @@ async fn maybe_spawn_guardrail_repair(
             .await
         {
             tracing::error!(%error, "guardrail repair notification delivery failed");
-            return;
+            return guardrail_outcome;
         }
         match dispatcher.lock().unwrap().spawn_turn(
             repair_prompt,
@@ -150,6 +157,59 @@ async fn maybe_spawn_guardrail_repair(
         queue.push_back(PostTurnAction::PersistSession {
             guardrail: Some(Box::new(guardrail)),
         });
+    }
+    guardrail_outcome
+}
+
+/// Record this turn's world-model surprise as a `surprise_observed` metric.
+///
+/// `latent_surprise_mean` and `latent_surprise_p95` are defined in
+/// `archon-cognitive`'s R8 table and had no producer at all: the event kind
+/// demands a prediction, an action attempt and a verification, and the
+/// cognitive turn loop has no verification identity to give it. The guardrail
+/// outcome does — the same action id the world-model corpus labels on, the
+/// prediction the surprise was computed against, and the verification that
+/// adjudicated the action.
+///
+/// Fails open, off the async runtime, and after the turn is already complete:
+/// a measurement may degrade, but it may not cost the user a turn. An action
+/// that cannot supply all three identities writes nothing rather than a row
+/// with an invented one.
+async fn record_turn_latent_surprise(
+    agent: &Arc<tokio::sync::Mutex<Agent>>,
+    active_session: &crate::session::active_session::ActiveSessionId,
+    working_dir: &std::path::Path,
+    guardrail_outcome: Option<archon_world_model::WorldGuardrailOutcome>,
+) {
+    let Some(outcome) = guardrail_outcome else {
+        return;
+    };
+    // The session the conversation was just persisted under, so a metric row
+    // joins to the same session a reader would look the turn up in.
+    let session_id = active_session.get().to_string();
+    let guard = agent.lock().await;
+    let turn_number = guard.turn_number();
+    let model_id = guard.current_model().to_owned();
+    drop(guard);
+    let working_dir = working_dir.to_path_buf();
+    let recorded =
+        archon_observability::spawn_blocking_named("record-latent-surprise", move || {
+            crate::command::world_model::record_latent_surprise(
+                crate::command::world_model::LatentSurpriseContext {
+                    working_dir: &working_dir,
+                    session_id: &session_id,
+                    turn_number,
+                    model_id: &model_id,
+                },
+                &outcome,
+            )
+        })
+        .await;
+    match recorded {
+        Ok(Ok(Some(written))) => tracing::debug!(?written, "latent surprise recorded"),
+        Ok(Ok(None)) => tracing::debug!("turn had no verified prediction to measure surprise on"),
+        Ok(Err(error)) => tracing::warn!(%error, "latent surprise metric write failed"),
+        Err(error) => tracing::warn!(%error, "latent surprise metric task failed"),
     }
 }
 

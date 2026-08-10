@@ -32,12 +32,11 @@ pub fn mock_tui_channel() -> (
     archon_tui::event_channel::bounded_tui_event_channel()
 }
 
-pub fn registered_learning_test_db(prefix: &str) -> Arc<cozo::DbInstance> {
-    let path = format!("/tmp/{prefix}-{}.db", uuid::Uuid::new_v4());
-    let db = archon_learning::cozo_guard::open_sqlite_guarded(&path, "open test learning store")
-        .unwrap();
-    archon_learning::schema::ensure_learning_schema(&db).unwrap();
-    db
+/// A learning store whose files self-delete — see [`crate::command::test_db`].
+pub fn registered_learning_test_db(
+    prefix: &str,
+) -> crate::command::test_db::TestDb<Arc<cozo::DbInstance>> {
+    crate::command::test_db::learning_test_db(prefix)
 }
 
 // ===========================================================================

@@ -377,7 +377,7 @@ mod tests {
             cozo::ScriptMutability::Mutable,
         )
         .unwrap();
-        let (writer, drain) = SandboxAuditWriter::new(db);
+        let (writer, drain) = SandboxAuditWriter::new(db.arc());
         writer.enqueue(session("failure"));
 
         let error = drain

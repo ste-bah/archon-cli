@@ -1,19 +1,13 @@
 use super::*;
 
-fn test_db() -> std::sync::Arc<DbInstance> {
-    let path = format!("/tmp/test-gt-schema-{}.db", uuid::Uuid::new_v4());
-    archon_cozo::open_sqlite_guarded_instance(
-        &path,
-        "open game-theory schema test db",
-        archon_cozo::CozoGuardConfig::for_db_path(&path),
-    )
-    .unwrap()
-    .db_arc()
+fn test_db() -> crate::test_support::TestDb<archon_cozo::GuardedDbInstance> {
+    crate::test_support::guarded_test_db("test-gt-schema", "open game-theory schema test db")
 }
 
-fn unregistered_test_db() -> DbInstance {
-    let path = format!("/tmp/test-gt-schema-raw-{}.db", uuid::Uuid::new_v4());
-    DbInstance::new("sqlite", &path, "").unwrap()
+fn unregistered_test_db() -> crate::test_support::TestDb<DbInstance> {
+    crate::test_support::TestDb::open("test-gt-schema-raw", |path| {
+        DbInstance::new("sqlite", path, "").unwrap()
+    })
 }
 
 #[test]

@@ -58,6 +58,8 @@ pub(crate) mod denials;
 pub(crate) mod diff;
 pub(crate) mod dispatcher;
 pub(crate) mod docs;
+pub(crate) mod docs_answer;
+pub(crate) mod docs_compile;
 pub(crate) mod docs_delete;
 #[cfg(test)]
 pub(crate) mod docs_drift;
@@ -96,6 +98,10 @@ pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
+/// `kb recall` — the R7 unified recall facade's live call site.
+pub(crate) mod kb_recall;
+/// Real memory/docs/code-index stores behind `archon-knowledge`'s recall ports.
+pub(crate) mod kb_recall_sources;
 pub(crate) mod kb_reprocess;
 pub(crate) mod kb_url;
 pub(crate) mod learning;
@@ -127,6 +133,7 @@ pub(crate) mod pipeline_rewind;
 pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
+pub(crate) mod pipeline_support_result;
 pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod provider_gate;
 pub(crate) mod workflow_mcp;
@@ -260,6 +267,8 @@ pub(crate) mod behaviour;
 #[cfg(test)]
 mod prd_pipeline_layout_tests;
 pub(crate) mod teleport;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_db;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub(crate) mod theme;

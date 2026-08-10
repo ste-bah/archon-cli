@@ -171,7 +171,10 @@ pub fn plan_prune(graph: &dyn MemoryTrait) -> Result<PruneReport, MemoryError> {
             .then_with(|| a.kept.id.cmp(&b.kept.id))
     });
     report.duplicates = groups;
-    report.oversized.sort_by(|a, b| b.length.cmp(&a.length));
+    // Descending by length, so `Reverse` rather than a bare key.
+    report
+        .oversized
+        .sort_by_key(|entry| std::cmp::Reverse(entry.length));
 
     Ok(report)
 }

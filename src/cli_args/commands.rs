@@ -67,7 +67,12 @@ pub enum Commands {
         action: TeamAction,
     },
     /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
-    IdeStdio,
+    IdeStdio {
+        /// Project root the agent works in. Defaults to the directory the
+        /// IDE spawned the process in.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+    },
     /// Run and manage multi-agent pipelines
     Pipeline {
         #[command(subcommand)]

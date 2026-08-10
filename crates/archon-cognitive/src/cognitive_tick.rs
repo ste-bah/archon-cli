@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use archon_policy::CognitivePolicy;
@@ -10,19 +11,30 @@ use uuid::Uuid;
 use crate::cognitive_tick_store::store_tick_report;
 use crate::cozo_guard::{relation_count, run_script_guarded};
 use crate::schema::ensure_cognitive_schema;
+use crate::self_model::SelfModelWriter;
 use crate::{
     CognitiveError, GovernedAutonomousApply, OutcomeSummary, ReflectionRecord, SituationKind,
 };
 
+/// Outcome of one autonomous tick.
+///
+/// A step that could not run reports `None` rather than a plausible zero/`true`,
+/// so a reader of the audit can tell "we looked and there was nothing" apart
+/// from "nobody ever looked".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TickReport {
     pub tick_id: String,
-    pub dead_letters_replayed: u64,
+    /// Ledgered reflections re-put into Cozo. `Some(0)` is a measurement
+    /// ("ledger and relation agree"); `None` means the replay itself failed.
+    pub dead_letters_replayed: Option<u64>,
     pub proposals_evaluated: u64,
     pub proposals_auto_applied: u64,
     pub proposals_denied: u64,
     pub proposals_generated: u64,
-    pub self_model_updated: bool,
+    /// Whether the self-model changed. `None` means policy withheld self-model
+    /// updates, which is not the same claim as `Some(false)` ("it ran and
+    /// nothing needed updating").
+    pub self_model_updated: Option<bool>,
     pub errors: Vec<String>,
     pub duration_ms: u64,
     pub created_at: DateTime<Utc>,
@@ -31,15 +43,24 @@ pub struct TickReport {
 pub struct CognitiveTick<'a> {
     db: &'a DbInstance,
     policy: Option<CognitivePolicy>,
+    ledger_dir: PathBuf,
 }
 
 impl<'a> CognitiveTick<'a> {
+    /// `ledger_dir` is the cognitive store root: the tick replays dead letters
+    /// out of the JSONL ledgers there and emits metric events beside them, so
+    /// it cannot be constructed without one.
     pub fn new(
         db: &'a DbInstance,
         policy: Option<CognitivePolicy>,
+        ledger_dir: impl AsRef<Path>,
     ) -> Result<Self, CognitiveError> {
         ensure_cognitive_schema(db)?;
-        Ok(Self { db, policy })
+        Ok(Self {
+            db,
+            policy,
+            ledger_dir: ledger_dir.as_ref().to_path_buf(),
+        })
     }
 
     pub fn tick(&self) -> Result<TickReport, CognitiveError> {
@@ -61,8 +82,28 @@ impl<'a> CognitiveTick<'a> {
         self.finish(report, started)
     }
 
-    fn replay_dead_letters(&self, _errors: &mut Vec<String>) -> u64 {
-        0
+    /// Re-put reflections that reached the ledger but not the relation.
+    ///
+    /// `Some(0)` is now a real measurement — the two agree — and `None` is
+    /// reserved for the replay itself failing, which is the only remaining case
+    /// where the tick genuinely does not know.
+    fn replay_dead_letters(&self, errors: &mut Vec<String>) -> Option<u64> {
+        match crate::dead_letters::replay(self.db, &self.ledger_dir) {
+            Ok(report) => {
+                errors.extend(report.errors);
+                if report.unparseable > 0 {
+                    errors.push(format!(
+                        "dead_letter_ledger_unparseable:{}",
+                        report.unparseable
+                    ));
+                }
+                Some(report.replayed)
+            }
+            Err(error) => {
+                errors.push(format!("replay_dead_letters:{error}"));
+                None
+            }
+        }
     }
 
     fn inspect_pending_proposals(&self, errors: &mut Vec<String>) -> u64 {
@@ -98,8 +139,34 @@ impl<'a> CognitiveTick<'a> {
         generated
     }
 
-    fn refresh_self_model(&self, _errors: &mut Vec<String>) -> bool {
-        true
+    /// Recompute domain-trust facts from verified reflection outcomes.
+    ///
+    /// `None` only when policy withholds self-model updates or the refresh
+    /// failed; otherwise the boolean is what actually happened, and the
+    /// domains that produced no fact are surfaced as errors-with-reasons rather
+    /// than silently absent.
+    fn refresh_self_model(&self, errors: &mut Vec<String>) -> Option<bool> {
+        let writer = SelfModelWriter::new(self.db, &self.ledger_dir, self.policy.clone());
+        match writer.refresh_domain_trust() {
+            Ok(Some(update)) => {
+                errors.extend(update.errors);
+                errors.extend(
+                    update
+                        .unwritten
+                        .into_iter()
+                        .map(|reason| format!("self_model_not_written:{reason}")),
+                );
+                Some(update.facts_written > 0)
+            }
+            Ok(None) => {
+                errors.push("self_model_updates_not_permitted_by_policy".into());
+                None
+            }
+            Err(error) => {
+                errors.push(format!("refresh_self_model:{error}"));
+                None
+            }
+        }
     }
 
     fn finish(
@@ -117,12 +184,12 @@ impl TickReport {
     pub fn empty() -> Self {
         Self {
             tick_id: Uuid::new_v4().to_string(),
-            dead_letters_replayed: 0,
+            dead_letters_replayed: None,
             proposals_evaluated: 0,
             proposals_auto_applied: 0,
             proposals_denied: 0,
             proposals_generated: 0,
-            self_model_updated: false,
+            self_model_updated: None,
             errors: Vec::new(),
             duration_ms: 0,
             created_at: Utc::now(),

@@ -94,6 +94,7 @@ fn turn(text: &str, temp: &TempDir) -> ExecutiveTurnInput {
         surface: CognitiveSurface::Tui,
         working_dir: temp.path().into(),
         world_model_state: WorldModelState::default(),
+        record_situation: true,
     }
 }
 

@@ -14,7 +14,7 @@ pub(crate) fn store_tick_report(
     params.insert("tick_id".into(), DataValue::from(report.tick_id.as_str()));
     params.insert(
         "dead_letters_replayed".into(),
-        DataValue::from(report.dead_letters_replayed as i64),
+        optional(report.dead_letters_replayed.map(|count| count as i64)),
     );
     params.insert(
         "proposals_evaluated".into(),
@@ -30,7 +30,7 @@ pub(crate) fn store_tick_report(
     );
     params.insert(
         "self_model_updated".into(),
-        DataValue::from(report.self_model_updated),
+        optional(report.self_model_updated),
     );
     params.insert("errors_json".into(), DataValue::from(errors_json.as_str()));
     params.insert(
@@ -51,4 +51,10 @@ pub(crate) fn store_tick_report(
         "store cognitive tick audit",
     )?;
     Ok(())
+}
+
+/// A step that produced no measurement is stored as `null`, never as a zero or
+/// a `false` that a later reader would mistake for an observation.
+fn optional<T: Into<DataValue>>(value: Option<T>) -> DataValue {
+    value.map_or(DataValue::Null, Into::into)
 }

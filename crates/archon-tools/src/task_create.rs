@@ -4,9 +4,6 @@ use crate::agent_tool::{SubagentRequest, run_subagent_foreground, run_subagent_w
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-/// Tool that creates a new tracked task in the global TaskManager.
-///
-
 /// Appended to every delegated prompt.
 ///
 /// A subagent spawned here has no human on the other end: its output goes to
@@ -31,6 +28,8 @@ never end a turn with a question. If something genuinely blocks you, say what \
 is missing and why, and return — that is a report, not a request. If the work \
 is already complete and nothing needs changing, say so plainly.";
 
+/// Tool that creates a new tracked task in the global TaskManager.
+///
 /// When a `prompt` field is provided, the installed subagent executor runs or
 /// spawns the request directly. Without `prompt`, the task is created for manual
 /// tracking only.

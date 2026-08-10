@@ -77,7 +77,13 @@ fn rows(status: archon_cognitive::CognitiveInspectionStatus) -> Vec<EvidenceRowP
             status: status.self_model_fact_count.to_string(),
             detail: format!("{} caution rule(s)", status.self_model.caution_rules.len()),
         },
+        summary_row(
+            "metric_events",
+            status.metric_event_count,
+            "append-only measurement source of truth",
+        ),
     ];
+    rows.extend(metric_rows(&status.metrics));
     rows.extend(
         status
             .recent_decisions
@@ -101,6 +107,34 @@ fn rows(status: archon_cognitive::CognitiveInspectionStatus) -> Vec<EvidenceRowP
             }),
     );
     rows
+}
+
+/// One row per derived metric per cohort. The cohort is part of the row id so
+/// a segment can be searched for directly instead of being hidden inside a
+/// pooled aggregate.
+fn metric_rows(snapshot: &archon_cognitive::CognitiveMetricSnapshot) -> Vec<EvidenceRowPayload> {
+    snapshot
+        .metrics
+        .iter()
+        .map(|metric| EvidenceRowPayload {
+            id: format!(
+                "{}@{}",
+                metric.metric_name,
+                metric.cohort.segmentation_key()
+            ),
+            title: "metric".into(),
+            status: metric
+                .value
+                .map(|value| format!("{value:.4}"))
+                .unwrap_or_else(|| "undefined".to_string()),
+            detail: format!(
+                "{} [{}] n={}",
+                metric.metric_name,
+                metric.cohort.segmentation_key(),
+                metric.sample_count
+            ),
+        })
+        .collect()
 }
 
 fn summary_row(id: &str, count: usize, detail: &str) -> EvidenceRowPayload {

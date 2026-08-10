@@ -1,9 +1,9 @@
 //! JSON-RPC 2.0 protocol types for IDE extension communication (TASK-CLI-411).
 //!
 //! Implements the full set of request/response/notification types for the
-//! archon/initialize, archon/prompt, archon/cancel, archon/toolResult,
-//! archon/status, and archon/config methods, plus all server→client
-//! notification types.
+//! archon/initialize, archon/prompt, archon/cancel, archon/permissionResponse,
+//! archon/toolResult, archon/status, and archon/config methods, plus all
+//! server→client notification types.
 
 use serde::{Deserialize, Serialize};
 
@@ -170,6 +170,23 @@ pub struct IdeToolResultParams {
     pub is_error: bool,
 }
 
+/// Parameters for `archon/permissionResponse`.
+///
+/// The client's answer to an `archon/permissionRequest` notification. It
+/// carries `request_id` back because the agent's permission channel is a bare
+/// `bool` with no correlation of its own: without the echo, a decision the
+/// user made about one tool could silently approve the next one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdePermissionResponseParams {
+    /// Session ID.
+    pub session_id: String,
+    /// The `requestId` from the `archon/permissionRequest` being answered.
+    pub request_id: String,
+    /// Whether the user approved the action.
+    pub approved: bool,
+}
+
 /// Parameters for `archon/status`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,17 +196,29 @@ pub struct IdeStatusParams {
 }
 
 /// Result for `archon/status`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Every measured field is optional, and absent rather than zero when Archon
+/// has nothing to report — a session that has not run a turn has not consumed
+/// zero tokens, it has no reading at all, and reporting `0` there is a
+/// fabricated measurement. `unavailable` says why the numbers are missing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdeStatusResult {
     /// Model name in use for this session.
-    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Total input tokens consumed in this session.
-    pub input_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
     /// Total output tokens consumed in this session.
-    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
     /// Estimated cost in USD for this session.
-    pub cost: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    /// Why the token and cost fields are absent, when they are.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 /// Parameters for `archon/config`.
@@ -243,16 +272,54 @@ pub struct IdeToolCall {
     pub input: serde_json::Value,
 }
 
+/// Payload for `archon/toolCallComplete` notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeToolCallComplete {
+    /// Session that ran the tool.
+    pub session_id: String,
+    /// Matches the `toolUseId` of the `archon/toolCall` that opened it.
+    pub tool_use_id: String,
+    /// Tool name.
+    pub name: String,
+    /// Whether the tool reported an error.
+    pub is_error: bool,
+    /// Tool output, truncated for display.
+    pub content: String,
+}
+
 /// Payload for `archon/permissionRequest` notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdePermissionRequest {
     /// Session requesting permission.
     pub session_id: String,
+    /// Correlation id echoed back in [`IdePermissionResponseParams`].
+    pub request_id: String,
     /// The action requiring approval (e.g. `"write_file"`).
     pub action: String,
     /// Human-readable description of what the agent wants to do.
     pub description: String,
+}
+
+/// Payload for `archon/permissionResolved` notification.
+///
+/// Emitted when the agent stops waiting — whether because the user answered,
+/// or because the request timed out. The IDE needs it to take the prompt down;
+/// otherwise a timed-out request leaves allow/deny buttons on screen that no
+/// longer control anything.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdePermissionResolved {
+    /// Session the decision belongs to.
+    pub session_id: String,
+    /// The action that was decided (matches `action` on the request).
+    pub action: String,
+    /// Whether the agent is going to run the tool.
+    pub granted: bool,
+    /// Why it was refused, when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Payload for `archon/turnComplete` notification.

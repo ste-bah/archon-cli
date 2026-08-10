@@ -395,15 +395,11 @@ fn find_from_current_dir() -> Result<Option<PathBuf>> {
 mod tests {
     use super::*;
 
-    fn test_db() -> std::sync::Arc<DbInstance> {
-        let path = format!("/tmp/test-gt-specimens-{}.db", uuid::Uuid::new_v4());
-        archon_cozo::open_sqlite_guarded_instance(
-            &path,
+    fn test_db() -> crate::test_support::TestDb<archon_cozo::GuardedDbInstance> {
+        crate::test_support::guarded_test_db(
+            "test-gt-specimens",
             "open game-theory specimen test db",
-            archon_cozo::CozoGuardConfig::for_db_path(&path),
         )
-        .unwrap()
-        .db_arc()
     }
 
     fn source_markdown() -> String {

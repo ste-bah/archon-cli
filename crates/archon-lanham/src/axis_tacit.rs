@@ -45,13 +45,12 @@ pub fn detect_tacit(text: &str) -> TacitPatterns {
 
     let mut alliteration_count = 0i64;
     for i in 0..content_words.len().saturating_sub(2) {
-        if let Some(a) = content_words[i].chars().next() {
-            if content_words[i + 1].starts_with(a)
-                && content_words[i + 2].starts_with(a)
-                && CONSONANTS.contains(a)
-            {
-                alliteration_count += 1;
-            }
+        if let Some(a) = content_words[i].chars().next()
+            && content_words[i + 1].starts_with(a)
+            && content_words[i + 2].starts_with(a)
+            && CONSONANTS.contains(a)
+        {
+            alliteration_count += 1;
         }
     }
     let alliteration_density = alliteration_count as f64 / sentence_count;
@@ -90,11 +89,11 @@ pub fn detect_tacit(text: &str) -> TacitPatterns {
                 if s1[a] == s1[b] {
                     continue;
                 }
-                if let Some(idx_b) = s2.iter().position(|x| *x == s1[b]) {
-                    if s2[idx_b + 1..].iter().any(|x| *x == s1[a]) {
-                        chiasmus_count += 1;
-                        break;
-                    }
+                if let Some(idx_b) = s2.iter().position(|x| *x == s1[b])
+                    && s2[idx_b + 1..].iter().any(|x| *x == s1[a])
+                {
+                    chiasmus_count += 1;
+                    break;
                 }
             }
             if chiasmus_count > 0 && chiasmus_count > i as i64 {

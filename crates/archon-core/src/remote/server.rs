@@ -206,9 +206,14 @@ async fn handle_ws_ide(mut socket: WebSocket, state: ServerState) {
 
 /// Dispatch one JSON-RPC 2.0 request line and return a JSON-RPC response string.
 ///
-/// This is a thin, stateless dispatcher suitable for the server.rs context.
-/// Full session state lives in the archon-sdk IdeProtocolHandler; here we
-/// handle method routing for the WebSocket transport layer.
+/// The fallback used when the binary layer injected no handler. It answers
+/// only what a stateless dispatcher can answer honestly.
+///
+/// Everything that needs an agent is refused. This endpoint is
+/// request/response with no way to push a frame the client did not ask for,
+/// so even with an agent behind it there is no channel for `archon/textDelta`
+/// to travel on — a prompt would run and the client would never see a word of
+/// it. Answering `{"queued": true}`, as this did, made that look like success.
 fn ide_dispatch(request_json: &str) -> String {
     let v: serde_json::Value = match serde_json::from_str(request_json) {
         Ok(v) => v,
@@ -236,21 +241,21 @@ fn ide_dispatch(request_json: &str) -> String {
         }
     };
 
-    // Route known methods; delegate full handling to archon-sdk at integration time.
+    // `archon/initialize` is answerable without an agent: it is a handshake.
+    // Nothing else here is, and the capabilities it advertises say so.
     match method {
         "archon/initialize" => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"result":{{"sessionId":"pending","serverVersion":"{ver}","capabilities":{{"inlineCompletion":false,"toolExecution":false,"diff":false,"terminal":false}}}}}}"#,
             ver = env!("CARGO_PKG_VERSION")
         ),
-        "archon/prompt" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"queued":true}}}}"#),
-        "archon/cancel" => {
-            format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"cancelled":false}}}}"#)
-        }
-        "archon/toolResult" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"ok":true}}}}"#),
-        "archon/status" => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"model":"","inputTokens":0,"outputTokens":0,"cost":0.0}}}}"#
+        "archon/prompt"
+        | "archon/cancel"
+        | "archon/permissionResponse"
+        | "archon/toolResult"
+        | "archon/status"
+        | "archon/config" => format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32600,"message":"{method} is not available over /ws/ide: this endpoint cannot push notifications, so a turn could never stream back. Use `archon ide-stdio`."}}}}"#
         ),
-        "archon/config" => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"value":null}}}}"#),
         other => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"method not found: {other}"}}}}"#
         ),

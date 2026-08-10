@@ -1,3 +1,5 @@
+mod descriptor;
+
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -11,16 +13,19 @@ use super::request::AgentToolError;
 use super::request::{expected_target_files, validate_and_build};
 use super::run::run_subagent_with_completion;
 use crate::agent_mutation_guard::{snapshot_expected_targets, verify_expected_mutations};
-use crate::board::DelegatedOutcome;
 use crate::background_agents::{
     AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
 };
+use crate::board::DelegatedOutcome;
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::subagent_request::SubagentRequest;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
-const INLINE_AGENT_LIMIT: usize = 20;
-pub(crate) const AGENT_DESCRIPTION_LIMIT_BYTES: usize = 4096;
+// Re-exported so `agent_tool.rs`'s existing `core::AGENT_DESCRIPTION_LIMIT_BYTES`
+// path keeps resolving after the constant moved into the `descriptor` child.
+// Test-gated to match that consumer, which is itself `#[cfg(test)]`.
+#[cfg(test)]
+pub(crate) use descriptor::AGENT_DESCRIPTION_LIMIT_BYTES;
 
 /// Register a handle, treating "already there" as done.
 ///
@@ -38,60 +43,6 @@ fn register_once(handle: BackgroundAgentHandle) -> Result<(), RegistryError> {
 pub struct AgentTool {
     /// Dynamic description including available agents. Built at registration time.
     description: String,
-}
-
-impl AgentTool {
-    /// Create an AgentTool with default description (no agent listing).
-    pub fn new() -> Self {
-        Self {
-            description:
-                "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
-                for the agent loop to execute. The subagent runs with its own conversation and \
-                tool set. Use normal isolation for read-only work; only request worktree isolation \
-                when the subagent needs isolated file edits."
-                    .into(),
-        }
-    }
-
-    /// Create an AgentTool with an injected agent listing.
-    /// The listing is appended to the description so the LLM knows valid subagent_type values.
-    pub fn with_agent_listing(agents: &[(String, String)]) -> Self {
-        let mut desc =
-            "Spawn a subagent to handle a complex task autonomously. Returns a SubagentRequest \
-            for the agent loop to execute. The subagent runs with its own conversation and \
-            tool set. Use known subagent_type names directly. Use AgentCatalog to list, search, \
-            or inspect less-common agents before launching them. Use normal isolation for read-only \
-            work; only request worktree isolation when the subagent needs isolated file edits."
-                .to_string();
-
-        if !agents.is_empty() {
-            desc.push_str("\n\nCommon agents: ");
-            let entries: Vec<String> = agents
-                .iter()
-                .take(INLINE_AGENT_LIMIT)
-                .map(|(name, summary)| {
-                    if summary.is_empty() {
-                        name.clone()
-                    } else {
-                        format!("{name} ({summary})")
-                    }
-                })
-                .collect();
-            desc.push_str(&entries.join(", "));
-        }
-
-        if desc.len() > AGENT_DESCRIPTION_LIMIT_BYTES {
-            desc.truncate(AGENT_DESCRIPTION_LIMIT_BYTES);
-        }
-
-        Self { description: desc }
-    }
-}
-
-impl Default for AgentTool {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl AgentTool {
@@ -128,47 +79,7 @@ impl Tool for AgentTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "required": ["prompt"],
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "The task prompt for the subagent"
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Optional model override. Omit this unless the user explicitly asks for a different model; omitted or empty inherits the parent model/provider. Do not invent provider model IDs."
-                },
-                "allowed_tools": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "List of tool names the subagent is allowed to use"
-                },
-                "subagent_type": {
-                    "type": "string",
-                    "description": "Optional agent type name. When set, loads the agent's custom prompt and tool filters."
-                },
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": "When true, runs the subagent as a background task."
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Working directory override for the subagent."
-                },
-                "isolation": {
-                    "type": "string",
-                    "enum": ["none", "worktree"],
-                    "description": "Optional isolation mode. Use 'none' or omit this field for normal/read-only subagents. Use 'worktree' only when isolated file edits are required."
-                },
-                "expected_target_files": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional file paths that must be changed by a foreground mutating subagent. Archon snapshots these paths before launch and fails the Agent result if they are unchanged after completion."
-                }
-            }
-        })
+        descriptor::input_schema()
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {

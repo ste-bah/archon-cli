@@ -36,7 +36,12 @@ pub fn scan_and_store(db: &DbInstance) -> Result<Vec<ContradictionRecord>> {
     Ok(contradictions)
 }
 
-fn contradicts(left: &ClaimRecord, right: &ClaimRecord) -> bool {
+/// Whether two claims assert the same thing both ways.
+///
+/// Public so unified recall ([`crate::recall::identity`]) reports the *same*
+/// contradiction the knowledge graph would have stored, rather than growing a
+/// second predicate that could drift from this one.
+pub fn contradicts(left: &ClaimRecord, right: &ClaimRecord) -> bool {
     left.normalized_subject == right.normalized_subject
         && left.normalized_predicate == right.normalized_predicate
         && matches!(

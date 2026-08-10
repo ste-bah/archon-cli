@@ -4,6 +4,16 @@ use archon_permissions::mode::{PermissionDecision, PermissionMode};
 use super::*;
 
 impl Agent {
+    /// Shared handle to the live permission mode.
+    ///
+    /// The mode is read on every tool call and written by `/permissions`, so
+    /// hosts that expose it (the TUI slash command, the IDE's
+    /// `archon/config`) need the same `Arc` the agent reads rather than a
+    /// copy that would drift out of agreement with the gate.
+    pub fn permission_mode_handle(&self) -> Arc<Mutex<String>> {
+        Arc::clone(&self.config.permission_mode)
+    }
+
     pub(super) fn permission_checker_decision(
         &self,
         raw_mode: &str,
@@ -391,6 +401,57 @@ mod tests {
     }
 
     include!("permission_gate_observer_test.rs");
+
+    // The prompt text is built next door, in the preflight gate that raises it.
+    use crate::agent::tool_preflight_gates::{INTENT_EXCERPT_LIMIT, describe_tool_intent};
+
+    /// The prompt has to say what is being approved. "Tool 'Bash' wants to:
+    /// use Bash" asked the user to authorise a shell command without showing
+    /// them the command, which is a rubber stamp rather than a decision.
+    #[test]
+    fn a_permission_prompt_names_the_command_it_is_asking_about() {
+        let described = describe_tool_intent("Bash", r#"{"command":"rm -rf /tmp/x"}"#);
+
+        // The checker renders this as "Tool 'Bash' wants to: {described}", so
+        // the phrasing has to complete that sentence.
+        assert_eq!(described, "run `rm -rf /tmp/x`");
+    }
+
+    #[test]
+    fn a_permission_prompt_names_the_file_a_write_would_touch() {
+        let described =
+            describe_tool_intent("Write", r#"{"file_path":"/etc/hosts","content":"x"}"#);
+
+        assert!(described.contains("/etc/hosts"), "{described}");
+    }
+
+    #[test]
+    fn an_unrecognised_tool_falls_back_to_its_name_rather_than_a_json_blob() {
+        let described = describe_tool_intent("Mystery", r#"{"secret":"value"}"#);
+
+        assert_eq!(described, "use Mystery");
+    }
+
+    #[test]
+    fn a_long_multiline_command_is_flattened_and_bounded() {
+        let long = "a".repeat(INTENT_EXCERPT_LIMIT + 50);
+        let input = serde_json::json!({ "command": format!("echo one\necho {long}") }).to_string();
+
+        let described = describe_tool_intent("Bash", &input);
+
+        assert!(!described.contains('\n'), "{described}");
+        assert!(
+            described.chars().count() < INTENT_EXCERPT_LIMIT + 40,
+            "{described}"
+        );
+    }
+
+    #[test]
+    fn unparseable_permission_input_still_produces_a_prompt() {
+        let described = describe_tool_intent("Bash", "{not json");
+
+        assert_eq!(described, "use Bash");
+    }
 
     #[tokio::test]
     async fn preflight_sandbox_check_uses_hook_mutated_input() {

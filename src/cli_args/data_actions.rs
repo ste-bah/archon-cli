@@ -56,6 +56,33 @@ pub enum KbAction {
         #[arg(long)]
         kb: Option<String>,
     },
+    /// Recall across memory, docs, the knowledge graph and the code index at once
+    ///
+    /// Scores are UNCALIBRATED: they encode each store's own ranking and carry
+    /// no cross-store meaning. See `archon_knowledge::recall::normalize`.
+    Recall {
+        /// Search query
+        query: String,
+        /// Maximum merged results, split evenly as a per-source quota
+        #[arg(long, default_value = "10")]
+        limit: usize,
+        /// Comma-separated stores to consult: memory, docs, knowledge, code
+        #[arg(long, default_value = "memory,docs,knowledge,code")]
+        sources: String,
+        /// How long any one store may take before it is abandoned
+        #[arg(long, default_value = "5000")]
+        source_timeout_ms: u64,
+        /// Path to an already-built LEANN code index; without it the code
+        /// source is reported as not consulted rather than skipped silently
+        #[arg(long)]
+        code_index: Option<std::path::PathBuf>,
+        /// Retrieval mode for the knowledge graph source: exact, semantic, hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
+        /// Restrict the knowledge graph source to a named knowledge base
+        #[arg(long)]
+        kb: Option<String>,
+    },
     /// Extract claims, entities, relations, source quality and contradictions from doc chunks
     Process {
         /// Extract claims from document chunks
@@ -163,10 +190,55 @@ pub enum DocsAction {
         #[arg(long, default_value = "10")]
         limit: usize,
     },
+    /// Compile ingested documents into summaries, concept articles and an index
+    ///
+    /// REQ-KB-002. Reads `doc_chunks` and writes its output back as ordinary
+    /// documents, so `docs search`, `kb search` and `kb recall` see the results
+    /// immediately. NFR-PIPE-012 budgets 5 minutes for 20 documents.
+    Compile {
+        /// Restrict compilation to a named knowledge base
+        #[arg(long, alias = "domain")]
+        kb: Option<String>,
+        /// Model alias or ID to compile with
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Export the corpus to markdown, grouped into raw/compiled/concepts/answers/index
+    Export {
+        /// Directory to write one markdown file per document; omit to print to stdout
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Restrict the export to a named knowledge base
+        #[arg(long, alias = "domain")]
+        kb: Option<String>,
+    },
     /// Answer a question using document evidence
+    ///
+    /// REQ-DOCS-013/014/015, the same capability REQ-KB-003 specifies. Uses LLM
+    /// synthesis when a provider is configured and the extractive path when one
+    /// is not; either way, insufficient evidence is reported rather than
+    /// papered over.
     Answer {
         /// Question to answer
         query: String,
+        /// Use the extractive answer even when a provider is available
+        #[arg(long)]
+        no_synthesis: bool,
+        /// File the answer back into the corpus as a searchable document
+        #[arg(long)]
+        file: bool,
+        /// Restrict retrieval to a named knowledge base
+        #[arg(long, alias = "domain")]
+        kb: Option<String>,
+        /// Maximum evidence chunks to retrieve
+        #[arg(long, default_value = "5")]
+        limit: usize,
+        /// Retrieval mode: exact, semantic, or hybrid
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
+        /// Model alias or ID to synthesize with
+        #[arg(long)]
+        model: Option<String>,
     },
     /// Show provenance chain for a chunk or answer component
     Provenance {

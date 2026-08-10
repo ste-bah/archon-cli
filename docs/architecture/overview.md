@@ -109,7 +109,7 @@ graph TB
 | `archon-policy` | Layered TOML policy gates for risky behaviour |
 | `archon-plugin` | Plugin loading + manifest parsing |
 | `archon-sdk` | Embedding API + IDE bridge |
-| `archon-context` | Context compaction |
+| `archon-context` | Context compaction; shared markdown-fence parsing for model output |
 | `archon-observability` | Metrics, tracing, structured logs |
 
 The remaining crates are internal helpers and test/observability support.

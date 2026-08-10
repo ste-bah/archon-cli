@@ -1,8 +1,15 @@
+//! Embedding-space lifecycle for the `kb_nodes` ingest path.
+//!
+//! These used to probe the migration machinery through `KnowledgeBase::query`.
+//! Retrieval moved to the document store, so each probe now reads
+//! `kb_embeddings` directly via `embedded_node_ids()` — the same property, one
+//! layer lower, and without a retrieval path that no longer exists.
+
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use archon_pipeline::kb::schema::ensure_kb_schema;
-use archon_pipeline::kb::{IngestSource, KnowledgeBase, QueryOptions};
+use archon_pipeline::kb::{IngestSource, KnowledgeBase};
 use cozo::{DbInstance, ScriptMutability};
 
 struct SynonymEmbeddingProvider;
@@ -136,7 +143,7 @@ fn mem_db() -> DbInstance {
 }
 
 #[tokio::test]
-async fn semantic_query_retrieves_ingested_synonym_without_text_overlap() {
+async fn ingest_with_an_embedder_stores_one_vector_per_node() {
     let db = mem_db();
     let kb = KnowledgeBase::with_embedder(db, Box::new(SynonymEmbeddingProvider)).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -151,10 +158,11 @@ async fn semantic_query_retrieves_ingested_synonym_without_text_overlap() {
         .await
         .unwrap();
 
-    let result = kb.query("vehicle", &QueryOptions::default()).await.unwrap();
+    let nodes = kb.list().await.unwrap();
+    let embedded = kb.embedded_node_ids().await.unwrap();
 
-    assert!(!result.sources.is_empty());
-    assert!(result.sources[0].content.contains("automobile"));
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(embedded.len(), 2);
 }
 
 #[tokio::test]
@@ -180,10 +188,8 @@ async fn semantic_constructor_rebuilds_legacy_embedding_schema_and_indexes_exist
     .unwrap();
 
     let kb = KnowledgeBase::with_embedder(db, Box::new(SynonymEmbeddingProvider)).unwrap();
-    let result = kb.query("vehicle", &QueryOptions::default()).await.unwrap();
 
-    assert!(!result.sources.is_empty());
-    assert_eq!(result.sources[0].node_id, "legacy-node");
+    assert_eq!(kb.embedded_node_ids().await.unwrap(), vec!["legacy-node"]);
 }
 
 #[tokio::test]
@@ -204,26 +210,16 @@ async fn failed_provider_migration_preserves_previous_semantic_index() {
     let previous =
         KnowledgeBase::with_embedder(db.clone(), Box::new(SynonymEmbeddingProvider)).unwrap();
     assert_eq!(
-        previous
-            .query("vehicle", &QueryOptions::default())
-            .await
-            .unwrap()
-            .sources[0]
-            .node_id,
-        "legacy-node"
+        previous.embedded_node_ids().await.unwrap(),
+        vec!["legacy-node"]
     );
 
     assert!(KnowledgeBase::with_embedder(db.clone(), Box::new(FailingMigrationProvider)).is_err());
 
     let restored = KnowledgeBase::with_embedder(db, Box::new(SynonymEmbeddingProvider)).unwrap();
     assert_eq!(
-        restored
-            .query("vehicle", &QueryOptions::default())
-            .await
-            .unwrap()
-            .sources[0]
-            .node_id,
-        "legacy-node"
+        restored.embedded_node_ids().await.unwrap(),
+        vec!["legacy-node"]
     );
 }
 
@@ -254,12 +250,11 @@ async fn changing_model_with_same_backend_and_dimension_rebuilds_embeddings() {
         Box::new(VersionedEmbeddingProvider { model: "model-b" }),
     )
     .unwrap();
-    let result = rebuilt
-        .query("vehicle", &QueryOptions::default())
-        .await
-        .unwrap();
 
-    assert_eq!(result.sources[0].node_id, "vehicle");
+    assert_eq!(
+        rebuilt.embedded_node_ids().await.unwrap(),
+        vec!["recipe", "vehicle"]
+    );
 }
 
 #[tokio::test]

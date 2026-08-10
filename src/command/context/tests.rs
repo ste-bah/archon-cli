@@ -250,6 +250,107 @@ fn build_command_context_populates_context_snapshot_for_slash_context() {
     );
 }
 
+// -----------------------------------------------------------------
+// Issue #37 AC#2: the permission-mode event must be written through
+// the governed-learning DB handle.
+//
+// The narrow `apply_effect` harness above deliberately stops at the
+// match-arm level, which is why `SetPermissionMode` is `unreachable!()`
+// there — mirroring the arm would mean re-implementing the very handle
+// choice that regressed. This test therefore drives the REAL
+// `apply_effect` against a REAL `SlashCommandContext` (see
+// `slash_ctx_test_fixture.rs` for why that fixture had to be built), with
+// `cozo_db` and `governed_learning_db` pointed at two different
+// databases so the assertion can tell them apart.
+//
+// Reverting `effects.rs` to `slash_ctx.cozo_db.as_ref()` fails this
+// test: the row lands in the project DB and the governed DB stays
+// empty.
+// -----------------------------------------------------------------
+
+#[tokio::test]
+async fn apply_effect_set_permission_mode_records_event_in_governed_learning_db() {
+    fn learning_db() -> Arc<cozo::DbInstance> {
+        let db = cozo::DbInstance::new("mem", "", "").expect("in-memory cozo db");
+        archon_learning::schema::ensure_learning_schema(&db).expect("learning schema");
+        Arc::new(db)
+    }
+
+    // Two distinct handles, both carrying the learning schema. Only the
+    // governed one may receive the event; if the project handle also has
+    // the relation, a wrong-handle write would succeed silently in
+    // production — which is exactly how the original bug hid.
+    let project_db = learning_db();
+    let governed_db = learning_db();
+
+    let fixture = super::slash_ctx_test_fixture::build_test_slash_context(
+        "session-ac2",
+        "default",
+        Some(Arc::clone(&project_db)),
+        Some(Arc::clone(&governed_db)),
+    );
+    let (tui_tx, mut tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+
+    super::apply_effect(
+        CommandEffect::SetPermissionMode("plan".to_string()),
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+
+    // 1. The shared permission mode was actually written.
+    assert_eq!(
+        fixture.ctx.permission_mode.lock().await.as_str(),
+        "plan",
+        "apply_effect must write the resolved mode to the shared slot"
+    );
+
+    // 2. The event row landed in the GOVERNED handle...
+    let governed_rows =
+        archon_learning::permission_runtime_events::list_permission_runtime_events_by_session(
+            &governed_db,
+            "session-ac2",
+        )
+        .expect("read governed permission events");
+    assert_eq!(
+        governed_rows.len(),
+        1,
+        "the permission-mode event must be written through governed_learning_db"
+    );
+    assert_eq!(governed_rows[0].tool_name, "PermissionMode");
+    assert_eq!(governed_rows[0].permission_mode, "plan");
+    assert_eq!(governed_rows[0].decision, "mode_changed");
+    assert_eq!(
+        governed_rows[0].reason_code.as_deref(),
+        Some("slash_permissions")
+    );
+    assert_eq!(
+        governed_rows[0].raw_redacted_json["previous_mode"], "default",
+        "the previous mode must be captured before the shared slot is overwritten"
+    );
+
+    // 3. ...and nowhere near the project handle.
+    let project_rows =
+        archon_learning::permission_runtime_events::list_permission_runtime_events(&project_db)
+            .expect("read project permission events");
+    assert!(
+        project_rows.is_empty(),
+        "no permission event may be written through cozo_db; got {project_rows:?}"
+    );
+
+    // 4. The TUI still sees the mode change.
+    let mut saw_mode_change = false;
+    while let Ok(event) = tui_rx.try_recv() {
+        if matches!(event, archon_tui::app::TuiEvent::PermissionModeChanged(ref m) if m == "plan") {
+            saw_mode_change = true;
+        }
+    }
+    assert!(
+        saw_mode_change,
+        "apply_effect must still emit PermissionModeChanged"
+    );
+}
+
 #[test]
 fn build_command_context_populates_cost_snapshot_for_slash_billing_alias() {
     // Spec wanted `/usage` as an alias for /cost, but `usage` is

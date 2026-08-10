@@ -19,6 +19,9 @@
 //! keyword pass did not already capture, and those are recorded through the
 //! same path. Late beats never; duplicated beats neither.
 
+use archon_consciousness::correction_classifier::{
+    CorrectionClassification, CorrectionClassifier, explicit_phrase_match,
+};
 use archon_consciousness::corrections::{CorrectionTracker, CorrectionType};
 use archon_memory::MemoryTrait;
 use archon_memory::types::MemoryType;
@@ -31,42 +34,25 @@ use super::support::stored_correction_content;
 /// Shared so both detectors agree on the taxonomy. `None` means "no keyword
 /// match", which is a statement about this function's patterns and not about
 /// whether the user corrected anything -- the semantic pass decides that.
+///
+/// The table itself now lives in `archon-consciousness` alongside the taxonomy
+/// and the R3 classifier that wraps it. One table, so the live mutating path
+/// and the shadow classifier cannot answer differently for the same phrasing --
+/// which is what makes the classifier's explicit-case recall measurable at all.
 pub(super) fn classify_correction(user_input: &str) -> Option<CorrectionType> {
-    let lower = user_input.to_lowercase();
-    if lower.starts_with("no,")
-        || lower.starts_with("no ")
-        || lower.starts_with("wrong")
-        || lower.starts_with("that's wrong")
-        || lower.starts_with("that is wrong")
-    {
-        Some(CorrectionType::FactualError)
-    } else if lower.contains("i said")
-        || lower.contains("i already told you")
-        || lower.contains("i already asked")
-        || lower.contains("as i mentioned")
-    {
-        Some(CorrectionType::RepeatedInstruction)
-    } else if lower.starts_with("don't ")
-        || lower.starts_with("do not ")
-        || lower.starts_with("stop ")
-        || lower.contains("never do that")
-    {
-        Some(CorrectionType::DidForbiddenAction)
-    } else if lower.contains("didn't ask")
-        || lower.contains("did not ask")
-        || lower.contains("without permission")
-        || lower.contains("without asking")
-    {
-        Some(CorrectionType::ActedWithoutPermission)
-    } else if lower.contains("instead,")
-        || lower.contains("should have")
-        || lower.contains("better approach")
-        || lower.contains("use this instead")
-    {
-        Some(CorrectionType::ApproachCorrection)
-    } else {
-        None
-    }
+    explicit_phrase_match(user_input)
+}
+
+/// The R3 classifier as it runs on the live path: default config, no provider.
+///
+/// Constructed per call rather than held on the `Agent`. It owns no state, and
+/// a field would be one more thing every `Agent` constructor has to remember to
+/// populate for a shadow observation that must never change behaviour anyway.
+///
+/// The provider arm is off here and stays off until the promotion gate at
+/// `docs/development/learning-roadmap-r1-r8-w5-w6.md:300` passes.
+pub(super) fn shadow_classify(user_input: &str) -> CorrectionClassification {
+    CorrectionClassifier::default().classify(user_input)
 }
 
 /// Record corrections the semantic pass found and the keyword pass missed.
@@ -108,6 +94,184 @@ pub(super) fn record_extracted_corrections(
     }
 
     recorded
+}
+
+// ── R3 shadow labels ─────────────────────────────────────────
+//
+// Everything below observes; nothing below mutates. The live path keeps
+// recording corrections from `classify_correction`, and the classifier's
+// verdict is written next to it as evidence. Promotion needs 400 adjudicated
+// examples (learning roadmap line 300), and none of them exist until something
+// starts writing them down -- which is what this is.
+
+/// Metric name carried by every shadow label row.
+const SHADOW_LABEL_METRIC: &str = "correction_classifier_shadow_label";
+
+/// Marks these labels as the pre-change heuristic baseline rather than
+/// adjudicated ground truth.
+///
+/// The roadmap is explicit that heuristic labels are migration-only and rank
+/// below adjudication (line 230). Recording that in the row means a later
+/// adjudication pass can supersede these without having to guess where they
+/// came from.
+const SHADOW_LABEL_SOURCE: &str = "live_heuristic_shadow";
+
+/// One turn's worth of "what did each detector decide".
+pub(super) struct ShadowCorrectionLabel {
+    pub session_id: String,
+    pub turn_number: u64,
+    /// Cognitive situation kind, when one was classified for this turn. The
+    /// roadmap forbids aggregate-only trends, and this is the task-class axis.
+    pub task_class: String,
+    pub model_id: String,
+    /// The classifier's verdict.
+    pub classification: CorrectionClassification,
+    /// The live heuristic's verdict -- the thing that actually mutated rules.
+    pub heuristic: Option<CorrectionType>,
+    /// Id of the correction the heuristic recorded, when it recorded one.
+    pub correction_id: Option<String>,
+    /// SHA-256 of the user turn. The corpus needs to join rows to turns and to
+    /// deduplicate them; it does not need the user's text, and an append-only
+    /// measurement log is the last place that should hold a copy of it.
+    pub user_input_hash: String,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl ShadowCorrectionLabel {
+    fn label_agreement(&self) -> &'static str {
+        // An abstention is not a disagreement: the classifier declined to
+        // answer, so there is nothing to agree or disagree with.
+        if self.classification.abstained() {
+            return "undefined";
+        }
+        if self.classification.is_correction == self.heuristic.is_some() {
+            "true"
+        } else {
+            "false"
+        }
+    }
+
+    /// Deterministic identity, so a retried write is recognised as a replay
+    /// rather than counted twice.
+    fn metric_event_id(&self) -> String {
+        format!("correction-shadow:{}:{}", self.session_id, self.turn_number)
+    }
+
+    fn evaluation_window(&self) -> archon_cognitive::metrics::EvaluationWindow {
+        // A UTC day. Windows are immutable once declared, so the definition has
+        // to be a pure function of the date -- a window derived from "now"
+        // would be redeclared with different bounds on the next turn and
+        // rejected.
+        let day = self.observed_at.date_naive();
+        let started_at = day.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
+        let ended_at = started_at + chrono::Duration::days(1);
+        archon_cognitive::metrics::EvaluationWindow::new(
+            format!("correction-shadow-{day}"),
+            started_at,
+            ended_at,
+        )
+    }
+
+    fn event(&self) -> archon_cognitive::metrics::CognitiveMetricEvent {
+        use archon_cognitive::metrics::{CognitiveMetricEvent, MetricCohort, MetricEventKind};
+
+        let window = self.evaluation_window();
+        let classifier_version =
+            archon_consciousness::correction_classifier::CORRECTION_CLASSIFIER_VERSION;
+        let mut event = CognitiveMetricEvent::new(
+            self.metric_event_id(),
+            SHADOW_LABEL_METRIC,
+            MetricEventKind::CorrectionClassified,
+            window.evaluation_window_id,
+            // Policy version is the classifier version: a threshold or arm
+            // change must not pool with rows measured under the old one.
+            MetricCohort::new(
+                self.task_class.clone(),
+                self.model_id.clone(),
+                classifier_version,
+            ),
+            self.observed_at,
+        )
+        .with_session(self.session_id.clone(), self.turn_number)
+        .with_value(f64::from(self.classification.confidence))
+        // Not a verified outcome. This row says what two detectors thought,
+        // not whether either was right; adjudication supplies that later.
+        .with_outcome("shadow")
+        // A turn where nothing was recorded still needs a typed source id, or
+        // the non-correction half of the corpus cannot be joined back to the
+        // turn it came from.
+        .with_identity(
+            "correction_id",
+            self.correction_id
+                .clone()
+                .unwrap_or_else(|| format!("shadow:{}:{}", self.session_id, self.turn_number)),
+        )
+        .with_identity("predicted_label", self.classification.predicted_label())
+        .with_identity(
+            "ground_truth_label",
+            if self.heuristic.is_some() {
+                "correction"
+            } else {
+                "not_correction"
+            },
+        )
+        .with_identity("abstained", bool_identity(self.classification.abstained()))
+        .with_identity("agreement", self.label_agreement())
+        .with_identity("rationale_code", self.classification.rationale_code.clone())
+        .with_identity("classifier_version", classifier_version)
+        .with_identity(
+            "predicted_correction_type",
+            self.classification
+                .correction_type
+                .map_or("none", CorrectionType::as_code),
+        )
+        .with_identity(
+            "heuristic_correction_type",
+            self.heuristic.map_or("none", CorrectionType::as_code),
+        )
+        // The audit finding this work answers is that a misfire becomes a
+        // permanent rule. Recording which detector was allowed to mutate makes
+        // "the classifier changed nothing" checkable from the rows themselves.
+        .with_identity("mutation_source", "heuristic")
+        .with_identity("user_input_hash", self.user_input_hash.clone());
+        // Set directly rather than through the builder, which has no setter for
+        // it. Load-bearing rather than decorative: it is what marks these rows
+        // as the heuristic baseline so an adjudication pass can outrank them.
+        event.label_source = SHADOW_LABEL_SOURCE.to_string();
+        event
+    }
+}
+
+fn bool_identity(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+/// SHA-256 of a user turn, hex encoded.
+pub(super) fn user_input_hash(user_input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(user_input.as_bytes()))
+}
+
+/// Append one shadow label to the cognitive metric substrate.
+///
+/// Writes through `archon-cognitive`'s public [`MetricEventStore`] rather than
+/// a private ledger of our own, so the same `correction_classified` rows the
+/// R8 derivations already know how to read are the ones that accumulate.
+///
+/// Takes an open store rather than a path: the agent already holds one, and
+/// opening a second handle on the same SQLite file per turn would be a cost
+/// paid by a measurement that must not slow the turn down.
+///
+/// [`MetricEventStore`]: archon_cognitive::metrics::MetricEventStore
+pub(super) fn record_shadow_correction_label(
+    store: &archon_cognitive::PersistentCognitiveStore,
+    label: &ShadowCorrectionLabel,
+) -> Result<archon_cognitive::metrics::MetricWriteOutcome, archon_cognitive::CognitiveError> {
+    let event_store = archon_cognitive::metrics::MetricEventStore::new(store.db(), store.root())?;
+    // Idempotent for an identical definition, so every turn can assert the
+    // window it is about to write into rather than depending on start-up order.
+    event_store.declare_window(&label.evaluation_window())?;
+    event_store.record(&label.event())
 }
 
 #[cfg(test)]

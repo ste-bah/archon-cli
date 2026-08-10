@@ -188,6 +188,11 @@ impl LifecycleDriver {
         Ok(raw_plan)
     }
 
+    // Eight with `&self`: mirrors `repair_post_remediation_plan_once` below, which
+    // it drives in a bounded loop and to which it forwards most of these verbatim.
+    // Grouping them would have to group both signatures identically and would only
+    // move the same values behind one more name.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn repair_post_remediation_plan(
         &self,
         contract: &LifecycleContract<'_>,
@@ -223,6 +228,10 @@ impl LifecycleDriver {
         Ok((!items.is_empty()).then_some(items))
     }
 
+    // Eight with `&self`: the innermost repair step. Its three counters
+    // (`wave_index`, `remediation_attempt`, `shape_attempt`) name three different
+    // nesting levels and only ever combine into the repair id below, so binding
+    // them into a struct would obscure which loop each one belongs to.
     #[allow(clippy::too_many_arguments)]
     pub async fn repair_post_remediation_plan_once(
         &self,

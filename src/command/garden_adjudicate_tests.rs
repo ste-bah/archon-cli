@@ -9,6 +9,86 @@ fn pair(a: &str, b: &str) -> ReviewPair {
     }
 }
 
+/// Answers `SAME` for everything and keeps the prompts it was shown.
+///
+/// All-SAME on purpose: the interesting failures here are a batch that grew past
+/// its cap and a call that should never have happened, and both are invisible
+/// against a double that declines to merge.
+#[derive(Default)]
+struct RecordingClient {
+    prompts: std::sync::Mutex<Vec<String>>,
+}
+
+impl RecordingClient {
+    fn calls(&self) -> usize {
+        self.prompts.lock().expect("prompts").len()
+    }
+
+    fn last_prompt(&self) -> String {
+        self.prompts
+            .lock()
+            .expect("prompts")
+            .last()
+            .cloned()
+            .expect("no adjudication call was made")
+    }
+}
+
+#[async_trait::async_trait]
+impl archon_pipeline::runner::LlmClient for RecordingClient {
+    async fn send_message(
+        &self,
+        messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<archon_pipeline::runner::LlmResponse> {
+        let prompt = messages
+            .first()
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or_default()
+            .to_string();
+        self.prompts.lock().expect("prompts").push(prompt);
+        // Far more verdicts than any batch can contain. Out-of-range lines are
+        // discarded by the parser, so this says SAME to every pair actually
+        // asked about without the double needing to know how many there were.
+        let verdicts = (1..=500)
+            .map(|i| format!("{i}: SAME"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(archon_pipeline::runner::LlmResponse {
+            content: verdicts,
+            tool_uses: Vec::new(),
+            tokens_in: 0,
+            tokens_out: 0,
+        })
+    }
+}
+
+fn empty_store() -> Arc<dyn MemoryTrait> {
+    Arc::new(archon_memory::MemoryGraph::in_memory().expect("in-memory graph"))
+}
+
+/// How many `N.` headers the prompt carries, i.e. how many pairs were judged.
+fn numbered_pairs(prompt: &str) -> usize {
+    prompt
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.ends_with('.') && line.trim_end_matches('.').parse::<usize>().is_ok()
+        })
+        .count()
+}
+
+fn adjudicating(min_pairs: usize) -> archon_memory::garden::GardenConfig {
+    archon_memory::garden::GardenConfig {
+        auto_adjudicate_review_band: true,
+        auto_adjudicate_min_pairs: min_pairs,
+        ..archon_memory::garden::GardenConfig::default()
+    }
+}
+
 /// The prompt has to name the failure mode, because the model cannot infer that
 /// merging is destructive from the question alone.
 #[test]
@@ -122,5 +202,125 @@ fn pair_content_is_excerpted() {
         prompt.len() < 2_000,
         "prompt grew to {} chars; content is not being excerpted",
         prompt.len()
+    );
+}
+
+/// The per-run cap holds however large the band has grown.
+///
+/// It bounds cost and blast radius in one number, and a band left to accumulate
+/// for weeks is exactly the input that would test it. The overflow is not lost:
+/// the band writes nothing, so the unjudged pairs are re-derived by the next
+/// consolidation and offered again.
+#[tokio::test]
+async fn no_more_than_max_pairs_per_run_are_judged() {
+    let client = Arc::new(RecordingClient::default());
+    let pairs: Vec<ReviewPair> = (0..MAX_PAIRS_PER_RUN * 3)
+        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
+        .collect();
+
+    let merged = adjudicate_and_apply(
+        client.clone(),
+        empty_store(),
+        pairs,
+        "test-model".to_string(),
+    )
+    .await;
+
+    assert_eq!(
+        client.calls(),
+        1,
+        "the whole batch must cost exactly one round-trip"
+    );
+    assert_eq!(
+        numbered_pairs(&client.last_prompt()),
+        MAX_PAIRS_PER_RUN,
+        "the batch must be truncated to the per-run cap"
+    );
+    assert_eq!(
+        merged, 0,
+        "these ids name no stored memory, so a SAME verdict must merge nothing"
+    );
+}
+
+/// The default configuration must not reach a provider at all.
+///
+/// Not "merges nothing" — makes no call. Automatic consolidation runs before the
+/// user has typed anything, and the whole reason this is opt-in is that the call
+/// itself is the cost.
+#[tokio::test]
+async fn the_automatic_path_is_silent_by_default() {
+    let client = Arc::new(RecordingClient::default());
+    let config = archon_memory::garden::GardenConfig::default();
+    let pairs: Vec<ReviewPair> = (0..50)
+        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
+        .collect();
+
+    let merged = maybe_adjudicate_review_band(
+        &config,
+        client.clone(),
+        empty_store(),
+        pairs,
+        "test-model".to_string(),
+    )
+    .await;
+
+    assert_eq!(merged, 0);
+    assert_eq!(
+        client.calls(),
+        0,
+        "the default must not spend a round-trip at session start"
+    );
+}
+
+/// Enabled but under the threshold: still no call.
+///
+/// The threshold is the half of this feature that keeps "adjudicate
+/// automatically" from meaning "one LLM call every launch".
+#[tokio::test]
+async fn a_band_under_the_threshold_makes_no_call() {
+    let client = Arc::new(RecordingClient::default());
+    let pairs: Vec<ReviewPair> = (0..9)
+        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
+        .collect();
+
+    let merged = maybe_adjudicate_review_band(
+        &adjudicating(10),
+        client.clone(),
+        empty_store(),
+        pairs,
+        "test-model".to_string(),
+    )
+    .await;
+
+    assert_eq!(merged, 0);
+    assert_eq!(
+        client.calls(),
+        0,
+        "nine pairs must not trigger a ten-pair threshold"
+    );
+}
+
+/// Enabled and exactly at the threshold: one call, judging every pending pair.
+#[tokio::test]
+async fn a_band_at_the_threshold_is_judged_in_one_call() {
+    let client = Arc::new(RecordingClient::default());
+    let pairs: Vec<ReviewPair> = (0..10)
+        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
+        .collect();
+
+    maybe_adjudicate_review_band(
+        &adjudicating(10),
+        client.clone(),
+        empty_store(),
+        pairs,
+        "test-model".to_string(),
+    )
+    .await;
+
+    assert_eq!(client.calls(), 1);
+    assert_eq!(
+        numbered_pairs(&client.last_prompt()),
+        10,
+        "a run that fires at the threshold must clear the band it fired on"
     );
 }

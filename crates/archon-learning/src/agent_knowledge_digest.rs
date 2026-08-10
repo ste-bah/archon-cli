@@ -166,7 +166,7 @@ fn string_vec_field(value: &serde_json::Value, key: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn test_db() -> std::sync::Arc<DbInstance> {
+    fn test_db() -> crate::cozo_guard::TestDb {
         crate::cozo_guard::test_sqlite_db("test-agent-knowledge-digest")
     }
 

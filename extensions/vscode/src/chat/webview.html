@@ -58,6 +58,88 @@
       font-size: 0.9em;
     }
 
+    .message.thinking {
+      align-self: flex-start;
+      font-style: italic;
+      opacity: 0.7;
+      border-left: 2px solid var(--vscode-panel-border, #3c3c3c);
+    }
+
+    .message.tool {
+      align-self: stretch;
+      max-width: 100%;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.9em;
+      background: var(--vscode-textCodeBlock-background, #1b1b1b);
+      border-left: 3px solid var(--vscode-panel-border, #3c3c3c);
+    }
+
+    .message.tool.error {
+      border-left-color: var(--vscode-errorForeground, #f14c4c);
+    }
+
+    .tool-name {
+      font-weight: 600;
+      opacity: 0.9;
+    }
+
+    .tool-output {
+      margin-top: 4px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #permission {
+      display: none;
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+      border-radius: 6px;
+      background: var(--vscode-inputValidation-warningBackground, #352a05);
+    }
+
+    #permission.visible {
+      display: block;
+    }
+
+    #permission-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    #permission-description {
+      opacity: 0.9;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .permission-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .permission-actions button {
+      border: none;
+      border-radius: 4px;
+      padding: 5px 14px;
+      cursor: pointer;
+      font-size: inherit;
+      font-family: inherit;
+    }
+
+    #permission-allow {
+      background: var(--vscode-button-background, #0e639c);
+      color: var(--vscode-button-foreground, #fff);
+    }
+
+    #permission-deny {
+      background: var(--vscode-button-secondaryBackground, #3a3d41);
+      color: var(--vscode-button-secondaryForeground, #fff);
+    }
+
     #streaming {
       padding: 8px 12px;
       min-height: 24px;
@@ -124,6 +206,14 @@
 <body>
   <div id="messages"></div>
   <div id="streaming"></div>
+  <div id="permission" role="alertdialog" aria-live="assertive">
+    <div id="permission-title"></div>
+    <div id="permission-description"></div>
+    <div class="permission-actions">
+      <button type="button" id="permission-allow">Allow</button>
+      <button type="button" id="permission-deny">Deny</button>
+    </div>
+  </div>
   <div id="input-area">
     <form id="chat-form">
       <textarea
@@ -132,6 +222,7 @@
         rows="1"
       ></textarea>
       <input type="submit" id="send-btn" value="Send" />
+      <button type="button" id="cancel-btn" hidden>Stop</button>
     </form>
   </div>
 
@@ -145,9 +236,22 @@
     const form = document.getElementById('chat-form');
     const textarea = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const permissionBox = document.getElementById('permission');
+    const permissionTitle = document.getElementById('permission-title');
+    const permissionDescription = document.getElementById('permission-description');
+    const allowBtn = document.getElementById('permission-allow');
+    const denyBtn = document.getElementById('permission-deny');
 
     let streamBuffer = '';
+    let thinkingBuffer = '';
     let isBusy = false;
+    // The request the buttons currently speak for. Cleared the moment a
+    // decision is sent so a second click cannot answer a question that is
+    // already closed.
+    let pendingPermissionId = null;
+    // Tool calls awaiting their result, keyed by toolUseId.
+    const openTools = new Map();
 
     function appendMessage(role, content) {
       const div = document.createElement('div');
@@ -155,6 +259,22 @@
       div.textContent = content;
       messagesDiv.appendChild(div);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      return div;
+    }
+
+    function flushThinking() {
+      if (thinkingBuffer.length > 0) {
+        appendMessage('thinking', thinkingBuffer);
+        thinkingBuffer = '';
+      }
+    }
+
+    function flushAssistant() {
+      if (streamBuffer.length > 0) {
+        appendMessage('assistant', streamBuffer);
+        streamBuffer = '';
+      }
+      setStreaming('');
     }
 
     function setStreaming(text) {
@@ -166,7 +286,37 @@
       isBusy = busy;
       textarea.disabled = busy;
       sendBtn.disabled = busy;
+      cancelBtn.hidden = !busy;
     }
+
+    function showPermission(msg) {
+      pendingPermissionId = msg.requestId;
+      permissionTitle.textContent = 'Allow Archon to run ' + msg.action + '?';
+      permissionDescription.textContent = msg.description || '';
+      permissionBox.classList.add('visible');
+      allowBtn.disabled = false;
+      denyBtn.disabled = false;
+      allowBtn.focus();
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function hidePermission() {
+      pendingPermissionId = null;
+      permissionBox.classList.remove('visible');
+    }
+
+    function decide(approved) {
+      if (pendingPermissionId === null) return;
+      const requestId = pendingPermissionId;
+      // Cleared before posting: the host round-trips to the backend, and a
+      // second click in the meantime would be a second answer to one question.
+      hidePermission();
+      vscode.postMessage({ type: 'permissionDecision', requestId, approved });
+    }
+
+    allowBtn.addEventListener('click', () => decide(true));
+    denyBtn.addEventListener('click', () => decide(false));
+    cancelBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -177,6 +327,8 @@
       textarea.value = '';
       setBusy(true);
       streamBuffer = '';
+      thinkingBuffer = '';
+      openTools.clear();
 
       vscode.postMessage({ type: 'prompt', text });
     });
@@ -193,16 +345,69 @@
       const msg = event.data;
       switch (msg.type) {
         case 'textDelta':
+          flushThinking();
           streamBuffer += msg.text;
           setStreaming(streamBuffer);
           break;
 
-        case 'turnComplete':
-          if (streamBuffer.length > 0) {
-            appendMessage('assistant', streamBuffer);
+        case 'thinkingDelta':
+          thinkingBuffer += msg.text;
+          setStreaming(streamBuffer);
+          break;
+
+        case 'toolCall': {
+          flushThinking();
+          flushAssistant();
+          const div = appendMessage('tool', '');
+          const name = document.createElement('div');
+          name.className = 'tool-name';
+          name.textContent = '\u2699 ' + msg.name + ' \u2026';
+          div.appendChild(name);
+          openTools.set(msg.toolUseId, { div, name });
+          break;
+        }
+
+        case 'toolResult': {
+          const open = openTools.get(msg.toolUseId);
+          const div = open ? open.div : appendMessage('tool', '');
+          if (open) {
+            open.name.textContent = (msg.isError ? '\u2717 ' : '\u2713 ') + msg.name;
+          } else {
+            const name = document.createElement('div');
+            name.className = 'tool-name';
+            name.textContent = (msg.isError ? '\u2717 ' : '\u2713 ') + msg.name;
+            div.appendChild(name);
           }
-          streamBuffer = '';
-          setStreaming('');
+          if (msg.isError) div.classList.add('error');
+          const out = document.createElement('div');
+          out.className = 'tool-output';
+          out.textContent = msg.content || '';
+          div.appendChild(out);
+          openTools.delete(msg.toolUseId);
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          break;
+        }
+
+        case 'permissionRequest':
+          showPermission(msg);
+          break;
+
+        case 'permissionResolved':
+          // The agent has stopped waiting, whoever decided it. Take the
+          // buttons down even if this client is not the one that answered.
+          hidePermission();
+          appendMessage(
+            'system',
+            (msg.granted ? '\u2713 Allowed ' : '\u2717 Denied ') +
+              msg.action +
+              (msg.reason ? ' \u2014 ' + msg.reason : '')
+          );
+          break;
+
+        case 'turnComplete':
+          flushThinking();
+          flushAssistant();
+          hidePermission();
           setBusy(false);
           break;
 
@@ -211,6 +416,9 @@
           break;
 
         case 'error':
+          flushThinking();
+          flushAssistant();
+          hidePermission();
           appendMessage('system', '\u26a0 ' + msg.message);
           setBusy(false);
           break;

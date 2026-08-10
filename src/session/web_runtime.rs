@@ -294,6 +294,7 @@ pub(crate) async fn spawn_web_session(
         config_path.clone(),
         working_dir.clone(),
         Arc::clone(&memory),
+        Arc::clone(&llm_adapter),
         Arc::clone(&hook_registry),
         governed_learning_db.clone(),
         Arc::clone(&session_store),

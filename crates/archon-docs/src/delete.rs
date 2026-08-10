@@ -5,8 +5,8 @@
 //! reprocess deliberately preserves — `doc_sources` above all.
 //!
 //! Dropping `doc_sources` is the load-bearing part. Content-hash dedupe is not a side registry:
-//! [`store::hash_exists_in_sources`] queries `doc_sources.content_hash` directly, so as long as
-//! that row survives, re-ingesting the same bytes reports `Skipped: 1 duplicates` with
+//! [`store::reserve_doc_source_by_hash`] queries `doc_sources.content_hash` directly, so as long
+//! as that row survives, re-ingesting the same bytes reports `Skipped: 1 duplicates` with
 //! `was_new == false`. An ingest killed partway through leaves exactly that row behind (it is
 //! inserted before the pipeline runs), which is the bug this command exists to clear.
 
@@ -191,7 +191,9 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            !store::hash_exists_in_sources(&db, &deleted.content_hash).unwrap(),
+            store::get_doc_by_hash(&db, &deleted.content_hash)
+                .unwrap()
+                .is_none(),
             "content hash still registered; re-ingest would be skipped as a duplicate"
         );
 

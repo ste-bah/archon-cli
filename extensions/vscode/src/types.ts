@@ -41,6 +41,68 @@ export interface PromptMessage {
   };
 }
 
+/**
+ * JSON-RPC 2.0 request frame for `archon/permissionResponse`.
+ *
+ * `requestId` is echoed from the `archon/permissionRequest` notification. The
+ * backend refuses an answer that does not match the request it is waiting on,
+ * so a decision can never be applied to the wrong tool.
+ */
+export interface PermissionResponseMessage {
+  jsonrpc: "2.0";
+  id: number;
+  method: "archon/permissionResponse";
+  params: {
+    sessionId: string;
+    requestId: string;
+    approved: boolean;
+  };
+}
+
+/** Payload of an inbound `archon/permissionRequest` notification. */
+export interface PermissionRequest {
+  requestId: string;
+  /** Tool name the agent wants to run. */
+  action: string;
+  description: string;
+}
+
+/** Payload of an inbound `archon/permissionResolved` notification. */
+export interface PermissionResolved {
+  action: string;
+  granted: boolean;
+  reason?: string;
+}
+
+/** Payload of an inbound `archon/toolCall` notification. */
+export interface ToolCall {
+  toolUseId: string;
+  name: string;
+}
+
+/** Payload of an inbound `archon/toolCallComplete` notification. */
+export interface ToolCallComplete {
+  toolUseId: string;
+  name: string;
+  isError: boolean;
+  content: string;
+}
+
+/**
+ * Result of `archon/status`.
+ *
+ * Every measured field is optional: the backend reports `unavailable` rather
+ * than zeros when the session has not run a turn, because a session that has
+ * consumed nothing has no reading rather than a reading of zero.
+ */
+export interface SessionStatus {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
+  unavailable?: string;
+}
+
 /** Configuration for the WebSocket transport. */
 export interface WsConnectionConfig {
   /** WebSocket endpoint URL. Default: ws://localhost:8420/ws/ide */

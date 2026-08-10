@@ -156,7 +156,7 @@ fn print_summary(summary: &TickSummary) {
 mod tests {
     use super::*;
 
-    fn test_db() -> std::sync::Arc<DbInstance> {
+    fn test_db() -> crate::command::test_db::TestDb<std::sync::Arc<cozo::DbInstance>> {
         crate::command::test_support::registered_learning_test_db("test-learning-tick")
     }
 

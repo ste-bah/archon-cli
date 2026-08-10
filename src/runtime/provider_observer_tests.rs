@@ -71,7 +71,7 @@ impl LlmProvider for CompleteProvider {
     }
 }
 
-fn test_db() -> Arc<DbInstance> {
+fn test_db() -> crate::command::test_db::TestDb<std::sync::Arc<cozo::DbInstance>> {
     crate::command::test_support::registered_learning_test_db("test-observed-provider-events")
 }
 
@@ -413,7 +413,7 @@ async fn observer_forwards_resolve_alias_to_the_wrapped_provider() {
         Arc::new(AliasingProvider),
         "direct",
         None,
-        ProviderRuntimeEventRecorder::with_db(db),
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
     )
     .await;
 
@@ -438,7 +438,7 @@ async fn observer_resolves_tier_alias_through_the_inner_map_not_first_model() {
         Arc::new(AliasingProvider),
         "direct",
         None,
-        ProviderRuntimeEventRecorder::with_db(db),
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
     )
     .await;
 

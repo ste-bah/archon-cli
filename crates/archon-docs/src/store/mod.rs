@@ -23,4 +23,8 @@ pub use locators::*;
 pub use pages::*;
 
 #[cfg(test)]
+mod hash_reservation_test_hooks;
+#[cfg(test)]
+mod hash_reservation_tests;
+#[cfg(test)]
 mod tests;

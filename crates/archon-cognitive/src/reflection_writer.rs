@@ -5,9 +5,22 @@ use cozo::DbInstance;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::reflection_store::{append_ledger, put_reflection, query_reflection_lessons};
+use crate::reflection_store::{
+    append_ledger, put_reflection, put_reflection_evidence, query_reflection_lessons,
+};
+use crate::reflection_trigger::{ReflectionTrigger, TriggeredReflection};
 use crate::schema::ensure_cognitive_schema;
-use crate::{CognitiveError, DecisionRecord, SituationKind, VerificationVerdict};
+use crate::{
+    CandidateActionKind, CognitiveError, DecisionRecord, SituationKind, VerificationVerdict,
+};
+
+/// Longest accepted evidence reference.
+///
+/// Evidence refs are identifiers (`kind:uuid`), so anything long is not a
+/// reference. Together with the whitespace rule this is what stops a caller
+/// from smuggling narrative text — model reasoning included — into the one
+/// free-form-looking field on the record.
+const MAX_EVIDENCE_REF_LEN: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -139,6 +152,60 @@ impl<'a, S: LessonSink> ReflectionWriter<'a, S> {
         })
     }
 
+    /// Write a reflection because a live turn tripped a trigger.
+    ///
+    /// This is the path issue #81 asks for, and it is deliberately narrower
+    /// than [`Self::reflect`]: it persists only the goal, the mismatch, the
+    /// proposed adjustment, the evidence references and the confidence. There
+    /// is no parameter that can carry raw chain-of-thought, and the strings on
+    /// the record are composed here from enums and counts rather than accepted
+    /// from the caller.
+    pub fn reflect_triggered(
+        &self,
+        input: TriggeredReflectInput,
+    ) -> Result<ReflectionWriteOutcome, CognitiveError> {
+        if !self.record_enabled || input.decision_id.is_empty() {
+            return Ok(ReflectionWriteOutcome::default());
+        }
+        let mut input = input;
+        let (evidence_refs, rejected) =
+            sanitize_evidence_refs(std::mem::take(&mut input.evidence_refs));
+        let mut degraded = Vec::new();
+        if rejected > 0 {
+            // The count, never the content: reporting what was rejected would
+            // reintroduce exactly the text this filter exists to keep out.
+            degraded.push(format!("evidence_refs_rejected:{rejected}"));
+        }
+
+        let mut reflection = build_triggered_reflection(&input);
+        reflection.should_propose = self.is_recurring_lesson(&reflection.lesson)?;
+        if let Err(error) = put_reflection(self.db, &reflection) {
+            degraded.push(format!("cozo_reflection_write_failed:{error}"));
+        }
+        if let Err(error) = put_reflection_evidence(
+            self.db,
+            &reflection.reflection_id,
+            input.trigger.trigger.as_str(),
+            input.trigger.confidence,
+            &evidence_refs,
+            &reflection.created_at.to_rfc3339(),
+        ) {
+            degraded.push(format!("reflection_evidence_write_failed:{error}"));
+        }
+        if let Err(error) = append_ledger(&self.ledger_dir, &reflection) {
+            degraded.push(format!("reflection_ledger_write_failed:{error}"));
+        }
+        if reflection.should_propose
+            && let Err(error) = self.lesson_sink.promote_lesson(&reflection)
+        {
+            degraded.push(format!("lesson_promotion_failed:{error}"));
+        }
+        Ok(ReflectionWriteOutcome {
+            reflection: Some(reflection),
+            degraded,
+        })
+    }
+
     fn is_recurring_lesson(&self, lesson: &str) -> Result<bool, CognitiveError> {
         let key = normalize_lesson(lesson);
         let count = query_reflection_lessons(self.db)?
@@ -147,6 +214,99 @@ impl<'a, S: LessonSink> ReflectionWriter<'a, S> {
             .count();
         Ok(count + 1 >= self.similarity_threshold)
     }
+}
+
+/// Everything the triggered path is allowed to know about a turn.
+///
+/// Ids, enums and a bounded confidence. No user text, no assistant text, no
+/// tool output — so "never persist raw chain-of-thought" is enforced by the
+/// type rather than by reviewer discipline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggeredReflectInput {
+    pub decision_id: String,
+    pub session_id: String,
+    pub turn_number: u64,
+    pub situation_kind: SituationKind,
+    /// What the plan intended, i.e. the goal this reflection is measured
+    /// against.
+    pub goal_action: Option<CandidateActionKind>,
+    /// What the turn actually did.
+    pub observed_action: Option<CandidateActionKind>,
+    pub trigger: TriggeredReflection,
+    pub evidence_refs: Vec<String>,
+}
+
+/// Keep only refs that look like references.
+///
+/// Returns the survivors and how many were dropped.
+fn sanitize_evidence_refs(refs: Vec<String>) -> (Vec<String>, usize) {
+    let total = refs.len();
+    let kept: Vec<String> = refs
+        .into_iter()
+        .filter(|reference| {
+            !reference.trim().is_empty()
+                && reference.len() <= MAX_EVIDENCE_REF_LEN
+                && !reference.chars().any(char::is_whitespace)
+        })
+        .collect();
+    let rejected = total - kept.len();
+    (kept, rejected)
+}
+
+fn build_triggered_reflection(input: &TriggeredReflectInput) -> ReflectionRecord {
+    let kind = input.situation_kind.as_str();
+    ReflectionRecord {
+        reflection_id: Uuid::new_v4().to_string(),
+        session_id: input.session_id.clone(),
+        turn_number: input.turn_number,
+        decision_id: input.decision_id.clone(),
+        situation_kind: input.situation_kind,
+        attempted: truncate(format!("goal:{kind}:{}", action_str(input.goal_action))),
+        // Nothing was verified on this path, so nothing is claimed to have
+        // worked. An empty string here is the honest value.
+        worked: String::new(),
+        failed: truncate(format!(
+            "mismatch:{}:observed_{}",
+            input.trigger.trigger.as_str(),
+            action_str(input.observed_action)
+        )),
+        lesson: truncate(triggered_lesson(input.trigger.trigger, kind)),
+        should_propose: false,
+        proposed_rule_id: None,
+        outcome: triggered_outcome(input.trigger.trigger),
+        created_at: Utc::now(),
+    }
+}
+
+/// The proposed adjustment for each trigger.
+///
+/// Kept generic over the situation kind rather than the turn's content: a
+/// lesson that quoted the turn would be both raw text and unusable as a
+/// recurring-lesson key.
+fn triggered_lesson(trigger: ReflectionTrigger, kind: &str) -> String {
+    match trigger {
+        ReflectionTrigger::HighConfidenceCorrection => {
+            format!("{kind}: user correction lowers confidence and requires source recheck")
+        }
+        ReflectionTrigger::RepeatedToolFailure => {
+            format!("{kind}: repeated tool failure should stop retrying and re-plan the approach")
+        }
+        ReflectionTrigger::HighSurprise => {
+            format!("{kind}: outcome diverged from the plan; record why before claiming completion")
+        }
+    }
+}
+
+fn triggered_outcome(trigger: ReflectionTrigger) -> OutcomeSummary {
+    match trigger {
+        ReflectionTrigger::HighConfidenceCorrection => OutcomeSummary::UserCorrected,
+        ReflectionTrigger::RepeatedToolFailure => OutcomeSummary::Failure,
+        ReflectionTrigger::HighSurprise => OutcomeSummary::Degraded,
+    }
+}
+
+fn action_str(action: Option<CandidateActionKind>) -> &'static str {
+    action.map(CandidateActionKind::as_str).unwrap_or("none")
 }
 
 fn is_meaningful(input: &ReflectInput) -> bool {

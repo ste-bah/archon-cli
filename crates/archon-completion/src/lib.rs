@@ -30,6 +30,9 @@ pub mod required_evidence;
 pub mod trust;
 pub mod verification_gates;
 
+#[cfg(test)]
+mod test_support;
+
 pub use models::{
     RequiredEvidence, RequiredEvidenceCheck, RequiredEvidenceKind, RequiredEvidenceStatus,
 };
@@ -219,9 +222,8 @@ mod tests {
     use super::*;
     use cozo::DbInstance;
 
-    fn test_db() -> DbInstance {
-        let path = format!("/tmp/test-completion-lib-{}.db", uuid::Uuid::new_v4());
-        DbInstance::new("sqlite", &path, "").unwrap()
+    fn test_db() -> crate::test_support::TestDb<DbInstance> {
+        crate::test_support::sqlite_test_db("test-completion-lib")
     }
 
     #[tokio::test]

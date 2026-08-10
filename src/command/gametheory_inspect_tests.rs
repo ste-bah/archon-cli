@@ -6,15 +6,11 @@ use super::gametheory_inspect::{
     render_list_agents, render_show, render_status,
 };
 
-fn test_db() -> std::sync::Arc<DbInstance> {
-    let path = format!("/tmp/test-gt-cli-inspect-{}.db", uuid::Uuid::new_v4());
-    archon_cozo::open_sqlite_guarded_instance(
-        &path,
+fn test_db() -> crate::command::test_db::TestDb<std::sync::Arc<DbInstance>> {
+    crate::command::test_db::guarded_test_db(
+        "test-gt-cli-inspect",
         "open game-theory inspect test db",
-        archon_cozo::CozoGuardConfig::for_db_path(&path),
     )
-    .unwrap()
-    .db_arc()
 }
 
 fn seed_run(db: &DbInstance) {

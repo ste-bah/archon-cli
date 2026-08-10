@@ -20,7 +20,9 @@ Current `archon docs --help` surface:
 | `chunks <document-id>` | List chunks for a document | chunk source of truth |
 | `inspect <document-id>` | Full document inspection | pages, chunks, OCR runs, provenance |
 | `search <query>` | Search chunks | `--mode exact|semantic|hybrid`, `--debug` |
-| `answer <query>` | Answer using document evidence | uses retrieved chunks |
+| `compile` | Summarize documents, extract concepts, refresh the index | `--kb`, `--model`; needs an LLM provider |
+| `answer <query>` | Answer using document evidence | `--no-synthesis`, `--file`, `--kb`, `--limit`, `--mode`, `--model` |
+| `export` | Dump the corpus to markdown | `--out <dir>` (default stdout), `--kb` |
 | `provenance <chunk-or-answer-id>` | Show provenance chain | chunk or answer component |
 | `index` | Embed and store vectors | `--all` re-indexes all chunks |
 | `vector-status` | Show vector store state | legacy Cozo rows, RocksDB rows, HNSW snapshot |
@@ -66,6 +68,111 @@ archon docs provenance <chunk-or-answer-id>
 For PDFs, `status` and `inspect` also show embedded images extracted, images
 skipped by the icon/decorator filter, image OCR runs/failures, image VLM
 descriptions/failures, and rendered page fallback counts.
+
+## Compile: summaries, concepts, and an index
+
+`archon docs compile` (REQ-KB-002) runs an LLM pass over every document ingested
+since the last run and writes three kinds of derived document:
+
+| Output | Stored as | Linked by |
+|---|---|---|
+| One summary per document | `archon-kb://summary/<document-id>` | `DerivedFrom` → the source document |
+| Concept articles across the batch | `archon-kb://concept/<slug>` | `DerivedFrom` → each document cited |
+| A single corpus index | `archon-kb://index` | none (rewritten each run) |
+
+Cross-references between concept articles are `Cites` edges in
+`doc_provenance_edges`.
+
+These are **ordinary documents**, not a separate graph. That is the point: the
+moment compile finishes, `docs search`, `kb search`, `kb recall` and
+`kb process` all see the summaries and concepts without knowing compile exists.
+A summary also inherits its source document's `--kb` memberships, so
+`kb search --kb <name>` ranks the summaries drawn from that bucket.
+
+```bash
+archon kb ingest ./research-pack --kb trading-elliott-wave
+archon docs compile --kb trading-elliott-wave
+archon docs search "wave 3 invalidation"      # now also matches the summaries
+```
+
+Compilation is incremental. `compile_state.last_compiled_at` is the watermark;
+a second run with nothing new ingested does no model work and reports zeros.
+The pass never reads its own output back in, so summaries are never
+re-summarized.
+
+Progress is printed per document because NFR-PIPE-012 budgets five minutes for
+twenty documents and every document costs one model round trip.
+
+Compile requires a configured LLM provider — unlike `answer` there is no
+meaningful extractive fallback, so it fails with an explicit message rather than
+reporting a successful run of zero.
+
+## Answer: extractive or synthesized
+
+`archon docs answer` satisfies REQ-DOCS-013 (answer from retrieved context),
+REQ-DOCS-014 (citations) and REQ-DOCS-015 (say so when the evidence is
+insufficient). REQ-KB-003 specifies the same capability and adds two things,
+which this command now does rather than a second verb:
+
+- **LLM synthesis.** With a provider configured, retrieved chunks plus any
+  compiled summaries and concept articles for those documents are synthesized
+  into an answer. With no provider, or with `--no-synthesis`, the extractive
+  path runs unchanged and prints cited evidence.
+- **Filing.** `--file` stores the answer as a searchable document under
+  `archon-kb://answer/<uuid>` with `DerivedFrom` edges to every chunk it cited,
+  so `docs provenance <document-id>` walks from the answer to its evidence.
+
+A filed answer is second-hand evidence, so it is scored 0.9× in later retrieval
+(EC-PIPE-018): identical content ranks below the source it was synthesised from.
+This is a multiplier, not an ordering guarantee — an answer that restates the
+question and lists its citations can match more query terms than its source and
+still come out on top.
+
+### The synthesized answer streams
+
+A synthesized answer prints token by token as the model produces it. Retrieval
+is a rounding error next to the model round trip — measured on a live run, 9ms
+of a 9.6s command — so the total is unchanged; what changes is that text starts
+appearing in well under a second instead of after ten seconds of blank
+terminal. Retrieval notes print above the answer, citations below it, and the
+complete answer is what `--file` stores, exactly as before.
+
+The command reports `Retrieval Nms, first token Nms, total Nms`. NFR-KB-003's
+5-second budget is checked against the time to the first token, not the total:
+with a streamed answer the first token is when the operator stops waiting, and
+a warning that fires on every healthy run is one nobody reads.
+
+The extractive path (no provider, or `--no-synthesis`) does not stream. It has
+no model round trip to hide, so it prints its answer in one go and reports
+`Retrieval Nms, synthesis Nms`.
+
+```bash
+archon docs answer "what is the retention window?"
+archon docs answer "what is the retention window?" --file --kb trading-elliott-wave
+archon docs answer "what is the retention window?" --no-synthesis --mode exact
+```
+
+An answer with no supporting evidence says so explicitly; it never fabricates
+confidence.
+
+## Export
+
+`archon docs export` dumps the corpus to markdown with YAML frontmatter,
+grouped into `raw/`, `compiled/`, `concepts/`, `answers/` and `index/` — the
+same five groups the older `kb_nodes` export used, now resolved from
+`doc_sources` by source path.
+
+```bash
+archon docs export                                  # single markdown stream to stdout
+archon docs export --out ./kb-dump                  # one file per document, grouped
+archon docs export --out ./kb-dump --kb trading-elliott-wave
+```
+
+Two frontmatter fields changed with the move off `kb_nodes`, rather than being
+dropped: `domain_tag` became `kb` (the document's `doc_kb_memberships`), and
+per-node `chunk_index` became `chunks` (the count, with the chunk text joined in
+order). `derived_from` is new — the old export had no way to show provenance
+edges.
 
 ## Repair Existing Evidence
 
@@ -274,6 +381,10 @@ Interactive sessions expose the document evidence browser through `/docs`:
 
 The read-side slash commands inspect the same Cozo source of truth as
 `archon docs ...`; they are not canned TUI labels.
+
+`/docs compile`, `/docs answer` and `/docs export` run through the CLI mirror
+like `/docs ingest` does, so their progress and output stream into the session.
+Because the mirror runs without a TTY, pass every flag on the command line.
 
 ## Multimodal policy
 
