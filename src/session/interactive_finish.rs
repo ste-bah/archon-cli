@@ -305,6 +305,22 @@ pub(super) async fn finish(
         // that just ran -- bounded, single-run-locked, and unable to delete a
         // memory at all. Dropping the handle detaches the task.
         let (data_dir, _) = archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
+
+        // Whether consolidated memories are ever recalled is only observable at
+        // the moment a prompt is built, so the observation is installed here and
+        // fires from the injection path for the rest of the process. Installed
+        // unconditionally: it costs one tag-filtered search per uncached
+        // injection, and nothing at all until a consolidation has been applied.
+        super::consolidation_reuse::install(
+            Arc::clone(&memory),
+            crate::command::garden_metrics::GardenMetricContext {
+                working_dir: working_dir.clone(),
+                model_id: agent_model_for_ledger.clone(),
+                session_id: session_id.to_string(),
+                turn_number: 0,
+            },
+        );
+
         let _garden_scheduler = super::garden_scheduler::spawn_garden_scheduler(
             super::garden_scheduler::GardenSchedulerSpec {
                 garden: config.memory.garden.clone(),

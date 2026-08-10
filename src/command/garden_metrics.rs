@@ -169,6 +169,51 @@ fn emit_rule_lifecycle(context: &GardenMetricContext, rule_id: &str, operation: 
     });
 }
 
+/// Open the store once and write a batch of events.
+///
+/// Batched because one injection observation produces one row per consolidated
+/// memory, and opening the cognitive store per row would put a file-system open
+/// and a schema check on the prompt-building path for each of them.
+///
+/// `build` is called once with the emitter and returns every event to write, so
+/// callers that need the emitter's window id can use it while building.
+pub(crate) fn write_batch(
+    context: &GardenMetricContext,
+    build: impl FnOnce(&MetricEmitter<'_>) -> Vec<CognitiveMetricEvent>,
+) {
+    let root = cognitive_root(context.working_dir.as_path());
+    let store = match PersistentCognitiveStore::open(&root) {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::debug!(%error, root = %root.display(), "garden: no cognitive store; metrics not recorded");
+            return;
+        }
+    };
+    let policy = archon_policy::load_effective_policy(context.working_dir.as_path())
+        .ok()
+        .map(|effective| effective.cognitive);
+    let emitter = match MetricEmitter::open(
+        store.db(),
+        &root,
+        runtime_cohort(TASK_CLASS, context.model_id.as_str(), policy.as_ref()),
+    ) {
+        Ok(emitter) => emitter,
+        Err(error) => {
+            tracing::warn!(%error, "garden: could not open the metric emitter");
+            return;
+        }
+    };
+    for event in build(&emitter) {
+        if let Err(error) = emitter.record(&event) {
+            // A same-id write with different content is how the store reports a
+            // replay whose timestamp moved. It is benign -- the first write is
+            // the observation -- so it is logged where it can be found rather
+            // than warned about on a path that runs every turn.
+            tracing::debug!(%error, metric = %event.metric_name, "garden: metric not recorded");
+        }
+    }
+}
+
 /// Open the store, build the event, write it. Every failure is a warning.
 fn write(
     context: &GardenMetricContext,

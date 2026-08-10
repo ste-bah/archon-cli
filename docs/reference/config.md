@@ -628,6 +628,14 @@ staleness_importance_floor = 0.3
 importance_decay_per_day = 0.01
 max_memories = 5000
 briefing_limit = 15
+scheduled_consolidation = false
+scheduled_interval_hours = 24
+scheduled_max_reversible_ops = 500
+scheduled_max_retirement_candidates = 100
+scheduled_max_seconds = 300
+consolidation_min_cluster_size = 3
+consolidation_max_span_days = 14
+consolidation_min_word_overlap = 0.5
 ```
 
 | Field | Default | What / Why |
@@ -644,6 +652,59 @@ briefing_limit = 15
 | `importance_decay_per_day` | `0.01` | Importance lost per day for unaccessed memories, charged **per consolidation run** for the days since the previous run. Memories regain importance when retrieved. At the default, a memory stored at `0.5` and never recalled crosses `staleness_importance_floor` in about 20 days and is deleted once it also passes `staleness_days`. (Before v1.5.2 the whole span since last access was charged on every run, so decay compounded and that took about a week.) |
 | `max_memories` | `5000` | Hard cap. When exceeded, lowest-importance memories are pruned first. Raise for long-running projects with many decisions to track. |
 | `briefing_limit` | `15` | Top-N memories injected into the session-start briefing. Higher = more context from prior sessions, more startup tokens. |
+
+### Scheduled consolidation
+
+The fields above describe the pass that runs at session start and on `/garden`.
+The fields below add a second, **deliberately weaker** pass on a timer.
+
+A scheduled pass differs from the manual one in three ways, all restrictions:
+
+1. It holds a single-run lock, so it cannot overlap another pass — its own
+   previous tick, a session start, or a `/garden` you are watching. The lock is
+   an OS advisory lock on `garden-run.lock` in the memory data directory, so a
+   killed process releases it without leaving anything to clean up.
+2. It stops at the work and time ceilings below, always between whole units, so
+   an interrupted pass leaves the store exactly as a pass with fewer candidates
+   would have.
+3. **It cannot delete a memory.** Anything the prune rules would have removed
+   becomes a retirement proposal for review instead, and the memory is left
+   untouched.
+
+Proposals are reviewed with `/garden proposals`, decided with
+`/garden approve <id>` or `/garden reject <id>`, carried out with
+`/garden apply`, and undone with `/garden rollback <id>`. Nothing moves a
+proposal past `Pending` except one of those commands. Every applied change is
+reversible: retiring adds a status tag that withholds the memory from recall,
+search and listing without deleting the row, and rolling back removes it.
+
+| Field | Default | What / Why |
+|---|---|---|
+| `scheduled_consolidation` | `false` | Run consolidation on a timer. **Off by default, and the knob that most needs to stay off.** Every other automatic pass is attached to something you did and reports where you are looking; a timer decays and merges your memories at an hour you did not choose. Requires the governed-learning store to be open for its proposals to be recorded. |
+| `scheduled_interval_hours` | `24` | Hours between scheduled passes. The clock lives in the memory store, not in the process, so several Archon instances sharing one store agree on it and a restart does not reset it. Ignored when the above is `false`. |
+| `scheduled_max_reversible_ops` | `500` | Ceiling on reversible mutations (importance decay plus merges) in one scheduled pass. On reaching it the pass stops and reports `budget_exhausted` rather than running on; the remaining work waits for the next tick. |
+| `scheduled_max_retirement_candidates` | `100` | Ceiling on how many retirement proposals one pass may raise, so an over-cap store cannot hand you ten thousand decisions. Refusing to propose costs nothing — the memories are untouched and the next pass finds them again. |
+| `scheduled_max_seconds` | `300` | Wall-clock ceiling on one scheduled pass. Nothing is cancelled when it expires; the pass stops taking on new work at the next unit boundary, which is the only kind of stopping that leaves the store consistent. |
+
+### Generative consolidation
+
+A scheduled pass also looks for several memories that restate one another and
+proposes recording the claim **once**, with its corroboration. The proposed text
+is verbatim one of the sources — never a summary — so the proposal can be checked
+against the memories it cites. A summariser would produce a sixth statement
+carrying the authority of the five it generalised past.
+
+Clusters must be **provenance-compatible**: same memory type, same project scope,
+same writer. Every *pair* in a cluster must satisfy that, not merely adjacent
+ones, so a chain of overlapping time windows cannot span more than the limit
+below. Rules, garden bookkeeping, already-consolidated memories, and anything the
+same pass proposed retiring are all excluded.
+
+| Field | Default | What / Why |
+|---|---|---|
+| `consolidation_min_cluster_size` | `3` | How many corroborating observations make a claim worth recording once. Two is a coincidence often enough to be a poor threshold; three is the smallest count that reads as a pattern rather than a repeat. |
+| `consolidation_max_span_days` | `14` | How far apart in time those observations may be recorded. Bounds what a cluster can span, so two records of a fact that *changed* are not consolidated into a claim that the older one is still true. |
+| `consolidation_min_word_overlap` | `0.5` | Word overlap every pair in a cluster must reach to count as the same claim. Provenance compatibility says two memories *may* be one claim; this says they are. Without it, unrelated facts recorded by one writer on one day would be proposed as a single memory citing all of them. |
 
 ---
 
