@@ -1,3 +1,4 @@
+pub mod attribution;
 pub mod candidate_planner;
 mod candidate_store;
 pub mod cognitive_tick;
@@ -30,6 +31,10 @@ pub mod verification_contracts;
 pub mod world_model_scoring;
 
 pub use archon_policy::CognitivePolicy;
+pub use attribution::{
+    ATTRIBUTION_MODE, AttributionAssessment, AttributionCohort, AttributionEngine, AttributionMode,
+    CAUSAL_ATTRIBUTION_VERSION, CauseActionClass,
+};
 pub use candidate_planner::{CandidatePlanner, HeuristicWeights};
 pub use cognitive_tick::{CognitiveTick, TickReport};
 pub use config::{CognitiveConfig, CognitiveDaemonConfig};

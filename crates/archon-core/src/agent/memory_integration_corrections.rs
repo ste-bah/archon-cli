@@ -44,7 +44,11 @@ impl Agent {
         };
 
         let tracker = CorrectionTracker::new(graph.as_ref());
-        let context = format!("turn:{}", self.turn_number);
+        // The context string is the correction record's only structured
+        // provenance -- see `archon_consciousness::correction_provenance`, which
+        // owns both this encoding and the parser R2 attribution reads it with.
+        let context =
+            archon_consciousness::correction_provenance::immediate_turn_context(self.turn_number);
         let engine = RulesEngine::new(graph.as_ref());
         let rules = match engine.get_rules_sorted() {
             Ok(rules) => rules,
@@ -103,6 +107,15 @@ impl Agent {
             heuristic,
             correction.as_ref().map(|record| record.id.clone()),
         );
+
+        // R2 attribution, strictly after the correction was written and its rule
+        // boosted above. Everything the live path mutates has already been
+        // mutated by this point, so the attribution verdict provably influenced
+        // none of it. Moving this call earlier is what a regression would look
+        // like.
+        if let Some(ref correction) = correction {
+            self.spawn_correction_attribution(correction, &classification);
+        }
 
         // Improve the record after the fact, never before it. The correction is
         // already stored above, so a failed or empty summary leaves the bounded
@@ -302,7 +315,9 @@ impl Agent {
                             crate::agent::correction_intake::record_extracted_corrections(
                                 &graph,
                                 &corrections,
-                                &format!("turn:{turn} (semantic pass)"),
+                                &archon_consciousness::correction_provenance::semantic_pass_context(
+                                    turn as u64,
+                                ),
                             );
                         tracing::info!(
                             recorded,
