@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::embedding::{EmbeddingRequest, WorldEmbeddingAdapter};
 use crate::features::{GraphContextFeatures, graph_context_for_row};
+use crate::replay::TransitionKey;
 use crate::schema::{ScalarFeatures, WorldActionKind, WorldLabelSet, WorldTraceRow};
 
 include!("representation/00_core.rs");

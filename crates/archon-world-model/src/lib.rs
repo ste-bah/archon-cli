@@ -23,6 +23,7 @@ pub mod labels;
 pub mod materialize;
 pub mod model;
 pub mod registry;
+pub mod replay;
 pub mod representation;
 pub mod schema;
 pub mod shadow;
@@ -51,6 +52,11 @@ pub use jepa::{
     JepaRuntimeBackendReport, JepaRuntimePrediction, JepaTensorBackend, JepaTraceModel,
     JepaTrainingConfig, JepaTrainingExample, JepaTrainingLosses, JepaTrainingOutcome,
     MlxMetalJepaBackend, PersistedEvalMode, RuntimeEvalMode,
+};
+pub use replay::{
+    MAX_DECILE_SHARE, MAX_PRIORITIZED_FRACTION, MAX_SURPRISE_WEIGHT, PRIORITY_VERSION, ReplayPlan,
+    ReplayPolicy, ReplaySample, ReplaySkipReason, ReplaySummary, TransitionKey, is_held_out,
+    plan_replay, surprise_by_row_id,
 };
 pub use representation::{
     GenericEmbeddingRepresentationAdapter, TraceAction, TraceTransition, TraceWindow,

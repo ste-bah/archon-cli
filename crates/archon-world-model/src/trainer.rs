@@ -1,4 +1,4 @@
-//! Dynamic trainer scheduling gates.
+﻿//! Dynamic trainer scheduling gates.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::BackendKind;
 use crate::registry::ModelRegistry;
-use crate::representation::WorldRepresentationAdapter;
+use crate::replay::{ReplayPlan, ReplayPolicy, ReplaySummary};
+use crate::representation::{TraceWindowBuilder, WorldRepresentationAdapter};
 use crate::storage::WorldModelStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +100,12 @@ pub struct DynamicTrainingRequest<'a> {
     pub trigger_policy: DynamicTrainerTriggerPolicy,
     pub runtime: TrainerRuntimeSnapshot,
     pub triggers: DynamicTrainerTriggerSnapshot,
+    /// Surprise-weighted replay policy.
+    ///
+    /// Its plan is computed on every run that reaches example construction and
+    /// reported on [`DynamicTrainerRunReport::replay`]; it changes the example
+    /// set only when `prioritized_enabled` is set, which is `false` by default.
+    pub replay: ReplayPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +127,21 @@ pub struct DynamicTrainerRunReport {
     pub candidate_id: Option<String>,
     pub checkpoint_path: Option<PathBuf>,
     pub training_mean_cosine_error: Option<f32>,
+    /// Replay plan for this run, whenever examples were built.
+    ///
+    /// Present even when the plan was not applied: an unapplied plan is the
+    /// shadow evidence â€” pool size, held-out size, surprise coverage, decile
+    /// concentration, importance-weight range â€” that has to exist before
+    /// prioritisation may be turned on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplaySummary>,
+}
+
+impl DynamicTrainerRunReport {
+    fn with_replay(mut self, summary: ReplaySummary) -> Self {
+        self.replay = Some(summary);
+        self
+    }
 }
 
 pub fn evaluate_dynamic_trainer(
@@ -194,6 +216,7 @@ pub fn run_dynamic_training_once_controlled(
         trigger_policy,
         runtime,
         triggers,
+        replay,
     } = request;
     let mut decision = evaluate_dynamic_trainer(*policy, *runtime);
     let trigger = evaluate_trainer_trigger(*trigger_policy, *triggers);
@@ -219,6 +242,9 @@ pub fn run_dynamic_training_once_controlled(
         return Ok(report(decision, trigger, rows.len(), 0, None, None, None));
     }
 
+    check_training_stop(should_stop, "world-model replay plan")?;
+    let (examples, replay_summary) = apply_replay_plan(&rows, root, *replay, examples)?;
+
     check_training_stop(should_stop, "world-model candidate train")?;
     let started = std::time::Instant::now();
     let (model, outcome) = crate::train::train_candidate_with_backend_or_cpu_fallback(
@@ -237,11 +263,14 @@ pub fn run_dynamic_training_once_controlled(
         decision,
         trigger,
         rows.len(),
+        // The count of examples actually trained on, which the replay summary
+        // beside it explains: equal to the built count unless a plan applied.
         examples.len(),
         Some(model.metadata.model_id),
         Some(path),
         Some(outcome.training_mean_cosine_error),
-    ))
+    )
+    .with_replay(replay_summary))
 }
 
 fn check_training_stop(should_stop: Option<&TrainerStopCallback>, stage: &str) -> Result<()> {
@@ -287,124 +316,43 @@ fn report(
         candidate_id,
         checkpoint_path,
         training_mean_cosine_error,
+        replay: None,
     }
+}
+
+/// Build the replay plan for a run and return the examples training will use.
+///
+/// The plan is always computed: it is the shadow evidence for W6, and a
+/// diagnostic that only runs once someone enables it is a diagnostic nobody can
+/// trust. `examples` is narrowed only when the plan reports itself applied.
+fn apply_replay_plan(
+    rows: &[crate::schema::WorldTraceRow],
+    root: &Path,
+    policy: ReplayPolicy,
+    examples: Vec<crate::model::LatentTransitionExample>,
+) -> Result<(Vec<crate::model::LatentTransitionExample>, ReplaySummary)> {
+    // Same horizon `examples_from_rows_with_representation_adapter_controlled`
+    // uses, from the same shared window scan, so position `i` here is the
+    // transition behind `examples[i]`. The length check inside `plan_replay`
+    // refuses the plan outright if that ever stops holding.
+    let keys = TraceWindowBuilder::new(rows).adjacent_transition_keys(1)?;
+    // Outcomes carry the latent surprise the guarded-action loop recorded; a
+    // corpus with none simply produces a plan that declines to apply.
+    let outcomes = crate::guardrail::load_guardrail_outcomes(root).unwrap_or_default();
+    let surprise = crate::replay::surprise_by_row_id(rows, &outcomes);
+    let plan: ReplayPlan = crate::replay::plan_replay(&keys, &surprise, policy, examples.len());
+    let summary = plan.summary.clone();
+    if !plan.applied() {
+        return Ok((examples, summary));
+    }
+    let selected = plan
+        .selected_indices()
+        .into_iter()
+        .map(|index| examples[index].clone())
+        .collect();
+    Ok((selected, summary))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn idle_snapshot() -> TrainerRuntimeSnapshot {
-        TrainerRuntimeSnapshot {
-            last_activity_age_ms: 600_000,
-            last_training_age_ms: None,
-            battery_percent: Some(80),
-            unplugged: false,
-        }
-    }
-
-    #[test]
-    fn trainer_suspends_while_session_is_active() {
-        let snapshot = TrainerRuntimeSnapshot {
-            last_activity_age_ms: 60_000,
-            ..idle_snapshot()
-        };
-
-        let decision = evaluate_dynamic_trainer(DynamicTrainerPolicy::default(), snapshot);
-
-        assert!(!decision.should_train);
-        assert_eq!(decision.reason, TrainerDecisionReason::RecentActivity);
-    }
-
-    #[test]
-    fn trainer_suspends_on_low_unplugged_battery() {
-        let snapshot = TrainerRuntimeSnapshot {
-            battery_percent: Some(20),
-            unplugged: true,
-            ..idle_snapshot()
-        };
-
-        let decision = evaluate_dynamic_trainer(DynamicTrainerPolicy::default(), snapshot);
-
-        assert!(!decision.should_train);
-        assert_eq!(decision.reason, TrainerDecisionReason::LowBattery);
-    }
-
-    #[test]
-    fn trainer_runs_when_idle_and_safe() {
-        let decision = evaluate_dynamic_trainer(DynamicTrainerPolicy::default(), idle_snapshot());
-
-        assert!(decision.should_train);
-        assert_eq!(decision.max_runtime_ms, 300_000);
-    }
-
-    #[test]
-    fn trigger_policy_detects_first_run_and_new_rows() {
-        let policy = DynamicTrainerTriggerPolicy::default();
-        let first = DynamicTrainerTriggerSnapshot {
-            total_rows: 300,
-            candidate_count: 0,
-            new_rows_since_training: 0,
-            surprises_since_training: 0,
-            corrections_since_training: 0,
-            elapsed_since_training_ms: None,
-        };
-        let new_rows = DynamicTrainerTriggerSnapshot {
-            candidate_count: 1,
-            total_rows: 400,
-            new_rows_since_training: 100,
-            ..first
-        };
-
-        assert_eq!(
-            evaluate_trainer_trigger(policy, first),
-            Some(TrainerTriggerReason::FirstRunThreshold)
-        );
-        assert_eq!(
-            evaluate_trainer_trigger(policy, new_rows),
-            Some(TrainerTriggerReason::NewRows)
-        );
-    }
-
-    #[test]
-    fn dynamic_training_tick_writes_candidate_when_triggered() {
-        use crate::embedding::DeterministicHashEmbeddingAdapter;
-        use crate::representation::GenericEmbeddingRepresentationAdapter;
-        use crate::schema::{WorldActionKind, WorldTraceRow};
-
-        let temp = tempfile::tempdir().unwrap();
-        let store = WorldModelStore::open(temp.path()).unwrap();
-        let mut first = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("r1");
-        first.redacted_excerpt = Some("run tests".into());
-        let mut second = WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("r2");
-        second.redacted_excerpt = Some("tests passed".into());
-        store.persist_rows(&[first, second]).unwrap();
-        let adapter = GenericEmbeddingRepresentationAdapter::new(Box::new(
-            DeterministicHashEmbeddingAdapter::new(4).unwrap(),
-        ));
-
-        let request = DynamicTrainingRequest {
-            root: temp.path(),
-            state_dim: 4,
-            backend: BackendKind::Cpu,
-            allow_cpu_fallback: true,
-            adapter: &adapter,
-            context_rows: 1,
-            policy: DynamicTrainerPolicy::default(),
-            trigger_policy: DynamicTrainerTriggerPolicy::default(),
-            runtime: idle_snapshot(),
-            triggers: DynamicTrainerTriggerSnapshot {
-                total_rows: 300,
-                candidate_count: 0,
-                new_rows_since_training: 0,
-                surprises_since_training: 0,
-                corrections_since_training: 0,
-                elapsed_since_training_ms: None,
-            },
-        };
-        let run = run_dynamic_training_once(&request).unwrap();
-
-        assert!(run.candidate_id.is_some());
-        assert!(run.checkpoint_path.unwrap().exists());
-    }
-}
+#[path = "trainer/00_tests.rs"]
+mod tests;

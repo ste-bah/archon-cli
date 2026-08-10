@@ -1044,6 +1044,16 @@ first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
 
+[learning.world_model.replay]
+prioritized_enabled = false
+held_out_fraction = 0.2
+batch_size = 512
+prioritized_fraction = 0.5
+max_surprise_weight = 4.0
+max_decile_share = 0.40
+seed = 6274407765686619927
+split_version = 1
+
 [learning.world_model.retention]
 jsonl_rotate_mb = 500
 raw_retention_days = 90
@@ -1107,6 +1117,13 @@ retain_checkpoint_count = 5
 | `guardrails.record_outcomes_without_prediction` | `true` | Records structured guardrail outcomes even when the advisor failed open without a prediction. |
 | `guardrails.max_guardrail_events_per_session` | `500` | Reserved cap for guardrail event volume per session. |
 | `auto_trainer.idle_required_ms` | `300000` | Suspends training while foreground work is active. |
+| `replay.prioritized_enabled` | `false` | The only key here that changes what the model trains on. When `false` the replay plan is still computed and printed by every trainer tick — pool size, held-out size, surprise coverage, decile concentration, importance-weight range — but the example set is untouched. Prioritised replay moves the training distribution, and a model fed its own surprise can drift toward whatever it was already wrong about, so it stays shadow-only until matched baseline/canary evidence exists (W6 gate: 1,000 linked transitions, 500-uniform vs 500-prioritized). |
+| `replay.held_out_fraction` | `0.2` | Share of **sessions** reserved for evaluation. The split hashes session id and `split_version` only — surprise is not an input — so weighting cannot move a session across it. Split by session rather than by transition because adjacent transitions share rows, and a per-transition split would leak a training target into a held-out context. Clamped to `0.5`. |
+| `replay.batch_size` | `512` | Ceiling on one replay batch. Covers a 500-example W6 evaluation cohort. |
+| `replay.prioritized_fraction` | `0.5` | Share of a batch drawn from the prioritised stream; the rest is uniform. This uniform floor keeps every transition's selection probability at or above `(1 - f)/n`, which is what bounds the recorded importance weight by `1/(1 - f)`. Clamped to `0.5`. |
+| `replay.max_surprise_weight` | `4.0` | Largest weight ratio between the most and least surprising transition. Applied to a rank percentile, not the raw surprise value, so a single anomaly cannot escape the bound however large its error was. Clamped to `4.0`. |
+| `replay.max_decile_share` | `0.40` | Largest share of a batch any one priority decile may supply, enforced during the draw. Mirrors the roadmap's W6 automatic-rollback trigger. Clamped to `0.40`. |
+| `replay.seed` / `replay.split_version` | fixed | Make a plan reproducible and a partition versioned. Changing `split_version` repartitions every corpus, so prior evaluation windows may not be pooled across the change. |
 | `retention.jsonl_rotate_mb` | `500` | Rotates raw JSONL ledgers. |
 | `retention.raw_retention_days` | `90` | Deletes old raw ledgers, while Cozo summaries remain. |
 
