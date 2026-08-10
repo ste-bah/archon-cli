@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use crate::cognitive_tick_store::store_tick_report;
 use crate::cozo_guard::{relation_count, run_script_guarded};
+use crate::metrics::event_store::MetricEventStore;
+use crate::metrics::gate::evaluate_release_gate;
 use crate::schema::ensure_cognitive_schema;
 use crate::self_model::SelfModelWriter;
 use crate::{
@@ -77,9 +79,51 @@ impl<'a> CognitiveTick<'a> {
 
         report.dead_letters_replayed = self.replay_dead_letters(&mut report.errors);
         report.proposals_evaluated = self.inspect_pending_proposals(&mut report.errors);
-        report.proposals_generated = self.propose_improvements(&mut report.errors);
+        if self.release_gate_permits_promotion(&mut report.errors) {
+            report.proposals_generated = self.propose_improvements(&mut report.errors);
+        }
         report.self_model_updated = self.refresh_self_model(&mut report.errors);
         self.finish(report, started)
+    }
+
+    /// Cognitive metrics gate autonomous self-modification.
+    ///
+    /// `propose_improvements` is where the tick turns reflections into
+    /// behaviour-change proposals the governed apply path can promote. A
+    /// segment whose measured cognition is below its declared threshold must
+    /// not be the evidence base for changing the agent's own behaviour, so the
+    /// gate is evaluated **per cohort** here: one failing segment withholds
+    /// promotion even when the pooled figure is healthy.
+    ///
+    /// Every blocking check is pushed into the tick's error list — the same
+    /// place `tick disabled by policy` lands — so the audit row says which
+    /// segment stopped the promotion rather than showing an unexplained zero.
+    fn release_gate_permits_promotion(&self, errors: &mut Vec<String>) -> bool {
+        let snapshot = MetricEventStore::new(self.db, &self.ledger_dir)
+            .and_then(|store| store.latest_snapshot());
+        let snapshot = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                // Unable to read the metrics is not the same as clean metrics.
+                // Fail closed: nothing promotes on an unread gate.
+                errors.push(format!("release_gate_unreadable:{error}"));
+                return false;
+            }
+        };
+
+        let gate = evaluate_release_gate(&snapshot);
+        if !gate.blocks_promotion() {
+            return true;
+        }
+        for failure in gate.failure_summary() {
+            errors.push(format!("release_gate_blocked:{failure}"));
+        }
+        tracing::warn!(
+            segments = ?gate.failing_segments(),
+            threshold_version = gate.metric_threshold_version,
+            "cognitive release gate withheld autonomous promotion"
+        );
+        false
     }
 
     /// Re-put reflections that reached the ledger but not the relation.

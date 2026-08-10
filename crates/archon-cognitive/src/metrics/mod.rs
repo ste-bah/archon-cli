@@ -12,6 +12,8 @@ pub mod derive;
 pub mod emit;
 pub mod event;
 pub mod event_store;
+pub mod gate;
+pub mod thresholds;
 pub mod window;
 mod window_store;
 
@@ -22,5 +24,12 @@ pub use derive::{CognitiveMetricSnapshot, DerivedMetric, by_cohort, derive_snaps
 pub use emit::{MetricEmitter, UNWINDOWED_EVALUATION_WINDOW, policy_version, runtime_cohort};
 pub use event::{CognitiveMetricEvent, METRIC_EVENT_SCHEMA_VERSION, MetricEventKind};
 pub use event_store::{MetricEventStore, MetricWriteOutcome};
+pub use gate::{
+    GateCheck, GateOutcome, ReleaseGateReport, ReleaseGateVerdict, evaluate_release_gate,
+};
+pub use thresholds::{
+    METRIC_THRESHOLD_VERSION, MetricThreshold, ThresholdBound, metric_thresholds,
+    thresholds_match_definition_version, unknown_threshold_metrics,
+};
 pub use window::{CohortRole, EvaluationWindow, MetricCohort};
 pub use window_store::WindowDeclaration;

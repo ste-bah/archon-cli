@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use archon_cognitive::self_model::SelfModelStore;
 use archon_cognitive::{
     CognitiveInspection, CognitiveInspectionStatus, CognitiveMetricSnapshot, CognitiveTick,
-    DecisionRecord, PersistentCognitiveStore, ProposalSummary, ReflectionSummary, ShadowSummary,
-    TickReport,
+    DecisionRecord, PersistentCognitiveStore, ProposalSummary, ReflectionSummary,
+    ReleaseGateReport, ReleaseGateVerdict, ShadowSummary, TickReport, evaluate_release_gate,
 };
 use archon_core::config::ArchonConfig;
 
@@ -31,6 +31,11 @@ pub(crate) async fn handle_cognitive_command(
                 CognitiveTick::new(bundle.store.db(), Some(policy), &bundle.ledger_dir)?.tick()?;
             process_deferred_world_model_retry();
             print_tick(&report, *json)
+        }
+        CognitiveAction::Gate { json } => {
+            let bundle = open_bundle(&cwd)?;
+            let snapshot = bundle.inspection()?.metrics()?;
+            print_release_gate(&evaluate_release_gate(&snapshot), *json)
         }
         CognitiveAction::Daemon { action } => {
             crate::command::cognitive_daemon::handle_daemon_action(action, config, &cwd).await
@@ -221,6 +226,52 @@ fn print_metrics(snapshot: &CognitiveMetricSnapshot, event_count: usize) {
             metric.sample_count
         );
     }
+}
+
+/// Release gate over the cognitive metrics, judged per cohort.
+///
+/// Bails on failure so the process exit code is non-zero: this is the form a
+/// human or a CI step actually consumes, and a gate that only prints would be
+/// advice rather than a gate.
+fn print_release_gate(report: &ReleaseGateReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!(
+            "Cognitive release gate (threshold version {}, definition version {})",
+            report.metric_threshold_version, report.metric_definition_version
+        );
+        println!(
+            "Evaluation window: {}",
+            report
+                .evaluation_window_id
+                .as_deref()
+                .unwrap_or("none declared; judging full history")
+        );
+        println!("Segments judged: {}", report.segments_evaluated);
+        for check in &report.checks {
+            println!("- {}", check.describe());
+        }
+        match report.verdict {
+            ReleaseGateVerdict::Passed => println!("Verdict: pass"),
+            ReleaseGateVerdict::NotEvaluated => {
+                println!("Verdict: not evaluated (no cohort carried enough evidence to judge)")
+            }
+            ReleaseGateVerdict::Failed => {
+                println!("Verdict: FAIL");
+                for check in report.blocking_checks() {
+                    println!("  {}: {}", check.cohort.segmentation_key(), check.rationale);
+                }
+            }
+        }
+    }
+    if report.blocks_promotion() {
+        anyhow::bail!(
+            "cognitive release gate failed for segment(s): {}",
+            report.failing_segments().join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// A tick step that could not run reports nothing, and the operator is told

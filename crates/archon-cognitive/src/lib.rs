@@ -51,8 +51,10 @@ pub use inspection::{
 };
 pub use metrics::{
     CognitiveMetricEvent, CognitiveMetricSnapshot, CohortRole, DerivedMetric, EvaluationWindow,
-    METRIC_DEFINITION_VERSION, MetricCohort, MetricEmitter, MetricEventKind, MetricEventStore,
-    MetricWriteOutcome, UNWINDOWED_EVALUATION_WINDOW, WindowDeclaration,
+    GateCheck, GateOutcome, METRIC_DEFINITION_VERSION, METRIC_THRESHOLD_VERSION, MetricCohort,
+    MetricEmitter, MetricEventKind, MetricEventStore, MetricThreshold, MetricWriteOutcome,
+    ReleaseGateReport, ReleaseGateVerdict, ThresholdBound, UNWINDOWED_EVALUATION_WINDOW,
+    WindowDeclaration, evaluate_release_gate, metric_thresholds,
 };
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
 pub use reflection_trigger::{

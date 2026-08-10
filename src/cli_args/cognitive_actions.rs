@@ -14,6 +14,13 @@ pub enum CognitiveAction {
         #[arg(long)]
         json: bool,
     },
+    /// Check derived cognitive metrics against the declared release
+    /// thresholds, per cohort. Exits non-zero if any segment fails.
+    Gate {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run or manage the background cognitive daemon.
     Daemon {
         #[command(subcommand)]
