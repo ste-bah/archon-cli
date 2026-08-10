@@ -57,8 +57,8 @@
 title = archon-memory keyword search full-scanned every memory per query
 verdict = closed
 verification = mechanical
-commit = 49c1f6f8830135ec157aa2df2b5558c1fa30ab0a  fix(audit): complete core remediation batches
-commit = 87205850dda73dc65c012778af34ef4ae1ab595e  fix(memory): complete indexed keyword search
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(audit): complete core remediation batches (squash-merged to main; branch commit 49c1f6f88)
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): complete indexed keyword search (squash-merged to main; branch commit 87205850d)
 commit = 8d8a122ba69b865f511ea575c705dbfddbe18721  fix(memory): stop recall scanning the relation on every turn
 # Three FTS indexes created at schema init, unconditionally, on open.
 anchor = crates/archon-memory/src/graph/schema.rs :: ::fts create memories:\{index\}
@@ -85,7 +85,7 @@ deviation = tags_fts stay unigram. Recorded at search_tests.rs:149.
 title = every Cozo operation was serialized process-wide by a per-call panic-hook swap and one global write mutex
 verdict = closed
 verification = mechanical
-commit = ed189b115f814106c354eae25e0914ad1440f9dc  fix(cozo): scope persistence guards per database
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(cozo): scope persistence guards per database (squash-merged to main; branch commit ed189b115)
 # One hook installed once, consulting a thread-local depth counter.
 anchor = crates/archon-cozo/src/panic_guard.rs :: static COZO_PANIC_HOOK: OnceLock<\(\)>
 anchor = crates/archon-cozo/src/panic_guard.rs :: if !in_guarded_operation\(\)
@@ -110,7 +110,7 @@ note = impossible, so its deletion would reopen finding 11 in silence.
 title = Anthropic "streaming" buffered the whole response before emitting anything, and swallowed mid-stream network failures
 verdict = closed
 verification = mechanical
-commit = 63b8c730f967ddb65615cbae872d654ac24d7daf  fix(llm): stream Anthropic responses incrementally
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(llm): stream Anthropic responses incrementally (squash-merged to main; branch commit 63b8c730f)
 anchor = crates/archon-llm/src/anthropic.rs :: response\.bytes_stream\(\)
 anchor = crates/archon-llm/src/anthropic_stream.rs :: chunk = stream\.next\(\)
 # Finding 18 rode with 17: a read error now becomes a visible error event.
@@ -131,7 +131,7 @@ note = would pass against the defective implementation too.
 title = every detected correction reinforced the highest-scoring rule, not a relevant one (rich-get-richer)
 verdict = closed
 verification = mechanical
-commit = 475c8cd3fba4e0242a3fb564979fbd086c1dd803  fix(memory): make correction learning atomic
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
 commit = ae5ad09344f34c1fcd056b7317e0906efac3bb60  refactor: split three files back under the 500-line gate
 anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: fn select_relevant_rule<'a>
 anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: const MATCH_THRESHOLD: f64 = 0\.25
@@ -156,7 +156,7 @@ deviation = falling back to the top rule.
 title = every correction minted a new "Avoid: {raw user text}" rule and format_for_prompt emitted all rules uncapped
 verdict = closed
 verification = mechanical
-commit = f75ec53380ba13b31561d5f94bf2b368ab7dcf79  fix(consciousness): bound correction rule growth
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(consciousness): bound correction rule growth (squash-merged to main; branch commit f75ec5338)
 # Five deterministic rule identities, one per correction type, reused by id.
 anchor = crates/archon-consciousness/src/corrections.rs :: fn derived_rule\(self\) -> \(&'static str, &'static str\)
 anchor = crates/archon-consciousness/src/corrections.rs :: add_rule_with_id\(id, text, RuleSource::CorrectionDerived\)
@@ -188,7 +188,7 @@ deviation = come from the correction records, not from rule text.
 title = rule trend metadata was written once and never updated; calculate_trend ignored it and thresholded the current score
 verdict = closed
 verification = mechanical
-commit = 4b647def6b4fc9ad39ccf19e2f80f380e1d20dea  fix(consciousness): reconcile rule trends across sessions
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(consciousness): reconcile rule trends across sessions (squash-merged to main; branch commit 4b647def6)
 anchor = crates/archon-consciousness/src/rules.rs :: pub fn reconcile_trends
 anchor = crates/archon-consciousness/src/rules.rs :: reconcile_importance_trend\(&rule\.id, previous\.score\)
 # The trend tag is recomputed inside one Cozo transaction against the persisted
@@ -211,7 +211,7 @@ deviation = and reconciled at session save, so the enum stays.
 title = recall_corrections truncated an unordered result set, keeping arbitrary corrections
 verdict = closed
 verification = mechanical
-commit = 475c8cd3fba4e0242a3fb564979fbd086c1dd803  fix(memory): make correction learning atomic
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
 commit = 88420bad6d05624e02844b5111f9b48879e26475  fix: unwedge cancellation, unbound memory recall, and type non-US symbols
 anchor = crates/archon-consciousness/src/corrections.rs :: fn sort_corrections\(corrections: &mut \[Correction\]\)
 anchor = crates/archon-consciousness/src/corrections.rs :: \.severity[[:space:]]*$
@@ -243,7 +243,7 @@ deviation = correction outranks a fresh trivial one.
 title = the R3 correction classifier runs in shadow only and owns no rule mutation
 verdict = closed
 verification = mechanical
-commit = 475c8cd3fba4e0242a3fb564979fbd086c1dd803  fix(memory): make correction learning atomic
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
 # Both rule-mutating paths take their CorrectionType from the deterministic
 # keyword heuristic. The classifier's output is bound to `classification` and
 # only ever reaches record_correction_shadow_label.
@@ -309,11 +309,11 @@ test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.
 test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: reinforcing_one_correction_twice_raises_the_score_once
 source_of_truth = crates/archon-core/src/agent/correction_attribution_tests.rs :: the_live_row_records_that_attribution_mutated_nothing
 source_of_truth = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_stores_a_lesson_the_row_points_at
-note = The commit above closed the shadow-containment half. The reinforcement
-note = gate (the `absent`, `order` and `wired` directives, and the
-note = deferred_reinforcement tests) landed after it and needs its own commit
-note = line added here when it is pushed; the directives themselves are checked
-note = against the working tree, so the gate already enforces them.
+commit = 397dfd1641275069d36b5bec6a76aa2a9b2621b5  feat(cognitive): reinforce a rule only when the correction can be attributed
+note = The first commit closed the shadow-containment half; the second closed
+note = the reinforcement gate (the `absent` and `order` directives above, and
+note = the deferred_reinforcement tests). Both are listed because either being
+note = reverted alone would reopen this finding.
 deviation = The roadmap's item 5 says "block rule reinforcement/proposal until
 deviation = attribution succeeds". Reinforcement is blocked as written. PROPOSAL
 deviation = is not, because R2 raises no rule proposals: the only proposal path
