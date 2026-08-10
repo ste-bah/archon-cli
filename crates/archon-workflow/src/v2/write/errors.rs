@@ -64,6 +64,35 @@ pub(super) fn write_branch_validation_error_result(
     result
 }
 
+/// A branch that returned an error the write layer has no classification for.
+///
+/// Same typed remediation shape as [`write_branch_validation_error_result`] —
+/// the same gap id, the same `write_branch_error_kind` classification, the same
+/// scope-expansion extraction — because the consumer (workflow.js, and the
+/// aggregation in `result.rs`) reads one shape, not two. Only the summary and
+/// one marker differ, so "the write layer recognised this rejection" and "the
+/// write layer did not recognise this error and scoped it to the branch anyway"
+/// stay separable in the records instead of having to be inferred later.
+///
+/// Reached only from `worktree_wave::worktree_wave_outcomes`, and only for
+/// errors that are NOT in that function's explicit fatal list.
+pub(super) fn write_branch_unhandled_error_result(
+    item_id: &str,
+    input: Option<&serde_json::Value>,
+    error: &str,
+) -> WorkflowV2Result {
+    let mut result = write_branch_validation_error_result(item_id, input, error);
+    result.summary =
+        format!("write branch '{item_id}' failed with an error the write layer does not classify");
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "branch_error_unclassified".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    result
+}
+
 /// Extract the repository path(s) a rejected write wanted, from the runtime's own
 /// ownership/scope error text. Domain-neutral: matches the quoted path the write
 /// guards report, plus the unquoted `target_files: <paths>` tail form. Returns an
@@ -72,7 +101,17 @@ pub(super) fn undeclared_write_paths(error: &str) -> Vec<String> {
     let lower = error.to_ascii_lowercase();
     let is_scope_error = lower.contains("undeclared path")
         || lower.contains("outside declared target_files")
-        || lower.contains("outside declared ownership");
+        || lower.contains("outside declared ownership")
+        // `WorkflowV2WriteSafetyError::UnsafeTarget` ("write target '<path>' for
+        // item '<id>' is unsafe") is the phrasing the ownership guards actually
+        // produced live, and it reaches here bare — `project_artifacts.rs` and
+        // `write_mode_paths.rs` raise it without the "outside declared
+        // target_files" prefix. Both `write_branch_error_kind` and
+        // `is_write_branch_validation_error` already recognise it as a scope
+        // rejection; this predicate did not, so the actionable
+        // `scope_expansion_needed_*` gap below was never emitted for the very
+        // failure it was written for.
+        || (lower.contains("write target") && lower.contains("is unsafe"));
     if !is_scope_error {
         return Vec::new();
     }
