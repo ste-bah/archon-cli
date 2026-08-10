@@ -10,7 +10,7 @@ mod builder;
 mod effects;
 mod primary;
 #[cfg(test)]
-mod slash_ctx_fixture;
+mod slash_ctx_test_fixture;
 #[cfg(test)]
 mod tests;
 

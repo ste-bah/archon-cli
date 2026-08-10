@@ -259,7 +259,7 @@ fn build_command_context_populates_context_snapshot_for_slash_context() {
 // there — mirroring the arm would mean re-implementing the very handle
 // choice that regressed. This test therefore drives the REAL
 // `apply_effect` against a REAL `SlashCommandContext` (see
-// `slash_ctx_fixture.rs` for why that fixture had to be built), with
+// `slash_ctx_test_fixture.rs` for why that fixture had to be built), with
 // `cozo_db` and `governed_learning_db` pointed at two different
 // databases so the assertion can tell them apart.
 //
@@ -283,7 +283,7 @@ async fn apply_effect_set_permission_mode_records_event_in_governed_learning_db(
     let project_db = learning_db();
     let governed_db = learning_db();
 
-    let fixture = super::slash_ctx_fixture::build_test_slash_context(
+    let fixture = super::slash_ctx_test_fixture::build_test_slash_context(
         "session-ac2",
         "default",
         Some(Arc::clone(&project_db)),
