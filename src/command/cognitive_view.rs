@@ -28,10 +28,25 @@ impl CommandHandler for CognitiveViewHandler {
     }
 }
 
+/// Which `archon cognitive ...` subcommands `/cognitive ...` forwards to the CLI.
+///
+/// `gate` is here despite reporting its verdict through an exit code, which a
+/// slash command has no equivalent of: the mirror renders a non-zero exit as a
+/// `FAILED` first line, so the TUI form is as loud as the shell form. Leaving it
+/// out was an omission, not a decision — the gate is a read-only judgement over
+/// the same store `/cognitive` already browses, and every other subcommand of
+/// the family, including the mutating `tick` and `daemon start`, is mirrored.
 fn mirrors_cli(subcommand: &str) -> bool {
     matches!(
         subcommand,
-        "status" | "tick" | "daemon" | "inspect" | "self-model" | "reflections"
+        "status"
+            | "tick"
+            | "gate"
+            | "adjudicate"
+            | "daemon"
+            | "inspect"
+            | "self-model"
+            | "reflections"
     )
 }
 
@@ -152,8 +167,9 @@ fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {
 }
 
 fn usage() -> String {
-    "Usage: /cognitive [open|view|status|tick|daemon|inspect|self-model|reflections]\n\
-     Opens the read-only executive-state browser or mirrors `archon cognitive ...`."
+    "Usage: /cognitive [open|view|status|tick|gate|adjudicate|daemon|inspect|self-model|reflections]\n\
+     Opens the read-only executive-state browser or mirrors `archon cognitive ...`.\n\
+     `gate` fails loudly: a non-zero exit is reported as a FAILED run, not a completed one."
         .into()
 }
 
@@ -164,6 +180,48 @@ mod tests {
     #[test]
     fn daemon_subcommand_is_mirrored_to_cli() {
         assert!(mirrors_cli("daemon"));
+    }
+
+    /// `archon cognitive gate` shipped without a slash form (#83 added the CLI,
+    /// `mirrors_cli` was never extended), so `/cognitive gate` answered "unknown
+    /// cognitive subcommand" for a command that exists.
+    #[test]
+    fn gate_subcommand_is_mirrored_to_cli() {
+        assert!(mirrors_cli("gate"));
+    }
+
+    /// #77 added `archon cognitive adjudicate` as the surface a human uses to
+    /// settle a proposed causal attribution. Without this token the slash form
+    /// answers "unknown cognitive subcommand", which reads as "the feature is
+    /// missing" rather than "the mirror is short a word" — the same shape as
+    /// `gate` above.
+    #[test]
+    fn adjudicate_subcommand_is_mirrored_to_cli() {
+        assert!(mirrors_cli("adjudicate"));
+    }
+
+    #[test]
+    fn usage_lists_every_mirrored_subcommand() {
+        let usage = super::usage();
+        for subcommand in [
+            "status",
+            "tick",
+            "gate",
+            "adjudicate",
+            "daemon",
+            "inspect",
+            "self-model",
+            "reflections",
+        ] {
+            assert!(
+                mirrors_cli(subcommand),
+                "{subcommand} is listed in usage but not mirrored"
+            );
+            assert!(
+                usage.contains(subcommand),
+                "{subcommand} is mirrored but missing from usage"
+            );
+        }
     }
 
     #[test]

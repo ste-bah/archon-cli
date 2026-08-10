@@ -19,8 +19,11 @@ Inside the TUI, use the same forms as `/cognitive ...`.
 | `archon cognitive self-model` | `/cognitive self-model` | Show domain trust and caution rules |
 | `archon cognitive self-model --domain coding --domain ci` | `/cognitive self-model --domain coding --domain ci` | Scope self-model output to specific domains |
 | `archon cognitive reflections --limit 20` | `/cognitive reflections --limit 20` | List safe reflection summaries |
-| `archon cognitive gate` | — (shell only) | Judge the derived cognitive metrics against the declared release thresholds, per cohort. Exits non-zero if any segment fails |
-| `archon cognitive gate --json` | — (shell only) | Emit the same gate report as JSON |
+| `archon cognitive gate` | `/cognitive gate` | Judge the derived cognitive metrics against the declared release thresholds, per cohort. Exits non-zero if any segment fails |
+| `archon cognitive gate --json` | `/cognitive gate --json` | Emit the same gate report as JSON |
+| `archon cognitive adjudicate` | `/cognitive adjudicate` | List causal attributions awaiting a human verdict |
+| `archon cognitive adjudicate --correction <id> --candidate <id> --adjudicator <name>` | same | Record that the named candidate was the actual cause |
+| `archon cognitive adjudicate --correction <id> --no-cause --adjudicator <name>` | same | Record that no proposed candidate was the cause |
 
 `/cognitive` or `/cognitive open` opens the TUI Executive State pane. The pane is
 read-only and shows compact state only: counts, selected candidate ids, policy
@@ -45,6 +48,28 @@ Three things it will not do:
 - **It does not compare across a definition change.** A threshold naming a metric
   no definition derives, or bounds orphaned by a changed formula, yield
   `DefinitionDrift`, which blocks. An incomparable check is not a pass.
+
+## Adjudication
+
+`archon cognitive adjudicate` is how a human settles a causal attribution the
+engine proposed. Attribution runs in shadow: it names the action it believes
+caused a correction, but nothing treats that name as true until someone says so.
+
+A verdict is a new append-only row, never an edit to the engine's proposal — the
+two sit side by side, so a later reader can see both what was proposed and what
+was decided. One verdict per correction: a replay is ignored, and a *different*
+second verdict is refused rather than overwriting the first. The adjudicator must
+be named, and a candidate the engine never considered is refused.
+
+This is the only way `causal_attribution_precision` acquires a population. Until
+attributions are adjudicated, that metric has no eligible rows and reports
+nothing — which is not the same as passing, and the release gate treats it as
+such.
+
+A failing gate exits non-zero, which is what a CI step consumes. The TUI has no
+exit code, so `/cognitive gate` reports a non-zero exit as a `FAILED` first line
+ahead of the command's own output — the verdict is never announced as a completed
+run. That applies to every mirrored slash command, not just this one.
 
 The same gate runs inside the cognitive tick, before `propose_improvements`: a
 degraded segment must not be the evidence base for the agent proposing changes to

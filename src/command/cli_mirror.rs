@@ -45,9 +45,8 @@ impl CommandHandler for CliMirrorHandler {
 
         archon_observability::spawn_named(task_name, async move {
             let _workload_guard = archon_tui::observability::LongRunningWorkloadGuard::new(&label);
-            let output = run_archon(cli_args).await;
-            let rendered = match output {
-                Ok(rendered) => format!("`{label}` completed\n\n{rendered}"),
+            let rendered = match run_archon(cli_args).await {
+                Ok(outcome) => outcome.render(&label),
                 Err(err) => format!("`{label}` failed to launch: {err}\n"),
             };
             let _ = tui_tx.send_async(TuiEvent::TextDelta(rendered)).await;
@@ -86,7 +85,48 @@ fn mirror_args(prefix: Option<&str>, args: &[String]) -> Vec<String> {
     out
 }
 
-async fn run_archon(args: Vec<String>) -> Result<String> {
+/// What a mirrored CLI run produced: the child's exit status alongside its
+/// captured streams.
+///
+/// The status is carried rather than folded into the text because the TUI has
+/// no exit code of its own. Commands that mean something *by* exiting non-zero
+/// — `archon cognitive gate` is the one that forced this — would otherwise be
+/// announced with the same "completed" line as a clean run, and a gate that
+/// reads as a pass when it failed is worse than no gate in the TUI at all.
+struct MirrorOutcome {
+    status: std::process::ExitStatus,
+    streams: String,
+}
+
+impl MirrorOutcome {
+    fn render(&self, label: &str) -> String {
+        let streams = if self.streams.trim().is_empty() {
+            "(no output)\n"
+        } else {
+            &self.streams
+        };
+        if self.status.success() {
+            format!("`{label}` completed\n\n{streams}")
+        } else {
+            format!(
+                "`{label}` FAILED — {}\n\n{streams}",
+                describe_status(self.status)
+            )
+        }
+    }
+}
+
+/// `ExitStatus`'s own `Display` reads "exit code: 1" on Windows and "exit status: 1"
+/// elsewhere; the prefix is normalised so the failure line does not depend on
+/// which OS the TUI is running on.
+fn describe_status(status: std::process::ExitStatus) -> String {
+    match status.code() {
+        Some(code) => format!("exit status {code}"),
+        None => format!("terminated by signal ({status})"),
+    }
+}
+
+async fn run_archon(args: Vec<String>) -> Result<MirrorOutcome> {
     let exe = std::env::current_exe()?;
     let output = tokio::process::Command::new(exe)
         .args(args)
@@ -95,28 +135,81 @@ async fn run_archon(args: Vec<String>) -> Result<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    let mut rendered = String::new();
+    let mut streams = String::new();
     if !stdout.trim().is_empty() {
-        rendered.push_str(stdout.trim_end());
-        rendered.push('\n');
+        streams.push_str(stdout.trim_end());
+        streams.push('\n');
     }
     if !stderr.trim().is_empty() {
-        rendered.push_str("\nstderr:\n");
-        rendered.push_str(stderr.trim_end());
-        rendered.push('\n');
+        streams.push_str("\nstderr:\n");
+        streams.push_str(stderr.trim_end());
+        streams.push('\n');
     }
-    if rendered.trim().is_empty() {
-        rendered.push_str(&format!("exit status: {}\n", output.status));
-    } else if !output.status.success() {
-        rendered.push_str(&format!("\nexit status: {}\n", output.status));
-    }
-    Ok(rendered)
+    Ok(MirrorOutcome {
+        status: output.status,
+        streams,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::command::registry::default_registry;
+
+    fn exit_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code as u32)
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(code << 8)
+        }
+    }
+
+    /// A mirrored command that exits non-zero must say so before anything the
+    /// command itself printed. `/cognitive gate` reports "Verdict: FAIL" on
+    /// stdout and bails to stderr, but both scroll; the first line does not.
+    #[test]
+    fn non_zero_exit_is_announced_before_the_output() {
+        let outcome = MirrorOutcome {
+            status: exit_status(1),
+            streams: "Verdict: FAIL\n".to_string(),
+        };
+        let rendered = outcome.render("archon cognitive gate");
+        let first_line = rendered.lines().next().expect("rendered output has a line");
+        assert!(
+            first_line.contains("FAILED") && first_line.contains("exit status 1"),
+            "first line must name the failure, got {first_line:?}"
+        );
+        assert!(
+            !first_line.contains("completed"),
+            "a failed run must not be announced as completed, got {first_line:?}"
+        );
+        assert!(rendered.contains("Verdict: FAIL"));
+    }
+
+    #[test]
+    fn zero_exit_keeps_the_completed_wording() {
+        let outcome = MirrorOutcome {
+            status: exit_status(0),
+            streams: "Verdict: pass\n".to_string(),
+        };
+        let rendered = outcome.render("archon cognitive gate");
+        assert!(rendered.starts_with("`archon cognitive gate` completed"));
+        assert!(!rendered.contains("FAILED"));
+    }
+
+    #[test]
+    fn silent_run_still_reports_something() {
+        let outcome = MirrorOutcome {
+            status: exit_status(0),
+            streams: String::new(),
+        };
+        assert!(outcome.render("archon kb claims").contains("(no output)"));
+    }
 
     #[test]
     fn mirror_args_prefixes_family_command() {
