@@ -1,5 +1,18 @@
 use super::*;
 
+/// Does every declared artifact path of a completion-evidence item resolve to
+/// real evidence?
+///
+/// # Issue #168: a directory is not the artifact
+///
+/// This delegated to [`artifact_path_exists`], which answers a plain "is there
+/// something at this path" — true for a directory and true for a zero-byte
+/// file. Task-completion credit is granted on the strength of this answer, so a
+/// criterion-named directory left in the project root could buy credit for the
+/// task whose criterion named it. Credit now requires a regular, non-empty
+/// file; the plain-existence predicate is kept for
+/// [`super::local_host_support_a::contradicted_existence_claims`], where "does
+/// this path exist" really is the question being asked.
 pub(super) fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
     let concrete_paths = paths
         .iter()
@@ -12,7 +25,29 @@ pub(super) fn artifact_paths_exist(v2_root: &Path, paths: &[String]) -> bool {
     }
     concrete_paths
         .iter()
-        .all(|path| artifact_path_exists(v2_root, path))
+        .all(|path| artifact_path_is_evidence(v2_root, path))
+}
+
+/// [`artifact_path_exists`], narrowed to a regular non-empty file.
+pub(super) fn artifact_path_is_evidence(v2_root: &Path, path: &str) -> bool {
+    if crate::v2::artifact_refs::is_nonfilesystem_artifact_ref(path) {
+        return true;
+    }
+    resolved_artifact_candidates(v2_root, Path::new(path))
+        .iter()
+        .any(|candidate| crate::v2::artifact_path_guard::artifact_file_is_evidence(candidate))
+}
+
+/// Every location a declared artifact path could name, in resolution order.
+fn resolved_artifact_candidates(v2_root: &Path, path: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![path.to_path_buf()];
+    if path.is_absolute() {
+        return candidates;
+    }
+    candidates.extend(v2_root.parent().map(|run_root| run_root.join(path)));
+    candidates.extend(project_root_for_v2(v2_root).map(|root| root.join(path)));
+    candidates.extend(repository_root_for_v2(v2_root).map(|root| root.join(path)));
+    candidates
 }
 
 pub(super) fn artifact_path_exists(v2_root: &Path, path: &str) -> bool {
@@ -67,6 +102,14 @@ pub(super) fn repository_root_for_v2(v2_root: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(root))
 }
 
+/// A path that names a family rather than a file, and so cannot be checked
+/// literally.
+///
+/// Deliberately NOT extended to `${...}` for issue #168. A shell-templated path
+/// stays concrete here, fails the literal check, and denies credit. Classifying
+/// it as a placeholder would make it *skipped* instead — vacuously satisfied
+/// alongside any one real path in the same list, which is the direction the
+/// fix is trying to close, not open.
 pub(super) fn artifact_path_is_placeholder(path: &str) -> bool {
     path.contains('<') || path.contains('>') || path.contains('*')
 }
