@@ -36,6 +36,11 @@ pub(super) fn workflow_trace_record(
         Kind::StageFailed | Kind::StageStalled => TraceKind::Retry,
         Kind::ForcedAccepted => TraceKind::GatePassed,
         Kind::Completed | Kind::Cancelled => TraceKind::NodeFinished,
+        // Deliberately not a trace record. A blocking gap is a property of a
+        // call's RESULT, not a lifecycle transition of its node, and the same
+        // call already contributes a `StageFailed`/`StageStalled` record.
+        // Mapping it too would fabricate an extra retry per gap.
+        Kind::BlockingGapDetected => return None,
         _ => return None,
     };
 

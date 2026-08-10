@@ -86,6 +86,12 @@ impl WorkflowScriptHost {
     }
 
     pub(super) fn emit_call_finished_event(&self, record: &WorkflowV2CallRecord) {
+        let result_path = self
+            .runner
+            .v2_store
+            .result_path(&record.call.id)
+            .display()
+            .to_string();
         self.emit_v2_event(
             match record.status {
                 WorkflowV2Status::Failed | WorkflowV2Status::Cancelled => {
@@ -105,9 +111,37 @@ impl WorkflowScriptHost {
                 "call_id": record.call.id.clone(),
                 "method": record.call.method.as_str(),
                 "status": record.status,
-                "result_path": self.runner.v2_store.result_path(&record.call.id).display().to_string(),
+                "result_path": result_path.clone(),
             }),
         );
+        self.emit_blocking_gap_events(record, &result_path);
+    }
+
+    /// Name every blocking residual gap the record carries in `events.jsonl`.
+    ///
+    /// Emitted from here, next to the call-finished event, because this is the
+    /// one place every newly persisted call record passes through — both
+    /// `run_v2_host_call` and `persist_source_metadata_review` reach it. Reuse
+    /// (`mark_reused`) deliberately does not: a reused record was persisted
+    /// earlier in this same run directory, so its gap events are already in
+    /// this same `events.jsonl` and re-emitting them would double-count.
+    ///
+    /// Emission is best-effort in exactly the way the surrounding event calls
+    /// are: a log write must never change a call's outcome.
+    pub(super) fn emit_blocking_gap_events(
+        &self,
+        record: &WorkflowV2CallRecord,
+        result_path: &str,
+    ) {
+        let Ok(events) = archon_workflow::events::blocking_gap_events::build_blocking_gap_events(
+            record,
+            result_path,
+        ) else {
+            return;
+        };
+        for (kind, detail) in events {
+            self.emit_v2_event(kind, detail);
+        }
     }
 
     pub(super) fn emit_v2_event(&self, kind: WorkflowEventKind, detail: serde_json::Value) {

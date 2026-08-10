@@ -19,3 +19,6 @@ mod workflow_live_v2_reuse_content_key_tests;
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]
 mod workflow_live_v2_script_tests_f;
+// Issue #162 — the events.jsonl / v2-results agreement invariant.
+#[path = "workflow_live_v2_blocking_gap_tests.rs"]
+mod workflow_live_v2_blocking_gap_tests;

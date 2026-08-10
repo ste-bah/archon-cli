@@ -32,6 +32,10 @@ fn status_label(kind: &WorkflowEventKind) -> &'static str {
         WorkflowEventKind::StageCompleted | WorkflowEventKind::Completed => "done",
         WorkflowEventKind::StageStalled => "stalled",
         WorkflowEventKind::StageFailed => "failed",
+        // Named explicitly rather than left to the catch-all below, which would
+        // label a discarded wave "write_coordination" — the exact class of
+        // mislabelling that let a blocking failure read as routine noise.
+        WorkflowEventKind::BlockingGapDetected => "blocked",
         WorkflowEventKind::StageSkipped => "skipped",
         WorkflowEventKind::ForcedAccepted => "forced",
         WorkflowEventKind::Resumed => "resumed",

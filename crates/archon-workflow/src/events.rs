@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use crate::error::WorkflowResult;
 use crate::store::WorkflowStore;
 
+pub mod blocking_gap_events;
 pub mod write_coordination_events;
 
 const FORBIDDEN_FIELDS: &[&str] = &[
@@ -35,6 +36,11 @@ pub enum WorkflowEventKind {
     Cancelled,
     Completed,
     LearningRecorded,
+    /// One residual gap with `severity: "blocking"` was recorded against a
+    /// call. Emitted once per distinct blocking gap, carrying the gap's id and
+    /// description, so `events.jsonl` names the same blockers `v2/results/`
+    /// does. See [`blocking_gap_events`].
+    BlockingGapDetected,
     WriteCoordinationItemWritePlanCreated,
     WriteCoordinationWaveScheduled,
     WriteCoordinationItemWorkspaceCreated,
