@@ -353,7 +353,14 @@ What this task format requires that `prdtospec` does not:
   `<...>` needs `instance_source_path`, `instance_source_records_field`,
   `instance_artifact_field`, and a `min_instances` floor. `min_instances: 0` is
   vacuous — zero matches satisfy it. A typed verifier takes one concrete path
-  and cannot be combined with a template.
+  and cannot be combined with a template. A `${...}` token is refused outright
+  rather than treated as a placeholder: nothing in the engine expands one, so
+  skipping it would be the vacuous pass this rule exists to prevent.
+- **A satisfied `artifact_path` is a regular, non-empty file.** A directory of
+  that name and a zero-byte file both used to count, because the check asked
+  only whether the path existed — and a run once satisfied contracts with
+  directories named after acceptance-criterion sentences. A failing candidate
+  now says which of the three it was rather than reporting all as missing.
 - **Distinct `kind` for create versus append** on the same path —
   `x_registry` creates, `x_registry_entry` appends.
 

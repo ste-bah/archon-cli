@@ -60,10 +60,13 @@ dies mid-work, its claim is released automatically the next time anything lists
 or claims on that run — no stale-claim heuristics, no "treat that as old state
 unless there is evidence someone is working on it" instruction in your prompt.
 
-One limit worth knowing: a subagent spawned with an explicit `allowed_tools` list
-does not get the board tools, because the default set applies only when neither
-the request nor the agent definition names any tools. If you spawn agents with an
-explicit list and want them on the board, name the board tools in it.
+You do not have to name the board tools when you spawn an agent with an explicit
+`allowed_tools` list. `ALWAYS_ALLOWED` in `subagent_executor.rs` unions the four
+into a subagent's tool set however that set was derived — from the request, from
+the agent definition, or from the defaults. Most pipeline agents name their tools
+explicitly, so without that the board would have been absent from exactly the
+fan-outs it exists to coordinate. A denylist entry still wins, so this offers the
+tools rather than overriding a deliberate refusal.
 
 ## What "done" means now
 

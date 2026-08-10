@@ -242,6 +242,13 @@ deliverable_contracts:
 - `kind` — required. A short snake_case name for what this is.
 - `artifact_path` — required. The path the task writes.
 
+**What satisfies the path is a regular, non-empty file.** Not a directory of
+that name, and not a zero-byte file. Both used to pass, because the check asked
+only whether the path existed, and a run once satisfied contracts with
+directories it had created from acceptance-criterion prose. A candidate that
+fails now says which of the three it was — a directory, an empty file, or absent
+— rather than reporting all of them as missing.
+
 ### 5.1 Distinct `kind` for create versus append
 
 When one task creates a file and another appends entries to it, give them
@@ -295,6 +302,14 @@ is named by a source record:
 
 **or** declare `min_instances: 1` or higher, which makes the expansion a claim
 that can fail.
+
+A `${NAME}` token is a different thing, and no declaration makes it checkable.
+Nothing in this engine expands `${...}` — the instance machinery rewrites
+`<...>` only — so a contract path carrying one is refused outright with a
+fail-closed verifier naming the token. It is refused rather than skipped
+deliberately: skipping would make a templated path a vacuous pass. Write the
+concrete path. `${PROJECT_ROOT}` is included in that refusal here, even though a
+`requiredArtifacts` entry in a `workflow.js` is allowed to use it.
 
 ### 5.3 `min_instances: 0` is a vacuous gate
 

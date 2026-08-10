@@ -32,6 +32,8 @@ before commit; workspace and private web package metadata aligned to `1.2.3`.
 - [x] Add live event manager API with cursor replay and cursor-expired recovery.
 - [x] Add typed web action envelope and audit row persistence.
 - [x] Add upload policy shell and attachment metadata model.
+- [x] Return the docs `document_id` an attachment was ingested as, with absent
+  and empty spelled differently.
 - [x] Add auth lifecycle endpoints for token/cookie posture.
 
 ## 007-DeepInspection
@@ -42,6 +44,9 @@ before commit; workspace and private web package metadata aligned to `1.2.3`.
 - [x] Add bounded dark/light theme toggle with screenshot coverage.
 - [x] Evidence graph: Cytoscape relationship view with node/edge budgets.
 - [x] Corpus browser: rooted source list, metadata, type filters, and safe text preview.
+- [x] Corpus browser: sandboxed PDF rendering, with scripting and XFA disabled, a
+  `script-src 'self' 'wasm-unsafe-eval'` CSP, a fully local PDF.js runtime, and
+  bytes served from a separate `GET /api/corpus/source/bytes` endpoint.
 - [x] Corpus search: bounded keyword search across source names, paths, and text previews.
 - [x] Memory tab: learning signal dashboard for sessions, reasoning quality,
   calibration, and proposal stores.

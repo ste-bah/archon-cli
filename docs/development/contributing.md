@@ -44,7 +44,7 @@ Hook scripts are tracked in the repo, so updates land via `git pull` — no manu
 
 ## CI gates
 
-archon-cli's CI flow is `scripts/ci-gate.sh` — 7 technical gates (file-size, banned-imports, fmt, clippy, test, baseline diff, bench compile-check). Run locally before pushing:
+archon-cli's CI flow is `scripts/ci-gate.sh` — 8 technical gates (file-size, banned-imports, R0 entry gate, fmt, clippy, test, baseline diff, bench compile-check). Run locally before pushing:
 
 ```bash
 ./scripts/ci-gate.sh                # full

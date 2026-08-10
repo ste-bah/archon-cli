@@ -19,6 +19,27 @@ All ten items remain roadmap work. Existing components are substantial, but none
 
 Status vocabulary follows `docs/reports/audit/prd-008-audit-validation-appendix.md`.
 
+The table is the audit verdict as recorded, and is not edited as work lands.
+Three of its missing boundaries now have code, which is a different claim from
+being promoted:
+
+- **R8's release gates exist.** `archon cognitive gate` and
+  `crates/archon-cognitive/src/metrics/thresholds.rs` judge the derived metrics
+  per cohort, and the cognitive tick consults the same gate before
+  `propose_improvements` — see [cognitive commands](../reference/cognitive-commands.md#the-release-gate).
+- **R5's live briefing and action use exist.** A prediction is written before
+  `prepare_turn_request` builds the request, and the briefing names unmeasured
+  domains rather than omitting them. Its calibration label is tool-execution
+  outcome, not task success, so the number gates and tracks movement but is not
+  yet a calibration of the quantity R5 is defined over.
+- **R6's measured reuse exists.** Reflections are injected under three bounds and
+  scored on citation and on verified reuse separately.
+
+None of that promotes anything. The quantitative gates below need adjudicated
+runtime cohorts — 500 shadow turns for R1, 200 correction attributions for R2,
+400 labelled examples for R3, 500 replayable queries for R7 — and those are
+evaluation corpora, not further code.
+
 ## Global constraints
 
 - R8 instrumentation ships with the first task in every slice, before behavior changes.
