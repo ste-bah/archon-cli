@@ -252,3 +252,81 @@ async fn agent_text_reconstructs_response_and_rendered_transcript() {
     assert!(world < boundary, "wide characters must preserve order");
     assert_eq!(lines.next().map(str::trim_end), Some("final"));
 }
+
+/// Issue #37: `/context` has to be able to report the size of the last request
+/// body, and the forwarder is the only place that sees it.
+///
+/// The preflight `ContextPressureUpdated` is emitted before the request is
+/// sent, so this is the one number that survives a rate-limited turn — a turn
+/// that never reaches `TurnComplete` and therefore never bills an input token.
+/// Deleting the `session_stats` write in the forwarder leaves the counter at
+/// zero and fails this test, while the TUI event keeps flowing unchanged.
+#[tokio::test]
+async fn context_pressure_event_banks_last_request_body_tokens_for_slash_context() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let session_store = Arc::new(
+        archon_session::storage::SessionStore::open(&temp.path().join("sessions.db"))
+            .expect("open session store"),
+    );
+    let (agent_tx, event_rx) = tokio::sync::mpsc::channel(1);
+    let (tui_tx, mut tui_rx) =
+        archon_tui::event_channel::bounded_tui_event_channel_with_capacity(4);
+    let cost_config = archon_core::config::CostConfig::default();
+    let session_stats = Arc::new(tokio::sync::Mutex::new(SessionStats::default()));
+    spawn_agent_event_forwarder(AgentEventForwarderConfig {
+        event_rx,
+        metrics: Arc::new(archon_tui::observability::ChannelMetrics::default()),
+        tui_tx,
+        session_stats: Arc::clone(&session_stats),
+        cost_alert_state: CostAlertState::new(&cost_config),
+        cost_config,
+        active_session: crate::session::active_session::ActiveSessionId::new("pressure-stats"),
+        session_store,
+        permission_mode: Arc::new(tokio::sync::Mutex::new("auto".into())),
+        permission_events_db: None,
+        agent_ledger_db: None,
+        ledger_context: crate::runtime::agent_ledger_events::AgentLedgerContext::new(
+            "main",
+            "pressure-stats",
+            "test-model",
+            "test-provider",
+        ),
+        selected_model: "test-model".into(),
+    });
+
+    assert_eq!(
+        session_stats.lock().await.last_request_body_tokens,
+        0,
+        "a session with no request sent must report zero"
+    );
+
+    for tokens in [470_000u64, 180_000u64] {
+        agent_tx
+            .send(timestamped(AgentEvent::ContextPressureUpdated {
+                tokens_used: tokens,
+                context_window: 1_000_000,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                context_name: Some("main".into()),
+                resolution_source: Some("bundled-catalog".into()),
+            }))
+            .await
+            .expect("send context pressure event");
+
+        // The forwarded TUI event is the completion signal for this iteration:
+        // it is sent after the stats write, so observing it means the write has
+        // already landed.
+        match tui_rx.recv().await.expect("forwarded pressure event") {
+            TuiEvent::ContextPressureUpdated { tokens_used, .. } => {
+                assert_eq!(tokens_used, tokens, "the TUI event must pass through");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        assert_eq!(
+            session_stats.lock().await.last_request_body_tokens,
+            tokens,
+            "the latest preflight size must overwrite the previous one"
+        );
+    }
+}

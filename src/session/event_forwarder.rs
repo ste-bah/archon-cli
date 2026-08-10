@@ -85,14 +85,25 @@ pub(super) fn spawn_agent_event_forwarder(
                     cache_read_tokens,
                     context_name,
                     resolution_source,
-                } => TuiEvent::ContextPressureUpdated {
-                    tokens_used,
-                    context_window,
-                    cache_creation_tokens,
-                    cache_read_tokens,
-                    context_name,
-                    resolution_source,
-                },
+                } => {
+                    // Bank the preflight size so `/context` can report it.
+                    //
+                    // The sole emitter of this event is the main-session
+                    // preflight in `Agent::emit_turn_request_started`, where
+                    // `tokens_used` is derived from the serialized request body
+                    // about to be sent. Recorded here rather than at turn end
+                    // because a request that is rate-limited never reaches turn
+                    // end — and that is the case `/context` needs to explain.
+                    session_stats.lock().await.last_request_body_tokens = tokens_used;
+                    TuiEvent::ContextPressureUpdated {
+                        tokens_used,
+                        context_window,
+                        cache_creation_tokens,
+                        cache_read_tokens,
+                        context_name,
+                        resolution_source,
+                    }
+                }
                 AgentEvent::TurnComplete {
                     input_tokens,
                     output_tokens,
