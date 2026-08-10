@@ -7,8 +7,39 @@
 use anyhow::Result;
 use cozo::{DbInstance, ScriptMutability};
 
+/// Context used when taking the store's write lock for schema creation.
+const SCHEMA_CONTEXT: &str = "docs schema creation";
+
 /// Ensure all document-core relations exist. Idempotent.
+///
+/// Serialised across handles. `:create` allocates a relation id through the
+/// store's own metadata, so two `DbInstance` handles opening the same file and
+/// running this concurrently can each read the same current id and hand it to
+/// two *different* relations — after which both share one physical relation and
+/// a query for one silently returns the other's rows.
+///
+/// That is not theoretical. Under 8-way concurrency this reproduced 7 times in
+/// 80 runs, with the victim varying by timing: `doc_pages` and `doc_artifacts`
+/// on Linux, the chunk FTS index on macOS, each surfacing through
+/// `list_doc_sources` as rows whose fields line up positionally with the other
+/// relation's columns.
+///
+/// The lock is the same one the content-hash reservation takes, and it is
+/// re-entrant, so schema creation nested inside an already-guarded operation
+/// runs inline rather than blocking on its own thread's lock.
 pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
+    let config = archon_cozo::bound_guard_config(db, SCHEMA_CONTEXT)?;
+    match config.write_lock_path.as_deref() {
+        Some(path) => {
+            archon_cozo::with_write_lock_blocking(path, SCHEMA_CONTEXT, || create_doc_relations(db))
+        }
+        // An in-memory store is reachable only from this process's handle, so
+        // there is no cross-handle race to serialise.
+        None => create_doc_relations(db),
+    }
+}
+
+fn create_doc_relations(db: &DbInstance) -> Result<()> {
     ensure_doc_sources(db)?;
     ensure_doc_ocr_runs(db)?;
     ensure_doc_artifacts(db)?;
