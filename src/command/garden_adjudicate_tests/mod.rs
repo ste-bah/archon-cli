@@ -1,4 +1,14 @@
+//! Tests for review-band adjudication.
+//!
+//! Split at the 500-line gate. This file keeps the doubles and fixtures, plus
+//! the tests that need no running pass: prompt shape, verdict parsing, and the
+//! per-run batch cap. [`background`] holds the ones that start the detached
+//! pass. It is a CHILD module rather than a sibling so it still reaches the
+//! private items of `garden_adjudicate` — and the fixtures here — by name.
+
 use super::*;
+
+mod background;
 
 fn pair(a: &str, b: &str) -> ReviewPair {
     ReviewPair {
@@ -239,88 +249,5 @@ async fn no_more_than_max_pairs_per_run_are_judged() {
     assert_eq!(
         merged, 0,
         "these ids name no stored memory, so a SAME verdict must merge nothing"
-    );
-}
-
-/// The default configuration must not reach a provider at all.
-///
-/// Not "merges nothing" — makes no call. Automatic consolidation runs before the
-/// user has typed anything, and the whole reason this is opt-in is that the call
-/// itself is the cost.
-#[tokio::test]
-async fn the_automatic_path_is_silent_by_default() {
-    let client = Arc::new(RecordingClient::default());
-    let config = archon_memory::garden::GardenConfig::default();
-    let pairs: Vec<ReviewPair> = (0..50)
-        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
-        .collect();
-
-    let merged = maybe_adjudicate_review_band(
-        &config,
-        client.clone(),
-        empty_store(),
-        pairs,
-        "test-model".to_string(),
-    )
-    .await;
-
-    assert_eq!(merged, 0);
-    assert_eq!(
-        client.calls(),
-        0,
-        "the default must not spend a round-trip at session start"
-    );
-}
-
-/// Enabled but under the threshold: still no call.
-///
-/// The threshold is the half of this feature that keeps "adjudicate
-/// automatically" from meaning "one LLM call every launch".
-#[tokio::test]
-async fn a_band_under_the_threshold_makes_no_call() {
-    let client = Arc::new(RecordingClient::default());
-    let pairs: Vec<ReviewPair> = (0..9)
-        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
-        .collect();
-
-    let merged = maybe_adjudicate_review_band(
-        &adjudicating(10),
-        client.clone(),
-        empty_store(),
-        pairs,
-        "test-model".to_string(),
-    )
-    .await;
-
-    assert_eq!(merged, 0);
-    assert_eq!(
-        client.calls(),
-        0,
-        "nine pairs must not trigger a ten-pair threshold"
-    );
-}
-
-/// Enabled and exactly at the threshold: one call, judging every pending pair.
-#[tokio::test]
-async fn a_band_at_the_threshold_is_judged_in_one_call() {
-    let client = Arc::new(RecordingClient::default());
-    let pairs: Vec<ReviewPair> = (0..10)
-        .map(|i| pair(&format!("a{i}"), &format!("b{i}")))
-        .collect();
-
-    maybe_adjudicate_review_band(
-        &adjudicating(10),
-        client.clone(),
-        empty_store(),
-        pairs,
-        "test-model".to_string(),
-    )
-    .await;
-
-    assert_eq!(client.calls(), 1);
-    assert_eq!(
-        numbered_pairs(&client.last_prompt()),
-        10,
-        "a run that fires at the threshold must clear the band it fired on"
     );
 }

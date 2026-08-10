@@ -32,15 +32,17 @@ async fn display_initial_resume_history(
 /// noise people learn to skip — which would defeat the point of showing it at
 /// all.
 ///
-/// `review_merges` is how many review-band pairs the adjudicator folded away
-/// after the report was produced, or zero when it did not run. Taken as an
-/// argument rather than read off the report because the report is a snapshot of
-/// the consolidation pass and the adjudication happens afterwards -- reporting
-/// the raw `review_pairs` count next to merges that already resolved some of
-/// them would overstate what is still outstanding.
+/// `review_adjudicating` is whether a background pass was started to judge the
+/// review band. Taken as an argument rather than read off the report because the
+/// report knows only that the pairs exist, not whether anything is resolving
+/// them — and those are the two different things this line has to say. The count
+/// is deliberately NOT adjusted for what that pass will merge: it is still
+/// running when this line is drawn, and the panel must not claim an outcome that
+/// has not happened. The correction, if there is one, arrives from
+/// `spawn_review_band_adjudication` when the verdict does.
 fn auto_consolidation_summary(
     report: &archon_memory::garden::GardenReport,
-    review_merges: usize,
+    review_adjudicating: bool,
 ) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if report.duplicates_merged > 0 {
@@ -55,12 +57,13 @@ fn auto_consolidation_summary(
     if report.overflow_pruned > 0 {
         parts.push(format!("{} pruned for overflow", report.overflow_pruned));
     }
-    if review_merges > 0 {
-        parts.push(format!("{review_merges} pair(s) merged after review"));
-    }
-    let still_pending = report.review_pairs.len().saturating_sub(review_merges);
-    if still_pending > 0 {
-        parts.push(format!("{still_pending} pair(s) awaiting review"));
+    let pending = report.review_pairs.len();
+    if pending > 0 {
+        parts.push(if review_adjudicating {
+            format!("judging {pending} pair(s) in the background")
+        } else {
+            format!("{pending} pair(s) awaiting review")
+        });
     }
     // Reported even on an otherwise silent run, because it is the one outcome
     // the counts above cannot express: zero duplicates merged by a pass that
@@ -244,18 +247,28 @@ pub(super) async fn finish(
                         // settle, and it writes nothing -- so without this it is
                         // resolved only when somebody happens to type `/garden`,
                         // and otherwise grows forever. Opt-in and threshold-gated
-                        // because the resolution is an LLM round-trip on the
-                        // session-start path; the policy lives in
-                        // `maybe_adjudicate_review_band`.
-                        let review_merges =
-                            crate::command::garden_adjudicate::maybe_adjudicate_review_band(
+                        // because the resolution is an LLM round-trip; the policy
+                        // lives in `spawn_review_band_adjudication`.
+                        //
+                        // DETACHED, not awaited. This function is the session
+                        // bootstrap: it runs before the TUI starts and before the
+                        // user can type, so an awaited round-trip here is dead
+                        // time between launching Archon and the first prompt.
+                        // Nothing below needs the verdict -- the summary reports
+                        // the band as still outstanding, which is true at the
+                        // moment it is drawn -- and the task corrects that itself
+                        // if it merges anything. Dropping the handle detaches the
+                        // task; it is returned only so tests can join it.
+                        let review_adjudicating =
+                            crate::command::garden_adjudicate::spawn_review_band_adjudication(
                                 &config.memory.garden,
                                 Arc::clone(&llm_client),
                                 Arc::clone(&memory),
                                 report.review_pairs.clone(),
                                 agent_model_for_ledger.clone(),
+                                Some(tui_event_tx.clone()),
                             )
-                            .await;
+                            .is_some();
                         tracing::info!(
                             decayed = report.importance_decayed,
                             pruned = report.stale_pruned,
@@ -266,7 +279,7 @@ pub(super) async fn finish(
                             after = report.total_memories_after,
                             ms = report.duration_ms,
                             review_pairs = report.review_pairs.len(),
-                            review_merges,
+                            review_adjudicating,
                             semantic_pass_unavailable = report.semantic_pass_unavailable,
                             "garden: consolidation complete"
                         );
@@ -275,7 +288,7 @@ pub(super) async fn finish(
                         // its only record was a log line nobody reads -- a
                         // process that quietly reshapes your memory is one whose
                         // mistakes are indistinguishable from it working.
-                        garden_summary = auto_consolidation_summary(&report, review_merges);
+                        garden_summary = auto_consolidation_summary(&report, review_adjudicating);
                     }
                     Err(e) => tracing::warn!("garden: consolidation failed: {e}"),
                 }

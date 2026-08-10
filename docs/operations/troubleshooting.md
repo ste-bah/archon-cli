@@ -208,10 +208,21 @@ archon memory reindex --all
 
 **Restatements are not near-verbatim.** One instruction recorded eight ways is
 the normal failure, and those pairs sit in the review band (0.15–0.35 cosine
-distance) rather than the merge band. They are linked with `RelatedTo`, not
-merged, because nothing at that distance can be distinguished from two genuinely
-different claims about the same subject. That is deliberate; see
+distance) rather than the merge band. Nothing at that distance can be told apart
+from two genuinely different claims about the same subject, so the band is
+**counted and otherwise untouched** — no merge, and no edge or tag either, since
+a mark left for "decide this later" was once read by a later phase as "merge
+this now". That is deliberate; see
 [consolidation bands](../architecture/learning-systems.md#consolidation-bands-not-a-threshold).
+
+The splash reports the band as `N pair(s) awaiting review`. Two things clear it:
+run `/garden`, which always adjudicates; or set
+`[memory.garden] auto_adjudicate_review_band = true`, which has automatic
+consolidation judge the band in the background after startup once
+`auto_adjudicate_min_pairs` (default 10) have accumulated. It is off by default
+because it spends an LLM round-trip and merging reshapes stored memories; it does
+not slow session start, because nothing waits on it. See
+[automatic adjudication](../architecture/learning-systems.md#automatic-adjudication-runs-after-startup-not-during-it).
 
 ### Consolidation reports `semantic_merged=0`, or the splash says the semantic pass is unavailable
 

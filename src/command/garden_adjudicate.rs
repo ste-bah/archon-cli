@@ -19,15 +19,26 @@
 //!    uncertainty leaves both memories intact. Silence must never destroy.
 //!
 //! `/garden` adjudicates unconditionally. Automatic session-start consolidation
-//! goes through [`maybe_adjudicate_review_band`] instead, which is opt-in and
+//! goes through [`spawn_review_band_adjudication`] instead, which is opt-in and
 //! waits for the band to be worth a round-trip -- without it the review band has
 //! no automatic resolution at all and grows for as long as nobody types
 //! `/garden`.
+//!
+//! The automatic pass is DETACHED, not awaited. Consolidation runs during
+//! session bootstrap, before the TUI is up and before the user can type;
+//! awaiting an LLM round-trip there put the provider's latency between launching
+//! Archon and the first prompt. Spawning instead costs the session nothing, and
+//! nothing downstream depends on the verdict: the review band writes nothing, so
+//! a pass that is slow, fails, or never returns leaves exactly the state a pass
+//! that never ran would have left, and the next consolidation re-derives the
+//! same pairs.
 
 use std::sync::Arc;
 
 use archon_memory::MemoryTrait;
 use archon_memory::garden::{Adjudication, ReviewPair};
+use archon_tui::app::TuiEvent;
+use archon_tui::event_channel::TuiEventSender;
 
 /// Most pairs judged in one pass.
 ///
@@ -36,14 +47,19 @@ use archon_memory::garden::{Adjudication, ReviewPair};
 /// and should be looked at before it reshapes the graph.
 const MAX_PAIRS_PER_RUN: usize = 20;
 
-/// Longest an automatic adjudication may hold up a session start.
+/// Longest a background adjudication may run before it is abandoned.
 ///
-/// Only the automatic path is bounded. `/garden` spawns its adjudication and
-/// returns, so a stalled provider there costs nothing; on the session-start path
-/// the same stall sits between launching Archon and being able to type. Abandoning
-/// the call loses nothing either: the band writes nothing, so the pairs are
-/// re-derived and offered again by the next consolidation.
-const STARTUP_ADJUDICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+/// This no longer bounds any latency the user can feel — the automatic pass is
+/// detached, so nothing waits on it. What it bounds is the task's own lifetime:
+/// a provider that accepts the request and never answers would otherwise hold
+/// the client, the store handle, and the pending batch alive for the rest of the
+/// session. Abandoning the call loses nothing, because the band writes nothing:
+/// the pairs are re-derived and offered again by the next consolidation.
+///
+/// Two minutes rather than the 45s this was when the call sat on the startup
+/// path. Nobody is waiting, so cutting a slow-but-working provider off early
+/// buys nothing and throws away a batch that was about to be judged.
+const BACKGROUND_ADJUDICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Ask whether each pair states the same thing.
 ///
@@ -198,46 +214,79 @@ pub(crate) async fn adjudicate_and_apply(
     }
 }
 
-/// Judge the review band on the automatic session-start path, if configured to.
+/// Start judging the review band in the background, if configured to.
 ///
-/// Returns how many pairs were merged; zero whenever the trigger did not fire,
-/// which is the default. Separate from [`adjudicate_and_apply`] so the policy —
-/// opted in, and only once the band is worth a round-trip — lives beside the
-/// cost it authorises rather than inside the session bootstrap.
-pub(crate) async fn maybe_adjudicate_review_band(
+/// SYNCHRONOUS on purpose, and returns before the provider has been asked
+/// anything. The caller is session bootstrap; every `.await` it takes is time
+/// the user spends looking at a splash screen instead of a prompt, and this is
+/// the only thing on that path that would call a model at all.
+///
+/// Returns the detached task, or `None` when the trigger did not fire — which is
+/// the default. Production drops the handle (dropping detaches; the task runs on
+/// regardless); it is returned so tests can join the pass instead of racing it.
+/// Separate from [`adjudicate_and_apply`] so the policy — opted in, and only
+/// once the band is worth a round-trip — lives beside the cost it authorises
+/// rather than inside the session bootstrap.
+///
+/// `notify` receives one line if and only if the pass actually merged something.
+/// Merges reshape stored memories behind the user's back, and by the time a
+/// verdict arrives the startup panel has already been drawn saying those pairs
+/// were still outstanding; without this, the correction never lands anywhere the
+/// user looks. A pass that merges nothing says nothing, because "the background
+/// judged your memories and changed none of them" on every launch is a line
+/// people learn to skip.
+pub(crate) fn spawn_review_band_adjudication(
     garden: &archon_memory::garden::GardenConfig,
     client: Arc<dyn archon_pipeline::runner::LlmClient>,
     memory: Arc<dyn MemoryTrait>,
     pairs: Vec<ReviewPair>,
     model: String,
-) -> usize {
+    notify: Option<TuiEventSender>,
+) -> Option<tokio::task::JoinHandle<usize>> {
     if !archon_memory::garden::should_auto_adjudicate(garden, pairs.len()) {
-        return 0;
+        return None;
     }
     let pending = pairs.len();
     tracing::info!(
         pending,
         threshold = garden.auto_adjudicate_min_pairs,
-        "garden: review band reached the automatic adjudication threshold"
+        "garden: review band reached the automatic adjudication threshold; judging in the background"
     );
-    match tokio::time::timeout(
-        STARTUP_ADJUDICATION_TIMEOUT,
-        adjudicate_and_apply(client, memory, pairs, model),
-    )
-    .await
-    {
-        Ok(merged) => merged,
-        Err(_) => {
-            tracing::warn!(
-                pending,
-                timeout_secs = STARTUP_ADJUDICATION_TIMEOUT.as_secs(),
-                "garden: automatic adjudication timed out; nothing merged"
-            );
-            0
+    Some(tokio::spawn(async move {
+        let merged = match tokio::time::timeout(
+            BACKGROUND_ADJUDICATION_TIMEOUT,
+            adjudicate_and_apply(client, memory, pairs, model),
+        )
+        .await
+        {
+            Ok(merged) => merged,
+            Err(_) => {
+                tracing::warn!(
+                    pending,
+                    timeout_secs = BACKGROUND_ADJUDICATION_TIMEOUT.as_secs(),
+                    "garden: background adjudication timed out; nothing merged"
+                );
+                0
+            }
+        };
+        if merged > 0
+            && let Some(tui) = notify
+            && let Err(error) = tui
+                .send_async(TuiEvent::TextDelta(format!(
+                    "\nMemory garden: {merged} of {pending} pair(s) awaiting review \
+                     merged after background judgement.\n"
+                )))
+                .await
+        {
+            // Logged rather than retried. The merges are already applied and
+            // already in the tracing record; a closed TUI channel means the
+            // session is going away, and there is nowhere left to say it.
+            tracing::warn!(%error, "garden: background adjudication result not delivered to the TUI");
         }
-    }
+        merged
+    }))
 }
 
 #[cfg(test)]
-#[path = "garden_adjudicate_tests.rs"]
+#[path = "garden_adjudicate_tests/mod.rs"]
 mod tests;

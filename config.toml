@@ -439,11 +439,15 @@ dedup_similarity_threshold = 0.92
 #                                       adjudicator to settle; nothing is written
 semantic_dedup_max_distance = 0.15
 semantic_review_max_distance = 0.35
-# Have the review band judged automatically at session start instead of only
-# when you run `/garden`. OFF because adjudication is an LLM round-trip and
-# automatic consolidation runs on the session-start path -- it would sit between
-# launching Archon and being able to type, and nothing else on that path calls a
-# model. Left off, the band simply accumulates and `/garden` clears it.
+# Have the review band judged automatically instead of only when you run
+# `/garden`. The judgement runs in the BACKGROUND after startup, not on the
+# session-start path: nothing waits on it, so switching this on does not delay
+# the first prompt. Merges are applied whenever the verdict comes back, and only
+# for pairs the model explicitly calls the same claim; anything else, including a
+# failed or slow call, leaves both memories exactly as they were.
+# Still OFF by default because it spends an LLM round-trip you did not ask for,
+# and merging reshapes stored memories. Left off, the band simply accumulates --
+# nothing is written and nothing is lost -- and `/garden` clears it.
 auto_adjudicate_review_band = false
 # Pending pairs required before that fires, so enabling it does not mean a call
 # on every launch. Below the adjudicator's 20-pair-per-run cap, so a run that
