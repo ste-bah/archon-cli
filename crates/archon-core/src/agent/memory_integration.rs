@@ -59,6 +59,11 @@ impl Agent {
     }
 
     pub(super) fn inject_turn_requirements(&self, system: &mut Vec<serde_json::Value>) {
+        // Issues #80(b)/#81(a): the self-model briefing on the first turn, the
+        // bounded unresolved-lesson block on later ones. Injected here rather
+        // than in `inject_memories` so it survives a session with no memory
+        // graph wired -- the self-model is a different store.
+        self.inject_cognitive_learning(system);
         if let Some(ref reminder) = self.cognitive_executive_reminder {
             system.push(serde_json::json!({
                 "type": "text",

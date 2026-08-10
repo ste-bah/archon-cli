@@ -232,6 +232,12 @@ pub struct Agent {
     cognitive_policy: Option<archon_cognitive::CognitivePolicy>,
     cognitive_ledger_dir: Option<std::path::PathBuf>,
     cognitive_executive_reminder: Option<String>,
+    /// Issue #80(b)/#81(a): the self-model briefing (first turn) or the
+    /// unresolved-lesson block (later turns) injected into this turn's prompt.
+    cognitive_learning_block: Option<String>,
+    /// Reflections shown to this turn, held so the turn's outcome can be
+    /// attributed to them rather than guessed at afterwards.
+    cognitive_injected_reflections: Vec<archon_cognitive::UnresolvedReflection>,
     /// World-model prediction backend, injected by the binary crate (the only
     /// one that can see both `archon-cognitive` and `archon-world-model`).
     /// `None` means advisories fall back to heuristic scoring.

@@ -12,6 +12,10 @@ use archon_cognitive::{
 
 use super::*;
 
+/// Issues #80 and #81's live wiring, split out under the file-size guard.
+#[path = "cognitive_learning.rs"]
+pub(super) mod cognitive_learning;
+
 impl Agent {
     pub(super) fn classify_cognitive_situation(&mut self, user_input: &str) {
         let situation = SituationClassifier.classify(ClassifyInput {
@@ -188,6 +192,18 @@ impl Agent {
             return;
         };
         let (tool_names, tool_failures) = turn_tool_activity(&self.state.messages, user_input);
+        // Issues #80/#81: the deterministic evidence this turn produced, and
+        // the reflections it was shown. Both are read here, on the live path,
+        // and handed to the same bounded task that joins the shadow plan.
+        let evidence = archon_cognitive::TurnEvidence {
+            tool_calls: tool_names.len() as u32,
+            tool_failures,
+            completed: true,
+        };
+        let injected = self.take_injected_reflections();
+        let assistant_text =
+            cognitive_learning::turn_assistant_text(&self.state.messages, user_input);
+        let learning_policy = Some(policy.clone());
         let session_id = self.config.session_id.clone();
         let turn_number = self.turn_number;
         let live = LiveTurnOutcome {
@@ -206,6 +222,21 @@ impl Agent {
             let observer =
                 ShadowTurnObserver::new(store.db(), &ledger_dir, config.clone(), Some(policy));
             let comparison = observer.join(&session_id, turn_number, &live, &model_id)?;
+            // Ahead of the reflection write on purpose: a failed reflection
+            // write must not strand this turn's prediction unresolved, because
+            // nothing would ever come back to resolve it.
+            cognitive_learning::resolve_turn_learning(
+                &store,
+                &ledger_dir,
+                learning_policy,
+                &session_id,
+                turn_number,
+                situation_kind,
+                evidence,
+                &injected,
+                &assistant_text,
+                &model_id,
+            )?;
             write_triggered_reflection(
                 &store,
                 &ledger_dir,

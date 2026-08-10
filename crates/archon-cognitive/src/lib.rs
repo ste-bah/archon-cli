@@ -15,6 +15,7 @@ pub mod governed_autonomous_apply;
 pub mod inspection;
 pub mod metrics;
 pub mod policy_gate;
+pub mod reflection_recall;
 mod reflection_store;
 pub mod reflection_trigger;
 pub mod reflection_writer;
@@ -42,6 +43,7 @@ pub use executive_loop::{
     ActionExecution, ActionExecutor, ActionOutcome, ExecutiveAdvisoryInput, ExecutiveLoop,
     ExecutiveRunOutcome, ExecutiveTurnInput, NoopActionExecutor, PlannedActionInput,
 };
+pub use executive_support::domain_for;
 pub use governed_autonomous_apply::{
     ApplyResult, BehaviourManifestKind, CanaryOutcome, GovernedAutonomousApply, Proposal,
 };
@@ -57,6 +59,10 @@ pub use metrics::{
     WindowDeclaration, evaluate_release_gate, metric_thresholds,
 };
 pub use policy_gate::{DenyReason, PolicyGate, PolicyVerdict, ProposalCheck, ProposalDenyReason};
+pub use reflection_recall::{
+    MAX_INJECTED_REFLECTIONS, MAX_INJECTIONS_PER_REFLECTION, ReflectionRecall,
+    ReflectionReuseTally, UnresolvedReflection,
+};
 pub use reflection_trigger::{
     HIGH_CONFIDENCE_CORRECTION_MIN, HIGH_SURPRISE_THRESHOLD, REPEATED_TOOL_FAILURE_THRESHOLD,
     ReflectionTrigger, TriggeredReflection, TurnSignals,
@@ -66,6 +72,9 @@ pub use reflection_writer::{
     ReflectionWriteOutcome, ReflectionWriter, TriggeredReflectInput,
 };
 pub use schema::{CURRENT_SCHEMA_VERSION, cognitive_schema_version, ensure_cognitive_schema};
+pub use self_model::{
+    SelfModelPredictor, SelfModelStartupBriefing, SelfModelStore, TurnEvidence, TurnVerification,
+};
 pub use shadow::{
     LiveTurnOutcome, SHADOW_DEGRADED_MARKER, ShadowComparison, ShadowObservation, ShadowTurnInput,
     ShadowTurnObserver, observed_action_from_tools, surprise_of,

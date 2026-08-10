@@ -502,6 +502,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "cozo-ce",
  "crc32fast",
  "dashmap 6.1.0",
  "dirs",

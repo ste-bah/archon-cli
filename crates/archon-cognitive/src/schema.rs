@@ -33,7 +33,12 @@ macro_rules! tick_audit_spec {
 /// 3: `cognitive_shadow_decisions` and `cognitive_reflection_evidence` were
 /// added so the shadow executive loop and the triggered reflection writer have
 /// somewhere to land that is distinguishable from live decisions.
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+///
+/// 4: `self_model_predictions` and `cognitive_reflection_injections` were added
+/// so a self-model prediction can be recorded *before* the action it predicts
+/// and verified afterwards without being rewritten, and so an injected
+/// reflection's reuse can be counted rather than assumed.
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
     for script in SCHEMA_RELATIONS {
@@ -257,6 +262,48 @@ const SCHEMA_RELATIONS: &[&str] = &[
             confidence: Float,
             evidence_refs_json: String,
             created_at: String,
+        }"#,
+    // Pre-action self-model predictions (issue #80). The row is written before
+    // the turn acts and only ever gains its verification columns afterwards:
+    // `predicted_success_probability` is never rewritten, which is the whole
+    // reason the later comparison is a prediction rather than a rationalisation.
+    //
+    // `verification_id` and `verified_outcome` start empty and `resolved` starts
+    // false, so an unresolved prediction stays distinguishable from one that was
+    // resolved with an inconclusive outcome.
+    r#":create self_model_predictions {
+            prediction_id: String =>
+            session_id: String,
+            turn_number: Int,
+            task_class: String,
+            self_model_fact_id: String,
+            self_model_dimension: String,
+            predicted_success_probability: Float,
+            fact_evidence_count: Int,
+            resolved: Bool,
+            verification_id: String,
+            verified_outcome: String,
+            created_at: String,
+            resolved_at: String,
+        }"#,
+    // Per-session bookkeeping for reflections injected back into later turns
+    // (issue #81). Keyed by (reflection, session) so the injection budget is
+    // per session: without it a long session would keep re-injecting the same
+    // unresolved lesson forever.
+    //
+    // `cited_count` and `verified_reuse_count` are separate on purpose. A
+    // citation says the lesson was referenced; verified reuse additionally
+    // requires the turn's deterministic verification to have passed, and
+    // collapsing the two would let a mention count as evidence of usefulness.
+    r#":create cognitive_reflection_injections {
+            reflection_id: String,
+            session_id: String =>
+            injection_count: Int,
+            cited_count: Int,
+            verified_reuse_count: Int,
+            last_turn_number: Int,
+            first_injected_at: String,
+            last_injected_at: String,
         }"#,
     r#":create cognitive_evaluation_windows {
             evaluation_window_id: String =>
