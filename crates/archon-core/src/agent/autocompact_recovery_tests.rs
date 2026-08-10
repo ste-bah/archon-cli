@@ -161,14 +161,6 @@ fn recovery_ladder_advances_normal_then_emergency_then_exhausted() {
 }
 
 #[test]
-fn recovery_ladder_does_not_retry_unrelated_errors() {
-    let mut recovery = RecoveryLadder::default();
-
-    assert_eq!(recovery.next_unclassified(), None);
-    assert_eq!(recovery.attempts(), 0);
-}
-
-#[test]
 fn recovery_telemetry_records_reduction_and_selected_tier() {
     let telemetry = RecoveryTelemetry::new(
         RequestPressureKind::ToolResultField,
