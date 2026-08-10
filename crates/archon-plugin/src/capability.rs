@@ -196,53 +196,51 @@ mod tests {
         std::env::temp_dir().join(format!("archon-plugin-{name}-{unique}"))
     }
 
-    /// Point `link` at `target`, or report that this host will not allow it.
+    /// Why the two tests below carry `#[cfg_attr(not(archon_can_symlink), ignore = ...)]`.
     ///
     /// Creating a symlink on Windows needs `SeCreateSymbolicLinkPrivilege`, which an ordinary
-    /// account does not hold unless Developer Mode is on. `expect("symlink")` therefore failed at
-    /// *setup* with `Os { code: 1314, .. "A required privilege is not held by the client." }` on
-    /// every unprivileged Windows machine, so `cargo test --workspace` was permanently red there
-    /// and the assertion these tests exist for never ran at all. GitHub's Windows runners are
-    /// administrators, so CI never saw it.
+    /// account does not hold unless Developer Mode is on. Setup failed there with
+    /// `Os { code: 1314, .. "A required privilege is not held by the client." }`, so
+    /// `cargo test --workspace` was permanently red on such a machine while the assertion these
+    /// tests exist for never ran at all. GitHub's Windows runners are administrators, so CI never
+    /// saw it.
     ///
-    /// Returning `false` rather than panicking keeps the suite honest on such a host. It is a skip
-    /// and not a pass: the caller prints why, so a green line is never mistaken for a checked one,
-    /// and on Linux, macOS and a privileged Windows the assertion runs exactly as before.
-    #[must_use]
-    fn try_symlink_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
+    /// The previous fix detected that at runtime and returned early. That is worse than red:
+    /// Rust's harness classifies a test on panic/no-panic alone, so an early return is reported as
+    /// a PASS, and a test that checked nothing became indistinguishable from one that checked
+    /// everything. Rust has no runtime skip, so the choice has to be made before the harness sees
+    /// the test — `build.rs` attempts a real symlink and sets `archon_can_symlink` if it worked.
+    ///
+    /// An unprivileged host now reports these as ignored rather than passed. `cargo test` prints
+    /// the reason inline; nextest only counts them as skipped, because libtest's `--list` output
+    /// does not carry the reason for it to print — so `build.rs` also emits a `cargo:warning`
+    /// saying the same thing, which is what a CI log will show. A privileged host runs them
+    /// unchanged, and a symlink that fails despite the probe succeeding panics, as a genuine
+    /// failure should.
+    ///
+    /// The reason is spelled out at each `ignore` rather than shared through a `const`: the
+    /// attribute takes a string literal, not a path, so a constant does not compile there.
+    fn symlink_dir(target: &Path, link: &Path) {
         #[cfg(unix)]
         let result = std::os::unix::fs::symlink(target, link);
         #[cfg(windows)]
         let result = std::os::windows::fs::symlink_dir(target, link);
 
-        match result {
-            Ok(()) => true,
-            Err(error) if is_symlink_privilege_error(&error) => {
-                eprintln!(
-                    "SKIPPED: this host does not permit creating symlinks ({error}). \
-                     On Windows, enable Developer Mode or run as administrator to exercise \
-                     the symlink-escape checks."
-                );
-                false
-            }
-            Err(error) => panic!("symlink: {error}"),
+        if let Err(error) = result {
+            panic!(
+                "symlink {} -> {}: {error}",
+                link.display(),
+                target.display()
+            );
         }
-    }
-
-    /// Is this the "you may not create symlinks" refusal, as opposed to a real failure?
-    ///
-    /// Matched on the raw OS code, not `ErrorKind`. Windows reports
-    /// `ERROR_PRIVILEGE_NOT_HELD` (1314) as `ErrorKind::Uncategorized`, not `PermissionDenied`,
-    /// so a kind-based check silently fails to match and the test panics anyway — which is exactly
-    /// what happened to the first version of this helper.
-    fn is_symlink_privilege_error(error: &std::io::Error) -> bool {
-        if error.kind() == std::io::ErrorKind::PermissionDenied {
-            return true;
-        }
-        cfg!(windows) && error.raw_os_error() == Some(1314)
     }
 
     #[test]
+    #[cfg_attr(
+        not(archon_can_symlink),
+        ignore = "requires permission to create symlinks (Windows: SeCreateSymbolicLinkPrivilege, \
+                  i.e. Developer Mode or an elevated shell); probed by build.rs"
+    )]
     fn checker_denies_read_through_symlink_escape() {
         let root = temp_path("read-root");
         let outside = temp_path("read-outside");
@@ -250,11 +248,7 @@ mod tests {
         std::fs::create_dir_all(&outside).expect("outside");
         std::fs::write(outside.join("secret.txt"), "nope").expect("secret");
 
-        if !try_symlink_dir(&outside, &root.join("link")) {
-            let _ = std::fs::remove_dir_all(root);
-            let _ = std::fs::remove_dir_all(outside);
-            return;
-        }
+        symlink_dir(&outside, &root.join("link"));
 
         let checker = CapabilityChecker::new(vec![PluginCapability::ReadFs(vec![root.clone()])]);
         assert!(!checker.can_read_fs(&root.join("link/secret.txt")));
@@ -264,17 +258,18 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(archon_can_symlink),
+        ignore = "requires permission to create symlinks (Windows: SeCreateSymbolicLinkPrivilege, \
+                  i.e. Developer Mode or an elevated shell); probed by build.rs"
+    )]
     fn checker_denies_write_when_parent_symlink_escapes() {
         let root = temp_path("write-root");
         let outside = temp_path("write-outside");
         std::fs::create_dir_all(&root).expect("root");
         std::fs::create_dir_all(&outside).expect("outside");
 
-        if !try_symlink_dir(&outside, &root.join("link")) {
-            let _ = std::fs::remove_dir_all(root);
-            let _ = std::fs::remove_dir_all(outside);
-            return;
-        }
+        symlink_dir(&outside, &root.join("link"));
 
         let checker = CapabilityChecker::new(vec![PluginCapability::WriteFs(vec![root.clone()])]);
         assert!(!checker.can_write_fs(&root.join("link/new.txt")));
