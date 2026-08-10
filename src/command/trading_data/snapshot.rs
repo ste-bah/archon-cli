@@ -11,18 +11,51 @@ use crate::command::trading_tools::{checked_text, project_root, run_node_script,
 
 use super::data_error;
 
+/// Where a TradingView snapshot reads provider state from.
+///
+/// Resolved once at the command boundary rather than by reading the process
+/// environment deep in the call stack, so the source is an explicit argument
+/// of every function that depends on it.
+#[derive(Debug)]
+pub(super) enum SnapshotSource {
+    /// Query the live TradingView MCP CLI under the project root.
+    LiveMcp,
+    /// Read a recorded provider payload from a fixture file.
+    Fixture(PathBuf),
+}
+
+impl SnapshotSource {
+    /// Reads the `ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE` override from the
+    /// process environment. Called once, at the command boundary.
+    fn from_env() -> Self {
+        match std::env::var_os("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") {
+            Some(path) => Self::Fixture(PathBuf::from(path)),
+            None => Self::LiveMcp,
+        }
+    }
+}
+
 pub(super) fn snapshot(target: Option<&PathBuf>, provider: &str, symbol: &str) -> Result<String> {
+    snapshot_from(target, provider, symbol, &SnapshotSource::from_env())
+}
+
+pub(super) fn snapshot_from(
+    target: Option<&PathBuf>,
+    provider: &str,
+    symbol: &str,
+    source: &SnapshotSource,
+) -> Result<String> {
     let root = project_root(target)?;
     let provider_key = provider.trim().to_ascii_lowercase();
     if provider_key == "tradingview" {
-        return tradingview_snapshot(&root, symbol);
+        return tradingview_snapshot(&root, symbol, source);
     }
     persist_unavailable_snapshot(&root, provider, symbol)
 }
 
-fn tradingview_snapshot(root: &Path, symbol: &str) -> Result<String> {
+fn tradingview_snapshot(root: &Path, symbol: &str, source: &SnapshotSource) -> Result<String> {
     let captured_at = chrono::Utc::now().timestamp();
-    let payload = match tradingview_snapshot_payload(root, symbol, captured_at) {
+    let payload = match tradingview_snapshot_payload(root, symbol, captured_at, source) {
         Ok(payload) => payload,
         Err(reason) => return tradingview_unavailable(symbol, &reason.to_string()),
     };
@@ -63,9 +96,14 @@ fn persist_tradingview_snapshot(
     )
 }
 
-fn tradingview_snapshot_payload(root: &Path, symbol: &str, captured_at: i64) -> Result<Value> {
-    if let Ok(path) = std::env::var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") {
-        return fixture_snapshot_payload(&path, symbol, captured_at);
+fn tradingview_snapshot_payload(
+    root: &Path,
+    symbol: &str,
+    captured_at: i64,
+    source: &SnapshotSource,
+) -> Result<Value> {
+    if let SnapshotSource::Fixture(path) = source {
+        return fixture_snapshot_payload(path, symbol, captured_at);
     }
     let health_check = run_tradingview_json(root, &["status"])?;
     let chart_state = run_tradingview_json(root, &["state"])?;
@@ -118,7 +156,7 @@ fn snapshot_freshness(provider_timestamp: i64, captured_at: i64) -> &'static str
     }
 }
 
-fn fixture_snapshot_payload(path: &str, symbol: &str, captured_at: i64) -> Result<Value> {
+fn fixture_snapshot_payload(path: &Path, symbol: &str, captured_at: i64) -> Result<Value> {
     let payload: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
     let health_check = payload
         .pointer("/mcp_tool_results/tv_health_check")
