@@ -1,20 +1,19 @@
+use std::future::Future;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use archon_tools::execution_deadline::{ExecutionDeadline, abort_pipe_tasks, join_pipe_tasks};
-#[cfg(windows)]
-use process_wrap::tokio::JobObject;
-#[cfg(unix)]
-use process_wrap::tokio::ProcessGroup;
-use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
+use process_wrap::tokio::ChildWrapper;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
 use tokio::task::JoinHandle;
 
 use super::{CommandOutput, RunError};
+
+#[path = "executor_process_spawn.rs"]
+mod spawn;
+use spawn::spawn_hook_process;
 
 const HOOK_OUTPUT_BYTES: usize = 64 * 1024;
 const READ_CHUNK_BYTES: usize = 8 * 1024;
@@ -28,23 +27,30 @@ pub(super) async fn run_command(
     event_name: &str,
     timeout_secs: u32,
 ) -> Result<CommandOutput, RunError> {
+    let spawned = spawn_hook_process(command, cwd, session_id, event_name).await?;
+    // The work budget starts here, once the process exists — see `SPAWN_BUDGET`
+    // for why getting it running is not time the hook asked for.
     let deadline = ExecutionDeadline::new(Duration::from_secs(u64::from(timeout_secs)));
-    let mut child = spawn_command(command, cwd, session_id, event_name)?;
+    tracing::debug!(
+        hook = %command,
+        spawn_ms = spawned.spawn_latency.as_millis(),
+        timeout_secs,
+        "hook process spawned"
+    );
+    let mut child = spawned.child;
     let process_group = child.id();
     let budget = Arc::new(AtomicUsize::new(HOOK_OUTPUT_BYTES));
     let mut stdout = drain_pipe(child.stdout().take(), Arc::clone(&budget));
     let mut stderr = drain_pipe(child.stderr().take(), budget);
-    let write_error = match deadline.wait(write_payload(&mut child, payload)).await {
-        Some(error) => error,
-        None => {
-            let cleanup_error =
-                timeout_with_cleanup(&mut child, process_group, &stdout, &stderr).await;
-            return Err(combine_cleanup_error(
-                RunError::Timeout("stdin write"),
-                cleanup_error,
-            ));
-        }
-    };
+    let write_error =
+        match within_deadline(&deadline, "stdin write", write_payload(&mut child, payload)).await {
+            Ok(error) => error,
+            Err(error) => {
+                let cleanup_error =
+                    timeout_with_cleanup(&mut child, process_group, &stdout, &stderr).await;
+                return Err(combine_cleanup_error(error, cleanup_error));
+            }
+        };
     let status = match wait_or_terminate(&mut child, &deadline).await {
         Ok(status) => status,
         Err(error) => {
@@ -85,35 +91,27 @@ async fn timeout_with_cleanup(
     cleanup_error
 }
 
-fn spawn_command(
-    command: &str,
-    cwd: &Path,
-    session_id: &str,
-    event_name: &str,
-) -> Result<Box<dyn ChildWrapper>, RunError> {
-    let shell = archon_shell::resolve_shell();
-    let mut command_builder = Command::new(&shell.program);
-    command_builder
-        .arg(shell.command_arg)
-        .arg(command)
-        .current_dir(cwd)
-        .env_clear()
-        .envs(archon_tools::bash::sanitized_env())
-        .env("ARCHON_SESSION_ID", session_id)
-        .env("ARCHON_CWD", cwd)
-        .env("ARCHON_HOOK_EVENT", event_name)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut command_wrapper = CommandWrap::from(command_builder);
-    command_wrapper.wrap(KillOnDrop);
-    #[cfg(unix)]
-    command_wrapper.wrap(ProcessGroup::leader());
-    #[cfg(windows)]
-    command_wrapper.wrap(JobObject);
-    command_wrapper
-        .spawn()
-        .map_err(|error| RunError::Spawn(format!("{command}: {error}")))
+/// Await one phase of a hook run under its work deadline, with the deadline
+/// authoritative over the phase's own result.
+///
+/// [`tokio::time::timeout_at`] polls the inner future *first* and only consults
+/// the deadline if that future is pending, so anything ready at the moment of a
+/// poll resolves as `Ok` even when the budget ran out beforehand. For a hook
+/// that inverts the verdict: a process that exits after its deadline — because
+/// the runtime was starved past it, or because the kill and the exit landed in
+/// the same window — gets classified from its exit code by
+/// [`super::interpret_exit_code`], so a hook that had to be killed reports
+/// `Success` and a blocking hook silently allows the turn. Once the budget is
+/// gone the phase is a timeout no matter what the future produced.
+async fn within_deadline<T>(
+    deadline: &ExecutionDeadline,
+    phase: &'static str,
+    future: impl Future<Output = T>,
+) -> Result<T, RunError> {
+    match deadline.wait(future).await {
+        Some(value) if !deadline.expired() => Ok(value),
+        _ => Err(RunError::Timeout(phase)),
+    }
 }
 
 async fn write_payload(
@@ -135,23 +133,18 @@ async fn wait_or_terminate(
     child: &mut Box<dyn ChildWrapper>,
     deadline: &ExecutionDeadline,
 ) -> Result<std::process::ExitStatus, RunError> {
-    match deadline.wait(child.wait()).await {
-        Some(status) => match status {
-            Ok(status) => Ok(status),
-            Err(error) => {
-                let cleanup_error = terminate_process_tree(child, child.id()).await;
-                Err(combine_cleanup_error(
-                    RunError::Io(error.to_string()),
-                    cleanup_error,
-                ))
-            }
-        },
-        None => {
+    match within_deadline(deadline, "process wait", child.wait()).await {
+        Ok(Ok(status)) => Ok(status),
+        Ok(Err(error)) => {
             let cleanup_error = terminate_process_tree(child, child.id()).await;
             Err(combine_cleanup_error(
-                RunError::Timeout("process wait"),
+                RunError::Io(error.to_string()),
                 cleanup_error,
             ))
+        }
+        Err(error) => {
+            let cleanup_error = terminate_process_tree(child, child.id()).await;
+            Err(combine_cleanup_error(error, cleanup_error))
         }
     }
 }
@@ -256,11 +249,18 @@ async fn join_pipes(
     stdout: &mut JoinHandle<PipeOutput>,
     stderr: &mut JoinHandle<PipeOutput>,
 ) -> Result<(PipeOutput, PipeOutput), RunError> {
-    let Some(pipes) = join_pipe_tasks(deadline, stdout, stderr).await else {
-        abort_pipe_tasks(stdout, stderr);
-        return Err(RunError::Timeout("pipe drain"));
-    };
-    Ok(pipes)
+    let drained = join_pipe_tasks(deadline, stdout, stderr).await;
+    // `join_pipe_tasks` is built on the same inner-future-first timeout as
+    // `within_deadline`, so a drain that completed past the budget still reports
+    // success. It is the last phase before the exit code is interpreted, which
+    // makes it the last place a timed-out hook could be read as a clean run.
+    match drained.filter(|_| !deadline.expired()) {
+        Some(pipes) => Ok(pipes),
+        None => {
+            abort_pipe_tasks(stdout, stderr);
+            Err(RunError::Timeout("pipe drain"))
+        }
+    }
 }
 
 impl CommandOutput {
@@ -324,6 +324,48 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "I/O error: timed out during stdin write; process cleanup failed: fixture cleanup failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_expired_budget_outranks_a_phase_that_already_finished() {
+        let deadline = ExecutionDeadline::new(Duration::ZERO);
+
+        // This is the primitive the whole executor waits on, and on its own it
+        // says the phase finished: `timeout_at` polls the inner future before
+        // the deadline, so anything ready at poll time resolves as `Some` no
+        // matter how long ago the budget ran out. If this ever stops holding,
+        // the guard below is redundant rather than wrong.
+        assert!(
+            deadline.wait(std::future::ready(0_i32)).await.is_some(),
+            "an expired deadline still admits a ready future"
+        );
+
+        // A hook run may not. `run_command` hands the phase result to
+        // `interpret_exit_code`, so accepting a late `wait()` means a hook that
+        // had to be killed for overrunning gets classified by its exit code —
+        // exit 0 becomes `Success`, and a hook whose whole job is to block the
+        // turn silently allows it.
+        let phase = within_deadline(&deadline, "process wait", std::future::ready(0_i32)).await;
+
+        assert!(
+            matches!(phase, Err(RunError::Timeout("process wait"))),
+            "expected a timeout once the budget is gone, got {phase:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hook_with_no_work_budget_cannot_report_a_clean_run() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // `true` exits 0 immediately, so every phase after the spawn is ready on
+        // its first poll. With a zero work budget the only honest verdict is a
+        // timeout: the spawn succeeded, the hook was never entitled to run.
+        let result = run_command("exit 0", b"{}", dir.path(), "deadline", "PreToolUse", 0).await;
+
+        assert!(
+            matches!(result, Err(RunError::Timeout(_))),
+            "expected a timeout, got {result:?}"
         );
     }
 

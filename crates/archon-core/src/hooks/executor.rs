@@ -51,6 +51,7 @@ impl Drop for AgentGuard {
 // Internal result from running a shell command
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct CommandOutput {
     exit_code: i32,
     stdout: String,
