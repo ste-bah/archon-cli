@@ -287,6 +287,7 @@ pub(crate) mod web_attach;
 pub(crate) mod web_chat;
 pub(crate) mod web_slash;
 pub(crate) mod workflow;
+pub(crate) mod workflow_capabilities;
 /// What `src/command/workflow*.rs` may name, pinned as a scan rather than a
 /// convention.
 #[cfg(test)]

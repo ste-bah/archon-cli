@@ -476,6 +476,21 @@ pub enum WorkflowAction {
         #[arg(long, value_name = "ID")]
         graph: Option<String>,
     },
+    /// Derive `.archon/project.json` from a decomposed task set
+    ///
+    /// Unions the tools and environment keys the tasks declare — and the
+    /// runners their focused tests actually invoke — into the project
+    /// capability manifest the runtime merges into every task. Only ever adds:
+    /// a project accumulates PRDs, and replacing the manifest would strip what
+    /// an earlier decomposition put there.
+    SyncCapabilities {
+        /// Directory of decomposed-PRD TASK-*.md files to derive from
+        #[arg(long, value_name = "DIR")]
+        tasks: std::path::PathBuf,
+        /// Report what would change without writing the manifest
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List workflow runs
     List,
 }

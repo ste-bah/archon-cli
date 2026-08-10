@@ -284,10 +284,65 @@ fn looks_like_path(span: &str) -> bool {
 }
 
 fn collect_focused_tests(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {
-    section_bullets(raw, "focused tests")
+    let mut entries: Vec<FocusedTestEntry> = section_bullets(raw, "focused tests")
         .into_iter()
         .map(|bullet| classify_focused_test(&bullet, declared_tools))
-        .collect()
+        .collect();
+    entries.extend(fenced_commands(raw, declared_tools));
+    entries
+}
+
+/// Commands written inside a fenced block under `## Focused Tests`.
+///
+/// A fenced block is a reasonable way to write a list of commands and only this
+/// reader disagreed, which turned into real damage: a run's self-check counted
+/// "prose entries", an agent drove that count to zero by un-bulleting, and six
+/// of fifteen specs ended with every command invisible — unable to prove a
+/// single requirement they claimed. Reading the block removes the incentive
+/// entirely, and it is strictly more permissive: nothing that parsed before
+/// stops parsing.
+///
+/// Only lines whose first token is a runner count, so prose inside the block —
+/// comments, headings, continuation text — is ignored rather than misread as a
+/// command.
+fn fenced_commands(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry> {
+    let mut commands = Vec::new();
+    let mut inside_section = false;
+    let mut inside_fence = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            // A fence only matters within the section; closing one outside it
+            // must not flip the flag on.
+            if inside_section {
+                inside_fence = !inside_fence;
+            }
+            continue;
+        }
+        if !inside_fence && let Some(rest) = trimmed.strip_prefix('#') {
+            inside_section = headings_match(rest.trim_start_matches('#').trim(), "focused tests");
+            continue;
+        }
+        if !inside_section || !inside_fence {
+            continue;
+        }
+        let command = normalize_command(trimmed);
+        let Some(first) = command.split_whitespace().next() else {
+            continue;
+        };
+        if is_runner(first, declared_tools) {
+            commands.push(FocusedTestEntry::Command(command));
+        }
+    }
+    commands
+}
+
+/// A first token that means "a shell will execute this", for this task.
+fn is_runner(first: &str, declared_tools: &[String]) -> bool {
+    KNOWN_RUNNERS.contains(&first)
+        || declared_tools
+            .iter()
+            .any(|tool| tool.trim().eq_ignore_ascii_case(first))
 }
 
 /// Classify one bullet against the common runners *and* the tools this task
@@ -314,10 +369,7 @@ fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTest
         let Some(first) = span.split_whitespace().next() else {
             continue;
         };
-        let declared = declared_tools
-            .iter()
-            .any(|tool| tool.trim().eq_ignore_ascii_case(first));
-        if KNOWN_RUNNERS.contains(&first) || declared {
+        if is_runner(first, declared_tools) {
             return FocusedTestEntry::Command(span);
         }
     }

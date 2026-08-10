@@ -27,6 +27,7 @@
 //! than a guess at which was meant.
 
 mod coverage;
+mod declarations;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -92,13 +93,40 @@ impl LintSource {
 /// graph, and it only has anything to say for `--tasks`. It is advisory like the
 /// other three — an unclaimed requirement is reported, never raised.
 pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
-    let graph = load_graph(cwd, source)?;
     let tasks_root = match source {
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
-    let mut out = render::report(&graph, &describe(source))?;
+    // A task set that will not lower to a graph still gets the file-level
+    // sections. Refusing everything on one malformed file is how a real corpus
+    // went unexamined: a single `artifact_paths` typo took the whole report
+    // down, so the reader learned nothing about the other fourteen tasks and
+    // the capability report never ran at all. The graph error is reported
+    // first, in full, and then the analyses that do not need a graph continue.
+    let graph = match load_graph(cwd, source) {
+        Ok(graph) => Some(graph),
+        Err(error) => {
+            if tasks_root.is_none() {
+                return Err(error);
+            }
+            None
+        }
+    };
+    let mut out = match &graph {
+        Some(graph) => render::report(graph, &describe(source))?,
+        None => format!(
+            "# topology lint — {}\n\n## graph\n  NOT ANALYSED: this task set does not \
+             lower to a graph.\n  {}\n  The file-level sections below still ran.\n",
+            describe(source),
+            load_graph(cwd, source).unwrap_err()
+        ),
+    };
     out.push_str(&coverage::section(tasks_root.as_deref()));
+    // Fifth section, and like coverage it is not a graph analysis: it asks
+    // whether each task's frontmatter accounts for the commands that task
+    // declares it will run. Advisory for the same reason the others are —
+    // reported so the author can settle it, never raised.
+    out.push_str(&declarations::section(tasks_root.as_deref()));
     Ok(out)
 }
 

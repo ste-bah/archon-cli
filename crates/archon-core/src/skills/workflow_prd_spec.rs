@@ -130,9 +130,13 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             found.\n\
          E. You are the ORCHESTRATOR: you do not write task bodies. As each \
             task completes, verify its file exists, its `task_id:` matches \
-            its filename, and its required keys are present. A subagent that \
-            failed or wrote nothing is RE-QUEUED once; a second failure is \
-            reported as a blocked task, not silently dropped.\n\
+            its filename, and its required keys are present. A subagent \
+            reporting success proves nothing — check the file. A subagent \
+            that failed or wrote nothing is RE-QUEUED, UP TO 10 ATTEMPTS PER \
+            TASK, and only then reported as blocked, never silently dropped. \
+            Writers fail often and transiently: a task has been seen fail \
+            three times in a row and a fixed two-attempt budget lost the spec \
+            entirely, orphaning every requirement it claimed.\n\
          F. Only when the queue is drained, run the §11 commands over the \
             whole directory. Coverage is a property of the SET, so it is \
             checked once at the end, never per agent.\n\
@@ -167,6 +171,13 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             proves something; \"Registry schema migration test.\" cannot. On \
             the reference corpus every entry was prose and the trace reported \
             0 of 93 requirements satisfied despite exact coverage both ways.\n\
+            A command only counts INSIDE A BULLET. A fenced code block full of \
+            commands is read as nothing at all, so never move focused tests \
+            into one, and never turn a bullet into plain text to make a \
+            prose-entry count go down — that removes the commands along with \
+            the prose and leaves the task unable to prove anything it claims. \
+            A bullet that is a description is fixed by making it a command or \
+            by deleting it, never by un-bulleting it.\n\
          2. `## Files Expected to Change` MUST list real backtick-quoted \
             paths. Backticked spans are what gets lifted; a section with none \
             yields no anchors and the task's requirements cannot promote. Do \
@@ -207,19 +218,38 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             consumes — is legitimate and is reported as such. Do NOT fabricate \
             a deliverable contract to silence it.\n\
          \n\
+         8. `required_tools` and `required_env_keys` must be TRUE, not merely \
+            present. `[]` is a claim that the task needs nothing and the host \
+            believes it: the branch's tool allowlist and the run's provider \
+            environment are built from these fields alone. Declare every \
+            runner your own `## Focused Tests` invoke, and every environment \
+            key that configures a service the task talks to — a task reaching \
+            a local or remote API needs the variable addressing it even when \
+            no command text spells the name. An undeclared key is not \
+            injected and its absence is never reported as a gap, so the task \
+            fails later for a reason that looks like the service being \
+            down.\n\
+         \n\
          AFTER WRITING:\n\
-         1. Run `archon workflow lint --tasks {task_dir}/`.\n\
+         1. Run `archon workflow lint --tasks {task_dir}/`. Its `## declared \
+            capabilities` section names any task whose commands use a runner \
+            the task never declared; fix the task, not the report.\n\
          2. Run `archon requirements trace --prd {prd_path} --tasks \
             {task_dir}/`. This is the authoritative coverage check. The \
             lint's own `## requirement coverage` section looks for the PRD as \
             a SIBLING of the task directory and will report \
             `no PRD found beside {task_dir}/; skipped` because the PRD lives \
             under `prds/`. That is expected, not an error.\n\
-         3. Print the paths created plus: task count, requirements claimed \
+         3. Run `archon workflow sync-capabilities --tasks {task_dir}/`. This \
+            unions the ambient toolchain and the environment keys this PRD \
+            needs into `.archon/project.json`, which the runtime merges into \
+            every task. It only ever adds, so it cannot strip what an earlier \
+            PRD's decomposition left there.\n\
+         4. Print the paths created plus: task count, requirements claimed \
             against requirements the PRD defines, any unclaimed requirement, \
             any cited ID the PRD does not define, and every focused-test entry \
             that classified as prose.\n\
-         4. Keep each tool-call payload under 8,000 characters — one task file \
+         5. Keep each tool-call payload under 8,000 characters — one task file \
             per Write call. Do NOT print full task bodies into the \
             conversation."
     )

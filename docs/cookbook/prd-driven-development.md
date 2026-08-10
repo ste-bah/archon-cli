@@ -315,6 +315,18 @@ What this task format requires that `prdtospec` does not:
   `deliverable_contracts`. Presence, not non-emptiness: `[]` is a valid and
   meaningful declaration, and a missing key is refused naming the file and the
   key.
+
+  Presence is all the parser checks, but `[]` is not free. The host builds a
+  branch's tool allowlist and resolves the run's provider environment from these
+  two fields alone, so a task that declares `[]` and then runs `cargo test` has
+  told the host it needs nothing and the host believes it. Nothing verified this
+  for a long time and the result varied by run: of the task sets in the
+  reference project, one 15-task set declared everything correctly, the next had
+  2 of 15 under-declaring, and an older 22-task set was wrong in all 22. See
+  [Project capabilities](#project-capabilities) for the manifest that carries
+  what every task needs, and run `archon workflow lint --tasks <dir>` — its
+  `## declared capabilities` section names any task whose commands use a runner
+  the task never declared.
 - **A `task_id` equal to the id in the filename.** A mismatch is refused naming
   both.
 - **`## Focused Tests` as runnable commands.** A bullet counts only when it
@@ -378,6 +390,50 @@ universe when the text contains one of three markers, matched
 case-insensitively: `decomposed prd`, `task-*.md`, or `/tasks/prd-`. Because
 this pipeline writes to `tasks/PRD-<NAME>/`, naming the directory satisfies the
 third by construction — but only if you spell the path with forward slashes.
+
+### Project capabilities
+
+`.archon/project.json` declares what the **project** needs rather than what any
+one task needs, and the runtime unions it into every task before planning:
+
+```json
+{
+  "schema_version": "archon.project.capabilities.v1",
+  "required_env_keys": ["POLYGON_API_KEY", "OPENBB_API_URL"],
+  "required_tools": ["cargo", "bash"],
+  "tool_bundles": {}
+}
+```
+
+It is the right home for the ambient toolchain every task assumes and for the
+credentials a provider reads, because those are properties of the environment
+rather than of a task. Anything here is granted to every task, so keep
+task-specific tools — MCP tool names in particular — in the task that needs
+them; hoisting those defeats per-task scoping.
+
+Keep it current with:
+
+```
+archon workflow sync-capabilities --tasks tasks/PRD-<NAME>/
+```
+
+That unions the environment keys the tasks declare and the runners their focused
+tests actually invoke into the manifest. It **only ever adds** — a project
+accumulates PRDs, and replacing the manifest would strip what an earlier
+decomposition put there. `--dry-run` reports without writing. A manifest that no
+longer parses is an error rather than something to overwrite, so a hand edit is
+never lost silently.
+
+The decomposition skill runs this after writing a task set, so a PRD that
+introduces a new tool or credential updates the manifest as part of being
+decomposed.
+
+One limit worth knowing: this can only see what the task files say. A task that
+talks to a service but never names the variable addressing it — prose about
+"the OpenBB endpoint" with no `OPENBB_API_URL` anywhere — is invisible to any
+derivation, which is why the authoring rules require the key to be declared. An
+undeclared key is not injected and its absence is never reported as a gap, so
+the task fails later looking as though the service were down.
 
 **2. The path must be absolute.** Path tokens are scraped from the text and
 only absolute ones are considered — `/…` on Unix, `C:\…` or `C:/…` on Windows.

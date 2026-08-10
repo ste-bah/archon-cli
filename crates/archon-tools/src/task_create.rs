@@ -6,6 +6,31 @@ use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
 
 /// Tool that creates a new tracked task in the global TaskManager.
 ///
+
+/// Appended to every delegated prompt.
+///
+/// A subagent spawned here has no human on the other end: its output goes to
+/// the orchestrator that dispatched it, and the run is usually non-interactive.
+/// Nothing gates it either — bypass propagates from the parent
+/// (`run_runner.rs` passes `parent_mode == "bypassPermissions"` into the
+/// overlay), so a confirmation question is not a permission being requested, it
+/// is a turn spent waiting for an answer that can never arrive. Observed live:
+/// a delegated writer returned "Please reply **proceed** to authorize the
+/// edit." inside a `-p` run and burned its turn.
+///
+/// Workflow V2 stage prompts have carried this rule for a long time
+/// (`stage_prompt.rs`: "Do not ask whether to proceed ... execute the stage
+/// now"). Delegated tasks never got it. Stated generally so it holds for any
+/// caller, not just the phrasing that exposed it.
+const AUTONOMY_RULE: &str = "\
+AUTONOMOUS EXECUTION. You are a delegated subagent. No human will read this \
+turn and none can reply to it: your output is consumed by the orchestrator \
+that dispatched you. Do the work now. Never ask whether to proceed, never \
+request authorization or confirmation, never stop at a plan and wait, and \
+never end a turn with a question. If something genuinely blocks you, say what \
+is missing and why, and return — that is a report, not a request. If the work \
+is already complete and nothing needs changing, say so plainly.";
+
 /// When a `prompt` field is provided, the installed subagent executor runs or
 /// spawns the request directly. Without `prompt`, the task is created for manual
 /// tracking only.
@@ -143,7 +168,7 @@ impl Tool for TaskCreateTool {
             .map(|s| s.to_string());
 
         let request = SubagentRequest {
-            prompt: prompt.to_string(),
+            prompt: format!("{prompt}\n\n{AUTONOMY_RULE}"),
             model,
             allowed_tools,
             max_turns,
