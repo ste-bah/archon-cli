@@ -412,6 +412,29 @@ mod workflow_live_test_support_generated_clients;
 #[path = "workflow_live_test_support_invalid_items.rs"]
 mod workflow_live_test_support_invalid_items;
 
+/// The one task board this test binary installs.
+///
+/// `archon_tools::board::install_board_access` is a `OnceLock`: the first caller
+/// wins and every later install is silently ignored. Two fixtures each building
+/// their own graph therefore leaves one of them asserting against a board the
+/// run never wrote to — and *which* one depends on test order, so the failure
+/// appears only when the two happen to run in the same process. There is one
+/// graph for the whole binary, and run partitioning is what keeps each fixture
+/// from seeing the others' items, exactly as it keeps two concurrent workflow
+/// runs apart in production.
+///
+/// Every full-lifecycle fixture installs it, not just the board tests: since
+/// #142 the drain gate refuses a run it cannot check.
+pub(crate) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
+    static BOARD: std::sync::OnceLock<Arc<archon_memory::MemoryGraph>> = std::sync::OnceLock::new();
+    let graph = BOARD
+        .get_or_init(|| Arc::new(archon_memory::MemoryGraph::in_memory().expect("board graph")));
+    archon_tools::board::install_board_access(
+        Arc::clone(graph) as Arc<dyn archon_memory::board::BoardAccess>
+    );
+    Arc::clone(graph)
+}
+
 pub(crate) fn request(input: serde_json::Value) -> StageRunRequest {
     StageRunRequest {
         run_id: "wf-test".into(),

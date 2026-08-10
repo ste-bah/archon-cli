@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use archon_tools::board::DelegatedOutcome;
 use archon_tools::provider_env::ProviderEnvResolution;
 use archon_workflow::{
     ProviderTier, SharedWorkflowUiSink, StageKind, StageRunRequest, WorkflowActivityStatus,
@@ -12,6 +13,9 @@ use archon_workflow::v2::project_artifact_stamping::stamp_project_artifact_paths
 
 use archon_workflow::llm_retry::run_agent_with_transient_retry;
 
+use super::super::workflow_live_runner::workflow_live_stage_board::{
+    StageBoardItem, stage_board_outcome,
+};
 use super::super::workflow_live_runner::{
     allowed_tools, tier_model_alias, workflow_agent, workflow_agent_ordinal,
     workflow_agent_session_id,
@@ -190,13 +194,21 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             "v2 call running",
         )
         .await?;
+        // The V2 lifecycle is the other dispatch path — it reuses this file's
+        // helpers but never enters `PipelineWorkflowRunner::run_stage` — so it
+        // has to raise its own branch onto the board or a decomposed run, which
+        // is most of what a real run does, stays invisible (#161).
+        let session_id = workflow_agent_session_id(&stage_request);
+        let ordinal = workflow_agent_ordinal(&stage_request);
+        let mut board =
+            StageBoardItem::raise(&stage_request, &session_id, ordinal, &agent_name, &prompt);
         let prompt_parts =
             archon_workflow::WorkflowV2AgentAdapter::new().build_prompt_parts(request);
         let agent_request = WorkflowAgentCall {
-            session_id: workflow_agent_session_id(&stage_request),
+            session_id,
             task: request.task.clone(),
             cwd: request_target_repository_root(&stage_request),
-            ordinal: workflow_agent_ordinal(&stage_request),
+            ordinal,
             attempt: stage_request.attempt as usize,
             agent,
             messages: vec![serde_json::json!({
@@ -249,6 +261,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         {
             Ok(response) => response,
             Err(err) => {
+                // Before the emit below, which is itself a `?`.
+                board.finish(stage_board_outcome(&err));
                 let notification_delivery = matches!(
                     &err,
                     archon_workflow::WorkflowError::NotificationDelivery(_)
@@ -277,6 +291,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             "v2 call complete",
         )
         .await?;
+        // `in_review`, not `resolved`: the branch returned, nothing verified it.
+        board.finish(DelegatedOutcome::Completed);
         Ok(response.content)
     }
 
