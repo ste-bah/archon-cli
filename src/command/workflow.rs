@@ -129,9 +129,8 @@ pub(crate) async fn handle_workflow_command(
         } else {
             cwd.join(tasks)
         };
-        let sync = crate::command::workflow_capabilities::sync_capabilities(
-            &cwd, &tasks_root, *dry_run,
-        )?;
+        let sync =
+            crate::command::workflow_capabilities::sync_capabilities(&cwd, &tasks_root, *dry_run)?;
         print!("{}", sync.render());
         return Ok(());
     }

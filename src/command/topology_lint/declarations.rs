@@ -97,10 +97,12 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         // of fifteen specs moved their commands into fenced ```bash blocks
         // while a repair drove a "prose entries" count to zero, and every
         // requirement those tasks claim became unprovable in the same stroke.
-        if !commands
-            .iter()
-            .any(|command| command.split_whitespace().next().is_some_and(|first| KNOWN_RUNNERS.contains(&first)))
-        {
+        if !commands.iter().any(|command| {
+            command
+                .split_whitespace()
+                .next()
+                .is_some_and(|first| KNOWN_RUNNERS.contains(&first))
+        }) {
             no_commands.push(name.clone());
         }
         for command in commands {
@@ -116,7 +118,11 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
                     .insert(first.to_string());
             }
             for key in referenced_env_keys(&command) {
-                if !task.required_env_keys.iter().any(|declared| *declared == key) {
+                if !task
+                    .required_env_keys
+                    .iter()
+                    .any(|declared| *declared == key)
+                {
                     undeclared_env.entry(name.clone()).or_default().insert(key);
                 }
             }
@@ -194,10 +200,10 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
 fn focused_test_commands(raw: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut inside = false;
-        // Commands inside a fenced block count too — the traceability reader
-        // reads them, and a lint that disagreed would report "no runnable
-        // tests" for a spec the engine parses fine.
-        let mut in_fence = false;
+    // Commands inside a fenced block count too — the traceability reader
+    // reads them, and a lint that disagreed would report "no runnable
+    // tests" for a spec the engine parses fine.
+    let mut in_fence = false;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {

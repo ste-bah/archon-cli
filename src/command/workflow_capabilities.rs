@@ -158,11 +158,12 @@ pub(crate) fn sync_capabilities(
         tasks_read,
     };
 
-    if !dry_run && tasks_read > 0 && (created || !sync.added_tools.is_empty() || !sync.added_env_keys.is_empty())
+    if !dry_run
+        && tasks_read > 0
+        && (created || !sync.added_tools.is_empty() || !sync.added_env_keys.is_empty())
     {
         if let Some(parent) = manifest_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         let body = serde_json::to_string_pretty(&Value::Object(manifest))?;
         fs::write(&manifest_path, format!("{body}\n"))
@@ -181,8 +182,12 @@ fn read_manifest(path: &Path) -> Result<Option<Map<String, Value>>> {
         return Ok(None);
     }
     let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let value: Value = serde_json::from_str(&raw)
-        .with_context(|| format!("{} is not valid JSON; refusing to overwrite it", path.display()))?;
+    let value: Value = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "{} is not valid JSON; refusing to overwrite it",
+            path.display()
+        )
+    })?;
     match value {
         Value::Object(map) => Ok(Some(map)),
         _ => anyhow::bail!(
@@ -193,7 +198,11 @@ fn read_manifest(path: &Path) -> Result<Option<Map<String, Value>>> {
 }
 
 /// Union `values` into `manifest[key]`, returning only what was newly added.
-fn merge_list(manifest: &mut Map<String, Value>, key: &str, values: &BTreeSet<String>) -> Vec<String> {
+fn merge_list(
+    manifest: &mut Map<String, Value>,
+    key: &str,
+    values: &BTreeSet<String>,
+) -> Vec<String> {
     let mut existing: BTreeSet<String> = manifest
         .get(key)
         .and_then(Value::as_array)
@@ -219,10 +228,10 @@ fn merge_list(manifest: &mut Map<String, Value>, key: &str, values: &BTreeSet<St
 fn focused_test_commands(raw: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut inside = false;
-        // Commands inside a fenced block count too — the traceability reader
-        // reads them, and a lint that disagreed would report "no runnable
-        // tests" for a spec the engine parses fine.
-        let mut in_fence = false;
+    // Commands inside a fenced block count too — the traceability reader
+    // reads them, and a lint that disagreed would report "no runnable
+    // tests" for a spec the engine parses fine.
+    let mut in_fence = false;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {

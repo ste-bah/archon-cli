@@ -353,8 +353,14 @@ lizard -l rust -C 15 src/a.rs
         })
         .collect();
     assert_eq!(commands.len(), 2, "{commands:?}");
-    assert!(commands.iter().any(|c| c.starts_with("cargo ")), "{commands:?}");
-    assert!(commands.iter().any(|c| c.starts_with("lizard ")), "{commands:?}");
+    assert!(
+        commands.iter().any(|c| c.starts_with("cargo ")),
+        "{commands:?}"
+    );
+    assert!(
+        commands.iter().any(|c| c.starts_with("lizard ")),
+        "{commands:?}"
+    );
 }
 
 /// A fenced block elsewhere in the document is not a focused test.
@@ -380,5 +386,10 @@ cargo bench
 - `cargo test -p thing`
 ";
     let binding = parse_task_binding(raw, "tasks/TASK-F-002.md").expect("parses");
-    assert_eq!(binding.focused_tests.len(), 1, "{:?}", binding.focused_tests);
+    assert_eq!(
+        binding.focused_tests.len(),
+        1,
+        "{:?}",
+        binding.focused_tests
+    );
 }

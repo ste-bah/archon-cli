@@ -158,7 +158,6 @@ fn a_task_with_a_runnable_focused_test_is_not_reported() {
     assert!(!out.contains("NO runnable focused test"), "{out}");
 }
 
-
 /// Commands in a fenced block are read, so such a task is not command-free.
 /// This is the pair to the parser change: lint and parser must agree, or the
 /// lint reports a defect the engine does not see.
