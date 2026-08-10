@@ -155,9 +155,14 @@ fn contract_field(contract: &Value, key: &str) -> Option<String> {
 ///
 /// # Issue #168: `${PROJECT_ROOT}` is not a directory name
 ///
-/// Run `wf-67dd2599` recorded
-/// `${PROJECT_ROOT}/.archon/trading-lab/data/datasets/${DATASET_ID}/${VERSION}/validation.json`
-/// as an `artifact_path`. Nothing in this engine expands `${...}`: the instance
+/// A run recorded an `artifact_path` of the shape
+/// `${PROJECT_ROOT}/.archon/<area>/data/<set>/${DATASET_ID}/${VERSION}/out.json`
+/// — the observed path itself is not reproduced here, because a fixture's
+/// domain vocabulary in generic runtime source is what the D52/D75 genericity
+/// gate exists to stop, and a comment fossilizes an assumption just as
+/// effectively as code does.
+///
+/// Nothing in this engine expands `${...}`: the instance
 /// machinery below rewrites `<...>` only, `glob_instances` wildcards `<...>`
 /// only, and a source-bound contract names its instances from registry entries.
 /// So a `${...}` path is unconditionally unbindable — unlike `<...>`, there is
