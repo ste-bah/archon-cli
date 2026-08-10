@@ -14,6 +14,7 @@ fn report() -> archon_memory::garden::GardenReport {
         semantic_pass_unavailable: false,
         budget_exhausted: false,
         retirement_candidates: Vec::new(),
+        consolidation_candidates: Vec::new(),
     }
 }
 

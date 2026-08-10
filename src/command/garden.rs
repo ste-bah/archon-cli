@@ -118,6 +118,18 @@ pub(crate) struct GardenHandler;
 
 impl CommandHandler for GardenHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
+        // 0. The governed-proposal surface: listing, deciding, applying,
+        //    undoing. Dispatched FIRST, before the memory borrow below, and
+        //    before the consolidate fall-through -- `/garden apply` reaching
+        //    "run a consolidation pass" is the one misreading here that would
+        //    change the store rather than merely confuse.
+        {
+            let sub = args.first().map(|s| s.as_str()).unwrap_or("").trim();
+            if crate::command::garden_proposals::handle(ctx, sub, args) {
+                return Ok(());
+            }
+        }
+
         // 1. Require memory handle. `build_command_context` populates
         //    this unconditionally from `SlashCommandContext::memory` so
         //    at the real dispatch site this branch never fires. Test

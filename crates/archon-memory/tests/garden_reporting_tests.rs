@@ -270,6 +270,7 @@ fn garden_report_format() {
         semantic_pass_unavailable: false,
         budget_exhausted: false,
         retirement_candidates: Vec::new(),
+        consolidation_candidates: Vec::new(),
     };
     let formatted = report.format();
     assert!(

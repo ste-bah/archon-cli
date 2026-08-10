@@ -7,12 +7,12 @@ pub mod apply;
 pub mod cozo_guard;
 pub mod errors;
 pub mod events;
+pub mod garden_proposals;
 pub mod llm_call_usage;
 #[cfg(test)]
 mod llm_call_usage_tests;
 pub mod manifest;
 pub mod memory_promotion_candidates;
-pub mod memory_retirement_proposals;
 pub mod models;
 pub mod outcome_signal;
 pub mod permission_runtime_events;

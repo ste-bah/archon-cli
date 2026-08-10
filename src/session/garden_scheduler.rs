@@ -43,11 +43,17 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use archon_learning::garden_proposals::{
+    GardenProposalKind, GardenProposalRecord, GardenProposalStatus, raise_garden_proposal,
+};
 use archon_memory::MemoryTrait;
 use archon_memory::garden::{
-    GardenConfig, RetirementCandidate, RetirementReason, ScheduledRun, run_scheduled_consolidation,
-    should_run_scheduled,
+    GardenConfig, RetirementCandidate, RetirementReason, RuleRetirementCandidate,
+    RuleRetirementPolicy, ScheduledRun, SemanticConsolidationCandidate, rule_retirement_candidates,
+    run_scheduled_consolidation, should_run_scheduled,
 };
+
+use crate::command::garden_metrics::{GardenMetricContext, record_proposal_raised};
 
 /// How often the scheduler asks whether a pass is due.
 ///
@@ -67,6 +73,9 @@ pub(crate) struct GardenSchedulerSpec {
     /// Where `memory.port` and the run lock live. This is what makes two Archon
     /// processes agree they are looking at one store.
     pub data_dir: PathBuf,
+    /// The project root, for the cognitive metric ledger and the policy that
+    /// segments its cohorts.
+    pub working_dir: PathBuf,
     /// The governed-learning store retirement proposals are written to.
     ///
     /// `None` disables proposal persistence, not the pass. A pass with nowhere
@@ -99,6 +108,7 @@ pub(crate) fn spawn_garden_scheduler(
             garden,
             memory,
             data_dir,
+            working_dir,
             learning_db,
         } = spec;
         let mut ticker = tokio::time::interval(CHECK_INTERVAL);
@@ -111,7 +121,14 @@ pub(crate) fn spawn_garden_scheduler(
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            run_one_tick(&garden, &memory, &data_dir, learning_db.as_deref()).await;
+            run_one_tick(
+                &garden,
+                &memory,
+                &data_dir,
+                &working_dir,
+                learning_db.as_deref(),
+            )
+            .await;
         }
     }))
 }
@@ -123,20 +140,26 @@ pub(crate) fn spawn_garden_scheduler(
 async fn run_one_tick(
     garden: &GardenConfig,
     memory: &Arc<dyn MemoryTrait>,
-    data_dir: &PathBuf,
+    data_dir: &std::path::Path,
+    working_dir: &std::path::Path,
     learning_db: Option<&cozo::DbInstance>,
 ) {
     let run_id = format!("garden-scheduled:{}", uuid::Uuid::new_v4());
-    let memory = Arc::clone(memory);
-    let garden = garden.clone();
-    let data_dir = data_dir.clone();
+    let memory_for_task = Arc::clone(memory);
+    let garden_for_task = garden.clone();
+    let data_dir_for_task = data_dir.to_path_buf();
     let id_for_task = run_id.clone();
 
     // `run_scheduled_consolidation` is synchronous and does database work, over
     // TCP in every process but the one that owns the store. Running it on the
     // async runtime's worker threads would block them for the length of a pass.
     let outcome = tokio::task::spawn_blocking(move || {
-        run_scheduled_consolidation(memory.as_ref(), &garden, &data_dir, &id_for_task)
+        run_scheduled_consolidation(
+            memory_for_task.as_ref(),
+            &garden_for_task,
+            &data_dir_for_task,
+            &id_for_task,
+        )
     })
     .await;
 
@@ -160,73 +183,221 @@ async fn run_one_tick(
         ScheduledRun::Ran(report) => report,
         ScheduledRun::Declined | ScheduledRun::TooRecent => return,
     };
-    if report.retirement_candidates.is_empty() {
+
+    // Rule retirement is computed here rather than inside the pass, because the
+    // evidence lives in two places the memory crate deliberately cannot join:
+    // the rules engine and the correction rows behind each rule. The analysis
+    // itself is a pure function taking plain data, so nothing on this path can
+    // reach a rule-mutating call.
+    let rule_candidates = rule_retirement_candidates(
+        &super::garden_rule_observations::rule_observations(memory.as_ref()),
+        &RuleRetirementPolicy::default(),
+        chrono::Utc::now(),
+    );
+
+    let total = report.retirement_candidates.len()
+        + report.consolidation_candidates.len()
+        + rule_candidates.len();
+    if total == 0 {
         return;
     }
     let Some(db) = learning_db else {
         tracing::info!(
             run_id,
-            candidates = report.retirement_candidates.len(),
-            "garden: retirement candidates found but no governed store is open; \
-             nothing was deleted and nothing was recorded"
+            candidates = total,
+            "garden: proposals found but no governed store is open; nothing was \
+             changed and nothing was recorded"
         );
         return;
     };
-    persist_retirement_proposals(db, &run_id, &report.retirement_candidates);
-}
-
-/// File each candidate as a pending, reviewable governed proposal.
-///
-/// Best effort per candidate. A candidate that fails to persist is logged and
-/// skipped rather than aborting the batch: the memories are untouched either
-/// way, so a partial review pile is strictly better than none, and the next pass
-/// re-derives whatever was missed.
-fn persist_retirement_proposals(
-    db: &cozo::DbInstance,
-    run_id: &str,
-    candidates: &[RetirementCandidate],
-) {
-    use archon_learning::memory_retirement_proposals::{
-        MemoryRetirementProposalRecord, MemoryRetirementStatus, insert_memory_retirement_proposal,
+    let metrics = GardenMetricContext {
+        working_dir: working_dir.to_path_buf(),
+        model_id: "scheduler".to_string(),
+        session_id: run_id.clone(),
+        turn_number: 0,
     };
-
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let mut filed = 0usize;
-    for candidate in candidates {
-        let reason_kind = candidate.reason.kind();
-        let record = MemoryRetirementProposalRecord {
-            proposal_id: MemoryRetirementProposalRecord::stable_id(
-                &candidate.memory_id,
-                reason_kind,
-            ),
-            memory_id: candidate.memory_id.clone(),
-            memory_title: candidate.title.clone(),
-            excerpt: candidate.excerpt.clone(),
-            memory_type: candidate.memory_type.to_string(),
-            importance: candidate.importance,
-            reason_kind: reason_kind.to_string(),
-            reason_detail: describe_reason(&candidate.reason),
-            run_id: run_id.to_string(),
-            // The only status a background pass may write. Deciding is a human
-            // act, and nothing here performs one.
-            status: MemoryRetirementStatus::Pending,
-            created_at: created_at.clone(),
-        };
-        match insert_memory_retirement_proposal(db, &record) {
-            Ok(()) => filed += 1,
-            Err(error) => tracing::warn!(
-                %error,
-                memory_id = %candidate.memory_id,
-                "garden: could not file a retirement proposal; the memory is untouched"
-            ),
-        }
-    }
+    let filed = file_retirements(db, &run_id, &report.retirement_candidates, &metrics)
+        + file_consolidations(db, &run_id, &report.consolidation_candidates, &metrics)
+        + file_rule_retirements(db, &run_id, &rule_candidates, &metrics);
     tracing::info!(
         run_id,
         filed,
-        offered = candidates.len(),
-        "garden: retirement candidates filed for review; none were deleted"
+        offered = total,
+        "garden: proposals filed for review; nothing was applied"
     );
+}
+
+/// Raise one proposal and record that it was raised.
+///
+/// Best effort per proposal. One that fails to persist is logged and skipped
+/// rather than aborting the batch: the store is untouched either way, so a
+/// partial review pile is strictly better than none and the next pass
+/// re-derives whatever was missed.
+fn raise(
+    db: &cozo::DbInstance,
+    record: GardenProposalRecord,
+    metrics: &GardenMetricContext,
+) -> usize {
+    match raise_garden_proposal(db, &record) {
+        Ok(stored) => {
+            // Only a genuinely new pending row is counted and measured. A
+            // proposal that was already decided comes back unchanged, and
+            // counting it would inflate the acceptance denominator with rows
+            // nobody was asked about again.
+            if stored.status == GardenProposalStatus::Pending && stored.run_id == record.run_id {
+                record_proposal_raised(metrics, &stored);
+                return 1;
+            }
+            0
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                subject = %record.subject_id,
+                "garden: could not file a proposal; the store is untouched"
+            );
+            0
+        }
+    }
+}
+
+fn file_retirements(
+    db: &cozo::DbInstance,
+    run_id: &str,
+    candidates: &[RetirementCandidate],
+    metrics: &GardenMetricContext,
+) -> usize {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    candidates
+        .iter()
+        .map(|candidate| {
+            raise(
+                db,
+                GardenProposalRecord {
+                    proposal_id: GardenProposalRecord::stable_id(
+                        GardenProposalKind::MemoryRetirement,
+                        &candidate.memory_id,
+                    ),
+                    proposal_kind: GardenProposalKind::MemoryRetirement,
+                    subject_id: candidate.memory_id.clone(),
+                    subject_title: candidate.title.clone(),
+                    excerpt: candidate.excerpt.clone(),
+                    detail: describe_reason(&candidate.reason),
+                    payload_json: "{}".to_string(),
+                    run_id: run_id.to_string(),
+                    status: GardenProposalStatus::Pending,
+                    applied_ref: String::new(),
+                    created_at: created_at.clone(),
+                    decided_at: String::new(),
+                },
+                metrics,
+            )
+        })
+        .sum()
+}
+
+fn file_consolidations(
+    db: &cozo::DbInstance,
+    run_id: &str,
+    candidates: &[SemanticConsolidationCandidate],
+    metrics: &GardenMetricContext,
+) -> usize {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    candidates
+        .iter()
+        .map(|candidate| {
+            // The whole candidate travels as the payload, because applying it
+            // has to write the exact text and sources that were reviewed. A
+            // proposal that re-derived its content at apply time could apply
+            // something other than what was approved.
+            let payload = serde_json::to_string(candidate).unwrap_or_else(|error| {
+                tracing::warn!(%error, "garden: consolidation payload not serialisable");
+                String::new()
+            });
+            if payload.is_empty() {
+                return 0;
+            }
+            raise(
+                db,
+                GardenProposalRecord {
+                    proposal_id: GardenProposalRecord::stable_id(
+                        GardenProposalKind::SemanticConsolidation,
+                        &candidate.candidate_id,
+                    ),
+                    proposal_kind: GardenProposalKind::SemanticConsolidation,
+                    subject_id: candidate.candidate_id.clone(),
+                    subject_title: candidate.proposed_title.clone(),
+                    excerpt: candidate.proposed_content.clone(),
+                    detail: format!(
+                        "{} provenance-compatible memories restate this claim; \
+                         recording it once at importance {:.2}",
+                        candidate.corroboration_count(),
+                        candidate.proposed_importance
+                    ),
+                    payload_json: payload,
+                    run_id: run_id.to_string(),
+                    status: GardenProposalStatus::Pending,
+                    applied_ref: String::new(),
+                    created_at: created_at.clone(),
+                    decided_at: String::new(),
+                },
+                metrics,
+            )
+        })
+        .sum()
+}
+
+fn file_rule_retirements(
+    db: &cozo::DbInstance,
+    run_id: &str,
+    candidates: &[RuleRetirementCandidate],
+    metrics: &GardenMetricContext,
+) -> usize {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    candidates
+        .iter()
+        .map(|candidate| {
+            raise(
+                db,
+                GardenProposalRecord {
+                    proposal_id: GardenProposalRecord::stable_id(
+                        GardenProposalKind::RuleRetirement,
+                        &candidate.rule_id,
+                    ),
+                    proposal_kind: GardenProposalKind::RuleRetirement,
+                    subject_id: candidate.rule_id.clone(),
+                    subject_title: "behavioural rule".to_string(),
+                    excerpt: candidate.rule_text.clone(),
+                    detail: describe_rule_evidence(candidate),
+                    payload_json: "{}".to_string(),
+                    run_id: run_id.to_string(),
+                    status: GardenProposalStatus::Pending,
+                    applied_ref: String::new(),
+                    created_at: created_at.clone(),
+                    decided_at: String::new(),
+                },
+                metrics,
+            )
+        })
+        .sum()
+}
+
+/// The correction evidence behind a rule-retirement proposal, as one line.
+fn describe_rule_evidence(candidate: &RuleRetirementCandidate) -> String {
+    let evidence = &candidate.evidence;
+    let corrections = match evidence.days_since_supporting_correction {
+        Some(days) => format!("last supporting correction {days} days ago"),
+        None => "no supporting correction on record".to_string(),
+    };
+    let triggered = match evidence.days_since_triggered {
+        Some(days) => format!("last matched {days} days ago"),
+        None => "never matched".to_string(),
+    };
+    format!(
+        "{corrections}, {triggered}, {} supporting correction(s), score {:.1}; \
+         quiet threshold {} days",
+        evidence.supporting_corrections, evidence.score, evidence.quiet_days
+    )
 }
 
 /// The evidence behind a candidate, as one readable line.

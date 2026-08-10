@@ -490,6 +490,24 @@ scheduled_max_retirement_candidates = 100
 # Wall-clock ceiling on one scheduled pass, in seconds. Nothing is cancelled
 # when it expires; the pass simply stops taking on new work.
 scheduled_max_seconds = 300
+# Generative consolidation. A scheduled pass looks for several memories that
+# restate one another and proposes recording the claim once, with its
+# corroboration. It never invents wording: the proposed text is verbatim one of
+# the sources, so the proposal can be checked against them.
+# Clusters must be provenance-compatible -- same memory type, same project
+# scope, same writer -- and EVERY PAIR must satisfy that, not merely adjacent
+# ones, so a chain of overlapping windows cannot span more than the limit below.
+# How many corroborating observations make a claim worth recording once.
+consolidation_min_cluster_size = 3
+# How far apart in time those observations may be recorded. Bounds what a
+# cluster can span, so two records of a fact that CHANGED are not consolidated
+# into a claim that the older one is still true.
+consolidation_max_span_days = 14
+# Word overlap every pair in a cluster must reach to count as the same claim.
+# Provenance compatibility says two memories MAY be one claim; this says they
+# are. Without it, unrelated facts recorded by one writer on one day would be
+# proposed as a single memory citing all of them.
+consolidation_min_word_overlap = 0.5
 
 # --- AutoCapture (regex-based memory detection at turn boundary) ---
 [memory.auto_capture]

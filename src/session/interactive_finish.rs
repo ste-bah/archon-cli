@@ -304,13 +304,13 @@ pub(super) async fn finish(
         // and what it eventually runs is a deliberately weaker pass than the one
         // that just ran -- bounded, single-run-locked, and unable to delete a
         // memory at all. Dropping the handle detaches the task.
-        let (data_dir, _) =
-            archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
+        let (data_dir, _) = archon_memory::resolve_memory_paths(config.memory.db_path.as_deref());
         let _garden_scheduler = super::garden_scheduler::spawn_garden_scheduler(
             super::garden_scheduler::GardenSchedulerSpec {
                 garden: config.memory.garden.clone(),
                 memory: Arc::clone(&memory),
                 data_dir,
+                working_dir: working_dir.clone(),
                 learning_db: governed_learning_db.clone(),
             },
         );

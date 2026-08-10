@@ -13,7 +13,7 @@ use tracing::warn;
 use super::super::budget::BudgetLedger;
 use super::super::{PRUNEABLE_TYPES, get_memories_by_type};
 use crate::access::MemoryTrait;
-use crate::types::{MemoryError, RelType, SUPERSEDED_TAG};
+use crate::types::{MemoryError, RETIRED_TAG, RelType, SUPERSEDED_TAG};
 
 /// Most merges one consolidation pass will perform.
 ///
@@ -21,21 +21,28 @@ use crate::types::{MemoryError, RelType, SUPERSEDED_TAG};
 /// for the next run rather than reshaping the whole graph in one go.
 pub(crate) const DEDUP_MERGE_BUDGET: usize = 50;
 
-/// Union of both memories' tags, minus [`SUPERSEDED_TAG`].
+/// Union of both memories' tags, minus every withheld-status marker.
 ///
-/// The marker is a STATUS, not a label, and carrying it across a merge marks the
-/// survivor as superseded too -- which hides it from every read path. Found when
+/// A marker is a STATUS, not a label, and carrying one across a merge marks the
+/// survivor with it too -- which hides it from every read path. Found when
 /// `phase_fragment_merge` folded an already-superseded memory into a live one
 /// and both vanished.
+///
+/// [`RETIRED_TAG`] is stripped for the same reason and one more: it is the
+/// undo record for an approved retirement. A survivor that inherited it would
+/// vanish from recall while its own rollback target was a different row
+/// entirely, so removing the tag from the retired memory would not bring the
+/// survivor back.
 fn merge_tags(survivor: &crate::types::Memory, victim: &crate::types::Memory) -> Vec<String> {
+    let is_status = |tag: &str| tag == SUPERSEDED_TAG || tag == RETIRED_TAG;
     let mut merged: Vec<String> = survivor
         .tags
         .iter()
-        .filter(|t| *t != SUPERSEDED_TAG)
+        .filter(|t| !is_status(t))
         .cloned()
         .collect();
     for t in &victim.tags {
-        if t != SUPERSEDED_TAG && !merged.contains(t) {
+        if !is_status(t) && !merged.contains(t) {
             merged.push(t.clone());
         }
     }

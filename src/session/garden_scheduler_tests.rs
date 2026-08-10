@@ -5,9 +5,7 @@
 
 use std::sync::Arc;
 
-use archon_learning::memory_retirement_proposals::{
-    MemoryRetirementStatus, list_memory_retirement_proposals,
-};
+use archon_learning::garden_proposals::{GardenProposalStatus, list_garden_proposals};
 use archon_memory::MemoryTrait;
 use archon_memory::garden::GardenConfig;
 use archon_memory::types::MemoryType;
@@ -94,6 +92,7 @@ async fn the_scheduler_does_not_start_by_default() {
         garden: GardenConfig::default(),
         memory,
         data_dir: dir.path().to_path_buf(),
+        working_dir: dir.path().to_path_buf(),
         learning_db: None,
     });
 
@@ -112,6 +111,7 @@ async fn an_enabled_scheduler_starts() {
         garden: enabled_config(),
         memory,
         data_dir: dir.path().to_path_buf(),
+        working_dir: dir.path().to_path_buf(),
         learning_db: None,
     });
 
@@ -129,16 +129,21 @@ async fn a_tick_files_proposals_and_deletes_nothing() {
         &enabled_config(),
         &memory,
         &dir.path().to_path_buf(),
+        dir.path(),
         Some(db.as_ref()),
     )
     .await;
 
-    let pending = list_memory_retirement_proposals(&db, MemoryRetirementStatus::Pending)
-        .expect("list pending");
+    let pending = list_garden_proposals(&db, GardenProposalStatus::Pending).expect("list pending");
     assert_eq!(pending.len(), 3, "each stale memory must be offered once");
-    assert!(pending.iter().all(|p| p.reason_kind == "stale"));
     assert!(
-        pending.iter().all(|p| !p.reason_detail.is_empty()),
+        pending.iter().all(|p| p.proposal_kind
+            == archon_learning::garden_proposals::GardenProposalKind::MemoryRetirement),
+        "a memory proposed for retirement must not also be proposed as \
+         consolidation evidence"
+    );
+    assert!(
+        pending.iter().all(|p| !p.detail.is_empty()),
         "a reviewer needs the evidence, not just the verdict"
     );
     for id in &ids {
@@ -162,19 +167,18 @@ async fn a_proposal_is_never_filed_as_anything_but_pending() {
         &enabled_config(),
         &memory,
         &dir.path().to_path_buf(),
+        dir.path(),
         Some(db.as_ref()),
     )
     .await;
 
     for status in [
-        MemoryRetirementStatus::Approved,
-        MemoryRetirementStatus::Applied,
-        MemoryRetirementStatus::Rejected,
+        GardenProposalStatus::Approved,
+        GardenProposalStatus::Applied,
+        GardenProposalStatus::Rejected,
     ] {
         assert!(
-            list_memory_retirement_proposals(&db, status)
-                .expect("list")
-                .is_empty(),
+            list_garden_proposals(&db, status).expect("list").is_empty(),
             "the background pass wrote a {} proposal",
             status.as_str()
         );
@@ -192,13 +196,68 @@ async fn repeated_ticks_do_not_pile_up_duplicate_proposals() {
     let config = enabled_config();
     let data_dir = dir.path().to_path_buf();
 
-    run_one_tick(&config, &memory, &data_dir, Some(db.as_ref())).await;
-    run_one_tick(&config, &memory, &data_dir, Some(db.as_ref())).await;
-    run_one_tick(&config, &memory, &data_dir, Some(db.as_ref())).await;
+    run_one_tick(&config, &memory, &data_dir, dir.path(), Some(db.as_ref())).await;
+    run_one_tick(&config, &memory, &data_dir, dir.path(), Some(db.as_ref())).await;
+    run_one_tick(&config, &memory, &data_dir, dir.path(), Some(db.as_ref())).await;
 
-    let pending = list_memory_retirement_proposals(&db, MemoryRetirementStatus::Pending)
-        .expect("list pending");
+    let pending = list_garden_proposals(&db, GardenProposalStatus::Pending).expect("list pending");
     assert_eq!(pending.len(), 3);
+}
+
+#[tokio::test]
+async fn a_quiet_correction_derived_rule_reaches_the_review_pile_without_being_touched() {
+    // The rule half of the loop, end to end: analysis holds no store handle, the
+    // seam files the proposal, and the rule itself is untouched until someone
+    // approves it.
+    use archon_consciousness::rules::{RuleSource, RulesEngine};
+
+    let graph = archon_memory::MemoryGraph::in_memory().expect("graph");
+    let rule_id = {
+        let engine = RulesEngine::new(&graph);
+        let rule = engine
+            .add_rule(
+                "check constraints before acting",
+                RuleSource::CorrectionDerived,
+            )
+            .expect("add rule");
+        rule.id
+    };
+    // Older than the minimum age, with no corrections and no triggering.
+    backdate(&graph, &rule_id, 400);
+    let memory: Arc<dyn MemoryTrait> = Arc::new(graph);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = learning_db();
+
+    run_one_tick(
+        &enabled_config(),
+        &memory,
+        &dir.path().to_path_buf(),
+        dir.path(),
+        Some(db.as_ref()),
+    )
+    .await;
+
+    let pending = list_garden_proposals(&db, GardenProposalStatus::Pending).expect("list");
+    let rule_proposal = pending
+        .iter()
+        .find(|proposal| {
+            proposal.proposal_kind
+                == archon_learning::garden_proposals::GardenProposalKind::RuleRetirement
+        })
+        .expect("a quiet rule should be proposed for retirement");
+    assert_eq!(rule_proposal.subject_id, rule_id);
+    assert!(
+        rule_proposal.detail.contains("no supporting correction"),
+        "the evidence must come from correction records: {}",
+        rule_proposal.detail
+    );
+
+    let untouched = memory.inspect_memory(&rule_id).expect("rule still there");
+    assert!(
+        !archon_memory::is_retired(&untouched.tags),
+        "raising a proposal must not retire the rule"
+    );
+    assert_eq!(untouched.content, "check constraints before acting");
 }
 
 #[tokio::test]
@@ -208,7 +267,14 @@ async fn a_tick_with_no_governed_store_still_refuses_to_delete() {
     let (memory, ids) = doomed_store();
     let dir = tempfile::tempdir().expect("tempdir");
 
-    run_one_tick(&enabled_config(), &memory, &dir.path().to_path_buf(), None).await;
+    run_one_tick(
+        &enabled_config(),
+        &memory,
+        &dir.path().to_path_buf(),
+        dir.path(),
+        None,
+    )
+    .await;
 
     for id in &ids {
         assert!(
@@ -239,12 +305,13 @@ async fn a_tick_declined_by_the_run_lock_changes_nothing() {
         &enabled_config(),
         &memory,
         &dir.path().to_path_buf(),
+        dir.path(),
         Some(db.as_ref()),
     )
     .await;
 
     assert!(
-        list_memory_retirement_proposals(&db, MemoryRetirementStatus::Pending)
+        list_garden_proposals(&db, GardenProposalStatus::Pending)
             .expect("list")
             .is_empty(),
         "a declined tick must not have read the store, let alone proposed anything"
