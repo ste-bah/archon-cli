@@ -199,6 +199,21 @@ fn aggregate(
                 .count() as f64;
             ratio(numerator, matching.len() as f64, None)
         }
+        MetricAggregation::IdentityMatchRate { left, right } => {
+            let numerator = matching
+                .iter()
+                .filter(
+                    |event| match (event.identity(left), event.identity(right)) {
+                        // A row missing either side is counted in the denominator
+                        // and not the numerator. Dropping it would quietly restrict
+                        // the population to the rows that happen to agree.
+                        (Some(left_value), Some(right_value)) => left_value == right_value,
+                        _ => false,
+                    },
+                )
+                .count() as f64;
+            ratio(numerator, matching.len() as f64, None)
+        }
         MetricAggregation::OutcomeRate { positive } => {
             let numerator = matching
                 .iter()

@@ -13,7 +13,19 @@ fn cohort() -> MetricCohort {
 fn event_for(subject: &AttributionInput) -> crate::metrics::event::CognitiveMetricEvent {
     let assessment = attribute(subject);
     let window = attribution_window(subject.correction.recorded_at);
-    attribution_event(subject, &assessment, cohort(), &window)
+    let lesson = crate::attribution::lesson::causal_lesson(
+        subject,
+        &assessment,
+        "conversation",
+        "test-model",
+    );
+    attribution_event(
+        subject,
+        &assessment,
+        cohort(),
+        &window,
+        lesson.as_ref().map(|lesson| lesson.lesson_id.as_str()),
+    )
 }
 
 fn identity<'a>(event: &'a crate::metrics::event::CognitiveMetricEvent, key: &str) -> &'a str {

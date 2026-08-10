@@ -71,7 +71,11 @@ impl Agent {
         // beats any paraphrase and costs nothing. Only a truncated one is worth
         // spending a call to restate.
         let was_truncated = stored_content != user_input;
-        let correction = match tracker.record_correction(
+        // Recorded WITHOUT reinforcement. The rule's score is a claim that this
+        // correction was caused by something the rule describes, and nothing has
+        // established that yet -- attribution below decides it. Under the joined
+        // call this line raised a score on the strength of a phrase match.
+        let correction = match tracker.record_correction_unreinforced(
             correction_type,
             &stored_content,
             &context,
@@ -108,13 +112,41 @@ impl Agent {
             correction.as_ref().map(|record| record.id.clone()),
         );
 
-        // R2 attribution, strictly after the correction was written and its rule
-        // boosted above. Everything the live path mutates has already been
-        // mutated by this point, so the attribution verdict provably influenced
-        // none of it. Moving this call earlier is what a regression would look
-        // like.
+        // R2 attribution, strictly BEFORE any rule score moves and strictly
+        // after the correction itself is stored. Both halves of that ordering
+        // are load-bearing:
+        //
+        // * before the reinforcement, because the verdict is what authorises it.
+        //   An abstained or unattributed correction reinforces nothing. This is
+        //   a write the slice REMOVES, not one it adds, which is why it does not
+        //   conflict with shadow containment.
+        // * after the record, because the correction happened whether or not it
+        //   can be explained, and an unexplainable one still has to enter the
+        //   unattributed cohort the promotion comparison is made against.
+        //
+        // Fails closed. No verdict -- no store, budget expired, write failed --
+        // is a refusal to reinforce, never a licence to.
         if let Some(ref correction) = correction {
-            self.spawn_correction_attribution(correction, &classification);
+            match self.attribute_correction(correction, &classification).await {
+                Some(verdict) if verdict.accepted => {
+                    match tracker.reinforce_from_correction(correction) {
+                        Ok(reinforced) => tracing::debug!(
+                            reinforced,
+                            lesson_id = verdict.lesson_id.as_deref().unwrap_or("none"),
+                            "attributed correction reinforced its rule"
+                        ),
+                        Err(error) => {
+                            tracing::warn!(%error, "attributed correction failed to reinforce")
+                        }
+                    }
+                }
+                Some(verdict) => tracing::debug!(
+                    cohort = verdict.cohort,
+                    rationale = %verdict.rationale_code,
+                    "correction was not attributed; no rule reinforced"
+                ),
+                None => tracing::debug!("no attribution verdict; no rule reinforced"),
+            }
         }
 
         // Improve the record after the fact, never before it. The correction is

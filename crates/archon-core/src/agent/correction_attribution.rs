@@ -254,14 +254,32 @@ fn observed_decisions(
     }
 }
 
-/// Score one correction and append its `attribution_evaluated` row.
+/// What the attribution decided, in the form the caller acts on.
 ///
-/// Returns the write outcome so the caller can tell a replay from a new
-/// observation.
+/// Deliberately small and owned: the caller's only question is whether a
+/// reinforcement is warranted, and handing it the whole ranked assessment would
+/// invite it to read a cause out of a refusal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AttributionVerdict {
+    /// The one field that authorises a rule reinforcement.
+    pub accepted: bool,
+    pub cohort: &'static str,
+    pub rationale_code: String,
+    /// Id of the lesson this attribution derived or corroborated, when it
+    /// accepted a cause.
+    pub lesson_id: Option<String>,
+}
+
+/// Score one correction, record its lesson, and append its
+/// `attribution_evaluated` row.
+///
+/// Returns the verdict. An `Err` means the measurement could not be written,
+/// and the caller must treat that as "not accepted": a reinforcement applied
+/// without a recorded justification is exactly the write this slice removes.
 pub(super) fn record_correction_attribution(
     store: &archon_cognitive::PersistentCognitiveStore,
     observation: &AttributionObservation,
-) -> Result<archon_cognitive::MetricWriteOutcome, archon_cognitive::CognitiveError> {
+) -> Result<AttributionVerdict, archon_cognitive::CognitiveError> {
     let correction = observation.correction_under_review();
     let decisions = observation
         .ledger_dir
@@ -275,7 +293,8 @@ pub(super) fn record_correction_attribution(
     };
 
     // The engine sees owned data and returns a verdict. Nothing mutable is in
-    // scope here except the metric store, which only appends measurement rows.
+    // scope here except the cognitive store, which appends measurement rows and
+    // causal lessons; no rule and no memory graph is reachable from here.
     let assessment = AttributionEngine.attribute(&input);
     let window = attribution_window(input.correction.recorded_at);
     let cohort = archon_cognitive::MetricCohort::new(
@@ -286,29 +305,101 @@ pub(super) fn record_correction_attribution(
         CAUSAL_ATTRIBUTION_VERSION,
     );
 
+    // `Lesson -> DerivedFrom -> Correction + evidence`, written before the
+    // metric row so the row can name the lesson it produced. A lesson whose
+    // provenance matches one already stored is corroborated rather than
+    // duplicated.
+    let lesson = record_causal_lesson(
+        store,
+        &input,
+        &assessment,
+        &observation.task_class,
+        &observation.model_id,
+    );
+
     let event_store = archon_cognitive::metrics::MetricEventStore::new(store.db(), store.root())?;
     event_store.declare_window(&window)?;
-    event_store.record(&attribution_event(&input, &assessment, cohort, &window))
+    event_store.record(&attribution_event(
+        &input,
+        &assessment,
+        cohort,
+        &window,
+        lesson.as_deref(),
+    ))?;
+
+    Ok(AttributionVerdict {
+        accepted: assessment.attributed,
+        cohort: assessment.cohort.as_code(),
+        rationale_code: assessment.rationale_code.clone(),
+        lesson_id: lesson,
+    })
 }
 
+/// Store the causal lesson for an accepted attribution, deduplicated.
+///
+/// Returns the lesson id, or `None` when the attribution named no cause — a
+/// refusal has nothing to derive a lesson from, and minting one anyway would
+/// put an unexplained correction into the lesson corpus.
+fn record_causal_lesson(
+    store: &archon_cognitive::PersistentCognitiveStore,
+    input: &AttributionInput,
+    assessment: &archon_cognitive::AttributionAssessment,
+    task_class: &str,
+    model_id: &str,
+) -> Option<String> {
+    let lesson = archon_cognitive::attribution::lesson::causal_lesson(
+        input, assessment, task_class, model_id,
+    )?;
+    match archon_cognitive::attribution::lesson::record_causal_lesson(store.db(), &lesson) {
+        Ok(outcome) => {
+            tracing::debug!(?outcome, lesson_id = %outcome.lesson_id(), "recorded causal lesson");
+            Some(outcome.into_lesson_id())
+        }
+        Err(error) => {
+            // The metric row is still written without a lesson id. Reporting a
+            // lesson that is not in the store would make the join integrity the
+            // R2 gate requires unverifiable.
+            tracing::warn!(%error, "causal lesson write failed; attribution row carries no lesson");
+            None
+        }
+    }
+}
+
+/// Wall-clock budget for one attribution.
+///
+/// It reads the decision ledger and appends two rows, so it is not free, and it
+/// now sits between a user's correction and the end of their turn. Exceeding
+/// the budget yields no verdict, which means no reinforcement: the roadmap
+/// forbids state mutation from failing open, so a slow store withholds a rule
+/// boost rather than waving one through unmeasured.
+const ATTRIBUTION_BUDGET_MS: u64 = 750;
+
 impl super::Agent {
-    /// Attribute a just-recorded correction, in shadow.
+    /// Attribute a just-recorded correction and report whether it earned a
+    /// reinforcement.
     ///
-    /// Called from `detect_and_record_correction` AFTER the correction has been
-    /// written and its rule boosted. That ordering is the containment: by the
-    /// time this runs, everything the live path was going to change has already
-    /// changed, so the verdict cannot influence it. Nothing reads the return
-    /// value, and there is none.
+    /// Runs BEFORE any rule score moves. That is the inversion R2 item 5 asks
+    /// for: reinforcement is a claim that this correction was caused by
+    /// something, and until attribution says what, there is nothing to
+    /// reinforce on the strength of. The verdict is the only thing the caller
+    /// may act on, and `accepted` is the only field that authorises a write.
     ///
-    /// Fails open. A shadow measurement may degrade; the turn may not.
-    pub(super) fn spawn_correction_attribution(
+    /// `None` means no verdict — no store, not a high-confidence correction,
+    /// the budget expired, or the write failed. Every one of those is a refusal
+    /// to reinforce, never a licence to.
+    pub(super) async fn attribute_correction(
         &self,
         correction: &archon_consciousness::corrections::Correction,
         classification: &archon_consciousness::correction_classifier::CorrectionClassification,
-    ) {
+    ) -> Option<AttributionVerdict> {
         let Some(store) = self.cognitive_store.as_ref().map(std::sync::Arc::clone) else {
-            tracing::debug!("no cognitive store; R2 attribution not recorded");
-            return;
+            // Worth a warning rather than a debug line: without the cognitive
+            // store there is no attribution, and therefore no correction-driven
+            // rule reinforcement at all in this process.
+            tracing::warn!(
+                "no cognitive store; R2 attribution unavailable, so no correction reinforces a rule"
+            );
+            return None;
         };
         // Slice 3 step 1: attribution runs on a HIGH-CONFIDENCE correction. An
         // abstention or a low-confidence label is not a correction the R3
@@ -318,7 +409,7 @@ impl super::Agent {
             || !classification.is_correction
             || classification.confidence < archon_cognitive::HIGH_CONFIDENCE_CORRECTION_MIN
         {
-            return;
+            return None;
         }
 
         let provenance = CorrectionProvenance::from_record(correction);
@@ -327,7 +418,7 @@ impl super::Agent {
             // The deferred semantic pass records against a turn whose actions
             // have already left the window this reconstructs. Refusing beats
             // attributing it to whatever is in the transcript now.
-            return;
+            return None;
         }
 
         let session_id = self.config.session_id.clone();
@@ -351,15 +442,30 @@ impl super::Agent {
             ledger_dir: self.cognitive_ledger_dir.clone(),
         };
 
-        archon_observability::spawn_blocking_named("record-correction-attribution", move || {
-            let store = store
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match record_correction_attribution(&store, &observation) {
-                Ok(outcome) => tracing::debug!(?outcome, "recorded R2 attribution evaluation"),
-                Err(error) => tracing::warn!(%error, "R2 attribution write failed"),
-            }
-        });
+        // Off the async runtime and under a hard budget, like every other
+        // cognitive observation on this path. Unlike them, the caller waits for
+        // the answer, because the answer gates a write.
+        super::cognitive_gate::bounded_cognitive_observation(
+            ATTRIBUTION_BUDGET_MS,
+            "record-correction-attribution",
+            move || {
+                let store = store
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match record_correction_attribution(&store, &observation) {
+                    Ok(verdict) => {
+                        tracing::debug!(?verdict, "recorded R2 attribution evaluation");
+                        Some(verdict)
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "R2 attribution write failed; withholding reinforcement");
+                        None
+                    }
+                }
+            },
+        )
+        .await
+        .flatten()
     }
 }
 

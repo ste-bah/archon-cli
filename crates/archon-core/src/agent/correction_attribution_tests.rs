@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use archon_memory::MemoryTrait;
 use archon_memory::graph::MemoryGraph;
@@ -58,7 +58,7 @@ fn unknown_effect(_name: &str, _input: &serde_json::Value) -> ActionEffectClass 
     ActionEffectClass::Unknown
 }
 
-// ── reconstructing the action window ─────────────────────────
+// â”€â”€ reconstructing the action window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn transcript(result_content: &str, is_error: bool) -> Vec<serde_json::Value> {
     vec![
@@ -134,7 +134,7 @@ fn an_unregistered_tool_has_an_unknown_effect_class_not_a_harmless_one() {
     );
 }
 
-// ── the live call site ───────────────────────────────────────
+// â”€â”€ the live call site â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// The whole point: a correction on the real turn path produces an
 /// `attribution_evaluated` row that names the action it blames.
@@ -303,16 +303,29 @@ async fn a_replayed_attribution_write_is_not_counted_twice() {
         ledger_dir: None,
     };
 
+    let first = record_correction_attribution(&store, &observation).expect("first write");
+    let replayed = record_correction_attribution(&store, &observation).expect("replayed write");
+
+    assert!(first.accepted);
     assert_eq!(
-        record_correction_attribution(&store, &observation).expect("first write"),
-        archon_cognitive::MetricWriteOutcome::Written
-    );
-    assert_eq!(
-        record_correction_attribution(&store, &observation).expect("replayed write"),
-        archon_cognitive::MetricWriteOutcome::DuplicateIgnored
+        first, replayed,
+        "a replay must reach the same verdict, not a second observation"
     );
     assert_eq!(attribution_rows(&store).len(), 1);
+    // The lesson is corroborated by its own correction once, not twice.
+    let lesson_id = first
+        .lesson_id
+        .expect("an accepted attribution derives a lesson");
+    let lesson = archon_cognitive::attribution::lesson::read_causal_lesson(store.db(), &lesson_id)
+        .expect("read lesson")
+        .expect("lesson exists");
+    assert_eq!(lesson.corroboration_count, 1);
 }
+
+// The item-5 reinforcement-gate and lesson-edge tests live in a child module to
+// keep this file under the size gate.
+#[path = "correction_attribution_tests/reinforcement_gate.rs"]
+mod reinforcement_gate;
 
 /// The two derived metrics that have existed since the R8 schema landed with
 /// nothing able to produce them.

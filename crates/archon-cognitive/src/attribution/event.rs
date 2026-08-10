@@ -41,6 +41,9 @@ pub const UNOBSERVED_PREFIX: &str = "unobserved:";
 /// Prefix of the `causal_candidate_id` written when no cause is claimed.
 pub const NO_CAUSE_PREFIX: &str = "no_cause:";
 
+/// Prefix of the `lesson_id` written when no lesson was derived.
+pub const NO_LESSON_PREFIX: &str = "no_lesson:";
+
 /// Most ranked candidate ids recorded on one row.
 const MAX_RECORDED_RANKS: usize = 3;
 
@@ -75,6 +78,7 @@ pub fn attribution_event(
     assessment: &AttributionAssessment,
     cohort: MetricCohort,
     window: &EvaluationWindow,
+    lesson_id: Option<&str>,
 ) -> CognitiveMetricEvent {
     let correction_id = input.correction.correction_id.as_str();
     let accepted = assessment.accepted_candidate();
@@ -196,7 +200,18 @@ pub fn attribution_event(
         } else {
             top_evidence
         },
+    )
+    // The last edge of the provenance model. A refusal derives no lesson, and
+    // the identity says so rather than pointing at one that does not exist.
+    .with_identity(
+        "lesson_id",
+        lesson_id
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{NO_LESSON_PREFIX}{correction_id}")),
     );
+    if let Some(lesson_id) = lesson_id {
+        evidence_refs.push(format!("lesson:{lesson_id}"));
+    }
     event.evidence_refs = evidence_refs;
     // Set directly: the builder has no setter, and this is what marks the rows
     // as engine output so an adjudication pass can outrank them.

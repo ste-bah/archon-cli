@@ -261,3 +261,67 @@ source_of_truth = crates/archon-core/src/agent/tests/correction_matching.rs :: c
 note = archon-core/src/agent/correction_intake.rs:52 states the provider arm of
 note = the classifier stays off until the promotion gate at
 note = docs/development/learning-roadmap-r1-r8-w5-w6.md:300 passes.
+
+# ---------------------------------------------------------------------------
+# Same clause of the same gate, one slice later. Slice 3 (R2) adds a causal
+# attribution engine, and the gate's condition applies to it unchanged: it may
+# measure, it may not mutate rules. Slice 3 also does the opposite of adding a
+# mutation -- it REMOVES one, by gating the correction-driven rule boost on an
+# attribution that succeeded. A restriction does not need the gate's permission,
+# but it does need a tripwire, because silently restoring the old ordering would
+# put every unexplained correction back into the rule scores.
+[finding:S3-attribution-shadow-containment]
+title = R2 causal attribution runs in shadow, owns no rule mutation, and gates the one it removed
+verdict = closed
+verification = mechanical
+commit = 2368ce754146e2c755529a16f9edc90a39a2de84  feat(cognitive): attribute a correction to the action that caused it, in shadow
+# Shadow is a compile-time constant. Not a config field, not an env read: the
+# only way to promote is a diff that changes this line.
+anchor = crates/archon-cognitive/src/attribution.rs :: pub const ATTRIBUTION_MODE.*Shadow
+anchor = crates/archon-cognitive/src/attribution.rs :: pub enum AttributionMode
+# The engine is a pure function of owned data, so no store, graph or rules
+# engine is in scope while a verdict is decided.
+anchor = crates/archon-cognitive/src/attribution.rs :: pub fn attribute\(&self, input: &AttributionInput\) -> AttributionAssessment
+# Structural containment, checked where it actually lives: archon-cognitive
+# cannot name RulesEngine or CorrectionTracker because it does not depend on the
+# crate that defines them. Making this module able to mutate a rule is a
+# manifest change, and this is the line that would have to appear.
+absent = crates/archon-cognitive/Cargo.toml :: archon-consciousness
+# The adjudicated candidate is never defaulted to the proposal, so precision
+# over an unadjudicated corpus reads as zero correct rather than a fabricated
+# 1.0. Deleting this sentinel is how that number would become a lie.
+anchor = crates/archon-cognitive/src/attribution/event.rs :: pub const ADJUDICATION_PENDING_PREFIX
+anchor = crates/archon-cognitive/src/attribution/event.rs :: ADJUDICATION_PENDING_PREFIX\}\{correction_id\}
+# Item 5, as a tripwire. `record_correction` boosts the rule inside the call;
+# `record_correction_unreinforced` does not. If either live path goes back to
+# the joined call, an unattributable correction starts moving rule scores again.
+absent = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction\(
+absent = crates/archon-core/src/agent/correction_intake.rs :: tracker\.record_correction\(
+# And the ordering that makes the gate a gate: record, then attribute, then --
+# only then -- reinforce.
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction_unreinforced\( :: self\.attribute_correction\(
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: self\.attribute_correction\( :: tracker\.reinforce_from_correction\(
+wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: match self\.attribute_correction\(correction, &classification\)\.await
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_unattributed_correction_reinforces_nothing_but_is_still_recorded
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_reinforces_the_rule
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: a_correction_with_no_attribution_substrate_reinforces_nothing
+test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: recording_without_reinforcement_leaves_the_rule_score_alone
+test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: reinforcing_one_correction_twice_raises_the_score_once
+source_of_truth = crates/archon-core/src/agent/correction_attribution_tests.rs :: the_live_row_records_that_attribution_mutated_nothing
+source_of_truth = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_stores_a_lesson_the_row_points_at
+note = The commit above closed the shadow-containment half. The reinforcement
+note = gate (the `absent`, `order` and `wired` directives, and the
+note = deferred_reinforcement tests) landed after it and needs its own commit
+note = line added here when it is pushed; the directives themselves are checked
+note = against the working tree, so the gate already enforces them.
+deviation = The roadmap's item 5 says "block rule reinforcement/proposal until
+deviation = attribution succeeds". Reinforcement is blocked as written. PROPOSAL
+deviation = is not, because R2 raises no rule proposals: the only proposal path
+deviation = is the governed one in archon-cognitive, which attribution does not
+deviation = reach. There is nothing to block there yet, and adding a gate to a
+deviation = path that does not exist would be a check nothing runs.
+deviation = The extractor's semantic pass now reinforces nothing at all, because
+deviation = it records several turns late against an action window that has
+deviation = already moved, so its corrections are permanently unattributable.
+deviation = That is a real reduction in what the system learns, taken knowingly:
+deviation = the alternative is reinforcing on a restatement nobody could explain.

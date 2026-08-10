@@ -100,6 +100,24 @@ pub(crate) async fn handle_cognitive_command(
             }
             Ok(())
         }
+        CognitiveAction::Adjudicate {
+            correction,
+            candidate,
+            no_cause,
+            adjudicator,
+            note,
+            limit,
+            json,
+        } => crate::command::cognitive_adjudicate::handle_adjudicate(
+            &cwd,
+            correction.as_deref(),
+            candidate.as_deref(),
+            *no_cause,
+            adjudicator.as_deref(),
+            note.as_deref(),
+            *limit,
+            *json,
+        ),
     }
 }
 

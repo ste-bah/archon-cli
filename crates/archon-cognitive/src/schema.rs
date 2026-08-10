@@ -38,7 +38,11 @@ macro_rules! tick_audit_spec {
 /// so a self-model prediction can be recorded *before* the action it predicts
 /// and verified afterwards without being rewritten, and so an injected
 /// reflection's reuse can be counted rather than assumed.
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+///
+/// 5: `cognitive_causal_lessons` was added so an attributed correction has
+/// somewhere to derive a lesson to, keyed by provenance so corroboration and
+/// duplication are distinguishable.
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 pub fn ensure_cognitive_schema(db: &DbInstance) -> Result<(), CognitiveError> {
     for script in SCHEMA_RELATIONS {
@@ -316,6 +320,30 @@ const SCHEMA_RELATIONS: &[&str] = &[
             cohort_identity: String,
             metric_definition_version: Int,
             created_at: String,
+        }"#,
+    // The last edge of the R2 provenance model: `Lesson -> DerivedFrom ->
+    // Correction + evidence`. Keyed on a hash of the provenance key rather than
+    // on a fresh id, so two provenance-compatible lessons land on one row and
+    // two incompatible ones cannot be merged by any similarity threshold.
+    r#":create cognitive_causal_lessons {
+            lesson_id: String =>
+            provenance_key: String,
+            session_id: String,
+            turn_number: Int,
+            correction_id: String,
+            correction_type: String,
+            cause_action_class: String,
+            cause_label: String,
+            causal_candidate_id: String,
+            decision_id: String,
+            action_attempt_id: String,
+            task_class: String,
+            model_id: String,
+            lesson: String,
+            evidence_refs_json: String,
+            corroboration_count: Int,
+            first_seen_at: String,
+            last_seen_at: String,
         }"#,
     SCHEMA_VERSION_RELATION,
 ];

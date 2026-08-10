@@ -85,6 +85,12 @@ impl Agent {
         self.complete_cognitive_shadow_turn(user_input, user_corrected, classification.as_ref())
             .await;
 
+        // R2 slice, item 7: a turn that ran tools is a repeated opportunity for
+        // every correction this session already attributed. Recorded after the
+        // correction pass so a correction detected on THIS turn cannot count its
+        // own turn as a chance to have recurred.
+        self.record_attribution_followup(user_input).await;
+
         // GAP 5: Auto-memory extraction check
         self.extraction_state.record_turn();
         if should_extract(

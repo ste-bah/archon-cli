@@ -61,6 +61,34 @@ pub enum CognitiveAction {
         #[arg(long)]
         json: bool,
     },
+    /// Adjudicate a causal attribution, or list the ones awaiting a verdict.
+    ///
+    /// The R2 attribution engine never fills in its own adjudicated candidate,
+    /// so accepted-link precision stays undefined until a human records one
+    /// here. With no `--correction`, lists what is pending.
+    Adjudicate {
+        /// Correction to adjudicate. Omit to list pending attributions.
+        #[arg(long)]
+        correction: Option<String>,
+        /// Causal candidate that actually caused the correction.
+        #[arg(long, conflicts_with = "no_cause")]
+        candidate: Option<String>,
+        /// Record that nothing in the window caused it.
+        #[arg(long)]
+        no_cause: bool,
+        /// Who is recording this verdict. Required when adjudicating.
+        #[arg(long)]
+        adjudicator: Option<String>,
+        /// Optional free-text note kept with the verdict.
+        #[arg(long)]
+        note: Option<String>,
+        /// Maximum pending attributions to list.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

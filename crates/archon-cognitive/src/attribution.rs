@@ -50,12 +50,18 @@ use crate::attribution::candidates::generate;
 use crate::attribution::input::AttributionInput;
 use crate::attribution::scoring::{ACCEPT_CONFIDENCE, ScoredCandidate, is_unambiguous, score};
 
+#[path = "attribution/adjudication.rs"]
+pub mod adjudication;
 #[path = "attribution/candidates.rs"]
 pub mod candidates;
 #[path = "attribution/event.rs"]
 pub mod event;
+#[path = "attribution/followup.rs"]
+pub mod followup;
 #[path = "attribution/input.rs"]
 pub mod input;
+#[path = "attribution/lesson.rs"]
+pub mod lesson;
 #[path = "attribution/scoring.rs"]
 pub mod scoring;
 

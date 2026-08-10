@@ -12,6 +12,7 @@ const RELATIONS: &[(&str, &str)] = &[
     ("cognitive_tick_audit", "tick_id"),
     ("cognitive_metric_events", "metric_event_id"),
     ("cognitive_evaluation_windows", "evaluation_window_id"),
+    ("cognitive_causal_lessons", "lesson_id"),
 ];
 
 #[test]

@@ -60,13 +60,23 @@ async fn correction_detection_links_the_relevant_rule_not_the_global_top_rule() 
     assert!(!captured[0].user_input_excerpt.is_empty());
     assert!(captured[0].user_input_excerpt.chars().count() <= 200);
 
+    // The finding this test exists for is WHICH rule the correction was linked
+    // to, which the payload above reads back from the graph. The scores are the
+    // second statement, and since R2 they say something different: this agent
+    // has no cognitive store, so the correction could not be attributed, so
+    // nothing was reinforced. Under the pre-R2 code the relevant rule would sit
+    // at 60.0 here on the strength of a phrase match alone.
     let relevant = graph
         .get_memory(&relevant_rule_id)
         .expect("get relevant rule");
     let unrelated = graph
         .get_memory(&unrelated_rule_id)
         .expect("get unrelated rule");
-    assert!((relevant.importance - 60.0).abs() < f64::EPSILON);
+    assert!(
+        (relevant.importance - 50.0).abs() < f64::EPSILON,
+        "an unattributed correction must not reinforce, got {}",
+        relevant.importance
+    );
     assert!((unrelated.importance - 100.0).abs() < f64::EPSILON);
 }
 

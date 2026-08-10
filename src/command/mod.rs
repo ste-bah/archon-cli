@@ -38,6 +38,7 @@ pub(crate) mod checkpoint;
 pub(crate) mod clear;
 pub(crate) mod cli_mirror;
 pub(crate) mod cognitive;
+pub(crate) mod cognitive_adjudicate;
 pub(crate) mod cognitive_daemon;
 pub(crate) mod cognitive_daemon_learning;
 pub(crate) mod cognitive_daemon_learning_ledger;
