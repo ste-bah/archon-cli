@@ -18,10 +18,13 @@ export function chatSubmitResponse(request: ChatRequest) {
       attachments: [],
     };
   }
-  const attachments = request.attachments?.map((attachment) => ({
+  // The server replaces the browser's attachment list with the one the chat
+  // backend produced, which carries the docs id assigned by ingest.
+  const attachments = request.attachments?.map((attachment, index) => ({
     ...attachment,
     dataBase64: null,
     storedPath: `~/.archon/web/uploads/webmsg_test/${attachment.fileName ?? "upload"}`,
+    documentId: `doc_mock_${index}`,
   })) ?? [];
   return {
     messageId: "webmsg_test",

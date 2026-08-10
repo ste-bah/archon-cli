@@ -162,7 +162,19 @@ impl StoredAttachment {
             policy_reason: "stored and forwarded to live session".into(),
             data_base64: None,
             stored_path: Some(self.path.to_string_lossy().to_string()),
+            document_id: self.document_id(),
         }
+    }
+
+    /// The docs id ingest assigned, or `None` when the ingest failed. Never an
+    /// empty string: "no id" and "the empty id" must not look the same in the
+    /// browser.
+    fn document_id(&self) -> Option<String> {
+        self.ingest
+            .as_ref()
+            .ok()
+            .map(|summary| summary.document_id.clone())
+            .filter(|id| !id.is_empty())
     }
 }
 
@@ -314,19 +326,5 @@ fn open_docs_db() -> Result<Arc<DbInstance>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn safe_file_name_adds_extension_for_extensionless_upload() {
-        assert_eq!(safe_file_name("scan", "application/pdf"), "scan.pdf");
-    }
-
-    #[test]
-    fn safe_file_name_replaces_path_separators() {
-        assert_eq!(
-            safe_file_name("../secret.png", "image/png"),
-            ".._secret.png"
-        );
-    }
-}
+#[path = "web_chat_tests.rs"]
+mod tests;

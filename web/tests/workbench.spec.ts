@@ -87,10 +87,12 @@ test("chat send and attach controls are interactive", async ({ page }) => {
   await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
   await expect(page.getByText("Mock Archon reply from live session")).toBeVisible();
   await expect(page.getByText("context.txt")).toBeVisible();
+  await expect(page.getByText("ingested as doc_mock_0")).toBeVisible();
   await page.goto("./#/corpus");
   await page.goto("./#/chat");
   await expect(page.getByText("Can you inspect the active run?")).toBeVisible();
   await expect(page.getByText("Mock Archon reply from live session")).toBeVisible();
+  await expect(page.getByText("ingested as doc_mock_0")).toBeVisible();
   assertNoErrors();
 });
 
