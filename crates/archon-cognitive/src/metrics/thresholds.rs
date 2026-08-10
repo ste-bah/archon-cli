@@ -14,7 +14,10 @@
 use crate::metrics::definitions::{METRIC_DEFINITION_VERSION, metric_definitions};
 
 /// Version of the threshold table below. Change a bound, change this.
-pub const METRIC_THRESHOLD_VERSION: i64 = 1;
+///
+/// 2: added the reflection verified-reuse bound, which became measurable once
+/// injected reflections started emitting `retrieval_hit_observed`.
+pub const METRIC_THRESHOLD_VERSION: i64 = 2;
 
 /// Which side of the bound a healthy value sits on.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +94,17 @@ pub fn metric_thresholds() -> &'static [MetricThreshold] {
                         prompt is largely describing a rule set that no longer \
                         exists, so behaviour attributed to the new rules is \
                         not attributable.",
+        },
+        MetricThreshold {
+            metric_name: "reflection_verified_reuse_rate",
+            calibrated_for_definition_version: METRIC_DEFINITION_VERSION,
+            bound: ThresholdBound::AtLeast(0.20),
+            min_sample_count: 100,
+            rationale: "The learning roadmap's W6/R6 promotion gate: below one \
+                        verified reuse in five, injecting reflections is \
+                        spending prompt budget on lessons that do not change a \
+                        verified outcome. 100 observations because a rate this \
+                        low is unstable on fewer.",
         },
         MetricThreshold {
             metric_name: "correction_classifier_abstention_rate",

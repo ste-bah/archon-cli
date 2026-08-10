@@ -10,7 +10,14 @@ use crate::metrics::event::MetricEventKind;
 ///
 /// 2: added the shadow-executive and self-model-fact definitions, which had no
 /// entries while nothing emitted their events.
-pub const METRIC_DEFINITION_VERSION: i64 = 2;
+///
+/// 3: `lesson_citation_rate` now counts the `cited` identity rather than
+/// `rule_injected`. Every emitter of `retrieval_hit_observed` records only hits
+/// it actually injected, so the old key made the "citation rate" a constant
+/// 1.0 — a number that reports nothing. Added `reflection_verified_reuse_rate`
+/// alongside it, which is deliberately *not* the citation rate: reuse requires
+/// the deterministic verification to have passed as well.
+pub const METRIC_DEFINITION_VERSION: i64 = 3;
 
 /// How a metric collapses its eligible events into one number.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -142,13 +149,29 @@ pub fn metric_definitions() -> &'static [MetricDefinition] {
                 zero_denominator_value: Some(0.0),
             },
         },
+        // Share of injected lessons the receiving turn cited. A citation says
+        // the lesson was referenced and nothing more, which is why the reuse
+        // metric below is a separate number rather than this one renamed.
         MetricDefinition {
             name: "lesson_citation_rate",
             version: METRIC_DEFINITION_VERSION,
             event_kind: MetricEventKind::RetrievalHitObserved,
-            identity_filter: None,
+            identity_filter: Some(("rule_injected", "true")),
             aggregation: MetricAggregation::IdentityRate {
-                key: "rule_injected",
+                key: "cited",
+                positive: "true",
+            },
+        },
+        // Share of injected lessons that were cited *and* followed by a
+        // deterministic verified pass. The promotion gate in the roadmap
+        // (W6/R6) is stated over this, not over citations.
+        MetricDefinition {
+            name: "reflection_verified_reuse_rate",
+            version: METRIC_DEFINITION_VERSION,
+            event_kind: MetricEventKind::RetrievalHitObserved,
+            identity_filter: Some(("rule_injected", "true")),
+            aggregation: MetricAggregation::IdentityRate {
+                key: "verified_reuse",
                 positive: "true",
             },
         },
