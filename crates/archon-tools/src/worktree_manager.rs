@@ -289,13 +289,22 @@ impl Default for WorktreeManager {
 // ---------------------------------------------------------------------------
 
 /// Resolve the data directory (`~/.local/share`).
+///
+/// The last-resort branch used to hardcode `/tmp` (issue #156). On Windows
+/// that is not a temp directory: it resolves against the current drive root,
+/// so a worktree base of `F:\tmp\.local\share\archon\worktrees` would be
+/// created at the root of whichever drive the process was launched from.
+/// `std::env::temp_dir()` is the portable equivalent — `$TMPDIR` on unix,
+/// `%TEMP%` on Windows.
 fn dirs_next() -> PathBuf {
     if let Some(data) = dirs::data_dir() {
         data
     } else {
         // Fallback for systems without XDG
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home).join(".local").join("share")
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        home.join(".local").join("share")
     }
 }
 

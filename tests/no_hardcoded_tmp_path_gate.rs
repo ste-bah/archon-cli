@@ -66,6 +66,16 @@ const FILESYSTEM_MARKERS: &[&str] = &[
     "OpenOptions",
 ];
 
+/// Tokens that mean "this literal is the *default* when directory lookup
+/// fails" — the production half of issue #156.
+///
+/// `dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))` never fires on
+/// a healthy machine, which is exactly why it survived: it is a root the
+/// process then `create_dir_all`s into. `unwrap_or_default` is deliberately
+/// not matched — `unwrap_or(` requires the open paren so the two do not
+/// collide.
+const FALLBACK_MARKERS: &[&str] = &["unwrap_or_else", "unwrap_or("];
+
 fn worktree_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -112,18 +122,18 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Line numbers (1-based) in `contents` where a `/tmp/` literal sits close
-/// enough to a filesystem marker to be treated as a real path.
+/// Line numbers (1-based) where `literal` sits within [`WINDOW`] lines of one
+/// of `markers` — close enough to count as the same statement.
 ///
 /// Comment lines never carry the literal *or* the marker: prose about the
 /// pattern is documentation, not a regression.
-fn offending_lines(contents: &str) -> Vec<usize> {
+fn lines_pairing(contents: &str, literal: &str, markers: &[&str]) -> Vec<usize> {
     let lines: Vec<&str> = contents.lines().collect();
     let is_comment = |line: &str| line.trim_start().starts_with("//");
 
     let mut offenders = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        if is_comment(line) || !line.contains("/tmp/") {
+        if is_comment(line) || !line.contains(literal) {
             continue;
         }
         let low = index.saturating_sub(WINDOW);
@@ -131,11 +141,7 @@ fn offending_lines(contents: &str) -> Vec<usize> {
         let window_has_marker = lines[low..=high]
             .iter()
             .filter(|candidate| !is_comment(candidate))
-            .any(|candidate| {
-                FILESYSTEM_MARKERS
-                    .iter()
-                    .any(|marker| candidate.contains(marker))
-            });
+            .any(|candidate| markers.iter().any(|marker| candidate.contains(marker)));
         if window_has_marker {
             offenders.push(index + 1);
         }
@@ -143,16 +149,29 @@ fn offending_lines(contents: &str) -> Vec<usize> {
     offenders
 }
 
-#[test]
-fn no_source_file_builds_a_filesystem_path_under_hardcoded_tmp() {
-    let root = worktree_root();
+/// A `/tmp/…` literal that is about to become a real file or directory.
+fn offending_lines(contents: &str) -> Vec<usize> {
+    lines_pairing(contents, "/tmp/", FILESYSTEM_MARKERS)
+}
+
+/// A bare `"/tmp"` literal used as the fallback root when a directory lookup
+/// fails. The closing quote is part of the pattern, so `"/tmp/project"` and
+/// the other opaque identifiers are not candidates.
+fn offending_fallback_lines(contents: &str) -> Vec<usize> {
+    lines_pairing(contents, "\"/tmp\"", FALLBACK_MARKERS)
+}
+
+/// Every `.rs` file under the scan roots, paired with its worktree-relative
+/// path. The gate's own source is excluded: it quotes both halves of every
+/// pattern as data.
+fn source_files(root: &Path) -> Vec<(String, String)> {
     let this_file = Path::new(file!())
         .file_name()
         .map(|name| name.to_os_string())
         .expect("gate has a file name");
 
     let mut files = Vec::new();
-    for scan_root in scan_roots(&root) {
+    for scan_root in scan_roots(root) {
         collect_rs_files(&scan_root, &mut files);
     }
     assert!(
@@ -162,21 +181,27 @@ fn no_source_file_builds_a_filesystem_path_under_hardcoded_tmp() {
         files.len()
     );
 
+    files
+        .into_iter()
+        .filter(|file| file.file_name() != Some(this_file.as_os_str()))
+        .filter_map(|file| {
+            let contents = fs::read_to_string(&file).ok()?;
+            let relative = file
+                .strip_prefix(root)
+                .unwrap_or(&file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some((relative, contents))
+        })
+        .collect()
+}
+
+#[test]
+fn no_source_file_builds_a_filesystem_path_under_hardcoded_tmp() {
+    let root = worktree_root();
+
     let mut offenders: Vec<String> = Vec::new();
-    for file in files {
-        // The gate's own source quotes both halves of the pattern as data.
-        if file.file_name() == Some(this_file.as_os_str()) {
-            continue;
-        }
-        let contents = match fs::read_to_string(&file) {
-            Ok(contents) => contents,
-            Err(_) => continue,
-        };
-        let relative = file
-            .strip_prefix(&root)
-            .unwrap_or(&file)
-            .to_string_lossy()
-            .replace('\\', "/");
+    for (relative, contents) in source_files(&root) {
         for line in offending_lines(&contents) {
             offenders.push(format!(
                 "HARDCODED /tmp/ PATH (issue #156): {relative}:{line}"
@@ -193,6 +218,35 @@ fn no_source_file_builds_a_filesystem_path_under_hardcoded_tmp() {
              and nothing ever deletes it. Use `tempfile::tempdir()` held by a \
              guard that outlives the handle — see `src/command/test_db.rs` — or \
              an in-memory Cozo instance if the test needs no persistence.\n\n{joined}\n",
+            n = offenders.len(),
+        );
+    }
+}
+
+/// The production half: a directory lookup that defaults to `/tmp` when it
+/// fails. `archon-core`'s agent-memory root and `archon-tools`'
+/// worktree data dir both did this, and both then created directories under
+/// the result.
+#[test]
+fn no_source_file_falls_back_to_a_hardcoded_tmp_root() {
+    let root = worktree_root();
+
+    let mut offenders: Vec<String> = Vec::new();
+    for (relative, contents) in source_files(&root) {
+        for line in offending_fallback_lines(&contents) {
+            offenders.push(format!(
+                "HARDCODED /tmp FALLBACK (issue #156): {relative}:{line}"
+            ));
+        }
+    }
+
+    if !offenders.is_empty() {
+        offenders.sort();
+        let joined = offenders.join("\n");
+        panic!(
+            "\n{n} site(s) fall back to a hardcoded `/tmp` when a directory \
+             lookup fails. On Windows that is the current drive's root, not a \
+             temp directory. Use `std::env::temp_dir()`.\n\n{joined}\n",
             n = offenders.len(),
         );
     }
@@ -254,5 +308,43 @@ mod detector {
              let d = 4;\n\
              let id = uuid::Uuid::new_v4();\n";
         assert!(offending_lines(distant).is_empty());
+    }
+
+    /// The two production fallbacks this issue removed, verbatim.
+    #[test]
+    fn flags_the_original_fallback_roots() {
+        let home_dir = "        AgentMemoryScope::User => dirs::home_dir()\n\
+             \x20           .unwrap_or_else(|| PathBuf::from(\"/tmp\"))\n\
+             \x20           .join(\".archon/agent-memory\")\n";
+        assert_eq!(offending_fallback_lines(home_dir), vec![2]);
+
+        let env_home =
+            "    let home = std::env::var(\"HOME\").unwrap_or_else(|_| \"/tmp\".to_string());\n";
+        assert_eq!(offending_fallback_lines(env_home), vec![1]);
+    }
+
+    /// The replacements must not re-trip the gate they were written for.
+    #[test]
+    fn accepts_the_portable_replacements() {
+        let fixed = "        AgentMemoryScope::User => dirs::home_dir()\n\
+             \x20           .unwrap_or_else(std::env::temp_dir)\n\
+             \x20   let home = std::env::var_os(\"HOME\")\n\
+             \x20       .map(PathBuf::from)\n\
+             \x20       .unwrap_or_else(std::env::temp_dir);\n";
+        assert!(offending_fallback_lines(fixed).is_empty());
+    }
+
+    /// `"/tmp"` as an opaque argument is not a fallback root, and
+    /// `unwrap_or_default` is not `unwrap_or(`.
+    #[test]
+    fn fallback_detector_ignores_opaque_and_near_misses() {
+        let opaque = "    let session = store.create_session(\"/tmp\", None, \"m\").unwrap();\n\
+             \x20   let cwd = value.unwrap_or_default();\n\
+             \x20   assert_eq!(request.cwd.as_deref(), Some(\"/tmp\"));\n";
+        assert!(offending_fallback_lines(opaque).is_empty());
+
+        // A longer path is a different literal — the closing quote matters.
+        let longer = "    let root = maybe.unwrap_or_else(|| PathBuf::from(\"/tmp/project\"));\n";
+        assert!(offending_fallback_lines(longer).is_empty());
     }
 }
