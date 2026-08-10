@@ -11,6 +11,13 @@ on:
       - "extensions/vscode/**"
       - ".github/workflows/vscode-extension.yml"
 
+# Supersede an in-flight PR run, never a main run. See the longer note in
+# ci.yml: a cancelled run on main is how an unverified commit reached it once
+# already, so main always finishes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
 

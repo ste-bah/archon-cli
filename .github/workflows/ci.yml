@@ -10,6 +10,24 @@ on:
 permissions:
   contents: read
 
+# Supersede an in-flight run when a PR branch gets a new push, but NEVER on
+# main.
+#
+# A full matrix here is expensive — roughly 36 min ubuntu, 58 macOS, 87 Windows
+# — so every superseded PR run burns over two hours of runner time verifying a
+# tree nobody will merge. Two of those happened in a single afternoon before
+# this was added.
+#
+# `cancel-in-progress` is deliberately an expression rather than `true`. A
+# cancelled run on main is exactly how 3b521a72 reached main unverified, and it
+# then caused three separate failures — an unformatted tree, a broken
+# `AUTONOMY_RULE` assertion, and the capability-hoisting regression behind #163
+# that made a 15-task workflow run produce one file. On main the run must always
+# finish, however long it takes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
