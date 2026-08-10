@@ -111,7 +111,7 @@ impl DaemonPaths {
         if !self.state_path.exists() {
             return Ok(None);
         }
-        let raw = std::fs::read_to_string(&self.state_path)?;
+        let raw = read_to_string_with_retry(&self.state_path)?;
         Ok(Some(serde_json::from_str(&raw)?))
     }
 
@@ -164,6 +164,50 @@ fn persist_with_retry(
         }
     }
     unreachable!("the final attempt returns rather than looping")
+}
+
+/// Read `path`, retrying briefly on the same transient denial the writer retries.
+///
+/// [`persist_with_retry`] covers the writer losing the replace race. This covers
+/// the reader losing it, which was left open: on Windows the destination is
+/// briefly unopenable while `MoveFileEx` replaces it, so a read landing inside
+/// that window fails with `Access denied` (5) even though the file is present
+/// and its contents are intact — the replace is atomic, so a read either sees
+/// the whole old file or the whole new one, never a partial write.
+///
+/// `CognitiveDaemon::status` reads this file on every poll while the daemon
+/// heartbeats into it, so without this a routine status check fails outright on
+/// Windows. Observed in CI as `state is always valid JSON: PermissionDenied`.
+fn read_to_string_with_retry(path: &Path) -> Result<String, std::io::Error> {
+    const ATTEMPTS: usize = 50;
+
+    for attempt in 0..ATTEMPTS {
+        match std::fs::read_to_string(path) {
+            Ok(raw) => return Ok(raw),
+            Err(error) if attempt + 1 < ATTEMPTS && is_transient_read_error(&error) => {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the final attempt returns rather than looping")
+}
+
+/// The replace window as a *reader* sees it, which is wider than the writer's.
+///
+/// The same race surfaces under two different codes depending on where the read
+/// lands: `Access denied` (5) while the destination is delete-pending, and
+/// `NotFound` (2) while it is momentarily absent. CI produced the first, a
+/// 40-way local run produced the second, and a retry that covered only the
+/// writer's codes would have left half the race unfixed.
+///
+/// `NotFound` is transient *here* specifically because `read_state` checks
+/// `exists()` before calling this: the file was there a moment ago, so its
+/// absence now means the replace removed it between the check and the open, not
+/// that no daemon ever wrote one. A genuinely absent state file never reaches
+/// this function.
+fn is_transient_read_error(error: &std::io::Error) -> bool {
+    is_transient_replace_error(error) || error.kind() == std::io::ErrorKind::NotFound
 }
 
 fn is_transient_replace_error(error: &std::io::Error) -> bool {
