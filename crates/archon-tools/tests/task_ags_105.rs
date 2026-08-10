@@ -126,6 +126,22 @@ fn recording_executor() -> Arc<RecordingExecutor> {
     exec
 }
 
+/// TaskCreate appends `AUTONOMY_RULE` to every delegated prompt, so the
+/// caller's text reaches the executor as a prefix rather than the whole string.
+/// Asserting equality here is what broke when that rule landed: the background
+/// test polls on this predicate, so an equality check did not fail loudly, it
+/// spun until the five-second timeout and reported the executor as unreachable.
+fn assert_prompt_propagated(prompt: &str) {
+    assert!(
+        prompt.starts_with("Review AGT-006"),
+        "caller prompt must reach the executor verbatim as a prefix: {prompt}"
+    );
+    assert!(
+        prompt.contains("AUTONOMOUS EXECUTION"),
+        "the autonomy rule must be appended to a delegated prompt: {prompt}"
+    );
+}
+
 fn make_ctx() -> ToolContext {
     ToolContext {
         working_dir: std::env::temp_dir(),
@@ -305,6 +321,13 @@ async fn task_create_foreground_propagates_request_fields() {
     let exec = recording_executor();
     *exec.last_request.lock().expect("clear request") = None;
     exec.last_nested.store(false, Ordering::SeqCst);
+    // The executor is a process-wide singleton and the background test below
+    // raises both of these. It restores them on its last two lines, which it
+    // never reaches when it fails — leaving a non-zero auto-background window
+    // that silently turns this foreground run into an auto-backgrounded one and
+    // reports a second, misleading failure. Own the state this test depends on.
+    exec.auto_bg_ms.store(0, Ordering::SeqCst);
+    exec.run_delay_ms.store(0, Ordering::SeqCst);
     let tool = TaskCreateTool;
     let input = json!({
         "subject": "Review",
@@ -331,7 +354,7 @@ async fn task_create_foreground_propagates_request_fields() {
         .expect("read request")
         .clone()
         .expect("foreground request recorded");
-    assert_eq!(request.prompt, "Review AGT-006");
+    assert_prompt_propagated(&request.prompt);
     assert_eq!(request.model.as_deref(), Some("sonnet"));
     assert_eq!(request.allowed_tools, ["Read", "Grep"]);
     assert_eq!(request.subagent_type.as_deref(), Some("code-reviewer"));
@@ -374,7 +397,7 @@ async fn task_create_background_classifies_propagated_request_fields() {
         loop {
             let run_started = exec.run_notify.notified();
             if let Some(request) = exec.last_request.lock().expect("read request").clone()
-                && request.prompt == "Review AGT-006"
+                && request.prompt.starts_with("Review AGT-006")
             {
                 break request;
             }
@@ -383,7 +406,7 @@ async fn task_create_background_classifies_propagated_request_fields() {
     })
     .await
     .expect("TaskCreate background request must reach the installed executor");
-    assert_eq!(request.prompt, "Review AGT-006");
+    assert_prompt_propagated(&request.prompt);
     assert_eq!(request.model.as_deref(), Some("sonnet"));
     assert_eq!(request.allowed_tools, ["Read", "Grep"]);
     assert_eq!(request.subagent_type.as_deref(), Some("code-reviewer"));
