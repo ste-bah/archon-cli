@@ -55,6 +55,12 @@ pub fn mime_type(path: &str) -> &'static str {
         "image/x-icon"
     } else if path.ends_with(".woff2") {
         "font/woff2"
+    } else if path.ends_with(".wasm") {
+        // PDF.js instantiates its JPX/JBIG2 decoders by streaming compile,
+        // which browsers refuse unless the response is `application/wasm`.
+        "application/wasm"
+    } else if path.ends_with(".ttf") {
+        "font/ttf"
     } else {
         "application/octet-stream"
     }

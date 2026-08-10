@@ -61,6 +61,24 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * Fetch a binary response body.
+ *
+ * Separate from `getJson` because the corpus byte endpoint answers with a
+ * document, not JSON, and the caller hands the buffer straight to PDF.js
+ * rather than letting the browser navigate to it.
+ */
+async function getBytes(path: string, accept: string): Promise<ArrayBuffer> {
+  const response = await fetch(path, {
+    headers: authHeaders(accept),
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new Error(`${path} failed with ${response.status}`);
+  }
+  return await response.arrayBuffer();
+}
+
 async function postJson<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
   const controller = timeoutMs ? new AbortController() : undefined;
   const timeout = controller
@@ -143,11 +161,13 @@ function parseSseJson<T>(block: string): T | undefined {
   return data ? (JSON.parse(data) as T) : undefined;
 }
 
-function authHeaders(): HeadersInit {
+function authHeaders(accept: string = jsonHeaders.Accept): HeadersInit {
   const token = new URLSearchParams(window.location.search).get("token");
-  return token
-    ? { ...jsonHeaders, Authorization: `Bearer ${token}` }
-    : jsonHeaders;
+  const headers: Record<string, string> = { Accept: accept };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 /**
@@ -215,6 +235,14 @@ export const apiClient = {
   corpusSourcePreview: (path: string) =>
     getJson<CorpusSourcePreview>(
       `/api/corpus/source?path=${encodeURIComponent(path)}`,
+    ),
+  // Binary sources are their own endpoint: `CorpusSourcePreview.content` is a
+  // string, and base64 in the preview JSON would inflate every document by a
+  // third and park it in the query cache.
+  corpusSourceBytes: (path: string) =>
+    getBytes(
+      `/api/corpus/source/bytes?path=${encodeURIComponent(path)}`,
+      "application/pdf",
     ),
   ingestSummary: () => getJson<WebIngestSummary>("/api/ingest/summary"),
   startIngest: (request: WebIngestRunRequest) =>

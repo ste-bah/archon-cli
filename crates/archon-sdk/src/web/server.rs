@@ -270,6 +270,12 @@ pub(super) fn build_app(config: &WebConfig, state: AppState) -> Router {
         .route("/api/corpus/summary", get(corpus::summary_handler))
         .route("/api/corpus/search", get(corpus::search_handler))
         .route("/api/corpus/source", get(corpus::preview_handler))
+        // Separate from `/api/corpus/source` because a PDF is bytes, not the
+        // `String` that preview carries. See `corpus_source.rs`.
+        .route(
+            "/api/corpus/source/bytes",
+            get(corpus::source::bytes_handler),
+        )
         .route("/api/ingest/summary", get(ingest::summary_handler))
         .route("/api/ingest/run", post(ingest::run_handler))
         .route("/api/ingest/kb", post(ingest::create_kb_handler))
@@ -340,6 +346,46 @@ pub(super) fn validate_bind_auth(
 // Shell handlers
 // ---------------------------------------------------------------------------
 
+/// Content-Security-Policy for the workbench document.
+///
+/// The workbench renders PDFs the user ingested from arbitrary URLs through
+/// PDF.js. A malicious document that finds a way to reach the DOM must not be
+/// able to load or run script, so `script-src` is the point of this header and
+/// `'unsafe-inline'`/`'unsafe-eval'` are deliberately absent from it.
+///
+/// - `'wasm-unsafe-eval'` permits `WebAssembly.compile` and nothing else. PDF.js
+///   decodes JPX/JBIG2 images with the WASM modules served from
+///   `/static/pdfjs/wasm/`; it does not permit `eval` of JavaScript.
+/// - `worker-src 'self'` is what keeps `pdf.worker` local. A CDN worker fails
+///   here rather than silently working.
+/// - `style-src` keeps `'unsafe-inline'` because xterm and uPlot inject style
+///   elements at runtime; that is a cosmetic surface, not a script one.
+/// - `object-src 'none'` blocks `<embed>`/`<object>`, i.e. the browser's own
+///   plugin PDF path, so the sandboxed PDF.js renderer is the only one.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
+     script-src 'self' 'wasm-unsafe-eval'; \
+     worker-src 'self'; \
+     style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: blob:; \
+     font-src 'self' data:; \
+     connect-src 'self'; \
+     object-src 'none'; \
+     base-uri 'none'; \
+     form-action 'none'; \
+     frame-ancestors 'none'";
+
+fn shell_security_headers() -> [(axum::http::HeaderName, &'static str); 4] {
+    [
+        (
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            CONTENT_SECURITY_POLICY,
+        ),
+        (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (axum::http::header::REFERRER_POLICY, "no-referrer"),
+        (axum::http::header::X_FRAME_OPTIONS, "DENY"),
+    ]
+}
+
 async fn index_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
@@ -347,7 +393,7 @@ async fn index_handler(State(state): State<AppState>, headers: HeaderMap) -> Res
     match assets::get_asset("index.html") {
         Some(asset) => {
             let html = String::from_utf8_lossy(asset.data.as_ref()).into_owned();
-            Html(html).into_response()
+            (shell_security_headers(), Html(html)).into_response()
         }
         None => (StatusCode::NOT_FOUND, "index.html not embedded").into_response(),
     }
@@ -368,7 +414,10 @@ async fn static_handler(
     match assets::get_asset(&path) {
         Some(asset) => (
             StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, asset.mime)],
+            [
+                (axum::http::header::CONTENT_TYPE, asset.mime),
+                (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            ],
             asset.data.as_ref().to_vec(),
         )
             .into_response(),

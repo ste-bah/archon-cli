@@ -381,6 +381,74 @@ async fn graceful_server_shutdown_times_out_for_stalled_request() {
     assert_eq!(shutdown_rx.await, Ok(()));
 }
 
+/// The workbench renders ingested PDFs through PDF.js. Without a `script-src`
+/// the renderer is one bug away from executing whatever a malicious document
+/// puts in the DOM, so the header is asserted rather than assumed.
+#[tokio::test]
+async fn shell_document_is_served_with_a_script_constraining_csp() {
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let app = build_app(&config, test_state(&config, None));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let csp = response
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .expect("workbench shell must carry a CSP")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let directive = |name: &str| {
+        csp.split(';')
+            .map(str::trim)
+            .find(|part| part.split_whitespace().next() == Some(name))
+            .unwrap_or_else(|| panic!("CSP has no {name} directive: {csp}"))
+            .split_whitespace()
+            .skip(1)
+            .collect::<Vec<_>>()
+    };
+
+    // Exact, not `contains`: an added source is what a regression looks like.
+    assert_eq!(directive("script-src"), ["'self'", "'wasm-unsafe-eval'"]);
+    // The pdf.worker must come from this origin, never a CDN.
+    assert_eq!(directive("worker-src"), ["'self'"]);
+    assert_eq!(directive("object-src"), ["'none'"]);
+    assert_eq!(directive("frame-ancestors"), ["'none'"]);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::X_CONTENT_TYPE_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+}
+
+#[tokio::test]
+async fn corpus_binary_bytes_reject_paths_outside_corpus_roots() {
+    let config = WebConfig {
+        open_browser: false,
+        ..WebConfig::default()
+    };
+    let app = build_app(&config, test_state(&config, None));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/corpus/source/bytes?path=/etc/passwd")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn chat_submit_requires_bearer_auth_when_token_is_configured() {
     let config = WebConfig {

@@ -176,7 +176,13 @@ export type WebActionResponse = { decision: WebActionDecision, audit: WebActionA
 
 export type WebAuthSession = { authenticated: boolean, authRequired: boolean, transport: string, cookieMode: boolean, csrfRequired: boolean, serverSideLogoutSupported: boolean, logoutMessage: string, };
 
-export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, dataBase64: string | null, storedPath: string | null, };
+export type WebChatAttachment = { fileName: string, sizeBytes: number, mimeType: string, accepted: boolean, policyReason: string, dataBase64: string | null, storedPath: string | null, 
+/**
+ * Docs store id the ingest assigned to this attachment. `null` when the
+ * file was never ingested — rejected by policy, or the ingest failed.
+ * Absent id and empty id are different facts, so this is never `""`.
+ */
+documentId: string | null, };
 
 export type WebChatSubmitRequest = { message: string, attachments: Array<WebChatAttachment>, };
 
@@ -239,7 +245,15 @@ export type CorpusChunkHit = { sourceLabel: string, sourcePath: string, chunkLab
 
 export type CorpusPreviewQuery = { path: string, };
 
-export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, policyReason: string, };
+export type CorpusPreviewMode = "text" | "pdf" | "unsupported";
+
+export type CorpusSourcePreview = { source: CorpusSource, content: string, lineCount: number, truncated: boolean, previewAvailable: boolean, 
+/**
+ * Which viewer the workbench should use. `content` is only populated for
+ * [`CorpusPreviewMode::Text`]; a PDF is fetched separately from
+ * `/api/corpus/source/bytes`.
+ */
+previewMode: CorpusPreviewMode, policyReason: string, };
 
 export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, indexQueue: WebIndexQueueSummary, indexJobs: Array<WebIndexJobItem>, indexFailures: Array<WebIndexFailureItem>, warnings: Array<string>, };
 

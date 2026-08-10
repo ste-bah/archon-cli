@@ -53,6 +53,7 @@ export function corpusPreview(path: string) {
       lineCount: 3,
       truncated: false,
       previewAvailable: true,
+      previewMode: "text",
       policyReason: "read-only preview under configured corpus root",
     };
   }
@@ -62,6 +63,7 @@ export function corpusPreview(path: string) {
     lineCount: 3,
     truncated: false,
     previewAvailable: true,
+    previewMode: "text",
     policyReason: "read-only preview under configured corpus root",
   };
 }

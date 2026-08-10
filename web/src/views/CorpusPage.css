@@ -181,6 +181,61 @@
   white-space: pre-wrap;
 }
 
+.corpus-pdf {
+  display: grid;
+  gap: 10px;
+}
+
+.corpus-pdf-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.corpus-pdf-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.corpus-pdf-controls button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.corpus-pdf-controls select {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 8px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.corpus-pdf-page {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.corpus-pdf-page canvas {
+  max-width: 100%;
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.corpus-pdf-message {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
 @media (max-width: 1080px) {
   .corpus-layout,
   .corpus-roots,
