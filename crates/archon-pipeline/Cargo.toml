@@ -41,7 +41,10 @@ dashmap.workspace = true
 process-wrap.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
+# `features = ["full"]` does not include `test-util`; the compilation-gate
+# lifecycle tests need it for `#[tokio::test(start_paused = true)]`, which is
+# how their deadlines stopped being wall-clock budgets.
+tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 serde_json.workspace = true
 cozo.workspace = true
@@ -49,3 +52,8 @@ async-trait.workspace = true
 futures-util.workspace = true
 chrono.workspace = true
 tracing-test.workspace = true
+# Used only by the compilation-gate lifecycle tests, to wait for a killed
+# descendant to leave the process table. That wait is the claim those tests
+# make, and it is the one question `std::process` cannot answer about a process
+# that is not our own child.
+sysinfo.workspace = true

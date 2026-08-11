@@ -14,6 +14,7 @@ const CHILD_GATE_RESULT_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_GATE_RESULT";
 const CHILD_INNER_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_INNER_MARKER";
 const CHILD_DESCENDANT_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_MARKER";
 const CHILD_DESCENDANT_SURVIVOR_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_SURVIVOR";
+const CHILD_DESCENDANT_PROBE_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_PROBE";
 const CHILD_STDIN_OUTCOME_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_STDIN_OUTCOME";
 
 /// How often anything here re-checks a marker file.
@@ -46,7 +47,9 @@ fn controlled_child() {
     let Ok(marker) = std::env::var(CHILD_MARKER_ENV) else {
         return;
     };
-    std::fs::write(marker, "started").unwrap();
+    // The marker carries this process's id, not just its existence, so a parent
+    // can wait for the *process* rather than for a file. See [`read_pid`].
+    std::fs::write(marker, std::process::id().to_string()).unwrap();
 
     match std::env::var(CHILD_MODE_ENV).as_deref() {
         Ok("await-release") => await_release(),
@@ -123,23 +126,38 @@ fn spawn_descendant() {
         .stderr(Stdio::inherit())
         .env(CHILD_MARKER_ENV, &descendant_marker)
         .env(CHILD_MODE_ENV, "descendant-hold-stream");
-    if let Ok(survivor) = std::env::var(CHILD_DESCENDANT_SURVIVOR_ENV) {
-        descendant.env(CHILD_DESCENDANT_SURVIVOR_ENV, survivor);
+    for key in [CHILD_DESCENDANT_PROBE_ENV, CHILD_DESCENDANT_SURVIVOR_ENV] {
+        if let Ok(value) = std::env::var(key) {
+            descendant.env(key, value);
+        }
     }
     descendant.spawn().unwrap();
-    assert!(
-        wait_for_file(Path::new(&descendant_marker), Duration::from_secs(1)),
-        "descendant must start before direct child exits"
-    );
+
+    // Block until the descendant is up. This is a precondition of exiting, not
+    // a claim - what the gate does with an already-exited direct child is only
+    // interesting once a descendant exists to hold the output pipe open - so it
+    // waits on the event instead of asserting a deadline.
+    while !Path::new(&descendant_marker).exists() {
+        std::thread::sleep(POLL_INTERVAL);
+    }
 }
 
 fn hold_descendant_stream() {
-    let survivor = std::env::var(CHILD_DESCENDANT_SURVIVOR_ENV).ok();
-    std::thread::sleep(Duration::from_millis(1200));
-    if let Some(survivor) = survivor {
+    // Hold the inherited output pipe open. Process-tree cleanup is supposed to
+    // end this process right here. The probe is the parent's release: it is
+    // written only after cleanup has returned, so a descendant that reaches the
+    // survivor write announces that it outlived cleanup - and one that was
+    // killed cannot reach it, because a dead process cannot see a file created
+    // after its death. The fixture used to sleep 1200ms and write the survivor
+    // unconditionally, which meant a slow box moved the write past the window
+    // the parent was watching and the check passed having observed nothing.
+    let probe = std::env::var(CHILD_DESCENDANT_PROBE_ENV).unwrap();
+    while !Path::new(&probe).exists() {
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    if let Ok(survivor) = std::env::var(CHILD_DESCENDANT_SURVIVOR_ENV) {
         std::fs::write(survivor, "survived-timeout").unwrap();
     }
-    std::thread::sleep(Duration::from_millis(1500));
 }
 
 /// The gate must give its child a stdin of its own, not the one it inherited.
@@ -240,25 +258,45 @@ fn cleanup_outcome_formats_only_observable_states() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+/// A descendant still holding the output pipe keeps the gate waiting even after
+/// the direct child has gone, and the gate must say so: it reaps the direct
+/// child and reports `AlreadyExited` rather than claiming it killed something.
+///
+/// The precondition - direct child exited, descendant alive - used to be
+/// asserted against a one-second budget after a one-second gate limit, which is
+/// really the question "can this box start two debug-profile processes that
+/// fast". It is now established before the deadline exists at all: see
+/// [`hold_until_exited`] for how the state is reached and [`fire_deadline`] for
+/// how the limit is then brought on.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn compilation_timeout_terminates_descendant_when_direct_child_exited() {
     let temp = tempfile::tempdir().unwrap();
     let child_marker = temp.path().join("child-started");
     let descendant_marker = temp.path().join("descendant-started");
+    let probe = temp.path().join("descendant-release");
     let spec = controlled_child_spec(temp.path(), &child_marker, None)
         .with_env(CHILD_MODE_ENV, "exit-after-spawning-descendant")
-        .with_env(
-            CHILD_DESCENDANT_MARKER_ENV,
-            descendant_marker.display().to_string(),
-        );
+        .with_env(CHILD_DESCENDANT_MARKER_ENV, &descendant_marker)
+        .with_env(CHILD_DESCENDANT_PROBE_ENV, &probe);
 
-    let result = CompilationGate
-        .run_command(spec, Duration::from_secs(1))
-        .await;
+    const LIMIT: Duration = Duration::from_secs(1);
+    let gate_task = tokio::spawn(async move { CompilationGate.run_command(spec, LIMIT).await });
+    // Establish the exact state the gate is asked to describe: the descendant
+    // running and holding the output pipe, the direct child gone. The direct
+    // child does not exit until its descendant is up, so waiting for it to exit
+    // subsumes the descendant's own start.
+    let direct_child = hold_until_started(&child_marker).await;
+    hold_until_started(&descendant_marker).await;
+    hold_until_exited(direct_child).await;
+    fire_deadline(LIMIT).await;
+    let result = gate_task.await.unwrap();
+    // Release any descendant that outlived cleanup, so a regression here leaves
+    // nothing running behind it.
+    std::fs::write(&probe, "release").unwrap();
 
     assert!(child_marker.exists(), "direct child must have started");
     assert!(
-        wait_for_file(&descendant_marker, Duration::from_secs(1)),
+        descendant_marker.exists(),
         "descendant must have inherited a pipe before the timeout"
     );
     assert!(!result.gate_passed);
@@ -270,38 +308,69 @@ async fn compilation_timeout_terminates_descendant_when_direct_child_exited() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+/// A timed-out compilation must take its descendants with it.
+///
+/// Two changes make this load-proof. The deadline is now virtual and cannot
+/// arrive before the descendant is up, so "descendant must have started" is
+/// established rather than raced for. And the survivor check no longer leans on
+/// a fixed observation window that a slow box quietly turned vacuous - the
+/// descendant is released only after cleanup has returned, and the test then
+/// waits for it to leave the process table. Waiting for the process is the
+/// claim; the survivor file is what makes a surviving descendant say so
+/// immediately instead of the wait spinning in silence.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn compilation_timeout_terminates_descendant_processes() {
     let temp = tempfile::tempdir().unwrap();
     let child_marker = temp.path().join("child-started");
     let descendant_marker = temp.path().join("descendant-started");
+    let probe = temp.path().join("descendant-release");
     let survivor_marker = temp.path().join("descendant-survived");
     let spec = controlled_child_spec(temp.path(), &child_marker, None)
         .with_env(CHILD_MODE_ENV, "exit-after-spawning-descendant")
         .with_env(CHILD_DESCENDANT_MARKER_ENV, &descendant_marker)
+        .with_env(CHILD_DESCENDANT_PROBE_ENV, &probe)
         .with_env(CHILD_DESCENDANT_SURVIVOR_ENV, &survivor_marker);
 
-    let result = CompilationGate
-        .run_command(spec, Duration::from_millis(500))
-        .await;
-    std::thread::sleep(Duration::from_millis(900));
+    const LIMIT: Duration = Duration::from_millis(500);
+    let gate_task = tokio::spawn(async move { CompilationGate.run_command(spec, LIMIT).await });
+    let direct_child = hold_until_started(&child_marker).await;
+    let descendant = hold_until_started(&descendant_marker).await;
+    hold_until_exited(direct_child).await;
+    fire_deadline(LIMIT).await;
+    let result = gate_task.await.unwrap();
 
     assert!(!result.gate_passed);
     assert!(descendant_marker.exists(), "descendant must have started");
+    std::fs::write(&probe, "release").unwrap();
+    await_process_exit(descendant, &survivor_marker);
     assert!(
         !survivor_marker.exists(),
         "timed-out compilation descendant survived process-tree cleanup"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+/// When the limit expires with the direct child still running, the gate must
+/// ask it to terminate, reap it, and describe exactly that - with the evidence
+/// mirrored into the failure detail.
+///
+/// The child running at that moment is the precondition, and asserting it after
+/// a hundred-millisecond real deadline was asking whether the box could start a
+/// debug binary in a hundred milliseconds. The limit is now virtual and is
+/// brought on by [`fire_deadline`] only once the child has reached its own code,
+/// so the cleanup path is always exercised against a child that is genuinely
+/// alive.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn compilation_timeout_requests_termination_and_reaps_child_with_stable_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let marker = temp.path().join("child-started");
     let spec = controlled_child_spec(temp.path(), &marker, None);
     let gate = CompilationGate;
 
-    let result = gate.run_command(spec, Duration::from_millis(100)).await;
+    const LIMIT: Duration = Duration::from_millis(100);
+    let gate_task = tokio::spawn(async move { gate.run_command(spec, LIMIT).await });
+    hold_until_started(&marker).await;
+    fire_deadline(LIMIT).await;
+    let result = gate_task.await.unwrap();
 
     assert!(marker.exists(), "controlled child must have started");
     assert!(!result.gate_passed);
@@ -385,35 +454,11 @@ async fn compilation_wait_keeps_current_thread_runtime_responsive() {
     );
 }
 
-fn wait_for_file(path: &Path, timeout: Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    while !path.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(POLL_INTERVAL);
-    }
-    path.exists()
-}
+// Split out to keep this file inside the 500-line limit; the tests above and
+// the fixtures they drive belong together, the waiting primitives do not.
+#[path = "compilation_gate_tests/support.rs"]
+mod support;
 
-fn controlled_child_spec(
-    project_root: &Path,
-    marker: &Path,
-    release: Option<&Path>,
-) -> CommandSpec {
-    let mut spec = CommandSpec::new(
-        std::env::current_exe().unwrap(),
-        [
-            "--exact".to_owned(),
-            "coding::compilation_gate::compilation_gate_tests::controlled_child".to_owned(),
-            "--nocapture".to_owned(),
-        ],
-        project_root,
-    )
-    .with_env(CHILD_MARKER_ENV, marker.display().to_string());
-
-    if let Some(release) = release {
-        spec = spec
-            .with_env(CHILD_MODE_ENV, "await-release")
-            .with_env(CHILD_RELEASE_ENV, release.display().to_string());
-    }
-
-    spec
-}
+use support::{
+    await_process_exit, controlled_child_spec, fire_deadline, hold_until_exited, hold_until_started,
+};

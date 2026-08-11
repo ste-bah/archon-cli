@@ -887,6 +887,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.10.9",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
