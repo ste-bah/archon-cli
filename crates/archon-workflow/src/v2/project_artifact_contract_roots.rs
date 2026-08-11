@@ -1,78 +1,104 @@
-//! Artifact roots derived from what the tasks themselves declare.
+//! Exact deliverable paths an artifact-only item is entitled to write.
 //!
-//! The allowed project-artifact roots were hardcoded (`.archon/artifacts` plus
-//! run directories), and agent-supplied requirement paths are deliberately
-//! restricted to `.archon/`-prefixed roots. Neither channel could ever admit a
-//! deliverable like `docs/<area>/report.md` — so a task whose *contract*
-//! declared exactly that had no writable home: the write was classified as a
-//! repository change outside declared targets and refused as unsafe. Observed
-//! live: a remediation agent, correctly, "made no edit because target_files
-//! and ownership scopes are empty" — dispatched to fix a report it was
-//! forbidden to touch.
+//! A task whose only output is a project artifact (a report, an audit, a
+//! generated dataset) carries no repository `target_files`. The write-ownership
+//! check then sees a changed file against an empty ownership list and rejects
+//! the branch — "declares no target ownership" — so the agent is refused the
+//! very deliverable it was dispatched to produce. Four consecutive runs died
+//! there, on one markdown file.
 //!
-//! Deliverable contracts are host-parsed from the task files, not
-//! agent-authored, so they are a trustworthy channel: a root a contract
-//! declares is a root the run may write.
+//! The earlier attempt admitted the *directory* of each declared contract as an
+//! artifact root and then tried to keep source paths out with a repository
+//! ownership guard. That was the wrong shape twice over: a directory is wider
+//! than the deliverable, and the guard needed to answer "does the repo own
+//! this?" — a question whose inputs (repository root, git availability inside a
+//! transient worktree) vary per branch and cannot be reconstructed after the
+//! fact.
 //!
-//! One guard is essential. Contracts also declare source paths
-//! (`crates/<crate>/src/<module>.rs`), and admitting those as artifact roots
-//! would reclassify real code edits as artifacts — emptying `files_changed` and
-//! silently disabling declared-target enforcement for every code task. So a
-//! root the repository owns is refused and keeps the strict repository rules.
+//! This admits the exact declared path instead, under two conditions that
+//! together need no repository at all:
 //!
-//! Ownership is decided by **git tracking, not directory existence**. Testing
-//! `is_dir()` conflates "a folder of this name is on disk" with "the repository
-//! owns this path": a project deliverable at `docs/trading/` that is untracked
-//! and gitignored in the code repo tripped that test purely because a same-named
-//! directory happened to sit in both trees, and the deliverable it was meant to
-//! admit was refused instead. Git answers the real question — `docs/trading` has
-//! zero tracked files, `crates/archon-trading` has many.
+//! 1. **The item is artifact-only** — it declares no repository `target_files`,
+//!    so by construction it produces nothing but artifacts. An item with repo
+//!    targets keeps the strict declared-target rules untouched.
+//! 2. **The path is host-parsed** — it appears as a `deliverable_contracts`
+//!    entry for one of the item's canonical task ids in the authoritative task
+//!    universe. Contracts are read from the task files by the host, never
+//!    authored by an agent, so an agent cannot widen its own write rights by
+//!    claiming a path.
 //!
-//! The check fails closed: if git cannot answer, the root is treated as
-//! repository-owned. A wrong refusal blocks one deliverable; a wrong admission
-//! disables write-ownership enforcement.
+//! One exact file, declared by the task itself, for an item that can write
+//! nothing else. Source paths declared by code tasks are untouched, because
+//! those items carry `target_files`.
 
-use std::path::Path;
+use serde_json::Value;
 
 use crate::task_universe::WorkflowV2TaskUniverse;
 
-/// Roots to admit, derived from every task's `deliverable_contracts`.
-///
-/// At most the first two path segments of each contract's directory — wide
-/// enough to cover sibling deliverables in the same area, narrow enough that a
-/// contract cannot claim the whole project.
-pub(crate) fn contract_artifact_roots(
+/// Exact deliverable paths this item may write, or empty when it is not
+/// artifact-only.
+pub(crate) fn contract_artifact_paths_for_item(
     universe: &WorkflowV2TaskUniverse,
-    target_repository_root: Option<&str>,
+    item: &Value,
 ) -> Vec<String> {
-    let mut roots: Vec<String> = Vec::new();
+    if declares_repository_targets(item) {
+        return Vec::new();
+    }
+    let task_ids = canonical_task_ids(item);
+    if task_ids.is_empty() {
+        return Vec::new();
+    }
+    let mut paths: Vec<String> = Vec::new();
     for task in &universe.tasks {
+        if !task_ids.iter().any(|id| id == &task.canonical_task_id) {
+            continue;
+        }
         for contract in &task.deliverable_contracts {
-            let Some(root) = root_of(&contract.artifact_path) else {
+            let Some(path) = admissible_path(&contract.artifact_path) else {
                 continue;
             };
-            if roots.iter().any(|existing| *existing == root) {
-                continue;
+            if !paths.contains(&path) {
+                paths.push(path);
             }
-            if repository_tracks(&root, target_repository_root) {
-                continue;
-            }
-            roots.push(root);
         }
     }
-    roots
+    paths
 }
 
-/// The admissible root of one declared path, or `None` when the path cannot
-/// safely contribute one: absolute, templated, traversing, or too shallow to
-/// have a directory at all.
-fn root_of(raw: &str) -> Option<String> {
+/// Does the item claim repository files? An absent or empty `target_files`
+/// means artifact-only; anything present keeps the strict repository rules.
+fn declares_repository_targets(item: &Value) -> bool {
+    match item.get("target_files") {
+        None | Some(Value::Null) => false,
+        Some(Value::Array(targets)) => targets
+            .iter()
+            .any(|target| target.as_str().is_some_and(|text| !text.trim().is_empty())),
+        Some(_) => true,
+    }
+}
+
+fn canonical_task_ids(item: &Value) -> Vec<String> {
+    item.get("canonical_task_ids")
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A declared path usable as an exact match, or `None` when it cannot name one
+/// file: templated, glob, absolute, traversing, or empty.
+fn admissible_path(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty()
         || trimmed.contains("${")
         || trimmed.contains('*')
         || trimmed.contains('<')
-        || Path::new(trimmed).is_absolute()
+        || std::path::Path::new(trimmed).is_absolute()
     {
         return None;
     }
@@ -80,59 +106,25 @@ fn root_of(raw: &str) -> Option<String> {
         .split('/')
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .collect();
-    if segments.iter().any(|segment| *segment == "..") {
+    if segments.is_empty() || segments.iter().any(|segment| *segment == "..") {
         return None;
     }
-    // The last segment is the file; everything before it is the directory.
-    let directory = &segments[..segments.len().saturating_sub(1)];
-    if directory.is_empty() {
-        return None;
-    }
-    Some(directory[..directory.len().min(2)].join("/"))
-}
-
-/// Does the repository track anything under this root?
-///
-/// Tracked content means the path is source the repository owns, so it keeps
-/// the strict declared-target rules rather than becoming an artifact root. An
-/// untracked or gitignored path is not repository content, whatever directories
-/// happen to exist on disk.
-///
-/// Fails closed: a git invocation that cannot answer reports ownership, so an
-/// unreadable repository refuses admission rather than widening write rights.
-fn repository_tracks(root: &str, target_repository_root: Option<&str>) -> bool {
-    let Some(repository) = target_repository_root
-        .map(str::trim)
-        .filter(|root| !root.is_empty())
-    else {
-        // No repository in play: nothing can claim the path as source.
-        return false;
-    };
-    let Ok(output) = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repository)
-        .args(["ls-files", "--", root])
-        .output()
-    else {
-        return true;
-    };
-    if !output.status.success() {
-        return true;
-    }
-    !output.stdout.is_empty()
+    Some(segments.join("/"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_universe::{WorkflowV2DeliverableContract, WorkflowV2TaskUniverseTask};
+    use crate::task_universe::{
+        WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
+    };
 
-    fn universe_with(paths: &[&str]) -> WorkflowV2TaskUniverse {
+    pub(super) fn universe_with(task_id: &str, paths: &[&str]) -> WorkflowV2TaskUniverse {
         WorkflowV2TaskUniverse {
             schema_version: "workflow-v2-task-universe-v1".to_string(),
             source_roots: Vec::new(),
             tasks: vec![WorkflowV2TaskUniverseTask {
-                canonical_task_id: "TASK-X-001".to_string(),
+                canonical_task_id: task_id.to_string(),
                 deliverable_contracts: paths
                     .iter()
                     .map(|path| WorkflowV2DeliverableContract {
@@ -146,192 +138,155 @@ mod tests {
         }
     }
 
-    /// A repository with `crates/thing/src/lib.rs` committed and an untracked,
-    /// gitignored `docs/trading/` directory present on disk — the exact shape
-    /// that produced the live failure.
-    fn repository_with_tracked_code_and_untracked_docs() -> tempfile::TempDir {
-        let repo = tempfile::tempdir().expect("repo");
-        let run = |args: &[&str]| {
-            let status = std::process::Command::new("git")
-                .arg("-C")
-                .arg(repo.path())
-                .args(args)
-                .output()
-                .expect("git");
-            assert!(status.status.success(), "git {args:?}");
-        };
-        run(&["init", "--quiet"]);
-        run(&["config", "user.email", "test@example.com"]);
-        run(&["config", "user.name", "test"]);
-        std::fs::create_dir_all(repo.path().join("crates/thing/src")).expect("mkdir");
-        std::fs::write(repo.path().join("crates/thing/src/lib.rs"), "// code\n").expect("write");
-        std::fs::write(repo.path().join(".gitignore"), "/docs/*\n").expect("write");
-        run(&["add", "crates", ".gitignore"]);
-        run(&["commit", "--quiet", "-m", "code"]);
-        // Present on disk, untracked and ignored: a project deliverable whose
-        // directory name collides with the repository tree.
-        std::fs::create_dir_all(repo.path().join("docs/trading")).expect("mkdir");
-        std::fs::write(repo.path().join("docs/trading/audit.md"), "# audit\n").expect("write");
-        repo
+    fn artifact_only_item(task_id: &str) -> Value {
+        serde_json::json!({
+            "item_id": "impl-item",
+            "canonical_task_ids": [task_id],
+            "target_files": [],
+        })
     }
 
-    /// The live case: the deliverable's directory EXISTS in the code repository
-    /// but is untracked and gitignored, so the repository does not own it and it
-    /// must be admitted. Testing directory existence instead of tracking refused
-    /// this root and blocked TASK-TDL-001 for an entire evening.
+    /// The live case: TASK-TDL-001 declares one report and no repo targets, so
+    /// it is entitled to write exactly that file.
     #[test]
-    fn an_untracked_docs_root_is_admitted_despite_the_directory_existing() {
-        let repo = repository_with_tracked_code_and_untracked_docs();
-        assert!(repo.path().join("docs/trading").is_dir(), "collision setup");
-
-        let universe = universe_with(&["docs/trading/audit.md"]);
-        let roots = contract_artifact_roots(&universe, Some(&repo.path().display().to_string()));
-        assert_eq!(roots, vec!["docs/trading".to_string()]);
-    }
-
-    /// Contracts also declare source files. Admitting a tracked code root would
-    /// reclassify real code edits as artifacts and silently disable
-    /// declared-target enforcement for every code task — so it must be refused.
-    #[test]
-    fn a_tracked_code_root_is_refused() {
-        let repo = repository_with_tracked_code_and_untracked_docs();
-        let universe = universe_with(&["crates/thing/src/lib.rs"]);
-        let roots = contract_artifact_roots(&universe, Some(&repo.path().display().to_string()));
-        assert!(
-            roots.is_empty(),
-            "tracked source must not become a root: {roots:?}"
-        );
-    }
-
-    /// A mixed universe keeps exactly the deliverable roots and drops the code.
-    #[test]
-    fn a_mixed_universe_admits_only_the_untracked_roots() {
-        let repo = repository_with_tracked_code_and_untracked_docs();
-        let universe = universe_with(&["crates/thing/src/lib.rs", "docs/trading/audit.md"]);
-        let roots = contract_artifact_roots(&universe, Some(&repo.path().display().to_string()));
-        assert_eq!(roots, vec!["docs/trading".to_string()]);
-    }
-
-    /// An unreadable repository fails closed: refusing admission blocks one
-    /// deliverable, while admitting would disable ownership enforcement.
-    #[test]
-    fn an_unreadable_repository_refuses_admission() {
-        let missing = tempfile::tempdir().expect("dir");
-        let path = missing.path().join("not-a-repo");
-        let universe = universe_with(&["docs/trading/audit.md"]);
-        let roots = contract_artifact_roots(&universe, Some(&path.display().to_string()));
-        assert!(roots.is_empty(), "must fail closed: {roots:?}");
-    }
-
-    /// Templates, globs, traversal and bare filenames contribute nothing.
-    #[test]
-    fn unsafe_shapes_contribute_no_root() {
-        let universe = universe_with(&[
-            "${PROJECT_ROOT}/data/out.json",
-            "reports/*.md",
-            "../outside/file.md",
-            "report.md",
-        ]);
-        assert!(contract_artifact_roots(&universe, None).is_empty());
-    }
-
-    /// Deep contract paths widen to at most two segments — sibling files in
-    /// the same area are covered without granting the whole tree.
-    #[test]
-    fn roots_are_capped_at_two_segments() {
-        let universe = universe_with(&["out/reports/2026/q1/audit.md"]);
+    fn an_artifact_only_item_may_write_its_declared_deliverable() {
+        let universe = universe_with("TASK-TDL-001", &["docs/trading/data-lake-gap-audit.md"]);
         assert_eq!(
-            contract_artifact_roots(&universe, None),
-            vec!["out/reports".to_string()]
+            contract_artifact_paths_for_item(&universe, &artifact_only_item("TASK-TDL-001")),
+            vec!["docs/trading/data-lake-gap-audit.md".to_string()]
         );
     }
 
-    // ---- causal proof -----------------------------------------------------
-    //
-    // The tests above check this module in isolation. These drive the real
-    // classification the live failure died in: an agent reports the deliverable
-    // it wrote as a changed file under the project root, and the host must
-    // reclassify it as a project artifact. If it stays in `files_changed`, the
-    // write-ownership check sees a changed file against empty target_files and
-    // rejects the branch with "declares no target ownership" — the exact live
-    // error. A negative control asserts the contract root is what makes the
-    // difference, so a future regression cannot pass by coincidence.
-
-    use crate::v2::project_artifacts::{
-        WorkflowV2ProjectArtifactContext, normalize_project_artifact_files,
-    };
-    use crate::v2::result::{WorkflowV2FileRecord, WorkflowV2Result};
-
-    /// A project root holding the deliverable, returned canonicalized so path
-    /// prefix-stripping matches on macOS (`/var` vs `/private/var`).
-    fn project_root_with_deliverable() -> (tempfile::TempDir, String) {
-        let project = tempfile::tempdir().expect("project");
-        let canonical = project.path().canonicalize().expect("canonicalize");
-        std::fs::create_dir_all(canonical.join("docs/trading")).expect("mkdir");
-        std::fs::write(canonical.join("docs/trading/audit.md"), "# audit\n").expect("write");
-        let root = canonical.display().to_string();
-        (project, root)
-    }
-
-    fn result_reporting_changed(path: &str) -> WorkflowV2Result {
-        let mut result = WorkflowV2Result::accepted("wrote the deliverable");
-        result.files_changed = vec![WorkflowV2FileRecord::new(path)];
-        result
-    }
-
+    /// An item WITH repository targets is ordinary repository work and gains
+    /// nothing here — code tasks keep declared-target enforcement in full.
     #[test]
-    fn the_contract_root_reclassifies_the_deliverable_out_of_changed_files() {
-        let repo = repository_with_tracked_code_and_untracked_docs();
-        let (_project, project_root) = project_root_with_deliverable();
-        let written = format!("{project_root}/docs/trading/audit.md");
+    fn an_item_with_repository_targets_gains_nothing() {
+        let universe = universe_with("TASK-TDL-010", &["crates/thing/src/lib.rs"]);
+        let item = serde_json::json!({
+            "canonical_task_ids": ["TASK-TDL-010"],
+            "target_files": ["crates/thing/src/lib.rs"],
+        });
+        assert!(contract_artifact_paths_for_item(&universe, &item).is_empty());
+    }
 
-        let mut context = WorkflowV2ProjectArtifactContext {
-            project_root: Some(project_root),
-            ..Default::default()
-        };
-        context.add_contract_roots(
-            &universe_with(&["docs/trading/audit.md"]),
-            Some(&repo.path().display().to_string()),
+    /// An agent cannot widen its own rights: a path it invents is not in the
+    /// host-parsed universe, so it is never admitted.
+    #[test]
+    fn a_path_the_universe_does_not_declare_is_refused() {
+        let universe = universe_with("TASK-TDL-001", &["docs/trading/data-lake-gap-audit.md"]);
+        let item = serde_json::json!({
+            "canonical_task_ids": ["TASK-TDL-001"],
+            "target_files": [],
+            "artifact_requirements": [{ "path": "crates/thing/src/lib.rs" }],
+        });
+        assert_eq!(
+            contract_artifact_paths_for_item(&universe, &item),
+            vec!["docs/trading/data-lake-gap-audit.md".to_string()],
+            "only the host-parsed contract path is admitted"
+        );
+    }
+
+    /// An item speaking for a different task gets that task's contracts only.
+    #[test]
+    fn contracts_are_matched_by_canonical_task_id() {
+        let universe = universe_with("TASK-TDL-001", &["docs/trading/audit.md"]);
+        assert!(
+            contract_artifact_paths_for_item(&universe, &artifact_only_item("TASK-TDL-999"))
+                .is_empty()
+        );
+    }
+
+    /// Templated, glob, absolute, traversing and empty paths name no single
+    /// file and are refused.
+    #[test]
+    fn unusable_shapes_are_refused() {
+        let universe = universe_with(
+            "TASK-TDL-001",
+            &[
+                "${PROJECT_ROOT}/out.json",
+                "reports/*.md",
+                "/etc/passwd",
+                "../outside.md",
+                "   ",
+            ],
         );
         assert!(
-            context.artifact_roots.contains(&"docs/trading".to_string()),
-            "precondition: the contract root must be admitted: {:?}",
-            context.artifact_roots
+            contract_artifact_paths_for_item(&universe, &artifact_only_item("TASK-TDL-001"))
+                .is_empty()
+        );
+    }
+
+    /// End-to-end against the REAL derivation, not a hand-built context: the
+    /// context comes from `project_artifact_context_from_v2_root` on a store
+    /// root shaped like a live run, and the deliverable is reported by absolute
+    /// path exactly as the agent reports it. It must leave `files_changed`, or
+    /// write-ownership rejects the branch with "declares no target ownership".
+    #[test]
+    fn the_declared_deliverable_is_reclassified_with_live_wiring() {
+        use crate::v2::project_artifacts::{
+            normalize_project_artifact_files, project_artifact_context_from_v2_root,
+        };
+        use crate::v2::result::{WorkflowV2FileRecord, WorkflowV2Result};
+
+        let project = tempfile::tempdir().expect("project");
+        let project_root = project.path().canonicalize().expect("canon");
+        let v2_root = project_root.join(".archon/workflows/wf-live/v2");
+        std::fs::create_dir_all(&v2_root).expect("mkdir v2");
+        std::fs::create_dir_all(project_root.join("docs/trading")).expect("mkdir docs");
+        let deliverable = project_root.join("docs/trading/data-lake-gap-audit.md");
+        std::fs::write(&deliverable, "# audit\n").expect("write");
+
+        let mut context = project_artifact_context_from_v2_root(&v2_root);
+        context.add_contract_artifact_paths(
+            &universe_with("TASK-TDL-001", &["docs/trading/data-lake-gap-audit.md"]),
+            &artifact_only_item("TASK-TDL-001"),
         );
 
-        let mut result = result_reporting_changed(&written);
-        normalize_project_artifact_files("inventory-tdl-001", &mut result, &context)
+        let mut result = WorkflowV2Result::accepted("wrote the deliverable");
+        result.files_changed = vec![WorkflowV2FileRecord::new(deliverable.display().to_string())];
+        normalize_project_artifact_files("impl-tdl-001", &mut result, &context)
             .expect("classification");
 
         assert!(
             result.files_changed.is_empty(),
-            "the deliverable must leave files_changed, or write-ownership rejects it: {:?}",
+            "deliverable must leave files_changed: {:?}",
             result.files_changed
         );
-        assert_eq!(result.artifacts.len(), 1, "it must become a project artifact");
+        assert_eq!(result.artifacts.len(), 1, "it becomes a project artifact");
     }
 
-    /// Negative control: without the contract root the same file stays a
-    /// changed file — reproducing the live rejection, and proving the root is
-    /// the operative difference rather than something incidental.
+    /// Control: a code path the item did not declare stays a repository change,
+    /// so ownership enforcement still applies to everything else it touches.
     #[test]
-    fn without_the_contract_root_the_deliverable_stays_a_changed_file() {
-        let (_project, project_root) = project_root_with_deliverable();
-        let written = format!("{project_root}/docs/trading/audit.md");
-
-        let context = WorkflowV2ProjectArtifactContext {
-            project_root: Some(project_root),
-            ..Default::default()
+    fn an_undeclared_path_remains_a_repository_change() {
+        use crate::v2::project_artifacts::{
+            normalize_project_artifact_files, project_artifact_context_from_v2_root,
         };
+        use crate::v2::result::{WorkflowV2FileRecord, WorkflowV2Result};
 
-        let mut result = result_reporting_changed(&written);
-        normalize_project_artifact_files("inventory-tdl-001", &mut result, &context)
+        let project = tempfile::tempdir().expect("project");
+        let project_root = project.path().canonicalize().expect("canon");
+        let v2_root = project_root.join(".archon/workflows/wf-live/v2");
+        std::fs::create_dir_all(&v2_root).expect("mkdir v2");
+        std::fs::create_dir_all(project_root.join("crates/thing/src")).expect("mkdir");
+        let code = project_root.join("crates/thing/src/lib.rs");
+        std::fs::write(&code, "// code\n").expect("write");
+
+        let mut context = project_artifact_context_from_v2_root(&v2_root);
+        context.add_contract_artifact_paths(
+            &universe_with("TASK-TDL-001", &["docs/trading/data-lake-gap-audit.md"]),
+            &artifact_only_item("TASK-TDL-001"),
+        );
+
+        let mut result = WorkflowV2Result::accepted("touched code");
+        result.files_changed = vec![WorkflowV2FileRecord::new(code.display().to_string())];
+        normalize_project_artifact_files("impl-tdl-001", &mut result, &context)
             .expect("classification");
 
         assert_eq!(
             result.files_changed.len(),
             1,
-            "control: an unadmitted path must remain a repository change"
+            "an undeclared path must stay a repository change"
         );
     }
 }

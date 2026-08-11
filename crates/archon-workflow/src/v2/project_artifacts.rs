@@ -19,6 +19,10 @@ pub struct WorkflowV2ProjectArtifactContext {
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_roots: Vec<String>,
+    /// Exact deliverable paths an artifact-only item may write, taken from the
+    /// host-parsed task universe. Matched exactly, never as a prefix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_evidence_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,23 +38,23 @@ impl WorkflowV2ProjectArtifactContext {
             .is_empty()
     }
 
-    /// Admit the roots the task universe's deliverable contracts declare.
+    /// Admit the exact deliverables an artifact-only item is entitled to write.
     ///
-    /// Contracts are host-parsed from task files — not agent-authored — which
-    /// is what makes this channel safe to trust where agent-supplied
-    /// requirement paths stay restricted. Roots the repository tracks are
-    /// refused, so contract-declared source paths never become artifact roots;
-    /// see `project_artifact_contract_roots` for the derivation.
-    pub fn add_contract_roots(
+    /// Only for items with no repository `target_files`, and only paths the
+    /// host parsed from the task files for that item's canonical tasks — so an
+    /// agent cannot widen its own rights and code tasks are untouched. See
+    /// `project_artifact_contract_roots` for the rule.
+    pub fn add_contract_artifact_paths(
         &mut self,
         universe: &crate::task_universe::WorkflowV2TaskUniverse,
-        target_repository_root: Option<&str>,
+        item: &serde_json::Value,
     ) {
-        for root in super::project_artifact_contract_roots::contract_artifact_roots(
-            universe,
-            target_repository_root,
-        ) {
-            push_unique_root(&mut self.artifact_roots, root);
+        for path in
+            super::project_artifact_contract_roots::contract_artifact_paths_for_item(universe, item)
+        {
+            if !self.artifact_paths.contains(&path) {
+                self.artifact_paths.push(path);
+            }
         }
     }
 
@@ -79,6 +83,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         project_root: project_root_for_v2_root(v2_root).map(|path| path.display().to_string()),
         run_id,
         artifact_roots,
+        artifact_paths: Vec::new(),
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
     }
@@ -298,7 +303,11 @@ fn push_unique_root(roots: &mut Vec<String>, root: String) {
 }
 
 fn allowed_relative_artifact(relative: &str, context: &WorkflowV2ProjectArtifactContext) -> bool {
-    relative.starts_with("artifacts/")
+    context
+        .artifact_paths
+        .iter()
+        .any(|declared| declared == relative)
+        || relative.starts_with("artifacts/")
         || namespaced_project_data_artifact(relative)
         || run_prefixed_workflow_artifact(relative, context)
         || context
