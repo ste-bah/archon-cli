@@ -201,21 +201,31 @@ struct BetaCache {
     integrity: String,
 }
 
+const DISCOVERED_BETAS_FILE: &str = "discovered_betas.json";
+const VALIDATED_BETAS_FILE: &str = "validated_betas.json";
+
+/// Real on-disk home of the beta caches: `<user config dir>/archon`.
+///
+/// This is the only place the user-level directory is named. Every read, write
+/// and delete below is expressed against a root the caller supplies, so a test
+/// can point at its own `TempDir` and share nothing with any other test. That
+/// is deliberate: these caches used to be reachable only through their real
+/// path, which meant the suite both raced against itself and overwrote the
+/// developer's actual `validated_betas.json` on every run.
+fn beta_cache_root() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("archon")
+}
+
 /// Load cached betas from disk, or None if cache is stale/missing.
 pub fn load_cached_betas() -> Option<Vec<String>> {
-    load_beta_cache_file(&beta_cache_path())
+    load_beta_cache_file(&beta_cache_root().join(DISCOVERED_BETAS_FILE))
 }
 
 /// Save discovered betas to cache.
 pub fn save_betas_cache(betas: &[String]) {
-    let _ = save_beta_cache_file(&beta_cache_path(), betas);
-}
-
-fn beta_cache_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("archon")
-        .join("discovered_betas.json")
+    let _ = save_beta_cache_file(&beta_cache_root().join(DISCOVERED_BETAS_FILE), betas);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,12 +234,22 @@ fn beta_cache_path() -> PathBuf {
 
 /// Load the previously validated+cached beta list, or None if missing/stale.
 pub fn load_cached_validated_betas() -> Option<Vec<String>> {
-    load_beta_cache_file(&validated_beta_cache_path())
+    load_validated_betas_in(&beta_cache_root())
 }
 
 /// Save the validated beta list to cache.
 pub fn save_validated_betas_cache(betas: &[String]) {
-    let _ = save_beta_cache_file(&validated_beta_cache_path(), betas);
+    save_validated_betas_in(&beta_cache_root(), betas);
+}
+
+/// [`load_cached_validated_betas`], against an explicit cache root.
+pub(crate) fn load_validated_betas_in(root: &Path) -> Option<Vec<String>> {
+    load_beta_cache_file(&root.join(VALIDATED_BETAS_FILE))
+}
+
+/// [`save_validated_betas_cache`], against an explicit cache root.
+pub(crate) fn save_validated_betas_in(root: &Path, betas: &[String]) {
+    let _ = save_beta_cache_file(&root.join(VALIDATED_BETAS_FILE), betas);
 }
 
 fn save_beta_cache_file(path: &Path, betas: &[String]) -> std::io::Result<()> {
@@ -292,20 +312,17 @@ fn write_private_json_file(path: &Path, content: &str) -> std::io::Result<()> {
     }
 }
 
-fn validated_beta_cache_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("archon")
-        .join("validated_betas.json")
-}
-
 /// Clear cached Claude/Anthropic beta-header discovery files.
 ///
 /// This backs the `/refresh-identity` skill. The next Anthropic request will
 /// re-discover and re-validate the accepted beta headers.
 pub fn clear_beta_caches() -> std::io::Result<Vec<PathBuf>> {
+    let root = beta_cache_root();
     let mut removed = Vec::new();
-    for path in [beta_cache_path(), validated_beta_cache_path()] {
+    for path in [
+        root.join(DISCOVERED_BETAS_FILE),
+        root.join(VALIDATED_BETAS_FILE),
+    ] {
         match fs::remove_file(&path) {
             Ok(()) => removed.push(path),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -326,6 +343,15 @@ pub async fn resolve_and_validate_betas(
     client: &crate::anthropic::AnthropicClient,
     config_betas: Option<&[String]>,
 ) -> Vec<String> {
+    resolve_and_validate_betas_in(&beta_cache_root(), client, config_betas).await
+}
+
+/// [`resolve_and_validate_betas`], against an explicit cache root.
+pub(crate) async fn resolve_and_validate_betas_in(
+    cache_root: &Path,
+    client: &crate::anthropic::AnthropicClient,
+    config_betas: Option<&[String]>,
+) -> Vec<String> {
     // Priority 1: explicit config override — user knows best, no validation needed
     if let Some(betas) = config_betas
         && !betas.is_empty()
@@ -334,7 +360,7 @@ pub async fn resolve_and_validate_betas(
     }
 
     // Priority 2: valid validated cache
-    if let Some(cached) = load_cached_validated_betas()
+    if let Some(cached) = load_validated_betas_in(cache_root)
         && !cached.is_empty()
     {
         tracing::debug!("Using {} validated betas from cache", cached.len());
@@ -367,7 +393,7 @@ pub async fn resolve_and_validate_betas(
     };
 
     // Cache the validated result
-    save_validated_betas_cache(&result);
+    save_validated_betas_in(cache_root, &result);
     tracing::info!(
         "Beta validation complete: {} betas validated and cached",
         result.len()

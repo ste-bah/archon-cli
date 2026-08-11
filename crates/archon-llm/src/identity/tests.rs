@@ -117,32 +117,42 @@ mod beta_validation_cache_tests {
 
     use super::*;
 
+    // Every test below drives the cache through an explicit root pointed at its
+    // own `TempDir`. Nothing here touches `dirs::config_dir()`, so no two tests
+    // share a file and the suite cannot overwrite the developer's real
+    // `<config>/archon/validated_betas.json`.
+    //
+    // These tests used to be marked `#[serial_test::serial(validated_betas_cache)]`
+    // instead. That annotation is inert under `cargo nextest`, which runs one
+    // process per test: an in-process mutex is not shared with anything and
+    // serialises nothing (see the note in `.config/nextest.toml`). The tests ran
+    // concurrently against one real file, and the `remove_file` in
+    // `resolve_and_validate_betas_falls_back_to_defaults` could land between the
+    // save and the load below.
+
     #[test]
-    #[serial_test::serial(validated_betas_cache)]
     fn test_load_cached_validated_betas_returns_none_when_missing() {
-        // When the cache file doesn't exist, should return None gracefully.
-        // We test this by checking a path that won't exist (temp path).
-        // The function uses dirs::config_dir() + archon/validated_betas.json
-        // We can't easily change the path, but we can verify None is returned
-        // when the content is absent (or expired). We'll do a round-trip instead.
-        // First, just ensure it returns None or Some without panicking.
-        let result = load_cached_validated_betas();
-        // Result is either None (no cache) or Some (cache exists) — both are valid.
-        // The test exercises that the function runs without panicking.
-        let _ = result;
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let result = load_validated_betas_in(dir.path());
+
+        assert_eq!(
+            result, None,
+            "an empty cache root must read back as None, not as a stale or partial list"
+        );
     }
 
     #[test]
-    #[serial_test::serial(validated_betas_cache)]
     fn test_save_and_load_validated_betas_round_trip() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let betas = vec![
             "claude-code-20250219".to_string(),
             "oauth-2025-04-20".to_string(),
             "test-beta-2025-01-01".to_string(),
         ];
 
-        save_validated_betas_cache(&betas);
-        let loaded = load_cached_validated_betas();
+        save_validated_betas_in(dir.path(), &betas);
+        let loaded = load_validated_betas_in(dir.path());
 
         assert!(loaded.is_some(), "cache should be present after saving");
         let loaded_betas = loaded.unwrap();
@@ -150,6 +160,26 @@ mod beta_validation_cache_tests {
         for b in &betas {
             assert!(loaded_betas.contains(b), "loaded cache should contain {b}");
         }
+    }
+
+    #[test]
+    fn validated_betas_cache_uses_its_own_file_under_the_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let betas = vec!["claude-code-20250219".to_string()];
+
+        save_validated_betas_in(dir.path(), &betas);
+
+        // Pins the wiring the zero-argument wrappers rely on: the validated list
+        // lives at `<root>/validated_betas.json` and not in the discovered-beta
+        // file, which is a separate cache with a separate lifetime.
+        assert!(
+            dir.path().join("validated_betas.json").is_file(),
+            "validated betas must be written to validated_betas.json under the root"
+        );
+        assert!(
+            !dir.path().join("discovered_betas.json").exists(),
+            "saving validated betas must not touch the discovered-beta cache"
+        );
     }
 
     #[test]
@@ -198,13 +228,13 @@ mod beta_validation_cache_tests {
         assert_eq!(load_beta_cache_file(&path), None);
     }
 
-    #[serial_test::serial(validated_betas_cache)]
     #[tokio::test]
     async fn test_resolve_and_validate_betas_uses_config_betas_if_provided() {
         use crate::anthropic::AnthropicClient;
         use crate::auth::AuthProvider;
         use crate::identity::{IdentityMode, IdentityProvider};
 
+        let dir = tempfile::tempdir().expect("tempdir");
         let auth = AuthProvider::ApiKey(crate::types::Secret::new("test-key".to_string()));
         let identity = IdentityProvider::new(
             IdentityMode::Clean,
@@ -215,25 +245,25 @@ mod beta_validation_cache_tests {
         let client = AnthropicClient::new(auth, identity, None);
 
         let config_betas = vec!["explicit-beta-2025-01-01".to_string()];
-        let result = resolve_and_validate_betas(&client, Some(&config_betas)).await;
+        let result = resolve_and_validate_betas_in(dir.path(), &client, Some(&config_betas)).await;
 
         // When config_betas is non-empty, it should be returned as-is without validation
         assert_eq!(result, config_betas);
+        assert!(
+            !dir.path().join("validated_betas.json").exists(),
+            "an explicit config override must short-circuit before touching the cache"
+        );
     }
 
-    #[serial_test::serial(validated_betas_cache)]
     #[tokio::test]
     async fn test_resolve_and_validate_betas_falls_back_to_defaults_when_no_discovery() {
         use crate::anthropic::AnthropicClient;
         use crate::auth::AuthProvider;
         use crate::identity::{IdentityMode, IdentityProvider};
 
-        // Clear any existing validated cache to force a fresh discovery attempt
-        let cache_path = dirs::config_dir()
-            .unwrap_or_default()
-            .join("archon")
-            .join("validated_betas.json");
-        let _ = std::fs::remove_file(&cache_path);
+        // A fresh temp root is already empty, so discovery is forced without
+        // having to delete anyone else's cache file.
+        let dir = tempfile::tempdir().expect("tempdir");
 
         let auth = AuthProvider::ApiKey(crate::types::Secret::new("test-key".to_string()));
         let identity = IdentityProvider::new(
@@ -247,7 +277,7 @@ mod beta_validation_cache_tests {
         // Pass None so it attempts discovery; if Claude Code is not installed,
         // should return DEFAULT_BETAS (possibly after a failed API probe).
         // We just verify the result is non-empty (graceful fallback).
-        let result = resolve_and_validate_betas(&client, None).await;
+        let result = resolve_and_validate_betas_in(dir.path(), &client, None).await;
         assert!(
             !result.is_empty(),
             "should always return at least some betas"
