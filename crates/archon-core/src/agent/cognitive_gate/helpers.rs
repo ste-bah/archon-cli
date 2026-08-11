@@ -44,9 +44,15 @@ pub(crate) fn correction_trigger_confidence(
 ///
 /// Returns `None` when the budget was exceeded or the task panicked. Neither
 /// is treated as an error worth failing the turn over: the whole point of a
-/// shadow observer is that the user cannot tell whether it ran. The task is not
-/// cancelled on timeout — it only writes shadow rows — but the caller stops
-/// waiting for it.
+/// shadow observer is that the user cannot tell whether it ran.
+///
+/// The task is NOT cancelled on timeout. The caller stops waiting; the closure
+/// runs on and its writes still land. So `task` must be safe to ABANDON:
+/// side-effect-free, or writing only rows nothing acts on. A closure whose
+/// result gates a later write does not qualify — `None` would withhold that
+/// write while the orphan recorded that it happened, and the row and the world
+/// would disagree. R2 attribution shipped that bug and now decides in one half
+/// and records in another, neither of them here.
 pub(crate) async fn bounded_cognitive_observation<T, F>(
     budget_ms: u64,
     name: &'static str,

@@ -19,9 +19,6 @@ use archon_cognitive::attribution::followup::{
     followup_window,
 };
 
-/// Wall-clock budget for one turn's follow-up pass.
-const FOLLOWUP_BUDGET_MS: u64 = 1_000;
-
 /// Everything the pass needs, gathered on the turn thread.
 pub(super) struct FollowupObservation {
     pub session_id: String,
@@ -39,7 +36,10 @@ pub(super) fn record_followup_opportunities(
     observation: &FollowupObservation,
 ) -> Result<usize, archon_cognitive::CognitiveError> {
     let event_store = archon_cognitive::metrics::MetricEventStore::new(store.db(), store.root())?;
-    let events = event_store.events()?;
+    // Scoped to the session in the query. Only this session's attributions can
+    // ever match, and a per-turn reader that deserialised the whole history to
+    // discover that would get slower every turn.
+    let events = event_store.events_for_session(&observation.session_id)?;
     let attributions = attributed_corrections(&events, &observation.session_id);
 
     let window = followup_window(observation.opportunity.observed_at);
@@ -96,9 +96,11 @@ impl super::Agent {
     /// the denominators describe conversation length rather than exposure.
     ///
     /// Runs after the turn has already been reported complete, off the async
-    /// runtime and under a hard budget. Awaited rather than fired and forgotten
-    /// so "the opportunity was recorded" is an observation a test can make
-    /// rather than a race it has to poll for.
+    /// runtime, awaited to completion. No wall-clock budget: the read is scoped
+    /// to one session in the query and the write is idempotent, so there is
+    /// nothing a deadline would protect that bounding the work does not, and a
+    /// deadline would make "was the opportunity recorded" a question about how
+    /// busy the machine was.
     ///
     /// `None` means the pass did not complete; `Some(n)` is the number of new
     /// rows. Nothing downstream reads either, which is why this may fail open
@@ -128,19 +130,17 @@ impl super::Agent {
             session_id,
         };
 
-        super::cognitive_gate::bounded_cognitive_observation(
-            FOLLOWUP_BUDGET_MS,
-            "record-attribution-followup",
-            move || {
-                let store = store
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                record_followup_opportunities(&store, &observation)
-                    .inspect_err(|error| tracing::warn!(%error, "R2 follow-up pass failed"))
-                    .ok()
-            },
-        )
+        archon_observability::spawn_blocking_named("record-attribution-followup", move || {
+            let store = store
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            record_followup_opportunities(&store, &observation)
+                .inspect_err(|error| tracing::warn!(%error, "R2 follow-up pass failed"))
+                .ok()
+        })
         .await
+        .inspect_err(|error| tracing::warn!(%error, "R2 follow-up task failed"))
+        .ok()
         .flatten()
     }
 }

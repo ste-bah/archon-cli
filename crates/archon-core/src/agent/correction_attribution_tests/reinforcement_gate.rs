@@ -1,4 +1,4 @@
-//! Reinforcement is gated on attribution (R2 slice, item 5).
+﻿//! Reinforcement is gated on attribution (R2 slice, item 5).
 //!
 //! Split out of the parent test module to stay under the file-size gate. These
 //! are the tests for the write this slice REMOVED: a correction only moves a
@@ -8,6 +8,82 @@ use super::*;
 
 fn rule_score(memory: &Arc<dyn MemoryTrait>, rule_id: &str) -> f64 {
     memory.get_memory(rule_id).expect("get rule").importance
+}
+
+fn replay_observation(session_id: &str) -> AttributionObservation {
+    AttributionObservation {
+        session_id: session_id.into(),
+        task_class: "conversation".into(),
+        model_id: "test-model".into(),
+        provenance: archon_consciousness::correction_provenance::CorrectionProvenance::from_record(
+            &archon_consciousness::corrections::Correction {
+                id: "corr-plan".into(),
+                correction_type: archon_consciousness::corrections::CorrectionType::FactualError,
+                content: "no, that broke the build".into(),
+                context: archon_consciousness::correction_provenance::immediate_turn_context(2),
+                severity: 1.5,
+                rule_id: None,
+                timestamp: chrono::Utc::now(),
+            },
+        ),
+        correction_content: "no, that broke the build".into(),
+        tool_runs: observed_tool_runs(
+            &transcript("error: build failed", true),
+            session_id,
+            2,
+            &unknown_effect,
+        ),
+        ledger_dir: None,
+    }
+}
+
+/// The shipped defect, as a test.
+///
+/// Deciding an attribution must write NOTHING. The first version decided and
+/// recorded in one task that a wall-clock budget could abandon without
+/// cancelling, so on a loaded runner the caller withheld the reinforcement while
+/// the orphan wrote a row saying `accepted=true` — an evaluation recorded for an
+/// effect that never happened, which is exactly what
+/// `causal_attribution_precision` is computed over.
+///
+/// If deciding ever writes again, this fails whether or not a timeout is
+/// involved, because the property that made the timeout dangerous is the one
+/// being asserted.
+#[test]
+fn deciding_an_attribution_writes_nothing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = cognitive_store(temp.path());
+    let observation = replay_observation("plan-only-session");
+
+    let plan = plan_correction_attribution(&store, &observation);
+
+    assert!(plan.accepted(), "this correction is attributable");
+    assert!(
+        attribution_rows(&store).is_empty(),
+        "deciding must not record the evaluation"
+    );
+    assert!(
+        archon_cognitive::attribution::lesson::causal_lessons(store.db())
+            .expect("list lessons")
+            .is_empty(),
+        "deciding must not derive a lesson either"
+    );
+}
+
+/// And recording is what records. The two halves together are the old
+/// behaviour; apart, they can be ordered around the effect.
+#[test]
+fn recording_a_decided_attribution_is_what_writes_the_row() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = cognitive_store(temp.path());
+    let observation = replay_observation("commit-session");
+    let plan = plan_correction_attribution(&store, &observation);
+
+    let verdict = commit_correction_attribution(&store, &plan).expect("commit");
+
+    assert!(verdict.accepted);
+    assert_eq!(attribution_rows(&store).len(), 1);
+    assert!(verdict.lesson_id.is_some());
 }
 
 /// The gate, in the direction that must still work: an attributed correction
@@ -31,7 +107,7 @@ async fn an_accepted_attribution_reinforces_the_rule() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
     assert_eq!(identity(&event, "accepted"), "true");
 
     // FactualError: 50.0 base + 1.5 * 5.0.
@@ -63,7 +139,7 @@ async fn an_unattributed_correction_reinforces_nothing_but_is_still_recorded() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
     assert_eq!(identity(&event, "attribution_cohort"), "unattributed");
     assert!(
         (rule_score(&memory, "rule:correction:factual-error:v2") - 50.0).abs() < f64::EPSILON,
@@ -117,7 +193,7 @@ async fn an_accepted_attribution_stores_a_lesson_the_row_points_at() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
     let lesson_id = identity(&event, "lesson_id");
     assert!(
         !lesson_id.starts_with("no_lesson:"),
@@ -160,7 +236,7 @@ async fn a_refused_attribution_derives_no_lesson() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
     assert!(identity(&event, "lesson_id").starts_with("no_lesson:"));
     assert!(
         archon_cognitive::attribution::lesson::causal_lessons(store.db())

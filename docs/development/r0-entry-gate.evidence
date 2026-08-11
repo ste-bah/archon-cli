@@ -297,14 +297,34 @@ anchor = crates/archon-cognitive/src/attribution/event.rs :: ADJUDICATION_PENDIN
 # the joined call, an unattributable correction starts moving rule scores again.
 absent = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction\(
 absent = crates/archon-core/src/agent/correction_intake.rs :: tracker\.record_correction\(
-# And the ordering that makes the gate a gate: record, then attribute, then --
-# only then -- reinforce.
-order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction_unreinforced\( :: self\.attribute_correction\(
-order = crates/archon-core/src/agent/memory_integration_corrections.rs :: self\.attribute_correction\( :: tracker\.reinforce_from_correction\(
-wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: match self\.attribute_correction\(correction, &classification\)\.await
+# And the ordering that makes the gate a gate: record the correction, DECIDE the
+# attribution, reinforce only if it was accepted, and record the evaluation last.
+#
+# The last edge is the one a Windows CI failure taught us. Deciding and recording
+# used to happen together inside a task the caller could abandon on a timeout, so
+# an expired budget withheld the reinforcement while the orphan wrote a row
+# saying `accepted=true`. The row claimed an effect that had not happened, which
+# is what `causal_attribution_precision` is computed over. Committing strictly
+# after the reinforcement is what makes that state unreachable.
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction_unreinforced\( :: \.plan_correction_attribution\(
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: \.plan_correction_attribution\( :: tracker\.reinforce_from_correction\(
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.reinforce_from_correction\( :: self\.commit_correction_attribution\(
+# Neither half may run under the abandon-on-timeout helper, whose contract
+# (`cognitive_gate/helpers.rs`) requires a closure that is safe to orphan.
+# Deciding is safe to orphan but its result gates a write; recording is not safe
+# to orphan at all. The call, not the name, is the signature.
+absent = crates/archon-core/src/agent/correction_attribution.rs :: bounded_cognitive_observation\(
+absent = crates/archon-core/src/agent/correction_attribution/decide.rs :: bounded_cognitive_observation\(
+# Deciding writes nothing: the only `record` call sits in the commit half, which
+# is defined after it. A `record` that moved up into the planner would break this
+# ordering, and `deciding_an_attribution_writes_nothing` below is the behavioural
+# form of the same claim.
+order = crates/archon-core/src/agent/correction_attribution/decide.rs :: fn plan_correction_attribution :: event_store\.record\(
+wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: self\.commit_correction_attribution\(plan\)\.await
 test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_unattributed_correction_reinforces_nothing_but_is_still_recorded
 test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_reinforces_the_rule
 test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: a_correction_with_no_attribution_substrate_reinforces_nothing
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: deciding_an_attribution_writes_nothing
 test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: recording_without_reinforcement_leaves_the_rule_score_alone
 test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: reinforcing_one_correction_twice_raises_the_score_once
 source_of_truth = crates/archon-core/src/agent/correction_attribution_tests.rs :: the_live_row_records_that_attribution_mutated_nothing

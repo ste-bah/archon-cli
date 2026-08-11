@@ -38,18 +38,23 @@ fn identity<'a>(event: &'a archon_cognitive::CognitiveMetricEvent, key: &str) ->
     event.identity(key).unwrap_or_default()
 }
 
-async fn wait_for_attribution(
+/// The one attribution row this turn produced.
+///
+/// No polling and no sleeping. `detect_and_record_correction` awaits both the
+/// planning task and the commit task to completion, so by the time it returns
+/// the row is either in the store or was deliberately withheld. A test that
+/// slept here would be asserting a timing margin the machine never agreed to.
+fn attribution_row(
     store: &archon_cognitive::PersistentCognitiveStore,
 ) -> archon_cognitive::CognitiveMetricEvent {
-    // The write goes to the blocking pool so it cannot add latency to the turn,
-    // which means the test waits for it rather than assuming it.
-    for _ in 0..200 {
-        if let Some(event) = attribution_rows(store).into_iter().next() {
-            return event;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    panic!("no attribution_evaluated row ever reached the metric store");
+    let mut rows = attribution_rows(store);
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected exactly one attribution row, got {}",
+        rows.len()
+    );
+    rows.remove(0)
 }
 
 /// Everything is `Unknown` because `test_agent` builds an empty registry, which
@@ -58,7 +63,7 @@ fn unknown_effect(_name: &str, _input: &serde_json::Value) -> ActionEffectClass 
     ActionEffectClass::Unknown
 }
 
-// â”€â”€ reconstructing the action window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- reconstructing the action window -------------------------
 
 fn transcript(result_content: &str, is_error: bool) -> Vec<serde_json::Value> {
     vec![
@@ -134,7 +139,7 @@ fn an_unregistered_tool_has_an_unknown_effect_class_not_a_harmless_one() {
     );
 }
 
-// â”€â”€ the live call site â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- the live call site ---------------------------------------
 
 /// The whole point: a correction on the real turn path produces an
 /// `attribution_evaluated` row that names the action it blames.
@@ -153,7 +158,7 @@ async fn a_correction_after_a_failed_tool_writes_an_accepted_attribution() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
 
     event
         .validate()
@@ -202,7 +207,7 @@ async fn the_live_row_records_that_attribution_mutated_nothing() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
 
     assert_eq!(identity(&event, "attribution_mode"), "shadow");
     assert_eq!(identity(&event, "mutation_source"), "none");
@@ -235,7 +240,7 @@ async fn a_correction_with_no_preceding_actions_writes_an_unattributed_row() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
 
     assert_eq!(identity(&event, "attribution_cohort"), "unattributed");
     assert_eq!(identity(&event, "accepted"), "false");
@@ -260,17 +265,11 @@ async fn an_abstained_turn_produces_no_attribution_row() {
         .detect_and_record_correction("that's not what I meant", &graph())
         .await;
 
-    let store = cognitive_store(temp.path());
-    // Wait for the R3 shadow label, which the same turn always writes, so the
-    // absence of an attribution row is an observation rather than a race.
-    for _ in 0..200 {
-        if !rows(&store).is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    assert_eq!(rows(&store).len(), 1, "only the R3 shadow label");
-    assert!(attribution_rows(&store).is_empty());
+    // No polling: the attribution path is awaited end to end, so if no row
+    // exists when the call returns, none ever will. (The R3 shadow label on the
+    // same turn IS fire-and-forget, which is why this test says nothing about
+    // it — `correction_intake_tests` owns that claim.)
+    assert!(attribution_rows(&cognitive_store(temp.path())).is_empty());
 }
 
 /// One correction, one attribution row, however many times the write is retried.
@@ -303,8 +302,9 @@ async fn a_replayed_attribution_write_is_not_counted_twice() {
         ledger_dir: None,
     };
 
-    let first = record_correction_attribution(&store, &observation).expect("first write");
-    let replayed = record_correction_attribution(&store, &observation).expect("replayed write");
+    let plan = plan_correction_attribution(&store, &observation);
+    let first = commit_correction_attribution(&store, &plan).expect("first write");
+    let replayed = commit_correction_attribution(&store, &plan).expect("replayed write");
 
     assert!(first.accepted);
     assert_eq!(
@@ -343,7 +343,7 @@ async fn the_written_rows_make_the_causal_attribution_metrics_derivable() {
         .await;
 
     let store = cognitive_store(temp.path());
-    let event = wait_for_attribution(&store).await;
+    let event = attribution_row(&store);
     let window = archon_cognitive::attribution::event::attribution_window(event.created_at);
     let snapshot = archon_cognitive::metrics::derive_snapshot(Some(&window), &rows(&store));
 

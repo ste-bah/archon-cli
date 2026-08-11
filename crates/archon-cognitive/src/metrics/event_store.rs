@@ -124,6 +124,41 @@ impl<'a> MetricEventStore<'a> {
         Ok(events)
     }
 
+    /// Events recorded against one session.
+    ///
+    /// Exists because a per-turn reader that wants one session's rows should not
+    /// deserialise the whole history to find them. The filter is pushed into the
+    /// query rather than applied after [`Self::events`], so the cost scales with
+    /// what the caller actually needs.
+    pub fn events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<CognitiveMetricEvent>, CognitiveError> {
+        let mut params = BTreeMap::new();
+        params.insert("session_id".into(), DataValue::from(session_id));
+        let rows = run_script_guarded(
+            self.db,
+            &format!(
+                "?[{EVENT_COLUMNS}] := *cognitive_metric_events{{{EVENT_COLUMNS}}}, \
+                 session_id = $session_id"
+            ),
+            params,
+            ScriptMutability::Immutable,
+            "list cognitive metric events for session",
+        )?;
+        let mut events = rows
+            .rows
+            .iter()
+            .map(|row| row_to_event(row))
+            .collect::<Result<Vec<_>, _>>()?;
+        events.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.metric_event_id.cmp(&right.metric_event_id))
+        });
+        Ok(events)
+    }
+
     /// Recompute the snapshot for `window`, or for the whole history when no
     /// window has been declared yet.
     pub fn snapshot(
