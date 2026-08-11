@@ -302,3 +302,32 @@ fn empty_targets_without_artifact_requirements_is_still_invalid() {
     });
     assert!(!valid_inventory_item(&contract, &item));
 }
+
+/// The second half of the artifact-only rule: normalization must not raise a
+/// target-file issue for it either. The item gate accepted such items while
+/// this issue stayed unresolved, so the run bricked at `inventory_has_issues`
+/// with zero malformed items — the gate said yes and the issue said no.
+#[test]
+fn artifact_only_item_raises_no_target_file_issue() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let inventory = contract.normalize_inventory(&serde_json::json!({
+        "items": [{
+            "item_id": "impl-audit",
+            "work_type": "implementation",
+            "canonical_task_ids": ["TASK-X-020"],
+            "target_files": [],
+            "acceptance_criteria": ["report exists"],
+            "focused_verification": ["report check"],
+            "artifact_requirements": ["docs/generated/report.md"]
+        }]
+    }));
+    assert!(
+        issues_of_kind(&inventory, "target_file_discovery").is_empty(),
+        "an artifact-only item must not carry an unresolvable target-file issue: {:?}",
+        inventory.get("unresolved_issues")
+    );
+}

@@ -376,6 +376,16 @@ fn target_files_issue(
 ) -> Option<String> {
     let targets = raw_strings_from_aliases(value, &["target_files"]);
     if targets.is_empty() {
+        // Empty is legitimate for artifact-only work — a task whose every
+        // deliverable is a project artifact has no repository file to name,
+        // and raising an issue here created one no repair could ever resolve:
+        // the reducer cannot invent a repo path the write layer would accept,
+        // so the issue stayed unresolved and bricked the inventory. Same rule
+        // as `valid_inventory_item` and artifact-only remediation: [] is valid
+        // exactly when the artifact requirements are concrete.
+        if value_present(value.get("artifact_requirements")) {
+            return None;
+        }
         return Some("implementation item is missing target files".to_string());
     }
     let root = target_repository_root.and_then(normalized_contract_path)?;
