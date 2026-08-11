@@ -15,7 +15,7 @@ impl AgentSubagentExecutor {
                 let content: String = text.chars().take(500).collect();
                 let title = format!("completion:{}:{}", agent_type, subagent_id);
                 let project_path = self.working_dir.to_string_lossy();
-                if let Err(e) = crate::agents::memory::save_agent_memory(
+                match crate::agents::memory::save_agent_memory(
                     &agent_type,
                     &content,
                     &title,
@@ -24,7 +24,17 @@ impl AgentSubagentExecutor {
                     &project_path,
                     meta.memory_scope.as_ref(),
                 ) {
-                    tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
+                    Ok(_) => {
+                        // #171 Part 6: the write this cache exists to not miss.
+                        // Invalidating here (rather than relying on the TTL
+                        // backstop) means a spawn immediately after a completion
+                        // recalls the new row instead of the pre-write block.
+                        self.recall_cache
+                            .invalidate(&agent_type, meta.memory_scope.as_ref());
+                    }
+                    Err(e) => {
+                        tracing::warn!(agent = %agent_type, error = %e, "failed to save agent memory");
+                    }
                 }
             }
         }
