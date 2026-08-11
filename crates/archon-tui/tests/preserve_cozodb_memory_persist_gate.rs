@@ -119,8 +119,10 @@
 //!    `cozo::DbInstance` appears in this comment for grep-level
 //!    verification per spec line 87.
 //! 4. Deleting the CozoDB file between the two instantiations causes
-//!    failure with "memory not retrievable after restart" — ✓ verified
-//!    by manual negative run during task validation (see task report).
+//!    failure with "memory not retrievable after restart" — ✓ enforced
+//!    by the negative control `control::deleting_the_cozodb_file_
+//!    between_instantiations_loses_the_memory`, which CI runs
+//!    alongside the gate. See "The negative control" below.
 //! 5. Gate completes in <3 seconds — **measured and reported, not
 //!    asserted.** See the next section, which is the whole of the
 //!    reason.
@@ -181,11 +183,43 @@
 //! only have moved the threshold at which the runner's load, rather
 //! than the code, decides the outcome.
 //!
+//! ## The negative control
+//!
+//! Criterion 4 used to be backed by a comment saying a manual negative
+//! run had been done once during task validation. That is a record of
+//! a person's recollection, not a control, and it decays the moment
+//! anything below it changes.
+//!
+//! It matters more now that criterion 5 is a measurement: the gate's
+//! entire remaining ability to go red rests on the persistence checks,
+//! and a gate nobody has watched go red is indistinguishable from a
+//! gate that cannot. Both shell gates over these invariants already
+//! carry the answer — `scripts/check-preserve-invariants.sh
+//! --self-test` and `scripts/check-r0-entry-gate.sh --self-test` each
+//! run their own `run_checks` against a deliberately broken input and
+//! demand it fails. This gate now does the same, in the form a Rust
+//! test binary has available: the `control` child holds a second
+//! `#[test]` that deletes the CozoDB file between the two
+//! instantiations, and CI runs it on every pass.
+//!
+//! The checks live in the `checks` child so the gate and the control
+//! call the *same* code rather than two copies that can drift. See
+//! those two files for the rest: `checks` for why `Absent` is narrow
+//! enough that an unrelated error cannot satisfy it, `control` for
+//! what the control does and does not prove.
+//!
+//! The positive assertions were not weakened to make this expressible.
+//! Every one of them — count, byte-for-byte content, title, tags,
+//! keyword recall, HNSW recall, and INV-PRESERVE-003 on the lock
+//! release — still fails the gate, with its original message.
+//!
 //! ## Failure-message contract
 //!
-//! Every assertion in this file produces a panic message containing
-//! BOTH the literal string `REQ-FOR-PRESERVE-D8` AND the literal
-//! string `CozoDB`, per spec line 45.
+//! Every assertion in this file and in its `checks` child produces a
+//! panic message containing BOTH the literal string
+//! `REQ-FOR-PRESERVE-D8` AND the literal string `CozoDB`, per spec
+//! line 45. `checks` builds its messages with the same [`fail_msg`]
+//! helper, so the contract holds across the split.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -196,6 +230,19 @@ use archon_memory::MemoryTrait;
 use archon_memory::embedding::EmbeddingProvider;
 use archon_memory::types::{MemoryError, MemoryType};
 use tempfile::TempDir;
+
+/// The post-restart checks, shared by the gate below and by the
+/// negative control. "The checks" is the unit both tests consult, so
+/// it is the natural seam — and splitting here keeps all three files
+/// under the 500-line ceiling.
+#[path = "preserve_cozodb_memory_persist_gate/checks.rs"]
+mod checks;
+
+/// The negative control over those checks. Carries its own rationale.
+#[path = "preserve_cozodb_memory_persist_gate/control.rs"]
+mod control;
+
+use checks::RestartFinding;
 
 /// Deterministic test-local embedding provider.
 ///
@@ -283,55 +330,70 @@ fn open_with_provider(path: &std::path::Path) -> MemoryGraph {
     graph
 }
 
+/// Phase 1, shared by the gate and its negative control: open the
+/// store at `db_path`, write the payload through `MemoryTrait`,
+/// confirm the first instance can see it, then drop that instance.
+///
+/// Shared rather than duplicated so the control exercises the same
+/// write path the gate does. A control that wrote the memory its own
+/// way could go green on a store the gate would never have produced.
+fn store_and_close(db_path: &std::path::Path) -> String {
+    let graph = open_with_provider(db_path);
+
+    // Explicitly exercise the PUBLIC contract surface: a
+    // `&dyn MemoryTrait` reference. This is the trait the
+    // REQ-FOR-PRESERVE-D8 contract names, and using it here (rather
+    // than the inherent `MemoryGraph` methods) enforces that the gate
+    // breaks if the trait surface is ever narrowed.
+    let mem: &dyn MemoryTrait = &graph;
+
+    let id = mem
+        .store_memory(
+            PAYLOAD_CONTENT,
+            PAYLOAD_TITLE,
+            MemoryType::Fact,
+            0.9,
+            &["preserve-d8".into(), "cozodb".into()],
+            "tui-gate",
+            "/test/preserve-d8",
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "{}",
+                fail_msg(&format!(
+                    "store_memory via MemoryTrait failed (phase-1): {e}"
+                ))
+            )
+        });
+
+    // Sanity: the first instance sees the memory (trait path).
+    let count = mem
+        .memory_count()
+        .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("memory_count failed: {e}"))));
+    assert_eq!(count, 1, "{}", fail_msg("phase-1 memory_count expected 1"));
+
+    id
+    // `graph` dropped on return — sqlite fd inside cozo::DbInstance
+    // released via RAII. The fcntl lock on db_path is gone before the
+    // caller's next line runs. No sleep-wait.
+}
+
+/// Make a temporary directory and the CozoDB path inside it.
+fn temp_db() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new()
+        .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("TempDir::new failed: {e}"))));
+    let db_path = tmp.path().join("memory.db");
+    (tmp, db_path)
+}
+
 #[test]
 fn cozodb_memory_persists_across_in_process_restart() {
     let t0 = Instant::now();
 
-    let tmp = TempDir::new()
-        .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("TempDir::new failed: {e}"))));
-    let db_path: PathBuf = tmp.path().join("memory.db");
+    let (_tmp, db_path) = temp_db();
 
     // ── Phase 1: open, store, drop ────────────────────────────
-    let stored_id = {
-        let graph = open_with_provider(&db_path);
-
-        // Explicitly exercise the PUBLIC contract surface: a
-        // `&dyn MemoryTrait` reference. This is the trait the
-        // REQ-FOR-PRESERVE-D8 contract names, and using it here
-        // (rather than the inherent `MemoryGraph` methods) enforces
-        // that the gate breaks if the trait surface is ever narrowed.
-        let mem: &dyn MemoryTrait = &graph;
-
-        let id = mem
-            .store_memory(
-                PAYLOAD_CONTENT,
-                PAYLOAD_TITLE,
-                MemoryType::Fact,
-                0.9,
-                &["preserve-d8".into(), "cozodb".into()],
-                "tui-gate",
-                "/test/preserve-d8",
-            )
-            .unwrap_or_else(|e| {
-                panic!(
-                    "{}",
-                    fail_msg(&format!(
-                        "store_memory via MemoryTrait failed (phase-1): {e}"
-                    ))
-                )
-            });
-
-        // Sanity: the first instance sees the memory (trait path).
-        let count = mem
-            .memory_count()
-            .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("memory_count failed: {e}"))));
-        assert_eq!(count, 1, "{}", fail_msg("phase-1 memory_count expected 1"));
-
-        id
-        // `graph` dropped here — sqlite fd inside cozo::DbInstance
-        // released via RAII. The fcntl lock on db_path is gone before
-        // the next line runs. No sleep-wait.
-    };
+    let stored_id = store_and_close(&db_path);
 
     assert!(
         db_path.exists(),
@@ -344,112 +406,19 @@ fn cozodb_memory_persists_across_in_process_restart() {
 
     // ── Phase 2: re-open SAME path, query ─────────────────────
     //
-    // If the file lock leaked on drop, MemoryGraph::open would fail
-    // here with a sqlite "database is locked" error. We surface that
-    // via INV-PRESERVE-003 per spec line 40.
-    let graph2 = match MemoryGraph::open(&db_path) {
-        Ok(g) => g,
-        Err(e) => panic!(
-            "INV-PRESERVE-003 violated: file lock leaked — {} (underlying: {e})",
-            fail_msg("CozoDB could not be re-opened after first-instance drop")
+    // Every check lives in `checks::check_after_restart`, which the
+    // negative control below calls as well. The only difference
+    // between the gate and the control is the verdict each demands.
+    match checks::check_after_restart(&db_path, &stored_id) {
+        RestartFinding::Persisted => {}
+        RestartFinding::Absent(detail) => panic!(
+            "{}",
+            fail_msg(&format!("memory not retrievable after restart — {detail}"))
         ),
-    };
-
-    // Reattach the same deterministic provider so HNSW queries use
-    // the same embedding space as the stored vectors.
-    let provider2: Arc<dyn EmbeddingProvider> = Arc::new(HashEmbedProvider::new());
-    graph2
-        .set_embedding_provider(provider2)
-        .unwrap_or_else(|e| {
-            panic!(
-                "{}",
-                fail_msg(&format!(
-                    "phase-2 set_embedding_provider (HNSW re-init) failed: {e}"
-                ))
-            )
-        });
-
-    // Phase-2 contract surface: `&dyn MemoryTrait` again — same
-    // rationale as phase-1. REQ-FOR-PRESERVE-D8 is a trait-level
-    // contract; the gate must route through it.
-    let mem2: &dyn MemoryTrait = &graph2;
-
-    // 2a. Memory count survives.
-    let post_count = mem2
-        .memory_count()
-        .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("phase-2 memory_count failed: {e}"))));
-    assert_eq!(
-        post_count,
-        1,
-        "{}",
-        fail_msg("memory not retrievable after restart (count mismatch)")
-    );
-
-    // 2b. Byte-for-byte content survives (direct get by id — the
-    // narrowest possible retrieval path, no ranking heuristics).
-    let recovered = mem2.get_memory(&stored_id).unwrap_or_else(|e| {
-        panic!(
-            "{}",
-            fail_msg(&format!(
-                "memory not retrievable after restart (get_memory id={stored_id}): {e}"
-            ))
-        )
-    });
-    assert_eq!(
-        recovered.content,
-        PAYLOAD_CONTENT,
-        "{}",
-        fail_msg("memory content mismatch after restart (byte-for-byte)")
-    );
-    assert_eq!(
-        recovered.title,
-        PAYLOAD_TITLE,
-        "{}",
-        fail_msg("memory title mismatch after restart")
-    );
-    assert!(
-        recovered.tags.iter().any(|t| t == "preserve-d8"),
-        "{}",
-        fail_msg("memory tags mismatch after restart (preserve-d8 tag missing)")
-    );
-
-    // 2c. Keyword-path recall survives.
-    let recalled_kw = mem2.recall_memories("preserve", 5).unwrap_or_else(|e| {
-        panic!(
-            "{}",
-            fail_msg(&format!("recall_memories (keyword) failed: {e}"))
-        )
-    });
-    assert!(
-        recalled_kw.iter().any(|m| m.id == stored_id),
-        "{}",
-        fail_msg("memory not retrievable after restart (keyword recall empty)")
-    );
-
-    // 2d. HNSW vector-similarity path survives. Querying with a
-    // different substring of the payload (that still shares tokens)
-    // forces the vector path to do work — the HNSW index must be
-    // intact and populated.
-    //
-    // `recall_memories` routes through `hybrid_search` when a provider
-    // is attached, which in turn calls `vector_search::search_similar`
-    // — the HNSW nearest-neighbour query entrypoint. This is the
-    // "issue a vector-similarity search" requirement from spec line 44.
-    let recalled_vec = mem2
-        .recall_memories("archon-cli restart survive", 5)
-        .unwrap_or_else(|e| {
-            panic!(
-                "{}",
-                fail_msg(&format!(
-                    "recall_memories (hybrid/vector via HNSW) failed: {e}"
-                ))
-            )
-        });
-    assert!(
-        recalled_vec.iter().any(|m| m.id == stored_id),
-        "{}",
-        fail_msg("memory not retrievable after restart (HNSW vector recall missed stored memory)")
-    );
+        // Already carries its own REQ-FOR-PRESERVE-D8 + CozoDB
+        // message, INV-PRESERVE-003 included where that applies.
+        RestartFinding::Broken(detail) => panic!("{detail}"),
+    }
 
     // ── Measurement ───────────────────────────────────────────
     //
@@ -468,5 +437,5 @@ fn cozodb_memory_persists_across_in_process_restart() {
         elapsed.as_millis()
     );
 
-    // Drop `graph2`; `tmp` drops at end of scope and cleans up.
+    // `_tmp` drops at end of scope and cleans up.
 }
