@@ -105,6 +105,53 @@ impl DocVectorStore {
         options.create_if_missing(true);
         options.set_max_open_files(256);
         options.increase_parallelism(config::num_parallelism());
+        // Turn off RocksDB's periodic stats dump. Nothing reads what it writes
+        // -- it only appends `rocksdb.stats` to the store's LOG file -- and it
+        // is the single background task that has taken this process down on two
+        // platforms.
+        //
+        // The name "periodic" is misleading, and that is what makes it
+        // dangerous. `DBImpl::StartPeriodicTaskScheduler` registers it with
+        // `run_immediately=true`, and `PeriodicTaskScheduler::Register` gives
+        // the process's first registration an initial delay of
+        // `initial_delay.fetch_add(1) % period`, which for the first one is
+        // zero. So the dump does not wait out `stats_dump_period_sec`; it
+        // starts on the shared timer thread the moment the first store in the
+        // process is opened, and then races whatever the process does next.
+        //
+        // On Linux it lost that race against the exit sequence, ran after
+        // RocksDB's own statics had been destroyed, read a null
+        // `DBPropertyInfo*` out of the destroyed property-name map and died of
+        // SIGSEGV at address 0x8; see the commentary in `cache.rs`.
+        //
+        // On Windows it deadlocks the exit drain instead. Captured live from a
+        // hung process, both halves of the cycle:
+        //
+        //   main thread   exit -> execute_onexit_table, holding the CRT onexit
+        //                 lock -> close_cached_stores_at_exit -> ~DBImpl ->
+        //                 CloseHelper -> CancelPeriodicTaskScheduler ->
+        //                 Timer::Cancel -> WaitForTaskCompleteIfNecessary,
+        //                 waiting for the timer's in-flight task
+        //   timer thread  Timer::Run -> DBImpl::DumpStats -> GetStringProperty
+        //                 -> DumpCFMapStatsWriteStall -> first touch of a
+        //                 function-local `static` -> atexit ->
+        //                 register_onexit_function -> EnterCriticalSection,
+        //                 waiting for the CRT onexit lock
+        //
+        // The task the drain waits on cannot finish, because finishing means
+        // registering a destructor through the very lock the drain holds. The
+        // process passes its tests, prints `ok`, and never exits -- which is
+        // what `cargo nextest` reported as a 240s timeout on a test that had
+        // already passed in half a second.
+        //
+        // Removing the task removes both. The timer thread is left with only
+        // `kFlushInfoLog`, whose task is a `shutdown_initiated_` check and a
+        // `LogFlush`: no lazily-initialised statics, so it never reaches
+        // `atexit`, and nothing for the drain to wait on for long.
+        // `stats_persist_period_sec` is disabled for the same reason -- its
+        // task walks the same `GetStringProperty` path.
+        options.set_stats_dump_period_sec(0);
+        options.set_stats_persist_period_sec(0);
         let db = DB::open(&options, &root)
             .with_context(|| format!("open RocksDB vector store {}", root.display()))?;
         Ok(Self {

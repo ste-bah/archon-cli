@@ -118,6 +118,33 @@ fn panicking_cached_store_open_can_be_retried() {
     assert!(DocVectorStore::acquire(&path).is_ok());
 }
 
+/// The periodic stats dump is the task that segfaulted the exit path on Linux
+/// and deadlocked it on Windows. RocksDB starts it on the first open rather
+/// than after a period, so the only defence is never registering it. Asserted
+/// through the `OPTIONS-*` file, which records what the database was opened
+/// with.
+#[test]
+fn the_store_never_schedules_rocksdbs_periodic_stats_dump() {
+    let temp = tempfile::tempdir().unwrap();
+    let _store = DocVectorStore::open(temp.path()).unwrap();
+
+    let options = std::fs::read_dir(temp.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_name().to_string_lossy().starts_with("OPTIONS-"))
+        .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+        .expect("RocksDB writes an OPTIONS-* file into the store it opens");
+
+    for key in ["stats_dump_period_sec", "stats_persist_period_sec"] {
+        let line = options
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(key))
+            .unwrap_or_else(|| panic!("{key} is absent from OPTIONS:\n{options}"));
+        assert_eq!(line, format!("{key}=0"));
+    }
+}
+
 #[test]
 fn count_vectors_does_not_decode_vector_payloads() {
     let temp = tempfile::tempdir().unwrap();
