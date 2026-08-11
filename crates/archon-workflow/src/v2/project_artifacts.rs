@@ -38,8 +38,9 @@ impl WorkflowV2ProjectArtifactContext {
     ///
     /// Contracts are host-parsed from task files — not agent-authored — which
     /// is what makes this channel safe to trust where agent-supplied
-    /// requirement paths stay restricted. See `project_artifact_contract_roots`
-    /// for the derivation and the repo-ownership guard.
+    /// requirement paths stay restricted. Roots the repository tracks are
+    /// refused, so contract-declared source paths never become artifact roots;
+    /// see `project_artifact_contract_roots` for the derivation.
     pub fn add_contract_roots(
         &mut self,
         universe: &crate::task_universe::WorkflowV2TaskUniverse,
