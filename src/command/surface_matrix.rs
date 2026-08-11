@@ -85,7 +85,7 @@ pub(crate) const COMMAND_SURFACE_ROWS: &[CommandSurfaceRow] = &[
         tui_surface: "CLI mirror",
         status: SurfaceStatus::Done,
         source_of_truth: "src/command/registry.rs",
-        notes: "Knowledge claims, entities, relations, contradictions, and search are mirrored.",
+        notes: "Knowledge claims, entities, relations, contradictions, and search are mirrored. `kbs` lists every knowledge base the store holds, which is the only way to recover a `--kb` name that was not written down.",
     },
     CommandSurfaceRow {
         cli: "archon prov ...",
@@ -380,13 +380,24 @@ mod tests {
     use super::*;
     use crate::command::registry::default_registry;
 
+    /// The doc is generated, so it has a generator rather than an editing
+    /// convention nobody can enforce: `UPDATE_COMMAND_SURFACE_DOC=1` rewrites
+    /// it from the code, the same escape hatch the generated web API types
+    /// use. Hand-editing the markdown only moves the drift.
     #[test]
     fn generated_command_surface_doc_matches_code() {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/generated/command-surface-matrix.md");
+        let rendered = render_command_surface_markdown();
+        if std::env::var("UPDATE_COMMAND_SURFACE_DOC").ok().as_deref() == Some("1") {
+            fs::write(&path, &rendered).expect("write generated command matrix doc");
+        }
 
         let generated = fs::read_to_string(path).expect("generated command matrix doc exists");
-        assert_eq!(generated, render_command_surface_markdown());
+        assert_eq!(
+            generated, rendered,
+            "the command surface doc is stale; run UPDATE_COMMAND_SURFACE_DOC=1 cargo test --bin archon generated_command_surface_doc_matches_code"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ Rows marked `PARTIAL` or `SHELL_ONLY` must carry an approved exception with an o
 | `archon providers ...` | `/providers` | Direct slash handler | DONE | `src/command/providers.rs` | Provider list, capabilities, and doctor are available in both surfaces. | - |
 | `archon docs ...` | `/docs` | Evidence browser + CLI mirror | DONE | `src/command/docs.rs + src/command/evidence_view.rs` | Document ingest/search/inspect routes through persisted document state. | - |
 | `archon video ...` | `/video` | CLI mirror | DONE | `src/command/video.rs + crates/archon-video` | Video ingest/status/inspect/frame/transcript/summary commands are mirrored. | - |
-| `archon kb ...` | `/kb` | CLI mirror | DONE | `src/command/registry.rs` | Knowledge claims, entities, relations, contradictions, and search are mirrored. | - |
+| `archon kb ...` | `/kb` | CLI mirror | DONE | `src/command/registry.rs` | Knowledge claims, entities, relations, contradictions, and search are mirrored. `kbs` lists every knowledge base the store holds, which is the only way to recover a `--kb` name that was not written down. | - |
 | `archon prov ...` | `/prov` | CLI mirror | DONE | `src/command/registry.rs` | Trace, export, and verify run through the same provenance store. | - |
 | `archon gametheory ...` | `/gametheory` | Direct slash handler | DONE | `src/command/gametheory_slash.rs` | Run, classify-only, status, inspect, replay, agents, and specimens are exposed. | - |
 | `archon completion ...` | `/completion` | CLI mirror | DONE | `src/command/registry.rs` | Completion integrity inspection and trust surfaces are mirrored. | - |

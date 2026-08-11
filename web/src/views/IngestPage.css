@@ -227,6 +227,23 @@
   color: var(--warn);
 }
 
+/* Sits above the knowledge-base list so a short list is explained where it is
+   read, not only in the jobs panel further down. */
+.ingest-kb-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+
+.ingest-kb-warnings p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--warn);
+}
+
 /* --- Store locations ---------------------------------------------------- */
 
 .ingest-store-list {

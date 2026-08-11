@@ -1,3 +1,5 @@
+mod kb;
+
 use std::{
     collections::BTreeMap,
     fs,
@@ -8,13 +10,14 @@ use std::{
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
 
+pub(crate) use kb::create_kb;
+
 use super::{
     WebRuntimePaths,
     api::EffectivePolicySummary,
     ingest::{
         WebDocStoreItem, WebIndexFailureItem, WebIndexJobItem, WebIndexQueueSummary, WebIngestJob,
-        WebIngestSummary, WebKbCreateRequest, WebKnowledgeBaseItem, WebKnowledgeStats,
-        WebVideoStoreItem, ingest_allowed,
+        WebIngestSummary, WebKnowledgeStats, WebVideoStoreItem, ingest_allowed,
     },
     inspect::PathProbe,
 };
@@ -27,46 +30,55 @@ pub(crate) fn summary(
     let (allowed, policy_reason) = ingest_allowed(policy);
     let mut warnings = Vec::new();
     let db_path = evidence_db_path(paths);
-    let mut documents = Vec::new();
-    let mut videos = Vec::new();
-    let mut knowledge_stats = WebKnowledgeStats::default();
-    if let Ok(db) = open_docs_db(paths) {
-        documents = doc_items(&db, &mut warnings);
-        videos = video_items(&db, &mut warnings);
-        knowledge_stats = kb_stats(&db, &mut warnings);
-        let index_queue = index_queue_summary(&db, &mut warnings);
-        let index_jobs = index_jobs(&db, &mut warnings);
-        let index_failures = index_failures(&db, &mut warnings);
+    let opened = open_docs_db(paths);
+    let db = opened.as_deref().ok();
+
+    // The knowledge-base listing spans the store and the filesystem, so it is
+    // built whether or not the store opened — and it reports what it could not
+    // reach rather than returning a short list silently.
+    let mut knowledge_base_warnings = Vec::new();
+    let knowledge_bases = kb::knowledge_bases(paths, db, &mut knowledge_base_warnings);
+    warnings.extend(knowledge_base_warnings.iter().cloned());
+
+    let Some(db) = db else {
+        warnings.push("document store is not readable right now".into());
         return WebIngestSummary {
             allowed,
             policy_reason,
             stores: stores(paths, db_path),
-            documents,
-            videos,
-            knowledge_bases: knowledge_bases(paths),
-            kb_stats: knowledge_stats,
+            documents: Vec::new(),
+            videos: Vec::new(),
+            knowledge_bases,
+            kb_stats: WebKnowledgeStats::default(),
             jobs,
-            index_queue,
-            index_jobs,
-            index_failures,
+            index_queue: WebIndexQueueSummary::default(),
+            index_jobs: Vec::new(),
+            index_failures: Vec::new(),
             warnings,
+            knowledge_base_warnings,
         };
-    } else {
-        warnings.push("document store is not readable right now".into());
-    }
+    };
+
+    let documents = doc_items(db, &mut warnings);
+    let videos = video_items(db, &mut warnings);
+    let knowledge_stats = kb_stats(db, &mut warnings);
+    let index_queue = index_queue_summary(db, &mut warnings);
+    let index_jobs = index_jobs(db, &mut warnings);
+    let index_failures = index_failures(db, &mut warnings);
     WebIngestSummary {
         allowed,
         policy_reason,
         stores: stores(paths, db_path),
         documents,
         videos,
-        knowledge_bases: knowledge_bases(paths),
+        knowledge_bases,
         kb_stats: knowledge_stats,
         jobs,
-        index_queue: WebIndexQueueSummary::default(),
-        index_jobs: Vec::new(),
-        index_failures: Vec::new(),
+        index_queue,
+        index_jobs,
+        index_failures,
         warnings,
+        knowledge_base_warnings,
     }
 }
 
@@ -77,42 +89,6 @@ fn stores(paths: &WebRuntimePaths, db_path: PathBuf) -> Vec<PathProbe> {
         probe("project kb", paths.cwd.join(".archon/kb")),
         probe("video artifacts", paths.cwd.join(".archon/video-artifacts")),
     ]
-}
-
-pub(crate) fn create_kb(
-    paths: &WebRuntimePaths,
-    request: &WebKbCreateRequest,
-) -> Result<WebKnowledgeBaseItem> {
-    let name = request.name.trim();
-    if name.is_empty() {
-        anyhow::bail!("knowledge base name is required");
-    }
-    let scope = if request.scope == "home" {
-        "home"
-    } else {
-        "project"
-    };
-    let root = if scope == "home" {
-        home_archon().join("kb")
-    } else {
-        paths.cwd.join(".archon/kb")
-    };
-    let dir = root.join(slugify(name));
-    fs::create_dir_all(&dir)?;
-    let readme = dir.join("README.md");
-    if !readme.exists() {
-        fs::write(
-            &readme,
-            format!(
-                "# {name}\n\n{}\n",
-                request
-                    .description
-                    .as_deref()
-                    .unwrap_or("Knowledge base notes.")
-            ),
-        )?;
-    }
-    Ok(kb_item(name, scope, &dir))
 }
 
 fn doc_items(db: &DbInstance, warnings: &mut Vec<String>) -> Vec<WebDocStoreItem> {
@@ -320,43 +296,6 @@ fn run_count(db: &DbInstance, script: &str, params: BTreeMap<String, DataValue>)
         .max(0) as u64
 }
 
-fn knowledge_bases(paths: &WebRuntimePaths) -> Vec<WebKnowledgeBaseItem> {
-    [
-        ("project", paths.cwd.join(".archon/kb")),
-        ("home", home_archon().join("kb")),
-    ]
-    .into_iter()
-    .flat_map(|(scope, root)| kb_dirs(scope, &root))
-    .collect()
-}
-
-fn kb_dirs(scope: &str, root: &Path) -> Vec<WebKnowledgeBaseItem> {
-    fs::read_dir(root)
-        .ok()
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            entry.metadata().ok()?.is_dir().then(|| {
-                let name = entry.file_name().to_string_lossy().to_string();
-                kb_item(&name, scope, &entry.path())
-            })
-        })
-        .collect()
-}
-
-fn kb_item(name: &str, scope: &str, path: &Path) -> WebKnowledgeBaseItem {
-    let (files, bytes) = dir_stats(path, 0);
-    WebKnowledgeBaseItem {
-        name: name.into(),
-        scope: scope.into(),
-        path: path.to_string_lossy().to_string(),
-        files,
-        bytes,
-        exists: path.exists(),
-    }
-}
-
 pub(crate) fn open_docs_db(paths: &WebRuntimePaths) -> Result<Arc<DbInstance>> {
     archon_docs::acquire_docs_db(evidence_db_path(paths))
 }
@@ -385,7 +324,7 @@ fn probe(label: impl Into<String>, path: PathBuf) -> PathProbe {
     }
 }
 
-fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
+pub(super) fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
     if depth > 3 {
         return (0, 0);
     }
@@ -404,24 +343,6 @@ fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
         .fold((0, 0), |(files, bytes), (child_files, child_bytes)| {
             (files + child_files, bytes + child_bytes)
         })
-}
-
-fn slugify(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-        } else if matches!(ch, ' ' | '-' | '_') && !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    out.trim_matches('-').to_string()
-}
-
-fn home_archon() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".archon")
 }
 
 fn str_cell(row: &[DataValue], index: usize) -> String {

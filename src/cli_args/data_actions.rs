@@ -110,6 +110,11 @@ pub enum KbAction {
         #[arg(long)]
         defer_index: bool,
     },
+    /// List every knowledge base in the store with its document count
+    ///
+    /// Every other verb here takes `--kb <name>` as an input filter, which
+    /// assumes you already know the name. This is the verb that tells you.
+    Kbs,
     /// List extracted claims
     Claims,
     /// List extracted entities

@@ -969,6 +969,7 @@ dependencies = [
  "archon-core",
  "archon-cozo",
  "archon-docs",
+ "archon-knowledge",
  "archon-learning",
  "archon-llm",
  "archon-memory",

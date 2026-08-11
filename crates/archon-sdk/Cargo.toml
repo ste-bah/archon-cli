@@ -16,6 +16,9 @@ sdk-minimal = []
 archon-core = { path = "../archon-core" }
 archon-cognitive = { path = "../archon-cognitive" }
 archon-docs = { path = "../archon-docs" }
+# The web ingest tab lists knowledge bases from the store, not just from
+# `.archon/kb` directories, so it needs the same enumeration the CLI uses.
+archon-knowledge = { path = "../archon-knowledge" }
 archon-llm = { path = "../archon-llm" }
 archon-learning = { path = "../archon-learning" }
 archon-cozo = { path = "../archon-cozo" }

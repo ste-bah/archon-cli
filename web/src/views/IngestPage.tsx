@@ -16,6 +16,7 @@ import type {
 } from "../api/generated/web";
 import { DeleteDocument } from "./ingest/DeleteDocument";
 import { IndexControls } from "./ingest/IndexControls";
+import { KbWarnings } from "./ingest/KbWarnings";
 import { StoreProbes } from "./ingest/StoreProbes";
 import { UploadPanel } from "./ingest/UploadPanel";
 import "./IngestPage.css";
@@ -225,6 +226,7 @@ export function IngestPage({ ingest, policy, uploadPolicy }: IngestPageProps) {
           items={items}
           selected={selected}
           onSelect={(item) => setSelectedKey(itemKey(item))}
+          kbWarnings={tab === "kbs" ? (ingest?.knowledgeBaseWarnings ?? []) : []}
           deleteEnabled={policy?.web.allowDocumentDeletion ?? false}
           deletePolicyReason={
             policy?.web.allowDocumentDeletion
@@ -273,6 +275,7 @@ function Viewer({
   items,
   selected,
   onSelect,
+  kbWarnings,
   deleteEnabled,
   deletePolicyReason,
 }: {
@@ -281,6 +284,7 @@ function Viewer({
   items: ViewerItem[];
   selected?: ViewerItem;
   onSelect: (item: ViewerItem) => void;
+  kbWarnings: string[];
   deleteEnabled: boolean;
   deletePolicyReason: string;
 }) {
@@ -300,6 +304,7 @@ function Viewer({
           </button>
         ))}
       </div>
+      <KbWarnings warnings={kbWarnings} />
       <div className="ingest-viewer-grid">
         <div className="ingest-item-list">
           {items.map((item) => (
@@ -452,7 +457,9 @@ function viewerItems(summary: WebIngestSummary | undefined, tab: ViewerTab): Vie
 function itemKey(item: ViewerItem) {
   if (isVideoItem(item)) return item.videoId;
   if (isDocItem(item)) return item.documentId;
-  return item.path;
+  // Keyed by name, not path: a knowledge base that lives only in the store has
+  // no directory, so every such row would share an empty path.
+  return item.name;
 }
 
 function itemTitle(item: ViewerItem) {
@@ -461,10 +468,12 @@ function itemTitle(item: ViewerItem) {
   return item.name;
 }
 
-function itemSubtitle(item: ViewerItem) {
+export function itemSubtitle(item: ViewerItem) {
   if (isDocItem(item)) return `${item.status} · ${item.chunks} chunks`;
   if (isVideoItem(item)) return `${item.status} · ${item.frames} frames`;
-  return `${item.scope} · ${item.files} files`;
+  // The `--kb` form is spelled out because the name is the thing a reader came
+  // here for, and it is not always the directory slug shown on disk.
+  return `--kb ${item.name} · ${item.origin} · ${item.documents} docs · ${item.files} files`;
 }
 
 function isDocItem(item: ViewerItem): item is WebDocStoreItem {

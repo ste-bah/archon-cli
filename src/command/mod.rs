@@ -101,6 +101,8 @@ pub(crate) mod hooks;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
+/// `kb kbs` — the only surface that enumerates knowledge-base names.
+pub(crate) mod kb_kbs;
 /// `kb recall` — the R7 unified recall facade's live call site.
 pub(crate) mod kb_recall;
 /// Real memory/docs/code-index stores behind `archon-knowledge`'s recall ports.

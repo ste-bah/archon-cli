@@ -34,6 +34,12 @@ pub struct WebIngestSummary {
     pub index_jobs: Vec<WebIndexJobItem>,
     pub index_failures: Vec<WebIndexFailureItem>,
     pub warnings: Vec<String>,
+    /// Why the knowledge-base listing may be short, if it is.
+    ///
+    /// Kept separate from `warnings` so the tab that renders the list can say
+    /// so in place. An unreadable store and a store with no knowledge bases
+    /// both produce an empty list, and they must not look the same.
+    pub knowledge_base_warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -70,12 +76,20 @@ pub struct WebVideoStoreItem {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct WebKnowledgeBaseItem {
+    /// The exact string to pass to `--kb`. Where a directory slug and a stored
+    /// `kb_id` differ this is the `kb_id`, because that is what `--kb` matches.
     pub name: String,
     pub scope: String,
     pub path: String,
     pub files: u64,
     pub bytes: u64,
     pub exists: bool,
+    /// Where this knowledge base is recorded: `db`, `dir`, or `both`. Shown so
+    /// a split is visible, never used to decide whether to list it.
+    pub origin: String,
+    /// Documents attached in the store. Always zero for a directory-only
+    /// knowledge base, which has no membership rows.
+    pub documents: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
@@ -184,6 +198,15 @@ pub struct WebKbCreateResponse {
     pub knowledge_base: Option<WebKnowledgeBaseItem>,
 }
 
+/// Status for an action policy refused.
+///
+/// Both mutating handlers here used to answer `200 OK` with `accepted: false`,
+/// so a caller that checked only the status read a denial as a success and
+/// waited for a knowledge base or an ingest job that was never going to
+/// arrive (#170). The body still carries the decision and its reason; the
+/// status is what makes the refusal impossible to miss.
+const DENIED_STATUS: StatusCode = StatusCode::FORBIDDEN;
+
 pub(crate) async fn summary_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(resp) = check_auth(&state, &headers) {
         return resp;
@@ -221,7 +244,7 @@ pub(crate) async fn run_handler(
     let decision = ingest_decision(&state.api.policy(), request.confirmed);
     if !decision.allowed {
         return (
-            StatusCode::OK,
+            DENIED_STATUS,
             Json(WebIngestRunResponse {
                 accepted: false,
                 decision,
@@ -259,7 +282,7 @@ pub(crate) async fn create_kb_handler(
     let decision = ingest_decision(&state.api.policy(), request.confirmed);
     if !decision.allowed {
         return (
-            StatusCode::OK,
+            DENIED_STATUS,
             Json(WebKbCreateResponse {
                 accepted: false,
                 decision,
@@ -355,5 +378,42 @@ mod tests {
         assert_eq!(tokio::spawn(async { 2 }).await.unwrap(), 2);
         release.send(()).unwrap();
         assert_eq!(work.await.unwrap().unwrap(), 1);
+    }
+
+    /// A refusal has to be visible to a caller that only looks at the status
+    /// line. Both mutating handlers in this module answered `200 OK` with
+    /// `accepted: false`, which reads as "done" to anything that does not
+    /// unpack the body.
+    #[test]
+    fn a_policy_refusal_does_not_answer_with_a_success_status() {
+        assert!(
+            !DENIED_STATUS.is_success(),
+            "a denial must not carry a 2xx status, got {DENIED_STATUS}"
+        );
+        assert_eq!(DENIED_STATUS, StatusCode::FORBIDDEN);
+    }
+
+    /// The status is the loud part; the body still has to explain why, or the
+    /// refusal is untraceable.
+    #[test]
+    fn a_refused_create_still_carries_its_reason() {
+        let policy = denying_policy();
+        let decision = ingest_decision(&policy, true);
+        assert!(!decision.allowed);
+        let response = WebKbCreateResponse {
+            accepted: false,
+            decision,
+            knowledge_base: None,
+        };
+        assert!(!response.accepted);
+        assert!(
+            response.decision.policy_reason.contains("denied"),
+            "unexpected reason: {}",
+            response.decision.policy_reason
+        );
+    }
+
+    fn denying_policy() -> EffectivePolicySummary {
+        EffectivePolicySummary::default_safe()
     }
 }

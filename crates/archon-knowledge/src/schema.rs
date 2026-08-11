@@ -131,6 +131,21 @@ pub const KB_CONTRADICTIONS_SCHEMA: &str = r#":create kb_contradictions {
     created_at: String
 }"#;
 
+/// Names declared as knowledge bases, independent of whether any document has
+/// been attached to them yet.
+///
+/// `doc_kb_memberships` can only record a name that already has a document, so
+/// a knowledge base created up front — the web workbench does exactly that —
+/// had nowhere to live in the store and was invisible to every other surface
+/// (#170). This relation is that home: it holds the `kb_id` a caller must pass
+/// to `--kb`, so an empty knowledge base is still enumerable.
+pub const KB_REGISTRY_SCHEMA: &str = r#":create kb_registry {
+    kb_id: String =>
+    scope: String,
+    description: String,
+    created_at: String
+}"#;
+
 pub fn ensure_knowledge_schema(db: &DbInstance) -> Result<()> {
     for script in [
         KB_CLAIMS_SCHEMA,
@@ -138,6 +153,7 @@ pub fn ensure_knowledge_schema(db: &DbInstance) -> Result<()> {
         KB_RELATIONS_SCHEMA,
         KB_SOURCE_QUALITY_SCHEMA,
         KB_CONTRADICTIONS_SCHEMA,
+        KB_REGISTRY_SCHEMA,
     ] {
         run_create(db, script)?;
     }
@@ -198,6 +214,7 @@ mod tests {
             "kb_relations",
             "kb_source_quality",
             "kb_contradictions",
+            "kb_registry",
         ] {
             assert!(names.contains(&expected.to_string()), "missing {expected}");
         }

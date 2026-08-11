@@ -255,13 +255,36 @@ export type CorpusSourcePreview = { source: CorpusSource, content: string, lineC
  */
 previewMode: CorpusPreviewMode, policyReason: string, };
 
-export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, indexQueue: WebIndexQueueSummary, indexJobs: Array<WebIndexJobItem>, indexFailures: Array<WebIndexFailureItem>, warnings: Array<string>, };
+export type WebIngestSummary = { allowed: boolean, policyReason: string, stores: Array<PathProbe>, documents: Array<WebDocStoreItem>, videos: Array<WebVideoStoreItem>, knowledgeBases: Array<WebKnowledgeBaseItem>, kbStats: WebKnowledgeStats, jobs: Array<WebIngestJob>, indexQueue: WebIndexQueueSummary, indexJobs: Array<WebIndexJobItem>, indexFailures: Array<WebIndexFailureItem>, warnings: Array<string>, 
+/**
+ * Why the knowledge-base listing may be short, if it is.
+ *
+ * Kept separate from `warnings` so the tab that renders the list can say
+ * so in place. An unreadable store and a store with no knowledge bases
+ * both produce an empty list, and they must not look the same.
+ */
+knowledgeBaseWarnings: Array<string>, };
 
 export type WebDocStoreItem = { documentId: string, sourcePath: string, mediaType: string, status: string, chunks: number, pages: number, artifacts: number, ocrRuns: number, discoveredAt: string, };
 
 export type WebVideoStoreItem = { videoId: string, documentId: string, title: string, source: string, status: string, durationMs: number, chunks: number, transcriptSegments: number, frames: number, };
 
-export type WebKnowledgeBaseItem = { name: string, scope: string, path: string, files: number, bytes: number, exists: boolean, };
+export type WebKnowledgeBaseItem = { 
+/**
+ * The exact string to pass to `--kb`. Where a directory slug and a stored
+ * `kb_id` differ this is the `kb_id`, because that is what `--kb` matches.
+ */
+name: string, scope: string, path: string, files: number, bytes: number, exists: boolean, 
+/**
+ * Where this knowledge base is recorded: `db`, `dir`, or `both`. Shown so
+ * a split is visible, never used to decide whether to list it.
+ */
+origin: string, 
+/**
+ * Documents attached in the store. Always zero for a directory-only
+ * knowledge base, which has no membership rows.
+ */
+documents: number, };
 
 export type WebKnowledgeStats = { chunks: number, claims: number, entities: number, relations: number, contradictions: number, };
 

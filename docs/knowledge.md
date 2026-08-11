@@ -98,6 +98,32 @@ Inside the TUI, use the same slash forms:
 /kb search --kb trading-elliott-wave "wave 3 invalidation" --mode hybrid
 ```
 
+## Listing Buckets
+
+`--kb <name>` is a filter, so every command above assumes you already know the
+name. `kb kbs` is the one that tells you, listing every bucket the store holds
+with its document count:
+
+```bash
+archon kb kbs
+```
+
+```text
+/kb kbs
+```
+
+The name it prints first on each line is the exact string `--kb` matches. It is
+not always the directory slug the web workbench shows under `.archon/kb/`: a
+bucket created from the browser as "Trading research" is stored as
+`Trading research` and shown as a `trading-research` directory, and `--kb`
+wants the former.
+
+The web workbench Ingest page lists the same set on its `kbs` tab, regardless of
+whether a bucket was created there, from the CLI, or from the TUI. Each row
+names its origin (`db`, `dir`, or `both`) so a bucket that exists on only one
+side is visible rather than hidden, and a listing that could not read the store
+says so instead of rendering as an empty tab.
+
 `kb reprocess` repairs every document currently attached to the bucket. It keeps
 the membership rows and document IDs, but refreshes generated OCR, PDF-image,
 VLM-description, chunk, embedding, and provenance rows using the current project
@@ -157,6 +183,7 @@ archon kb claims
 archon kb entities
 archon kb relations
 archon kb contradictions
+archon kb kbs
 archon kb stats
 archon docs compile
 archon docs answer "what does the policy require?"

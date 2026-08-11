@@ -98,6 +98,7 @@ pub(crate) async fn handle_kb_command_at(db_path: &Path, action: KbAction) -> Re
         KbAction::Reprocess { kb, defer_index } => {
             crate::command::kb_reprocess::handle_reprocess(&kb, defer_index).await
         }
+        KbAction::Kbs => crate::command::kb_kbs::print_kbs(&db),
         KbAction::Claims => print_claims(&engine).await,
         KbAction::Entities => print_entities(&engine).await,
         KbAction::Relations => print_relations(&engine).await,

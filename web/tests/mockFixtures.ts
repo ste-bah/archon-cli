@@ -124,8 +124,8 @@ export function videoItem(videoId: string, documentId: string, title: string, so
   return { videoId, documentId, title, source, status, durationMs, chunks, transcriptSegments, frames };
 }
 
-export function kbItem(name: string, scope: string, path: string, files: number, bytes: number) {
-  return { name, scope, path, files, bytes, exists: true };
+export function kbItem(name: string, scope: string, path: string, files: number, bytes: number, origin = "both", documents = 3) {
+  return { name, scope, path, files, bytes, exists: true, origin, documents };
 }
 
 export function ingestJob(jobId: string, label: string, target: string, command: string, status: string) {

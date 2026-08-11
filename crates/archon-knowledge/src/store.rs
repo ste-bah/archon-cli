@@ -1,4 +1,10 @@
+mod kbs;
 mod rows;
+
+pub use kbs::{
+    KnowledgeBaseRow, RegisteredKb, list_kb_membership_counts, list_kbs, list_registered_kbs,
+    register_kb,
+};
 
 use std::collections::BTreeMap;
 

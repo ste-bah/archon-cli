@@ -227,6 +227,7 @@ export async function mockApi(page: Page, options: MockApiOptions = {}) {
       knowledgeBases: [
         kbItem("project-evidence", "project", "/repo/.archon/kb/project-evidence", 3, 9000),
       ],
+      knowledgeBaseWarnings: [],
       kbStats: { chunks: 84, claims: 12, entities: 9, relations: 5, contradictions: 1 },
       jobs: [
         ingestJob("job-1", "design.pdf", "docs", "archon docs ingest /repo/hld/design.pdf", "completed"),
