@@ -32,6 +32,7 @@ pub fn ensure_learning_schema(db: &DbInstance) -> Result<()> {
     ensure_agent_profile_versions(db)?;
     ensure_agent_shadow_evaluations(db)?;
     ensure_memory_promotion_candidates(db)?;
+    ensure_garden_governed_proposals(db)?;
     ensure_permission_runtime_events(db)?;
     ensure_provider_auth_profiles(db)?;
     ensure_provider_rate_limit_windows(db)?;
@@ -295,6 +296,32 @@ fn ensure_memory_promotion_candidates(db: &DbInstance) -> Result<()> {
             evidence_ids_json: String default "[]",
             proposal_required: Bool default true,
             created_at: String,
+        }"#,
+    )
+}
+
+/// Changes a background consolidation pass proposed, and did not make.
+///
+/// `status` defaults to `Pending` at the storage layer as well as in code: a row
+/// that somehow arrives without one must read as undecided, never as consent.
+/// `applied_ref` is what an applied change touched, so a rollback has a target
+/// rather than having to re-derive one.
+fn ensure_garden_governed_proposals(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create garden_governed_proposals {
+            proposal_id: String =>
+            proposal_kind: String,
+            subject_id: String,
+            subject_title: String default "",
+            excerpt: String default "",
+            detail: String default "",
+            payload_json: String default "{}",
+            run_id: String default "",
+            status: String default "Pending",
+            applied_ref: String default "",
+            created_at: String,
+            decided_at: String default "",
         }"#,
     )
 }

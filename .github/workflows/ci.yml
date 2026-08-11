@@ -10,6 +10,24 @@ on:
 permissions:
   contents: read
 
+# Supersede an in-flight run when a PR branch gets a new push, but NEVER on
+# main.
+#
+# A full matrix here is expensive — roughly 36 min ubuntu, 58 macOS, 87 Windows
+# — so every superseded PR run burns over two hours of runner time verifying a
+# tree nobody will merge. Two of those happened in a single afternoon before
+# this was added.
+#
+# `cancel-in-progress` is deliberately an expression rather than `true`. A
+# cancelled run on main is exactly how 3b521a72 reached main unverified, and it
+# then caused three separate failures — an unformatted tree, a broken
+# `AUTONOMY_RULE` assertion, and the capability-hoisting regression behind #163
+# that made a 15-task workflow run produce one file. On main the run must always
+# finish, however long it takes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -418,6 +436,29 @@ jobs:
             echo "Update the stale side, normally: cp config.toml .archon/config.toml"
             exit 1
           fi
+
+  r0-entry-gate:
+    name: r0-entry-gate (learning prerequisite closure)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 is load-bearing, not caution. The gate re-checks that
+      # every recorded closure commit is still an ancestor of HEAD, and on the
+      # default shallow checkout `git merge-base --is-ancestor` cannot answer,
+      # so `--require-commits` below would fail the job rather than pass it
+      # quietly. Full history is what makes the commit half of the evidence
+      # mean anything.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: R0 entry gate (findings 9, 11, 17, 40-43)
+        run: bash scripts/check-r0-entry-gate.sh --require-commits
+      # Same reasoning as the preserve-invariants self-test: a gate nobody has
+      # watched go red is indistinguishable from a gate that cannot.
+      - name: R0 entry gate self-test (prove it can go red)
+        run: bash scripts/check-r0-entry-gate.sh --self-test
+      - name: R0 entry gate is wired (no uncalled artefacts)
+        run: bash scripts/tests/r0-entry-gate-wired.sh
 
   preserve-invariants:
     name: preserve-invariants (TASK-AGS-OBS-918)

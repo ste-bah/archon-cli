@@ -107,7 +107,7 @@ On a memory-constrained host, cap parallelism (`-j<N>`, `--test-threads=<N>`) to
 
 Run locally and confirm **exit 0 before any PR or push to main**. Steps fail fast in order:
 
-1. FileSizeGuard · 2. BannedImports · 3. `cargo fmt --check` · 4. `cargo clippy -- -D warnings` · 5. `cargo test --workspace` · 6. baseline test-list diff · 7. `cargo bench --no-run`.
+1. FileSizeGuard · 2. BannedImports · 2b. R0 entry gate (`scripts/check-r0-entry-gate.sh`) · 3. `cargo fmt --check` · 4. `cargo clippy -- -D warnings` · 5. `cargo test --workspace` · 6. baseline test-list diff · 7. `cargo bench --no-run`.
 
 `./scripts/ci-gate.sh` (full) or `--skip-bench` (faster). TUI gates (`scripts/tui-*.sh`) run separately for `crates/archon-tui/`. The 6-gate Sherlock-narrative flow is **root archon only** — not archon-cli; don't apply it here.
 

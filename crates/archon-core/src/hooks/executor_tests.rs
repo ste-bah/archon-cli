@@ -292,7 +292,7 @@ async fn windows_hook_timeout_kills_descendant_process() {
         .expect("hook invocation exceeded its outer deadline")
         .expect("hook invocation task panicked");
 
-    assert_eq!(output.outcome, HookOutcome::Blocking);
+    assert_eq!(output.outcome, HookOutcome::Blocking, "result={output:?}");
     wait_until_process_is_absent(&pid).await;
 }
 

@@ -106,6 +106,29 @@ Event payloads are sanitized before persistence. Provider-private reasoning
 fields such as `thinking`, `reasoning_encrypted`, OAuth tokens, API keys, and
 authorization headers are stripped.
 
+### `events.jsonl` kinds
+
+Each line carries a `seq`, a `run_id`, a `kind` and a payload. The lifecycle
+kinds are `started`, `stage_started`, `stage_completed`, `stage_failed`,
+`stage_stalled`, `stage_skipped`, `forced_accepted`, `resumed`, `paused`,
+`cancelled`, `completed`, `learning_recorded` and `blocking_gap_detected`; the
+write coordinator adds ten `write_coordination_*` kinds of its own (see
+[write coordinator](../operations/workflow-write-coordinator.md)). The
+authoritative list is `WorkflowEventKind` in `crates/archon-workflow/src/events.rs`.
+
+**`blocking_gap_detected` is the one to filter on when watching for failure.** A
+write-capable fanout could record a residual gap with `severity: blocking` and
+nothing in the stream said so, so a run that lost an entire remediation wave
+presented as healthy for its whole duration while `v2/results/` recorded the
+failure. One event is emitted per distinct blocking gap, carrying the gap id,
+description, severity, call id and result path — enough to learn *which* gap
+blocked without opening `v2/results/`. It is a kind of its own rather than a
+reused one on purpose: `stage_completed` with a non-accepted status would tell
+the TUI and the web API that a discarded wave is done, and reusing `stage_failed`
+would fabricate a retry in the topology corpus, because the tap maps that kind to
+`TraceKind::Retry`. The `stage_failed` event for the same call is still emitted,
+so no consumer loses a signal it already had.
+
 Live stage execution also has an evidence contract. Stage agents receive a
 structured input envelope with `stage_input`, upstream `dependencies`, and
 `source_files` extracted from the workflow task or stage payload. Fan-out stages
@@ -119,6 +142,39 @@ or has empty findings because required file/artifact content was absent, Archon
 marks the stage failed. Quality gates inspect upstream artifacts for the same
 blocked/no-evidence signals, so hollow live runs cannot pass merely because an
 agent returned a polite report.
+
+### Declared artifacts
+
+An authored `workflow.js` declares `requiredArtifacts` on a write-capable call.
+Those paths are resolved against the project root, printed into the agent's
+prompt under "Resolved Project Artifact Paths", and checked on return. Three
+rules keep that loop from certifying something that was never written.
+
+**A declared artifact must be a regular, non-empty file.** All four checks — the
+declared-artifact contract, the Existing/Missing classification behind artifact
+evidence, task-completion credit, and which artifacts reach the final report —
+asked `Path::exists()`, which says yes to a directory and yes to a zero-byte
+file, so a fabricated deliverable could appear in the run's most visible output.
+A failing candidate now reports which of the three it was.
+
+**An entry must look like a path.** `requiredArtifacts` accepted any non-empty
+string, and `workflow.js` is agent-authored, so an acceptance-criterion sentence
+was one line away from being resolved against the project root and printed as a
+path under "write every file listed above" — which is how directories named
+after prose, nesting wherever the prose contained a slash, came to exist in
+project roots. Prose, oversize and control-character entries now refuse the whole
+call rather than being dropped quietly, and the refusals are carried into the
+prompt under "Refused Declared Artifact Paths" with an explicit instruction not
+to create them. Immediate children of the project root are also scanned at the
+end of the run, and offenders demote an otherwise-accepted report to
+needs-review.
+
+**A template expands or fails.** `${PROJECT_ROOT}` is bound because the host
+knows it; unset is an error, never an empty substitution that turns an absolute
+path relative. Every other `${...}` is unbindable and yields a fail-closed
+verifier naming the token. Note the different rule for a task's
+`deliverable_contracts`, where `${...}` — `${PROJECT_ROOT}` included — is
+refused outright.
 
 ## Command surface
 

@@ -19,6 +19,18 @@ export interface LiveFeed {
   status: LiveStatus;
   /** Times the cursor expired and local state was dropped and refetched. */
   recoveries: number;
+  /**
+   * `nextCursor` of the backlog snapshot, i.e. the first cursor the server had
+   * not issued yet when this client started listening.
+   *
+   * Everything below it is history that whatever fetched a surface has already
+   * seen; everything at or above it happened while we were watching. Consumers
+   * that react to events — not just count them — need that line, otherwise the
+   * backlog looks like a burst of brand-new activity on every page load.
+   *
+   * `undefined` until the first snapshot lands.
+   */
+  backlogCursor: number | undefined;
 }
 
 /**
@@ -31,6 +43,7 @@ export function useLiveEvents(): LiveFeed {
   const [events, setEvents] = useState<WebLiveEvent[]>([]);
   const [status, setStatus] = useState<LiveStatus>("connecting");
   const [recoveries, setRecoveries] = useState(0);
+  const [backlogCursor, setBacklogCursor] = useState<number | undefined>(undefined);
   const cursor = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -48,6 +61,7 @@ export function useLiveEvents(): LiveFeed {
     const loadSnapshot = async () => {
       const snapshot = await apiClient.liveSnapshot();
       cursor.current = snapshot.nextCursor;
+      setBacklogCursor(snapshot.nextCursor);
       setEvents([...snapshot.events].reverse().slice(0, FEED_LIMIT));
     };
 
@@ -103,5 +117,5 @@ export function useLiveEvents(): LiveFeed {
     };
   }, []);
 
-  return { events, status, recoveries };
+  return { events, status, recoveries, backlogCursor };
 }

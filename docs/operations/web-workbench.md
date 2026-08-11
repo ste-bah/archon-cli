@@ -141,12 +141,18 @@ right Archon process and project directory.
 The task board tab shows what agents have raised for each other: the
 `board_items` rows, as a board.
 
-**It is not a workflow progress view.** A running workflow does not populate it,
-and an empty board during a run is the normal case — items appear only when an
-agent chooses to hand a finding to another agent. Workflow stages and agents are
-on the **Workflows** tab. The board's connection to a workflow is the drain
-gate, which reads it once at the run's terminal point and refuses to accept a
-final report over anything outstanding; it is an enforcement point, not a feed.
+**A running workflow does populate it, as notes.** Every stage branch raises a
+board item on the run's own partition when it dispatches and closes it when it
+unwinds, so the board fills as the run proceeds. Those items are `note` kind
+deliberately: the drain gate refuses a run that still owns an unresolved
+**issue**, and a branch closes `in_review` by design, so mirroring branches as
+issues would make every run block on itself.
+
+**It is still not a stage progress view.** A note says a branch was dispatched
+and how it ended, not where the stage is; the per-stage detail and the agents
+themselves are on the **Workflows** tab. The board's other connection to a
+workflow is the drain gate, which reads the partition at the run's terminal
+point and refuses to accept a final report over anything outstanding.
 
 | Area | Shows |
 |---|---|
@@ -169,8 +175,10 @@ All eight statuses get a column rather than being grouped into a tidier five.
 The distinctions are load-bearing: the drain gate does not count `escalated` as
 done, and `resolved`, `promoted` and `declined` are three different endings.
 
-The tab is read-only — every route behind it is a `GET`. The board is written by
-agents through `BoardRaise`, `BoardClaim` and `BoardResolve`. See
+The tab is read-only — every route behind it is a `GET`. The board is written
+from two directions: by agents, through `BoardRaise`, `BoardClaim` and
+`BoardResolve`; and by the host, when a workflow stage branch is dispatched
+through either of the two V2 lifecycle paths. See
 [agent task board](../architecture/agent-task-board.md) for the design and
 [multi-agent handoffs](../cookbook/multi-agent-handoffs.md) for how agents use
 it.
@@ -190,12 +198,20 @@ Current foundation behaviour:
 | Area | Shows |
 |---|---|
 | Conversation shell | prompt area, recent saved turns, pending assistant state, and local web-session responses |
-| Attachments | file picker, upload-intent validation, accepted attachment chips, and stored-upload status |
+| Attachments | file picker, upload-intent validation, accepted attachment chips, stored-upload status, and the docs id the file was ingested as |
 | Auth state | whether the web session is loopback or token-protected |
 | History | last saved turns loaded from the web chat ledger, with a refresh control |
 
 When uploads are enabled by policy, attachment metadata is checked before the
 file is accepted. Uploads do not bypass normal tool, file, or policy gates.
+
+An attachment that reached the docs store reports the id it was ingested as, and
+the submitted message renders it as "ingested as `<id>`". The id is absent when
+the file was never ingested — rejected by policy, or the ingest failed — and
+absent is spelled as absent rather than as an empty string, so the UI can tell
+"no answer" from a real one. Until this was returned, the id existed only inside
+the model's prompt.
+
 Submitted web-chat messages are appended to
 `~/.archon/web/chat.messages.jsonl` for auditability. The browser calls
 `GET /api/chat/history` on page load to restore the latest ledger rows and uses
@@ -254,12 +270,35 @@ docs ...`, `/kb`, and related document-ingest workflows.
 |---|---|
 | Roots | repository docs, `.archon/docs`, `.archon/docs/inbox`, `.archon/docs/images`, and other configured roots |
 | Source list | path, type, size, excerpts, match scores |
-| Preview | safe text preview for files inside allowed corpus roots |
+| Preview | safe text preview, or a rendered PDF, for files inside allowed corpus roots |
 | Search | bounded ranked keyword search over source names, paths, and preview chunks |
 | Chunk hits | line start, excerpt, score, and embedding/index hint |
 
 The browser preview is read-only and rooted. It refuses paths outside the known
-corpus roots. Full ingestion still happens through the CLI/TUI:
+corpus roots.
+
+**PDFs render in the browser.** The preview response carries a `preview_mode` of
+`text`, `pdf` or `unsupported`. That enum is what decides the client's render
+path; `preview_available` remains beside it, but on its own a boolean could only
+ever say text or nothing, which is what made a PDF report as unpreviewable while
+its own chunks were being returned as search hits. A `pdf` preview carries no
+`content`: the
+bytes come from `GET /api/corpus/source/bytes`, served with `nosniff`,
+`no-store`, an attachment disposition and its own `default-src 'none'; sandbox`,
+and the client fetches them into the renderer rather than navigating to the URL.
+Reads are capped and still pass the corpus-root containment check.
+
+The renderer is contained on purpose, because we render documents users ingest
+from arbitrary URLs. PDF.js runs with `enableScripting: false` and
+`enableXfa: false`, every page renders with annotations disabled, and the shell
+is served under a CSP whose `script-src` is exactly `'self'` and
+`'wasm-unsafe-eval'` — the latter for the JPX and JBIG2 decoders, and it does
+not permit `eval` — with `object-src 'none'` closing the browser's own plugin
+PDF path. The whole PDF.js runtime is a local asset, so nothing reaches for a
+CDN the CSP would then block. A binary that is neither text nor PDF renders the
+server's stated reason rather than a placeholder.
+
+Full ingestion still happens through the CLI/TUI:
 
 ```bash
 archon docs ingest .archon/docs/inbox

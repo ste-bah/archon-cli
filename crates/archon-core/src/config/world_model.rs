@@ -21,6 +21,7 @@ pub struct WorldModelConfig {
     pub eval: WorldModelEvalConfig,
     pub cold_start: WorldModelColdStartConfig,
     pub auto_trainer: WorldModelAutoTrainerConfig,
+    pub replay: WorldModelReplayConfig,
     pub guardrails: WorldModelGuardrailsConfig,
     pub retention: WorldModelRetentionConfig,
 }
@@ -46,6 +47,7 @@ impl Default for WorldModelConfig {
             eval: WorldModelEvalConfig::default(),
             cold_start: WorldModelColdStartConfig::default(),
             auto_trainer: WorldModelAutoTrainerConfig::default(),
+            replay: WorldModelReplayConfig::default(),
             guardrails: WorldModelGuardrailsConfig::default(),
             retention: WorldModelRetentionConfig::default(),
         }
@@ -358,6 +360,42 @@ impl Default for WorldModelAutoTrainerConfig {
             first_run_threshold: 300,
             max_runtime_ms: 300_000,
             tick_interval_ms: 60_000,
+        }
+    }
+}
+
+/// Surprise-weighted replay — `[learning.world_model.replay]`.
+///
+/// `prioritized_enabled` is the only key that changes what the trainer learns
+/// from, and it is `false` by default: prioritised replay moves the training
+/// distribution, so it stays a shadow computation until an operator turns it on
+/// with matched baseline/canary evidence in hand. The other keys may only make
+/// replay more conservative — `ReplayPolicy::clamped` narrows anything that
+/// exceeds the crate's hard bounds, so a hand-edited value cannot widen one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldModelReplayConfig {
+    pub prioritized_enabled: bool,
+    pub held_out_fraction: f32,
+    pub batch_size: usize,
+    pub prioritized_fraction: f32,
+    pub max_surprise_weight: f32,
+    pub max_decile_share: f32,
+    pub seed: u64,
+    pub split_version: u32,
+}
+
+impl Default for WorldModelReplayConfig {
+    fn default() -> Self {
+        Self {
+            prioritized_enabled: false,
+            held_out_fraction: 0.2,
+            batch_size: 512,
+            prioritized_fraction: 0.5,
+            max_surprise_weight: 4.0,
+            max_decile_share: 0.40,
+            seed: 0x5713_2C9E_A1B4_0F17,
+            split_version: 1,
         }
     }
 }

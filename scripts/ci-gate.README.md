@@ -37,6 +37,7 @@ intentionally does not.
 |---|-----------------|----------------------------------------------|--------------|
 | 1 | file-sizes      | ≤500 lines per file (NFR-FOR-D4)             | TASK-AGS-002 |
 | 2 | banned-imports  | No `mcp__memorygraph__`, no legacy shims     | TASK-AGS-003 |
+| 2b| r0-entry-gate   | Learning prerequisites 9/11/17/40–43 closed  | issue #86    |
 | 3 | fmt             | `cargo fmt --all -- --check`                 | stdlib       |
 | 4 | clippy          | `-D warnings` workspace-wide                 | stdlib       |
 | 5 | test            | `cargo test --workspace -- --test-threads=2` | TASK-AGS-007 |
@@ -50,8 +51,8 @@ messages cite which task owns the missing piece.
 ## Flags
 
 - `--only <step>` — run a single step and exit. Step keys are:
-  `file-sizes`, `banned-imports`, `fmt`, `clippy`, `test`, `baseline-diff`,
-  `bench`. Useful for local debugging.
+  `file-sizes`, `banned-imports`, `r0-entry-gate`, `fmt`, `clippy`, `test`,
+  `baseline-diff`, `bench`. Useful for local debugging.
 - `--skip-bench` — skip step 7. **Local dev convenience only.** CI must
   always run the full pipeline; this flag exists for contributors without
   the criterion build cached.

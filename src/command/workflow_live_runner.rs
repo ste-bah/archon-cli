@@ -1,10 +1,17 @@
 use std::sync::Arc;
 
+use archon_tools::board::DelegatedOutcome;
 use archon_workflow::{
     ProviderTier, SharedWorkflowUiSink, StageKind, StageRunOutput, StageRunRequest,
     WorkflowActivityStatus, WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
     WorkflowLlmClient, WorkflowStageRunner, WriteBoundaryProbe,
 };
+
+/// Child of this module, not a sibling: the board item's identity is derived
+/// from the same session id and ordinal this file mints, and the two belong
+/// where they can be read together.
+#[path = "workflow_live_stage_board.rs"]
+pub(crate) mod workflow_live_stage_board;
 
 use archon_workflow::agent_select::select_workflow_agent_key;
 use archon_workflow::llm_retry::run_agent_with_transient_retry;
@@ -12,6 +19,7 @@ use archon_workflow::stage_activity::{request_target_repository_root, required_a
 use archon_workflow::stage_command_policy::command_execution_stage;
 use archon_workflow::stage_item_output::{item_output_needs_schema_repair, repair_item_output};
 use archon_workflow::stage_prompt::{workflow_prompt, workflow_stage_system_context};
+use workflow_live_stage_board::{StageBoardItem, stage_board_outcome};
 
 pub(crate) struct PipelineWorkflowRunner {
     pub(crate) llm: Arc<dyn WorkflowLlmClient>,
@@ -58,16 +66,24 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             "stage running",
         )
         .await?;
+        // On the board before the provider is called, and claimed, because that
+        // is what is true from this point on: an agent is holding this branch.
+        // Raised here rather than after the call so a stage that dies in the
+        // provider still leaves a record of having been dispatched.
+        let session_id = workflow_agent_session_id(&request);
+        let ordinal = workflow_agent_ordinal(&request);
+        let prompt = workflow_prompt(&request);
+        let mut board = StageBoardItem::raise(&request, &session_id, ordinal, &agent_name, &prompt);
         let agent_request = WorkflowAgentCall {
-            session_id: workflow_agent_session_id(&request),
+            session_id,
             task: request.task.clone(),
             cwd: request_target_repository_root(&request),
-            ordinal: workflow_agent_ordinal(&request),
+            ordinal,
             attempt: request.attempt as usize,
             agent,
             messages: vec![serde_json::json!({
                 "role": "user",
-                "content": workflow_prompt(&request),
+                "content": prompt,
             })],
             system: vec![serde_json::json!({
                 "type": "text",
@@ -103,6 +119,9 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             {
                 Ok(response) => response,
                 Err(err) => {
+                    // Before the emit, not after: the emit is a `?`, and the
+                    // classified verdict has to survive it unwinding.
+                    board.finish(stage_board_outcome(&err));
                     required_activity(
                         &self.ui_sink,
                         &request,
@@ -156,6 +175,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             {
                 Ok(response) => response,
                 Err(err) => {
+                    board.finish(stage_board_outcome(&err));
                     required_activity(
                         &self.ui_sink,
                         &request,
@@ -182,6 +202,10 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             "stage complete",
         )
         .await?;
+        // `Completed` closes to `in_review`, not `resolved`: all that was
+        // observed is a branch returning content, and nothing has checked that
+        // the work it claims to have done exists.
+        board.finish(DelegatedOutcome::Completed);
         let mut output = StageRunOutput::markdown(response.content);
         output.provider_id = Some(provider_id);
         output.resolved_model = Some(resolved_model);

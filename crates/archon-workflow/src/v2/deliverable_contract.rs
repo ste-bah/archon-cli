@@ -80,6 +80,9 @@ pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String
 /// - a templated `artifact_path` with a `typed_verifier_command`, because a
 ///   typed verifier is handed one concrete path and cannot expand it.
 fn template_binding_failure(contract: &Value) -> Option<String> {
+    if let Some(failure) = shell_template_failure(contract) {
+        return Some(failure);
+    }
     for key in ["registry_path", "instance_source_path"] {
         let Some(path) = contract_field(contract, key) else {
             continue;
@@ -146,6 +149,67 @@ fn declared_instance_floor(contract: &Value) -> u64 {
 fn contract_field(contract: &Value, key: &str) -> Option<String> {
     let text = contract.get(key)?.as_str()?.trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+/// A shell-style `${...}` in any declared contract path, or `None`.
+///
+/// # Issue #168: `${PROJECT_ROOT}` is not a directory name
+///
+/// A run recorded an `artifact_path` of the shape
+/// `${PROJECT_ROOT}/.archon/<area>/data/<set>/${DATASET_ID}/${VERSION}/out.json`
+/// — the observed path itself is not reproduced here, because a fixture's
+/// domain vocabulary in generic runtime source is what the D52/D75 genericity
+/// gate exists to stop, and a comment fossilizes an assumption just as
+/// effectively as code does.
+///
+/// Nothing in this engine expands `${...}`: the instance
+/// machinery below rewrites `<...>` only, `glob_instances` wildcards `<...>`
+/// only, and a source-bound contract names its instances from registry entries.
+/// So a `${...}` path is unconditionally unbindable — unlike `<...>`, there is
+/// no declaration an author can add that makes it checkable.
+///
+/// The alternative is worse than a refusal. Handed to a shell, an unset
+/// `${PROJECT_ROOT}` expands to nothing and the "absolute" path silently
+/// becomes relative to whatever directory the process is in; `${DATASET_ID}`
+/// leaves a literal `${DATASET_ID}` segment in a path someone may then create.
+/// Expand or refuse — and this engine cannot expand, so it refuses, naming the
+/// token.
+fn shell_template_failure(contract: &Value) -> Option<String> {
+    for key in [
+        "artifact_path",
+        "registry_path",
+        "instance_source_path",
+        "payload_path",
+    ] {
+        let Some(path) = contract_field(contract, key) else {
+            continue;
+        };
+        let tokens = shell_tokens(&path);
+        if !tokens.is_empty() {
+            return Some(format!(
+                "deliverable contract {key} '{path}' carries an unexpanded shell {}; nothing in \
+                 the verifier expands `${{...}}`, and an unset variable would expand to nothing \
+                 and silently make the path relative, so declare a concrete path",
+                rendered_tokens(&tokens)
+            ));
+        }
+    }
+    None
+}
+
+/// Every `${...}` span in a declared path, in the order written.
+fn shell_tokens(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut rest = value;
+    while let Some(open) = rest.find("${") {
+        let after = &rest[open..];
+        let Some(close) = after.find('}') else {
+            break;
+        };
+        tokens.push(after[..=close].to_string());
+        rest = &after[close + 1..];
+    }
+    tokens
 }
 
 /// Every `<...>` span in a declared path, in the order written.

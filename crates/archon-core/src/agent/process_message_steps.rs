@@ -61,6 +61,11 @@ impl Agent {
         // turn instead of being reconstructed afterwards. It executes nothing
         // and is bounded by the cognitive pipeline budget.
         self.run_cognitive_shadow_observation(user_input).await;
+        // Issues #80/#81: record the self-model's pre-action prediction for
+        // this turn and select the bounded set of unresolved lessons the prompt
+        // will carry. Both happen before the request is built, so the
+        // prediction is on record ahead of the action it predicts.
+        self.prepare_cognitive_turn_learning().await;
         self.spawn_auto_extraction();
     }
 

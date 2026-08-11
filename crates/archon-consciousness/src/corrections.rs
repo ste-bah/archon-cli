@@ -182,6 +182,24 @@ impl<'g> CorrectionTracker<'g> {
         context: &str,
         rule_id: Option<&str>,
     ) -> Result<Correction, CorrectionError> {
+        let (correction, newly_claimed) =
+            self.record_claim(correction_id, correction_type, content, context, rule_id)?;
+        self.boost_with_compensation(&correction, newly_claimed)?;
+        Ok(correction)
+    }
+
+    /// Steps that establish the correction and its link, with no score change.
+    ///
+    /// Returns the correction and whether THIS call claimed the row, which is
+    /// the rollback token [`Self::compensate_new_claim_failure`] needs.
+    fn record_claim(
+        &self,
+        correction_id: &str,
+        correction_type: CorrectionType,
+        content: &str,
+        context: &str,
+        rule_id: Option<&str>,
+    ) -> Result<(Correction, bool), CorrectionError> {
         let severity = correction_type.severity_multiplier();
         let derived_rule = correction_type.derived_rule();
         let effective_rule_id = rule_id.map_or_else(|| derived_rule.0.to_string(), str::to_string);
@@ -234,41 +252,18 @@ impl<'g> CorrectionTracker<'g> {
             ));
         }
 
-        if let Err(first_error) = self.boost_rule(&effective_rule_id, severity, &correction.id)
-            && let Err(retry_error) = self.boost_rule(&effective_rule_id, severity, &correction.id)
-        {
-            match self
-                .graph
-                .has_importance_application(&effective_rule_id, &correction.id)
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    return Err(self.compensate_new_claim_failure(
-                        CorrectionError::Memory(archon_memory::MemoryError::Database(format!(
-                            "initial boost failed: {first_error}; retry failed: {retry_error}"
-                        ))),
-                        &correction.id,
-                        outcome.created,
-                    ));
-                }
-                Err(status_error) => {
-                    return Err(CorrectionError::BoostOutcomeUnknown(format!(
-                        "initial boost failed: {first_error}; retry failed: {retry_error}; \
-                         provenance status read failed: {status_error}"
-                    )));
-                }
-            }
-        }
-
-        Ok(Correction {
-            id: correction.id,
-            correction_type,
-            content: content.to_string(),
-            context: context.to_string(),
-            severity,
-            rule_id: Some(effective_rule_id),
-            timestamp: correction.created_at,
-        })
+        Ok((
+            Correction {
+                id: correction.id,
+                correction_type,
+                content: content.to_string(),
+                context: context.to_string(),
+                severity,
+                rule_id: Some(effective_rule_id),
+                timestamp: correction.created_at,
+            },
+            outcome.created,
+        ))
     }
 
     /// Recall corrections similar to the given context string.
@@ -481,6 +476,14 @@ fn memory_to_correction(m: archon_memory::Memory) -> Result<Correction, Correcti
         timestamp: m.created_at,
     })
 }
+
+// ── reinforcement ────────────────────────────
+//
+// The rule-score half of recording a correction, split out so it can be
+// withheld until an attribution justifies it. See the module note there.
+
+#[path = "corrections/reinforcement.rs"]
+mod reinforcement;
 
 // ── tests ────────────────────────────────────
 

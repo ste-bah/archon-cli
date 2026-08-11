@@ -1,20 +1,25 @@
 use cozo::ScriptMutability;
 
 use crate::search;
-use crate::types::{Memory, MemoryError, MemoryType, SearchFilter, is_superseded};
+use crate::types::{Memory, MemoryError, MemoryType, SearchFilter, is_withheld};
 
-/// Remove memories folded into another by consolidation.
+/// Remove memories withheld from ordinary reads: folded into another by
+/// consolidation, or retired by an approved governed proposal.
 ///
 /// Applied at every read path rather than at the storage layer, so the rows stay
 /// on disk and remain reachable by id -- that is what makes a merge reversible,
 /// and it is why consolidation can mark rather than delete. `get_memory` and
 /// `inspect_memory` deliberately do NOT filter: someone asking for a specific id
 /// is entitled to what is there, including the superseded history a `Supersedes`
-/// edge points at.
-fn drop_superseded(memories: Vec<Memory>) -> Vec<Memory> {
+/// edge points at, and the retired rows a rollback has to be able to find.
+///
+/// Both statuses go through one predicate. Two filters would mean every read
+/// path had to remember both, and the cost of forgetting the second is a retired
+/// memory that keeps surfacing in the prompt after someone approved its removal.
+fn drop_withheld(memories: Vec<Memory>) -> Vec<Memory> {
     memories
         .into_iter()
-        .filter(|memory| !is_superseded(&memory.tags))
+        .filter(|memory| !is_withheld(&memory.tags))
         .collect()
 }
 
@@ -61,7 +66,7 @@ impl MemoryGraph {
         } else {
             search::recall(&self.db, query, limit)
         };
-        Ok(drop_state_snapshots(drop_superseded(results?)))
+        Ok(drop_state_snapshots(drop_withheld(results?)))
     }
 
     /// Structured search with filters.
@@ -77,7 +82,7 @@ impl MemoryGraph {
     pub fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
         // Superseded rows are dropped before the limit is applied, so a page of
         // results is never silently shortened by memories the caller cannot see.
-        let mut results = drop_superseded(search::search(&self.db, filter)?);
+        let mut results = drop_withheld(search::search(&self.db, filter)?);
         // Snapshots are withheld unless asked for by type. `search_snapshots` in
         // `archon-consciousness` sets exactly that filter, so persistence keeps
         // working while ordinary searches stop returning JSON blobs.
@@ -93,7 +98,7 @@ impl MemoryGraph {
     /// List the most recently created memories (up to `limit`).
     pub fn list_recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
         let all = read_all_memories(&self.db)?;
-        let mut memories: Vec<Memory> = drop_state_snapshots(drop_superseded(
+        let mut memories: Vec<Memory> = drop_state_snapshots(drop_withheld(
             all.into_iter()
                 .filter_map(|raw| raw_to_memory(raw).ok())
                 .collect(),

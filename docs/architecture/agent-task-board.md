@@ -8,14 +8,16 @@ prose in a subagent's return value — loses everything the parent does not
 happen to quote forward, and gives no way for a second agent to take ownership
 of a finding without two agents doing the same work.
 
-This document describes the board as built: the four tools agents use, the
-lifecycle an item moves through, the storage and concurrency design underneath,
-and the gate that stops a run being reported complete over an undrained board.
+This document describes the board as built: the four tools agents use, the host
+helpers that raise an item on an agent's behalf, the lifecycle an item moves
+through, the storage and concurrency design underneath, and the gate that stops a
+run being reported complete over an undrained board.
 
 ## What an agent does with it
 
-Four tools, offered to every subagent. They are the whole surface — there is no
-separate API an agent reaches for.
+Four tools, offered to every subagent. They are the whole surface an agent
+*calls*; the host also raises items on a dispatched agent's behalf, which is
+[below](#what-the-host-raises-on-an-agents-behalf).
 
 | Tool | What it does |
 |---|---|
@@ -51,6 +53,41 @@ list is written to bound blast radius, and the four widen none — they are
 
 `DENYLIST` still wins, so this is an always-*offer* set, not an override of a
 deliberate refusal.
+
+## What the host raises on an agent's behalf
+
+Three host-side helpers write to the board without an agent calling a tool.
+`raise_delegated_task` and `close_delegated_task` back the `TaskCreate` and
+`Agent` spawn tools: the parent's dispatch raises a claimed item so a spawned
+agent is visible on the board without being asked to announce itself.
+
+`raise_delegated_branch` does the same for a **workflow stage branch**, and it
+exists because the spawn *tools* are not the spawn *paths*. Workflow stages
+dispatch through the V2 lifecycle and reach neither tool, so a run that
+dispatched seven stages left the board empty for hours while the half of the
+system doing the work was invisible (#161). Both V2 dispatch routes are wired —
+`PipelineWorkflowRunner::run_stage` and `LiveV2AgentClient::run_agent_request`,
+the latter being the one a real decomposed run takes.
+
+Two properties matter to anyone reading the board:
+
+- **A stage branch is a `note`, not an `issue`.** The drain gate counts an
+  unresolved issue as undrained, and a branch closes `in_review` by design, so
+  raising branches as issues makes every run gate itself — measured, not
+  reasoned: it turned the full-lifecycle fixture's `Accepted` into `NeedsReview`
+  with `blocked-board-drain`. An issue outlives the run; a note dies with it, and
+  a stage branch is the run executing itself.
+- **The item id is not the session id.** It is `{session}-{ordinal}-{agent}`, the
+  id the subagent adapter mints and registers for liveness. A claim held under an
+  id no registry knows would be swept back to `open` by `release_dead_claims`
+  while the stage was still running.
+
+The item is owned by an RAII guard that closes `Failed` on drop unless a verdict
+was set, so an exit that unwinds still closes its item rather than leaking one
+that reads as live work forever. Every board write on this path is soft: none can
+fail or delay a stage. Partitioning needed nothing new — `run_id_for_session`
+splits a stage session id on the first `-stage-`, yielding the run's own `wf-…`
+id.
 
 ## The item lifecycle
 
@@ -118,8 +155,9 @@ board_items {
 ::index board_items:by_run {run_id}
 ```
 
-`run_id` partitions the board, and it is the partition the drain gate will be
-defined over. Every subagent inherits its parent's. `list_board_items_by_run`
+`run_id` partitions the board, and it is the partition
+[the drain gate](#the-drain-gate) is defined over. Every subagent inherits its
+parent's, and a workflow stage session id resolves to its run's. `list_board_items_by_run`
 goes through `board_items:by_run` rather than filtering a scan, for the polling
 reason above.
 

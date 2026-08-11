@@ -136,6 +136,12 @@ fn shadow_rows(
         .expect("metric event store")
         .events()
         .expect("read metric events")
+        .into_iter()
+        // The same store now also receives R2 attribution rows from the same
+        // turn. Filtering by kind keeps this suite measuring the R3 labels it is
+        // about rather than whichever row happened to sort first.
+        .filter(|event| event.event_kind == archon_cognitive::MetricEventKind::CorrectionClassified)
+        .collect()
 }
 
 fn label(

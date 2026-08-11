@@ -19,6 +19,27 @@ All ten items remain roadmap work. Existing components are substantial, but none
 
 Status vocabulary follows `docs/reports/audit/prd-008-audit-validation-appendix.md`.
 
+The table is the audit verdict as recorded, and is not edited as work lands.
+Three of its missing boundaries now have code, which is a different claim from
+being promoted:
+
+- **R8's release gates exist.** `archon cognitive gate` and
+  `crates/archon-cognitive/src/metrics/thresholds.rs` judge the derived metrics
+  per cohort, and the cognitive tick consults the same gate before
+  `propose_improvements` — see [cognitive commands](../reference/cognitive-commands.md#the-release-gate).
+- **R5's live briefing and action use exist.** A prediction is written before
+  `prepare_turn_request` builds the request, and the briefing names unmeasured
+  domains rather than omitting them. Its calibration label is tool-execution
+  outcome, not task success, so the number gates and tracks movement but is not
+  yet a calibration of the quantity R5 is defined over.
+- **R6's measured reuse exists.** Reflections are injected under three bounds and
+  scored on citation and on verified reuse separately.
+
+None of that promotes anything. The quantitative gates below need adjudicated
+runtime cohorts — 500 shadow turns for R1, 200 correction attributions for R2,
+400 labelled examples for R3, 500 replayable queries for R7 — and those are
+evaluation corpora, not further code.
+
 ## Global constraints
 
 - R8 instrumentation ships with the first task in every slice, before behavior changes.
@@ -37,6 +58,8 @@ Status vocabulary follows `docs/reports/audit/prd-008-audit-validation-appendix.
 No behavior-changing roadmap slice may be promoted until findings 9, 11, 17, and 40–43 have verified closure evidence. Finding 9 is now closed in physical source: memory keyword retrieval queries the `content_fts`, `title_fts`, and `tags_fts` indexes first, with a full scan retained only as an explicit fallback when those indexes are unavailable. Re-evaluate findings 11, 17, and 40–43 from physical source before promotion; Slice 1 may implement metrics and run the existing heuristic in shadow mode while any remaining R0 item closes, but it may not mutate rules through the new classifier.
 
 Record R0 closure as immutable evidence references to the relevant test runs, runtime source-of-truth inspections, reviews, and commits. Re-evaluate this gate immediately before each slice starts; do not infer closure from this roadmap.
+
+That record is `docs/development/r0-entry-gate.evidence`. It names, per finding, the pushed closure commit, the source anchors that must remain present, the defect signatures that must remain absent, the live call site, and the behavioural and source-of-truth tests. `scripts/check-r0-entry-gate.sh` re-verifies every one of those statements and prints an explicit R0 PASS/FAIL; it runs as the `r0-entry-gate` job in `.github/workflows/ci.yml` (with `fetch-depth: 0` and `--require-commits`, so commit ancestry is actually checked) and as step 2b of `scripts/ci-gate.sh`. Re-evaluating the gate before a slice starts means running that script, not re-reading this paragraph. As of 2026-08-10 it reports PASS for findings 9, 11, 17, 40–43 and for slice-1 shadow containment; the implementation deviations behind findings 40, 41, 42 and 43 are recorded in the evidence file and are material to how R2/R3 must source lesson provenance.
 
 ## Measurement schema (R8 foundation)
 

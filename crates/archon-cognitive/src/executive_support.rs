@@ -247,7 +247,12 @@ pub(crate) fn neutral_profile(kind: SituationKind) -> SelfModelProfile {
     neutral_profile_for_domain(domain_for(kind))
 }
 
-pub(crate) fn domain_for(kind: SituationKind) -> &'static str {
+/// Self-model domain a situation kind is measured under.
+///
+/// Public because the live turn has to name the same domain the self-model
+/// writer wrote, otherwise a pre-action prediction would be read from a fact
+/// nobody updates.
+pub fn domain_for(kind: SituationKind) -> &'static str {
     match kind {
         SituationKind::CiDebug => "ci",
         SituationKind::CodeChange => "coding",

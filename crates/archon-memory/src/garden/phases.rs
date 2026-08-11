@@ -1,6 +1,8 @@
 use chrono::Utc;
 use tracing::warn;
 
+use super::budget::BudgetLedger;
+use super::retirement::{PrunePolicy, RetirementCandidate, RetirementReason};
 use super::{PRUNEABLE_TYPES, get_memories_by_type};
 use crate::access::MemoryTrait;
 use crate::types::{Memory, MemoryError, MemoryType, SearchFilter};
@@ -12,6 +14,18 @@ pub(super) use merging::{
     DEDUP_MERGE_BUDGET, apply_adjudicated_merges, phase_dedup, phase_fragment_merge,
     phase_semantic_dedup,
 };
+
+/// What a pruning phase did, and what it declined to do.
+///
+/// Two fields rather than one count because they are not alternatives that can
+/// be summed: `pruned` rows are gone, `candidates` name rows that are still
+/// there. Collapsing them would let a caller report "8 pruned" for a pass that
+/// deleted nothing.
+#[derive(Debug, Default)]
+pub(super) struct PruneOutcome {
+    pub(super) pruned: usize,
+    pub(super) candidates: Vec<RetirementCandidate>,
+}
 
 /// Reduce importance for memories that have gone untouched.
 ///
@@ -31,11 +45,16 @@ pub(super) use merging::{
 /// consolidation" -- the increment this run is actually responsible for. With no
 /// previous run recorded, the first run catches up from creation, which is the
 /// intent.
+///
+/// REVERSIBLE. Each delta is applied against an immutable provenance id, so it
+/// can be identified and, if a run must be undone, countered. This is why decay
+/// is the one mutating phase an unattended pass still performs directly.
 pub(super) fn phase_importance_decay(
     graph: &dyn MemoryTrait,
     decay_per_day: f64,
     run_id: &str,
     previous_run: Option<chrono::DateTime<Utc>>,
+    ledger: &mut BudgetLedger,
 ) -> Result<usize, MemoryError> {
     let now = Utc::now();
     let mut count = 0;
@@ -53,6 +72,13 @@ pub(super) fn phase_importance_decay(
             }
             let delta = -(days as f64 * decay_per_day).min(mem.importance);
             if delta < 0.0 {
+                // Claimed immediately before the write and never in the middle
+                // of one, so a refusal always lands between whole units. The
+                // rows not reached keep the importance they had, and the next
+                // run bills only the span it is responsible for.
+                if !ledger.take_reversible() {
+                    return Ok(count);
+                }
                 let provenance_id = format!("garden-decay:{run_id}:{}", mem.id);
                 if let Err(e) = graph.apply_importance_delta(&mem.id, delta, &provenance_id) {
                     warn!(id = %mem.id, error = %e, "failed to decay importance");
@@ -65,37 +91,58 @@ pub(super) fn phase_importance_decay(
     Ok(count)
 }
 
+/// Remove -- or propose removing -- memories left untouched below the floor.
+///
+/// IRREVERSIBLE under [`PrunePolicy::Delete`]: `delete_memory` destroys the row
+/// and there is nothing left to restore from. That is acceptable for `/garden`,
+/// which a person typed and whose report they are reading. Under
+/// [`PrunePolicy::Propose`] nothing is deleted and the same rows come back as
+/// [`RetirementCandidate`]s.
 pub(super) fn phase_staleness_prune(
     graph: &dyn MemoryTrait,
     staleness_days: u32,
     importance_floor: f64,
-) -> Result<usize, MemoryError> {
+    policy: PrunePolicy,
+    ledger: &mut BudgetLedger,
+) -> Result<PruneOutcome, MemoryError> {
     let now = Utc::now();
     let threshold = chrono::Duration::days(i64::from(staleness_days));
-    let mut count = 0;
+    let mut outcome = PruneOutcome::default();
     for mt in &PRUNEABLE_TYPES {
         let memories = get_memories_by_type(graph, *mt)?;
         for mem in memories {
             let accessed = mem.last_accessed.unwrap_or(mem.created_at);
-            if (now - accessed) > threshold && mem.importance < importance_floor {
-                if let Err(e) = graph.delete_memory(&mem.id) {
-                    warn!(id = %mem.id, error = %e, "failed to prune stale memory");
-                } else {
-                    count += 1;
-                }
+            if (now - accessed) <= threshold || mem.importance >= importance_floor {
+                continue;
+            }
+            let reason = RetirementReason::Stale {
+                days_since_access: (now - accessed).num_days(),
+                staleness_days,
+                importance_floor,
+            };
+            if !record_or_delete(graph, &mem, reason, policy, ledger, &mut outcome) {
+                return Ok(outcome);
             }
         }
     }
-    Ok(count)
+    Ok(outcome)
 }
 
+/// Remove -- or propose removing -- the least important rows over the cap.
+///
+/// Same reversibility split as [`phase_staleness_prune`], and a weaker
+/// justification: nothing is wrong with these memories, they simply sorted last.
+/// That is why an unattended pass proposes rather than acts.
 pub(super) fn phase_overflow_prune(
     graph: &dyn MemoryTrait,
     max_memories: usize,
-) -> Result<usize, MemoryError> {
+    policy: PrunePolicy,
+    ledger: &mut BudgetLedger,
+) -> Result<PruneOutcome, MemoryError> {
+    let mut outcome = PruneOutcome::default();
     let total = graph.memory_count()?;
     if total <= max_memories {
-        return Ok(0);
+        return Ok(outcome);
     }
     let to_remove = total - max_memories;
     // Gather all pruneable memories, sort by importance ASC then created_at ASC.
@@ -109,15 +156,52 @@ pub(super) fn phase_overflow_prune(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.created_at.cmp(&b.created_at))
     });
-    let mut count = 0;
+    let reason = RetirementReason::Overflow {
+        max_memories,
+        total_memories: total,
+    };
     for mem in candidates.iter().take(to_remove) {
-        if let Err(e) = graph.delete_memory(&mem.id) {
-            warn!(id = %mem.id, error = %e, "failed to prune overflow memory");
-        } else {
-            count += 1;
+        if !record_or_delete(graph, mem, reason.clone(), policy, ledger, &mut outcome) {
+            return Ok(outcome);
         }
     }
-    Ok(count)
+    Ok(outcome)
+}
+
+/// Apply one pruning decision under the pass's policy.
+///
+/// Returns whether the phase may continue; `false` means the budget refused and
+/// the caller must stop rather than move to the next candidate. Shared by both
+/// pruning phases so there is exactly ONE place in the crate where a
+/// consolidation pass can reach `delete_memory`, and exactly one place the
+/// policy is consulted. Two copies of this decision is how one of them
+/// eventually stops checking.
+fn record_or_delete(
+    graph: &dyn MemoryTrait,
+    memory: &Memory,
+    reason: RetirementReason,
+    policy: PrunePolicy,
+    ledger: &mut BudgetLedger,
+    outcome: &mut PruneOutcome,
+) -> bool {
+    if !policy.may_delete() {
+        if !ledger.take_proposal() {
+            return false;
+        }
+        outcome
+            .candidates
+            .push(RetirementCandidate::from_memory(memory, reason));
+        return true;
+    }
+    if !ledger.take_deletion() {
+        return false;
+    }
+    if let Err(e) = graph.delete_memory(&memory.id) {
+        warn!(id = %memory.id, error = %e, "failed to prune memory");
+    } else {
+        outcome.pruned += 1;
+    }
+    true
 }
 
 /// When consolidation last ran, or `None` if it never has (or the stored value
@@ -137,6 +221,15 @@ pub(super) fn read_last_run(
         .and_then(|m| m.content.parse::<chrono::DateTime<Utc>>().ok()))
 }
 
+/// Record that a pass happened, INCLUDING one that ran out of budget.
+///
+/// Recording unconditionally looks wrong -- a pass that did half its work
+/// claiming a full run -- and is nonetheless the safe choice, because the
+/// timestamp's only reader is the decay bill. `phase_importance_decay` charges
+/// the shorter of "since last access" and "since the previous run"; skipping the
+/// write leaves the next pass billing this pass's span a second time, which
+/// compounds decay and deletes memories early. Losing some pruning to the next
+/// run costs a day of tidiness. Double-charging decay costs memories.
 pub(super) fn phase_record_timestamp(graph: &dyn MemoryTrait) -> Result<(), MemoryError> {
     let now_str = Utc::now().to_rfc3339();
     let filter = SearchFilter {

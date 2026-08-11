@@ -63,6 +63,41 @@ pub fn raise_delegated_task(
 ) -> Option<String> {
     raise_on(
         &BoardHandle::Global,
+        BoardItemKind::Issue,
+        session_id,
+        subagent_id,
+        description,
+        instruction,
+        raised_by,
+    )
+}
+
+/// [`raise_delegated_task`] for a workflow run's own stage branch.
+///
+/// Identical in every respect but the kind, and the kind is the whole point.
+/// The V2 lifecycle's drain gate refuses to accept a run while any *issue* on
+/// its partition is anything other than resolved, promoted or declined
+/// (`archon_workflow::v2::lifecycle_policy::drain_gate`) — and a self-reported
+/// completion closes to `in_review`, which is none of those. Mirroring a run's
+/// own branches as issues therefore makes every run gate itself: each branch
+/// raises an issue the run has no way to resolve, because resolving one means
+/// something verified the work, which is what the rest of the lifecycle is for.
+/// Observed directly — wiring this as an issue turned the full-lifecycle
+/// fixture's `Accepted` into `NeedsReview` with `blocked-board-drain`.
+///
+/// A note is also what a branch actually is by the gate's own definition: an
+/// issue is work that must happen and outlives the run, a note is context that
+/// dies with it. A stage branch is the run executing itself.
+pub fn raise_delegated_branch(
+    session_id: &str,
+    subagent_id: &str,
+    description: &str,
+    instruction: &str,
+    raised_by: &str,
+) -> Option<String> {
+    raise_on(
+        &BoardHandle::Global,
+        BoardItemKind::Note,
         session_id,
         subagent_id,
         description,
@@ -79,6 +114,7 @@ pub fn raise_delegated_task(
 /// passes `Global`.
 fn raise_on(
     handle: &BoardHandle,
+    kind: BoardItemKind,
     session_id: &str,
     subagent_id: &str,
     description: &str,
@@ -97,7 +133,7 @@ fn raise_on(
     let item = NewBoardItem {
         id: Some(subagent_id.to_string()),
         run_id: run_id_for_session(session_id).to_string(),
-        kind: BoardItemKind::Issue,
+        kind,
         title: summarise(description),
         // Storage rejects empty evidence, and rightly so — but the evidence for
         // a delegated task is not a file reference, it is the instruction the
@@ -240,6 +276,7 @@ mod tests {
     fn raise(handle: &BoardHandle, session: &str, agent: &str) -> String {
         raise_on(
             handle,
+            BoardItemKind::Issue,
             session,
             agent,
             "Build the parser",
@@ -247,6 +284,41 @@ mod tests {
             "parent",
         )
         .expect("mirroring onto a reachable board succeeds")
+    }
+
+    /// A delegated *task* is an issue: work that must happen and outlives the
+    /// run, which is what the drain gate is entitled to hold a run against.
+    #[test]
+    fn a_delegated_task_is_raised_as_an_issue() {
+        let (handle, access) = board();
+        let id = raise(&handle, "sess-abc", "agent-1");
+        assert_eq!(
+            access.get_board_item(&id).expect("item").kind,
+            BoardItemKind::Issue
+        );
+    }
+
+    /// A workflow's own stage branch is a note. As an issue it would gate the
+    /// run on itself: it closes `in_review`, which the drain gate counts as
+    /// undrained, and no branch can resolve its own work.
+    #[test]
+    fn a_stage_branch_is_raised_as_a_note() {
+        let (handle, access) = board();
+        let id = raise_on(
+            &handle,
+            BoardItemKind::Note,
+            "wf-1-stage-implement-attempt-1",
+            "agent-1",
+            "Build the parser",
+            "the brief",
+            "workflow:wf-1",
+        )
+        .expect("mirroring a branch onto a reachable board succeeds");
+
+        let item = access.get_board_item(&id).expect("item");
+        assert_eq!(item.kind, BoardItemKind::Note);
+        assert_eq!(item.run_id, "wf-1");
+        assert_eq!(item.status, BoardStatus::Claimed);
     }
 
     /// The whole point: dispatching work puts a *claimed* item on the run's

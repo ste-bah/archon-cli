@@ -10,7 +10,7 @@ pub mod store; // TODO: TASK-AGS-203 // TODO: TASK-AGS-208
 
 pub use api::CliTaskApi;
 pub use events::{EventBus, EventLog};
-pub use executor::{AgentExecutor, CancelHandle, TaskExecutor};
+pub use executor::{AgentExecutor, CancelHandle, DEFAULT_RESOURCE_SAMPLE_INTERVAL, TaskExecutor};
 pub use metrics::MetricsRegistry;
 pub use models::{
     ResourceSample, SubmitRequest, Task, TaskError, TaskEvent, TaskEventKind, TaskFilter, TaskId,

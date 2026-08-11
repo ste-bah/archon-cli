@@ -25,6 +25,6 @@ pub use board::{
 pub use graph::MemoryGraph;
 pub use injection::MemoryInjector;
 pub use types::{
-    Memory, MemoryError, MemoryType, RelType, Relationship, SearchFilter, StoreMemoryOutcome,
-    StoreMemoryRequest,
+    Memory, MemoryError, MemoryType, RETIRED_TAG, RelType, Relationship, SUPERSEDED_TAG,
+    SearchFilter, StoreMemoryOutcome, StoreMemoryRequest, is_retired, is_superseded, is_withheld,
 };

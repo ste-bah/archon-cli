@@ -3,24 +3,13 @@ use super::*;
 /// The board this test binary shares, installed exactly as session boot and
 /// `workflow_live_board.rs` install a real one.
 ///
-/// One graph for the whole binary because the handle is a `OnceLock`: a second
-/// test installing a second graph would be ignored and would then assert against
-/// a board the run never read. Run partitioning is what keeps the tests from
-/// seeing each other's items, which is the same thing that keeps two concurrent
-/// workflow runs apart in production.
-///
-/// Every full-lifecycle fixture installs it, not just the drain tests. Since
-/// #142 the drain gate refuses a run it cannot check, so a lifecycle test that
-/// left the global unset would be asserting on whichever test happened to run
-/// first — the ordering dependency the gate's own honesty introduces.
+/// The graph itself lives in `workflow_live_test_support` rather than here, so
+/// that it is genuinely one board per binary: the fixtures in this file are no
+/// longer its only users, and a second `OnceLock` anywhere else in the binary
+/// would silently lose the install race and leave whoever lost asserting against
+/// a board the run never wrote to.
 pub(super) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
-    static BOARD: std::sync::OnceLock<Arc<archon_memory::MemoryGraph>> = std::sync::OnceLock::new();
-    let graph = BOARD
-        .get_or_init(|| Arc::new(archon_memory::MemoryGraph::in_memory().expect("board graph")));
-    archon_tools::board::install_board_access(
-        Arc::clone(graph) as Arc<dyn archon_memory::board::BoardAccess>
-    );
-    Arc::clone(graph)
+    crate::command::workflow_live::workflow_live_test_support::installed_board()
 }
 
 /// Everything the FullLifecycle fixture needs on disk and in memory, up to the

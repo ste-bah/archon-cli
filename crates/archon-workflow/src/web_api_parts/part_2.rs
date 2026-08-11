@@ -331,6 +331,7 @@ fn status_label(kind: &WorkflowEventKind) -> &'static str {
         WorkflowEventKind::StageCompleted | WorkflowEventKind::Completed => "completed",
         WorkflowEventKind::StageStalled => "stalled",
         WorkflowEventKind::StageFailed => "failed",
+        WorkflowEventKind::BlockingGapDetected => "blocked",
         WorkflowEventKind::StageSkipped => "skipped",
         WorkflowEventKind::ForcedAccepted => "forced",
         WorkflowEventKind::Resumed => "resumed",

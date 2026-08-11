@@ -42,6 +42,11 @@ pub struct WebChatAttachment {
     pub data_base64: Option<String>,
     #[serde(default)]
     pub stored_path: Option<String>,
+    /// Docs store id the ingest assigned to this attachment. `null` when the
+    /// file was never ingested — rejected by policy, or the ingest failed.
+    /// Absent id and empty id are different facts, so this is never `""`.
+    #[serde(default)]
+    pub document_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -139,10 +144,7 @@ pub(crate) async fn submit_handler(
         };
         match backend.submit(&response.message_id, request.clone()).await {
             Ok(output) => {
-                response.reply = output.reply;
-                response.policy_reason = output.policy_reason;
-                ledger_attachments = output.attachments;
-                response.attachments = ledger_attachments.clone();
+                ledger_attachments = apply_backend_output(&mut response, output);
             }
             Err(err) => {
                 response.accepted = false;
@@ -166,6 +168,23 @@ pub(crate) async fn submit_handler(
         );
     }
     (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Copy what the chat backend produced onto the wire response, and hand the
+/// same attachment list back for the ledger row.
+///
+/// The backend's attachments are the only ones carrying the docs
+/// `document_id` that ingest assigned; the request attachments the browser
+/// sent do not have it. If this does not overwrite `response.attachments`,
+/// the id exists only inside the model prompt.
+fn apply_backend_output(
+    response: &mut WebChatSubmitResponse,
+    output: WebChatBackendOutput,
+) -> Vec<WebChatAttachment> {
+    response.reply = output.reply;
+    response.policy_reason = output.policy_reason;
+    response.attachments = output.attachments.clone();
+    output.attachments
 }
 
 pub fn evaluate_chat_submit(request: &WebChatSubmitRequest) -> WebChatSubmitResponse {
@@ -369,6 +388,7 @@ fn metadata_only(attachment: &WebChatAttachment) -> WebChatAttachment {
         policy_reason: attachment.policy_reason.clone(),
         data_base64: None,
         stored_path: attachment.stored_path.clone(),
+        document_id: attachment.document_id.clone(),
     }
 }
 

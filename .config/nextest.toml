@@ -20,3 +20,139 @@
 # whole point: a named failure beats a silent two-hour cancellation.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# ---------------------------------------------------------------------------
+# Bounding process-spawn contention (#154).
+#
+# A second family of failures, unrelated to hangs: tests that start a real OS
+# process and then have to finish inside a wall-clock budget. Process creation
+# costs what the *machine* is doing, not what the test is doing. Commit
+# 51f70aca6 measured it: 30 spawn samples on a 32-core box under the failing
+# load, min 893ms, mean 2017ms, max 4960ms — for a hook whose command then ran
+# in about 300ms. Against a two-second budget, creating the process consumed all
+# of it and the hook was refused having never run. Widen the run and every such
+# budget shrinks together.
+#
+# Why a nextest test group and not `serial_test`, which #154 suggested:
+# nextest's execution model is one process per test, so an in-process mutex is
+# not shared with anything and serialises nothing. nextest's own documentation
+# says as much and points at test groups as the replacement. CI runs nextest.
+#
+# Why not `--test-threads`: it is per test binary. The reported reproduction is
+# `cargo test -p archon-tools -p archon-core --no-fail-fast` — two whole crate
+# suites at once — and no per-binary number can bound their sum. A test group is
+# a single semaphore held across the entire run, which is the quantity that
+# actually needs bounding.
+#
+# max-threads = 4 is the one measured figure available. `bash_tests.rs:22-30`
+# records that suite failing on Windows at full width and passing under
+# `--test-threads=4` (#131). Spawn contention is machine-wide, so "four of these
+# at once" is the same quantity whether it comes from one binary or six, and 4
+# is the width that was observed to work. Note the consequence: nextest defaults
+# to num_cpus and GitHub runners have 4 cores, so on CI this cap is inert by
+# construction. That is the correct behaviour — the group exists to remove the
+# excess concurrency a wide machine creates, and every measurement of this
+# failure came from a wide machine.
+#
+# Not `threads-required`: that is a weight against the global thread pool, not
+# membership of a bounded set. Each of these tests needs one slot; what has to
+# be limited is how many hold one at the same time.
+#
+# Membership rule, applied per test: it starts a real OS process AND has a bound
+# it must finish *inside*, where that bound is within an order of magnitude of
+# what the spawn itself can cost. The ratio is the criterion, not the raw number:
+# `SPAWN_TIMEOUT = 30s` in the root gate tests is in, because those spawn the
+# whole `archon` binary and `headless_wire_gate_test` records an actual 10.2s
+# observation on macOS CI; a 30s hook budget around `echo hello` is out, because
+# nothing in the measured range comes close to it.
+#
+# The archon-core hook integration binaries are taken whole rather than
+# test-by-test. They all drive `execute_hooks` over `HookCommandType::Command`,
+# which is the exact path commit 51f70aca6 measured, and picking which 5s budget
+# is "probably safe" would be guesswork. The ones that only construct or persist
+# a hook config without running it (`hook_toml_tests`, `hooks_persistence_gate`)
+# and the ones whose hooks are callbacks or functions (`hook_callback_tests`,
+# `hook_function_tests`, `hook_prompt_tests`) never spawn, and are out.
+#
+# Elsewhere the filter is written at module or binary granularity wherever that
+# unit is dominated by spawners, so a handful of instant unit tests come along
+# with them — that costs a slot for microseconds and keeps the filter from
+# rotting every time a test is added next to one that is in it.
+# Deliberately excluded, and why:
+#   * tests that assert a timeout DOES fire (`provider_env::tests::profile_
+#     timeout_is_resolution_error_not_missing`, `marker_source::tests::*`,
+#     `ocr::rapid::tests::rapidocr_wedged_subprocess_times_out`) — load makes
+#     those pass more easily, not less;
+#   * tests that spawn with no bound at all (the `.output()` CLI smokes,
+#     `worktree_isolation`'s git tests, `archon-mcp::transport`) — they cannot
+#     go red from contention, and grouping them would only cost wall time;
+#   * `archon-llm` (no process is spawned anywhere in the crate) and
+#     `archon-tools::task_create_cancellation` (timing-heavy but its executor is
+#     an in-process mock) — both named in #154, neither is this failure;
+#   * `archon-plugin`'s symlink tests, also named in #154 — those fail on a
+#     missing privilege, not on load, and are handled by the `build.rs`
+#     capability probe instead.
+#
+# Measured on the reported reproduction, `cargo nextest run -p archon-tools -p
+# archon-core --no-fail-fast`, 2361 tests, 32-core Windows box, default width:
+#
+#   without this group  4 runs, 2 of them failed
+#                       `hook_phase3_integration::
+#                       test_session_hook_timeout_clamped_to_budget` — a
+#                       `sleep 10` hook clamped to a 3s budget, asserting
+#                       elapsed < 5s — failed twice, and passed in 2.5s when run
+#                       alone
+#   with this group     4 runs, 2361/2361 every time
+#
+# The cost is ~85s against ~70s, a fifth of the wall clock on this subset, and
+# only on a machine wide enough for the cap to bite.
+#
+# One failure seen in those runs is deliberately not in the group:
+# `archon-core::task_executor::test_executor_samples_resource_usage` slept a flat
+# 1500ms waiting for an in-process 500ms sampler. It spawns nothing, so this cap
+# was the wrong instrument; it would have stopped failing only because the
+# machine got quieter. It got its own fix instead (#169) — the test now runs on a
+# paused tokio clock and consults no wall clock at all, so it cannot be made to
+# fail by load. Do not add it here: membership would re-couple a test with no
+# process and no wall-clock dependency to a cap that exists for both.
+#
+# GOTCHA: profile overrides do not inherit. CI runs `cargo nextest run
+# --workspace --no-fail-fast` with no `--profile` and no `NEXTEST_PROFILE`
+# (.github/workflows/ci.yml:341 and :368), so the default profile is the one
+# that runs and this single block covers it. If a named profile is ever added,
+# this override must be repeated verbatim under `[[profile.<name>.overrides]]`
+# or it will silently stop applying.
+[test-groups]
+process-spawn = { max-threads = 4 }
+
+[[profile.default.overrides]]
+test-group = 'process-spawn'
+filter = '''
+    (binary_id(=archon-core) and test(/^hooks::executor::executor_tests::/))
+  + binary_id(=archon-core::hook_agent_tests)
+  + binary_id(=archon-core::hook_elicitation_tests)
+  + binary_id(=archon-core::hook_lifecycle_tests)
+  + binary_id(=archon-core::hook_phase2_integration)
+  + binary_id(=archon-core::hook_phase3_integration)
+  + binary_id(=archon-core::hook_session_tests)
+  + binary_id(=archon-core::hook_timeout_budget_tests)
+  + binary_id(=archon-core::hooks_tests)
+  + (binary_id(=archon-core) and test(=subagent::runner::tests::parallel::tool_round_timeout_kills_bash_process_group))
+  + (binary_id(=archon-tools) and test(/^bash::(tests|bash_process_tests)::/))
+  + (binary_id(=archon-tools) and test(=monitor::tests::monitor_echo_captures_line))
+  + binary_id(=archon-tools::bash_tests)
+  + (binary_id(=archon-pipeline) and test(/^coding::compilation_gate::compilation_gate_tests::/))
+  + (binary_id(=archon-video) and test(/^subprocess::tests::/))
+  + (binary_id(=archon-cozo::guarded_operations) and test(/^guarded_panics_are_converted/))
+  + (binary_id(=archon-workflow::coordinated_implementation_fanout) and test(=ac_wc_008_cross_process_repo_lock))
+  + (binary_id(=archon-cli-workspace::headless_wire_gate_test) and test(/^headless_/))
+  + (binary_id(=archon-cli-workspace::performance_tests) and test(=startup_under_500ms))
+  + binary_id(=archon-cli-workspace::shutdown_no_panic)
+  + binary_id(=archon-cli-workspace::remote_ssh_gate_test)
+  + binary_id(=archon-cli-workspace::auto_resume_gate_test)
+  + binary_id(=archon-cli-workspace::memory_enabled_gate_test)
+  + binary_id(=archon-cli-workspace::prompt_cache_gate_test)
+  + binary_id(=archon-cli-workspace::voice_wire_gate_test)
+  + binary_id(=archon-cli-workspace::voice_toggle_mode_wire_test)
+  + (binary_id(=archon-cli-workspace::bin/archon) and (test(/::workflow_live_v2_client::wire_tests::/) + test(/::workflow_live_v2_lifecycle_e2e_tests_[be]::/)))
+'''

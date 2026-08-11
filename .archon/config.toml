@@ -439,11 +439,15 @@ dedup_similarity_threshold = 0.92
 #                                       adjudicator to settle; nothing is written
 semantic_dedup_max_distance = 0.15
 semantic_review_max_distance = 0.35
-# Have the review band judged automatically at session start instead of only
-# when you run `/garden`. OFF because adjudication is an LLM round-trip and
-# automatic consolidation runs on the session-start path -- it would sit between
-# launching Archon and being able to type, and nothing else on that path calls a
-# model. Left off, the band simply accumulates and `/garden` clears it.
+# Have the review band judged automatically instead of only when you run
+# `/garden`. The judgement runs in the BACKGROUND after startup, not on the
+# session-start path: nothing waits on it, so switching this on does not delay
+# the first prompt. Merges are applied whenever the verdict comes back, and only
+# for pairs the model explicitly calls the same claim; anything else, including a
+# failed or slow call, leaves both memories exactly as they were.
+# Still OFF by default because it spends an LLM round-trip you did not ask for,
+# and merging reshapes stored memories. Left off, the band simply accumulates --
+# nothing is written and nothing is lost -- and `/garden` clears it.
 auto_adjudicate_review_band = false
 # Pending pairs required before that fires, so enabling it does not mean a call
 # on every launch. Below the adjudicator's 20-pair-per-run cap, so a run that
@@ -458,6 +462,52 @@ importance_decay_per_day = 0.01
 max_memories = 5000
 # Number of memories in session-start briefing
 briefing_limit = 15
+# Run consolidation on a timer, instead of only at session start and on
+# `/garden`. OFF by default, and this is the knob that most needs to stay off:
+# every other automatic pass is attached to something you did and reports where
+# you are looking, while a timer decays and merges your memories at an hour you
+# did not choose.
+# A scheduled pass is deliberately weaker than the manual one:
+#   * it holds a single-run lock, so it cannot overlap another pass in this
+#     process or in another Archon sharing the same store;
+#   * it stops at the work and time ceilings below, at a point that leaves the
+#     store consistent;
+#   * it CANNOT DELETE A MEMORY. Anything the prune rules would have removed is
+#     recorded as a retirement proposal for review instead, and the memory is
+#     left exactly as it was.
+scheduled_consolidation = false
+# Hours between scheduled passes. The interval is held in the memory store, not
+# in this process, so several Archons sharing one store agree on it and a
+# restart does not reset the clock.
+scheduled_interval_hours = 24
+# Ceiling on reversible mutations (importance decay plus merges) in one
+# scheduled pass. Reached, the pass stops and says so rather than running on.
+scheduled_max_reversible_ops = 500
+# Ceiling on how many retirement proposals one scheduled pass may raise, so an
+# over-cap store cannot hand you ten thousand decisions. Refusing to propose
+# costs nothing: the memories are untouched and the next pass finds them again.
+scheduled_max_retirement_candidates = 100
+# Wall-clock ceiling on one scheduled pass, in seconds. Nothing is cancelled
+# when it expires; the pass simply stops taking on new work.
+scheduled_max_seconds = 300
+# Generative consolidation. A scheduled pass looks for several memories that
+# restate one another and proposes recording the claim once, with its
+# corroboration. It never invents wording: the proposed text is verbatim one of
+# the sources, so the proposal can be checked against them.
+# Clusters must be provenance-compatible -- same memory type, same project
+# scope, same writer -- and EVERY PAIR must satisfy that, not merely adjacent
+# ones, so a chain of overlapping windows cannot span more than the limit below.
+# How many corroborating observations make a claim worth recording once.
+consolidation_min_cluster_size = 3
+# How far apart in time those observations may be recorded. Bounds what a
+# cluster can span, so two records of a fact that CHANGED are not consolidated
+# into a claim that the older one is still true.
+consolidation_max_span_days = 14
+# Word overlap every pair in a cluster must reach to count as the same claim.
+# Provenance compatibility says two memories MAY be one claim; this says they
+# are. Without it, unrelated facts recorded by one writer on one day would be
+# proposed as a single memory citing all of them.
+consolidation_min_word_overlap = 0.5
 
 # --- AutoCapture (regex-based memory detection at turn boundary) ---
 [memory.auto_capture]
@@ -716,6 +766,23 @@ trigger_elapsed_ms = 86400000
 first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
+
+# Surprise-weighted replay (W6). The plan is computed and reported on every
+# trainer tick; `prioritized_enabled` is the only key that changes what the
+# model actually trains on, and it stays false until matched baseline/canary
+# evidence exists — prioritised replay moves the training distribution, and a
+# model fed its own surprise can drift toward whatever it was already wrong
+# about. The remaining keys may only tighten: values above the crate's hard
+# bounds are clamped down, never honoured.
+[learning.world_model.replay]
+prioritized_enabled = false
+held_out_fraction = 0.2
+batch_size = 512
+prioritized_fraction = 0.5
+max_surprise_weight = 4.0
+max_decile_share = 0.40
+seed = 6274407765686619927
+split_version = 1
 
 [learning.world_model.guardrails]
 enabled = true

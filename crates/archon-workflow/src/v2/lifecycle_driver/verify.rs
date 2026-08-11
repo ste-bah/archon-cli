@@ -5,6 +5,11 @@
 
 use super::*;
 
+// Inherent `impl LifecycleDriver` plus its own pure helpers — nothing to
+// re-export.
+#[path = "verify_shape_repair.rs"]
+mod verify_shape_repair;
+
 impl LifecycleDriver {
     pub(crate) async fn run_verification_lifecycle(
         &self,
@@ -292,69 +297,18 @@ impl LifecycleDriver {
             );
             repair_inventory =
                 support::constrain_inventory_tasks(&contract, &repair_inventory, &allowed_task_ids);
-            let mut shape_attempt = 1usize;
-            while !support::verification_inventory_ready(&repair_inventory)
-                && !support::array(repair_inventory.get("unresolved_issues")).is_empty()
-                && shape_attempt <= self.max_repair_iterations
-            {
-                let shape_call_id = format!(
-                    "verification-repair-shape-repair-{wave_index}-{repair_attempt}-{shape_attempt}"
-                );
-                let issues = support::array(repair_inventory.get("unresolved_issues"));
-                let shape_repair = self
-                    .reduce(
-                        &shape_call_id,
-                        serde_json::json!([
-                            self.task_universe,
-                            repair_inventory,
-                            issues,
-                            verification,
-                            evidence.implementation
-                        ]),
-                        "reducer",
-                        prompts::VERIFICATION_REPAIR_SHAPE_REPAIR_TASK,
-                    )
-                    .await?;
-                support::record_repair_attempt(
-                    &mut evidence.repair_attempts,
-                    &shape_call_id,
-                    "verification_repair_shape_repair",
-                    &issues,
-                    &shape_repair,
-                );
-                let mut candidate = contract.normalize_inventory(&shape_repair);
-                candidate = lifecycle_policy::verify_invariants::enforce_retry_invariants(
-                    &candidate,
+            // D74 preservation, the bounded attempts, and the identical-cause
+            // escalation that keeps those attempts from being spent on one
+            // unwinnable rejection all live together in the child module.
+            repair_inventory = self
+                .run_verification_shape_repair(
+                    repair_inventory,
                     &verification,
-                );
-                candidate =
-                    support::constrain_inventory_tasks(&contract, &candidate, &allowed_task_ids);
-                // D74: a shape repair is adopted only when it preserves the
-                // semantic identity of the items it reshaped; otherwise the
-                // violations feed the next bounded attempt as issues.
-                let preservation = semantic_preservation::check_items(
-                    &support::array(repair_inventory.get("items")),
-                    &support::array(candidate.get("items")),
-                );
-                if preservation.passed() {
-                    repair_inventory = candidate;
-                } else {
-                    support::record_repair_attempt(
-                        &mut evidence.repair_attempts,
-                        &shape_call_id,
-                        "semantic_preservation_rejected",
-                        &semantic_preservation::violation_issues(&preservation.violations),
-                        &candidate,
-                    );
-                    self.record_preservation_rejection(&shape_call_id, &preservation.violations)
-                        .await?;
-                    semantic_preservation::append_preservation_issues(
-                        &mut repair_inventory,
-                        &preservation.violations,
-                    );
-                }
-                shape_attempt += 1;
-            }
+                    &allowed_task_ids,
+                    (wave_index, repair_attempt),
+                    evidence,
+                )
+                .await?;
             if !support::verification_inventory_ready(&repair_inventory)
                 || support::array(repair_inventory.get("items")).is_empty()
             {

@@ -205,29 +205,34 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.7.0** — [release notes](docs/release-notes/v1.7.0.md)
+**Current release: v1.8.0** — [release notes](docs/release-notes/v1.8.0.md)
 
-Four subsystems that had been built, tested and never called are now wired and
-producing data — the executive loop runs as a shadow observer on every turn,
-reflection triggers on real signals, the self-model has a writer, and an
-abstaining correction classifier accumulates the labels its own promotion gate
-needs. The knowledge base gained `docs compile`, `docs answer` and `docs export`,
-the last two of which had been implemented since April with no command to reach
-them. VSCode can execute tools behind a permission prompt that actually refuses.
+The cognitive metrics v1.7.0 started producing now have a consumer that can say
+no: release gates judged per cohort, blocking the agent's own improvement
+proposals when a segment degrades. The self-model writes its prediction before
+the action it predicts, and reflections are carried into later turns and measured
+for reuse rather than written and forgotten. The learning roadmap's R0 entry gate
+is a script that can go red instead of a paragraph, wired into CI. The corpus
+viewer renders PDFs, sandboxed. And workflow runs finally appear on the task
+board — the third dispatch path that had to be wired separately.
 
-Also closes a content-hash race in the shipping ingest path: a bare read followed
-by an unguarded write, so two processes could create two documents for one hash.
+Built on v1.7.0, which wired four subsystems that had been built, tested and
+never called, and gave the knowledge base `docs compile`, `docs answer` and
+`docs export`.
 
-Built on v1.6.1, which made the browser a full archon surface — a terminal pane
-running the real TUI, plus upload, delete and index controls over the knowledge
-store.
-
-> **On upgrade: the cognitive schema migrates on first open**, and history for
-> two `cognitive_tick_audit` columns is set to null — under the old code those
-> were hardcoded, so every stored value was a fabrication rather than a
-> measurement. The Bash tool's `timeout` argument also gains a floor, since a
-> model-chosen two minutes could previously override a configured hour. See the
-> [release notes](docs/release-notes/v1.7.0.md#upgrade-notes).
+> **On upgrade: project capability manifests no longer hoist tools**, so a task
+> is no longer obliged to invoke every tool in `.archon/project.json`; env keys
+> still hoist, and tools already on disk are reported as inert rather than
+> deleted. **A declared artifact must now be a regular, non-empty file** — a
+> directory or a zero-byte file used to satisfy the contract. `events.jsonl`
+> gains a `blocking_gap_detected` kind for monitors to filter on, and garden
+> review-band adjudication now runs detached after startup instead of blocking
+> the session bootstrap. See the
+> [release notes](docs/release-notes/v1.8.0.md#upgrade-notes).
+>
+> From v1.7.0: the cognitive schema migrates on first open, and history for two
+> `cognitive_tick_audit` columns is set to null — under the old code those were
+> hardcoded, so every stored value was a fabrication rather than a measurement.
 >
 > From v1.6.0: the repository code index no longer builds at
 > session start — it cost roughly seventeen CPU-hours on a 3,200-file repository,

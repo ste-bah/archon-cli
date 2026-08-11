@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { StatusPill } from "../components/StatusPill";
 import type { CorpusChunkHit, CorpusSource, CorpusSummary } from "../api/generated/web";
+import { SourcePreview } from "./corpus/SourcePreview";
 import "./CorpusPage.css";
 
 interface CorpusPageProps {
@@ -172,52 +173,6 @@ function ChunkHits({
   );
 }
 
-function SourcePreview({
-  source,
-  preview,
-  loading,
-  resultCount,
-}: {
-  source?: CorpusSource;
-  preview?: {
-    content: string;
-    lineCount: number;
-    truncated: boolean;
-    previewAvailable: boolean;
-    policyReason: string;
-  };
-  loading: boolean;
-  resultCount: number;
-}) {
-  return (
-    <aside className="panel corpus-preview-panel">
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">Source viewer</span>
-          <h3>{source?.label ?? "No source selected"}</h3>
-        </div>
-        <StatusPill tone={preview?.previewAvailable ? "good" : "muted"}>
-          {resultCount} results
-        </StatusPill>
-      </div>
-      <div className="corpus-meta">
-        <span>{source?.kind ?? "type"}</span>
-        <span>{formatBytes(source?.bytes)}</span>
-        <span>{preview?.lineCount ?? 0} lines</span>
-      </div>
-      <p className="summary">{preview?.policyReason ?? "Select a corpus source to inspect it."}</p>
-      <pre className="corpus-preview">
-        {loading
-          ? "Loading preview..."
-          : preview?.previewAvailable
-            ? preview.content
-            : "Preview is not available for this source type yet."}
-      </pre>
-      {preview?.truncated && <StatusPill tone="warn">preview truncated</StatusPill>}
-    </aside>
-  );
-}
-
 function uniqueKinds(sources: CorpusSource[]) {
   return [...new Set(sources.map((source) => source.kind))].sort();
 }
@@ -251,15 +206,3 @@ function shortPath(value: string) {
   return parts.slice(-3).join("/") || value;
 }
 
-function formatBytes(value?: number) {
-  if (value === undefined) {
-    return "0 B";
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${Math.round(value / 1024)} KB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}

@@ -19,6 +19,41 @@ pub fn is_superseded(tags: &[String]) -> bool {
     tags.iter().any(|tag| tag == SUPERSEDED_TAG)
 }
 
+/// Marks a memory retired by an approved governed proposal.
+///
+/// Retirement is what an unattended consolidation pass proposes instead of
+/// deleting. Applying that proposal must therefore be undoable, or "reviewable"
+/// would mean "reviewable once, irreversibly" -- and a reviewer approving a
+/// batch of ninety would have no way back from the one they misread.
+///
+/// Distinct from [`SUPERSEDED_TAG`] rather than reusing it, because the two
+/// claims differ. Superseded means "folded into that memory over there", and the
+/// merge machinery reads it as such: `merge_tags` strips it so a status cannot
+/// travel onto a survivor, and `phase_fragment_merge` skips superseded relatives
+/// so a completed merge is not undone by the next phase. A retired memory has no
+/// survivor and nothing folded into it. Conflating them would let a fragment
+/// merge resurrect retired content into a live row.
+pub const RETIRED_TAG: &str = "retired";
+
+/// Whether `tags` mark a memory as retired.
+pub fn is_retired(tags: &[String]) -> bool {
+    tags.iter().any(|tag| tag == RETIRED_TAG)
+}
+
+/// Whether a memory is withheld from ordinary reads for any reason.
+///
+/// ONE predicate for both statuses, deliberately. The alternative -- a second
+/// filter alongside `drop_superseded` at each read path -- means every future
+/// read path has to remember two things instead of one, and the failure mode of
+/// forgetting is a retired memory that keeps being recalled. Adding a status
+/// here reaches every read at once.
+///
+/// Withheld is not deleted: the row is on disk and `get_memory` / `inspect_memory`
+/// still return it by id. That is exactly what makes both statuses reversible.
+pub fn is_withheld(tags: &[String]) -> bool {
+    is_superseded(tags) || is_retired(tags)
+}
+
 /// A single memory node in the graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {

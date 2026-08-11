@@ -11,6 +11,18 @@ pub struct SessionStats {
     pub turn_count: u64,
     pub session_cost: f64,
     pub cache_stats: archon_context::cache::CacheStats,
+    /// Approximate token size of the most recent request body actually put on
+    /// the wire, from the preflight [`AgentEvent::ContextPressureUpdated`].
+    ///
+    /// Distinct from `input_tokens`, which is the provider's *billed* count
+    /// summed over the session and is reported only after a turn succeeds. A
+    /// request that gets rate-limited never bills anything, so on the failure
+    /// this exists to diagnose — TPM pressure, issue #37 — `input_tokens` is
+    /// exactly the number that stays silent. This one is recorded before the
+    /// request is sent, so it survives the failure.
+    ///
+    /// Zero until the first request of the session is prepared.
+    pub last_request_body_tokens: u64,
 }
 
 impl Default for SessionStats {
@@ -21,6 +33,7 @@ impl Default for SessionStats {
             turn_count: 0,
             session_cost: 0.0,
             cache_stats: archon_context::cache::CacheStats::default(),
+            last_request_body_tokens: 0,
         }
     }
 }

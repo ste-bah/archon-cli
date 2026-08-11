@@ -259,14 +259,74 @@ it. Two things do:
 
 - `/garden` always does, in the background — the command was explicitly asked for,
   so its cost is not a surprise.
-- Automatic session-start consolidation does only when
-  `[memory.garden] auto_adjudicate_review_band` is on **and** at least
-  `auto_adjudicate_min_pairs` (10) are pending. It is off by default because that
-  path runs before the user has typed anything and nothing else on it calls a
-  model; the threshold is what keeps "on" from meaning a round-trip per launch.
-  Whatever it merges is reported in the startup panel alongside the rest of the
-  pass, and the call is abandoned after 45s so a stalled provider cannot wedge a
-  session start.
+- Automatic consolidation does only when `[memory.garden]
+  auto_adjudicate_review_band` is on **and** at least `auto_adjudicate_min_pairs`
+  (10) pairs are pending. That is off by default; see below.
+
+### Automatic adjudication runs after startup, not during it
+
+Automatic consolidation is part of session bootstrap. It runs before the TUI is
+up and before you can type, and adjudication is the only thing on that path that
+calls a model at all — awaited there, the provider's latency sits between
+launching Archon and the first prompt.
+
+So it is **detached**. `spawn_review_band_adjudication`
+(`src/command/garden_adjudicate.rs`) decides whether to fire, spawns the task,
+and returns; bootstrap carries on without it and the merges are applied whenever
+the verdict comes back.
+
+Detaching is safe rather than merely faster, because nothing downstream needs the
+verdict. The band writes nothing, so a pass that is slow, fails, finds no
+provider, or never returns leaves exactly the state a pass that never ran would
+have left, and the next consolidation re-derives the same pairs and offers them
+again. The task is abandoned after two minutes — not to protect a session start
+nobody is waiting on any more, but so a provider that accepts a request and never
+answers cannot hold the batch, the client, and the store handle for the rest of
+the session.
+
+Detaching changed *when* a verdict may arrive, not *what* is allowed to act on
+one. A merge still happens only through `apply_adjudicated_merges`, still only
+for a pair the model explicitly answered `SAME`, and the background pass writes
+nothing else — no marker, no edge, no tag that a later phase could read back as a
+decision. That is the invariant the 13 destroyed memories bought.
+
+Because the verdict arrives after the startup panel has been drawn, the two
+report separately:
+
+| when | what it says |
+|---|---|
+| startup panel, adjudication on | `judging N pair(s) in the background` — the band as it stood, with a pass in flight. It does not pre-announce merges, because none have happened yet. |
+| startup panel, adjudication off | `N pair(s) awaiting review` — a backlog, and the only prompt to run `/garden`. |
+| when the verdict lands | one line, and only if something actually merged: `Memory garden: M of N pair(s) awaiting review merged after background judgement.` |
+
+A pass that merges nothing says nothing. Consolidation fires on every session
+start once the throttle elapses, and "judged your memories, changed none of them"
+on every launch is a line people learn to skip.
+
+### Turning automatic adjudication on and off
+
+```toml
+[memory.garden]
+# Judge the review band automatically, in the background, after startup.
+auto_adjudicate_review_band = true   # default: false
+# Pending pairs required before a round-trip is spent on them.
+auto_adjudicate_min_pairs = 10       # default: 10
+```
+
+Off is still the default, but the reason is no longer latency — detaching removed
+that. It is that the setting spends an LLM round-trip nobody asked for and then
+reshapes stored memories with the answer. Turn it back off by setting
+`auto_adjudicate_review_band = false`, or by deleting the key: it defaults to
+off, so a config file written before the feature existed reads as off. Nothing
+accumulates as a result except the band itself, and `/garden` still clears that
+on demand.
+
+`auto_adjudicate_min_pairs` is the other half of the switch. One round-trip costs
+the same whatever the batch size, so the threshold decides how many judgements it
+has to buy; `0` means "whenever there is anything at all". It is deliberately
+below the adjudicator's 20-pair per-run cap, so a run that fires at the threshold
+clears the band it fired on rather than leaving a remainder that re-triggers next
+launch. It is ignored entirely when `auto_adjudicate_review_band` is off.
 
 Three properties keep a model acceptable in a path that supersedes memories:
 

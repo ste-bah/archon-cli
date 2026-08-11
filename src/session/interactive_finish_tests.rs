@@ -12,6 +12,9 @@ fn report() -> archon_memory::garden::GardenReport {
         duration_ms: 5,
         review_pairs: Vec::new(),
         semantic_pass_unavailable: false,
+        budget_exhausted: false,
+        retirement_candidates: Vec::new(),
+        consolidation_candidates: Vec::new(),
     }
 }
 
@@ -22,14 +25,14 @@ fn report() -> archon_memory::garden::GardenReport {
 /// skips is no more visible than the log line it replaced.
 #[test]
 fn a_no_op_consolidation_is_silent() {
-    assert!(super::auto_consolidation_summary(&report(), 0).is_none());
+    assert!(super::auto_consolidation_summary(&report(), false).is_none());
     // Importance decay alone is bookkeeping, not a change to what is
     // remembered, so it does not warrant interrupting a session start.
     let decayed = archon_memory::garden::GardenReport {
         importance_decayed: 12,
         ..report()
     };
-    assert!(super::auto_consolidation_summary(&decayed, 0).is_none());
+    assert!(super::auto_consolidation_summary(&decayed, false).is_none());
 }
 
 /// Anything that removed or altered a memory has to be reported.
@@ -66,7 +69,7 @@ fn destructive_outcomes_are_reported() {
         ),
     ] {
         assert!(
-            super::auto_consolidation_summary(&built, 0).is_some(),
+            super::auto_consolidation_summary(&built, false).is_some(),
             "{label} removals must be surfaced"
         );
     }
@@ -90,31 +93,37 @@ fn pending(count: usize) -> archon_memory::garden::GardenReport {
 /// are the work `/garden` would do next, and the only prompt to run it.
 #[test]
 fn pending_review_pairs_are_surfaced() {
-    let summary = super::auto_consolidation_summary(&pending(1), 0).expect("summary");
+    let summary = super::auto_consolidation_summary(&pending(1), false).expect("summary");
     assert_eq!(
         summary, "1 pair(s) awaiting review",
         "the panel entry is prefixed with \"Memory garden:\" by the splash builder,          so the summary itself must be the bare description"
     );
 }
 
-/// Pairs the adjudicator settled are counted as settled, not as still pending.
+/// A band being judged in the background says so, and still says how many.
 ///
-/// The report is a snapshot taken before adjudication ran, so its
-/// `review_pairs` count is stale by the time this line is drawn. Showing it raw
-/// would tell the user work is outstanding that has already been done — and the
-/// panel exists precisely so the memory changes made behind their back are
-/// legible.
+/// It must NOT pre-announce merges. The pass is detached and unfinished at the
+/// moment this line is drawn; reporting a settled count here would be the panel
+/// asserting an outcome nothing has produced yet. The real count arrives from
+/// the background task itself, and only if it merged something.
 #[test]
-fn adjudicated_pairs_are_reported_as_merged_and_removed_from_the_backlog() {
-    let summary = super::auto_consolidation_summary(&pending(7), 3).expect("summary");
-    assert_eq!(
-        summary,
-        "3 pair(s) merged after review, 4 pair(s) awaiting review"
+fn a_band_under_background_judgement_is_reported_as_in_progress() {
+    let summary = super::auto_consolidation_summary(&pending(7), true).expect("summary");
+    assert_eq!(summary, "judging 7 pair(s) in the background");
+    assert!(
+        !summary.contains("merged"),
+        "the panel must not claim merges the background pass has not made yet"
     );
+    // The splash column truncates past roughly fifty characters.
+    assert!(summary.len() <= 50, "summary must fit the splash column");
+}
 
-    // A band cleared completely leaves no backlog to mention.
-    let summary = super::auto_consolidation_summary(&pending(2), 2).expect("summary");
-    assert_eq!(summary, "2 pair(s) merged after review");
+/// With adjudication off — the default — the band is reported as a backlog, not
+/// as work in flight, because nothing is going to resolve it but `/garden`.
+#[test]
+fn a_band_nobody_is_judging_is_reported_as_a_backlog() {
+    let summary = super::auto_consolidation_summary(&pending(7), false).expect("summary");
+    assert_eq!(summary, "7 pair(s) awaiting review");
 }
 
 /// A pass that never ran is surfaced, even though it changed nothing.
@@ -129,7 +138,7 @@ fn an_unavailable_semantic_pass_is_surfaced() {
         semantic_pass_unavailable: true,
         ..report()
     };
-    let summary = super::auto_consolidation_summary(&unavailable, 0).expect("summary");
+    let summary = super::auto_consolidation_summary(&unavailable, false).expect("summary");
     assert_eq!(summary, "semantic pass unavailable (second instance)");
     // The splash column truncates past roughly fifty characters, and a notice
     // clipped to "semantic pass unavailable (second inst..." says less than

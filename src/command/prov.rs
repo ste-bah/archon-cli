@@ -9,7 +9,7 @@ use cozo::DbInstance;
 use crate::cli_args::ProvAction;
 
 fn prov_db_path() -> PathBuf {
-    crate::command::store_paths::evidence_db_path(&["ARCHON_PROV_DB_PATH", "ARCHON_KB_DB_PATH"])
+    crate::command::store_paths::evidence_db_path(crate::command::store_paths::PROV_DB_ENV_KEYS)
 }
 
 fn open_db() -> Result<Arc<DbInstance>> {
@@ -80,6 +80,8 @@ fn verify(db: &DbInstance, artifact_id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::*;
 
     #[test]
@@ -94,14 +96,34 @@ mod tests {
         archon_provenance::store::ensure_schema(&provenance).unwrap();
     }
 
+    /// Exercises the key list and precedence rule `prov_db_path` is built from, with
+    /// the environment supplied as an explicit argument. It used to `set_var` on the
+    /// real process environment, which every other test in this binary shares (#166).
     #[test]
     fn prov_db_path_prefers_explicit_override() {
-        unsafe {
-            std::env::set_var("ARCHON_PROV_DB_PATH", "/tmp/archon-prov-test.db");
-        }
-        assert_eq!(prov_db_path(), PathBuf::from("/tmp/archon-prov-test.db"));
-        unsafe {
-            std::env::remove_var("ARCHON_PROV_DB_PATH");
-        }
+        let resolve = |lookup: fn(&str) -> Option<OsString>| {
+            crate::command::store_paths::evidence_db_path_with(
+                Path::new("/proj"),
+                crate::command::store_paths::PROV_DB_ENV_KEYS,
+                lookup,
+            )
+        };
+
+        // The provenance-specific key wins over the knowledge-base fallback.
+        assert_eq!(
+            resolve(|key| match key {
+                "ARCHON_PROV_DB_PATH" => Some(OsString::from("/tmp/archon-prov-test.db")),
+                "ARCHON_KB_DB_PATH" => Some(OsString::from("/tmp/archon-kb-test.db")),
+                _ => None,
+            }),
+            PathBuf::from("/tmp/archon-prov-test.db")
+        );
+
+        // Without it, provenance still reads the shared knowledge-base store.
+        assert_eq!(
+            resolve(|key| (key == "ARCHON_KB_DB_PATH")
+                .then(|| OsString::from("/tmp/archon-kb-test.db"))),
+            PathBuf::from("/tmp/archon-kb-test.db")
+        );
     }
 }

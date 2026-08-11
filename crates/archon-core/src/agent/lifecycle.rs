@@ -83,6 +83,8 @@ impl Agent {
             cognitive_policy: None,
             cognitive_ledger_dir: None,
             cognitive_executive_reminder: None,
+            cognitive_learning_block: None,
+            cognitive_injected_reflections: Vec::new(),
             cognitive_prediction_backend: None,
             cognitive_world_model_state: archon_cognitive::WorldModelState::default(),
             // TASK #245: wired by the binary at startup; default None makes

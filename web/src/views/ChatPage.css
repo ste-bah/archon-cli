@@ -135,6 +135,14 @@
   font-style: normal;
 }
 
+/* Document ids are long; the chip stays one line and the full id lives in the
+   title attribute. */
+.attachment-chip__doc-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer button {
   display: inline-flex;
   align-items: center;

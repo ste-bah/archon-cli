@@ -110,6 +110,26 @@ if should_run "banned-imports"; then
 fi
 
 # ---------------------------------------------------------------------
+# Step 2b — R0 entry gate (learning prerequisite closure evidence)
+#
+# Re-verifies docs/development/r0-entry-gate.evidence: findings 9, 11, 17 and
+# 40-43 from reports/core-audit-2026-07-11.md must still be closed in source,
+# still be reached by a live call site, and still be covered by the named
+# behavioural tests. The roadmap forbids promoting any behaviour-changing slice
+# while this is red (docs/development/learning-roadmap-r1-r8-w5-w6.md line 35).
+#
+# Commit-ancestry checking is best-effort here and mandatory in CI: a local
+# working copy is often a shallow or Windows-created worktree whose history the
+# running shell cannot walk. The `r0-entry-gate` job in .github/workflows/ci.yml
+# checks out with fetch-depth: 0 and passes --require-commits, so the skip
+# cannot become the permanent state of the check.
+# ---------------------------------------------------------------------
+if should_run "r0-entry-gate"; then
+    banner 2b "R0 entry gate (learning prerequisite closure)"
+    bash scripts/check-r0-entry-gate.sh
+fi
+
+# ---------------------------------------------------------------------
 # Step 3 — cargo fmt --check
 # ---------------------------------------------------------------------
 if should_run "fmt"; then

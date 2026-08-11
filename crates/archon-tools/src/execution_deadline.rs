@@ -18,6 +18,18 @@ impl ExecutionDeadline {
         self.end.saturating_duration_since(Instant::now())
     }
 
+    /// Whether the budget is gone.
+    ///
+    /// [`Self::wait`] alone cannot answer this: it is built on
+    /// [`tokio::time::timeout_at`], which polls the inner future before the
+    /// deadline and so returns `Some` for anything ready at poll time even when
+    /// the budget expired earlier. Callers that must not accept a late result —
+    /// anything deciding "did this finish in time?" rather than merely bounding
+    /// a wait — check this after the future resolves.
+    pub fn expired(&self) -> bool {
+        self.remaining().is_zero()
+    }
+
     pub async fn wait<T>(&self, future: impl Future<Output = T>) -> Option<T> {
         tokio::time::timeout_at(self.end.into(), future).await.ok()
     }

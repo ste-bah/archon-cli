@@ -24,6 +24,10 @@ use crate::cozo_guard::run_script_guarded;
 use crate::executive_support::domain_for;
 use crate::metrics::emit::{MetricEmitter, runtime_cohort};
 use crate::metrics::event::MetricEventKind;
+// The dimension label is shared with the pre-action predictor: it reads the
+// facts this writer produces, and two independent copies of the label would let
+// the reader silently miss them.
+use crate::self_model::prediction::TRUST_DIMENSION;
 use crate::self_model::store::SelfModelStore;
 use crate::self_model::types::{FactKind, SelfModelFact};
 use crate::{CognitiveError, OutcomeSummary, SituationKind};
@@ -44,9 +48,6 @@ pub const MAX_CONFIDENCE_DRIFT: f32 = 0.05;
 
 /// Confidence assumed for a domain that has no fact yet.
 const NEUTRAL_CONFIDENCE: f32 = 0.5;
-
-/// Dimension label recorded on the metric event.
-const TRUST_DIMENSION: &str = "domain_trust";
 
 const METRIC_NAME: &str = "self_model_fact_confidence_mean";
 

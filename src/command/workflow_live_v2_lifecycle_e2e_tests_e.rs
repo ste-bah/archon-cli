@@ -146,3 +146,51 @@ async fn a_fully_drained_board_lets_the_run_be_accepted() {
         "the reason the gate accepted must still be on the record afterwards"
     );
 }
+
+/// #161: a real run leaves its own branches on its own partition.
+///
+/// The V2 lifecycle dispatches through `LiveV2AgentClient`, not through
+/// `PipelineWorkflowRunner::run_stage`, so this is the only place the dominant
+/// path is proved: run the composition root's entry point and read the board it
+/// installed. Before the fix this partition was empty for the entire run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_real_run_leaves_its_own_branches_on_its_board_partition() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture = full_lifecycle_fixture(temp.path());
+    let board = installed_board();
+    let run_id = fixture.run_id.clone();
+
+    let summary = run_full_lifecycle(fixture.runner).await;
+
+    let items = board
+        .list_board_items_by_run(&run_id, &[])
+        .expect("the run's partition");
+    assert!(
+        items.len() > 5,
+        "every branch should be on the run's own partition, found {}",
+        items.len()
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| item.kind == BoardItemKind::Note && item.run_id == run_id),
+        "branches are notes on the run's partition, not issues on a stage's"
+    );
+    assert!(
+        items.iter().all(|item| item.status != BoardStatus::Claimed),
+        "no branch may still read as held once the run is over"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| item.status == BoardStatus::InReview),
+        "a branch that returned closes for review, not resolved"
+    );
+    // And none of it gated the run: notes are exempt, which is the whole reason
+    // a branch is raised as one.
+    assert_eq!(
+        summary.status,
+        WorkflowV2Status::Accepted,
+        "mirroring branches must not block a run that would otherwise be accepted"
+    );
+}

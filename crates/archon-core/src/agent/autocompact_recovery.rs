@@ -28,10 +28,6 @@ impl RecoveryLadder {
         Some(tier)
     }
 
-    pub fn next_unclassified(&mut self) -> Option<RecoveryTier> {
-        None
-    }
-
     pub fn attempts(&self) -> u8 {
         self.attempts
     }

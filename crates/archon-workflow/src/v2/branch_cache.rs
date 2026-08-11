@@ -12,6 +12,37 @@
 //! Wave call ids additionally require durable completion evidence, because
 //! their outcomes feed the completion ledger; an outcome with no evidence would
 //! be reused into a credit it cannot support.
+//!
+//! # Reuse is keyed on `(call_id, item_id)`, and that is deliberate
+//!
+//! It is tempting to widen this to a call-id-independent identity, because a
+//! retried wave gets a NEW call id (`remediation-wave-1` →
+//! `remediation-wave-1-1`, minted in `lifecycle_driver::implementation`) and new
+//! branch ids (`{call_id}-{item_id}`, minted in `call_data::source`), so nothing
+//! from the previous attempt is visible to the next one.
+//!
+//! Widening it would be WRONG, because of what a new call id means here. The
+//! retry wave is not the same wave run again: its items come from a follow-up
+//! inventory the driver derives from `non_accepted_outcomes` of the previous
+//! wave and filters through `enforce_outcome_repair_accounting`. Membership in a
+//! retry wave therefore MEANS "this did not resolve". An item that resolved is
+//! already credited (`matching_accepted_ids`) and is never rescheduled, so there
+//! is no accepted sibling to rescue; and anything that IS rescheduled is
+//! something the accounting has just decided must be redone.
+//!
+//! The decisive case is the review loop. `review-remediation-wave-{n+1}` can
+//! legitimately ask for the SAME remediation as round `n` — the follow-up
+//! inventory is even hydrated from the previous round's source items — and that
+//! repetition is the signal that round `n`'s accepted fix did not stick. A
+//! payload-identity cache would answer it with round `n`'s accepted outcome,
+//! skip the work, and let the loop declare convergence it never reached. A
+//! repeated execution costs money; a wrong reuse costs correctness, silently.
+//!
+//! The accepted-siblings loss that motivated this note came from
+//! `write::worktree_wave`, where one branch's `Err` aborted the collection
+//! before any sibling was persisted. That is fixed at the source, in
+//! `worktree_wave_outcomes`. See `cross_attempt_reuse_is_refused` below, which
+//! pins this decision.
 
 use std::collections::BTreeMap;
 
@@ -41,14 +72,25 @@ pub fn split_reusable_branch_outcomes(
 }
 
 /// Whether an outcome is terminal-good, self-consistent, and hash-stamped.
+///
+/// `failure_kind` must also be absent. It is not redundant with the status
+/// check: `write::save_write_branch_outcome` derives it from
+/// `failure_kind_from_write_result`, which reads `result.data["failure_kind"]`
+/// FIRST and only falls back to the status. `data` on an accepted branch is the
+/// AGENT's, so an agent returning `status: accepted` alongside
+/// `data.failure_kind` produces a stored outcome that says both "this
+/// succeeded" and "this failed". Reuse takes the pessimistic reading and
+/// re-runs, because the cost of being wrong is asymmetric: a needless execution
+/// versus crediting failed work as done.
 pub fn reusable_branch_outcome(outcome: &WorkflowV2BranchOutcome) -> bool {
     matches!(
         outcome.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) && outcome
-        .result
-        .as_ref()
-        .is_some_and(|result| result.status == outcome.status && result.validate().is_ok())
+    ) && outcome.failure_kind.is_none()
+        && outcome
+            .result
+            .as_ref()
+            .is_some_and(|result| result.status == outcome.status && result.validate().is_ok())
         && outcome.item_input_hash.is_some()
 }
 
@@ -91,3 +133,7 @@ pub fn sort_branch_outcomes_by_order(
 ) {
     outcomes.sort_by_key(|outcome| order.get(&outcome.item_id).copied().unwrap_or(usize::MAX));
 }
+
+#[cfg(test)]
+#[path = "branch_cache_tests.rs"]
+mod tests;

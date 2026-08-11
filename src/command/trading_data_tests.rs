@@ -1,3 +1,4 @@
+use super::snapshot::{SnapshotSource, snapshot_from};
 use super::*;
 
 #[test]
@@ -264,15 +265,14 @@ fn tradingview_snapshot_persists_provider_snapshot() {
         r#"{"mcp_tool_results":{"tv_health_check":{"connected":true},"chart_get_state":{"symbol":"CME_MINI:ES1!"},"quote_get":{"time":1785245400,"last":340.16}}}"#,
     )
     .unwrap();
-    unsafe { std::env::set_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE", &fixture_path) };
     let captured_before = chrono::Utc::now().timestamp();
-    let output = render_data(&TradingCliDataAction::Snapshot {
-        target: Some(temp.path().to_path_buf()),
-        provider: "tradingview".into(),
-        symbol: "CME_MINI:ES1!".into(),
-    })
+    let output = snapshot_from(
+        Some(&temp.path().to_path_buf()),
+        "tradingview",
+        "CME_MINI:ES1!",
+        &SnapshotSource::Fixture(fixture_path),
+    )
     .unwrap();
-    unsafe { std::env::remove_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") };
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
     assert_eq!(report["can_fetch"], true);
@@ -312,14 +312,13 @@ fn tradingview_snapshot_classifies_provider_timestamp_fresh_within_five_minutes(
         ),
     )
     .unwrap();
-    unsafe { std::env::set_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE", &fixture_path) };
-    let output = render_data(&TradingCliDataAction::Snapshot {
-        target: Some(temp.path().to_path_buf()),
-        provider: "tradingview".into(),
-        symbol: "BATS:AAPL".into(),
-    })
+    let output = snapshot_from(
+        Some(&temp.path().to_path_buf()),
+        "tradingview",
+        "BATS:AAPL",
+        &SnapshotSource::Fixture(fixture_path),
+    )
     .unwrap();
-    unsafe { std::env::remove_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") };
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
     let snapshot_path = temp.path().join(report["snapshot_path"].as_str().unwrap());
     let snapshot: serde_json::Value =
@@ -334,14 +333,13 @@ fn tradingview_snapshot_classifies_provider_timestamp_fresh_within_five_minutes(
 fn tradingview_snapshot_fails_closed_without_provider_state() {
     let temp = tempfile::tempdir().unwrap();
     let missing_fixture = temp.path().join("missing-snapshot.json");
-    unsafe { std::env::set_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE", &missing_fixture) };
-    let output = render_data(&TradingCliDataAction::Snapshot {
-        target: Some(temp.path().to_path_buf()),
-        provider: "tradingview".into(),
-        symbol: "CME_MINI:ES1!".into(),
-    })
+    let output = snapshot_from(
+        Some(&temp.path().to_path_buf()),
+        "tradingview",
+        "CME_MINI:ES1!",
+        &SnapshotSource::Fixture(missing_fixture),
+    )
     .unwrap();
-    unsafe { std::env::remove_var("ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE") };
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
     assert_eq!(report["can_fetch"], false);
@@ -361,6 +359,31 @@ fn tradingview_snapshot_fails_closed_without_provider_state() {
             .path()
             .join(".archon/trading-lab/data/snapshots/tradingview/CME_MINI_ES1_.json")
             .exists()
+    );
+}
+
+#[test]
+fn snapshot_dispatches_through_render_data_for_unsupported_provider() {
+    // Covers the `TradingCliDataAction::Snapshot` dispatch arm. Uses a
+    // non-TradingView provider because that branch never consults the
+    // environment, so the test is independent of ambient process state.
+    let temp = tempfile::tempdir().unwrap();
+    let output = render_data(&TradingCliDataAction::Snapshot {
+        target: Some(temp.path().to_path_buf()),
+        provider: "Stooq".into(),
+        symbol: "SPY".into(),
+    })
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(report["can_fetch"], false);
+    let snapshot_path = temp.path().join(report["snapshot_path"].as_str().unwrap());
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(snapshot_path).unwrap()).unwrap();
+    assert_eq!(snapshot["snapshot"]["provider"], "stooq");
+    assert_eq!(
+        snapshot["snapshot"]["payload"]["unavailable_reason"],
+        "provider-specific snapshot fetch support is not implemented"
     );
 }
 

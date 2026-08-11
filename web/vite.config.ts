@@ -1,9 +1,39 @@
+import { cpSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
+
+/**
+ * Copy the PDF.js runtime data into `dist/pdfjs/`.
+ *
+ * PDF.js fetches CMaps, the standard font programs, its WASM image decoders
+ * and ICC profiles at render time. Left unconfigured it reaches for Mozilla's
+ * CDN; these are served from our own origin instead, which is what makes the
+ * `default-src 'self'` shell CSP survivable and keeps the viewer working with
+ * no network at all.
+ */
+function pdfjsRuntimeAssets(): Plugin {
+  const require = createRequire(import.meta.url);
+  const packageRoot = dirname(require.resolve("pdfjs-dist/package.json"));
+  return {
+    name: "archon-pdfjs-runtime-assets",
+    apply: "build",
+    writeBundle(options) {
+      const outDir = options.dir ?? "dist";
+      for (const directory of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+        cpSync(join(packageRoot, directory), join(outDir, "pdfjs", directory), {
+          recursive: true,
+        });
+      }
+    },
+  };
+}
 
 export default defineConfig({
   base: "/static/",
-  plugins: [react()],
+  plugins: [react(), pdfjsRuntimeAssets()],
   server: {
     host: "127.0.0.1",
     port: 5173,

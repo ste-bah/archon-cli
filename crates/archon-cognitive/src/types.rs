@@ -154,6 +154,23 @@ pub struct DecisionRecord {
 }
 
 impl SituationKind {
+    /// Every variant, so a caller that has to enumerate the situation space
+    /// (the self-model briefing enumerating domains, for one) cannot silently
+    /// miss a kind added later. `all_situation_kinds_are_enumerated` in the
+    /// self-model briefing tests is what keeps this honest.
+    pub const ALL: [Self; 10] = [
+        Self::Greeting,
+        Self::HighRisk,
+        Self::GitMutation,
+        Self::CiDebug,
+        Self::PipelineControl,
+        Self::WorldModelTask,
+        Self::CodeChange,
+        Self::Research,
+        Self::SimpleQuestion,
+        Self::Ambiguous,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Greeting => "greeting",

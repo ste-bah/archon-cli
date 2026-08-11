@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { HashRouter } from "react-router";
 import { apiClient } from "./api/client";
+import { useLiveQueryInvalidation } from "./api/liveQueryInvalidation";
 import { useLiveEvents } from "./api/useLiveEvents";
 import { AppShell } from "./components/AppShell";
 import { WorkbenchRoutes } from "./views/routes";
@@ -16,6 +17,11 @@ export function App() {
   const config = useQuery({ queryKey: ["config"], queryFn: apiClient.config });
   const policy = useQuery({ queryKey: ["policy"], queryFn: apiClient.policy });
   const live = useLiveEvents();
+  // The rest of these queries are fetch-once under the client's 10s staleTime.
+  // Rather than giving each one a timer, the live stream tells them when the
+  // state behind them actually moved; see `LIVE_EVENT_QUERY_KEYS` for the
+  // event-to-surface mapping and for the surfaces that have no event at all.
+  useLiveQueryInvalidation(live);
   const agents = useQuery({
     queryKey: ["agents"],
     queryFn: apiClient.agentsLive,

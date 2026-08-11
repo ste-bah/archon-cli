@@ -126,16 +126,17 @@ mod tests {
         )
         .unwrap();
 
+        // The store is passed in, not published through `ARCHON_PROV_DB_PATH`. This test
+        // used to set that variable under a `// SAFETY: single-threaded test` comment that
+        // was simply false: it shares a process with the rest of the `archon` bin target,
+        // which runs its tests concurrently (#166).
         let db_file = dir.join("prov.db");
-        // SAFETY: single-threaded test; no other thread reads the env concurrently.
-        unsafe {
-            std::env::set_var("ARCHON_PROV_DB_PATH", &db_file);
-        }
 
         // No quotes → no corpus linkage attempted (hermetic: this db has no ingested corpus).
-        let summary = import_provenance_to_store(&chain, "test-section", "claude-fable-5", &[], "")
-            .unwrap()
-            .expect("non-empty chain");
+        let summary =
+            import_provenance_to_store(&db_file, &chain, "test-section", "claude-fable-5", &[], "")
+                .unwrap()
+                .expect("non-empty chain");
         assert_eq!(summary.records, 3);
         assert_eq!(summary.final_artifact, "test-section#02-revision");
         assert!(summary.cited.is_empty());
@@ -154,9 +155,6 @@ mod tests {
         // verify runs end-to-end against the imported chain
         archon_provenance::verify::verify_artifact(&db, &final_artifact).unwrap();
 
-        unsafe {
-            std::env::remove_var("ARCHON_PROV_DB_PATH");
-        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

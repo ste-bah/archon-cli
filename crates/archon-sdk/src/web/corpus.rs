@@ -14,6 +14,14 @@ use ts_rs::{Config as TsConfig, TS};
 
 use super::{AppState, check_auth, inspect::PathProbe};
 
+#[path = "corpus_source.rs"]
+pub mod source;
+
+use source::{
+    CorpusPreviewMode, corpus_roots, is_corpus_file, is_inside_corpus_root, is_text_preview,
+    preview_mode_for,
+};
+
 const SOURCE_LIMIT: usize = 200;
 const PREVIEW_LIMIT: usize = 64 * 1024;
 
@@ -91,6 +99,10 @@ pub struct CorpusSourcePreview {
     pub line_count: u64,
     pub truncated: bool,
     pub preview_available: bool,
+    /// Which viewer the workbench should use. `content` is only populated for
+    /// [`CorpusPreviewMode::Text`]; a PDF is fetched separately from
+    /// `/api/corpus/source/bytes`.
+    pub preview_mode: CorpusPreviewMode,
     pub policy_reason: String,
 }
 
@@ -189,13 +201,31 @@ fn corpus_preview(query: CorpusPreviewQuery) -> Result<CorpusSourcePreview, Stri
     let Some(source) = source_from_path(&path) else {
         return Err("path is not a supported corpus file".into());
     };
-    if !is_text_preview(&source.kind) {
-        return Ok(preview_unavailable(
+    match preview_mode_for(&source.kind) {
+        CorpusPreviewMode::Text => text_preview(&path, source),
+        // The bytes never travel in this JSON. The response says "there is a
+        // viewer for this, go and fetch it" and the client calls
+        // `/api/corpus/source/bytes`.
+        CorpusPreviewMode::Pdf => Ok(CorpusSourcePreview {
             source,
-            "binary preview is not available yet",
-        ));
+            content: String::new(),
+            line_count: 0,
+            truncated: false,
+            preview_available: true,
+            preview_mode: CorpusPreviewMode::Pdf,
+            policy_reason: "read-only PDF stream under configured corpus root; \
+                            rendered in-browser with embedded scripting disabled"
+                .into(),
+        }),
+        CorpusPreviewMode::Unsupported => Ok(preview_unavailable(
+            source.clone(),
+            &format!("no viewer for .{} sources", source.kind),
+        )),
     }
-    let bytes = fs::read(&path).map_err(|err| format!("failed to read corpus source: {err}"))?;
+}
+
+fn text_preview(path: &Path, source: CorpusSource) -> Result<CorpusSourcePreview, String> {
+    let bytes = fs::read(path).map_err(|err| format!("failed to read corpus source: {err}"))?;
     let truncated = bytes.len() > PREVIEW_LIMIT;
     let content = String::from_utf8_lossy(&bytes[..bytes.len().min(PREVIEW_LIMIT)]).to_string();
     let line_count = content.lines().count() as u64;
@@ -205,6 +235,7 @@ fn corpus_preview(query: CorpusPreviewQuery) -> Result<CorpusSourcePreview, Stri
         line_count,
         truncated,
         preview_available: true,
+        preview_mode: CorpusPreviewMode::Text,
         policy_reason: "read-only preview under configured corpus root".into(),
     })
 }
@@ -362,42 +393,9 @@ fn preview_unavailable(source: CorpusSource, reason: &str) -> CorpusSourcePrevie
         line_count: 0,
         truncated: false,
         preview_available: false,
+        preview_mode: CorpusPreviewMode::Unsupported,
         policy_reason: reason.into(),
     }
-}
-
-fn is_inside_corpus_root(path: &Path) -> bool {
-    let Ok(path) = path.canonicalize() else {
-        return false;
-    };
-    corpus_roots()
-        .into_iter()
-        .filter_map(|(_, root)| root.canonicalize().ok())
-        .any(|root| path.starts_with(root))
-}
-
-fn corpus_roots() -> Vec<(String, PathBuf)> {
-    let cwd = cwd();
-    vec![
-        ("repo docs".into(), cwd.join("docs")),
-        ("local kb".into(), cwd.join(".archon/kb")),
-        ("local docs store".into(), cwd.join(".archon/docs")),
-        ("home kb".into(), home_archon().join("kb")),
-    ]
-}
-
-fn is_corpus_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()).unwrap_or(""),
-        "md" | "txt" | "pdf" | "json" | "jsonl" | "toml" | "yaml" | "yml"
-    )
-}
-
-fn is_text_preview(kind: &str) -> bool {
-    matches!(
-        kind,
-        "md" | "txt" | "json" | "jsonl" | "toml" | "yaml" | "yml"
-    )
 }
 
 fn probe(label: impl Into<String>, path: PathBuf) -> PathProbe {
@@ -432,16 +430,6 @@ fn dir_stats(path: &Path, depth: usize) -> (u64, u64) {
         })
 }
 
-fn cwd() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn home_archon() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".archon")
-}
-
 pub fn generated_typescript() -> String {
     let cfg = TsConfig::default().with_large_int("number");
     [
@@ -451,6 +439,7 @@ pub fn generated_typescript() -> String {
         exported(CorpusSearchResponse::decl(&cfg)),
         exported(CorpusChunkHit::decl(&cfg)),
         exported(CorpusPreviewQuery::decl(&cfg)),
+        exported(CorpusPreviewMode::decl(&cfg)),
         exported(CorpusSourcePreview::decl(&cfg)),
     ]
     .join("\n\n")

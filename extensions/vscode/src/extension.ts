@@ -27,6 +27,9 @@ let connectionManager: ConnectionManager | null = null;
 /** Status bar item showing the current connection state. */
 let statusBarItem: vscode.StatusBarItem | null = null;
 
+/** Output channel carrying backend stderr and process-exit notices. */
+let outputChannel: vscode.OutputChannel | null = null;
+
 // ── Activate ──────────────────────────────────────────────────────────────────
 
 export async function activate(
@@ -43,8 +46,17 @@ export async function activate(
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
+  // ── Backend output channel ─────────────────────────────────────────────────
+  // The stdio backend is spawned with `windowsHide`, so its stderr has no
+  // console to land in. Without somewhere to route it, a backend that dies —
+  // including one killed by a user closing a window they took for a hung
+  // process — shows up only as "Archon: error" in the status bar.
+  outputChannel = vscode.window.createOutputChannel("Archon");
+  context.subscriptions.push(outputChannel);
+
   // ── Connection manager ─────────────────────────────────────────────────────
   connectionManager = new ConnectionManager();
+  connectionManager.onBackendLog = (text) => outputChannel?.append(text);
 
   // ── Command: archon.openChat ───────────────────────────────────────────────
   context.subscriptions.push(
@@ -225,8 +237,11 @@ export async function activate(
   try {
     await connectFromConfig();
     updateStatusBar("connected");
-  } catch {
+  } catch (err) {
     // Non-fatal: server may not be running yet. User can reconnect manually.
+    // The reason goes to the channel so "Archon: error" in the status bar is
+    // traceable to something rather than being the whole of the diagnosis.
+    outputChannel?.appendLine(`[archon] connection failed — ${errText(err)}`);
     updateStatusBar("error");
   }
 }
@@ -239,6 +254,8 @@ export function deactivate(): void {
   ChatPanel.current?.dispose();
   statusBarItem?.dispose();
   statusBarItem = null;
+  outputChannel?.dispose();
+  outputChannel = null;
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

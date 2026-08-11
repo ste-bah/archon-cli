@@ -260,6 +260,19 @@ mod cognitive_parse_tests {
     use clap::Parser;
 
     #[test]
+    fn cognitive_gate_json_parses() {
+        let cli = Cli::try_parse_from(["archon", "cognitive", "gate", "--json"])
+            .expect("cognitive gate must parse");
+
+        match cli.command {
+            Some(Commands::Cognitive {
+                action: CognitiveAction::Gate { json },
+            }) => assert!(json),
+            other => panic!("expected cognitive gate, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn cognitive_status_json_parses() {
         let cli = Cli::try_parse_from(["archon", "cognitive", "status", "--json"])
             .expect("cognitive status must parse");

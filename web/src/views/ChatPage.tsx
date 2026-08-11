@@ -116,6 +116,7 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
           policyReason: result.decision.policyReason,
           dataBase64: null,
           storedPath: null,
+          documentId: null,
         };
         if (result.accepted) {
           setAttachments((current) => [...current, item]);
@@ -288,14 +289,22 @@ export function ChatPage({ uploadPolicy }: ChatPageProps) {
   );
 }
 
-function AttachmentList({ attachments }: { attachments: WebChatAttachment[] }) {
+export function AttachmentList({ attachments }: { attachments: WebChatAttachment[] }) {
   return (
     <div className="attachment-list">
       {attachments.map((attachment) => (
-        <span key={`${attachment.fileName}:${attachment.sizeBytes}:${attachment.storedPath ?? ""}`} className="attachment-chip attachment-chip--static">
+        <span
+          key={`${attachment.fileName}:${attachment.sizeBytes}:${attachment.storedPath ?? ""}:${attachment.documentId ?? ""}`}
+          className="attachment-chip attachment-chip--static"
+        >
           <span>{attachment.fileName}</span>
           <small>{formatBytes(attachment.sizeBytes)}</small>
           {attachment.storedPath ? <em title={attachment.storedPath}>stored</em> : null}
+          {/* Absent when the file was never ingested; the id is the handle the
+              operator needs to reference the document in a later turn. */}
+          {attachment.documentId
+            ? <em className="attachment-chip__doc-id" title={`Archon docs document ${attachment.documentId}`}>ingested as {attachment.documentId}</em>
+            : null}
         </span>
       ))}
     </div>

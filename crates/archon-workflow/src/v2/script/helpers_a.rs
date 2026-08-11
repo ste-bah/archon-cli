@@ -37,7 +37,7 @@ pub fn parse_script_options(
                     value.as_u64().and_then(|value| usize::try_from(value).ok());
             }
             "requiredArtifacts" | "required_artifacts" => {
-                options.required_artifacts = artifact_requirements(value);
+                options.required_artifacts = artifact_requirements(value)?;
             }
             "write" | "writeMode" | "write_mode" => {
                 if value.as_bool() == Some(true) {

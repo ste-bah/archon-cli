@@ -611,6 +611,8 @@ hybrid_alpha = 0.3
 ## `[memory.garden]`
 
 Background memory consolidation. Runs at session start when throttle elapses.
+Its one LLM-backed step, review-band adjudication, is detached and runs after
+startup rather than on it — see `auto_adjudicate_review_band` below.
 
 ```toml
 [memory.garden]
@@ -626,6 +628,14 @@ staleness_importance_floor = 0.3
 importance_decay_per_day = 0.01
 max_memories = 5000
 briefing_limit = 15
+scheduled_consolidation = false
+scheduled_interval_hours = 24
+scheduled_max_reversible_ops = 500
+scheduled_max_retirement_candidates = 100
+scheduled_max_seconds = 300
+consolidation_min_cluster_size = 3
+consolidation_max_span_days = 14
+consolidation_min_word_overlap = 0.5
 ```
 
 | Field | Default | What / Why |
@@ -635,13 +645,66 @@ briefing_limit = 15
 | `dedup_similarity_threshold` | `0.92` | **Jaccard word-set overlap** (not cosine) above which two memories are merged. Only ever catches near-verbatim copies: two restatements of one instruction typically score ~0.31, because set-of-words similarity does not even match "deploy" to "deploys". Semantic duplicates are handled by the two fields below. |
 | `semantic_dedup_max_distance` | `0.15` | Cosine **distance** (0 = identical) below which two memories are merged and the loser marked superseded. Measured, not chosen — see [consolidation bands](../architecture/learning-systems.md#consolidation-bands-not-a-threshold). Requires an embedding provider; without one this is a no-op and only the Jaccard pass runs. |
 | `semantic_review_max_distance` | `0.35` | Upper bound of the review band. Pairs between the merge distance and this are **counted and otherwise untouched** — probably the same subject, not provably the same claim. Nothing is written: an earlier version recorded a `RelatedTo` edge here, which the fragment-merge phase then read as a merge instruction and destroyed one memory of each pair. Run `/garden` to have them adjudicated, or set `auto_adjudicate_review_band`. Set equal to `semantic_dedup_max_distance` to disable the band. |
-| `auto_adjudicate_review_band` | `false` | Judge the review band during automatic session-start consolidation, instead of only when `/garden` is run by hand. **Off by default because of startup latency**: adjudication is an LLM round-trip, automatic consolidation runs before you can type, and nothing else on that path calls a model. Left off, review-band pairs simply accumulate — nothing is written and nothing is lost, but they are resolved only when you run `/garden`. Merges are reversible (the loser is tagged `superseded`, not deleted) and anything the model is unsure about is left alone. |
+| `auto_adjudicate_review_band` | `false` | Judge the review band automatically, instead of only when `/garden` is run by hand. The judgement runs **in the background after startup** — it is spawned during automatic consolidation and nothing waits on it, so turning this on does not delay the first prompt; merges are applied whenever the verdict comes back, and reported then. **Still off by default**, because it spends an LLM round-trip you did not ask for and reshapes stored memories with the answer. Left off, review-band pairs simply accumulate — nothing is written and nothing is lost, but they are resolved only when you run `/garden`. Only a pair the model explicitly calls the same claim is ever merged: a failed, slow, or unparseable answer leaves both memories alone, the call is abandoned after two minutes, and merges are reversible (the loser is tagged `superseded`, not deleted). See [automatic adjudication](../architecture/learning-systems.md#automatic-adjudication-runs-after-startup-not-during-it). |
 | `auto_adjudicate_min_pairs` | `10` | Pending review-band pairs required before automatic adjudication fires, so enabling the setting above does not mean an LLM call on every launch. One round-trip costs the same whatever the batch size, so the threshold is about buying enough judgements to be worth it. Kept below the adjudicator's 20-pair-per-run cap so a run that fires at the threshold clears the whole band in one call rather than leaving a remainder that re-triggers next launch. Ignored when `auto_adjudicate_review_band` is `false`. |
 | `staleness_days` | `30` | Days a memory can sit unaccessed before counting as stale. |
 | `staleness_importance_floor` | `0.3` | Stale memories with importance below this floor get pruned. Raise to retain more borderline memories; lower to clean up aggressively. |
 | `importance_decay_per_day` | `0.01` | Importance lost per day for unaccessed memories, charged **per consolidation run** for the days since the previous run. Memories regain importance when retrieved. At the default, a memory stored at `0.5` and never recalled crosses `staleness_importance_floor` in about 20 days and is deleted once it also passes `staleness_days`. (Before v1.5.2 the whole span since last access was charged on every run, so decay compounded and that took about a week.) |
 | `max_memories` | `5000` | Hard cap. When exceeded, lowest-importance memories are pruned first. Raise for long-running projects with many decisions to track. |
 | `briefing_limit` | `15` | Top-N memories injected into the session-start briefing. Higher = more context from prior sessions, more startup tokens. |
+
+### Scheduled consolidation
+
+The fields above describe the pass that runs at session start and on `/garden`.
+The fields below add a second, **deliberately weaker** pass on a timer.
+
+A scheduled pass differs from the manual one in three ways, all restrictions:
+
+1. It holds a single-run lock, so it cannot overlap another pass — its own
+   previous tick, a session start, or a `/garden` you are watching. The lock is
+   an OS advisory lock on `garden-run.lock` in the memory data directory, so a
+   killed process releases it without leaving anything to clean up.
+2. It stops at the work and time ceilings below, always between whole units, so
+   an interrupted pass leaves the store exactly as a pass with fewer candidates
+   would have.
+3. **It cannot delete a memory.** Anything the prune rules would have removed
+   becomes a retirement proposal for review instead, and the memory is left
+   untouched.
+
+Proposals are reviewed with `/garden proposals`, decided with
+`/garden approve <id>` or `/garden reject <id>`, carried out with
+`/garden apply`, and undone with `/garden rollback <id>`. Nothing moves a
+proposal past `Pending` except one of those commands. Every applied change is
+reversible: retiring adds a status tag that withholds the memory from recall,
+search and listing without deleting the row, and rolling back removes it.
+
+| Field | Default | What / Why |
+|---|---|---|
+| `scheduled_consolidation` | `false` | Run consolidation on a timer. **Off by default, and the knob that most needs to stay off.** Every other automatic pass is attached to something you did and reports where you are looking; a timer decays and merges your memories at an hour you did not choose. Requires the governed-learning store to be open for its proposals to be recorded. |
+| `scheduled_interval_hours` | `24` | Hours between scheduled passes. The clock lives in the memory store, not in the process, so several Archon instances sharing one store agree on it and a restart does not reset it. Ignored when the above is `false`. |
+| `scheduled_max_reversible_ops` | `500` | Ceiling on reversible mutations (importance decay plus merges) in one scheduled pass. On reaching it the pass stops and reports `budget_exhausted` rather than running on; the remaining work waits for the next tick. |
+| `scheduled_max_retirement_candidates` | `100` | Ceiling on how many retirement proposals one pass may raise, so an over-cap store cannot hand you ten thousand decisions. Refusing to propose costs nothing — the memories are untouched and the next pass finds them again. |
+| `scheduled_max_seconds` | `300` | Wall-clock ceiling on one scheduled pass. Nothing is cancelled when it expires; the pass stops taking on new work at the next unit boundary, which is the only kind of stopping that leaves the store consistent. |
+
+### Generative consolidation
+
+A scheduled pass also looks for several memories that restate one another and
+proposes recording the claim **once**, with its corroboration. The proposed text
+is verbatim one of the sources — never a summary — so the proposal can be checked
+against the memories it cites. A summariser would produce a sixth statement
+carrying the authority of the five it generalised past.
+
+Clusters must be **provenance-compatible**: same memory type, same project scope,
+same writer. Every *pair* in a cluster must satisfy that, not merely adjacent
+ones, so a chain of overlapping time windows cannot span more than the limit
+below. Rules, garden bookkeeping, already-consolidated memories, and anything the
+same pass proposed retiring are all excluded.
+
+| Field | Default | What / Why |
+|---|---|---|
+| `consolidation_min_cluster_size` | `3` | How many corroborating observations make a claim worth recording once. Two is a coincidence often enough to be a poor threshold; three is the smallest count that reads as a pattern rather than a repeat. |
+| `consolidation_max_span_days` | `14` | How far apart in time those observations may be recorded. Bounds what a cluster can span, so two records of a fact that *changed* are not consolidated into a claim that the older one is still true. |
+| `consolidation_min_word_overlap` | `0.5` | Word overlap every pair in a cluster must reach to count as the same claim. Provenance compatibility says two memories *may* be one claim; this says they are. Without it, unrelated facts recorded by one writer on one day would be proposed as a single memory citing all of them. |
 
 ---
 
@@ -1042,6 +1105,16 @@ first_run_threshold = 300
 max_runtime_ms = 300000
 tick_interval_ms = 60000
 
+[learning.world_model.replay]
+prioritized_enabled = false
+held_out_fraction = 0.2
+batch_size = 512
+prioritized_fraction = 0.5
+max_surprise_weight = 4.0
+max_decile_share = 0.40
+seed = 6274407765686619927
+split_version = 1
+
 [learning.world_model.retention]
 jsonl_rotate_mb = 500
 raw_retention_days = 90
@@ -1105,6 +1178,13 @@ retain_checkpoint_count = 5
 | `guardrails.record_outcomes_without_prediction` | `true` | Records structured guardrail outcomes even when the advisor failed open without a prediction. |
 | `guardrails.max_guardrail_events_per_session` | `500` | Reserved cap for guardrail event volume per session. |
 | `auto_trainer.idle_required_ms` | `300000` | Suspends training while foreground work is active. |
+| `replay.prioritized_enabled` | `false` | The only key here that changes what the model trains on. When `false` the replay plan is still computed and printed by every trainer tick — pool size, held-out size, surprise coverage, decile concentration, importance-weight range — but the example set is untouched. Prioritised replay moves the training distribution, and a model fed its own surprise can drift toward whatever it was already wrong about, so it stays shadow-only until matched baseline/canary evidence exists (W6 gate: 1,000 linked transitions, 500-uniform vs 500-prioritized). |
+| `replay.held_out_fraction` | `0.2` | Share of **sessions** reserved for evaluation. The split hashes session id and `split_version` only — surprise is not an input — so weighting cannot move a session across it. Split by session rather than by transition because adjacent transitions share rows, and a per-transition split would leak a training target into a held-out context. Clamped to `0.5`. |
+| `replay.batch_size` | `512` | Ceiling on one replay batch. Covers a 500-example W6 evaluation cohort. |
+| `replay.prioritized_fraction` | `0.5` | Share of a batch drawn from the prioritised stream; the rest is uniform. This uniform floor keeps every transition's selection probability at or above `(1 - f)/n`, which is what bounds the recorded importance weight by `1/(1 - f)`. Clamped to `0.5`. |
+| `replay.max_surprise_weight` | `4.0` | Largest weight ratio between the most and least surprising transition. Applied to a rank percentile, not the raw surprise value, so a single anomaly cannot escape the bound however large its error was. Clamped to `4.0`. |
+| `replay.max_decile_share` | `0.40` | Largest share of a batch any one priority decile may supply, enforced during the draw. Mirrors the roadmap's W6 automatic-rollback trigger. Clamped to `0.40`. |
+| `replay.seed` / `replay.split_version` | fixed | Make a plan reproducible and a partition versioned. Changing `split_version` repartitions every corpus, so prior evaluation windows may not be pooled across the change. |
 | `retention.jsonl_rotate_mb` | `500` | Rotates raw JSONL ledgers. |
 | `retention.raw_retention_days` | `90` | Deletes old raw ledgers, while Cozo summaries remain. |
 

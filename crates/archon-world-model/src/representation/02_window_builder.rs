@@ -104,13 +104,9 @@ impl<'a> TraceWindowBuilder<'a> {
         }
 
         let mut transitions = Vec::new();
-        for index in 0..self.rows.len().saturating_sub(horizon) {
+        for index in self.adjacent_indices(horizon) {
             let current = &self.rows[index];
-            let target_index = index + horizon;
-            let target = &self.rows[target_index];
-            if current.session_id.as_str() != target.session_id.as_str() {
-                continue;
-            }
+            let target = &self.rows[index + horizon];
 
             transitions.push(TraceTransition {
                 context: self.prior_context_window_at(index, context_rows)?,
@@ -121,6 +117,46 @@ impl<'a> TraceWindowBuilder<'a> {
         }
 
         Ok(transitions)
+    }
+
+    /// Anchor positions `adjacent_transitions` will build a transition from.
+    ///
+    /// Factored out so replay indexes exactly the transitions the trainer turns
+    /// into examples. A second copy of this scan elsewhere would drift, and a
+    /// replay plan built on a drifted index set would train on transitions
+    /// other than the ones it scored.
+    fn adjacent_indices(&self, horizon: usize) -> Vec<usize> {
+        (0..self.rows.len().saturating_sub(horizon))
+            .filter(|index| {
+                self.rows[*index].session_id.as_str()
+                    == self.rows[*index + horizon].session_id.as_str()
+            })
+            .collect()
+    }
+
+    /// Stable identities for those transitions, in the same order, without
+    /// building or embedding a single window.
+    ///
+    /// Cheap on purpose: it runs on every training tick to build the replay
+    /// plan, and paying for window construction twice per tick would make the
+    /// diagnostic cost more than the thing it measures.
+    pub fn adjacent_transition_keys(&self, horizon: usize) -> Result<Vec<TransitionKey>> {
+        if horizon == 0 {
+            bail!("trace transition horizon must be greater than zero");
+        }
+        Ok(self
+            .adjacent_indices(horizon)
+            .into_iter()
+            .map(|index| {
+                let row = &self.rows[index];
+                TransitionKey {
+                    transition_id: row.row_id.clone(),
+                    session_id: row.session_id.clone(),
+                    action_attempt_id: row.action_attempt_id.clone(),
+                    created_at: row.created_at,
+                }
+            })
+            .collect())
     }
 
     fn index_of(&self, row_id: &str) -> Result<usize> {

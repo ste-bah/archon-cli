@@ -13,6 +13,7 @@ pub(super) fn final_report_result(
         .build(paths, &required_task_ids, &source_results)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
     guard_final_report_artifact_paths_exist(&mut report, v2_store.root());
+    guard_final_report_project_root_litter(&mut report, v2_store.root());
     guard_final_report_blocker_freshness(&mut report, v2_store.root());
     guard_final_report_against_dynamic_wave_evidence(&mut report, v2_store, task_universe)?;
     reconcile_final_task_statuses(&mut report, &required_task_ids);
@@ -343,6 +344,14 @@ fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// Is this final-report artifact backed by a real file?
+///
+/// # Issue #168
+///
+/// Was `path.exists()`, which a directory and a zero-byte file both satisfy. A
+/// final report is the run's outward claim about what it produced, so an entry
+/// retained here on the strength of a criterion-named empty directory is a
+/// fabricated deliverable in the most visible place there is.
 fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     if raw.is_empty() {
         return false;
@@ -352,9 +361,51 @@ fn final_artifact_path_exists(raw: &str, project_root: Option<&Path>) -> bool {
     }
     let path = Path::new(raw);
     if path.is_absolute() {
-        return path.exists();
+        return crate::v2::artifact_path_guard::artifact_file_is_evidence(path);
     }
-    project_root.is_some_and(|root| root.join(path).exists()) || path.exists()
+    project_root.is_some_and(|root| {
+        crate::v2::artifact_path_guard::artifact_file_is_evidence(&root.join(path))
+    }) || crate::v2::artifact_path_guard::artifact_file_is_evidence(path)
+}
+
+/// Report project-root entries that are a prose value used as a path.
+///
+/// # Issue #168: the part the host cannot prevent, only notice
+///
+/// The `mkdir` that creates these is composed inside an agent and never reaches
+/// a host-side writer, so no host validator can stop the call itself. What the
+/// host can refuse to do is finish quietly over the top of it. Every entry
+/// matching the issue's own verification (`ls -1 | awk 'length($0)>60'`, plus
+/// sentence shape and surviving template tokens) becomes a review-severity
+/// residual gap on the final report, and an otherwise-accepted report is
+/// demoted so the litter is seen rather than swept up by an operator months
+/// later.
+fn guard_final_report_project_root_litter(report: &mut WorkflowV2FinalReport, v2_root: &Path) {
+    let Some(project_root) = project_root_for_v2_root(v2_root) else {
+        return;
+    };
+    let litter = crate::v2::artifact_path_guard::project_root_path_litter(&project_root);
+    if litter.is_empty() {
+        return;
+    }
+    report.residual_gaps.push(WorkflowV2ResidualGap {
+        id: "project_root_path_litter".to_string(),
+        description: format!(
+            "project root {} contains {} entry/entries whose name is a prose or templated value \
+             used as a path, not a deliverable: {}. A description was substituted into a path \
+             position; delete these and declare only artifact_path values as paths.",
+            project_root.display(),
+            litter.len(),
+            litter.join("; ")
+        ),
+        severity: Some("review".to_string()),
+    });
+    if matches!(
+        report.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
+        report.status = WorkflowV2Status::NeedsReview;
+    }
 }
 
 fn merge_sorted_strings(mut existing: Vec<String>, extra: BTreeSet<String>) -> Vec<String> {

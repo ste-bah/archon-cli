@@ -102,6 +102,20 @@ fn render_latent_trainer_tick(
         trigger_elapsed_ms: auto.trigger_elapsed_ms,
         first_run_threshold: auto.first_run_threshold,
     };
+    let replay_config = &config.learning.world_model.replay;
+    // Clamped on the way in, so a widened `config.toml` value is narrowed to the
+    // crate's hard bound rather than trusted.
+    let replay = archon_world_model::ReplayPolicy {
+        prioritized_enabled: replay_config.prioritized_enabled,
+        held_out_fraction: replay_config.held_out_fraction,
+        batch_size: replay_config.batch_size,
+        prioritized_fraction: replay_config.prioritized_fraction,
+        max_surprise_weight: replay_config.max_surprise_weight,
+        max_decile_share: replay_config.max_decile_share,
+        seed: replay_config.seed,
+        split_version: replay_config.split_version,
+    }
+    .clamped();
     let store = WorldModelStore::open(root)?;
     let stats = store.cold_start_stats()?;
     let registry = ModelRegistry::open(root)?;
@@ -142,6 +156,7 @@ fn render_latent_trainer_tick(
             corrections_since_training: 0,
             elapsed_since_training_ms: schedule.last_training_age_ms,
         },
+        replay,
     };
     let run =
         archon_world_model::trainer::run_dynamic_training_once_controlled(&request, should_stop)?;
@@ -168,6 +183,7 @@ fn render_latent_trainer_tick(
          Examples: {}\n\
          Candidate: {}\n\
          Mean cosine error: {}\n\
+         Replay: {}\n\
          Auto promotion: {}\n\
          Checkpoint: {}",
         run.decision.reason,
@@ -184,6 +200,10 @@ fn render_latent_trainer_tick(
         run.training_mean_cosine_error
             .map(|value| format!("{value:.4}"))
             .unwrap_or_else(|| "none".into()),
+        run.replay
+            .as_ref()
+            .map(archon_world_model::ReplaySummary::summary_line)
+            .unwrap_or_else(|| "none (no examples built)".into()),
         auto_promotion,
         run.checkpoint_path
             .as_ref()

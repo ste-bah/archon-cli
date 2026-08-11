@@ -1,0 +1,347 @@
+# R0 entry gate — frozen closure evidence
+#
+# Reference: docs/development/learning-roadmap-r1-r8-w5-w6.md line 35 ("R0 entry
+# gate") and the quantitative promotion-gate table at line 294.
+#
+# WHAT THIS FILE IS
+# -----------------
+# The roadmap says no behaviour-changing slice (R1-R8, W5-W6) may be PROMOTED
+# until findings 9, 11, 17, and 40-43 from reports/core-audit-2026-07-11.md have
+# verified closure evidence, and that closure must be recorded as immutable
+# evidence references rather than inferred from the roadmap prose.
+#
+# This is that record, in a form a script can re-verify. It is consumed by
+# scripts/check-r0-entry-gate.sh, which runs in CI (job `r0-entry-gate` in
+# .github/workflows/ci.yml) and as step 8 of scripts/ci-gate.sh. If a
+# prerequisite regresses -- an anchor deleted, a defect signature reintroduced,
+# a behavioural test removed, a closure commit no longer in history -- the gate
+# goes red and R0 reverts to OPEN.
+#
+# This file is APPEND-CORRECT, not append-only: an entry may be edited only to
+# record a REGRESSION (verdict -> open) or to add evidence. Rewriting a closed
+# entry's commit or verdict to make a red gate green is the exact fraud this
+# file exists to make visible in review.
+#
+# FORMAT
+# ------
+#   [finding:<id>]        starts a block
+#   key = value           one directive per line; '#' starts a comment line
+#
+# Directives:
+#   title            one-line restatement of the audit finding
+#   verdict          closed | open      (gate fails unless every block is closed)
+#   verification     mechanical | manual
+#   attested_by      REQUIRED when verification = manual; a named human
+#   commit           <40-hex sha>  <subject>   pushed commit that closed it
+#   anchor           <path> :: <ERE>   must be PRESENT in path
+#   absent           <path> :: <ERE>   must be ABSENT from path (defect signature)
+#   order            <path> :: <ERE-first> :: <ERE-second>
+#                    first match of ERE-first must precede first match of
+#                    ERE-second in path
+#   wired            <path> :: <ERE>   live call site; same check as anchor,
+#                    reported separately because this repo has repeatedly
+#                    shipped correct code nothing calls (#76, #129, #161)
+#   test             <path> :: <fn>    behavioural test that must still exist
+#   source_of_truth  <path> :: <fn>    test that reads the persisted/streamed
+#                    artefact back rather than trusting the writer's return
+#   deviation        recorded, not checked: how the shipped fix differs from
+#                    the fix the audit proposed
+#   note             recorded, not checked
+#
+# Every required finding must carry at least one commit, anchor, wired, test and
+# source_of_truth directive; the checker enforces that, so an entry cannot be
+# thinned out to a title and a verdict.
+
+# ---------------------------------------------------------------------------
+[finding:9]
+title = archon-memory keyword search full-scanned every memory per query
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(audit): complete core remediation batches (squash-merged to main; branch commit 49c1f6f88)
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): complete indexed keyword search (squash-merged to main; branch commit 87205850d)
+commit = 8d8a122ba69b865f511ea575c705dbfddbe18721  fix(memory): stop recall scanning the relation on every turn
+# Three FTS indexes created at schema init, unconditionally, on open.
+anchor = crates/archon-memory/src/graph/schema.rs :: ::fts create memories:\{index\}
+anchor = crates/archon-memory/src/graph/schema.rs :: self\.init_memory_fts\(\)
+# The query asks all three indexes; the full scan survives only as the guarded
+# fallback for "index unavailable", which is what the roadmap's R0 text records.
+anchor = crates/archon-memory/src/search.rs :: for index in \["content_fts", "title_fts", "tags_fts"\]
+anchor = crates/archon-memory/src/search.rs :: fts_index_unavailable\(&message\)
+order = crates/archon-memory/src/search.rs :: match fts_keyword_candidates\(db, query, limit\) :: let all_rows = read_all_memories\(db\)\?
+wired = crates/archon-memory/src/hybrid_search.rs :: let candidates = keyword_candidates\(db, query, top_k\)\?
+test = crates/archon-memory/src/search_tests.rs :: keyword_candidates_use_fts_for_content_title_and_tags
+test = crates/archon-memory/src/search_tests.rs :: keyword_candidates_fall_back_when_fts_is_unavailable
+test = crates/archon-memory/src/search_tests.rs :: search_with_text_uses_fts_candidates
+source_of_truth = crates/archon-memory/src/search_tests.rs :: keyword_fts_tracks_updates_and_deletes
+source_of_truth = crates/archon-memory/src/search_tests.rs :: reopening_a_store_records_the_fts_tokenizer_marker
+note = `used_fts` is a #[cfg(test)] field on KeywordCandidates, so the tests
+note = distinguish "FTS answered" from "the fallback answered and got lucky".
+deviation = content_fts uses an NGram(2,2) tokenizer rather than the unigram
+deviation = tokenizer the audit's `::fts create` sketch implied; title_fts and
+deviation = tags_fts stay unigram. Recorded at search_tests.rs:149.
+
+# ---------------------------------------------------------------------------
+[finding:11]
+title = every Cozo operation was serialized process-wide by a per-call panic-hook swap and one global write mutex
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(cozo): scope persistence guards per database (squash-merged to main; branch commit ed189b115)
+# One hook installed once, consulting a thread-local depth counter.
+anchor = crates/archon-cozo/src/panic_guard.rs :: static COZO_PANIC_HOOK: OnceLock<\(\)>
+anchor = crates/archon-cozo/src/panic_guard.rs :: if !in_guarded_operation\(\)
+# Write locks keyed by canonical db path, not one mutex for the whole process.
+anchor = crates/archon-cozo/src/locking.rs :: HashMap<WriteLockKey, Arc<Mutex<\(\)>>>
+anchor = crates/archon-cozo/src/locking.rs :: fn process_write_lock\(key: &WriteLockKey\)
+absent = crates/archon-cozo/src/lib.rs :: COZO_PANIC_HOOK_LOCK
+absent = crates/archon-cozo/src/panic_guard.rs :: COZO_PANIC_HOOK_LOCK
+absent = crates/archon-cozo/src/locking.rs :: COZO_PROCESS_WRITE_LOCK([^S]|$)
+wired = crates/archon-cozo/src/lib.rs :: let key = write_lock_key\(config\.write_lock_path\.as_deref\(\)\)\?
+test = crates/archon-cozo/tests/guarded_operations.rs :: writes_with_different_lock_paths_overlap
+test = crates/archon-cozo/tests/guarded_operations.rs :: writes_with_the_same_lock_path_are_serialized
+test = crates/archon-cozo/tests/guarded_operations.rs :: nested_mutable_same_path_guard_does_not_deadlock
+source_of_truth = crates/archon-cozo/tests/guarded_operations.rs :: guarded_database_retains_its_write_lock_identity
+source_of_truth = crates/archon-cozo/tests/guarded_operations.rs :: writes_through_symlinked_parent_are_serialized_after_lock_creation
+note = writes_with_different_lock_paths_overlap is the finding stated as a test:
+note = two databases writing concurrently is exactly what the global mutex made
+note = impossible, so its deletion would reopen finding 11 in silence.
+
+# ---------------------------------------------------------------------------
+[finding:17]
+title = Anthropic "streaming" buffered the whole response before emitting anything, and swallowed mid-stream network failures
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(llm): stream Anthropic responses incrementally (squash-merged to main; branch commit 63b8c730f)
+anchor = crates/archon-llm/src/anthropic.rs :: response\.bytes_stream\(\)
+anchor = crates/archon-llm/src/anthropic_stream.rs :: chunk = stream\.next\(\)
+# Finding 18 rode with 17: a read error now becomes a visible error event.
+anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, "network", error\)
+absent = crates/archon-llm/src/anthropic_stream.rs :: \.text\(\)\.await
+absent = crates/archon-llm/src/anthropic_stream.rs :: unwrap_or_default
+wired = crates/archon-llm/src/anthropic.rs :: return self\.spawn_stream_reader\(response\)\.await
+test = crates/archon-llm/src/anthropic_stream.rs :: emits_delta_before_source_stream_completes
+test = crates/archon-llm/src/anthropic_stream.rs :: source_error_after_delta_is_emitted_as_network_error
+source_of_truth = crates/archon-llm/src/anthropic_stream.rs :: emits_delta_before_source_stream_completes
+note = source_of_truth here is the stream itself: the test holds the source
+note = stream open and asserts a delta has already been received, which is only
+note = observable if nothing buffered the body. A completion-only assertion
+note = would pass against the defective implementation too.
+
+# ---------------------------------------------------------------------------
+[finding:40]
+title = every detected correction reinforced the highest-scoring rule, not a relevant one (rich-get-richer)
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
+commit = ae5ad09344f34c1fcd056b7317e0906efac3bb60  refactor: split three files back under the 500-line gate
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: fn select_relevant_rule<'a>
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: const MATCH_THRESHOLD: f64 = 0\.25
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: const MIN_MEANINGFUL_OVERLAP: usize = 2
+absent = crates/archon-core/src/agent/memory_integration_corrections.rs :: rules\.first\(\)
+absent = crates/archon-core/src/agent/memory_integration.rs :: rules\.first\(\)
+wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: select_relevant_rule\(user_input, &rules\)\.map
+test = crates/archon-core/src/agent/tests/correction_matching.rs :: correction_detection_links_the_relevant_rule_not_the_global_top_rule
+source_of_truth = crates/archon-core/src/agent/tests/correction_matching.rs :: correction_detection_links_the_relevant_rule_not_the_global_top_rule
+note = The test seeds a high-scoring unrelated rule (reinforced ten times) and a
+note = low-scoring relevant one, then reads back which rule the correction was
+note = linked to in the graph. Under the defect the unrelated rule wins, so this
+note = test is a direct falsifier rather than a smoke check.
+deviation = relevance is lexical (Jaccard and Dice over stop-word-filtered
+deviation = tokens, both >= 0.25 with >= 2 meaningful overlapping tokens), not
+deviation = the embedding similarity the audit listed as the later option.
+deviation = Below threshold the correction links no rule at all rather than
+deviation = falling back to the top rule.
+
+# ---------------------------------------------------------------------------
+[finding:41]
+title = every correction minted a new "Avoid: {raw user text}" rule and format_for_prompt emitted all rules uncapped
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(consciousness): bound correction rule growth (squash-merged to main; branch commit f75ec5338)
+# Five deterministic rule identities, one per correction type, reused by id.
+anchor = crates/archon-consciousness/src/corrections.rs :: fn derived_rule\(self\) -> \(&'static str, &'static str\)
+anchor = crates/archon-consciousness/src/corrections.rs :: add_rule_with_id\(id, text, RuleSource::CorrectionDerived\)
+# Prompt block is capped and score-floored.
+anchor = crates/archon-consciousness/src/rules.rs :: pub const MAX_PROMPT_RULES: usize = 10
+anchor = crates/archon-consciousness/src/rules.rs :: pub const MIN_PROMPT_RULE_SCORE: f64 = 5\.0
+anchor = crates/archon-consciousness/src/rules.rs :: \.take\(MAX_PROMPT_RULES\)
+absent = crates/archon-consciousness/src/corrections.rs :: Avoid: \{
+wired = src/session/build_prompt.rs :: \.format_for_prompt\(\)
+test = crates/archon-consciousness/src/corrections/tests/recording.rs :: automatic_corrections_use_bounded_type_specific_rules
+test = crates/archon-consciousness/src/corrections/tests/recording.rs :: same_type_automatic_corrections_reuse_one_rule
+test = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: format_for_prompt_keeps_only_the_top_ten_rules
+test = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: format_for_prompt_omits_rules_below_score_floor
+source_of_truth = crates/archon-consciousness/src/corrections/tests/recall.rs :: correction_derived_rule_does_not_embed_raw_user_text
+source_of_truth = crates/archon-consciousness/src/corrections/tests/concurrency.rs :: concurrent_equivalent_corrections_create_one_derived_rule
+deviation = MATERIAL, and the one the issue asked to be called out. The audit
+deviation = proposed similarity-searching existing CorrectionDerived rules and
+deviation = reinforcing the closest, with rule text synthesised per correction
+deviation = via template or LLM. What shipped is stronger and simpler: the rule
+deviation = identity is a compile-time constant per CorrectionType, so there is
+deviation = no similarity threshold to tune and no synthesis step to go wrong,
+deviation = and raw user text can never reach a rule body at all. The cost is
+deviation = coarser granularity: five generic rules instead of a growing set of
+deviation = correction-specific ones. R2/R3 lesson provenance must therefore
+deviation = come from the correction records, not from rule text.
+
+# ---------------------------------------------------------------------------
+[finding:42]
+title = rule trend metadata was written once and never updated; calculate_trend ignored it and thresholded the current score
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(consciousness): reconcile rule trends across sessions (squash-merged to main; branch commit 4b647def6)
+anchor = crates/archon-consciousness/src/rules.rs :: pub fn reconcile_trends
+anchor = crates/archon-consciousness/src/rules.rs :: reconcile_importance_trend\(&rule\.id, previous\.score\)
+# The trend tag is recomputed inside one Cozo transaction against the persisted
+# importance, so it cannot drift from the row it describes.
+anchor = crates/archon-memory/src/graph/crud_importance.rs :: pub fn reconcile_importance_trend
+anchor = crates/archon-memory/src/graph/crud_importance.rs :: if\(importance > \$previous_importance, 'trend:rising'
+absent = crates/archon-consciousness/src/rules.rs :: fn calculate_trend
+wired = src/session_loop/personality_save.rs :: engine\.reconcile_trends\(&previous\.rule_scores\)
+test = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: reconcile_snapshot_trends_compares_persisted_scores
+test = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: format_for_prompt_uses_stored_trend
+test = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: zero_delta_import_preserves_reconciled_trend
+source_of_truth = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: reinforce_persists_rising_trend_for_reload_and_prompt
+source_of_truth = crates/archon-consciousness/src/rules/tests/reinforcement.rs :: decay_persists_declining_trend_for_reload
+deviation = the audit offered "diff against the persisted snapshot, or delete
+deviation = the tags and the enum". The first option shipped: the tags are live
+deviation = and reconciled at session save, so the enum stays.
+
+# ---------------------------------------------------------------------------
+[finding:43]
+title = recall_corrections truncated an unordered result set, keeping arbitrary corrections
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
+commit = 88420bad6d05624e02844b5111f9b48879e26475  fix: unwedge cancellation, unbound memory recall, and type non-US symbols
+anchor = crates/archon-consciousness/src/corrections.rs :: fn sort_corrections\(corrections: &mut \[Correction\]\)
+anchor = crates/archon-consciousness/src/corrections.rs :: \.severity[[:space:]]*$
+# The query is bounded, and the bound is a candidate WINDOW wider than the
+# caller's limit, so the re-rank has something to re-rank.
+anchor = crates/archon-consciousness/src/corrections.rs :: limit: Some\(recall_candidate_window\(limit\)\)
+anchor = crates/archon-consciousness/src/corrections.rs :: fn recall_candidate_window\(limit: usize\)
+# The whole finding, mechanically: sort must happen before truncate.
+order = crates/archon-consciousness/src/corrections.rs :: sort_corrections\(&mut corrections\); :: corrections\.truncate\(limit\);
+wired = crates/archon-core/src/agent/memory_integration.rs :: tracker\.recall_corrections\(&context\.join\(" "\), RECALLED_CORRECTION_LIMIT\)
+test = crates/archon-consciousness/src/corrections/tests/recall.rs :: recall_corrections_orders_by_severity_before_truncating
+test = crates/archon-consciousness/src/corrections/tests/recall.rs :: correction_sorting_breaks_timestamp_ties_by_stable_id
+test = crates/archon-consciousness/src/corrections/tests/recall.rs :: correction_sorting_orders_non_finite_severity_deterministically
+test = crates/archon-consciousness/src/corrections/tests/recall_bounds.rs :: recall_corrections_issues_a_bounded_query
+source_of_truth = crates/archon-consciousness/src/corrections/tests/recall_bounds.rs :: recall_corrections_finds_high_severity_behind_many_low_severity_matches
+source_of_truth = crates/archon-consciousness/src/corrections/tests/recall.rs :: recall_corrections_finds_stored
+deviation = ordering is severity-desc first, then timestamp-desc, then id. The
+deviation = audit offered "timestamp desc (or severity)"; severity leads because
+deviation = the consumer is a prompt with a fixed slot count and a stale severe
+deviation = correction outranks a fresh trivial one.
+
+# ---------------------------------------------------------------------------
+# Not one of the seven audit findings, but stated in the same roadmap paragraph
+# (line 37) and in the issue's required work: "Block mutation through new
+# learning classifiers until this gate passes." Slice 1 may run the R3
+# classifier in shadow; it may not mutate rules. That is a promotion-blocking
+# condition of the same gate, so it is verified by the same gate.
+[finding:S1-shadow-containment]
+title = the R3 correction classifier runs in shadow only and owns no rule mutation
+verdict = closed
+verification = mechanical
+commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(memory): make correction learning atomic (squash-merged to main; branch commit 475c8cd3f)
+# Both rule-mutating paths take their CorrectionType from the deterministic
+# keyword heuristic. The classifier's output is bound to `classification` and
+# only ever reaches record_correction_shadow_label.
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: let classification = super::correction_intake::shadow_classify\(user_input\)
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: let heuristic = super::correction_intake::classify_correction\(user_input\)
+anchor = crates/archon-core/src/agent/memory_integration_corrections.rs :: let Some\(correction_type\) = heuristic else
+anchor = crates/archon-core/src/agent/correction_intake.rs :: classify_correction\(&item\.content\)\.unwrap_or\(CorrectionType::ApproachCorrection\)
+# If the classifier ever becomes the source of a recorded correction type, one
+# of these two lines is what changes. They are the regression tripwire.
+absent = crates/archon-core/src/agent/memory_integration_corrections.rs :: = classification\.correction_type
+absent = crates/archon-core/src/agent/correction_intake.rs :: shadow_classify\(&item\.content\)
+wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: self\.record_correction_shadow_label\(user_input, &classification
+test = crates/archon-core/src/agent/tests/correction_matching.rs :: correction_detection_links_the_relevant_rule_not_the_global_top_rule
+source_of_truth = crates/archon-core/src/agent/tests/correction_matching.rs :: correction_detection_links_the_relevant_rule_not_the_global_top_rule
+note = archon-core/src/agent/correction_intake.rs:52 states the provider arm of
+note = the classifier stays off until the promotion gate at
+note = docs/development/learning-roadmap-r1-r8-w5-w6.md:300 passes.
+
+# ---------------------------------------------------------------------------
+# Same clause of the same gate, one slice later. Slice 3 (R2) adds a causal
+# attribution engine, and the gate's condition applies to it unchanged: it may
+# measure, it may not mutate rules. Slice 3 also does the opposite of adding a
+# mutation -- it REMOVES one, by gating the correction-driven rule boost on an
+# attribution that succeeded. A restriction does not need the gate's permission,
+# but it does need a tripwire, because silently restoring the old ordering would
+# put every unexplained correction back into the rule scores.
+[finding:S3-attribution-shadow-containment]
+title = R2 causal attribution runs in shadow, owns no rule mutation, and gates the one it removed
+verdict = closed
+verification = mechanical
+commit = 2368ce754146e2c755529a16f9edc90a39a2de84  feat(cognitive): attribute a correction to the action that caused it, in shadow
+# Shadow is a compile-time constant. Not a config field, not an env read: the
+# only way to promote is a diff that changes this line.
+anchor = crates/archon-cognitive/src/attribution.rs :: pub const ATTRIBUTION_MODE.*Shadow
+anchor = crates/archon-cognitive/src/attribution.rs :: pub enum AttributionMode
+# The engine is a pure function of owned data, so no store, graph or rules
+# engine is in scope while a verdict is decided.
+anchor = crates/archon-cognitive/src/attribution.rs :: pub fn attribute\(&self, input: &AttributionInput\) -> AttributionAssessment
+# Structural containment, checked where it actually lives: archon-cognitive
+# cannot name RulesEngine or CorrectionTracker because it does not depend on the
+# crate that defines them. Making this module able to mutate a rule is a
+# manifest change, and this is the line that would have to appear.
+absent = crates/archon-cognitive/Cargo.toml :: archon-consciousness
+# The adjudicated candidate is never defaulted to the proposal, so precision
+# over an unadjudicated corpus reads as zero correct rather than a fabricated
+# 1.0. Deleting this sentinel is how that number would become a lie.
+anchor = crates/archon-cognitive/src/attribution/event.rs :: pub const ADJUDICATION_PENDING_PREFIX
+anchor = crates/archon-cognitive/src/attribution/event.rs :: ADJUDICATION_PENDING_PREFIX\}\{correction_id\}
+# Item 5, as a tripwire. `record_correction` boosts the rule inside the call;
+# `record_correction_unreinforced` does not. If either live path goes back to
+# the joined call, an unattributable correction starts moving rule scores again.
+absent = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction\(
+absent = crates/archon-core/src/agent/correction_intake.rs :: tracker\.record_correction\(
+# And the ordering that makes the gate a gate: record the correction, DECIDE the
+# attribution, reinforce only if it was accepted, and record the evaluation last.
+#
+# The last edge is the one a Windows CI failure taught us. Deciding and recording
+# used to happen together inside a task the caller could abandon on a timeout, so
+# an expired budget withheld the reinforcement while the orphan wrote a row
+# saying `accepted=true`. The row claimed an effect that had not happened, which
+# is what `causal_attribution_precision` is computed over. Committing strictly
+# after the reinforcement is what makes that state unreachable.
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.record_correction_unreinforced\( :: \.plan_correction_attribution\(
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: \.plan_correction_attribution\( :: tracker\.reinforce_from_correction\(
+order = crates/archon-core/src/agent/memory_integration_corrections.rs :: tracker\.reinforce_from_correction\( :: self\.commit_correction_attribution\(
+# Neither half may run under the abandon-on-timeout helper, whose contract
+# (`cognitive_gate/helpers.rs`) requires a closure that is safe to orphan.
+# Deciding is safe to orphan but its result gates a write; recording is not safe
+# to orphan at all. The call, not the name, is the signature.
+absent = crates/archon-core/src/agent/correction_attribution.rs :: bounded_cognitive_observation\(
+absent = crates/archon-core/src/agent/correction_attribution/decide.rs :: bounded_cognitive_observation\(
+# Deciding writes nothing: the only `record` call sits in the commit half, which
+# is defined after it. A `record` that moved up into the planner would break this
+# ordering, and `deciding_an_attribution_writes_nothing` below is the behavioural
+# form of the same claim.
+order = crates/archon-core/src/agent/correction_attribution/decide.rs :: fn plan_correction_attribution :: event_store\.record\(
+wired = crates/archon-core/src/agent/memory_integration_corrections.rs :: self\.commit_correction_attribution\(plan\)\.await
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_unattributed_correction_reinforces_nothing_but_is_still_recorded
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_reinforces_the_rule
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: a_correction_with_no_attribution_substrate_reinforces_nothing
+test = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: deciding_an_attribution_writes_nothing
+test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: recording_without_reinforcement_leaves_the_rule_score_alone
+test = crates/archon-consciousness/src/corrections/tests/deferred_reinforcement.rs :: reinforcing_one_correction_twice_raises_the_score_once
+source_of_truth = crates/archon-core/src/agent/correction_attribution_tests.rs :: the_live_row_records_that_attribution_mutated_nothing
+source_of_truth = crates/archon-core/src/agent/correction_attribution_tests/reinforcement_gate.rs :: an_accepted_attribution_stores_a_lesson_the_row_points_at
+commit = 397dfd1641275069d36b5bec6a76aa2a9b2621b5  feat(cognitive): reinforce a rule only when the correction can be attributed
+note = The first commit closed the shadow-containment half; the second closed
+note = the reinforcement gate (the `absent` and `order` directives above, and
+note = the deferred_reinforcement tests). Both are listed because either being
+note = reverted alone would reopen this finding.
+deviation = The roadmap's item 5 says "block rule reinforcement/proposal until
+deviation = attribution succeeds". Reinforcement is blocked as written. PROPOSAL
+deviation = is not, because R2 raises no rule proposals: the only proposal path
+deviation = is the governed one in archon-cognitive, which attribution does not
+deviation = reach. There is nothing to block there yet, and adding a gate to a
+deviation = path that does not exist would be a check nothing runs.
+deviation = The extractor's semantic pass now reinforces nothing at all, because
+deviation = it records several turns late against an action window that has
+deviation = already moved, so its corrections are permanently unattributable.
+deviation = That is a real reduction in what the system learns, taken knowingly:
+deviation = the alternative is reinforcing on a restatement nobody could explain.

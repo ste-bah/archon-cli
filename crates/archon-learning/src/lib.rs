@@ -7,6 +7,7 @@ pub mod apply;
 pub mod cozo_guard;
 pub mod errors;
 pub mod events;
+pub mod garden_proposals;
 pub mod llm_call_usage;
 #[cfg(test)]
 mod llm_call_usage_tests;

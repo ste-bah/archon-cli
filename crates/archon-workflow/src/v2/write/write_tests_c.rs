@@ -1,5 +1,10 @@
 use super::*;
 
+// Wave-scoped discard (#163) and the scope-expansion gap it hid, split into a
+// child module so this file stays inside the source-size gate.
+#[path = "write_tests_c1.rs"]
+mod tests_c1;
+
 #[test]
 fn write_fanout_review_branch_stays_needs_review_not_failed() {
     let temp = tempfile::tempdir().expect("tempdir");

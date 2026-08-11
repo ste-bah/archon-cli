@@ -14,6 +14,13 @@ pub enum CognitiveAction {
         #[arg(long)]
         json: bool,
     },
+    /// Check derived cognitive metrics against the declared release
+    /// thresholds, per cohort. Exits non-zero if any segment fails.
+    Gate {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run or manage the background cognitive daemon.
     Daemon {
         #[command(subcommand)]
@@ -49,6 +56,34 @@ pub enum CognitiveAction {
         session: Option<String>,
         /// Maximum reflections to show.
         #[arg(long, default_value = "10")]
+        limit: usize,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Adjudicate a causal attribution, or list the ones awaiting a verdict.
+    ///
+    /// The R2 attribution engine never fills in its own adjudicated candidate,
+    /// so accepted-link precision stays undefined until a human records one
+    /// here. With no `--correction`, lists what is pending.
+    Adjudicate {
+        /// Correction to adjudicate. Omit to list pending attributions.
+        #[arg(long)]
+        correction: Option<String>,
+        /// Causal candidate that actually caused the correction.
+        #[arg(long, conflicts_with = "no_cause")]
+        candidate: Option<String>,
+        /// Record that nothing in the window caused it.
+        #[arg(long)]
+        no_cause: bool,
+        /// Who is recording this verdict. Required when adjudicating.
+        #[arg(long)]
+        adjudicator: Option<String>,
+        /// Optional free-text note kept with the verdict.
+        #[arg(long)]
+        note: Option<String>,
+        /// Maximum pending attributions to list.
+        #[arg(long, default_value = "20")]
         limit: usize,
         /// Emit machine-readable JSON.
         #[arg(long)]

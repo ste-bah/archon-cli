@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     WorkflowV2Artifact, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap,
     WorkflowV2Result, WorkflowV2Status, WorkflowV2WriteSafetyError,
+    artifact_path_guard::artifact_file_defect,
     project_artifact_contract::{artifact_path_is_templated, artifact_requirement_paths},
 };
 
@@ -44,7 +45,9 @@ impl WorkflowV2ProjectArtifactContext {
 
 enum ProjectArtifactPath {
     Existing(String),
-    Missing(String),
+    /// The declared path and why it is not evidence — absent, a directory, or
+    /// an empty file. See [`project_artifact_status`].
+    Missing(String, &'static str),
     Templated(String),
     NotArtifact,
 }
@@ -88,7 +91,9 @@ fn normalize_changed_project_artifacts(
             ProjectArtifactPath::Existing(path) => {
                 artifacts.push(artifact_from_file(path, file.purpose))
             }
-            ProjectArtifactPath::Missing(path) => note_missing_project_artifact(result, &path),
+            ProjectArtifactPath::Missing(path, defect) => {
+                note_missing_project_artifact(result, &path, defect)
+            }
             ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
             ProjectArtifactPath::NotArtifact => retained.push(file),
         }
@@ -112,7 +117,9 @@ fn normalize_declared_project_artifacts(
                 artifact.path = path;
                 retained.push(artifact);
             }
-            ProjectArtifactPath::Missing(path) => note_missing_project_artifact(result, &path),
+            ProjectArtifactPath::Missing(path, defect) => {
+                note_missing_project_artifact(result, &path, defect)
+            }
             ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
             ProjectArtifactPath::NotArtifact => retained.push(artifact),
         }
@@ -149,7 +156,7 @@ fn allowed_project_artifact_requirement(
 ) -> bool {
     matches!(
         classify_project_artifact_path("artifact-requirement", path, context),
-        Ok(ProjectArtifactPath::Existing(_) | ProjectArtifactPath::Missing(_))
+        Ok(ProjectArtifactPath::Existing(_) | ProjectArtifactPath::Missing(..))
     )
 }
 
@@ -308,6 +315,23 @@ fn relative_under_root(relative: &str, root: &str) -> bool {
     relative != root && relative.starts_with(&format!("{root}/"))
 }
 
+/// Is this declared path satisfied on disk?
+///
+/// # Issue #168: `exists()` was the hole
+///
+/// This asked `absolute.exists()`. `Path::exists` answers yes for a directory,
+/// and yes for a zero-byte file. Run `wf-67dd2599` created directories in the
+/// project root named after acceptance criteria; a directory named after the
+/// criterion that demands an artifact would have answered the check for that
+/// artifact, and the run would have recorded `Existing` — artifact evidence
+/// present — against something containing nothing. That is issue #153's
+/// fabricated-success shape arriving through the filesystem instead of through
+/// a subsystem.
+///
+/// Evidence is now a regular, non-empty file, and a candidate that exists but
+/// is not one is reported as `Missing` naming what it actually is, so the
+/// residual gap reads "is a directory, not the declared file" rather than the
+/// misleading "missing".
 fn project_artifact_status(
     item_id: &str,
     project_root: &Path,
@@ -317,8 +341,8 @@ fn project_artifact_status(
 ) -> Result<ProjectArtifactPath, WorkflowV2WriteSafetyError> {
     let absolute = absolute_artifact_candidate(project_root, relative, context);
     ensure_project_path_parent_safe(item_id, project_root, &absolute, relative)?;
-    if !absolute.exists() {
-        return Ok(ProjectArtifactPath::Missing(output_path));
+    if let Some(defect) = artifact_file_defect(&absolute) {
+        return Ok(ProjectArtifactPath::Missing(output_path, defect));
     }
     ensure_existing_project_path(item_id, project_root, &absolute, relative)?;
     Ok(ProjectArtifactPath::Existing(output_path))
@@ -413,12 +437,12 @@ fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
     }
 }
 
-fn note_missing_project_artifact(result: &mut WorkflowV2Result, path: &str) {
+fn note_missing_project_artifact(result: &mut WorkflowV2Result, path: &str, defect: &'static str) {
     let id = format!("missing_project_artifact_{}", artifact_id_for_path(path));
     if !result.residual_gaps.iter().any(|gap| gap.id == id) {
         result.residual_gaps.push(WorkflowV2ResidualGap {
             id,
-            description: format!("missing project artifact evidence at {path}"),
+            description: format!("missing project artifact evidence at {path}: it {defect}"),
             severity: Some("blocking".to_string()),
         });
     }

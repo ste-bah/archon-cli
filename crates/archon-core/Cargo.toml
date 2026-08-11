@@ -102,3 +102,8 @@ archon-test-support = { path = "../archon-test-support" }
 wiremock.workspace = true
 wat.workspace = true
 tracing-test.workspace = true
+# Issues #80/#81: the live-turn cognitive tests read the cognitive relations
+# back through a separate handle, which is the source-of-truth read the
+# completion standard asks for. Dev-only; archon-core links Cozo only through
+# archon-cognitive in the production graph.
+cozo.workspace = true

@@ -37,9 +37,17 @@
 //! /context is READ-ONLY — there is no `CommandEffect` variant for
 //! this ticket.
 //!
-//! # Byte-for-byte output preservation
+//! # Output
 //!
-//! Every emitted value mirrors the deleted slash.rs:267-331 body:
+//! Issue #37 added two lines to the block described below: a `Fixed overhead:`
+//! subtotal (system prompt + tool definitions — the part of every request that
+//! is resent verbatim and therefore cannot be compacted away) and a
+//! `Last request:` line carrying the size of the most recent request body put
+//! on the wire. Between them and the existing `Source:` line, the three
+//! quantities a TPM stall has to tell apart — window source, fixed overhead,
+//! and latest request-body pressure — are now separately visible. The AGS-814
+//! migration otherwise preserves the deleted slash.rs:267-331 body byte for
+//! byte:
 //! - `context_limit` = resolved startup model context window when known.
 //! - `bar_width` = 40 chars, filled with `#` and padded with `-`.
 //! - Percent formatted as `{pct:.1}%`, clamped to 100.0.
@@ -107,6 +115,10 @@ pub(crate) struct ContextSnapshot {
     pub(crate) context_window: u64,
     /// Resolution source shown to the user (config-override/catalog/provider/etc.).
     pub(crate) context_source: String,
+    /// Approximate token size of the most recent request body put on the wire,
+    /// copied from `SessionStats::last_request_body_tokens`. Zero before the
+    /// first request of the session.
+    pub(crate) last_request_body_tokens: u64,
 }
 
 /// Build a [`ContextSnapshot`] by awaiting a single
@@ -136,6 +148,7 @@ pub(crate) async fn build_context_snapshot(slash_ctx: &SlashCommandContext) -> C
         tool_defs_chars: slash_ctx.tool_defs_chars,
         context_window: slash_ctx.context_window,
         context_source: slash_ctx.context_source.clone(),
+        last_request_body_tokens: stats.last_request_body_tokens,
     }
 }
 
@@ -213,15 +226,31 @@ impl CommandHandler for ContextHandler {
         } else {
             "unknown".to_string()
         };
+
+        // Issue #37: the three quantities a TPM stall needs told apart.
+        //
+        // A session can sit well under its context-window percentage and still
+        // fail on request size, so "47% of the window" alone never explained
+        // the failure. `Fixed overhead` names the part of every request that is
+        // resent verbatim each turn (and so cannot be compacted away), and
+        // `Last request` reports what was actually serialized onto the wire —
+        // measured before the send, so a rate-limited request still reports it.
+        let last_request_label = if snap.last_request_body_tokens > 0 {
+            format!("~{} tokens", fmt_tok(snap.last_request_body_tokens as f64))
+        } else {
+            "no request sent yet".to_string()
+        };
         let msg = format!(
             "\nContext window usage:\n\
              {bar}\n\
              \n\
              System prompt:    ~{sys} tokens\n\
              Tool definitions: ~{tools} tokens\n\
+             Fixed overhead:   ~{fixed} tokens (resent every request)\n\
              Conversation:     ~{conv} tokens\n\
              Total context:    ~{total} / {limit} tokens\n\
              Source:           {source}\n\
+             Last request:     {last_request}\n\
              \n\
              API usage this session:\n\
              Input:  {input_k:.1}k tokens\n\
@@ -230,10 +259,12 @@ impl CommandHandler for ContextHandler {
              Turns:  {turns}\n",
             sys = fmt_tok(sys_prompt_tokens),
             tools = fmt_tok(tool_def_tokens),
+            fixed = fmt_tok(fixed_overhead),
             conv = fmt_tok(conversation_tokens),
             total = fmt_tok(total_context),
             limit = limit_label,
             source = snap.context_source,
+            last_request = last_request_label,
             cache_create = snap.cache_creation_tokens,
             cache_read = snap.cache_read_tokens,
             turns = snap.turn_count,
@@ -317,6 +348,7 @@ mod tests {
             tool_defs_chars: 2_000,
             context_window: 1_000_000,
             context_source: "catalog".into(),
+            last_request_body_tokens: 470_000,
         };
         let (mut ctx, mut rx) = make_ctx(Some(snap));
         ContextHandler
@@ -360,6 +392,18 @@ mod tests {
                     s.contains("Turns:  3"),
                     "turn count 3 must surface verbatim; got: {s}"
                 );
+                // Issue #37: fixed overhead is 4000/4 + 2000/4 = 1500 tokens,
+                // rendered by fmt_tok as "1.5k".
+                assert!(
+                    s.contains("Fixed overhead:   ~1.5k tokens (resent every request)"),
+                    "fixed prompt/tool overhead must be a named subtotal; got: {s}"
+                );
+                // Issue #37: latest request-body pressure, distinct from both
+                // the window percentage and the billed input tokens.
+                assert!(
+                    s.contains("Last request:     ~470.0k tokens"),
+                    "latest request-body pressure must surface; got: {s}"
+                );
             }
             other => panic!("expected TuiEvent::TextDelta, got {other:?}"),
         }
@@ -398,6 +442,7 @@ mod tests {
             tool_defs_chars: 50,
             context_window: 500_000,
             context_source: "provider".into(),
+            last_request_body_tokens: 12_345,
         };
         let cloned = snap.clone();
         assert_eq!(cloned.input_tokens, 100);
@@ -409,7 +454,46 @@ mod tests {
         assert_eq!(cloned.tool_defs_chars, 50);
         assert_eq!(cloned.context_window, 500_000);
         assert_eq!(cloned.context_source, "provider");
+        assert_eq!(cloned.last_request_body_tokens, 12_345);
         // Debug impl must not panic.
         let _ = format!("{snap:?}");
+    }
+
+    /// Issue #37: before the first request there is no wire measurement, and
+    /// the line must say so rather than render a misleading `~0 tokens`.
+    #[test]
+    fn context_handler_reports_no_request_sent_before_the_first_turn() {
+        let snap = ContextSnapshot {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            turn_count: 0,
+            system_prompt_chars: 4_000,
+            tool_defs_chars: 2_000,
+            context_window: 1_000_000,
+            context_source: "catalog".into(),
+            last_request_body_tokens: 0,
+        };
+        let (mut ctx, mut rx) = make_ctx(Some(snap));
+        ContextHandler
+            .execute(&mut ctx, &[])
+            .expect("ContextHandler::execute must return Ok with snapshot");
+
+        match rx.try_recv().expect("must emit a TuiEvent") {
+            TuiEvent::TextDelta(s) => {
+                assert!(
+                    s.contains("Last request:     no request sent yet"),
+                    "an unmeasured session must say so, not report ~0; got: {s}"
+                );
+                // The fixed overhead is known at startup, so it is reported
+                // even before any request has been sent.
+                assert!(
+                    s.contains("Fixed overhead:   ~1.5k tokens"),
+                    "fixed overhead is known before the first turn; got: {s}"
+                );
+            }
+            other => panic!("expected TuiEvent::TextDelta, got {other:?}"),
+        }
     }
 }

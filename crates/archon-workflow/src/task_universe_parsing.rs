@@ -234,6 +234,33 @@ fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
     }
 }
 
+/// Union `.archon/project.json` into one task — **environment keys only**.
+///
+/// The two capability lists look symmetric and are not, because the branch
+/// contract treats them differently:
+///
+/// - A `required_env_keys` entry is **proven**. The branch reports it checked,
+///   and a key nothing uses costs a `checked_keys` line and nothing else. That
+///   carries no obligation, so granting one project-wide is free.
+/// - A `required_tools` entry is **exercised**. An accepted result must show an
+///   actual invocation of every declared tool, and declaring a no-op is refused
+///   outright while any tool is declared. That is an obligation, and granting
+///   one project-wide imposes it on every task.
+///
+/// So the project manifest is the right home for the first and the wrong home
+/// for the second. It used to carry both: the manifest hoisted the ambient
+/// toolchain (`archon`, `bash`, `cargo`, `python3` on the reference project)
+/// and this function unioned it onto every task, which made all four an
+/// invocation obligation for tasks with no reason to run any of them. Every
+/// branch was then trapped — accepted required four invocations it had no work
+/// for, and noop was forbidden because tools were declared — so a 15-task run
+/// produced nothing (#163, failure 3).
+///
+/// A task's tools now come only from that task. The under-declared-runner
+/// problem `workflow lint`'s `## declared capabilities` section reports is
+/// real, and its fix is in the task that invokes the runner. `required_tools`
+/// and `tool_bundles` in an existing manifest are read by nothing and left in
+/// place; `sync-capabilities` reports them as inert rather than removing them.
 pub fn merge_project_capabilities(
     task: &mut WorkflowV2TaskUniverseTask,
     task_path: &Path,
@@ -260,29 +287,7 @@ pub fn merge_project_capabilities(
             .chain(metadata_strings(&manifest, "required_env_keys"))
             .collect(),
     );
-    let mut project_tools = metadata_strings(&manifest, "required_tools");
-    if let Some(bundles) = manifest
-        .get("tool_bundles")
-        .and_then(serde_json::Value::as_object)
-    {
-        for tools in bundles.values() {
-            project_tools.extend(match tools {
-                serde_json::Value::Array(values) => values
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_string)
-                    .collect(),
-                _ => Vec::new(),
-            });
-        }
-    }
-    task.required_tools = sorted_unique(
-        task.required_tools
-            .iter()
-            .cloned()
-            .chain(project_tools)
-            .collect(),
-    );
+    // `task.required_tools` is deliberately untouched: see the doc comment.
     Ok(())
 }
 

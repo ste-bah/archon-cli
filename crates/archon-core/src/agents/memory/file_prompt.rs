@@ -17,11 +17,17 @@ pub const MAX_ENTRYPOINT_BYTES: usize = 25_000;
 /// - Local:   `<cwd>/.archon/agent-memory-local/<agent_type>/`
 ///
 /// Agent type colons are sanitized to dashes (Windows-safe, plugin-namespaced types).
+///
+/// The `User` fallback used to be a hardcoded `/tmp` (issue #156). That path
+/// is not a temp directory on Windows — it resolves against the current drive
+/// root — and [`ensure_memory_dir_exists`] would then `create_dir_all` an
+/// `F:\tmp\.archon\agent-memory\…` tree that nothing ever removes.
+/// `std::env::temp_dir()` is the portable equivalent.
 pub fn get_agent_memory_dir(agent_type: &str, scope: &AgentMemoryScope, cwd: &Path) -> PathBuf {
     let safe_name = agent_type.replace(':', "-");
     match scope {
         AgentMemoryScope::User => dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .unwrap_or_else(std::env::temp_dir)
             .join(".archon/agent-memory")
             .join(&safe_name),
         AgentMemoryScope::Project => cwd.join(".archon/agent-memory").join(&safe_name),

@@ -8,9 +8,16 @@
 use std::collections::HashMap;
 
 use super::phases::phase_semantic_dedup;
+use super::{BudgetLedger, GardenBudget};
 use crate::access::MemoryTrait;
 use crate::graph::MemoryGraph;
 use crate::types::{Memory, MemoryError, MemoryType, RelType, SearchFilter, StoreMemoryOutcome};
+
+/// A ledger that never refuses, so these tests measure the dedup rules and not
+/// the work budget. The budget has its own tests.
+fn unbounded() -> BudgetLedger {
+    BudgetLedger::new(GardenBudget::unbounded())
+}
 
 /// Wraps a real graph and answers `embedding_neighbours` from a fixed table.
 struct StubNeighbours {
@@ -112,7 +119,8 @@ fn merges_a_restatement_that_lexical_overlap_would_miss() {
     );
     stub.link(&a, &b, 0.04);
 
-    let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
+    let (merged, _linked) =
+        phase_semantic_dedup(&stub, 0.15, 0.15, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(1));
     // Higher importance survives.
@@ -155,7 +163,8 @@ fn leaves_related_but_distinct_memories_alone() {
     // Related enough to be neighbours, not close enough to be the same claim.
     stub.link(&a, &b, 0.31);
 
-    let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
+    let (merged, _linked) =
+        phase_semantic_dedup(&stub, 0.15, 0.15, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(0));
     assert!(stub.get_memory(&a).is_ok());
@@ -180,7 +189,8 @@ fn the_review_band_records_no_relationship() {
     // Inside the review band: closer than "unrelated", further than "the same".
     stub.link(&a, &b, 0.25);
 
-    let (merged, review) = phase_semantic_dedup(&stub, 0.15, 0.35, 50).expect("dedup");
+    let (merged, review) =
+        phase_semantic_dedup(&stub, 0.15, 0.35, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(0), "the review band must never merge");
     assert_eq!(
@@ -301,7 +311,7 @@ fn a_searchable_store_with_no_near_neighbours_reports_zero() {
     stub.store("something else", MemoryType::Fact, 0.5);
 
     assert_eq!(
-        phase_semantic_dedup(&stub, 0.15, 0.15, 50)
+        phase_semantic_dedup(&stub, 0.15, 0.15, 50, &mut unbounded())
             .expect("dedup")
             .0,
         Some(0)
@@ -322,7 +332,8 @@ fn an_unindexed_store_reports_the_pass_as_unavailable() {
         .store_memory("something", "", MemoryType::Fact, 0.5, &[], "test", "")
         .expect("store");
 
-    let (merged, review) = phase_semantic_dedup(&graph, 0.15, 0.35, 50).expect("dedup");
+    let (merged, review) =
+        phase_semantic_dedup(&graph, 0.15, 0.35, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, None, "an absent index is not a clean store");
     assert!(review.is_empty());
@@ -338,7 +349,8 @@ fn respects_the_merge_budget() {
         stub.link(&a, &b, 0.01);
     }
 
-    let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 2).expect("dedup");
+    let (merged, _linked) =
+        phase_semantic_dedup(&stub, 0.15, 0.15, 2, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(2), "the pass must stop at its budget");
 }
@@ -400,7 +412,8 @@ fn real_vector_index_merges_near_neighbours_and_spares_distant_ones() {
         distance_to(&unrelated)
     );
 
-    let (merged, _linked) = phase_semantic_dedup(&graph, 0.15, 0.15, 50).expect("dedup");
+    let (merged, _linked) =
+        phase_semantic_dedup(&graph, 0.15, 0.15, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(1), "only the paraphrase should merge");
     assert!(graph.get_memory(&anchor).is_ok(), "the anchor survives");
@@ -425,7 +438,8 @@ fn does_not_merge_across_memory_types() {
     let rule = stub.store("Always deploy to eu-west-2", MemoryType::Rule, 0.5);
     stub.link(&fact, &rule, 0.0);
 
-    let (merged, _linked) = phase_semantic_dedup(&stub, 0.15, 0.15, 50).expect("dedup");
+    let (merged, _linked) =
+        phase_semantic_dedup(&stub, 0.15, 0.15, 50, &mut unbounded()).expect("dedup");
 
     assert_eq!(merged, Some(0));
     assert!(stub.get_memory(&fact).is_ok());

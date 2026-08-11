@@ -85,7 +85,15 @@ pub(super) fn record_extracted_corrections(
         // relation, and the reason corrections needed bounding at all was a
         // writer that trusted its input.
         let content = stored_correction_content(&item.content);
-        match tracker.record_correction(correction_type, &content, context, None) {
+        // Recorded without reinforcement, like the fast path. Unlike the fast
+        // path there is no attribution to follow: the semantic pass runs several
+        // turns late, against an action window that has already moved, so there
+        // is nothing left to attribute the correction to. That makes every
+        // extractor-found correction permanently unattributed, and an
+        // unattributed correction reinforces nothing. The correction is still
+        // recorded and still recalled -- what it no longer does is move a rule's
+        // score on the strength of a restatement nobody could explain.
+        match tracker.record_correction_unreinforced(correction_type, &content, context, None) {
             Ok(_) => recorded += 1,
             Err(error) => {
                 tracing::warn!(%error, "recording an extractor-found correction failed")

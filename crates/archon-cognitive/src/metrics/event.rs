@@ -21,6 +21,7 @@ pub enum MetricEventKind {
     CorrectionClassified,
     ShadowDecisionCompared,
     AttributionEvaluated,
+    AttributionFollowupEvaluated,
     SelfModelPredictionEvaluated,
     SelfModelFactUpdated,
     RetrievalHitObserved,
@@ -37,6 +38,7 @@ impl MetricEventKind {
             Self::CorrectionClassified => "correction_classified",
             Self::ShadowDecisionCompared => "shadow_decision_compared",
             Self::AttributionEvaluated => "attribution_evaluated",
+            Self::AttributionFollowupEvaluated => "attribution_followup_evaluated",
             Self::SelfModelPredictionEvaluated => "self_model_prediction_evaluated",
             Self::SelfModelFactUpdated => "self_model_fact_updated",
             Self::RetrievalHitObserved => "retrieval_hit_observed",
@@ -78,6 +80,22 @@ impl MetricEventKind {
                 "attribution_adjudication_id",
                 "accepted",
                 "abstained",
+            ],
+            // Roadmap line 151: one event per follow-up opportunity, carrying
+            // the correction it follows, the cohort it belongs to, and the
+            // immutable window and stratum it is counted in. Without the stratum
+            // and cohort-entry ids the cohort rates cannot be matched, and an
+            // unmatched comparison is the thing the R2 rollback trigger calls an
+            // undefined effect.
+            Self::AttributionFollowupEvaluated => &[
+                "correction_id",
+                "followup_opportunity_id",
+                "followup_window_id",
+                "followup_match_stratum_id",
+                "cohort_entry_window_id",
+                "attribution_cohort",
+                "cause_action_class",
+                "followup_comparator",
             ],
             Self::SelfModelPredictionEvaluated => &[
                 "self_model_prediction_id",
@@ -131,6 +149,7 @@ impl std::str::FromStr for MetricEventKind {
             "correction_classified" => Self::CorrectionClassified,
             "shadow_decision_compared" => Self::ShadowDecisionCompared,
             "attribution_evaluated" => Self::AttributionEvaluated,
+            "attribution_followup_evaluated" => Self::AttributionFollowupEvaluated,
             "self_model_prediction_evaluated" => Self::SelfModelPredictionEvaluated,
             "self_model_fact_updated" => Self::SelfModelFactUpdated,
             "retrieval_hit_observed" => Self::RetrievalHitObserved,
