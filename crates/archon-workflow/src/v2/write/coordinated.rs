@@ -15,6 +15,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
         v2_store,
         store_for_control,
         run_id,
+        task_universe,
     } = ctx;
     let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let mut results = Vec::new();
@@ -68,7 +69,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                         &branch_execution,
                         &adapter,
                         Some(v2_store),
-                        None,
+                        task_universe,
                     )
                     .await;
                 active.fetch_sub(1, Ordering::SeqCst);

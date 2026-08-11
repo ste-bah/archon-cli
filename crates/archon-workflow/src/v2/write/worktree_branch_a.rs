@@ -17,6 +17,7 @@ pub(crate) async fn run_one_worktree_branch(
         ctx.v2_store,
         ctx.adapter,
         &branch,
+        ctx.task_universe,
     )
     .await?;
     poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
@@ -107,6 +108,7 @@ pub(super) async fn run_worktree_branch_agent(
     v2_store: &WorkflowV2ResultStore,
     adapter: WorkflowV2AgentAdapter,
     branch: &WorktreeBranchExecution,
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
     // The worktree branch runs against its own sealed workspace, which takes
     // precedence over the run's target repository root — the same `or`
@@ -120,7 +122,7 @@ pub(super) async fn run_worktree_branch_agent(
             &branch.execution,
             &adapter,
             Some(v2_store),
-            None,
+            task_universe,
         )
         .await;
     normalize_worktree_agent_result(result, branch)

@@ -17,6 +17,7 @@ pub(super) async fn run_serial_v2_write_fanout(
         v2_store,
         store_for_control,
         run_id,
+        task_universe,
     } = ctx;
     let mut branch_results = Vec::new();
     for branch in branches {
@@ -51,7 +52,7 @@ pub(super) async fn run_serial_v2_write_fanout(
                 &branch_execution,
                 &adapter,
                 Some(v2_store),
-                None,
+                task_universe,
             )
             .await
         {

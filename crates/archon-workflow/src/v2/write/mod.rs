@@ -73,6 +73,13 @@ pub(super) struct WriteFanoutContext<'a> {
     pub(super) v2_store: &'a WorkflowV2ResultStore,
     pub(super) store_for_control: &'a WorkflowStore,
     pub(super) run_id: &'a str,
+    /// The authoritative task universe, carried to the agent dispatch.
+    ///
+    /// Write branches passed `None` here, so every host rule keyed on the
+    /// universe was inert on the only path that writes — an artifact-only item
+    /// could not be granted the deliverable its own task declares, and its
+    /// branch was rejected for changing files outside declared targets.
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 /// Run one write-capable fan-out call to completion.
@@ -155,6 +162,7 @@ pub async fn run_write_capable_v2_fanout(
         v2_store,
         store_for_control,
         run_id,
+        task_universe,
     };
     match (execution.call.write_mode, workspace_boundary_supported) {
         (Some(WorkflowV2WriteMode::Coordinated), true) => {

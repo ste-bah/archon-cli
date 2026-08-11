@@ -30,6 +30,7 @@ pub(super) struct WorktreePlanRunContext<'a> {
     pub(super) semaphore: Arc<Semaphore>,
     pub(super) active: Arc<AtomicUsize>,
     pub(super) peak: Arc<AtomicUsize>,
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 pub(super) fn worktree_plan_context<'a>(
@@ -52,6 +53,7 @@ pub(super) fn worktree_plan_context<'a>(
         semaphore: Arc::new(Semaphore::new(max_parallelism)),
         active: Arc::new(AtomicUsize::new(0)),
         peak: Arc::new(AtomicUsize::new(0)),
+        task_universe: ctx.task_universe,
     }
 }
 
@@ -298,6 +300,7 @@ pub(super) struct WorktreeWaveRunContext<'a> {
     pub(super) semaphore: Arc<Semaphore>,
     pub(super) active: Arc<AtomicUsize>,
     pub(super) peak: Arc<AtomicUsize>,
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 impl WorktreePlanRunContext<'_> {
@@ -317,6 +320,7 @@ impl WorktreePlanRunContext<'_> {
             semaphore: self.semaphore.clone(),
             active: self.active.clone(),
             peak: self.peak.clone(),
+            task_universe: self.task_universe,
         }
     }
 }
