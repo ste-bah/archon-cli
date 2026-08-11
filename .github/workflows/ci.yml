@@ -526,6 +526,29 @@ jobs:
     name: release build smoke
     runs-on: ubuntu-latest
     needs: [build-and-test]
+    # Only build the release profile when a release is actually intended.
+    #
+    # This job sits at the tail of every run: it waits for the whole test matrix
+    # — roughly 36 min ubuntu, 58 macOS, 87 Windows — and then spends several
+    # more minutes compiling a profile nothing else in the run uses. Almost no
+    # commit is a release, so almost all of that proves something nobody is
+    # about to ship.
+    #
+    # Skipping is deliberately the mechanism rather than cancelling the run by
+    # hand. A cancelled run concludes `cancelled`, and release.yml fires on
+    # `workflow_run` gated on `conclusion == 'success'` — so cancelling to save
+    # time on an ordinary commit would also silently skip the real release on a
+    # version bump. A skipped job leaves the run green and the chain intact.
+    #
+    # Nothing is lost when it skips: release.yml builds the release profile
+    # itself, with the cross targets, whenever Cargo.toml carries a version that
+    # has no tag yet. This job exists to answer the same question *earlier*, on
+    # demand, for a commit that is about to become one — 71eec6a4b is the
+    # precedent, where the release profile needed toolchain targets the debug
+    # build never asked for.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || contains(github.event.head_commit.message, '[release]')
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
