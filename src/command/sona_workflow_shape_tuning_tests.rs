@@ -13,6 +13,11 @@ fn consenting() -> LearningConfig {
 
 /// Seed `count` contention observations onto the width route, through the same
 /// store and relation the runtime writes.
+///
+/// One batch rather than `count` single writes, for the reason given on the
+/// sibling helper in `sona_workflow_tuning_tests.rs`: the guarded-write round
+/// trip is charged once per script, and it is an order of magnitude dearer on
+/// Windows than on Linux.
 fn seed(project_root: &Path, class: &str, pressure: f64, count: u32) {
     let db =
         crate::command::topology_fold::open_store(&learning_store_path(project_root), "learning")
@@ -20,8 +25,8 @@ fn seed(project_root: &Path, class: &str, pressure: f64, count: u32) {
     archon_pipeline::learning::schema::initialize_learning_schemas(&db).expect("schemas");
     let knob = TunableShapeKnob::ImplementationWaveFanoutWidth;
     let route = SonaParameterTuner::route(class, knob.key());
-    for index in 0..count {
-        let trajectory = archon_pipeline::learning::sona::Trajectory {
+    let observations: Vec<_> = (0..count)
+        .map(|index| archon_pipeline::learning::sona::Trajectory {
             trajectory_id: format!("shape-seed-{index}"),
             route: route.clone(),
             agent_key: "generated-workflow-shape-tuner".to_string(),
@@ -35,9 +40,9 @@ fn seed(project_root: &Path, class: &str, pressure: f64, count: u32) {
             weights_path: String::new(),
             created_at: u64::from(index) + 1,
             updated_at: u64::from(index) + 1,
-        };
-        trajectory_store::store_trajectory(&db, &trajectory).expect("store observation");
-    }
+        })
+        .collect();
+    trajectory_store::store_trajectory_batch(&db, &observations).expect("store observations");
 }
 
 fn tune(project_root: &Path, class: &str, learning: &LearningConfig) -> GeneratedShape {

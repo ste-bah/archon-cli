@@ -10,6 +10,12 @@ fn consenting() -> LearningConfig {
 
 /// Seed `count` observations at one pressure onto one route, through the same
 /// store and relation the runtime writes.
+///
+/// Written as one batch rather than `count` single writes. Both land the same
+/// rows; the batch pays the guarded-write round trip once instead of `count`
+/// times, and that round trip is an order of magnitude dearer on Windows than
+/// on Linux, which is enough to make a several-hundred-row fixture the slowest
+/// thing in the suite on one platform only.
 fn seed(
     project_root: &Path,
     class: &str,
@@ -22,8 +28,8 @@ fn seed(
             .expect("learning store");
     archon_pipeline::learning::schema::initialize_learning_schemas(&db).expect("schemas");
     let route = SonaParameterTuner::route(class, parameter.key());
-    for index in 0..count {
-        let trajectory = archon_pipeline::learning::sona::Trajectory {
+    let observations: Vec<_> = (0..count)
+        .map(|index| archon_pipeline::learning::sona::Trajectory {
             trajectory_id: format!("tuning-seed-{}-{index}", parameter.key()),
             route: route.clone(),
             agent_key: "generated-workflow-tuner".to_string(),
@@ -37,9 +43,9 @@ fn seed(
             weights_path: String::new(),
             created_at: u64::from(index) + 1,
             updated_at: u64::from(index) + 1,
-        };
-        trajectory_store::store_trajectory(&db, &trajectory).expect("store observation");
-    }
+        })
+        .collect();
+    trajectory_store::store_trajectory_batch(&db, &observations).expect("store observations");
 }
 
 fn decision_for(
