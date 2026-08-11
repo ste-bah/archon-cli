@@ -331,6 +331,7 @@ fn request_declares_required_tools(input: &serde_json::Value) -> bool {
 fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
     let mut required: Vec<String> = Vec::new();
     collect_required_tool_names(input, &mut required);
+    required.retain(|tool| !is_generic_shell_utility(tool));
     if required.is_empty() {
         return Vec::new();
     }
@@ -347,6 +348,32 @@ fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Resu
                 .any(|command| command.contains(tool.as_str()))
         })
         .collect()
+}
+
+/// Ubiquitous shell utilities every agent already has, which this guard must
+/// not police.
+///
+/// The guard exists to stop an agent asserting a *capability* was unavailable
+/// without attempting it — a live MCP action, a provider call, a build or test
+/// runner. Those can be silently skipped and their absence hidden in prose, so
+/// proof of invocation is worth demanding.
+///
+/// A text-processing or file-listing binary is not a capability, it is a means.
+/// How an agent inspects a tree is its own business, and an agent that answers
+/// the same question with its own search tooling has done the work. Policing
+/// these turned a satisfied task into a rejection for not shelling out to
+/// `find`, which cost a run: the declaration was true, the work was done, and
+/// the only thing missing was the literal binary in a command string.
+///
+/// Names only, no PRD or domain knowledge, so this holds for every workflow.
+fn is_generic_shell_utility(tool: &str) -> bool {
+    const GENERIC: &[&str] = &[
+        "awk", "basename", "bash", "cat", "cd", "cut", "diff", "dirname", "echo", "find", "grep",
+        "head", "ls", "mkdir", "printf", "pwd", "rg", "sed", "sh", "sort", "tail", "tee", "tr",
+        "uniq", "wc", "xargs", "zsh",
+    ];
+    let name = tool.trim().to_ascii_lowercase();
+    GENERIC.contains(&name.as_str())
 }
 
 /// Collect the raw (lowercased) names of every declared required tool anywhere
