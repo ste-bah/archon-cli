@@ -16,6 +16,31 @@ const CHILD_DESCENDANT_MARKER_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCEND
 const CHILD_DESCENDANT_SURVIVOR_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_DESCENDANT_SURVIVOR";
 const CHILD_STDIN_OUTCOME_ENV: &str = "ARCHON_COMPILATION_GATE_CHILD_STDIN_OUTCOME";
 
+/// How often anything here re-checks a marker file.
+///
+/// This is a polling interval, not a deadline. Every loop that uses it ends on
+/// the event it is watching for, so load changes how many times a loop turns
+/// and nothing else.
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+/// The gate limit given to the two fixtures that are not about timing out.
+///
+/// [`compilation_child_receives_eof_before_parent_stdin_closes`] and
+/// [`compilation_wait_keeps_current_thread_runtime_responsive`] both have to
+/// pass `run_command` *some* limit, and neither asserts anything about how long
+/// the child takes: each waits on an event the child itself produces. So the
+/// value is sized so that only a wedged child can reach it, which leaves it out
+/// of the result on any machine at any load.
+///
+/// Sixty seconds is twelve times the worst process-creation cost measured on a
+/// loaded 32-core Windows box (`.config/nextest.toml` records 4.96s for a
+/// single spawn), and comfortably inside nextest's `60s x 4` `terminate-after`
+/// ceiling, so a fixture that genuinely deadlocked still fails through the
+/// assertions below - with their message - rather than through the harness
+/// cancelling the run. It is a hang guard, not a budget: moving it up or down
+/// does not change what passes.
+const HANG_GUARD: Duration = Duration::from_secs(60);
+
 #[test]
 fn controlled_child() {
     let Ok(marker) = std::env::var(CHILD_MARKER_ENV) else {
@@ -30,16 +55,27 @@ fn controlled_child() {
         Ok("exit-after-spawning-descendant") => spawn_descendant(),
         Ok("descendant-hold-stream") => hold_descendant_stream(),
         _ => loop {
-            std::thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(POLL_INTERVAL);
         },
     }
 }
 
+/// Block until the parent says so, with no deadline of its own.
+///
+/// The deadline this used to carry was the flake: the parent writes `release`
+/// only once it has observed this process's startup marker, so a child that
+/// gave up on a timer would end the wait before the parent got its observation
+/// in, and whether that happened was decided by how busy the machine was. The
+/// wait is now ended by the parent's signal and nothing else.
+///
+/// Nothing is leaked by looping forever: the gate wraps this process in
+/// `KillOnDrop` plus a job object (Windows) or process group (unix) and owns
+/// its lifetime, which is the same arrangement the default arm of
+/// [`controlled_child`] already relies on.
 fn await_release() {
     let release = std::env::var(CHILD_RELEASE_ENV).unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
-    while !Path::new(&release).exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(5));
+    while !Path::new(&release).exists() {
+        std::thread::sleep(POLL_INTERVAL);
     }
 }
 
@@ -61,7 +97,7 @@ fn run_stdin_reader() {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(CompilationGate.run_command(spec, Duration::from_millis(100)));
+        .block_on(CompilationGate.run_command(spec, HANG_GUARD));
     std::fs::write(
         gate_result,
         if result.gate_passed {
@@ -106,6 +142,21 @@ fn hold_descendant_stream() {
     std::thread::sleep(Duration::from_millis(1500));
 }
 
+/// The gate must give its child a stdin of its own, not the one it inherited.
+///
+/// Three processes: this test holds the write end of `runner`'s stdin pipe;
+/// `runner` hosts a [`CompilationGate`] on its own runtime; the gate spawns a
+/// reader that drains stdin to EOF. If the gate ever handed the reader an
+/// inherited stdin, the reader would sit on a pipe only this test can close and
+/// the gate would not return until it did.
+///
+/// What proves that did not happen is `runner`'s exit. `runner` never reads its
+/// own stdin, so it exits as soon as the gate it hosts returns - and it exits
+/// here while `runner_stdin` is still open, which is the ordering the name
+/// claims. Waiting on the exit replaces three `wait_for_file` polls that each
+/// had a one-second budget; spawning a debug-profile process costs what the
+/// machine is doing, so those budgets asked whether the box was busy, not
+/// whether the gate rewired stdin.
 #[test]
 fn compilation_child_receives_eof_before_parent_stdin_closes() {
     let temp = tempfile::tempdir().unwrap();
@@ -128,26 +179,27 @@ fn compilation_child_receives_eof_before_parent_stdin_closes() {
         .env(CHILD_GATE_RESULT_ENV, &gate_result)
         .spawn()
         .unwrap();
+    // `Child::wait` closes `stdin` before waiting, precisely to avoid the
+    // deadlock this test wants to be exposed to. Taking the handle moves the
+    // write end here so it survives the wait below.
     let runner_stdin = runner.stdin.take().unwrap();
 
-    assert!(
-        wait_for_file(&runner_marker, Duration::from_secs(1)),
-        "controlled gate runner must start"
-    );
-    assert!(
-        wait_for_file(&inner_marker, Duration::from_secs(1)),
-        "controlled stdin reader must start"
-    );
-    assert!(
-        wait_for_file(&gate_result, Duration::from_secs(1)),
+    let status = runner.wait().unwrap();
+    // Read everything while the pipe is still open, so the evidence is gathered
+    // under the condition being asserted rather than after it is relaxed.
+    let runner_started = runner_marker.exists();
+    let reader_started = inner_marker.exists();
+    let gate_outcome = std::fs::read_to_string(&gate_result).unwrap_or_default();
+    let stdin_outcome = std::fs::read_to_string(&stdin_outcome).unwrap_or_default();
+    drop(runner_stdin);
+
+    assert!(runner_started, "controlled gate runner must start");
+    assert!(reader_started, "controlled stdin reader must start");
+    assert!(status.success(), "controlled gate runner must exit cleanly");
+    assert_eq!(
+        gate_outcome, "passed",
         "deadlock guard: gate must finish while its parent's stdin stays open"
     );
-    let gate_outcome = std::fs::read_to_string(&gate_result).unwrap();
-    let stdin_outcome = std::fs::read_to_string(&stdin_outcome).unwrap_or_default();
-
-    drop(runner_stdin);
-    assert!(runner.wait().unwrap().success());
-    assert_eq!(gate_outcome, "passed");
     assert_eq!(stdin_outcome, "eof");
 }
 
@@ -285,6 +337,24 @@ async fn compilation_spawn_failure_returns_failed_gate_record() {
     );
 }
 
+/// Awaiting the compilation child must leave the current-thread runtime free to
+/// run everything else on it.
+///
+/// The property is observed rather than timed. The child blocks until `release`
+/// exists, and the only thing that can create `release` is this test body -
+/// another task on the same single-threaded runtime as `gate_task`. So the gate
+/// completing at all is the evidence: if `run_command` held the thread while it
+/// waited, this task would never be polled again, `release` would never be
+/// written, and the gate could not return.
+///
+/// That is also what the old shape could not do. It waited on a marker file
+/// from an OS thread and awaited a `oneshot` under a two-second timeout, but a
+/// blocked current-thread runtime cannot fire its own timer either, so a real
+/// violation hung there just as it does here - the budgets only ever separated
+/// a busy machine from a quiet one. Worse, the child gave up on `release` after
+/// one second of its own, so a slow spawn let the gate finish before the
+/// `is_finished` check ran and turned the claim inside out. Both budgets are
+/// gone; the check is now true by construction.
 #[tokio::test(flavor = "current_thread")]
 async fn compilation_wait_keeps_current_thread_runtime_responsive() {
     let temp = tempfile::tempdir().unwrap();
@@ -292,21 +362,16 @@ async fn compilation_wait_keeps_current_thread_runtime_responsive() {
     let release = temp.path().join("release-child");
     let spec = controlled_child_spec(temp.path(), &marker, Some(&release));
     let gate = CompilationGate;
-    let (progress_tx, progress_rx) = tokio::sync::oneshot::channel();
 
-    let gate_task =
-        tokio::spawn(async move { gate.run_command(spec, Duration::from_secs(2)).await });
-    let marker_for_thread = marker.clone();
-    std::thread::spawn(move || {
-        let started = wait_for_file(&marker_for_thread, Duration::from_secs(1));
-        let _ = progress_tx.send(started);
-    });
+    let gate_task = tokio::spawn(async move { gate.run_command(spec, HANG_GUARD).await });
 
-    let started = tokio::time::timeout(Duration::from_secs(2), progress_rx)
-        .await
-        .expect("controlled child startup signal timed out")
-        .expect("controlled child startup sender dropped");
-    assert!(started, "controlled child did not write its startup marker");
+    // Reaching the far side of this loop is itself the observation: it can only
+    // happen if the runtime kept scheduling this task while `gate_task` sat on
+    // its child. The loop ends on the child's own startup signal, never on a
+    // clock.
+    while !marker.exists() {
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
     assert!(
         !gate_task.is_finished(),
         "the async runtime must progress while the compilation command waits"
@@ -323,7 +388,7 @@ async fn compilation_wait_keeps_current_thread_runtime_responsive() {
 fn wait_for_file(path: &Path, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     while !path.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(POLL_INTERVAL);
     }
     path.exists()
 }
