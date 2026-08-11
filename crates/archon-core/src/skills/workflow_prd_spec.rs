@@ -229,6 +229,14 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             injected and its absence is never reported as a gap, so the task \
             fails later for a reason that looks like the service being \
             down.\n\
+         9. An `artifact_path` must be a path a build can account for. Check \
+            the target repository's `.gitignore` before declaring one: a \
+            deliverable inside an ignored directory cannot travel in a git \
+            patch and is handled by a slower bytes-sidecar fallback, so \
+            prefer version-controlled paths for anything reviewers must see. \
+            Ignored paths are legitimate ONLY for content that must never \
+            enter history — user documentation, generated data — and then \
+            the ignored location is the point, not an accident.\n\
          \n\
          AFTER WRITING:\n\
          1. Run `archon workflow lint --tasks {task_dir}/`. Its `## declared \

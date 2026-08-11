@@ -32,6 +32,7 @@ fn captured(path: &str) -> CapturedPatch {
         pre_hashes: BTreeMap::new(),
         post_hashes: BTreeMap::new(),
         baseline_commit: "abc".into(),
+        ignored_files: vec![],
     }
 }
 

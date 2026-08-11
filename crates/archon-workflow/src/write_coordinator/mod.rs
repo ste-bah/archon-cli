@@ -19,6 +19,7 @@ pub mod conflict_graph;
 pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
+mod patch_sidecar;
 pub mod status;
 pub mod worktree_isolation;
 
