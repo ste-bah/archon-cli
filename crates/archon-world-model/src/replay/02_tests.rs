@@ -6,11 +6,9 @@ use chrono::{TimeZone, Utc};
 
 use super::policy::{
     MAX_DECILE_SHARE, MAX_PRIORITIZED_FRACTION, MAX_SURPRISE_WEIGHT, ReplayPolicy, TransitionKey,
-    is_held_out, surprise_by_row_id,
+    is_held_out,
 };
 use super::sampler::{ReplaySkipReason, plan_replay};
-use crate::guardrail::WorldGuardrailOutcome;
-use crate::schema::{WorldActionKind, WorldTraceRow};
 
 fn key(session: &str, id: &str) -> TransitionKey {
     TransitionKey {

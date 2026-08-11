@@ -5,8 +5,6 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{TimeZone, Utc};
-
 use super::super::policy::{ReplayPolicy, surprise_by_row_id};
 use super::super::sampler::plan_replay;
 use super::{corpus, enabled, enabled_batch, graded_surprise};
