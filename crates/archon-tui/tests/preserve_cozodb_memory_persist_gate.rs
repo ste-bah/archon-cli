@@ -47,8 +47,8 @@
 //!    `cozo::DbInstance` with SQLite backend and initialises the schema.
 //! 3. Attach a deterministic in-test `EmbeddingProvider` so the HNSW
 //!    index is populated on `store_memory` (real providers like OpenAI
-//!    or fastembed would push this test over the 3 s budget and break
-//!    offline CI).
+//!    or fastembed would make the gate depend on a model download and
+//!    a network round trip, and break offline CI).
 //! 4. Store a memory with known content + tags via
 //!    `MemoryTrait::store_memory` (the PUBLIC trait path — this is the
 //!    REQ-FOR-PRESERVE-D8 contract surface).
@@ -97,8 +97,8 @@
 //! the HNSW index is via an `EmbeddingProvider` attached to the graph.
 //! Real providers (`archon_memory::embedding::local::LocalEmbedding`
 //! pulls fastembed; `openai::OpenAIEmbedding` needs a network API
-//! key) are neither <3 s nor deterministic in CI. **This gate uses a
-//! test-local deterministic `EmbeddingProvider` impl**
+//! key) are neither offline nor deterministic in CI. **This gate uses
+//! a test-local deterministic `EmbeddingProvider` impl**
 //! (`HashEmbedProvider`) that produces reproducible vectors from a
 //! token hash. `recall_memories` with a provider attached routes
 //! through `hybrid_search` → `vector_search::search_similar` (the
@@ -121,11 +121,65 @@
 //! 4. Deleting the CozoDB file between the two instantiations causes
 //!    failure with "memory not retrievable after restart" — ✓ verified
 //!    by manual negative run during task validation (see task report).
-//! 5. Gate completes in <3 seconds — ✓ empirically <500ms; the
-//!    deterministic provider has no IO, no model loading.
+//! 5. Gate completes in <3 seconds — **measured and reported, not
+//!    asserted.** See the next section, which is the whole of the
+//!    reason.
 //! 6. Gate asserts the file lock is released on drop — ✓ `assert!` on
 //!    the second-open success path; message includes `INV-PRESERVE-003`
 //!    and `file lock leaked`.
+//!
+//! ## Why criterion 5 is measured and not asserted
+//!
+//! This is deliberate, and it is a removal, so it is written down at
+//! length rather than left to a diff.
+//!
+//! **The three-second figure was never a product requirement.**
+//! REQ-FOR-PRESERVE-D8 is a contract about *persistence*: a memory
+//! stored before a restart is retrievable after it, through
+//! `MemoryTrait`, out of the embedded store, and never out of an
+//! external MCP or an ad-hoc file. That is what the sibling guard
+//! `archon-core/tests/preserve_d8_save_agent_memory.rs` asserts and
+//! what `scripts/check-preserve-invariants.sh` — the standing CI gate
+//! over these invariants — checks. Neither carries a latency clause.
+//! Nothing anywhere promises a user that persistence completes inside
+//! any wall-clock bound.
+//!
+//! The three seconds came from this gate's own task sheet, and its
+//! stated job there was test hygiene: to rule out an embedding
+//! provider that downloads a model or calls a network API. That job is
+//! done by construction — `HashEmbedProvider` below is pure arithmetic
+//! — and it does not need a stopwatch to enforce.
+//!
+//! **What the assertion actually measured was the runner.** The gate
+//! does two `MemoryGraph::open` calls, two schema initialisations, two
+//! HNSW index initialisations, one store and four recalls. All of it
+//! is CPU-bound work whose duration is set by how much of the machine
+//! the process is given. Nominal cost is ~0.35s. Pinned to one core
+//! shared with forty CPU burners, the same unchanged code takes 2-9.4s
+//! and the old assertion failed 6 runs in 15; CI recorded 7.79s on a
+//! busy `windows-latest` runner while passing on a quiet one from a
+//! byte-identical tree. A bound with under 9x headroom cannot separate
+//! a regression from a busy neighbour when load alone moves the
+//! measurement by 27x: it fires on load long before it fires on a real
+//! regression, which makes it a load detector wearing a performance
+//! guard's name.
+//!
+//! **The claims are therefore split, not merged and not dropped.** The
+//! persistence claim keeps every assertion it had — count, byte-for-
+//! byte content, title, tags, keyword recall, HNSW vector recall, and
+//! `INV-PRESERVE-003` on the lock release. The performance number is
+//! still taken and still printed on a stable, greppable line, so drift
+//! remains visible to anyone reading the output; it simply no longer
+//! decides whether the tree is red. A genuine throughput regression
+//! guard needs a controlled machine and a baseline to compare against,
+//! which is what `crates/archon-bench` is for, and it is not something
+//! a correctness gate on a shared runner can honestly provide.
+//!
+//! Nothing here was retried, widened, or added to a nextest test
+//! group. `.config/nextest.toml` records why the third of those is
+//! wrong for a test that spawns no process, and the first two would
+//! only have moved the threshold at which the runner's load, rather
+//! than the code, decides the outcome.
 //!
 //! ## Failure-message contract
 //!
@@ -157,8 +211,8 @@ use tempfile::TempDir;
 /// - `archon_memory::embedding::openai::OpenAIEmbedding` needs an
 ///   API key and network.
 ///
-/// Neither is acceptable for a <3 s deterministic preservation gate.
-/// This provider exercises the same `EmbeddingProvider` trait surface
+/// Neither is acceptable for an offline, deterministic preservation
+/// gate. This provider exercises the same `EmbeddingProvider` surface
 /// the real providers implement, so the HNSW wiring under test is
 /// identical.
 struct HashEmbedProvider {
@@ -232,9 +286,6 @@ fn open_with_provider(path: &std::path::Path) -> MemoryGraph {
 #[test]
 fn cozodb_memory_persists_across_in_process_restart() {
     let t0 = Instant::now();
-
-    // Budget sentinel — spec Validation §5 requires <3 s.
-    let hard_budget = std::time::Duration::from_secs(3);
 
     let tmp = TempDir::new()
         .unwrap_or_else(|e| panic!("{}", fail_msg(&format!("TempDir::new failed: {e}"))));
@@ -400,14 +451,21 @@ fn cozodb_memory_persists_across_in_process_restart() {
         fail_msg("memory not retrievable after restart (HNSW vector recall missed stored memory)")
     );
 
-    // ── Budget check ──────────────────────────────────────────
+    // ── Measurement ───────────────────────────────────────────
+    //
+    // The REQ-FOR-PRESERVE-D8 persistence gate is complete above; every
+    // assertion that can fail has already run. What follows records how
+    // long the round trip took and asserts nothing about it, because on
+    // a shared runner that number describes the runner. The module
+    // header section "Why criterion 5 is measured and not asserted"
+    // carries the argument and the measurements behind it.
+    //
+    // Stable prefix so the series can be grepped out of CI output, the
+    // same shape `preserve_subagent_spawn_latency_gate` prints.
     let elapsed = t0.elapsed();
-    assert!(
-        elapsed < hard_budget,
-        "{}",
-        fail_msg(&format!(
-            "gate exceeded 3s budget (actual: {elapsed:?}) — spec §Validation Criteria line 76"
-        ))
+    println!(
+        "[preserve_cozodb_memory_persist_gate] elapsed_ms={} (measurement, not a budget)",
+        elapsed.as_millis()
     );
 
     // Drop `graph2`; `tmp` drops at end of scope and cleans up.
