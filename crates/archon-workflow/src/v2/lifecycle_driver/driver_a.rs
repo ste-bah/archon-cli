@@ -15,7 +15,17 @@ impl LifecycleDriver {
         resume_completed_ids: std::collections::BTreeSet<String>,
         limits: LifecycleLimits,
     ) -> Self {
-        let task_universe = serde_json::to_value(&universe).unwrap_or(serde_json::Value::Null);
+        let mut task_universe = serde_json::to_value(&universe).unwrap_or(serde_json::Value::Null);
+        // Host-stamped existence for every declared deliverable. Agents run in
+        // isolated worktrees — git checkouts that cannot contain gitignored or
+        // project-root files — so an agent-side glob answers "absent" for
+        // artifacts that exist. Three runs bricked on exactly that lie; the
+        // host stats the real roots once and the universe carries the answer.
+        crate::v2::artifact_presence::stamp_artifact_presence(
+            &mut task_universe,
+            project_artifact_root.as_deref(),
+            target_repository_root.as_deref(),
+        );
         let canonical = universe.tasks.len();
         Self {
             host,
