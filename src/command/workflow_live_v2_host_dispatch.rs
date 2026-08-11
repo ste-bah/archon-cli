@@ -199,6 +199,14 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     if let Some(store) = v2_store {
         let mut context = archon_workflow::project_artifact_context_from_v2_root(store.root());
         context.add_artifact_requirements(&request.input);
+        // Contract-declared roots: a deliverable the tasks themselves declare
+        // (host-parsed, never agent-authored) is a place this run may write,
+        // unless the repository checkout owns that directory. Without this an
+        // artifact-only item has no writable home and its agent must refuse
+        // the very edit it was dispatched to make.
+        if let Some(universe) = task_universe {
+            context.add_contract_roots(universe, request.repository_root.as_deref());
+        }
         request.project_artifacts = context;
     }
     let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(

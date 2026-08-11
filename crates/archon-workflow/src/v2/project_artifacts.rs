@@ -34,6 +34,25 @@ impl WorkflowV2ProjectArtifactContext {
             .is_empty()
     }
 
+    /// Admit the roots the task universe's deliverable contracts declare.
+    ///
+    /// Contracts are host-parsed from task files — not agent-authored — which
+    /// is what makes this channel safe to trust where agent-supplied
+    /// requirement paths stay restricted. See `project_artifact_contract_roots`
+    /// for the derivation and the repo-ownership guard.
+    pub fn add_contract_roots(
+        &mut self,
+        universe: &crate::task_universe::WorkflowV2TaskUniverse,
+        target_repository_root: Option<&str>,
+    ) {
+        for root in super::project_artifact_contract_roots::contract_artifact_roots(
+            universe,
+            target_repository_root,
+        ) {
+            push_unique_root(&mut self.artifact_roots, root);
+        }
+    }
+
     pub fn add_artifact_requirements(&mut self, value: &serde_json::Value) {
         for path in artifact_requirement_paths(value) {
             if let Some(root) = artifact_root_from_requirement(&path) {

@@ -33,6 +33,7 @@ pub mod plan_metadata;
 pub mod prd_intake;
 mod project_artifact_completion;
 pub mod project_artifact_contract;
+pub(crate) mod project_artifact_contract_roots;
 mod project_artifact_prompt;
 pub mod project_artifact_results;
 pub mod project_artifact_stamping;
