@@ -77,14 +77,39 @@ impl LifecycleDriver {
         } else {
             false
         };
-        if !route_plan.run_write_remediation {
+        // A retry re-runs a READ-ONLY verifier. That resolves a verification
+        // -shape problem, but when the finding is about the artifact's content
+        // — "revise each provider row to address exact-native capability,
+        // native fetch, snapshot support..." — re-reading an unchanged file
+        // returns the same verdict every time. Observed live: three rounds of
+        // plan → shape-repair → re-verify against a byte-identical 53KB report,
+        // each consuming a round, until the budget died. The triage had filed
+        // the finding as a retry item, so the writer was never asked.
+        //
+        // One retry round is a fair test of "the verifier just needs to look
+        // again". After that the evidence says otherwise, so the failures go to
+        // write remediation instead of round four of the same read.
+        let escalated: Vec<serde_json::Value> = if routes.implementation_failures.is_empty()
+            && !routes.retry_items.is_empty()
+            && repair_attempt > 1
+        {
+            routes.retry_items.clone()
+        } else {
+            Vec::new()
+        };
+        if !route_plan.run_write_remediation && escalated.is_empty() {
             return Ok(retried || superseded);
         }
+        let failures = if escalated.is_empty() {
+            routes.implementation_failures.clone()
+        } else {
+            escalated
+        };
         let remediated = self
             .run_write_verification_remediation(
                 ready_items,
                 plan_items,
-                &routes.implementation_failures,
+                &failures,
                 wave_index,
                 dependency_iteration,
                 remediation_attempt,
