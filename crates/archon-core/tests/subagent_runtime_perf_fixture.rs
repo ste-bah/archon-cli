@@ -16,7 +16,14 @@
 //!
 //! The same fixture doubles as the bench workload: 20 rounds over a transcript
 //! that grows past 400KB. `bench_twenty_round_transcript` is `#[ignore]`d so it
-//! only runs when asked for.
+//! only runs when asked for, and it runs the fixture in the *digesting* mode
+//! (see [`capture`]) because a harness holding all twenty bodies owns the peak
+//! working set and hides whatever the runner does with its own memory.
+
+// An integration-test root is a crate root, so a bare `mod` would look for
+// `tests/capture.rs` — which cargo would then build as its own test target.
+#[path = "subagent_runtime_perf_fixture/capture.rs"]
+mod capture;
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -33,6 +40,8 @@ use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
 use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult};
 
+use capture::{BodyRecord, BodySummary, request_snapshot, snapshot_bytes};
+
 /// Bytes of tool output per round. 20 rounds x 20KB clears the 400KB
 /// transcript the issue's bench asks for.
 const PAYLOAD_BYTES: usize = 22_000;
@@ -46,47 +55,34 @@ struct CaptureProvider {
     rounds: u32,
     calls: AtomicU32,
     compaction_calls: AtomicU32,
+    bodies: Mutex<BodyRecord>,
     /// Round index (0-based) of every request that arrived *after* a
     /// compaction summary was requested, so trigger timing is observable.
-    captured: Mutex<Vec<serde_json::Value>>,
     compaction_rounds: Mutex<Vec<u32>>,
 }
 
 impl CaptureProvider {
-    fn new(rounds: u32) -> Self {
+    fn new(rounds: u32, bodies: BodyRecord) -> Self {
         Self {
             rounds,
             calls: AtomicU32::new(0),
             compaction_calls: AtomicU32::new(0),
-            captured: Mutex::new(Vec::new()),
+            bodies: Mutex::new(bodies),
             compaction_rounds: Mutex::new(Vec::new()),
         }
     }
 
     fn snapshots(&self) -> Vec<serde_json::Value> {
-        self.captured.lock().expect("capture lock").clone()
+        self.bodies.lock().expect("capture lock").snapshots()
+    }
+
+    fn summary(&self) -> BodySummary {
+        self.bodies.lock().expect("capture lock").summary()
     }
 
     fn compaction_rounds(&self) -> Vec<u32> {
         self.compaction_rounds.lock().expect("capture lock").clone()
     }
-}
-
-/// The provider-facing body shape, in the same field order every time.
-fn request_snapshot(request: &LlmRequest) -> serde_json::Value {
-    serde_json::json!({
-        "model": &request.model,
-        "max_tokens": request.max_tokens,
-        "system": &request.system,
-        "messages": &request.messages,
-        "tools": request.tools.as_ref(),
-        "thinking": &request.thinking,
-        "speed": &request.speed,
-        "effort": &request.effort,
-        "extra": &request.extra,
-        "request_origin": &request.request_origin,
-        "reasoning_encrypted": &request.reasoning_encrypted,
-    })
 }
 
 #[async_trait::async_trait]
@@ -142,10 +138,10 @@ impl LlmProvider for CaptureProvider {
             .await);
         }
 
-        self.captured
+        self.bodies
             .lock()
             .expect("capture lock")
-            .push(request_snapshot(&request));
+            .record(request_snapshot(&request));
         let round = self.calls.fetch_add(1, Ordering::SeqCst);
 
         let events = if round + 1 < self.rounds {
@@ -322,16 +318,33 @@ fn build_runner(provider: Arc<CaptureProvider>, pressure: bool) -> SubagentRunne
     runner
 }
 
-/// Run one fixture pass and hand back every captured outbound body.
-async fn run_fixture(pressure: bool) -> (Vec<serde_json::Value>, Vec<u32>) {
-    let provider = Arc::new(CaptureProvider::new(ROUNDS));
+/// Run one fixture pass with the given body bookkeeping.
+async fn run_fixture_with(pressure: bool, bodies: BodyRecord) -> Arc<CaptureProvider> {
+    let provider = Arc::new(CaptureProvider::new(ROUNDS, bodies));
     let runner = build_runner(provider.clone(), pressure);
     let output = runner
         .run("run the issue-171 fixture")
         .await
         .expect("fixture subagent must finish");
     assert_eq!(output, "fixture complete");
+    provider
+}
+
+/// Run one fixture pass and hand back every captured outbound body.
+async fn run_fixture(pressure: bool) -> (Vec<serde_json::Value>, Vec<u32>) {
+    let provider = run_fixture_with(pressure, BodyRecord::retaining()).await;
     (provider.snapshots(), provider.compaction_rounds())
+}
+
+/// Run one fixture pass keeping only the digest of what was sent.
+///
+/// This is the arm to measure memory in: nothing the fixture itself allocates
+/// outlives the round that produced it, so the process high-water mark belongs
+/// to the runner rather than to the harness.
+async fn run_fixture_digested(pressure: bool) -> BodySummary {
+    run_fixture_with(pressure, BodyRecord::digesting())
+        .await
+        .summary()
 }
 
 fn transcript_bytes(snapshot: &serde_json::Value) -> usize {
@@ -348,8 +361,7 @@ fn write_capture(name: &str, snapshots: &[serde_json::Value], compaction_rounds:
     std::fs::create_dir_all(&dir).expect("create capture dir");
     let mut out: Vec<u8> = Vec::new();
     for snapshot in snapshots {
-        out.extend_from_slice(&serde_json::to_vec(snapshot).expect("serialize snapshot"));
-        out.push(b'\n');
+        out.extend_from_slice(&snapshot_bytes(snapshot));
     }
     out.extend_from_slice(format!("compaction_rounds={compaction_rounds:?}\n").as_bytes());
     std::fs::write(dir.join(format!("{name}.jsonl")), out).expect("write capture");
@@ -416,6 +428,25 @@ async fn capture_pressure_fixture_request_bodies() {
     println!("pressure fixture compacted at rounds {compaction_rounds:?}");
 }
 
+/// The memory arm has to be the same program as the byte-identity arm.
+///
+/// Dropping each body after folding it in is only a legitimate way to measure
+/// peak RSS if the bodies are still built and serialized identically — an arm
+/// that skipped work would be measuring a different program. Running both
+/// modes over the same fixture and comparing the digest is what makes the
+/// non-retaining mode usable as a standing gate: the number it prints is the
+/// capture file's body bytes, so it moves exactly when the capture would.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn digesting_and_retaining_fixtures_send_the_same_bytes() {
+    let digested = run_fixture_digested(false).await;
+    let (snapshots, _) = run_fixture(false).await;
+    let retained = BodyRecord::Retained(snapshots).summary();
+
+    assert_eq!(digested, retained);
+    assert_eq!(digested.bodies, ROUNDS);
+    println!("quiet fixture bodies: {digested}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "bench fixture; run explicitly for #171 numbers"]
 async fn bench_twenty_round_transcript() {
@@ -425,15 +456,18 @@ async fn bench_twenty_round_transcript() {
         .unwrap_or(5);
 
     let mut millis: Vec<u128> = Vec::new();
+    let mut summary = None;
     for _ in 0..iterations {
         let started = std::time::Instant::now();
-        let (snapshots, _) = run_fixture(false).await;
+        let sent = run_fixture_digested(false).await;
         millis.push(started.elapsed().as_millis());
-        assert_eq!(snapshots.len(), ROUNDS as usize);
+        assert_eq!(sent.bodies, ROUNDS);
+        summary = Some(sent);
     }
     let total: u128 = millis.iter().sum();
     println!(
-        "bench_twenty_round_transcript iterations={iterations} per_run_ms={millis:?} mean_ms={}",
-        total / u128::from(iterations)
+        "bench_twenty_round_transcript iterations={iterations} per_run_ms={millis:?} mean_ms={} sent={}",
+        total / u128::from(iterations),
+        summary.expect("at least one iteration"),
     );
 }
