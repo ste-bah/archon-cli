@@ -101,7 +101,9 @@ deliverable_contracts:
     assert_eq!(task.canonical_task_id, "TASK-DEMO-017");
     assert_eq!(
         task.required_env_keys,
-        vec!["PROJECT_TOKEN".to_string(), "TASK_TOKEN".to_string()]
+        vec!["TASK_TOKEN".to_string()],
+        "the manifest's env keys must not reach a task either: a key that cannot \
+         be satisfied fails the branch rather than costing a checked_keys line"
     );
     assert_eq!(
         task.required_tools,
@@ -185,9 +187,11 @@ fn a_task_declaring_no_tools_is_not_given_the_projects_tools() {
         "a task that declares no tools must owe no invocations; got {:?}",
         task.required_tools
     );
-    assert_eq!(
-        task.required_env_keys,
-        vec!["PROJECT_TOKEN".to_string()],
-        "environment keys are proven, not exercised, and still merge"
+    assert!(
+        task.required_env_keys.is_empty(),
+        "a task that declares no env keys must inherit none: hoisting made \
+         AHDM_REVIEW_RUN_ID — one task's per-review identifier — fail a \
+         verification branch on unrelated work; got {:?}",
+        task.required_env_keys
     );
 }
