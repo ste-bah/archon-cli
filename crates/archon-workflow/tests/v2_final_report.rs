@@ -373,3 +373,54 @@ fn coverage(task_id: &str, status: WorkflowV2TaskCoverageStatus) -> WorkflowV2Ta
         )],
     }
 }
+
+/// Remediation must be able to CLEAR an earlier wave failure.
+///
+/// The live case: TASK-TDL-010's implementation wave reported `Missing` because
+/// its eleven declared files did not exist yet; remediation then wrote all of
+/// them and reported `Accepted`. Classifying on "any record ever failed" kept
+/// the task failed, so every task depending on it stayed unscheduled and the
+/// run ended with one of fifteen credited.
+#[test]
+fn a_later_accepted_coverage_supersedes_an_earlier_failure() {
+    let report = WorkflowV2FinalReportBuilder::new()
+        .build(
+            paths(),
+            &["TASK-TDL-010".to_string()],
+            &[
+                coverage_result("TASK-TDL-010", WorkflowV2TaskCoverageStatus::Missing),
+                coverage_result("TASK-TDL-010", WorkflowV2TaskCoverageStatus::Accepted),
+            ],
+        )
+        .expect("report");
+
+    assert_eq!(
+        report.accepted_tasks,
+        vec!["TASK-TDL-010"],
+        "remediation's accepted verdict must stand as the current one"
+    );
+    assert!(
+        report.failed_tasks.is_empty(),
+        "a superseded failure must not keep the task failed: {:?}",
+        report.failed_tasks
+    );
+}
+
+/// The converse must still hold: a task that passed and then regressed is
+/// failed, so this is supersession, not "accepted wins".
+#[test]
+fn a_later_failure_supersedes_an_earlier_acceptance() {
+    let report = WorkflowV2FinalReportBuilder::new()
+        .build(
+            paths(),
+            &["TASK-TDL-010".to_string()],
+            &[
+                coverage_result("TASK-TDL-010", WorkflowV2TaskCoverageStatus::Accepted),
+                coverage_result("TASK-TDL-010", WorkflowV2TaskCoverageStatus::Missing),
+            ],
+        )
+        .expect("report");
+
+    assert_eq!(report.failed_tasks, vec!["TASK-TDL-010"]);
+    assert!(report.accepted_tasks.is_empty());
+}
