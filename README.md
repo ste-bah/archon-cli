@@ -205,30 +205,43 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.8.0** — [release notes](docs/release-notes/v1.8.0.md)
+**Current release: v1.9.0** — [release notes](docs/release-notes/v1.9.0.md)
 
-The cognitive metrics v1.7.0 started producing now have a consumer that can say
-no: release gates judged per cohort, blocking the agent's own improvement
-proposals when a segment degrades. The self-model writes its prediction before
-the action it predicts, and reflections are carried into later turns and measured
-for reuse rather than written and forgotten. The learning roadmap's R0 entry gate
-is a script that can go red instead of a paragraph, wired into CI. The corpus
-viewer renders PDFs, sandboxed. And workflow runs finally appear on the task
-board — the third dispatch path that had to be wired separately.
+A knowledge base is now one thing rather than two. `archon kb kbs` and the web
+Ingest tab list the same union, so a name created on either surface is visible
+and usable from both — and a name you did not write down is recoverable at all.
+Corrections only reinforce a rule once something has been shown to have caused
+them, with the attribution itself running in shadow. The Memory Garden runs
+under a single-run lock and a work budget, and its irreversible operations
+became proposals a human approves. Replay weights transitions by latent
+surprise, which was recorded and never read.
 
-Built on v1.7.0, which wired four subsystems that had been built, tested and
-never called, and gave the knowledge base `docs compile`, `docs answer` and
-`docs export`.
+The subagent runtime stopped repeating itself: five whole-array copies per round
+became two, a transcript opens once instead of once per message, and a ten-way
+fan-out queries the memory store three times rather than thirty. Typing is
+multi-line — Shift+Enter inserts a newline where the terminal can express it —
+and the input area no longer leaves glyphs behind when it grows and shrinks.
 
-> **On upgrade: project capability manifests no longer hoist tools**, so a task
-> is no longer obliged to invoke every tool in `.archon/project.json`; env keys
-> still hoist, and tools already on disk are reported as inert rather than
-> deleted. **A declared artifact must now be a regular, non-empty file** — a
-> directory or a zero-byte file used to satisfy the contract. `events.jsonl`
-> gains a `blocking_gap_detected` kind for monitors to filter on, and garden
-> review-band adjudication now runs detached after startup instead of blocking
-> the session bootstrap. See the
-> [release notes](docs/release-notes/v1.8.0.md#upgrade-notes).
+Built on v1.8.0, which gave the cognitive metrics a consumer that can say no,
+and v1.7.0, which wired four subsystems that had been built, tested and never
+called.
+
+> **On upgrade: a correction no longer reinforces a rule unless something has
+> been shown to have caused it.** Attribution runs in shadow and fails closed,
+> so an unattributable correction is recorded and reinforces nothing — the
+> extractor's deferred semantic pass reinforces nothing at all now, because it
+> records against an action window that has already moved. **Scheduled garden
+> consolidation never deletes**: staleness and overflow pruning become proposals
+> you approve through `/garden proposals`, while `/garden` run by hand behaves
+> as before. The web workbench answers **403 rather than 200** when policy
+> refuses an action, so a caller checking only the status code no longer reads a
+> refusal as success. Enter still submits; **Shift+Enter inserts a newline**, and
+> Ctrl+L forces a redraw. See the
+> [release notes](docs/release-notes/v1.9.0.md#upgrade-notes).
+>
+> From v1.8.0: project capability manifests no longer hoist tools, a declared
+> artifact must be a regular non-empty file, and `events.jsonl` gained a
+> `blocking_gap_detected` kind.
 >
 > From v1.7.0: the cognitive schema migrates on first open, and history for two
 > `cognitive_tick_audit` columns is set to null — under the old code those were

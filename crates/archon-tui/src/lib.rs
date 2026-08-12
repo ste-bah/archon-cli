@@ -78,6 +78,7 @@ pub mod state;
 pub use state::AppState;
 pub mod context_viz;
 pub mod keybindings;
+pub mod keylog;
 pub mod message_renderer;
 pub mod notifications;
 pub mod overlays;

@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.8.0"
+version = "1.9.0"
 edition = "2024"
 # 1.88 is the floor because the tree uses let-chains (`if cond && let Some(x) =
 # ...`), which are unstable in edition 2024 before then: 1.86 and 1.87 both
@@ -233,8 +233,11 @@ cozo.workspace = true
 # can use it too.
 regex.workspace = true
 libc = "0.2"
-# TASK #246: panic_save terminal restore (Show + LeaveAlternateScreen + disable_raw_mode)
-crossterm.workspace = true
+# TASK #246 dropped its `crossterm` direct dependency at issue #174:
+# `panic_save` now restores the terminal through
+# `archon_tui::terminal::restore_terminal`, which is what pops the keyboard
+# enhancement flags. Re-listing the commands here is how that pop would get
+# missed on the panic path.
 
 [dev-dependencies]
 # Arms `archon_cozo::poison_guarded_scripts` for the "no hot-path database

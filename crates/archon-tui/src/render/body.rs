@@ -296,20 +296,31 @@ pub fn draw_input_area(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render the session name badge (right-aligned on input line).
+///
+/// The badge is sized by *display width*, not by `str::len`: a session name
+/// with any non-ASCII byte used to reserve more columns than it paints, which
+/// pushed the badge off its right-aligned anchor and left the cells between
+/// the badge and the margin owned by nobody.
 pub fn draw_session_badge(frame: &mut Frame, app: &App, input_area: Rect) {
     let name = match &app.session_name {
         Some(n) => n,
         None => return,
     };
 
-    let badge = format!(" {name} ");
-    let badge_width = badge.len() as u16;
+    // One column of margin on each side of the badge, inside the input area.
+    let available = input_area.width.saturating_sub(2) as usize;
+    let badge = super::width::truncate_to_width(&format!(" {name} "), available);
+    let badge_width = super::width::display_width(&badge) as u16;
+    if badge_width == 0 {
+        return;
+    }
     let badge_x = input_area.right().saturating_sub(badge_width + 1);
     let badge_area = Rect::new(badge_x, input_area.y, badge_width, 1);
     let badge_widget =
         Paragraph::new(badge).style(Style::default().fg(Color::Black).bg(Color::Cyan));
     frame.render_widget(badge_widget, badge_area);
 }
+
 /// Render the command suggestion popup (above the input line).
 pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     if !app.input.suggestions.active || app.is_generating {
@@ -339,8 +350,11 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             } else {
                 Style::default().fg(t.muted)
             };
+            // `{:<16}` pads by char count, which is a column count only while
+            // the name is narrow text; pad in columns so the description
+            // column lines up whatever the name contains.
             let line = Line::from(vec![
-                ratatui::text::Span::styled(format!("{:<16}", cmd.name), style),
+                ratatui::text::Span::styled(super::width::fit_to_width(&cmd.name, 16), style),
                 ratatui::text::Span::styled(cmd.description.as_str(), desc_style),
             ]);
             ListItem::new(line)
@@ -351,6 +365,11 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     let popup_y = input_area.y.saturating_sub(popup_height);
     let popup_width = input_area.width.min(60);
     let popup_area = Rect::new(input_area.x, popup_y, popup_width, popup_height);
+
+    // The popup floats over the output area, so its footprint has to be cells
+    // it owns rather than cells it happens to overlap: `Clear` resets them
+    // before the list is drawn (#174 part 2, point 2).
+    frame.render_widget(ratatui::widgets::Clear, popup_area);
 
     let popup = List::new(items).block(
         Block::default()
