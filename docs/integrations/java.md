@@ -126,16 +126,36 @@ report *exists*, a dead analyser is indistinguishable from a clean pass. When a
 report is absent, `analyze` says so explicitly rather than reporting a clean
 stage.
 
-This is not hypothetical. SpotBugs reads bytecode including the JDK's own
-runtime classes, so its bundled ASM must understand the class file version of
-the JDK it runs on. `spotbugs-maven-plugin` 4.8.6.6 aborts on JDK 25 with
-`Unsupported class file major version 69` and writes nothing — while Checkstyle
-and PMD carry on and the build still exits zero. If you see that message, the
-plugin is older than the JDK; 4.10.3.0 handles 25.
-
 An absent report is not proof of breakage — a project that does not configure
-PMD will never write a PMD report — so it is surfaced as information rather than
-treated as a failure.
+PMD will never write a PMD report — so on its own it is surfaced as information
+rather than treated as a failure.
+
+**When the build output says why, it becomes an error.** The case worth naming
+is version skew between an analysis plugin and the JDK running the build.
+SpotBugs reads bytecode including the JDK's own runtime classes, so its bundled
+ASM has to understand the JDK it runs on; a plugin older than the JDK aborts
+before writing anything, while Checkstyle and PMD carry on and the build still
+exits zero. Nothing else in the run distinguishes that from a clean scan.
+
+`analyze` detects it and fails the stage with the version named:
+
+```
+No report from: spotbugs. That analyser is either not configured in this
+build or failed to run — which is NOT the same as it finding nothing.
+
+An analysis tool could not read Java 25 class files and aborted before
+writing its report. Its bundled bytecode reader predates that release.
+...
+Fix it by raising the plugin to a release newer than Java 25:
+  Maven:  com.github.spotbugs:spotbugs-maven-plugin
+  Gradle: id("com.github.spotbugs")
+```
+
+The JDK version is derived arithmetically — a class file's major version is its
+JDK feature version plus 44, so 69 is Java 25 — rather than looked up in a table
+of releases. This matters because the failure recurs with every new Java
+version: whoever's plugin is older than their JDK hits it next, and the
+diagnosis stays correct for JDKs that did not exist when it was written.
 
 ### Findings
 

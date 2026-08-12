@@ -16,6 +16,7 @@
 //! project's own build and fetched by it. That is why the Java system
 //! dependency set is exactly JDK, Gradle and Maven.
 
+pub mod diagnose;
 pub mod finding;
 pub mod invoke;
 pub mod parse;
@@ -198,10 +199,23 @@ async fn run(
         body.push_str(&format!(
             "\nNo report from: {}. That analyser is either not configured in \
              this build or failed to run — which is NOT the same as it finding \
-             nothing. Check the build output before treating this stage as \
-             clean.\n",
+             nothing.\n",
             missing.join(", ")
         ));
+
+        // When the build output says why, this stops being a caveat and becomes
+        // a definite, fixable fault — so it is returned as an error rather than
+        // a successful stage with a note attached. An incomplete security scan
+        // that reports success is the failure this whole path exists to avoid.
+        if let Some(explanation) = diagnose::explain_missing_reports(&outcome.output) {
+            body.push('\n');
+            body.push_str(&explanation);
+            return ToolResult::error(body);
+        }
+
+        body.push_str(
+            "Check the build output before treating this stage as clean.\n",
+        );
     }
 
     // A non-zero exit with nothing parsed means the failure is not one the
