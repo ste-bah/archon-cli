@@ -367,10 +367,16 @@ fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Resu
 ///
 /// Names only, no PRD or domain knowledge, so this holds for every workflow.
 fn is_generic_shell_utility(tool: &str) -> bool {
+    // `git` belongs here for the same reason as `grep`: agents never perform
+    // git operations in this workflow — the write coordinator owns worktrees,
+    // patches and commits — so a task declaring it wants the checkout INSPECTED,
+    // and an agent that learned the same fact another way has done the work.
+    // Leaving it out rejected a documentation audit that had already written
+    // its deliverable, purely for not shelling out to the binary.
     const GENERIC: &[&str] = &[
-        "awk", "basename", "bash", "cat", "cd", "cut", "diff", "dirname", "echo", "find", "grep",
-        "head", "ls", "mkdir", "printf", "pwd", "rg", "sed", "sh", "sort", "tail", "tee", "tr",
-        "uniq", "wc", "xargs", "zsh",
+        "awk", "basename", "bash", "cat", "cd", "cut", "diff", "dirname", "echo", "find", "git",
+        "grep", "head", "ls", "mkdir", "printf", "pwd", "rg", "sed", "sh", "sort", "tail", "tee",
+        "tr", "uniq", "wc", "xargs", "zsh",
     ];
     let name = tool.trim().to_ascii_lowercase();
     GENERIC.contains(&name.as_str())

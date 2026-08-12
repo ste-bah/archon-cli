@@ -472,7 +472,7 @@ fn write_project_artifact_file(request: &WorkflowV2AgentRequest, path: &str) {
 #[test]
 fn generic_shell_utilities_do_not_gate_but_capabilities_do() {
     let input = serde_json::json!({
-        "item": { "required_tools": ["bash", "find", "grep", "wc", "cargo", "mcp_action:tv_health_check"] }
+        "item": { "required_tools": ["bash", "find", "git", "grep", "wc", "cargo", "mcp_action:tv_health_check"] }
     });
     let mut result = WorkflowV2Result::accepted("did the work");
     result.commands_run = vec![crate::WorkflowV2CommandRecord {
