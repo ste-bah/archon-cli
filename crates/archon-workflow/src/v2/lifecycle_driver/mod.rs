@@ -136,6 +136,8 @@ mod review_test_host;
 #[cfg(test)]
 mod review_verification_tests;
 #[cfg(test)]
+mod verify_actionable_tests;
+#[cfg(test)]
 mod verify_escalation_tests;
 #[cfg(test)]
 mod verify_remediation_tests;

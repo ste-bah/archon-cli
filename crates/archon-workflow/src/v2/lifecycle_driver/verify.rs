@@ -142,6 +142,29 @@ impl LifecycleDriver {
                             .get("verification_failure_next_action")
                             .and_then(|v| v.as_str())
                             == Some("write_remediation")
+                        // A failed verification IS the request to fix something.
+                        //
+                        // The three markers above are opt-in fields the verifier
+                        // must set, and a verifier that simply reports the defect
+                        // sets none of them. Silence then read as "nothing to
+                        // act on": the only route to a write branch is this
+                        // filter, so an empty `actionable` means the loop falls
+                        // through to plan, reshape and re-verify against an
+                        // unchanged tree until the budget dies.
+                        //
+                        // Observed live: TASK-TDL-020 failed five branches with
+                        // precise, fixable findings — "implement all 17 exact
+                        // stable validation IDs", "add the seven missing focused
+                        // test functions" — none of which carried a marker.
+                        // `verification-failure-triage` never ran once in the
+                        // whole run, so no writer was ever dispatched and the
+                        // task sat at 9 of 11 artifacts for hours.
+                        //
+                        // Default to actionable instead. A verifier that failed
+                        // and recorded a gap has asked for work; opting out
+                        // stays available by failing without gaps, or by any of
+                        // the explicit markers above.
+                        || failed_with_residual_gaps(outcome)
                 })
                 .cloned()
                 .collect();
@@ -423,4 +446,32 @@ pub(crate) fn item_matches_ids(
 
 pub(crate) fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
     lifecycle_policy::verify_invariants::verification_item_ids(item)
+}
+
+/// Did this verification outcome fail AND say what is wrong?
+///
+/// The failure alone is not enough — a branch can fail for a reason no writer
+/// can act on (a transport death, an unreadable input), and dispatching a
+/// worktree at that wastes a round. A recorded residual gap is the difference:
+/// it names a defect, which is a request for work.
+///
+/// Reads only status and residual_gaps, so it carries no knowledge of any
+/// verifier, task or PRD and holds for every workflow.
+pub(crate) fn failed_with_residual_gaps(outcome: &serde_json::Value) -> bool {
+    let result = outcome.get("result").unwrap_or(outcome);
+    let status = result
+        .get("status")
+        .or_else(|| outcome.get("status"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if !matches!(status, "failed" | "needs_review" | "blocked") {
+        return false;
+    }
+    let gaps = result
+        .get("residual_gaps")
+        .or_else(|| outcome.get("residual_gaps"))
+        .and_then(|value| value.as_array())
+        .map(|gaps| gaps.len())
+        .unwrap_or(0);
+    gaps > 0
 }
