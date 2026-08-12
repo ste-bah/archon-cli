@@ -3,33 +3,26 @@ use super::*;
 pub(super) fn projected_request(
     runner: &SubagentRunner,
     messages: &[serde_json::Value],
-    request: &LlmRequest,
+    template: &LlmRequest,
 ) -> LlmRequest {
-    let mut request = LlmRequest {
-        messages: projected_messages(runner, messages),
-        ..request.clone()
-    };
-    crate::agent::request_cache::apply_conversation_cache(
-        &mut request,
-        runner.provider.as_ref(),
-        runner.agent_config.context.prompt_cache
-            && runner.agent_config.context.prompt_cache_conversation,
-        &runner.agent_config.context.prompt_cache_mode,
-        &runner.agent_config.context.prompt_cache_ttl,
-    );
-    request
-}
-
-fn projected_messages(
-    runner: &SubagentRunner,
-    messages: &[serde_json::Value],
-) -> Vec<serde_json::Value> {
-    crate::agent::tool_result_context::project_messages_for_request(
+    let projected = crate::agent::tool_result_context::project_messages_for_request(
         messages,
         runner.agent_config.context.preserve_recent_turns,
-    )
+    );
+    request_with_messages(runner, template, projected)
 }
 
+/// Open the round's stream, walking the #103 recovery ladder on request
+/// pressure.
+///
+/// Returns the receiver together with the request that actually opened it, so
+/// the caller can classify a mid-stream failure against the bytes that were
+/// really sent. The request arrives owned and becomes the first attempt
+/// directly — it used to be cloned on the way in and then cloned again for
+/// every `stream` call, two full message-array deep clones per round on the
+/// quiet path (#171 part 2). One clone per call remains because `stream`
+/// consumes its request and the error arms need the failed one to classify
+/// and to measure.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn open_stream_with_retries(
     runner: &SubagentRunner,
@@ -42,11 +35,11 @@ pub(super) async fn open_stream_with_retries(
     request_body_bytes: usize,
     large_retry_body_bytes: usize,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<StreamEvent>> {
-    let mut attempt_request = request.clone();
+) -> anyhow::Result<(tokio::sync::mpsc::Receiver<StreamEvent>, LlmRequest)> {
+    let mut attempt_request = request;
     loop {
         match runner.provider.stream(attempt_request.clone()).await {
-            Ok(rx) => return Ok(rx),
+            Ok(rx) => return Ok((rx, attempt_request)),
             Err(error)
                 if crate::agent::autocompact::request_pressure_kind_for_request(
                     &error,
@@ -74,7 +67,9 @@ pub(super) async fn open_stream_with_retries(
                         )
                         .await
                         {
-                            Ok(()) => projected_request(runner, messages.as_slice(), &request),
+                            Ok(()) => {
+                                projected_request(runner, messages.as_slice(), &attempt_request)
+                            }
                             Err(crate::agent::autocompact::CompactionError::NoSafeBoundary) => {
                                 tier = recovery_ladder.next(classification).ok_or_else(|| {
                                     anyhow::anyhow!(
@@ -85,7 +80,11 @@ pub(super) async fn open_stream_with_retries(
                                     tier,
                                     crate::agent::autocompact::RecoveryTier::EmergencyProjection
                                 );
-                                emergency_projected_request(runner, messages.as_slice(), &request)
+                                emergency_projected_request(
+                                    runner,
+                                    messages.as_slice(),
+                                    &attempt_request,
+                                )
                             }
                             Err(error) => {
                                 return Err(anyhow::anyhow!(
@@ -95,7 +94,7 @@ pub(super) async fn open_stream_with_retries(
                         }
                     }
                     crate::agent::autocompact::RecoveryTier::EmergencyProjection => {
-                        emergency_projected_request(runner, messages.as_slice(), &request)
+                        emergency_projected_request(runner, messages.as_slice(), &attempt_request)
                     }
                 };
                 log_recovery_retry(
@@ -137,7 +136,7 @@ pub(super) async fn open_stream_with_retries(
                 .map_err(|error| {
                     anyhow::anyhow!("rate-limit subagent compaction failed: {error}")
                 })?;
-                attempt_request = projected_request(runner, messages.as_slice(), &request);
+                attempt_request = projected_request(runner, messages.as_slice(), &attempt_request);
             }
             Err(error) => return Err(anyhow::Error::new(error)),
         }
@@ -161,14 +160,31 @@ pub(super) fn emergency_projected_request(
     request_with_messages(runner, request, projected)
 }
 
+/// Rebuild a request around a fresh message array.
+///
+/// The fields are copied one by one rather than through `..template.clone()`:
+/// functional update syntax clones the whole base first and then drops the
+/// field being overridden, so the old shape deep-cloned the entire message
+/// array on every rebuild only to throw it away (#171 part 2). Everything
+/// copied here is small — the tool list is an `Arc` (#171 part 3) and the
+/// system blocks are a handful of KB.
 fn request_with_messages(
     runner: &SubagentRunner,
-    request: &LlmRequest,
+    template: &LlmRequest,
     messages: Vec<serde_json::Value>,
 ) -> LlmRequest {
     let mut projected = LlmRequest {
+        model: template.model.clone(),
+        max_tokens: template.max_tokens,
+        system: template.system.clone(),
         messages,
-        ..request.clone()
+        tools: archon_llm::provider::SharedTools::clone(&template.tools),
+        thinking: template.thinking.clone(),
+        speed: template.speed.clone(),
+        effort: template.effort.clone(),
+        extra: template.extra.clone(),
+        request_origin: template.request_origin.clone(),
+        reasoning_encrypted: template.reasoning_encrypted.clone(),
     };
     crate::agent::request_cache::apply_conversation_cache(
         &mut projected,

@@ -1,7 +1,16 @@
 use super::*;
 
 pub(super) struct PreparedRequest {
-    pub request: LlmRequest,
+    /// The round's request with everything settled except its message array.
+    ///
+    /// #171 part 2: the projection is the round's one O(N) pass over history,
+    /// so it runs once, at the point the request is actually handed to the
+    /// provider (`stream_round`), rather than here and then again — and once
+    /// more when pressure compaction rewrote history — on the way there. The
+    /// message array is left empty deliberately: everything downstream of this
+    /// struct fills it from the live history, and `request_envelope_bytes`
+    /// measures the request with an empty array anyway.
+    pub template: LlmRequest,
     pub request_body_bytes: usize,
     pub large_retry_body_bytes: usize,
     pub telemetry: crate::agent::autocompact::CompactionTelemetry,
@@ -46,19 +55,18 @@ pub(super) async fn prepare_request_round(
     )
     .await;
 
-    let mut request =
-        build_llm_request(runner, messages.as_slice(), reasoning_encrypted, turn).await;
+    let template = build_llm_request(runner, messages.as_slice(), reasoning_encrypted, turn).await;
     // The envelope is measured with `reasoning_encrypted` absent on the first
     // round, so the current round's blob is added back on top of it.
     let envelope_bytes = pressure
         .envelope_bytes
-        .get_or_insert_with(|| crate::agent::autocompact::request_envelope_bytes(&request))
-        .saturating_add(request.reasoning_encrypted.as_ref().map_or(0, String::len));
+        .get_or_insert_with(|| crate::agent::autocompact::request_envelope_bytes(&template))
+        .saturating_add(template.reasoning_encrypted.as_ref().map_or(0, String::len));
     let mut request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
         envelope_bytes,
         messages.estimated_tokens(),
     );
-    log_request_size(runner, &request, request_body_bytes, messages);
+    log_request_size(runner, &template, request_body_bytes, messages);
     let large_retry_body_bytes =
         crate::agent::autocompact::large_request_retry_body_bytes(&runner.agent_config.context);
 
@@ -68,14 +76,13 @@ pub(super) async fn prepare_request_round(
         auto_compact,
         last_known_context_tokens,
         (pressure, envelope_bytes),
-        &mut request,
         &mut request_body_bytes,
         &telemetry,
     )
     .await;
 
     PreparedRequest {
-        request,
+        template,
         request_body_bytes,
         large_retry_body_bytes,
         telemetry,
@@ -192,10 +199,8 @@ async fn build_llm_request(
         model: runner.model.clone(),
         max_tokens,
         system: build_system_messages(runner, messages),
-        messages: crate::agent::tool_result_context::project_messages_for_request(
-            messages,
-            runner.agent_config.context.preserve_recent_turns,
-        ),
+        // Filled by the round's single projection, in `stream_round`.
+        messages: Vec::new(),
         // #171 part 3: an Arc bump, not a deep clone of ~70 frozen schemas.
         tools: archon_llm::provider::SharedTools::clone(&runner.tool_definitions),
         thinking,
@@ -218,6 +223,10 @@ async fn build_llm_request(
         &runner.agent_config.context.prompt_cache_mode,
         &runner.agent_config.context.prompt_cache_ttl,
     );
+    // Runs against the empty message array on purpose: the conversation marker
+    // itself is placed by the projection in `stream_round`, but on a provider
+    // without message caching this is also what strips inherited markers off
+    // the system blocks and the tool list, and that has to happen here too.
     crate::agent::request_cache::apply_conversation_cache(
         &mut request,
         runner.provider.as_ref(),
@@ -286,14 +295,12 @@ async fn resolve_effort(runner: &SubagentRunner) -> Option<String> {
     Some(level.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn maybe_compact_for_request_pressure(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
     (pressure, envelope_bytes): (&mut PressureState, usize),
-    request: &mut LlmRequest,
     request_body_bytes: &mut usize,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) {
@@ -342,18 +349,9 @@ async fn maybe_compact_for_request_pressure(
         "subagent request-pressure compaction failed; continuing turn",
     )
     .await;
-    request.messages = crate::agent::tool_result_context::project_messages_for_request(
-        messages.as_slice(),
-        runner.agent_config.context.preserve_recent_turns,
-    );
-    crate::agent::request_cache::apply_conversation_cache(
-        request,
-        runner.provider.as_ref(),
-        runner.agent_config.context.prompt_cache
-            && runner.agent_config.context.prompt_cache_conversation,
-        &runner.agent_config.context.prompt_cache_mode,
-        &runner.agent_config.context.prompt_cache_ttl,
-    );
+    // The compacted history is projected once, when the request is opened.
+    // Rebuilding the message array here as well was the second of the two
+    // full-history passes #171 part 2 set out to remove.
     *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
         envelope_bytes,
         messages.estimated_tokens(),

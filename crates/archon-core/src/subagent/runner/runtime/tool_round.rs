@@ -5,11 +5,18 @@ use futures::future::join_all;
 
 use super::*;
 
+/// A tool call with its input decoded exactly once (#171 part 8).
+///
+/// The replay message and the execution both need the same decoded input, and
+/// both used to run `parse_pending_tool_input` over the same `input_json` —
+/// twice per tool, plus two registry lookups to rebuild the same input schema
+/// for the empty-input rule. Holding the outcome as a `Result` keeps the two
+/// consumers on one decision: the replay message renders the malformed-input
+/// marker from the error, and execution returns that same error verbatim.
 struct PreparedTool {
     id: String,
     name: String,
-    input: serde_json::Value,
-    parse_error: Option<String>,
+    input: Result<serde_json::Value, String>,
 }
 
 pub(super) async fn replay_tool_round(
@@ -20,14 +27,8 @@ pub(super) async fn replay_tool_round(
     pending_tools: Vec<PendingTool>,
     round_cancel: tokio_util::sync::CancellationToken,
 ) {
-    record_assistant_tool_use_message(
-        runner,
-        messages,
-        text_content,
-        thinking_blocks,
-        &pending_tools,
-    );
     let prepared = prepare_tools_for_execution(runner, &pending_tools);
+    record_assistant_tool_use_message(runner, messages, text_content, thinking_blocks, &prepared);
     let exec_results = execute_prepared_tools(runner, &prepared, round_cancel).await;
     record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
@@ -38,7 +39,7 @@ fn record_assistant_tool_use_message(
     messages: &mut MessageHistory,
     text_content: String,
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
-    pending_tools: &[PendingTool],
+    prepared: &[PreparedTool],
 ) {
     let mut assistant_content: Vec<serde_json::Value> = Vec::new();
     if should_replay_signed_thinking(runner) {
@@ -58,12 +59,12 @@ fn record_assistant_tool_use_message(
             "text": text_content,
         }));
     }
-    for tool in pending_tools {
+    for tool in prepared {
         assistant_content.push(serde_json::json!({
             "type": "tool_use",
             "id": tool.id,
             "name": tool.name,
-            "input": parse_tool_input_for_replay(runner, tool),
+            "input": replay_tool_input(tool),
         }));
     }
     let assistant_msg = serde_json::json!({
@@ -82,27 +83,17 @@ fn should_replay_signed_thinking(runner: &SubagentRunner) -> bool {
     )
 }
 
-fn parse_tool_input_for_replay(runner: &SubagentRunner, tool: &PendingTool) -> serde_json::Value {
-    match crate::agent::tool_input_json::parse_pending_tool_input(
-        &tool.name,
-        &tool.id,
-        &tool.input_json,
-        tool_allows_empty_input(runner, &tool.name),
-    ) {
-        Ok(input) => input,
-        Err(err) => {
-            tracing::warn!(
-                tool = %tool.name,
-                tool_use_id = %tool.id,
-                input_len = tool.input_json.len(),
-                scope = "subagent",
-                "{err}"
-            );
-            serde_json::json!({
-                "_archon_malformed_tool_input": true,
-                "error": err,
-            })
-        }
+/// The `input` field the assistant replay message carries for one tool.
+///
+/// A tool whose input never parsed is replayed as the malformed-input marker,
+/// byte for byte what the two-parse shape produced.
+fn replay_tool_input(tool: &PreparedTool) -> serde_json::Value {
+    match &tool.input {
+        Ok(input) => input.clone(),
+        Err(err) => serde_json::json!({
+            "_archon_malformed_tool_input": true,
+            "error": err,
+        }),
     }
 }
 
@@ -112,29 +103,25 @@ fn prepare_tools_for_execution(
 ) -> Vec<PreparedTool> {
     let mut prepared = Vec::with_capacity(pending_tools.len());
     for tool in pending_tools {
-        let (input, parse_error) = match crate::agent::tool_input_json::parse_pending_tool_input(
+        let input = crate::agent::tool_input_json::parse_pending_tool_input(
             &tool.name,
             &tool.id,
             &tool.input_json,
             tool_allows_empty_input(runner, &tool.name),
-        ) {
-            Ok(input) => (input, None),
-            Err(err) => {
-                tracing::warn!(
-                    tool = %tool.name,
-                    tool_use_id = %tool.id,
-                    input_len = tool.input_json.len(),
-                    scope = "subagent",
-                    "{err}"
-                );
-                (serde_json::json!({}), Some(err))
-            }
-        };
+        );
+        if let Err(ref err) = input {
+            tracing::warn!(
+                tool = %tool.name,
+                tool_use_id = %tool.id,
+                input_len = tool.input_json.len(),
+                scope = "subagent",
+                "{err}"
+            );
+        }
         prepared.push(PreparedTool {
             id: tool.id.clone(),
             name: tool.name.clone(),
             input,
-            parse_error,
         });
     }
     prepared
@@ -162,14 +149,14 @@ async fn execute_prepared_tools(
             let name = p.name.clone();
             let tool_use_id = p.id.clone();
             let input = p.input.clone();
-            let parse_error = p.parse_error.clone();
             let registry = Arc::clone(&registry);
             let mut ctx = runner.tool_context.with_tool_run_attempt(tool_use_id, 0);
             ctx.cancel_parent = Some(round_cancel.child_token());
             async move {
-                if let Some(err) = parse_error {
-                    return ToolResult::error(err);
-                }
+                let input = match input {
+                    Ok(input) => input,
+                    Err(err) => return ToolResult::error(err),
+                };
                 registry.dispatch(&name, input, &ctx).await
             }
         })
@@ -279,8 +266,7 @@ mod result_boundary_tests {
         PreparedTool {
             id: "tool-1".into(),
             name: "Read".into(),
-            input: serde_json::json!({}),
-            parse_error: None,
+            input: Ok(serde_json::json!({})),
         }
     }
 
@@ -337,6 +323,30 @@ mod result_boundary_tests {
                 .as_str()
                 .expect("canonical content")
                 .contains("omitted")
+        );
+    }
+
+    /// #171 part 8: one parse per tool must not change what a tool whose
+    /// input never parsed replays, or what it hands the executor.
+    #[test]
+    fn malformed_tool_input_replays_the_marker_and_fails_execution_with_the_same_error() {
+        let malformed = PreparedTool {
+            id: "tool-9".into(),
+            name: "Read".into(),
+            input: Err("tool input was not valid JSON".into()),
+        };
+
+        assert_eq!(
+            replay_tool_input(&malformed),
+            serde_json::json!({
+                "_archon_malformed_tool_input": true,
+                "error": "tool input was not valid JSON",
+            })
+        );
+        assert_eq!(
+            malformed.input.unwrap_err(),
+            "tool input was not valid JSON",
+            "execution surfaces the parse error verbatim"
         );
     }
 

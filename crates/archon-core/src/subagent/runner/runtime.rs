@@ -113,7 +113,7 @@ impl SubagentRunner {
                             &mut reactive_rate_limit_retried,
                             &mut last_known_context_tokens,
                         ),
-                        prepared_request.request,
+                        prepared_request.template,
                         (
                             prepared_request.request_body_bytes,
                             prepared_request.large_retry_body_bytes,
