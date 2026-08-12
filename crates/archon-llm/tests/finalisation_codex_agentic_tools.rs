@@ -217,7 +217,7 @@ fn agentic_request() -> AgenticTurnRequest {
             "role": "user",
             "content": [{"type": "text", "text": "hello"}]
         })],
-        tools: Vec::new(),
+        tools: Default::default(),
         tool_results: Vec::new(),
         effort: None,
         reasoning_encrypted: None,

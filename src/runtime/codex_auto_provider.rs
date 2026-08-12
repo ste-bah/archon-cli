@@ -240,7 +240,7 @@ mod tests {
             ArchonConfig::default(),
         );
         let request = LlmRequest {
-            tools: vec![serde_json::json!({"name": "Read"})],
+            tools: archon_llm::provider::shared_tools(vec![serde_json::json!({"name": "Read"})]),
             ..LlmRequest::default()
         };
 

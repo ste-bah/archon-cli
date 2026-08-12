@@ -11,7 +11,7 @@ fn phase1_agentic_contract_is_exported_from_archon_llm() {
         max_tokens: 64,
         system: Vec::new(),
         messages: Vec::new(),
-        tools: Vec::new(),
+        tools: Default::default(),
         tool_results: Vec::new(),
         effort: None,
         reasoning_encrypted: None,

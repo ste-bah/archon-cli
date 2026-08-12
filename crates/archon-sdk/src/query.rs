@@ -133,7 +133,7 @@ async fn run_query(
     })];
 
     if let Some(ref mcp) = options.mcp_server {
-        request.tools = mcp.tool_schemas();
+        request.tools = archon_llm::provider::shared_tools(mcp.tool_schemas());
     }
 
     // Apply thinking configuration

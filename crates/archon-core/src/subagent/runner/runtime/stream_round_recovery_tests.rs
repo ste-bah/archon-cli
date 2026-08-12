@@ -15,9 +15,9 @@ fn minimal_oversized_messages() -> Vec<serde_json::Value> {
 async fn subagent_pre_stream_no_safe_boundary_advances_to_emergency_projection() {
     let provider = Arc::new(FieldLimitRecoveryProvider::new());
     let runner = field_recovery_runner(provider.clone());
-    let mut messages = minimal_oversized_messages();
+    let mut messages = MessageHistory::new(minimal_oversized_messages());
     let request = LlmRequest {
-        messages: messages.clone(),
+        messages: messages.as_slice().to_vec(),
         request_origin: Some("subagent".into()),
         ..LlmRequest::default()
     };
@@ -65,9 +65,9 @@ async fn subagent_mid_stream_no_safe_boundary_advances_to_emergency_projection()
         FieldFailurePhase::MidStream,
     ));
     let runner = field_recovery_runner(provider.clone());
-    let mut messages = minimal_oversized_messages();
+    let mut messages = MessageHistory::new(minimal_oversized_messages());
     let request = LlmRequest {
-        messages: messages.clone(),
+        messages: messages.as_slice().to_vec(),
         request_origin: Some("subagent".into()),
         ..LlmRequest::default()
     };
@@ -133,10 +133,10 @@ async fn subagent_mid_stream_field_rejection_advances_to_emergency_projection() 
         FieldFailurePhase::MidStream,
     ));
     let runner = field_recovery_runner(provider.clone());
-    let mut messages = oversized_recent_messages();
-    let canonical = messages.clone();
+    let mut messages = MessageHistory::new(oversized_recent_messages());
+    let canonical = messages.as_slice().to_vec();
     let request = LlmRequest {
-        messages: messages.clone(),
+        messages: messages.as_slice().to_vec(),
         request_origin: Some("subagent".into()),
         ..LlmRequest::default()
     };
@@ -217,7 +217,7 @@ async fn subagent_mid_stream_field_rejection_advances_to_emergency_projection() 
     assert!(largest_tool_result_field(&requests[0]) > 64_000);
     assert!(largest_tool_result_field(&requests[1]) > 64_000);
     assert!(largest_tool_result_field(&requests[2]) <= 64_000);
-    assert_eq!(messages, canonical);
+    assert_eq!(messages.as_slice(), canonical.as_slice());
 }
 
 #[tokio::test]
@@ -243,7 +243,7 @@ async fn subagent_pre_stream_field_rejection_advances_to_emergency_projection() 
         Arc::new(config),
         Arc::new(test_identity()),
     );
-    let mut messages = vec![
+    let mut messages = MessageHistory::new(vec![
         serde_json::json!({"role":"user","content":"old turn"}),
         serde_json::json!({"role":"assistant","content":"old response"}),
         serde_json::json!({"role":"user","content":"inspect"}),
@@ -254,10 +254,10 @@ async fn subagent_pre_stream_field_rejection_advances_to_emergency_projection() 
             "type":"tool_result","tool_use_id":"recent-tool",
             "content":format!("HEAD{}TAIL", "x".repeat(180_000)),"is_error":false
         }]}),
-    ];
-    let canonical = messages.clone();
+    ]);
+    let canonical = messages.as_slice().to_vec();
     let request = LlmRequest {
-        messages: messages.clone(),
+        messages: messages.as_slice().to_vec(),
         request_origin: Some("subagent".into()),
         ..LlmRequest::default()
     };
@@ -303,7 +303,7 @@ async fn subagent_pre_stream_field_rejection_advances_to_emergency_projection() 
     assert!(largest_tool_result_field(&requests[1]) > 64_000);
     assert!(largest_tool_result_field(&requests[2]) <= 64_000);
     assert_eq!(provider.compaction_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(messages, canonical);
+    assert_eq!(messages.as_slice(), canonical.as_slice());
 
     let recovery: Vec<serde_json::Value> = activity
         .events()

@@ -16,7 +16,7 @@ pub(super) struct StreamRoundResult {
 
 pub(super) async fn collect_stream_round(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     (
         recovery_ladder,
@@ -36,9 +36,9 @@ pub(super) async fn collect_stream_round(
     let mut reconnected = false;
     let mut rx = loop {
         let attempt_request = if std::mem::take(emergency_projection_pending) {
-            emergency_projected_request(runner, messages, &request)
+            emergency_projected_request(runner, messages.as_slice(), &request)
         } else {
-            projected_request(runner, messages, &request)
+            projected_request(runner, messages.as_slice(), &request)
         };
         match tokio::time::timeout(
             STREAM_IDLE_TIMEOUT,
@@ -84,7 +84,7 @@ pub(super) async fn collect_stream_round(
                 drop(rx);
                 reconnected = true;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
-                let retry_request = projected_request(runner, messages, &request);
+                let retry_request = projected_request(runner, messages.as_slice(), &request);
                 rx = tokio::time::timeout(
                     STREAM_IDLE_TIMEOUT,
                     runner.provider.stream(retry_request),

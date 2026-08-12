@@ -211,7 +211,7 @@ fn serialized_request_len(request: &LlmRequest) -> usize {
         "max_tokens": request.max_tokens,
         "system": &request.system,
         "messages": &request.messages,
-        "tools": &request.tools,
+        "tools": request.tools.as_ref(),
         "thinking": &request.thinking,
         "speed": &request.speed,
         "effort": &request.effort,

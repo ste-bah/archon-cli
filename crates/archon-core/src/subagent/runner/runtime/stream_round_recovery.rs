@@ -33,7 +33,7 @@ fn projected_messages(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn open_stream_with_retries(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     recovery_ladder: &mut crate::agent::autocompact::RecoveryLadder,
     reactive_rate_limit_retried: &mut bool,
@@ -74,7 +74,7 @@ pub(super) async fn open_stream_with_retries(
                         )
                         .await
                         {
-                            Ok(()) => projected_request(runner, messages, &request),
+                            Ok(()) => projected_request(runner, messages.as_slice(), &request),
                             Err(crate::agent::autocompact::CompactionError::NoSafeBoundary) => {
                                 tier = recovery_ladder.next(classification).ok_or_else(|| {
                                     anyhow::anyhow!(
@@ -85,7 +85,7 @@ pub(super) async fn open_stream_with_retries(
                                     tier,
                                     crate::agent::autocompact::RecoveryTier::EmergencyProjection
                                 );
-                                emergency_projected_request(runner, messages, &request)
+                                emergency_projected_request(runner, messages.as_slice(), &request)
                             }
                             Err(error) => {
                                 return Err(anyhow::anyhow!(
@@ -95,7 +95,7 @@ pub(super) async fn open_stream_with_retries(
                         }
                     }
                     crate::agent::autocompact::RecoveryTier::EmergencyProjection => {
-                        emergency_projected_request(runner, messages, &request)
+                        emergency_projected_request(runner, messages.as_slice(), &request)
                     }
                 };
                 log_recovery_retry(
@@ -137,7 +137,7 @@ pub(super) async fn open_stream_with_retries(
                 .map_err(|error| {
                     anyhow::anyhow!("rate-limit subagent compaction failed: {error}")
                 })?;
-                attempt_request = projected_request(runner, messages, &request);
+                attempt_request = projected_request(runner, messages.as_slice(), &request);
             }
             Err(error) => return Err(anyhow::Error::new(error)),
         }
@@ -231,7 +231,7 @@ fn log_recovery_retry(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_stream_error(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     recovery_ladder: &mut crate::agent::autocompact::RecoveryLadder,
     emergency_projection_pending: &mut bool,
@@ -255,6 +255,12 @@ pub(super) async fn handle_stream_error(
         let Some(mut tier) = recovery_ladder.next(classification) else {
             anyhow::bail!("request pressure recovery exhausted after two bounded retries");
         };
+        // Recovery telemetry compares before/after body sizes, so both sides
+        // must be measured the same way. The round's `request_body_bytes` is
+        // now derived (#171 part 7); this is a rare error path, so the "before"
+        // side is measured here rather than mixing an estimate with the
+        // measured "after" and skewing the `reduced` verdict.
+        let before_body_bytes = crate::agent::autocompact::request_body_bytes(request);
         match tier {
             crate::agent::autocompact::RecoveryTier::FullCompaction => {
                 match compact_messages_for_retry(
@@ -266,12 +272,12 @@ pub(super) async fn handle_stream_error(
                 .await
                 {
                     Ok(()) => {
-                        let retry_request = projected_request(runner, messages, request);
+                        let retry_request = projected_request(runner, messages.as_slice(), request);
                         log_recovery_retry(
                             runner,
                             classification,
                             tier,
-                            request_body_bytes,
+                            before_body_bytes,
                             &retry_request,
                             "subagent",
                         );
@@ -287,12 +293,13 @@ pub(super) async fn handle_stream_error(
                             crate::agent::autocompact::RecoveryTier::EmergencyProjection
                         );
                         *emergency_projection_pending = true;
-                        let retry_request = emergency_projected_request(runner, messages, request);
+                        let retry_request =
+                            emergency_projected_request(runner, messages.as_slice(), request);
                         log_recovery_retry(
                             runner,
                             classification,
                             tier,
-                            request_body_bytes,
+                            before_body_bytes,
                             &retry_request,
                             "subagent",
                         );
@@ -306,12 +313,13 @@ pub(super) async fn handle_stream_error(
             }
             crate::agent::autocompact::RecoveryTier::EmergencyProjection => {
                 *emergency_projection_pending = true;
-                let retry_request = emergency_projected_request(runner, messages, request);
+                let retry_request =
+                    emergency_projected_request(runner, messages.as_slice(), request);
                 log_recovery_retry(
                     runner,
                     classification,
                     tier,
-                    request_body_bytes,
+                    before_body_bytes,
                     &retry_request,
                     "subagent",
                 );
@@ -349,7 +357,7 @@ pub(super) async fn handle_stream_error(
 
 pub(super) async fn compact_messages_for_retry(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
 ) -> Result<(), crate::agent::autocompact::CompactionError> {
@@ -363,7 +371,7 @@ pub(super) async fn compact_messages_for_retry(
     let result = crate::agent::autocompact::compact_json_messages_with_provider(
         runner.provider.as_ref(),
         &runner.model,
-        messages,
+        messages.as_slice(),
         crate::agent::CompactAction::Full,
         true,
         attribution,
@@ -376,15 +384,15 @@ pub(super) async fn compact_messages_for_retry(
             return Err(error);
         }
     };
-    *messages = compacted;
+    messages.replace(compacted);
     let after_current_tokens = match outcome {
         crate::agent::autocompact::CompactionOutcome::Compacted {
             after_estimated_tokens,
             ..
         } => after_estimated_tokens,
-        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => {
-            crate::agent::autocompact::estimate_messages_tokens(messages)
-        }
+        // `replace` already recomputed this; #171 part 1 removed the second
+        // full pass, not the number.
+        crate::agent::autocompact::CompactionOutcome::Skipped { .. } => messages.estimated_tokens(),
     };
     *last_known_context_tokens = 0;
     auto_compact.on_success(after_current_tokens);

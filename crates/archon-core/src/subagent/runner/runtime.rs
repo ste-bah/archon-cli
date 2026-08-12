@@ -1,10 +1,12 @@
 use super::*;
 
+mod message_history;
 mod request_round;
 mod stream_round;
 mod tool_round;
 
-use request_round::prepare_request_round;
+use message_history::MessageHistory;
+use request_round::{PressureState, prepare_request_round};
 use stream_round::collect_stream_round;
 use tool_round::replay_tool_round;
 
@@ -13,24 +15,18 @@ impl SubagentRunner {
     /// Returns the accumulated text output from the final turn.
     pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
         // AGT-024: Use initial_messages for resume, or start fresh
-        let mut messages: Vec<serde_json::Value> = if let Some(ref initial) = self.initial_messages
-        {
-            let mut msgs = initial.clone();
-            let user_msg = serde_json::json!({
-                "role": "user",
-                "content": initial_prompt,
-            });
-            self.record_transcript(&user_msg);
-            msgs.push(user_msg);
-            msgs
-        } else {
-            let user_msg = serde_json::json!({
-                "role": "user",
-                "content": initial_prompt,
-            });
-            self.record_transcript(&user_msg);
-            vec![user_msg]
-        };
+        let mut messages = MessageHistory::new(
+            self.initial_messages
+                .as_ref()
+                .map(Clone::clone)
+                .unwrap_or_default(),
+        );
+        let user_msg = serde_json::json!({
+            "role": "user",
+            "content": initial_prompt,
+        });
+        self.record_transcript(&user_msg);
+        messages.push(user_msg);
 
         let started = Instant::now();
         let mut deadline = started + Duration::from_secs(self.timeout_secs);
@@ -41,7 +37,7 @@ impl SubagentRunner {
         let mut recovery_ladder = crate::agent::autocompact::RecoveryLadder::default();
         let mut emergency_projection_pending = false;
         let mut reactive_rate_limit_retried = false;
-        let mut proactive_pressure_attempted = false;
+        let mut pressure = PressureState::default();
 
         for turn in 0..self.max_turns {
             // Check timeout. The error message reports BOTH wall-clock
@@ -83,7 +79,7 @@ impl SubagentRunner {
                     &mut messages,
                     &mut auto_compact,
                     &mut last_known_context_tokens,
-                    &mut proactive_pressure_attempted,
+                    &mut pressure,
                     reasoning_encrypted.clone(),
                     turn,
                 ),

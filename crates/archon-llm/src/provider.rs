@@ -166,6 +166,19 @@ fn is_local_host(host: &str) -> bool {
 // Request / response types
 // ---------------------------------------------------------------------------
 
+/// A frozen tool-schema list shared between the request builder and the
+/// request itself.
+///
+/// `Arc<Vec<_>>` rather than `Arc<[_]>` so existing `&[serde_json::Value]`
+/// call sites keep working through deref, and so a rare mutator can still
+/// reach for `Arc::make_mut`.
+pub type SharedTools = std::sync::Arc<Vec<serde_json::Value>>;
+
+/// Wrap an owned tool list in the shared form `LlmRequest::tools` expects.
+pub fn shared_tools(tools: Vec<serde_json::Value>) -> SharedTools {
+    std::sync::Arc::new(tools)
+}
+
 /// Provider-agnostic representation of an LLM inference request.
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -173,7 +186,14 @@ pub struct LlmRequest {
     pub max_tokens: u32,
     pub system: Vec<serde_json::Value>,
     pub messages: Vec<serde_json::Value>,
-    pub tools: Vec<serde_json::Value>,
+    /// Tool schemas for this request.
+    ///
+    /// Shared rather than owned (#171 part 3): a session's tool list is frozen
+    /// once (#75 A3) and every round would otherwise deep-clone ~70 JSON
+    /// schemas on the way into the request, and again on each request clone.
+    /// Sharing an immutable value also makes A3's byte-stability invariant
+    /// structural — a value nobody can mutate cannot drift.
+    pub tools: SharedTools,
     pub thinking: Option<serde_json::Value>,
     /// When fast mode is active, set to `Some("fast")`.
     pub speed: Option<String>,
@@ -194,7 +214,7 @@ impl Default for LlmRequest {
             max_tokens: 8192,
             system: Vec::new(),
             messages: Vec::new(),
-            tools: Vec::new(),
+            tools: SharedTools::default(),
             thinking: None,
             speed: None,
             effort: None,

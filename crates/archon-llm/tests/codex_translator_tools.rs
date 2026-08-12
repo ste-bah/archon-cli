@@ -29,14 +29,14 @@ fn codex_tool_section_bytes_are_stable() {
     .expect("provider");
     let request = LlmRequest {
         model: "gpt-5.3-codex".into(),
-        tools: vec![serde_json::json!({
+        tools: archon_llm::provider::shared_tools(vec![serde_json::json!({
             "name":"lookup",
             "description":"Lookup thing",
             "input_schema":{
                 "type":"object",
                 "properties":{"q":{"type":"string"}}
             }
-        })],
+        })]),
         ..LlmRequest::default()
     };
 

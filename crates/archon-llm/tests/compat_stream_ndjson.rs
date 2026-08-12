@@ -45,7 +45,7 @@ fn sample_request() -> LlmRequest {
         max_tokens: 64,
         system: Vec::new(),
         messages: vec![serde_json::json!({"role": "user", "content": "bonjour"})],
-        tools: Vec::new(),
+        tools: Default::default(),
         thinking: None,
         speed: None,
         effort: None,

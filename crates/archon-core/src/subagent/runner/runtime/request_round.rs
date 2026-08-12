@@ -7,12 +7,32 @@ pub(super) struct PreparedRequest {
     pub telemetry: crate::agent::autocompact::CompactionTelemetry,
 }
 
+/// Cross-round pressure bookkeeping owned by the run loop.
+#[derive(Default)]
+pub(super) struct PressureState {
+    /// One proactive request-pressure compaction attempt per run.
+    pub proactive_attempted: bool,
+    /// Serialized size of the request's fixed parts, measured on the first
+    /// round and reused (#171 part 7).
+    ///
+    /// What it covers is stable for the run: the tool list is frozen for the
+    /// session (#75 A3) and shared as an `Arc` (#171 part 3), the system
+    /// prompt, stable workflow blocks and critical reminder are set before the
+    /// run starts, and the billing header — the one system block derived from
+    /// the conversation — is a fixed-length fingerprint, so a compaction that
+    /// rewrites the first message does not change its size. The two fields
+    /// that genuinely vary per round are the turn counter's digits in `extra`
+    /// (a byte or two) and `reasoning_encrypted`, which is added back in
+    /// per round rather than baked into this number.
+    pub envelope_bytes: Option<usize>,
+}
+
 pub(super) async fn prepare_request_round(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
-    proactive_pressure_attempted: &mut bool,
+    pressure: &mut PressureState,
     reasoning_encrypted: Option<String>,
     turn: u32,
 ) -> PreparedRequest {
@@ -26,8 +46,19 @@ pub(super) async fn prepare_request_round(
     )
     .await;
 
-    let mut request = build_llm_request(runner, messages, reasoning_encrypted, turn).await;
-    let mut request_body_bytes = crate::agent::autocompact::request_body_bytes(&request);
+    let mut request =
+        build_llm_request(runner, messages.as_slice(), reasoning_encrypted, turn).await;
+    // The envelope is measured with `reasoning_encrypted` absent on the first
+    // round, so the current round's blob is added back on top of it.
+    let envelope_bytes = pressure
+        .envelope_bytes
+        .get_or_insert_with(|| crate::agent::autocompact::request_envelope_bytes(&request))
+        .saturating_add(request.reasoning_encrypted.as_ref().map_or(0, String::len));
+    let mut request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
+        envelope_bytes,
+        messages.estimated_tokens(),
+    );
+    log_request_size(runner, &request, request_body_bytes, messages);
     let large_retry_body_bytes =
         crate::agent::autocompact::large_request_retry_body_bytes(&runner.agent_config.context);
 
@@ -36,7 +67,7 @@ pub(super) async fn prepare_request_round(
         messages,
         auto_compact,
         last_known_context_tokens,
-        proactive_pressure_attempted,
+        (pressure, envelope_bytes),
         &mut request,
         &mut request_body_bytes,
         &telemetry,
@@ -49,6 +80,31 @@ pub(super) async fn prepare_request_round(
         large_retry_body_bytes,
         telemetry,
     }
+}
+
+/// Preflight size line for the subagent request.
+///
+/// The main-agent path still gets this from `request_body_bytes`; here the
+/// number is derived (#171 part 7), so it is reported as an estimate rather
+/// than dressed up as a measurement.
+fn log_request_size(
+    runner: &SubagentRunner,
+    request: &LlmRequest,
+    request_body_bytes: usize,
+    messages: &MessageHistory,
+) {
+    tracing::info!(
+        target: "archon::context",
+        request_origin = request.request_origin.as_deref().unwrap_or("subagent"),
+        request_model = %request.model,
+        request_body_bytes_estimated = request_body_bytes,
+        request_approx_tokens = crate::agent::autocompact::approx_tokens_from_bytes(
+            request_body_bytes
+        ),
+        request_message_count = messages.as_slice().len(),
+        request_tool_count = runner.tool_definitions.len(),
+        "llm request size preflight (estimated)"
+    );
 }
 
 fn build_compaction_telemetry(
@@ -78,7 +134,7 @@ fn build_compaction_telemetry(
 
 async fn maybe_compact_for_context_window(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
@@ -140,7 +196,8 @@ async fn build_llm_request(
             messages,
             runner.agent_config.context.preserve_recent_turns,
         ),
-        tools: runner.tool_definitions.clone(),
+        // #171 part 3: an Arc bump, not a deep clone of ~70 frozen schemas.
+        tools: archon_llm::provider::SharedTools::clone(&runner.tool_definitions),
         thinking,
         speed,
         effort: resolve_effort(runner).await,
@@ -193,7 +250,7 @@ fn build_system_messages(
         "type": "text",
         "text": &runner.system_prompt,
     }));
-    system.extend(runner.request_system.clone());
+    system.extend(runner.request_system.iter().cloned());
     if let Some(ref reminder) = runner.critical_system_reminder {
         system.push(serde_json::json!({
             "type": "text",
@@ -232,10 +289,10 @@ async fn resolve_effort(runner: &SubagentRunner) -> Option<String> {
 #[allow(clippy::too_many_arguments)]
 async fn maybe_compact_for_request_pressure(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
-    proactive_pressure_attempted: &mut bool,
+    (pressure, envelope_bytes): (&mut PressureState, usize),
     request: &mut LlmRequest,
     request_body_bytes: &mut usize,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
@@ -251,13 +308,13 @@ async fn maybe_compact_for_request_pressure(
         .context
         .rate_limit_pressure_body_bytes
         .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
-    if *proactive_pressure_attempted
+    if pressure.proactive_attempted
         || !(token_pressure || body_pressure)
         || !auto_compact.should_attempt()
     {
         return;
     }
-    *proactive_pressure_attempted = true;
+    pressure.proactive_attempted = true;
     let reason = pressure_reason(token_pressure, body_pressure);
     tracing::info!(
         compaction.reason = reason,
@@ -286,7 +343,7 @@ async fn maybe_compact_for_request_pressure(
     )
     .await;
     request.messages = crate::agent::tool_result_context::project_messages_for_request(
-        messages,
+        messages.as_slice(),
         runner.agent_config.context.preserve_recent_turns,
     );
     crate::agent::request_cache::apply_conversation_cache(
@@ -297,11 +354,17 @@ async fn maybe_compact_for_request_pressure(
         &runner.agent_config.context.prompt_cache_mode,
         &runner.agent_config.context.prompt_cache_ttl,
     );
-    *request_body_bytes = crate::agent::autocompact::request_body_bytes(request);
+    *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
+        envelope_bytes,
+        messages.estimated_tokens(),
+    );
 }
 
-fn current_trigger_tokens(messages: &[serde_json::Value], last_known_context_tokens: u64) -> u64 {
-    last_known_context_tokens.max(crate::agent::autocompact::trigger_tokens(messages))
+/// #103 trigger guard: the freshest of provider-reported usage and our own
+/// estimate wins. Part 1 only made the estimate O(1); which number the guard
+/// picks is unchanged.
+fn current_trigger_tokens(messages: &MessageHistory, last_known_context_tokens: u64) -> u64 {
+    last_known_context_tokens.max(messages.estimated_tokens())
 }
 
 fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {
@@ -315,7 +378,7 @@ fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {
 
 async fn compact_proactively(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     last_known_context_tokens: &mut u64,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
@@ -326,7 +389,7 @@ async fn compact_proactively(
     match crate::agent::autocompact::compact_json_messages_with_provider(
         runner.provider.as_ref(),
         &runner.model,
-        messages,
+        messages.as_slice(),
         action,
         false,
         runner.agent_config.runtime_attribution_extra(
@@ -346,7 +409,7 @@ async fn compact_proactively(
             },
             compacted,
         )) => {
-            *messages = compacted;
+            messages.replace(compacted);
             *last_known_context_tokens = 0;
             auto_compact.on_success(after_estimated_tokens);
         }
@@ -388,48 +451,5 @@ async fn compact_proactively(
 }
 
 #[cfg(test)]
-mod trigger_tests {
-    use super::current_trigger_tokens;
-
-    #[test]
-    fn fresh_message_burst_can_raise_stale_provider_usage() {
-        let messages = vec![serde_json::json!({
-            "role": "user",
-            "content": "x".repeat(600_000),
-        })];
-        let fresh = crate::agent::autocompact::trigger_tokens(&messages);
-
-        assert_eq!(current_trigger_tokens(&messages, 10), fresh);
-    }
-
-    #[test]
-    fn five_tool_result_burst_raises_pressure_above_stale_usage() {
-        let messages: Vec<serde_json::Value> = (0..5)
-            .map(|index| {
-                serde_json::json!({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": format!("tool-{index}"),
-                        "content": "x".repeat(150 * 1024),
-                        "is_error": false,
-                    }],
-                })
-            })
-            .collect();
-        let fresh = crate::agent::autocompact::trigger_tokens(&messages);
-
-        assert!(
-            fresh > 150_000,
-            "five-result burst must create measurable pressure"
-        );
-        assert_eq!(current_trigger_tokens(&messages, 10), fresh);
-    }
-
-    #[test]
-    fn provider_usage_can_raise_low_fresh_estimate() {
-        let messages = vec![serde_json::json!({"role": "user", "content": "small"})];
-
-        assert_eq!(current_trigger_tokens(&messages, 900_000), 900_000);
-    }
-}
+#[path = "request_round_trigger_tests.rs"]
+mod trigger_tests;

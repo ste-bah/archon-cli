@@ -14,7 +14,7 @@ struct PreparedTool {
 
 pub(super) async fn replay_tool_round(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     text_content: String,
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pending_tools: Vec<PendingTool>,
@@ -35,7 +35,7 @@ pub(super) async fn replay_tool_round(
 
 fn record_assistant_tool_use_message(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     text_content: String,
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pending_tools: &[PendingTool],
@@ -179,7 +179,7 @@ async fn execute_prepared_tools(
 
 fn record_tool_results(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     prepared: &[PreparedTool],
     exec_results: Vec<ToolResult>,
 ) {
@@ -263,7 +263,7 @@ fn record_tool_progress(runner: &SubagentRunner, prepared_tool: &PreparedTool) {
     }
 }
 
-async fn drain_pending_user_turns(runner: &SubagentRunner, messages: &mut Vec<serde_json::Value>) {
+async fn drain_pending_user_turns(runner: &SubagentRunner, messages: &mut MessageHistory) {
     let pending = runner.drain_pending_as_user_turns().await;
     for msg in pending {
         runner.record_transcript(&msg);
