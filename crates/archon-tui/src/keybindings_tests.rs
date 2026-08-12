@@ -10,6 +10,56 @@ fn submit_via_enter() {
     assert_eq!(km.resolve(enter), Some(&Action::Submit));
 }
 
+/// Issue #174 acceptance: Enter submits, Shift+Enter and Alt+Enter insert a
+/// newline. Alt is bound as well as Shift because Shift+Enter only reaches us
+/// with SHIFT set when the terminal speaks the kitty keyboard protocol.
+#[test]
+fn shift_enter_and_alt_enter_insert_a_newline() {
+    let km = KeyMap::default();
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)),
+        Some(&Action::InsertNewline)
+    );
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)),
+        Some(&Action::InsertNewline)
+    );
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(&Action::Submit),
+        "plain Enter must still submit"
+    );
+}
+
+/// `DISAMBIGUATE_ESCAPE_CODES` makes the numeric keypad's Enter arrive with
+/// `KeyEventState::KEYPAD`. Without normalisation that key would stop
+/// submitting the moment the enhancement flags were pushed.
+#[test]
+fn keypad_enter_still_submits_under_disambiguation() {
+    let km = KeyMap::default();
+    let keypad_enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::KEYPAD,
+    };
+    assert_eq!(km.resolve(keypad_enter), Some(&Action::Submit));
+}
+
+/// Held keys arrive as `Repeat`; `should_process_key_event` accepts them, so
+/// resolution must too.
+#[test]
+fn repeat_events_resolve_like_press_events() {
+    let km = KeyMap::default();
+    let held_backspace = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Repeat,
+        state: KeyEventState::NONE,
+    };
+    assert_eq!(km.resolve(held_backspace), Some(&Action::Backspace));
+}
+
 #[test]
 fn quit_via_ctrl_c() {
     let km = KeyMap::default();

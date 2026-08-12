@@ -360,7 +360,6 @@ dependencies = [
  "chrono",
  "clap",
  "cozo-ce",
- "crossterm",
  "dirs",
  "fd-lock",
  "futures-util",

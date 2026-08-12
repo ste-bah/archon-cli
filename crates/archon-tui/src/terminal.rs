@@ -2,19 +2,43 @@
 //!
 //! Extracts terminal setup/cleanup from `app.rs` into a dedicated guard struct
 //! that automatically restores the terminal on drop.
+//!
+//! # Teardown paths (issue #174)
+//!
+//! Entering pushes progressive keyboard-enhancement flags (see
+//! [`keyboard`]) so `Shift+Enter` is distinguishable from `Enter`. Those
+//! flags live on the *terminal*, not in this process: leaving them pushed
+//! outlives archon and the user has no obvious way to undo it. Every way out
+//! therefore funnels through [`restore_terminal`], which pops at most once:
+//!
+//! | path        | entry point                                  |
+//! |-------------|----------------------------------------------|
+//! | clean exit  | `<TerminalGuard as Drop>::drop`              |
+//! | panic       | the hook installed by [`install_panic_restore_hook`] (and `src/panic_save.rs`, which calls [`restore_terminal`] directly) |
+//! | suspend     | [`TerminalGuard::suspend`], undone by [`TerminalGuard::resume`] |
+//!
+//! `tests/keyboard_enhancement_teardown.rs` spawns a child process down each
+//! of those paths and asserts the pop sequence reaches stdout.
 
 use std::io::Result as IoResult;
 use std::io::stdout;
+use std::sync::Once;
+
+pub mod keyboard;
 
 pub use crate::events::TuiEvent;
 
 /// Guard that manages raw mode and alternate screen lifecycle.
 ///
 /// On creation via `enter()`, enables raw mode, enters the alternate screen,
-/// and hides the cursor. On drop, restores the terminal to its original state
-/// (shows cursor, leaves alternate screen, disables raw mode).
+/// hides the cursor, and pushes keyboard-enhancement flags when the terminal
+/// supports them. On drop, restores the terminal to its original state (pops
+/// the enhancement flags, shows cursor, leaves alternate screen, disables raw
+/// mode).
 pub struct TerminalGuard {
-    _priv: (),
+    /// Whether *this* guard turned raw mode on, so [`TerminalGuard::resume`]
+    /// knows whether to turn it back on after a suspend.
+    raw_mode: bool,
 }
 
 pub fn mouse_capture_enabled() -> bool {
@@ -43,6 +67,65 @@ fn running_under_wsl() -> bool {
             .unwrap_or(false)
 }
 
+/// Enter the alternate screen, bracketed paste and cursor-hide modes.
+///
+/// Split out so `enter` (strict, production) and `enter_without_raw_mode`
+/// (best-effort, teardown harness) drive exactly the same sequence.
+fn enter_screen_modes() -> IoResult<()> {
+    use crossterm::ExecutableCommand;
+    use crossterm::cursor::Hide;
+    use crossterm::event::EnableBracketedPaste;
+    use crossterm::terminal::EnterAlternateScreen;
+
+    stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableBracketedPaste)?;
+    stdout().execute(Hide)?;
+    Ok(())
+}
+
+/// Restore the terminal to the state it had before [`TerminalGuard::enter`].
+///
+/// Best-effort and idempotent: it runs from `Drop`, from the panic hook, and
+/// from [`TerminalGuard::suspend`], so it must tolerate being called twice
+/// and must never panic. The keyboard-enhancement pop goes **first** —
+/// terminals that scope the keyboard stack to the active screen buffer would
+/// otherwise see the pop land on the primary screen's stack and leave the
+/// alternate screen's entry (and hence the user's shell) in modified-keys
+/// mode.
+pub fn restore_terminal() {
+    use crossterm::ExecutableCommand;
+    use crossterm::cursor::Show;
+    use crossterm::event::DisableBracketedPaste;
+    use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+
+    keyboard::deactivate();
+    // Errors are discarded because there is nothing we can do about a failed
+    // cleanup, and propagating one would panic at shutdown.
+    let _ = stdout().execute(Show);
+    let _ = stdout().execute(DisableBracketedPaste);
+    let _ = stdout().execute(LeaveAlternateScreen);
+    let _ = disable_raw_mode();
+}
+
+static PANIC_HOOK: Once = Once::new();
+
+/// Install a process panic hook that restores the terminal before the
+/// previous hook prints its message.
+///
+/// Idempotent — the first caller wins and later calls are no-ops, so this is
+/// safe to call from every `TerminalGuard::enter`. `src/panic_save.rs`
+/// installs its own hook later in startup and chains to this one; both call
+/// [`restore_terminal`], which pops the enhancement flags only once.
+pub fn install_panic_restore_hook() {
+    PANIC_HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal();
+            previous(info);
+        }));
+    });
+}
+
 impl TerminalGuard {
     /// Enter raw mode and alternate screen, hiding the cursor.
     ///
@@ -50,33 +133,65 @@ impl TerminalGuard {
     /// Returns an error if raw mode cannot be enabled or the alternate screen
     /// cannot be activated.
     pub fn enter() -> IoResult<Self> {
-        use crossterm::ExecutableCommand;
-        use crossterm::cursor::Hide;
-        use crossterm::event::EnableBracketedPaste;
-        use crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
+        use crossterm::terminal::enable_raw_mode;
 
         enable_raw_mode()?;
-        stdout().execute(EnterAlternateScreen)?;
-        stdout().execute(EnableBracketedPaste)?;
-        stdout().execute(Hide)?;
+        enter_screen_modes()?;
+        Ok(Self::finish_enter(true))
+    }
 
-        Ok(Self { _priv: () })
+    /// Everything [`TerminalGuard::enter`] does except raw mode.
+    ///
+    /// The teardown harness (`tests/keyboard_enhancement_teardown.rs`) runs
+    /// child processes with stdout on a pipe, where `enable_raw_mode` has no
+    /// terminal to act on. Every behaviour the harness observes — the
+    /// enhancement push, the panic hook, suspend/resume, and the `Drop` pop —
+    /// is the production code path, unchanged.
+    #[doc(hidden)]
+    pub fn enter_without_raw_mode() -> Self {
+        let _ = enter_screen_modes();
+        Self::finish_enter(false)
+    }
+
+    fn finish_enter(raw_mode: bool) -> Self {
+        install_panic_restore_hook();
+        keyboard::activate();
+        Self { raw_mode }
+    }
+
+    /// Hand the terminal back before running another full-screen program (or
+    /// stopping this one).
+    ///
+    /// Pops the enhancement flags and undoes the screen modes; pair with
+    /// [`TerminalGuard::resume`]. A suspend that skipped the pop would leave
+    /// the *other* program — and the shell after it — receiving disambiguated
+    /// key encodings it never asked for.
+    pub fn suspend(&self) {
+        restore_terminal();
+    }
+
+    /// Re-take the terminal after [`TerminalGuard::suspend`].
+    ///
+    /// # Errors
+    /// Returns an error if raw mode or the alternate screen cannot be
+    /// re-entered.
+    pub fn resume(&self) -> IoResult<()> {
+        use crossterm::terminal::enable_raw_mode;
+
+        if self.raw_mode {
+            enable_raw_mode()?;
+            enter_screen_modes()?;
+        } else {
+            let _ = enter_screen_modes();
+        }
+        keyboard::activate();
+        Ok(())
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        use crossterm::ExecutableCommand;
-        use crossterm::cursor::Show;
-        use crossterm::event::DisableBracketedPaste;
-        use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-
-        // We use std::mem::forget on the result because there's nothing we can
-        // do if cleanup fails, and swallowing the error avoids a panic at shutdown.
-        let _ = stdout().execute(Show);
-        let _ = stdout().execute(DisableBracketedPaste);
-        let _ = stdout().execute(LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        restore_terminal();
     }
 }
 
@@ -165,5 +280,15 @@ mod tests {
         assert!(!mouse_capture_policy(Some("off"), true));
         assert!(mouse_capture_policy(Some("1"), false));
         assert!(mouse_capture_policy(Some("yes"), false));
+    }
+
+    /// `restore_terminal` is reached from three unrelated places and must
+    /// never leave a pop owed, however many times it runs.
+    #[test]
+    fn restore_terminal_leaves_no_enhancement_pop_outstanding() {
+        restore_terminal();
+        assert!(!keyboard::is_active());
+        restore_terminal();
+        assert!(!keyboard::is_active());
     }
 }

@@ -16,7 +16,10 @@ pub(crate) fn set_input_cursor(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some(ref vim) = app.vim_state {
         let col: u16 = vim.cursor().1.try_into().unwrap_or(u16::MAX);
-        let cursor_x = area.x + vim.mode_display().chars().count() as u16 + 1 + col;
+        // The mode indicator is measured in columns, matching what the input
+        // paragraph actually paints ahead of the vim line.
+        let indicator_width = super::width::display_width(vim.mode_display()) as u16;
+        let cursor_x = area.x + indicator_width + 1 + col;
         frame.set_cursor_position((cursor_x.min(area.right().saturating_sub(1)), area.y + 1));
     } else {
         let (cursor_row, cursor_col) =

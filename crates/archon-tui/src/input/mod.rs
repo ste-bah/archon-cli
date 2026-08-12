@@ -97,6 +97,30 @@ impl InputHandler {
         self.cursor_pos += ch.len_utf8();
         self.refresh_suggestions();
         self.ultrathink.scan_input(&self.current);
+        self.trace("insert");
+    }
+
+    /// Insert a literal newline at the cursor (Shift+Enter / Alt+Enter).
+    ///
+    /// A separate entry point from [`InputHandler::insert`] so the
+    /// `ARCHON_TUI_LOG_KEYS` trace distinguishes "the user asked for a
+    /// newline" from "a newline arrived as text" (paste, voice injection) —
+    /// the two look identical in the buffer and have completely different
+    /// causes when a draft ends up multi-line unexpectedly.
+    pub fn insert_newline(&mut self) {
+        self.current.insert(self.cursor_pos, '\n');
+        self.cursor_pos += 1;
+        self.refresh_suggestions();
+        self.ultrathink.scan_input(&self.current);
+        self.trace("insert_newline");
+    }
+
+    /// Emit one buffer-state line to the `ARCHON_TUI_LOG_KEYS` trace.
+    ///
+    /// Returns immediately when the trace is off, which is every production
+    /// run — see [`crate::keylog`].
+    fn trace(&self, op: &str) {
+        crate::keylog::log_buffer(op, &self.current, self.cursor_pos);
     }
 
     /// Delete character before cursor (backspace).
@@ -112,6 +136,7 @@ impl InputHandler {
         }
         self.refresh_suggestions();
         self.ultrathink.scan_input(&self.current);
+        self.trace("backspace");
     }
 
     /// Move cursor left.
@@ -146,6 +171,7 @@ impl InputHandler {
         self.cursor_pos = self.current.len();
         self.refresh_suggestions();
         self.ultrathink.scan_input(&self.current);
+        self.trace("set_text");
     }
 
     /// Update suggestion state based on current input text.
@@ -217,6 +243,7 @@ impl InputHandler {
             self.history.push(text.clone());
         }
 
+        crate::keylog::log_buffer("submit", &text, 0);
         text
     }
 
@@ -262,6 +289,7 @@ impl InputHandler {
         self.cursor_pos = 0;
         self.history_index = None;
         self.ultrathink.scan_input(&self.current);
+        self.trace("clear");
     }
 
     /// Inject `text` at the current cursor position (voice input integration).
@@ -270,194 +298,10 @@ impl InputHandler {
         self.cursor_pos += text.len();
         self.refresh_suggestions();
         self.ultrathink.scan_input(&self.current);
+        self.trace("inject_text");
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn basic_input() {
-        let mut input = InputHandler::new();
-        input.insert('H');
-        input.insert('i');
-        assert_eq!(input.text(), "Hi");
-        assert_eq!(input.cursor(), 2);
-    }
-
-    #[test]
-    fn backspace() {
-        let mut input = InputHandler::new();
-        input.insert('a');
-        input.insert('b');
-        input.backspace();
-        assert_eq!(input.text(), "a");
-    }
-
-    #[test]
-    fn submit_clears_and_adds_history() {
-        let mut input = InputHandler::new();
-        input.insert('x');
-        let text = input.submit();
-        assert_eq!(text, "x");
-        assert!(input.text().is_empty());
-    }
-
-    #[test]
-    fn init_test_catalog() {
-        use crate::commands;
-        commands::set_catalog(vec![
-            commands::CommandInfo {
-                name: "/model".into(),
-                description: "Switch model".into(),
-            },
-            commands::CommandInfo {
-                name: "/cost".into(),
-                description: "Show cost".into(),
-            },
-            commands::CommandInfo {
-                name: "/help".into(),
-                description: "Show help".into(),
-            },
-        ]);
-    }
-
-    #[test]
-    fn suggestions_activate_on_slash() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        input.insert('/');
-        assert!(input.suggestions.active);
-        assert!(!input.suggestions.suggestions.is_empty());
-    }
-
-    #[test]
-    fn suggestions_deactivate_on_dismiss() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        input.insert('/');
-        assert!(input.suggestions.active);
-        input.dismiss_suggestions();
-        assert!(!input.suggestions.active);
-    }
-
-    #[test]
-    fn tab_completes_selected_command() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        // Type "/mo" to filter to /model
-        for ch in "/mo".chars() {
-            input.insert(ch);
-        }
-        assert!(input.suggestions.active);
-        assert_eq!(input.suggestions.suggestions.len(), 1);
-        let accepted = input.accept_suggestion();
-        assert!(accepted);
-        assert!(input.text().starts_with("/model"));
-        assert!(!input.suggestions.active);
-    }
-
-    #[test]
-    fn suggestions_deactivate_on_non_slash() {
-        let mut input = InputHandler::new();
-        input.insert('h');
-        assert!(!input.suggestions.active);
-    }
-
-    #[test]
-    fn suggestions_deactivate_on_backspace_past_slash() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        input.insert('/');
-        assert!(input.suggestions.active);
-        input.backspace();
-        assert!(!input.suggestions.active);
-    }
-
-    #[test]
-    fn suggestions_dismiss_when_argument_typed() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        // Type "/model" — suggestions active
-        for ch in "/model".chars() {
-            input.insert(ch);
-        }
-        assert!(input.suggestions.active);
-        // Type space + "haiku" — suggestions should dismiss
-        input.insert(' ');
-        assert!(
-            !input.suggestions.active,
-            "suggestions stayed active after argument typed"
-        );
-        for ch in "haiku".chars() {
-            input.insert(ch);
-        }
-        assert!(!input.suggestions.active);
-        assert_eq!(input.text(), "/model haiku");
-    }
-
-    #[test]
-    fn suggestions_stay_active_for_partial_prefix() {
-        init_test_catalog();
-        let mut input = InputHandler::new();
-        for ch in "/mo".chars() {
-            input.insert(ch);
-        }
-        assert!(input.suggestions.active);
-        // No space yet — still completing
-        assert!(
-            input
-                .suggestions
-                .suggestions
-                .iter()
-                .any(|c| c.name == "/model")
-        );
-    }
-
-    #[test]
-    fn set_text_replaces_buffer_and_places_cursor_at_end() {
-        let mut input = InputHandler::new();
-        input.set_text("/skills ");
-        assert_eq!(input.text(), "/skills ");
-        assert_eq!(input.cursor(), "/skills ".len());
-    }
-
-    #[test]
-    fn set_text_after_existing_text_overwrites() {
-        let mut input = InputHandler::new();
-        for ch in "hello".chars() {
-            input.insert(ch);
-        }
-        assert_eq!(input.text(), "hello");
-        input.set_text("/foo ");
-        assert_eq!(input.text(), "/foo ");
-        assert_eq!(input.cursor(), "/foo ".len());
-    }
-
-    #[test]
-    fn inject_text_accepts_multiline_paste() {
-        let mut input = InputHandler::new();
-        input.inject_text("first\nsecond");
-        assert_eq!(input.text(), "first\nsecond");
-        assert_eq!(input.cursor(), "first\nsecond".len());
-    }
-
-    #[test]
-    fn history_navigation() {
-        let mut input = InputHandler::new();
-        input.insert('a');
-        input.submit();
-        input.insert('b');
-        input.submit();
-
-        input.history_up();
-        assert_eq!(input.text(), "b");
-        input.history_up();
-        assert_eq!(input.text(), "a");
-        input.history_down();
-        assert_eq!(input.text(), "b");
-        input.history_down();
-        assert!(input.text().is_empty());
-    }
-}
+#[path = "handler_tests.rs"]
+mod tests;

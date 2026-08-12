@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
 /// All distinct actions that can be triggered by a key binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +15,9 @@ pub enum Action {
     Quit,
     /// Enter = submit the current input line.
     Submit,
+    /// Shift+Enter / Alt+Enter = insert a newline into the draft instead of
+    /// submitting it (issue #174).
+    InsertNewline,
     /// Up arrow = navigate history up or select previous suggestion.
     HistoryUp,
     /// Down arrow = navigate history down or select next suggestion.
@@ -159,6 +162,26 @@ impl Default for KeyMap {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             Action::Submit,
         );
+        // Multi-line input (issue #174). BOTH chords are bound, not either:
+        //
+        // * Shift+Enter is the chord users reach for, but it only ever
+        //   arrives with SHIFT set when the terminal is speaking the kitty
+        //   keyboard protocol. Without it — Windows Terminal in legacy VT
+        //   input, most of xterm's descendants — Shift+Enter is encoded
+        //   byte-for-byte as Enter and this binding is simply never hit.
+        //   `TerminalGuard::enter` pushes DISAMBIGUATE_ESCAPE_CODES to make
+        //   it hit wherever the terminal will allow it.
+        // * Alt+Enter survives legacy encoding as an ESC prefix, so it works
+        //   everywhere and is the universal fallback. It is documented in
+        //   `/help` — a fallback nobody knows about is not a fallback.
+        bindings.insert(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            Action::InsertNewline,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT),
+            Action::InsertNewline,
+        );
         bindings.insert(
             KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             Action::TabComplete,
@@ -252,7 +275,32 @@ impl KeyMap {
     /// Returns `Some(&Action)` if the event is bound, or `None` if it has
     /// no mapping (e.g. Alt+F4, Ctrl+@, etc.).
     pub fn resolve(&self, key: KeyEvent) -> Option<&Action> {
-        self.bindings.get(&key)
+        self.bindings.get(&normalize(key))
+    }
+}
+
+/// Reduce a key event to the (code, modifiers) pair the binding table is
+/// keyed on.
+///
+/// `KeyEvent`'s `Hash`/`Eq` include `kind` and `state`, and every binding is
+/// built with `KeyEvent::new`, i.e. `Press` + `NONE`. Two real event shapes
+/// would otherwise miss every binding:
+///
+/// * `Repeat` — emitted for held keys (Windows always, and any terminal once
+///   `REPORT_EVENT_TYPES` is on). `should_process_key_event` deliberately
+///   accepts `Repeat` so held Backspace/arrows work; without this
+///   normalisation the accepted event then resolved to nothing.
+/// * `KeyEventState::KEYPAD` — set once `DISAMBIGUATE_ESCAPE_CODES` is
+///   pushed (issue #174), which is exactly what numeric-keypad Enter carries.
+///   Enabling disambiguation without this would have stopped keypad Enter
+///   from submitting.
+///
+/// `Release` never reaches here — `should_process_key_event` drops it first.
+fn normalize(key: KeyEvent) -> KeyEvent {
+    KeyEvent {
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+        ..key
     }
 }
 
