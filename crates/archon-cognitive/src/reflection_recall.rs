@@ -214,6 +214,7 @@ impl<'a> ReflectionRecall<'a> {
     /// `cited` names the reflections whose marker appeared in the turn's own
     /// output. Verified reuse additionally requires `verification` to be a
     /// deterministic pass.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_outcome(
         &self,
         session_id: &str,

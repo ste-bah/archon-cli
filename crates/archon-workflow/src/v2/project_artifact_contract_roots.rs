@@ -106,7 +106,7 @@ fn admissible_path(raw: &str) -> Option<String> {
         .split('/')
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .collect();
-    if segments.is_empty() || segments.iter().any(|segment| *segment == "..") {
+    if segments.is_empty() || segments.contains(&"..") {
         return None;
     }
     Some(segments.join("/"))

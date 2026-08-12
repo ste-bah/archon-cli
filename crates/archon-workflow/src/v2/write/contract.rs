@@ -338,7 +338,7 @@ fn artifact_parent_scope(raw: &str) -> Option<String> {
         .split('/')
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .collect();
-    if segments.iter().any(|segment| *segment == "..") || segments.len() < 2 {
+    if segments.contains(&"..") || segments.len() < 2 {
         return None;
     }
     Some(segments[..segments.len() - 1].join("/"))
