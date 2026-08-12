@@ -25,6 +25,7 @@
 #   sudo scripts/install-system-deps.sh --with-sandbox   # Docker + OpenShell
 #   sudo scripts/install-system-deps.sh --with-trading-tools
 #   sudo scripts/install-system-deps.sh --with-ocr
+#   sudo scripts/install-system-deps.sh --with-java   # JDK, Gradle, Maven
 #   scripts/install-system-deps.sh --with-openshell --setup-openshell-gateway
 #
 # OpenShell extras follow NVIDIA's current support matrix: Debian/Ubuntu Linux
@@ -57,6 +58,7 @@ WITH_OPENSHELL=false
 SETUP_OPENSHELL_GATEWAY=false
 WITH_TRADING_TOOLS=false
 WITH_OCR=false
+WITH_JAVA=false
 WITH_RUST=true
 
 while [ $# -gt 0 ]; do
@@ -68,6 +70,7 @@ while [ $# -gt 0 ]; do
         --with-openshell)           WITH_OPENSHELL=true ;;
         --with-trading-tools)       WITH_TRADING_TOOLS=true ;;
         --with-ocr)                 WITH_OCR=true ;;
+        --with-java)                WITH_JAVA=true ;;
         --setup-openshell-gateway|--start-openshell-gateway)
             WITH_OPENSHELL=true
             SETUP_OPENSHELL_GATEWAY=true
@@ -148,6 +151,11 @@ PKG_VIDEO=""
 PKG_DOCKER=""
 PKG_OPENSHELL_PREREQ=""
 PKG_TRADING_TOOLS=""
+# JDK + Maven for --with-java. Gradle is deliberately NOT in here on Linux:
+# see install_gradle below.
+PKG_JAVA=""
+# True where the package manager ships a Gradle new enough to be worth using.
+GRADLE_FROM_PKG_MGR=false
 CHECK_WHISPER_CLI=false
 # Set for distros whose repos do not package tesseract at all (Amazon Linux
 # 2023). --check and post-install verification then treat tesseract as a
@@ -171,6 +179,7 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker.io"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 python3-venv"
+        PKG_JAVA="default-jdk maven unzip"
         ;;
     fedora|rhel|rocky|almalinux|centos)
         PKG_MGR="dnf"
@@ -183,6 +192,7 @@ case "$DISTRO_ID" in
         PKG_DOCKER="moby-engine docker-cli"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3"
+        PKG_JAVA="java-21-openjdk-devel maven unzip"
         ;;
     amzn)
         # Amazon Linux. AL2023+ uses dnf against a deliberately small core
@@ -210,6 +220,7 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3"
+        PKG_JAVA="java-21-amazon-corretto-devel maven unzip"
         ;;
     arch|manjaro|endeavouros|garuda)
         PKG_MGR="pacman"
@@ -223,6 +234,9 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python python-virtualenv"
+        # Arch tracks Gradle upstream closely, so its package is worth using.
+        PKG_JAVA="jdk-openjdk maven gradle unzip"
+        GRADLE_FROM_PKG_MGR=true
         ;;
     opensuse-tumbleweed|opensuse-leap|opensuse|sles|sled)
         # OpenSUSE / SLE family. The poppler CLI utilities ship under
@@ -239,6 +253,7 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 python3-virtualenv"
+        PKG_JAVA="java-21-openjdk-devel maven unzip"
         ;;
     alpine)
         # Alpine — common in containers. Note busybox `sh` already; the
@@ -254,6 +269,7 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 py3-virtualenv"
+        PKG_JAVA="openjdk21 maven unzip"
         ;;
     macos)
         PKG_MGR="brew"
@@ -269,6 +285,11 @@ case "$DISTRO_ID" in
         PKG_DOCKER=""
         PKG_OPENSHELL_PREREQ=""
         PKG_TRADING_TOOLS="node python"
+        # Homebrew's gradle tracks upstream; the JDK comes from the temurin
+        # cask rather than the keg-only `openjdk` formula, which needs a
+        # root-owned symlink into /Library/Java before any build tool sees it.
+        PKG_JAVA="maven gradle"
+        GRADLE_FROM_PKG_MGR=true
         ;;
     *)
         echo "install-system-deps.sh: unsupported OS (uname=$UNAME_S, distro=$DISTRO_ID)" >&2
@@ -351,6 +372,15 @@ if [ "$CHECK_ONLY" = true ]; then
             fi
         done
     fi
+    if [ "$WITH_JAVA" = true ]; then
+        # javac as well as java: a JRE satisfies `java` and cannot compile,
+        # which is the failure this check exists to catch early.
+        for bin in java javac mvn gradle; do
+            if ! command -v "$bin" >/dev/null 2>&1; then
+                MISSING="$MISSING $bin"
+            fi
+        done
+    fi
     if [ "$WITH_RUST" = true ] && ! have_cargo; then
         MISSING="$MISSING cargo"
     fi
@@ -368,6 +398,8 @@ if [ "$CHECK_ONLY" = true ]; then
             echo "  Run: $0 --with-openshell" >&2
         elif [ "$WITH_DOCKER" = true ]; then
             [ "$PKG_MGR" = "brew" ] && echo "  Run: $0 --with-docker" >&2 || echo "  Run: sudo $0 --with-docker" >&2
+        elif [ "$WITH_JAVA" = true ]; then
+            [ "$PKG_MGR" = "brew" ] && echo "  Run: $0 --with-java" >&2 || echo "  Run: sudo $0 --with-java" >&2
         else
             [ "$PKG_MGR" = "brew" ] && echo "  Run: $0" >&2 || echo "  Run: sudo $0" >&2
         fi
@@ -388,6 +420,9 @@ if [ "$CHECK_ONLY" = true ]; then
     fi
     if [ "$WITH_TRADING_TOOLS" = true ]; then
         PRESENT="$PRESENT, node, npm, python3"
+    fi
+    if [ "$WITH_JAVA" = true ]; then
+        PRESENT="$PRESENT, java, javac, mvn, gradle"
     fi
     if [ "$WITH_RUST" = true ]; then
         PRESENT="$PRESENT, cargo"
@@ -431,6 +466,9 @@ fi
 if [ "$WITH_TRADING_TOOLS" = true ]; then
     ALL_PKGS="$ALL_PKGS $PKG_TRADING_TOOLS"
 fi
+if [ "$WITH_JAVA" = true ]; then
+    ALL_PKGS="$ALL_PKGS $PKG_JAVA"
+fi
 # Trim leading space if PKG_BUILD was empty (macOS case)
 ALL_PKGS=$(echo "$ALL_PKGS" | sed 's/^ *//')
 
@@ -457,6 +495,7 @@ run() {
 echo "install-system-deps.sh: detected $OS_FAMILY/$DISTRO_ID, package manager: $PKG_MGR"
 echo "install-system-deps.sh: sandbox extras: docker=$WITH_DOCKER openshell=$WITH_OPENSHELL"
 echo "install-system-deps.sh: trading tools deps: $WITH_TRADING_TOOLS"
+echo "install-system-deps.sh: java toolchain: $WITH_JAVA"
 if [ "$SETUP_OPENSHELL_GATEWAY" = true ]; then
     echo "install-system-deps.sh: OpenShell gateway setup requested"
 fi
@@ -573,6 +612,105 @@ install_rustup() {
     fi
 }
 
+# macOS JDK. Homebrew's `openjdk` formula is keg-only: it installs, and then no
+# build tool finds it until a root-owned symlink is placed in
+# /Library/Java/JavaVirtualMachines. The temurin cask installs a system JDK
+# that Gradle and Maven detect with no further steps, which is why it is used
+# here in preference to the formula.
+install_java_macos() {
+    if [ "$WITH_JAVA" != true ] || [ "$PKG_MGR" != "brew" ]; then
+        return 0
+    fi
+    if command -v javac >/dev/null 2>&1; then
+        echo "install-system-deps.sh: JDK already present ($(javac -version 2>&1))"
+        return 0
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        echo "[dry-run] brew install --cask temurin"
+        return 0
+    fi
+    echo "+ brew install --cask temurin"
+    brew install --cask temurin || {
+        echo "install-system-deps.sh: Temurin JDK install failed" >&2
+        exit 3
+    }
+}
+
+# Gradle, from the official distribution, on Linux.
+#
+# The distro packages are not usable for this: Ubuntu 22.04 ships Gradle 4.4.1
+# and Fedora/RHEL/Amazon Linux do not package Gradle at all, so a project on any
+# current Gradle would fail to configure. Arch and Homebrew track upstream and
+# are handled through the package manager instead (GRADLE_FROM_PKG_MGR).
+#
+# The version is resolved from Gradle's own current-version endpoint rather than
+# pinned here, so this does not go stale, and the download is checked against the
+# published SHA-256 before anything is unpacked.
+GRADLE_INSTALL_ROOT="/opt/gradle"
+
+install_gradle() {
+    if [ "$WITH_JAVA" != true ] || [ "$GRADLE_FROM_PKG_MGR" = true ] || [ "$PKG_MGR" = "brew" ]; then
+        return 0
+    fi
+    if command -v gradle >/dev/null 2>&1; then
+        echo "install-system-deps.sh: gradle already present ($(gradle --version 2>/dev/null | awk '/^Gradle /{print $2; exit}'))"
+        return 0
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        echo "[dry-run] resolve https://services.gradle.org/versions/current, verify SHA-256, unpack to $GRADLE_INSTALL_ROOT, link /usr/local/bin/gradle"
+        return 0
+    fi
+
+    GRADLE_META=$(curl -fsSL https://services.gradle.org/versions/current) || {
+        echo "install-system-deps.sh: could not reach services.gradle.org to resolve the current Gradle version" >&2
+        exit 3
+    }
+    GRADLE_URL=$(echo "$GRADLE_META" | sed -n 's/.*"downloadUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    GRADLE_SHA=$(echo "$GRADLE_META" | sed -n 's/.*"checksum"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    GRADLE_VER=$(echo "$GRADLE_META" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ -z "$GRADLE_URL" ] || [ -z "$GRADLE_SHA" ] || [ -z "$GRADLE_VER" ]; then
+        echo "install-system-deps.sh: could not parse the Gradle version metadata" >&2
+        exit 3
+    fi
+
+    echo "+ installing Gradle $GRADLE_VER from $GRADLE_URL"
+    GRADLE_TMP=$(mktemp -d)
+    curl -fsSL "$GRADLE_URL" -o "$GRADLE_TMP/gradle.zip" || {
+        echo "install-system-deps.sh: Gradle download failed" >&2
+        rm -rf "$GRADLE_TMP"
+        exit 3
+    }
+
+    # Verify before unpacking, not after: an unverified archive is never
+    # extracted onto the filesystem.
+    ACTUAL_SHA=$(sha256sum "$GRADLE_TMP/gradle.zip" 2>/dev/null | cut -d' ' -f1)
+    [ -n "$ACTUAL_SHA" ] || ACTUAL_SHA=$(shasum -a 256 "$GRADLE_TMP/gradle.zip" 2>/dev/null | cut -d' ' -f1)
+    if [ "$ACTUAL_SHA" != "$GRADLE_SHA" ]; then
+        echo "install-system-deps.sh: Gradle checksum mismatch — refusing to install" >&2
+        echo "  expected: $GRADLE_SHA" >&2
+        echo "  actual:   ${ACTUAL_SHA:-<could not compute>}" >&2
+        rm -rf "$GRADLE_TMP"
+        exit 3
+    fi
+
+    $SUDO mkdir -p "$GRADLE_INSTALL_ROOT" || {
+        echo "install-system-deps.sh: could not create $GRADLE_INSTALL_ROOT" >&2
+        rm -rf "$GRADLE_TMP"
+        exit 3
+    }
+    $SUDO unzip -q -o -d "$GRADLE_INSTALL_ROOT" "$GRADLE_TMP/gradle.zip" || {
+        echo "install-system-deps.sh: Gradle archive extraction failed (is unzip installed?)" >&2
+        rm -rf "$GRADLE_TMP"
+        exit 3
+    }
+    rm -rf "$GRADLE_TMP"
+
+    $SUDO ln -sfn "$GRADLE_INSTALL_ROOT/gradle-$GRADLE_VER/bin/gradle" /usr/local/bin/gradle || {
+        echo "install-system-deps.sh: could not link gradle into /usr/local/bin" >&2
+        exit 3
+    }
+}
+
 install_amzn_extras() {
     if [ "$AMZN_BINARY_FALLBACKS" != true ]; then
         return 0
@@ -671,6 +809,8 @@ fi
 
 install_macos_docker
 install_amzn_extras
+install_java_macos
+install_gradle
 install_rustup
 install_marker_venv
 install_openshell
@@ -698,6 +838,9 @@ if [ "$DRY_RUN" = false ]; then
     if [ "$WITH_TRADING_TOOLS" = true ]; then
         VERIFY_BINS="$VERIFY_BINS node npm python3"
     fi
+    if [ "$WITH_JAVA" = true ]; then
+        VERIFY_BINS="$VERIFY_BINS java javac mvn gradle"
+    fi
     for bin in $VERIFY_BINS; do
         if command -v "$bin" >/dev/null 2>&1; then
             # poppler utilities only understand -v (--version is read as a
@@ -705,6 +848,14 @@ if [ "$DRY_RUN" = false ]; then
             case "$bin" in
                 pdftotext|pdfimages|pdftoppm)
                     VERSION=$("$bin" -v 2>&1 | head -n 1 || echo "(version check failed)") ;;
+                gradle)
+                    # `gradle --version` prints a banner; the version is on a
+                    # later line, and the whole thing needs a JVM to start.
+                    VERSION=$("$bin" --version 2>&1 | awk '/^Gradle /{print; exit}' || echo "(version check failed)")
+                    [ -n "$VERSION" ] || VERSION="(version check failed)" ;;
+                java|javac)
+                    # Both write their version banner to stderr, not stdout.
+                    VERSION=$("$bin" -version 2>&1 | head -n 1 || echo "(version check failed)") ;;
                 *)
                     VERSION=$("$bin" --version 2>&1 | head -n 1 || echo "(version check failed)") ;;
             esac
@@ -744,6 +895,12 @@ if [ "$DRY_RUN" = false ]; then
         echo "     Optional RapidOCR image-OCR fallback: re-run this script with --with-ocr"
     fi
     echo "     Optional Trading Lab tools: scripts/setup-trading-tools.sh --target /path/to/project"
+    if [ "$WITH_JAVA" = true ]; then
+        echo "     Java analysis needs no further system packages: Checkstyle, PMD, SpotBugs,"
+        echo "     FindSecBugs, Error Prone and PIT are declared by the project's own build."
+    else
+        echo "     Optional Java toolchain (JDK, Gradle, Maven): re-run this script with --with-java"
+    fi
     if [ "$WITH_DOCKER" = true ]; then
         echo "  5. Enable Docker sandboxing by setting [sandbox].backend=\"docker\" and [sandbox.docker].enabled=true"
     fi

@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<!--
+  Minimal configuration for the fixture projects: just enough rules to prove
+  each one fires and is parsed back with its rule name intact.
+
+  FileLength is set to 40 rather than the 500 a real project would use, so a
+  short fixture file trips it. Checking in a genuinely 600-line Java file to
+  demonstrate the same thing would add 600 lines of noise to the repository and
+  test nothing extra — the rule either fires and is parsed, or it does not.
+-->
+<module name="Checker">
+  <property name="severity" value="warning"/>
+
+  <module name="FileLength">
+    <property name="max" value="40"/>
+  </module>
+
+  <module name="TreeWalker">
+    <module name="ParameterNumber">
+      <property name="max" value="7"/>
+      <property name="severity" value="error"/>
+    </module>
+    <module name="EmptyStatement"/>
+  </module>
+</module>

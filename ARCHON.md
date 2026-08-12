@@ -79,7 +79,7 @@ Inventory: 50 coding agents in `crates/archon-pipeline/src/coding/agents.rs::AGE
 
 ## Code Structure & Complexity (all languages)
 
-Applies to every language the agents produce (Rust, Python, TS/JS, Go).
+Applies to every language the agents produce (Rust, Python, TS/JS, Go, Java).
 
 - Files < 500 lines preferred, **1500 hard cap** (Gate 2 / `scripts/check-file-sizes.sh`, language-agnostic). Functions < 50 lines, single responsibility. One concept per module/file (~100 lines per impl).
 - Keep functions flat: cyclomatic complexity ≤ 10, nesting depth ≤ 3, ≤ 5 args. Prefer early returns / guard clauses over nested branches; extract a helper before a function grows a second concern.

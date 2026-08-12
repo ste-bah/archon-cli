@@ -25,6 +25,11 @@ pub enum SymbolKind {
     Enum,
     Interface,
     Type,
+    /// A Java record. Distinct from `Struct` so the summary names the construct
+    /// a Java reader is looking for rather than a Rust one.
+    Record,
+    /// A Java annotation type declaration (`@interface`).
+    Annotation,
 }
 
 /// In-memory index of codebase symbols and dependency graph.

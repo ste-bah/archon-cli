@@ -15,6 +15,7 @@
 #   scripts\install-system-deps.ps1 -WithDocker
 #   scripts\install-system-deps.ps1 -WithTradingTools
 #   scripts\install-system-deps.ps1 -WithOcr        # RapidOCR image OCR
+#   scripts\install-system-deps.ps1 -WithJava       # JDK, Gradle, Maven
 #
 # Exit codes (matching install-system-deps.sh):
 #   0   success, or all deps present in -Check mode
@@ -28,7 +29,8 @@ param(
     [switch]$DryRun,
     [switch]$WithDocker,
     [switch]$WithTradingTools,
-    [switch]$WithOcr
+    [switch]$WithOcr,
+    [switch]$WithJava
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,9 +73,17 @@ $Packages = [ordered]@{
 # later with no obvious connection to this step. `--override` selects the C++
 # workload non-interactively, which is what the docs' "select Desktop
 # development with C++ during install" means for anyone clicking through.
+#
+# Temurin's MSI leaves JAVA_HOME unset under its default feature selection. Maven
+# reads JAVA_HOME directly and fails without it, so the two optional features
+# that set the variable and extend PATH are requested explicitly. `--custom`
+# appends to the msiexec command line; `--override` would replace winget's own
+# silent-install arguments and is wrong here.
 $PackageArgs = @{
     'Microsoft.VisualStudio.2022.BuildTools' =
         @('--override', '--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
+    'EclipseAdoptium.Temurin.21.JDK' =
+        @('--custom', 'ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJavaHome')
 }
 
 if ($WithDocker)        { $Packages['Docker.DockerDesktop'] = @('docker') }
@@ -83,6 +93,17 @@ if ($WithTradingTools)  {
 }
 # RapidOCR needs an interpreter to build its virtualenv from.
 if ($WithOcr) { $Packages['Python.Python.3.12'] = @('python') }
+# Java toolchain. `javac` as well as `java` is probed deliberately: a JRE
+# satisfies `java` and cannot compile anything, which is the failure this
+# would otherwise hide until the first build.
+#
+# Only the JDK comes from winget: neither Gradle nor Maven is in the winget
+# repository at all (searching either name returns unrelated packages), so both
+# are installed from their projects' official archives by Install-JavaBuildTools
+# below.
+if ($WithJava) {
+    $Packages['EclipseAdoptium.Temurin.21.JDK'] = @('java', 'javac')
+}
 
 # poppler ships three binaries and the PDF pipeline needs all of them:
 #   pdftotext  - text-layer extraction
@@ -95,6 +116,7 @@ $RequiredBinaries = @(
 if ($WithDocker)       { $RequiredBinaries += 'docker' }
 if ($WithTradingTools) { $RequiredBinaries += @('node', 'npm', 'python') }
 if ($WithOcr -and -not $WithTradingTools) { $RequiredBinaries += 'python' }
+if ($WithJava)         { $RequiredBinaries += @('java', 'javac', 'gradle', 'mvn') }
 
 # Whether the Perl on PATH can actually configure vendored OpenSSL.
 #
@@ -116,6 +138,144 @@ function Test-BuildPerl {
         Ok     = $false
         Reason = 'perl lacks Locale::Maketext::Simple (this is Git for Windows'' msys perl, not Strawberry Perl)'
         Path   = $perl.Source
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Gradle and Maven — official archives, not winget
+# ---------------------------------------------------------------------------
+#
+# Neither tool is packaged in winget. Both publish a versioned zip with a
+# published checksum beside it, which is what is used here.
+#
+# Everything lands under %LOCALAPPDATA%\Programs and the PATH entries are
+# written to the *user* environment, so no part of this needs elevation — which
+# also means no UAC prompt can block a non-interactive run.
+#
+# The checksum comes from the same host as the archive, so it guards against a
+# truncated or corrupted download rather than against a compromised origin. It
+# is the strongest check either project publishes.
+
+# Maven has no version-metadata endpoint that also serves a checksum, so the
+# version is pinned. It is the version maven.apache.org/download.cgi names as
+# "the recommended version for all users"; bumping it is this one line.
+# archive.apache.org rather than dlcdn.apache.org: the archive is permanent,
+# while the mirror drops releases as they age out and would start 404ing.
+$MavenVersion = '3.9.16'
+$MavenBaseUrl = "https://archive.apache.org/dist/maven/maven-3/$MavenVersion/binaries"
+
+$JavaToolsRoot = Join-Path $env:LOCALAPPDATA 'Programs'
+
+function Install-ZipDistribution {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$ExpectedHash,
+        [Parameter(Mandatory)][ValidateSet('SHA256', 'SHA512')][string]$Algorithm,
+        [Parameter(Mandatory)][string]$BinDir
+    )
+
+    if (Test-Path $BinDir) {
+        Write-Host "  present: $Name ($BinDir)"
+        return $true
+    }
+
+    $zip = Join-Path ([System.IO.Path]::GetTempPath()) "archon-$Name.zip"
+    Write-Host "+ downloading $Name from $Url"
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $zip -UseBasicParsing
+    } catch {
+        Write-Host "  FAILED: could not download $Name : $_" -ForegroundColor Red
+        return $false
+    }
+
+    # Verified before extraction, never after: an archive that fails the check
+    # is not written anywhere but the temp file it arrived in.
+    $actual = (Get-FileHash -Path $zip -Algorithm $Algorithm).Hash
+    if ($actual -ne $ExpectedHash.Trim().ToUpperInvariant()) {
+        Write-Host "  FAILED: $Name checksum mismatch - refusing to install" -ForegroundColor Red
+        Write-Host "    expected: $ExpectedHash"
+        Write-Host "    actual:   $actual"
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    try {
+        if (-not (Test-Path $JavaToolsRoot)) {
+            New-Item -ItemType Directory -Force -Path $JavaToolsRoot | Out-Null
+        }
+        Expand-Archive -Path $zip -DestinationPath $JavaToolsRoot -Force
+    } catch {
+        Write-Host "  FAILED: could not unpack $Name : $_" -ForegroundColor Red
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    return (Test-Path $BinDir)
+}
+
+# Append to the *user* PATH, persistently, without duplicating an existing entry.
+function Add-UserPathEntry {
+    param([Parameter(Mandatory)][string]$Directory)
+
+    $current = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    if (-not $current) { $current = '' }
+    $entries = $current -split ';' | Where-Object { $_ -ne '' }
+    if ($entries -contains $Directory) {
+        Write-Host "  PATH already contains $Directory"
+        return
+    }
+    $updated = (@($entries) + $Directory) -join ';'
+    [Environment]::SetEnvironmentVariable('PATH', $updated, 'User')
+    # Also make it usable in THIS process, so the verification pass below sees it.
+    $env:PATH = "$env:PATH;$Directory"
+    Write-Host "  added to user PATH: $Directory"
+}
+
+function Install-JavaBuildTools {
+    if (-not $WithJava) { return }
+
+    Write-Host ''
+    Write-Host 'install-system-deps.ps1: installing Gradle and Maven from official archives'
+
+    if ($DryRun) {
+        Write-Host '[dry-run] resolve https://services.gradle.org/versions/current, verify SHA-256, unpack Gradle to' $JavaToolsRoot
+        Write-Host "[dry-run] download $MavenBaseUrl/apache-maven-$MavenVersion-bin.zip, verify SHA-512, unpack to $JavaToolsRoot"
+        Write-Host '[dry-run] append both bin directories to the user PATH'
+        return
+    }
+
+    # --- Gradle -------------------------------------------------------------
+    # services.gradle.org/versions/current returns the current version, its
+    # download URL and its SHA-256 in one document, so nothing is pinned here.
+    try {
+        $meta = Invoke-RestMethod -Uri 'https://services.gradle.org/versions/current' -UseBasicParsing
+    } catch {
+        Write-Host "  FAILED: could not resolve the current Gradle version: $_" -ForegroundColor Red
+        $meta = $null
+    }
+    if ($meta -and $meta.version -and $meta.downloadUrl -and $meta.checksum) {
+        $gradleBin = Join-Path $JavaToolsRoot "gradle-$($meta.version)\bin"
+        $ok = Install-ZipDistribution -Name "gradle-$($meta.version)" -Url $meta.downloadUrl `
+            -ExpectedHash $meta.checksum -Algorithm SHA256 -BinDir $gradleBin
+        if ($ok) { Add-UserPathEntry -Directory $gradleBin }
+    } elseif ($meta) {
+        Write-Host '  FAILED: Gradle version metadata was missing expected fields' -ForegroundColor Red
+    }
+
+    # --- Maven --------------------------------------------------------------
+    $mavenZipUrl = "$MavenBaseUrl/apache-maven-$MavenVersion-bin.zip"
+    try {
+        $mavenHash = (Invoke-WebRequest -Uri "$mavenZipUrl.sha512" -UseBasicParsing).Content
+    } catch {
+        Write-Host "  FAILED: could not fetch the Maven checksum: $_" -ForegroundColor Red
+        $mavenHash = $null
+    }
+    if ($mavenHash) {
+        $mavenBin = Join-Path $JavaToolsRoot "apache-maven-$MavenVersion\bin"
+        $ok = Install-ZipDistribution -Name "apache-maven-$MavenVersion" -Url $mavenZipUrl `
+            -ExpectedHash $mavenHash -Algorithm SHA512 -BinDir $mavenBin
+        if ($ok) { Add-UserPathEntry -Directory $mavenBin }
     }
 }
 
@@ -151,6 +311,9 @@ if ($Check) {
 
     Write-Host "install-system-deps.ps1: all required binaries present ($($RequiredBinaries -join ', '))"
     Write-Host "install-system-deps.ps1: perl usable for vendored OpenSSL ($($perl.Path))"
+    if ($WithJava -and -not $env:JAVA_HOME) {
+        Write-Host 'install-system-deps.ps1: note - JAVA_HOME is unset. Gradle finds a JDK on PATH, but Maven reads JAVA_HOME.' -ForegroundColor Yellow
+    }
     exit 0
 }
 
@@ -158,7 +321,7 @@ if ($Check) {
 # Install
 # ---------------------------------------------------------------------------
 Write-Host 'install-system-deps.ps1: installing Windows build and ingest dependencies'
-Write-Host "install-system-deps.ps1: docker=$WithDocker trading-tools=$WithTradingTools ocr=$WithOcr"
+Write-Host "install-system-deps.ps1: docker=$WithDocker trading-tools=$WithTradingTools ocr=$WithOcr java=$WithJava"
 Write-Host ''
 
 $failed = @()
@@ -191,6 +354,8 @@ foreach ($id in $Packages.Keys) {
         $failed += $id
     }
 }
+
+Install-JavaBuildTools
 
 if ($DryRun) {
     Write-Host ''
@@ -293,6 +458,15 @@ if ($WithOcr) {
     Write-Host "     RapidOCR image OCR is installed at $MarkerVenv and needs no further configuration"
 } else {
     Write-Host '     Optional RapidOCR image-OCR fallback: re-run with -WithOcr'
+}
+if ($WithJava) {
+    Write-Host '     Java analysis needs no further system packages: Checkstyle, PMD, SpotBugs,'
+    Write-Host "     FindSecBugs, Error Prone and PIT are declared by the project's own build."
+    if (-not $env:JAVA_HOME) {
+        Write-Host '     JAVA_HOME is not set in THIS shell yet - open a new one before running Maven.' -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '     Optional Java toolchain (JDK, Gradle, Maven): re-run with -WithJava'
 }
 if ($WithDocker) {
     Write-Host '  5. Enable Docker sandboxing with [sandbox].backend="docker" and [sandbox.docker].enabled=true'

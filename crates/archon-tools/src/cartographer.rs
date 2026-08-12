@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod deps;
 pub mod index;
 pub mod parser;
 pub mod summary;
@@ -20,7 +21,10 @@ const EXCLUDE_DIRS: &[&str] = &[
     "__pycache__",
     ".venv",
     "dist",
+    // Gradle writes compiled output to `build/` and its own caches to
+    // `.gradle/`; Maven writes to `target/`, already excluded above.
     "build",
+    ".gradle",
 ];
 
 // ---------------------------------------------------------------------------
@@ -38,7 +42,7 @@ impl Tool for CartographerTool {
 
     fn description(&self) -> &str {
         "Scan and index a codebase for symbols (structs, classes, functions, etc.). \
-         Supports Rust, Python, TypeScript, JavaScript, and Go. \
+         Supports Rust, Python, TypeScript, JavaScript, Go, and Java. \
          Operations: scan (index directory), query (find symbols), \
          summary (token-bounded overview), focus (all symbols in one file)."
     }
@@ -359,30 +363,10 @@ fn file_mtime(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Simple regex-based import dependency extraction.
-///
-/// Adds edges to the codebase index's dependency graph.
+/// Record an edge from `from_file` to every import named in `source`.
 fn extract_deps(source: &str, language: &str, from_file: &str, index: &mut CodebaseIndex) {
-    let pattern = match language {
-        "rust" => r#"(?m)^use\s+([\w:]+)"#,
-        "python" => r#"(?m)^(?:import|from)\s+([\w.]+)"#,
-        "typescript" | "javascript" => r##"(?m)from\s+['"]([^'"]+)['"]"##,
-        "go" => r#"(?m)import\s+"([\w./]+)""#,
-        _ => return,
-    };
-
-    let re = match regex::Regex::new(pattern) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("Failed to compile import regex: {e}");
-            return;
-        }
-    };
-
-    for cap in re.captures_iter(source) {
-        if let Some(dep) = cap.get(1) {
-            index.add_dep_edge(from_file, dep.as_str());
-        }
+    for dep in deps::extract_dependencies(source, language) {
+        index.add_dep_edge(from_file, &dep);
     }
 }
 
