@@ -51,7 +51,7 @@ async fn answer_btw_question(
             "role": "user",
             "content": [{"type": "text", "text": wrapped}],
         })],
-        tools: Vec::new(),
+        tools: Default::default(),
         request_origin: Some("btw".into()),
         ..LlmRequest::default()
     };

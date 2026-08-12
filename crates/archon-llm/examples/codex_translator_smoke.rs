@@ -12,7 +12,9 @@ fn main() {
             serde_json::json!({"role": "user", "content": [{"type": "text", "text": "hello"}]}),
             serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "hi"}]}),
         ],
-        tools: vec![serde_json::json!({"name": "lookup", "input_schema": {"type": "object"}})],
+        tools: archon_llm::provider::shared_tools(vec![
+            serde_json::json!({"name": "lookup", "input_schema": {"type": "object"}}),
+        ]),
         ..LlmRequest::default().with_reasoning_encrypted(Some("blob".into()))
     };
 

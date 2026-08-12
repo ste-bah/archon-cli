@@ -113,7 +113,7 @@ impl VertexProvider {
         }
 
         if !request.tools.is_empty() {
-            body["tools"] = serde_json::Value::Array(request.tools.clone());
+            body["tools"] = serde_json::Value::Array(request.tools.as_ref().clone());
         }
 
         body
@@ -583,7 +583,7 @@ mod tests {
             Some("missing-credentials.json".into()),
         );
         let request = LlmRequest {
-            tools: vec![serde_json::json!({"name": "lookup"})],
+            tools: std::sync::Arc::new(vec![serde_json::json!({"name": "lookup"})]),
             ..LlmRequest::default()
         };
 

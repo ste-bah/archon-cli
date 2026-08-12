@@ -97,7 +97,10 @@ impl Agent {
             max_tokens,
             system,
             messages,
-            tools: self.config.tools.clone(),
+            // The main-agent loop keeps its owned tool list (#171 non-goal:
+            // no main-agent changes); it is wrapped here so the request type
+            // stays shared-by-construction for the subagent path.
+            tools: archon_llm::provider::shared_tools(self.config.tools.clone()),
             thinking,
             speed,
             effort,

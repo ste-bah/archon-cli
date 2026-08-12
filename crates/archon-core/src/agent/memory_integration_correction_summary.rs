@@ -98,7 +98,7 @@ impl Agent {
                     "role": "user",
                     "content": build_correction_summary_prompt(&user_input),
                 })],
-                tools: Vec::new(),
+                tools: Default::default(),
                 thinking: None,
                 speed: None,
                 effort: None,

@@ -436,7 +436,7 @@ impl AnthropicClient {
             body["tools"] = if crate::anthropic_url::is_official_messages_url(&self.api_url) {
                 serde_json::json!(cached_tool_blocks(&request.tools))
             } else {
-                serde_json::json!(&request.tools)
+                serde_json::json!(request.tools.as_ref())
             };
         }
 

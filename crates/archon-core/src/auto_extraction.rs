@@ -121,7 +121,7 @@ impl AutoExtractor {
                 "role": "user",
                 "content": prompt,
             })],
-            tools: vec![],
+            tools: Default::default(),
             thinking: None,
             speed: None,
             effort: None,

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::{collect_stream_round, compact_messages_for_retry, projected_request};
+use super::{MessageHistory, collect_stream_round, compact_messages_for_retry, projected_request};
 use crate::subagent::runner::SubagentRunner;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
 use archon_llm::provider::{

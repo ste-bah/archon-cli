@@ -80,7 +80,7 @@ impl Agent {
                     "role": "user",
                     "content": prompt,
                 })],
-                tools: Vec::new(),
+                tools: Default::default(),
                 thinking: None,
                 speed: None,
                 effort: None,

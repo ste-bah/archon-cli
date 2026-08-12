@@ -256,7 +256,7 @@ async fn generate_summary_with_usage(
                 "text": archon_context::compact::SUMMARY_PROMPT,
             })],
             messages: request_messages,
-            tools: Vec::new(),
+            tools: Default::default(),
             thinking: None,
             speed: None,
             effort: None,

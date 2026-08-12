@@ -10,7 +10,10 @@ pub struct MessageRequest {
     pub max_tokens: u32,
     pub system: Vec<serde_json::Value>,
     pub messages: Vec<serde_json::Value>,
-    pub tools: Vec<serde_json::Value>,
+    /// Shared frozen tool schemas — see `LlmRequest::tools` (#171 part 3).
+    /// Keeping the same shape here means the `LlmRequest` conversion moves an
+    /// `Arc` instead of deep-cloning every schema on the way to the wire.
+    pub tools: crate::provider::SharedTools,
     pub thinking: Option<serde_json::Value>,
     /// When fast mode is active, set to `Some("fast")`.
     pub speed: Option<String>,
@@ -27,7 +30,7 @@ impl Default for MessageRequest {
             max_tokens: 8192,
             system: Vec::new(),
             messages: Vec::new(),
-            tools: Vec::new(),
+            tools: crate::provider::SharedTools::default(),
             thinking: None,
             speed: None,
             effort: None,

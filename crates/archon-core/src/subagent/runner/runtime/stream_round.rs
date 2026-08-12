@@ -16,7 +16,7 @@ pub(super) struct StreamRoundResult {
 
 pub(super) async fn collect_stream_round(
     runner: &SubagentRunner,
-    messages: &mut Vec<serde_json::Value>,
+    messages: &mut MessageHistory,
     auto_compact: &mut crate::agent::AutoCompactState,
     (
         recovery_ladder,
@@ -29,16 +29,19 @@ pub(super) async fn collect_stream_round(
         &mut bool,
         &mut u64,
     ),
-    request: LlmRequest,
+    template: LlmRequest,
     (request_body_bytes, large_retry_body_bytes): (usize, usize),
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) -> anyhow::Result<StreamRoundResult> {
     let mut reconnected = false;
-    let mut rx = loop {
+    // `request` is the body that actually opened the stream. Mid-stream
+    // recovery classifies and measures against it rather than against the
+    // template, which carries no messages of its own (#171 part 2).
+    let (mut rx, request) = loop {
         let attempt_request = if std::mem::take(emergency_projection_pending) {
-            emergency_projected_request(runner, messages, &request)
+            emergency_projected_request(runner, messages.as_slice(), &template)
         } else {
-            projected_request(runner, messages, &request)
+            projected_request(runner, messages.as_slice(), &template)
         };
         match tokio::time::timeout(
             STREAM_IDLE_TIMEOUT,
@@ -84,7 +87,7 @@ pub(super) async fn collect_stream_round(
                 drop(rx);
                 reconnected = true;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
-                let retry_request = projected_request(runner, messages, &request);
+                let retry_request = projected_request(runner, messages.as_slice(), &request);
                 rx = tokio::time::timeout(
                     STREAM_IDLE_TIMEOUT,
                     runner.provider.stream(retry_request),

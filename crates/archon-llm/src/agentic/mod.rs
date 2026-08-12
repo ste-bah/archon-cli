@@ -27,7 +27,8 @@ pub struct AgenticTurnRequest {
     pub max_tokens: u32,
     pub system: Vec<serde_json::Value>,
     pub messages: Vec<serde_json::Value>,
-    pub tools: Vec<serde_json::Value>,
+    /// Shared frozen tool schemas — see `LlmRequest::tools` (#171 part 3).
+    pub tools: crate::provider::SharedTools,
     pub tool_results: Vec<AgenticToolResult>,
     pub effort: Option<String>,
     pub reasoning_encrypted: Option<String>,

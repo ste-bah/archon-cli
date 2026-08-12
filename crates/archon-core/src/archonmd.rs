@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+mod cache;
+
+pub use cache::{ArchonMdCache, ArchonMdCacheStats};
 
 /// Discover and load all ARCHON.md files from global to project.
 ///
@@ -28,22 +32,43 @@ pub fn load_hierarchical_archon_md_with_limit(working_dir: &Path, max_chars: usi
 
 /// Internal: collect sections, optionally truncating.
 fn collect_archon_md_sections(working_dir: &Path, max_chars: Option<usize>) -> String {
-    let mut sections: Vec<String> = Vec::new();
-    let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
+    let sections = render_sections(&discover_archon_md_paths(working_dir));
+    join_sections(sections, max_chars)
+}
+
+/// Join rendered sections, applying the optional front-truncation limit.
+fn join_sections(sections: Vec<String>, max_chars: Option<usize>) -> String {
+    let combined = sections.join("\n");
+    match max_chars {
+        Some(limit) if combined.len() > limit => truncate_from_front(sections, limit),
+        _ => combined,
+    }
+}
+
+/// Discover, in load order, the instructions files that apply to `working_dir`.
+///
+/// This is the stat-only half of loading: it resolves the hierarchy and
+/// deduplicates by canonical path but reads nothing. [`ArchonMdCache`] uses it
+/// to revalidate a cached render without re-reading the files (issue #171
+/// Part 5) — and because discovery reruns, a file *added to* or *removed from*
+/// the hierarchy changes the returned list, not merely its mtimes.
+pub(crate) fn discover_archon_md_paths(working_dir: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
 
     // 1. Global: ~/.archon/ARCHON.md (with ~/.claude/CLAUDE.md fallback)
     if let Some(home) = dirs::home_dir() {
         let new_global = home.join(".archon").join("ARCHON.md");
         let old_global = home.join(".claude").join("CLAUDE.md");
         if new_global.is_file() {
-            try_load(&new_global, &mut sections, &mut seen);
+            push_unique(new_global, &mut paths, &mut seen);
         } else if old_global.is_file() {
             tracing::warn!(
                 "Loading from deprecated path {}. Rename to {} to suppress this warning.",
                 old_global.display(),
                 new_global.display()
             );
-            try_load(&old_global, &mut sections, &mut seen);
+            push_unique(old_global, &mut paths, &mut seen);
         }
     }
 
@@ -61,28 +86,42 @@ fn collect_archon_md_sections(working_dir: &Path, max_chars: Option<usize>) -> S
         if *ancestor == canonical.as_path() {
             continue;
         }
-        try_load_dir(ancestor, &mut sections, &mut seen);
+        push_dir_candidate(ancestor, &mut paths, &mut seen);
     }
 
     // 3. Working dir itself
-    try_load_dir(canonical.as_path(), &mut sections, &mut seen);
+    push_dir_candidate(canonical.as_path(), &mut paths, &mut seen);
 
-    let combined = sections.join("\n");
-
-    match max_chars {
-        Some(limit) if combined.len() > limit => truncate_from_front(sections, limit),
-        _ => combined,
-    }
+    paths
 }
 
-/// Try to load ARCHON.md from a directory, with backward compat fallback.
+/// Read each discovered file and render its section, preserving the historical
+/// `# ARCHON.md from {path}` header and the skip-empty/skip-unreadable rules.
+pub(crate) fn render_sections(paths: &[PathBuf]) -> Vec<String> {
+    let mut sections = Vec::with_capacity(paths.len());
+    for path in paths {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue, // Skip non-UTF-8 or unreadable files
+        };
+        if content.is_empty() {
+            continue;
+        }
+        let header = format!("# ARCHON.md from {}\n", path.display());
+        sections.push(format!("{header}\n{content}"));
+    }
+    sections
+}
+
+/// Pick the applicable instructions file in a directory, with backward compat
+/// fallback.
 ///
 /// Preference order:
 /// 1. `.archon/ARCHON.md` (new, preferred)
 /// 2. `.claude/CLAUDE.md` (deprecated fallback)
 /// 3. `ARCHON.md` (root-level new)
 /// 4. `CLAUDE.md` (root-level deprecated fallback)
-fn try_load_dir(dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
+fn push_dir_candidate(dir: &Path, paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
     let dot_archon = dir.join(".archon").join("ARCHON.md");
     let dot_claude = dir.join(".claude").join("CLAUDE.md");
     let plain_archon = dir.join("ARCHON.md");
@@ -90,48 +129,37 @@ fn try_load_dir(dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::
 
     // Prefer .archon/ARCHON.md; fall back to .claude/CLAUDE.md; then root files
     if dot_archon.is_file() {
-        try_load(&dot_archon, sections, seen);
+        push_unique(dot_archon, paths, seen);
     } else if dot_claude.is_file() {
         tracing::warn!(
             "Loading from deprecated path {}. Rename to {} to suppress this warning.",
             dot_claude.display(),
             dot_archon.display()
         );
-        try_load(&dot_claude, sections, seen);
+        push_unique(dot_claude, paths, seen);
     } else if plain_archon.is_file() {
-        try_load(&plain_archon, sections, seen);
+        push_unique(plain_archon, paths, seen);
     } else if plain_claude.is_file() {
         tracing::warn!(
             "Loading from deprecated path {}. Rename to {} to suppress this warning.",
             plain_claude.display(),
             plain_archon.display()
         );
-        try_load(&plain_claude, sections, seen);
+        push_unique(plain_claude, paths, seen);
     }
 }
 
-/// Try to load a single instructions file, deduplicating by canonical path.
-fn try_load(path: &Path, sections: &mut Vec<String>, seen: &mut HashSet<std::path::PathBuf>) {
+/// Record a candidate path, deduplicating by canonical path so symlinks and
+/// repeated ancestors don't load the same file twice.
+fn push_unique(path: PathBuf, paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
     let canon = match path.canonicalize() {
         Ok(p) => p,
         Err(_) => return,
     };
-
     if !seen.insert(canon) {
-        return; // Already loaded this exact file
+        return; // Already discovered this exact file
     }
-
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return, // Skip non-UTF-8 or unreadable files
-    };
-
-    if content.is_empty() {
-        return;
-    }
-
-    let header = format!("# ARCHON.md from {}\n", path.display());
-    sections.push(format!("{header}\n{content}"));
+    paths.push(path);
 }
 
 /// Truncate sections from the front (global first) until total fits in limit.

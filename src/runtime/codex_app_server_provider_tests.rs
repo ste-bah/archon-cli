@@ -13,11 +13,11 @@ fn configured_provider() -> CodexAppServerProvider {
 async fn provider_rejects_tools_without_direct_fallback() {
     let provider = configured_provider();
     let request = LlmRequest {
-        tools: vec![serde_json::json!({
+        tools: archon_llm::provider::shared_tools(vec![serde_json::json!({
             "name": "Bash",
             "description": "run command",
             "input_schema": {"type": "object"}
-        })],
+        })]),
         ..LlmRequest::default()
     };
 

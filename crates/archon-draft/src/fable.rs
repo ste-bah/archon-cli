@@ -89,7 +89,7 @@ pub fn build_message_request(model: &str, max_tokens: u32, prompt: &str) -> Mess
         max_tokens,
         system: vec![],
         messages: vec![json!({"role": "user", "content": prompt})],
-        tools: vec![],
+        tools: Default::default(),
         thinking: Some(json!({"type": "adaptive"})),
         speed: None,
         effort: Some("medium".to_string()),

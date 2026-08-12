@@ -97,11 +97,11 @@ fn codex_request_body_stays_responses_shaped_without_anthropic_cache_control() {
             "role": "assistant",
             "content": [{"type": "tool_use", "id": "call_1", "name": "Read", "input": {}}],
         })],
-        tools: vec![serde_json::json!({
+        tools: archon_llm::provider::shared_tools(vec![serde_json::json!({
             "name": "Read",
             "description": "Read a file",
             "input_schema": {"type": "object", "properties": {}},
-        })],
+        })]),
         ..LlmRequest::default()
     };
 

@@ -119,6 +119,14 @@ pub struct AgentSubagentExecutor {
     /// maximum as a defensive invariant, but workflow fanout must experience
     /// the limit as backpressure instead of a hard branch failure.
     subagent_capacity: Arc<Semaphore>,
+    /// Session cache for the rendered ARCHON.md hierarchy (#171 Part 5).
+    /// Keyed by `working_dir` and revalidated against the discovered files'
+    /// `(len, mtime)`, so a 10-agent fan-out reads the hierarchy once.
+    archon_md_cache: Arc<crate::archonmd::ArchonMdCache>,
+    /// Session cache for rendered `<agent-memory>` blocks (#171 Part 6).
+    /// Invalidated from `handle_inner_complete` right after the single
+    /// `save_agent_memory` site writes.
+    recall_cache: Arc<crate::agents::memory::AgentMemoryRecallCache>,
 }
 
 /// Per-subagent metadata the executor caches between
@@ -174,7 +182,19 @@ impl AgentSubagentExecutor {
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),
             memory_cache: Arc::new(Mutex::new(HashMap::new())),
             subagent_capacity,
+            archon_md_cache: Arc::new(crate::archonmd::ArchonMdCache::new()),
+            recall_cache: Arc::new(crate::agents::memory::AgentMemoryRecallCache::new()),
         }
+    }
+
+    /// Snapshot of the ARCHON.md cache counters (spawn fixtures, #171 Part 5).
+    pub fn archon_md_cache_stats(&self) -> crate::archonmd::ArchonMdCacheStats {
+        self.archon_md_cache.stats()
+    }
+
+    /// Snapshot of the memory-recall cache counters (spawn fixtures, #171 Part 6).
+    pub fn recall_cache_stats(&self) -> crate::agents::memory::RecallCacheStats {
+        self.recall_cache.stats()
     }
 
     /// Fire a hook via the optional hook registry. Inlined from

@@ -54,7 +54,7 @@ fn request_with_tool(content: &str) -> LlmRequest {
             "role": "user",
             "content": [{"type": "text", "text": content}]
         })],
-        tools: vec![serde_json::json!({
+        tools: archon_llm::provider::shared_tools(vec![serde_json::json!({
             "name": "lookup",
             "description": "Lookup a value",
             "input_schema": {
@@ -62,7 +62,7 @@ fn request_with_tool(content: &str) -> LlmRequest {
                 "properties": {"query": {"type": "string"}},
                 "required": ["query"]
             }
-        })],
+        })]),
         ..request()
     }
 }
@@ -201,7 +201,7 @@ fn captured_tool_and_reasoning_fixtures_match_translator_shape() {
             "role": "user",
             "content": [{"type": "text", "text": "call the tool"}]
         })],
-        tools: vec![serde_json::json!({
+        tools: archon_llm::provider::shared_tools(vec![serde_json::json!({
             "name": "lookup",
             "description": "Lookup a value",
             "input_schema": {
@@ -209,7 +209,7 @@ fn captured_tool_and_reasoning_fixtures_match_translator_shape() {
                 "properties": {"query": {"type": "string"}},
                 "required": ["query"]
             }
-        })],
+        })]),
         ..LlmRequest::default()
     };
     let tool_body = serde_json::to_value(

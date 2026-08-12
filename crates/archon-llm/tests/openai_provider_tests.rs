@@ -102,14 +102,14 @@ async fn openai_tool_section_bytes_are_stable() {
         .mount(&server)
         .await;
     let provider = OpenAiProvider::new("test-key".into(), Some(server.uri()), "gpt-4o".into());
-    let tools = vec![serde_json::json!({
+    let tools = archon_llm::provider::shared_tools(vec![serde_json::json!({
         "name":"Read",
         "description":"read",
         "input_schema":{
             "type":"object",
             "properties":{"file_path":{"type":"string"}}
         }
-    })];
+    })]);
 
     for content in ["first turn", "second turn"] {
         let mut stream = provider

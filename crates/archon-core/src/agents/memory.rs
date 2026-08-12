@@ -6,6 +6,7 @@
 mod extraction;
 mod file_prompt;
 mod meta;
+mod recall_cache;
 mod store;
 mod tags;
 
@@ -15,8 +16,11 @@ pub use file_prompt::{
     get_agent_memory_dir, load_agent_memory_prompt, truncate_entrypoint_content,
 };
 pub use meta::increment_invocation_count;
+pub use recall_cache::{AgentMemoryRecallCache, DEFAULT_TTL as RECALL_CACHE_TTL, RecallCacheStats};
 pub use store::{load_agent_memory, save_agent_memory};
 pub use tags::{agent_tag, scope_tag};
 
+/// `pub(crate)` so the subagent-executor spawn fixtures can reuse the memory
+/// test doubles rather than duplicating a full `MemoryTrait` implementation.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

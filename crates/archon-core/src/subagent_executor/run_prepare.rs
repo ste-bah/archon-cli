@@ -1,5 +1,10 @@
 use super::*;
 
+/// Spawn fixture for issue #171 Parts 5 and 6 — a child module so it can drive
+/// the private `assemble_system_prompt`, which is where both caches are read.
+#[cfg(test)]
+mod spawn_cache_tests;
+
 pub(super) struct RunIdentity {
     pub(super) manager_id: String,
     pub(super) cache_id: String,
@@ -271,7 +276,11 @@ impl AgentSubagentExecutor {
         if def.map(|d| d.omit_claude_md).unwrap_or(false) {
             return prompt;
         }
-        let archon_md = crate::archonmd::load_hierarchical_archon_md(&self.working_dir);
+        // #171 Part 5: the hierarchy depends only on `working_dir`, so every
+        // subagent in a fan-out shares one render. The cache re-discovers the
+        // hierarchy (stat-only) on each call and re-reads it only when a file's
+        // identity, length, or mtime changed.
+        let archon_md = self.archon_md_cache.load(&self.working_dir);
         if archon_md.is_empty() {
             prompt
         } else {
@@ -316,20 +325,19 @@ impl AgentSubagentExecutor {
         let Some(ref memory) = self.memory else {
             return prompt;
         };
-        let memories = crate::agents::memory::load_agent_memory(
+        // #171 Part 6: repeated fan-outs of one agent type re-ran identical
+        // recall queries for an identical block. The cache holds the rendered
+        // block and is invalidated by `handle_inner_complete` right after the
+        // single `save_agent_memory` site writes.
+        let Some(block) = self.recall_cache.block(
             &def.agent_type,
             &def.recall_queries,
             memory.as_ref(),
             def.memory_scope.as_ref(),
-        );
-        if memories.is_empty() {
-            prompt
-        } else {
-            format!(
-                "{prompt}\n\n<agent-memory>\n{}\n</agent-memory>",
-                memories.join("\n---\n")
-            )
-        }
+        ) else {
+            return prompt;
+        };
+        format!("{prompt}\n\n{block}")
     }
 
     fn with_file_memory(&self, prompt: String, def: Option<&CustomAgentDefinition>) -> String {

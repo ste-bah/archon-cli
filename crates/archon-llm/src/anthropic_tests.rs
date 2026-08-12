@@ -290,7 +290,7 @@ fn tool_definitions_get_anthropic_cache_control() {
     let client = AnthropicClient::new(make_auth(), make_identity(), None);
     let request = MessageRequest {
         messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-        tools: vec![
+        tools: crate::provider::shared_tools(vec![
             serde_json::json!({
                 "name": "Agent",
                 "description": "spawn",
@@ -301,7 +301,7 @@ fn tool_definitions_get_anthropic_cache_control() {
                 "description": "read",
                 "input_schema": {"type": "object"}
             }),
-        ],
+        ]),
         ..MessageRequest::default()
     };
 
@@ -395,7 +395,7 @@ fn cache_control_blocks_stay_within_anthropic_budget() {
         .collect();
     let request = MessageRequest {
         messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-        tools,
+        tools: crate::provider::shared_tools(tools),
         ..MessageRequest::default()
     };
 

@@ -78,7 +78,7 @@ pub(crate) fn request_size_breakdown(
         "max_tokens": request.max_tokens,
         "system": &request.system,
         "messages": &request.messages,
-        "tools": &request.tools,
+        "tools": request.tools.as_ref(),
         "thinking": &request.thinking,
         "speed": &request.speed,
         "effort": &request.effort,
@@ -92,7 +92,7 @@ pub(crate) fn request_size_breakdown(
         approx_tokens: approx_tokens_from_bytes(total_body_bytes),
         system_bytes: serialized_len(&request.system),
         messages_bytes: serialized_len(&request.messages),
-        tools_bytes: serialized_len(&request.tools),
+        tools_bytes: serialized_len(request.tools.as_ref()),
         extra_bytes: serialized_len(&request.extra),
         message_count: request.messages.len(),
         tool_count: request.tools.len(),
@@ -101,6 +101,43 @@ pub(crate) fn request_size_breakdown(
 
 pub(crate) fn approx_tokens_from_bytes(bytes: usize) -> u64 {
     bytes.div_ceil(4) as u64
+}
+
+/// Serialized size of everything in a request except the message array.
+///
+/// #171 part 7: the subagent round measures this once per run — the tool list
+/// is frozen for the session (#75 A3) and the system blocks are rebuilt from
+/// the same constant inputs every round — and adds the running message
+/// estimate to it, instead of re-serializing the whole request each round only
+/// to produce a pressure number.
+pub(crate) fn request_envelope_bytes(request: &archon_llm::provider::LlmRequest) -> usize {
+    serialized_len(&serde_json::json!({
+        "model": &request.model,
+        "max_tokens": request.max_tokens,
+        "system": &request.system,
+        "messages": [],
+        "tools": request.tools.as_ref(),
+        "thinking": &request.thinking,
+        "speed": &request.speed,
+        "effort": &request.effort,
+        "extra": &request.extra,
+        "request_origin": &request.request_origin,
+        "reasoning_encrypted": &request.reasoning_encrypted,
+    }))
+}
+
+/// Approximate a request body size from the envelope plus a running message
+/// token estimate.
+///
+/// The estimate's own model is `bytes / 4` (`estimate_message_tokens`), so
+/// multiplying back by four recovers the message bytes it was derived from.
+/// The result is a slight over-estimate: it counts the untrimmed history,
+/// while the wire carries the request-boundary projection (#75 A1), and each
+/// message's token count is rounded up. Both errors push the pressure check to
+/// fire marginally earlier, never later.
+pub(crate) fn estimated_body_bytes(envelope_bytes: usize, message_tokens: u64) -> usize {
+    let message_bytes = usize::try_from(message_tokens.saturating_mul(4)).unwrap_or(usize::MAX);
+    envelope_bytes.saturating_add(message_bytes)
 }
 
 fn serialized_len(value: &impl serde::Serialize) -> usize {
@@ -152,7 +189,9 @@ mod tests {
     fn request_body_bytes_includes_messages_and_tools() {
         let request = LlmRequest {
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-            tools: vec![serde_json::json!({"name": "Agent", "description": "spawn"})],
+            tools: archon_llm::provider::shared_tools(vec![
+                serde_json::json!({"name": "Agent", "description": "spawn"}),
+            ]),
             ..LlmRequest::default()
         };
 
@@ -164,7 +203,9 @@ mod tests {
         let request = LlmRequest {
             system: vec![serde_json::json!({"type": "text", "text": "sys"})],
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-            tools: vec![serde_json::json!({"name": "Agent", "description": "spawn"})],
+            tools: archon_llm::provider::shared_tools(vec![
+                serde_json::json!({"name": "Agent", "description": "spawn"}),
+            ]),
             extra: serde_json::json!({"runtime": "test"}),
             ..LlmRequest::default()
         };

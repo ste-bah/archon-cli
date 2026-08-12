@@ -38,7 +38,7 @@ fn simple_request() -> LlmRequest {
         max_tokens: 32,
         system: Vec::new(),
         messages: vec![json!({"role": "user", "content": "ping"})],
-        tools: Vec::new(),
+        tools: Default::default(),
         thinking: None,
         speed: None,
         effort: None,

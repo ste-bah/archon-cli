@@ -135,7 +135,7 @@ fn llm_request_from_message_request_round_trip() {
         max_tokens: 4096,
         system: vec![serde_json::json!({"type": "text", "text": "system"})],
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-        tools: vec![],
+        tools: Default::default(),
         thinking: Some(serde_json::json!({"type": "enabled", "budget_tokens": 1024})),
         speed: Some("fast".into()),
         effort: Some("low".into()),

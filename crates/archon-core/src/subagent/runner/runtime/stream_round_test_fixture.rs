@@ -44,9 +44,11 @@ async fn reactive_subagent_compaction_failure_updates_breaker_state() {
         Arc::new(config),
         Arc::new(test_identity()),
     );
-    let mut messages: Vec<serde_json::Value> = (0..5)
-        .map(|index| serde_json::json!({"role":"user","content":format!("turn-{index}")}))
-        .collect();
+    let mut messages = MessageHistory::new(
+        (0..5)
+            .map(|index| serde_json::json!({"role":"user","content":format!("turn-{index}")}))
+            .collect(),
+    );
     let mut auto_compact = crate::agent::AutoCompactState::default();
     let mut last_known_context_tokens = 0;
 

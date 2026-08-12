@@ -6,8 +6,9 @@ use std::sync::Mutex;
 
 use crate::agents::definition::AgentMemoryScope;
 
-mod helpers;
+pub(crate) mod helpers;
 
 mod extraction;
 mod prompt;
+mod recall_cache;
 mod store;
