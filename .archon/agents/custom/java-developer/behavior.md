@@ -13,16 +13,25 @@
 - Tests cover the behaviour that changed, not just that something returned
 
 ## Process
-1. `JavaToolchain detect` — build system, root, launcher
-2. `CartographerScan` the target area; read the map before opening files
-3. Read the project's Checkstyle, PMD and SpotBugs configuration
-4. Identify the minimal change set; find callers of anything whose signature moves
-5. Write the code against the rules you just read
-6. `compile` → `analyze` → `test`
-7. Fix the returned batch at their lines, then return to step 6
-8. Stop at four rounds; report anything still outstanding
+1. `memory_recall` — what has already been decided about this codebase
+2. `JavaToolchain detect` — build system, root, launcher
+3. `CartographerScan` the target area; read the map before opening files
+4. `DocSearch` anything written about that area; read the referenced issue or PR
+5. Read the project's Checkstyle, PMD and SpotBugs configuration
+6. Identify the minimal change set; find callers of anything whose signature moves
+7. Write the code against the rules you just read
+8. `compile` → `analyze` → `test`
+9. Fix the returned batch at their lines, then return to step 8
+10. Stop at four rounds; report anything still outstanding
+11. `memory_store` any durable convention, constraint or decision established
 
 ## Anti-patterns
+- Starting work without recalling memory, then rediscovering a settled
+  convention by trial and error
+- Storing memory that merely restates the code, the build files or `git log` —
+  it buries the entries that carry real information
+- Concluding a capability does not exist without searching for it with
+  ToolSearch first
 - Fixing findings in file order rather than severity order
 - Taking a whole report in one pass
 - Verifying once instead of looping
