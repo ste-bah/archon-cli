@@ -24,8 +24,17 @@ const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
 pub struct SubagentRunner {
     provider: Arc<dyn LlmProvider>,
     system_prompt: String,
-    request_system: Vec<serde_json::Value>,
-    tool_definitions: Vec<serde_json::Value>,
+    /// Stable workflow/system blocks appended to every request.
+    ///
+    /// Shared rather than owned (#171 part 3) so the per-round request build
+    /// never clones the block list itself.
+    request_system: Arc<Vec<serde_json::Value>>,
+    /// Frozen tool schemas for the session (#75 A3).
+    ///
+    /// Handed to every `LlmRequest` as a shared `Arc` (#171 part 3): the list
+    /// never changes, so nothing needs its own copy, and byte stability across
+    /// rounds becomes structural rather than a property to re-verify.
+    tool_definitions: archon_llm::provider::SharedTools,
     registry: Arc<ToolRegistry>,
     tool_context: ToolContext,
     model: String,
@@ -91,8 +100,8 @@ impl SubagentRunner {
         Self {
             provider,
             system_prompt,
-            request_system: Vec::new(),
-            tool_definitions,
+            request_system: Arc::new(Vec::new()),
+            tool_definitions: archon_llm::provider::shared_tools(tool_definitions),
             registry,
             tool_context,
             model,
@@ -119,7 +128,7 @@ impl SubagentRunner {
     }
 
     pub fn set_request_system(&mut self, system: Vec<serde_json::Value>) {
-        self.request_system = system;
+        self.request_system = Arc::new(system);
     }
 
     /// TASK-T3 (G4): wire a shared ProgressTracker so the runner can

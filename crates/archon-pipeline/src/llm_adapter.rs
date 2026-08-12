@@ -54,7 +54,7 @@ impl LlmClient for AnthropicLlmAdapter {
             max_tokens: 8192,
             system,
             messages,
-            tools,
+            tools: archon_llm::provider::shared_tools(tools),
             thinking: None,
             speed: None,
             effort: None,
@@ -132,7 +132,7 @@ impl ProviderLlmAdapter {
             max_tokens: self.max_tokens,
             system,
             messages,
-            tools,
+            tools: archon_llm::provider::shared_tools(tools),
             request_origin: self.request_origin.clone(),
             extra: self.runtime_extra(run_id, session_id),
             ..LlmRequest::default()

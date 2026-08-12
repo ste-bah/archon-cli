@@ -4,7 +4,11 @@
 //! Path: `~/.archon/sessions/{session_id}/subagents/agent-{agent_id}.jsonl`
 //! Metadata: `~/.archon/sessions/{session_id}/subagents/agent-{agent_id}.meta.json`
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,27 +33,56 @@ pub struct AgentMetadata {
 // ---------------------------------------------------------------------------
 
 /// Manages transcript JSONL files for subagents in a session.
+///
+/// Appending holds an open `BufWriter` per agent transcript rather than
+/// reopening the file for every message (issue #171 Part 4 — the same
+/// held-writer shape audit finding 35 already applied to the activity sink
+/// in `archon_observability::activity`). Durability is unchanged: every
+/// message is flushed before `record_message` returns, so a crash loses at
+/// most the in-flight message, exactly as the reopen-per-message form did.
 #[derive(Debug, Clone)]
 pub struct AgentTranscriptStore {
     base_dir: PathBuf,
+    /// Lazily-opened append writers, one per `agent_id`. Opened on the
+    /// agent's first message and reused for the rest of its transcript;
+    /// dropped (so the next write reopens) if a write ever fails.
+    writers: Arc<Mutex<HashMap<String, BufWriter<File>>>>,
+    /// Number of `open` calls this store has made for transcript files.
+    /// Fixtures assert one per agent transcript lifetime.
+    opens: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AgentTranscriptStore {
     /// Create a store rooted at `~/.archon/sessions/{session_id}/subagents/`.
     pub fn new(session_id: &str) -> Option<Self> {
         let home = dirs::home_dir()?;
-        Some(Self {
-            base_dir: home
-                .join(".archon/sessions")
+        Some(Self::with_base_dir(
+            home.join(".archon/sessions")
                 .join(session_id)
                 .join("subagents"),
-        })
+        ))
     }
 
     /// Create a store at an explicit base directory (for testing).
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+        Self {
+            base_dir,
+            writers: Arc::new(Mutex::new(HashMap::new())),
+            opens: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
     }
+
+    /// Number of transcript-file `open` calls made through this store
+    /// (shared with clones). One per agent transcript unless a write
+    /// failed and forced a reopen.
+    pub fn open_count(&self) -> usize {
+        self.opens.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    // Handles are released when the last clone of the store drops, which is the
+    // end of the subagent run that owns it (`run_runner::configure_transcript`
+    // builds one store per subagent). There is deliberately no explicit close:
+    // every message is already flushed, so an early close would buy nothing.
 
     /// Path to the transcript JSONL file.
     pub fn transcript_path(&self, agent_id: &str) -> PathBuf {
@@ -105,20 +138,54 @@ impl AgentTranscriptStore {
         std::fs::create_dir_all(&self.base_dir)
     }
 
+    /// Open (once) the append writer for `agent_id`. `ensure_dir` runs here
+    /// rather than per message: the directory can only need creating on the
+    /// transcript's first write.
+    fn open_writer(&self, agent_id: &str) -> std::io::Result<BufWriter<File>> {
+        self.ensure_dir()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.transcript_path(agent_id))?;
+        self.opens
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(BufWriter::new(file))
+    }
+
     fn append_jsonl(
         &self,
         agent_id: &str,
         message: &serde_json::Value,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.ensure_dir()?;
-        let path = self.transcript_path(agent_id);
-        let line = serde_json::to_string(message)?;
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        writeln!(file, "{line}")?;
+        let mut line = serde_json::to_vec(message)?;
+        line.push(b'\n');
+
+        let mut writers = self
+            .writers
+            .lock()
+            .map_err(|_| "transcript writer mutex poisoned")?;
+
+        if !writers.contains_key(agent_id) {
+            let writer = self.open_writer(agent_id)?;
+            writers.insert(agent_id.to_string(), writer);
+        }
+
+        // Buffered write, then an unconditional flush: the buffer never spans
+        // messages, so the durability window is the same single in-flight
+        // message the reopen-per-message form had.
+        let result = (|| -> std::io::Result<()> {
+            let writer = writers
+                .get_mut(agent_id)
+                .expect("transcript writer just inserted");
+            writer.write_all(&line)?;
+            writer.flush()
+        })();
+
+        if result.is_err() {
+            // Drop the handle so the next message reopens the file.
+            writers.remove(agent_id);
+        }
+        result?;
         Ok(())
     }
 
@@ -179,6 +246,10 @@ pub fn load_resume_context(store: &AgentTranscriptStore, agent_id: &str) -> Opti
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/// Held-writer coverage for issue #171 Part 4 (open-once, flush-per-message).
+#[cfg(test)]
+mod held_writer_tests;
 
 #[cfg(test)]
 mod tests {

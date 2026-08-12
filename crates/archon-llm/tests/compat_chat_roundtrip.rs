@@ -89,7 +89,7 @@ fn simple_user_request(model: &str) -> LlmRequest {
         max_tokens: 256,
         system: Vec::new(),
         messages: vec![json!({"role": "user", "content": "hi there"})],
-        tools: Vec::new(),
+        tools: Default::default(),
         thinking: None,
         speed: None,
         effort: None,
@@ -147,10 +147,10 @@ async fn compat_complete_rejects_tools_when_descriptor_does_not_advertise_tool_u
     let descriptor = make_descriptor(&server.uri(), AuthFlavor::BearerApiKey);
     let provider = make_provider(descriptor, "test-key");
     let mut request = simple_user_request("test-default-model");
-    request.tools = vec![json!({
+    request.tools = archon_llm::provider::shared_tools(vec![json!({
         "name": "do_thing",
         "input_schema": {"type": "object"}
-    })];
+    })]);
 
     match provider.complete(request).await {
         Err(LlmError::Unsupported(message)) => {

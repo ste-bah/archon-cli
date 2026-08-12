@@ -2,7 +2,7 @@ use super::*;
 use archon_memory::StoreMemoryOutcome;
 
 /// Null memory implementation for testing. Returns empty results.
-pub(super) struct NullMemory;
+pub(crate) struct NullMemory;
 
 impl MemoryTrait for NullMemory {
     fn store_memory(
@@ -107,16 +107,52 @@ impl MemoryTrait for NullMemory {
     }
 }
 
-/// Mock memory that records store calls for verification.
-pub(super) struct MockMemory {
-    pub(super) stored: Mutex<Vec<(String, Vec<String>)>>, // (content, tags)
+/// Mock memory that records store and search calls for verification.
+pub(crate) struct MockMemory {
+    pub(crate) stored: Mutex<Vec<(String, Vec<String>)>>, // (content, tags)
+    /// Filters passed to `search_memories`, in call order. Recall-cache tests
+    /// assert on the length: one entry per query actually run.
+    pub(crate) searches: Mutex<Vec<SearchFilter>>,
+    /// Rows every `search_memories` call returns.
+    pub(crate) search_results: Mutex<Vec<Memory>>,
 }
 
 impl MockMemory {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             stored: Mutex::new(vec![]),
+            searches: Mutex::new(vec![]),
+            search_results: Mutex::new(vec![]),
         }
+    }
+
+    /// Number of `search_memories` calls seen so far.
+    pub(crate) fn search_count(&self) -> usize {
+        self.searches.lock().unwrap().len()
+    }
+
+    /// Replace the canned rows every subsequent search returns.
+    pub(crate) fn set_search_results(&self, contents: &[&str]) {
+        *self.search_results.lock().unwrap() =
+            contents.iter().map(|c| memory_row(c)).collect::<Vec<_>>();
+    }
+}
+
+/// Build a minimal `Memory` row; only `content` is read by agent recall.
+pub(crate) fn memory_row(content: &str) -> Memory {
+    Memory {
+        id: format!("mock-{content}"),
+        content: content.to_string(),
+        title: String::new(),
+        memory_type: MemoryType::Fact,
+        importance: 0.5,
+        tags: vec![],
+        source_type: "test".to_string(),
+        project_path: String::new(),
+        created_at: chrono::Utc::now(),
+        updated_at: None,
+        access_count: 0,
+        last_accessed: None,
     }
 }
 
@@ -210,8 +246,9 @@ impl MemoryTrait for MockMemory {
     fn recall_memories(&self, _query: &str, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
         Ok(vec![])
     }
-    fn search_memories(&self, _filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
-        Ok(vec![])
+    fn search_memories(&self, filter: &SearchFilter) -> Result<Vec<Memory>, MemoryError> {
+        self.searches.lock().unwrap().push(filter.clone());
+        Ok(self.search_results.lock().unwrap().clone())
     }
     fn list_recent(&self, _limit: usize) -> Result<Vec<Memory>, MemoryError> {
         Ok(vec![])

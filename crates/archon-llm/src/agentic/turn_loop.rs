@@ -214,7 +214,7 @@ mod tests {
                 "role": "user",
                 "content": [{"type": "text", "text": "use a tool"}]
             })],
-            tools: Vec::new(),
+            tools: Default::default(),
             tool_results: Vec::new(),
             effort: None,
             reasoning_encrypted: None,

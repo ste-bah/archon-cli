@@ -319,7 +319,7 @@ mod tests {
             max_tokens: 64,
             system: Vec::new(),
             messages,
-            tools: Vec::new(),
+            tools: Default::default(),
             thinking: None,
             speed: None,
             effort: None,

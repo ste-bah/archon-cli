@@ -57,9 +57,19 @@ pub(crate) fn apply_conversation_cache(
 }
 
 fn remove_cache_directives(request: &mut LlmRequest) {
-    for tool in &mut request.tools {
-        if let Some(object) = tool.as_object_mut() {
-            object.remove("cache_control");
+    // #171 part 3: `tools` is a shared frozen list, so only take the
+    // copy-on-write path when a marker is actually present. Tool schemas
+    // built from the registry never carry one, which is why the shared list
+    // survives untouched on every non-Anthropic round.
+    if request
+        .tools
+        .iter()
+        .any(|tool| tool.get("cache_control").is_some())
+    {
+        for tool in std::sync::Arc::make_mut(&mut request.tools) {
+            if let Some(object) = tool.as_object_mut() {
+                object.remove("cache_control");
+            }
         }
     }
     for block in &mut request.system {
@@ -179,7 +189,9 @@ mod tests {
                 serde_json::json!({"role":"assistant","content":[{"type":"text","text":"reply"}]}),
                 serde_json::json!({"role":"user","content":[{"type":"text","text":"latest"}]}),
             ],
-            tools: vec![serde_json::json!({"name":"Read","cache_control":{"type":"ephemeral"}})],
+            tools: archon_llm::provider::shared_tools(vec![
+                serde_json::json!({"name":"Read","cache_control":{"type":"ephemeral"}}),
+            ]),
             ..LlmRequest::default()
         }
     }

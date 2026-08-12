@@ -4,6 +4,12 @@ use crate::identity::{IdentityMode, IdentityProvider};
 use crate::provider::{LlmProvider, ProviderFeature};
 use crate::providers::AnthropicProvider;
 
+/// `MessageRequest::tools` is shared rather than owned (#171 part 3), so the
+/// test fixtures build it through the same wrapper the runtime uses.
+macro_rules! shared_tools {
+    ($($tool:expr),* $(,)?) => { crate::provider::shared_tools(vec![$($tool),*]) };
+}
+
 fn spoof_identity() -> IdentityProvider {
     IdentityProvider::new(
         IdentityMode::Spoof {
@@ -41,7 +47,7 @@ fn proxy_wire_does_not_add_anthropic_tool_cache_marker() {
     );
     let request = MessageRequest {
         messages: vec![serde_json::json!({"role":"user","content":"hello"})],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name":"Read",
             "description":"read",
             "input_schema":{"type":"object"}
@@ -76,7 +82,7 @@ fn spoof_proxy_wire_strips_anthropic_directives_but_preserves_schema_property() 
                 "cache_control":{"type":"ephemeral"}
             }]
         })],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name":"Configure",
             "description":"configure",
             "cache_control":{"type":"ephemeral"},
@@ -118,7 +124,7 @@ fn spoof_wire_keeps_conversation_cache_marker_when_budget_allows() {
                 "cache_control": {"type": "ephemeral"}
             }]
         })],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name": "Read",
             "description": "read",
             "input_schema": {"type": "object"}
@@ -178,7 +184,7 @@ fn spoof_wire_does_not_duplicate_existing_billing_cache_marker() {
                 "cache_control": {"type": "ephemeral"}
             }]
         })],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name": "Read",
             "description": "read",
             "input_schema": {"type": "object"}
@@ -224,7 +230,7 @@ fn spoof_wire_prioritizes_conversation_marker_over_tool_marker() {
                 "cache_control": {"type": "ephemeral"}
             }]
         })],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name": "Read",
             "description": "read",
             "input_schema": {"type": "object"}
@@ -248,7 +254,7 @@ fn official_anthropic_tool_section_bytes_are_stable() {
     let client = AnthropicClient::new(make_auth(), spoof_identity(), None);
     let request = MessageRequest {
         messages: vec![serde_json::json!({"role":"user","content":"hello"})],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name":"Read",
             "description":"read",
             "input_schema":{
@@ -287,7 +293,7 @@ fn cache_budget_preserves_tool_schema_property_named_cache_control() {
                 "cache_control":{"type":"ephemeral"}
             }]
         })],
-        tools: vec![serde_json::json!({
+        tools: shared_tools![serde_json::json!({
             "name":"Configure",
             "description":"configure",
             "input_schema":{
