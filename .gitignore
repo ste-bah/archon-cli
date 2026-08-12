@@ -130,3 +130,8 @@ __pycache__/
 # (data stays off the remote); transferred to other dev boxes out-of-band (scp/bundle).
 # The dependent tests skip when these are absent; synthetic fixtures ship in-repo.
 /crates/archon-draft/tests/fixtures/m6/
+
+# Audit and rescue reports: working documents, never tracked.
+# They cite findings that source comments reference by name, but nothing reads
+# them at build or gate time -- the citations are prose, not dependencies.
+reports/

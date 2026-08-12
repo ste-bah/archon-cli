@@ -202,6 +202,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             app.input.insert(*c);
             KeyResult::Nothing
         }
+        // Shift+Enter / Alt+Enter (issue #174). Deliberately *before* the
+        // suggestion handling that `Submit` does: growing a draft onto a
+        // second line is never an attempt to accept a slash completion.
+        Action::InsertNewline => {
+            app.input.insert_newline();
+            KeyResult::Nothing
+        }
         Action::Submit => {
             // Suggestion popup: exact match → dismiss, else → accept+return
             if app.input.suggestions.active {

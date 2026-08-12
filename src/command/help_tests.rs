@@ -243,6 +243,10 @@ fn help_handler_empty_args_header_byte_identical() {
         /diff                - Show git diff --stat for the working directory\n\
         /help                - Show this help\n\
         /help <command>      - Show detailed help for a command\n\n\
+        Keyboard:\n\
+        Enter                - Send the prompt\n\
+        Shift+Enter          - New line (terminals with keyboard enhancement)\n\
+        Alt+Enter            - New line (works on every terminal)\n\n\
         Extended commands:\n";
     match &events[0] {
         TuiEvent::TextDelta(body) => {
@@ -258,6 +262,26 @@ fn help_handler_empty_args_header_byte_identical() {
             "expected TuiEvent::TextDelta for empty-args path, got: {:?}",
             other
         ),
+    }
+}
+
+/// Issue #174: Alt+Enter is the multi-line fallback that works on terminals
+/// without keyboard-enhancement support. A fallback nobody is told about is
+/// not a fallback, so `/help` is the place it has to be discoverable.
+#[test]
+fn help_documents_both_newline_chords() {
+    let (mut ctx, mut rx) = make_status_ctx(None);
+    HelpHandler.execute(&mut ctx, &[]).unwrap();
+    let events = drain_tui_events(&mut rx);
+    match &events[0] {
+        TuiEvent::TextDelta(body) => {
+            assert!(body.contains("Shift+Enter"), "got: {body:?}");
+            assert!(
+                body.contains("Alt+Enter"),
+                "Alt+Enter is the universal fallback and MUST be documented; got: {body:?}"
+            );
+        }
+        other => panic!("expected TuiEvent::TextDelta, got: {other:?}"),
     }
 }
 

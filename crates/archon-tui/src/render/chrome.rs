@@ -14,11 +14,21 @@ use crate::app::App;
 use crate::status::ContextWarning;
 use crate::ultrathink;
 
+use super::width::{display_width, fit_to_width};
+
 /// Render the status bar (bottom row, full width).
+///
+/// The bar is rendered *width-exact*: the status text is truncated on grapheme
+/// boundaries to the columns still free and then padded to fill them. The bar
+/// is a single row at the bottom of the screen whose content changes on every
+/// token update, so it is the surface where a computed width that disagrees
+/// with the written width does the most damage — the reported #174 fragments
+/// (`1`, `0`, `%`) are the shape of `ctx 392k/1000k (39%)` left half-repainted.
+/// Padding also means the row is entirely cells this widget owns, so nothing
+/// from a previous frame can show through the gap after the text.
 pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
     let status_bg = t.border;
-    let status_text = app.status.format();
     let status_fg = match app.status.warning_state {
         ContextWarning::Ok => t.fg,
         ContextWarning::Warning => Color::Yellow,
@@ -29,33 +39,48 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         .bg(status_bg)
         .add_modifier(Modifier::BOLD);
 
-    let status_line = if app.input.ultrathink.active {
-        let mut spans: Vec<ratatui::text::Span<'_>> = Vec::new();
-        for (ch, color) in ultrathink::ultrathink_status_spans(app.input.ultrathink.shimmer_offset)
-        {
-            spans.push(ratatui::text::Span::styled(
-                String::from(ch),
-                Style::default()
-                    .fg(color)
-                    .bg(status_bg)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-        spans.push(ratatui::text::Span::styled(
-            " | ",
-            Style::default()
-                .fg(t.fg)
-                .bg(status_bg)
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(ratatui::text::Span::styled(status_text, status_style));
-        Line::from(spans)
-    } else {
-        Line::from(ratatui::text::Span::styled(status_text, status_style))
-    };
+    let mut spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+    if app.input.ultrathink.active {
+        spans.extend(ultrathink_prefix_spans(app, status_bg, t.fg));
+    }
+    let used: usize = spans.iter().map(|span| display_width(&span.content)).sum();
+    let remaining = (area.width as usize).saturating_sub(used);
+    spans.push(ratatui::text::Span::styled(
+        fit_to_width(&app.status.format(), remaining),
+        status_style,
+    ));
 
-    let widget = Paragraph::new(status_line);
-    frame.render_widget(widget, area);
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// The shimmering `ultrathink` banner and its separator, drawn ahead of the
+/// status text when ultrathink is armed.
+fn ultrathink_prefix_spans(
+    app: &App,
+    status_bg: Color,
+    separator_fg: Color,
+) -> Vec<ratatui::text::Span<'static>> {
+    let mut spans: Vec<ratatui::text::Span<'static>> =
+        ultrathink::ultrathink_status_spans(app.input.ultrathink.shimmer_offset)
+            .into_iter()
+            .map(|(ch, color)| {
+                ratatui::text::Span::styled(
+                    String::from(ch),
+                    Style::default()
+                        .fg(color)
+                        .bg(status_bg)
+                        .add_modifier(Modifier::BOLD),
+                )
+            })
+            .collect();
+    spans.push(ratatui::text::Span::styled(
+        " | ",
+        Style::default()
+            .fg(separator_fg)
+            .bg(status_bg)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans
 }
 
 /// Render the permission mode indicator (single row, just above status bar).

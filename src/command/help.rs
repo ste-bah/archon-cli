@@ -120,6 +120,10 @@ impl CommandHandler for HelpHandler {
                     /diff                - Show git diff --stat for the working directory\n\
                     /help                - Show this help\n\
                     /help <command>      - Show detailed help for a command\n\n\
+                    Keyboard:\n\
+                    Enter                - Send the prompt\n\
+                    Shift+Enter          - New line (terminals with keyboard enhancement)\n\
+                    Alt+Enter            - New line (works on every terminal)\n\n\
                     Extended commands:\n"
                     .to_string();
                 // If `skill_registry` is populated (production path),

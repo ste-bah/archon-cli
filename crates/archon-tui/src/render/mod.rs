@@ -6,24 +6,33 @@
 //! - `chrome` — status bar, permission indicator, /btw overlay
 //! - `body` — output area, input area, session badge, suggestions popup,
 //!   MCP manager overlay, session picker overlay
-//! - `mod.rs` — facade: `draw()` function entry point
+//! - `repaint` — when a frame needs a full clear instead of a diff
+//! - `width` — display-width helpers shared by the width-exact surfaces
+//! - `mod.rs` — facade: `draw()` and `draw_frame()` entry points
 //!
 //! ## Usage
 //!
+//! Live callers use [`draw_frame`], which owns the full-repaint policy:
+//!
 //! ```ignore
-//! use crate::render::draw;
-//! terminal.draw(|frame| {
-//!     draw(frame, app);
-//! })?;
+//! use crate::render::{RepaintTracker, draw_frame};
+//! let mut repaint = RepaintTracker::default();
+//! draw_frame(&mut terminal, &mut app, &mut repaint)?;
 //! ```
+//!
+//! [`draw`] itself is the bare frame builder, for callers that already own a
+//! `terminal.draw()` closure.
 
 pub mod body;
 pub mod chrome;
 pub mod cursor;
 pub mod evidence;
 pub mod layout;
+pub mod repaint;
+pub mod width;
 
 pub use layout::{Layout, compute_layout};
+pub use repaint::{FrameGeometry, RepaintTracker, draw_frame, frame_geometry, note_terminal_event};
 
 use crate::app::App;
 use ratatui::Frame;

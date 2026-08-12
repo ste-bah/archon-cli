@@ -111,13 +111,28 @@ where
 
     let keymap = crate::keybindings::KeyMap::default();
     let mut tick_scheduler = TickScheduler::new(IDLE_TICK_CADENCE);
+    // #174 part 2: owns the "this frame moved cells, repaint everything"
+    // decision. `draw_frame` is the only draw path so the policy cannot be
+    // bypassed by a caller that forgets it.
+    let mut repaint = crate::render::RepaintTracker::default();
 
     loop {
-        terminal.draw(|frame| crate::render::draw(frame, &mut app))?;
+        crate::render::draw_frame(terminal, &mut app, &mut repaint)?;
         tick_scheduler.reconfigure(animation_cadence(&app));
 
         match next_loop_event(terminal_events.as_mut(), &mut event_rx, &mut tick_scheduler).await {
             LoopEvent::Terminal(event) => {
+                // ARCHON_TUI_LOG_KEYS wire capture (issue #174). This is the
+                // single point every crossterm event passes through, so the
+                // trace is complete by construction — no dispatch branch can
+                // consume an event without it having been logged first.
+                crate::keylog::log_event(&event);
+                // Ctrl+L is answered here rather than through the keymap so it
+                // redraws from inside every overlay and modal, none of which
+                // forward unrecognised keys.
+                if crate::render::note_terminal_event(&event, &mut repaint) {
+                    continue;
+                }
                 input::handle_key_event(
                     &mut app,
                     event,
@@ -156,6 +171,25 @@ where
     }
 
     Ok(())
+}
+
+/// Event-injection seam for integration tests, mirroring the
+/// backend-injection seam [`crate::app::run_with_backend`] (TUI-327).
+///
+/// Feeds one already-decoded `crossterm::Event` through the *production*
+/// dispatch — the same call `run_inner` makes — so a test can assert on what
+/// actually lands on `input_tx` instead of re-implementing the forwarding.
+/// That matters for the issue #174 acceptance criterion "submitting a
+/// multi-line draft sends the text verbatim including newlines": the claim is
+/// about the channel, so the test has to watch the channel.
+pub async fn dispatch_terminal_event(
+    app: &mut App,
+    event: crossterm::event::Event,
+    input_tx: &tokio::sync::mpsc::Sender<String>,
+    keymap: &crate::keybindings::KeyMap,
+) {
+    crate::keylog::log_event(&event);
+    input::handle_key_event(app, event, input_tx, None, None, None, keymap).await;
 }
 
 /// Return the action strings available for a given server entry.

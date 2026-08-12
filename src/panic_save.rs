@@ -25,9 +25,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use archon_consciousness::inner_voice::InnerVoice;
 use archon_memory::access::MemoryTrait;
-use crossterm::ExecutableCommand;
-use crossterm::cursor::Show;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 
 /// Captured at install time; read by the panic hook.
 pub(crate) struct PanicSaveContext {
@@ -99,12 +96,13 @@ pub(crate) fn install(
         // AssertUnwindSafe: Arc<Mutex<...>> are not auto-UnwindSafe;
         // this opt-out is required and matches dispatcher.rs:707.
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            // Restore terminal in the SAME order TerminalGuard::Drop uses
-            // (crates/archon-tui/src/terminal.rs:47-49) so post-panic
-            // console is usable.
-            let _ = std::io::stdout().execute(Show);
-            let _ = std::io::stdout().execute(LeaveAlternateScreen);
-            let _ = disable_raw_mode();
+            // Restore the terminal through the SAME helper `TerminalGuard`'s
+            // Drop uses so the post-panic console is usable. Calling the
+            // shared helper rather than re-listing the sequence here is what
+            // makes the keyboard-enhancement pop (issue #174) reach this
+            // path: a hand-rolled copy would silently miss it and leave the
+            // terminal in modified-keys mode after a panic.
+            archon_tui::terminal::restore_terminal();
 
             // Read mirror with poison tolerance — a panic while the
             // mirror lock was held would have poisoned it.
