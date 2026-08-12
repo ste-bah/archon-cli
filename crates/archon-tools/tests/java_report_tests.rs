@@ -314,12 +314,67 @@ fn maven_surefire_results_are_found() {
 
 /// An analysis stage that ran and found nothing writes empty reports. That is a
 /// different state from "the stage never ran", and both legitimately produce no
-/// findings here — the caller separates them using the build's exit code.
+/// findings here.
 #[test]
 fn no_reports_yields_no_findings_rather_than_an_error() {
     let temp = tempfile::tempdir().expect("tempdir");
     let findings = reports::collect(temp.path(), BuildSystem::Gradle, Stage::Analyze);
     assert!(findings.is_empty());
+}
+
+/// An analyser that crashed writes no report; one that ran clean writes an
+/// empty one. Both contribute zero findings, so without tracking which reports
+/// appeared, a dead security scanner is indistinguishable from a clean pass.
+///
+/// This is not hypothetical. SpotBugs 4.8.6 aborts on JDK 25 with "Unsupported
+/// class file major version 69" and writes nothing at all, while Checkstyle and
+/// PMD carry on and the build still exits zero — so `analyze` reported success
+/// with the security analyser entirely dead.
+#[test]
+fn an_analyser_that_wrote_no_report_is_named() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("build/reports/checkstyle/main.xml"),
+        CHECKSTYLE_XML,
+    );
+    write(&root.join("build/reports/pmd/main.xml"), PMD_XML);
+    // No SpotBugs report: the analyser died.
+
+    let collected = reports::collect_stage(root, BuildSystem::Gradle, Stage::Analyze);
+    assert!(
+        !collected.findings.is_empty(),
+        "the surviving analysers still reported"
+    );
+    assert_eq!(
+        collected.missing,
+        vec!["spotbugs"],
+        "the silent analyser must be named, not inferred from a zero count"
+    );
+}
+
+/// An empty report is the analyser saying "clean", and must not be reported as
+/// absent — otherwise the warning fires on every healthy project and is ignored.
+#[test]
+fn an_empty_report_is_not_treated_as_missing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("build/reports/checkstyle/main.xml"),
+        CHECKSTYLE_XML,
+    );
+    write(&root.join("build/reports/pmd/main.xml"), PMD_XML);
+    write(
+        &root.join("build/reports/spotbugs/main.xml"),
+        r#"<?xml version="1.0"?><BugCollection version="4.9.0"></BugCollection>"#,
+    );
+
+    let collected = reports::collect_stage(root, BuildSystem::Gradle, Stage::Analyze);
+    assert!(
+        collected.missing.is_empty(),
+        "a clean analyser was reported as missing: {:?}",
+        collected.missing
+    );
 }
 
 /// A truncated report is what a killed build leaves behind. Returning what

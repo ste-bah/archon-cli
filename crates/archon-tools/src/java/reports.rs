@@ -10,9 +10,11 @@ use super::finding::Finding;
 use super::parse;
 use super::project::{BuildSystem, Stage};
 
-/// A report location: a glob relative to the project root, and the parser that
-/// understands what it finds there.
+/// A report location: the analyser's name, a glob relative to the project root,
+/// and the parser that understands what it finds there.
 struct ReportKind {
+    /// The analyser, for reporting which ones left nothing behind.
+    name: &'static str,
     /// Relative glob. `**/` because both build systems write per-module
     /// reports, and a multi-module project is the normal case in Java.
     pattern: &'static str,
@@ -21,14 +23,17 @@ struct ReportKind {
 
 const GRADLE_ANALYSIS: &[ReportKind] = &[
     ReportKind {
+        name: "checkstyle",
         pattern: "**/build/reports/checkstyle/*.xml",
         parse: parse::checkstyle,
     },
     ReportKind {
+        name: "pmd",
         pattern: "**/build/reports/pmd/*.xml",
         parse: parse::pmd,
     },
     ReportKind {
+        name: "spotbugs",
         pattern: "**/build/reports/spotbugs/*.xml",
         parse: parse::spotbugs,
     },
@@ -36,25 +41,30 @@ const GRADLE_ANALYSIS: &[ReportKind] = &[
 
 const MAVEN_ANALYSIS: &[ReportKind] = &[
     ReportKind {
+        name: "checkstyle",
         pattern: "**/target/checkstyle-result.xml",
         parse: parse::checkstyle,
     },
     ReportKind {
+        name: "pmd",
         pattern: "**/target/pmd.xml",
         parse: parse::pmd,
     },
     ReportKind {
+        name: "spotbugs",
         pattern: "**/target/spotbugsXml.xml",
         parse: parse::spotbugs,
     },
 ];
 
 const GRADLE_TESTS: &[ReportKind] = &[ReportKind {
+    name: "tests",
     pattern: "**/build/test-results/**/TEST-*.xml",
     parse: parse::junit,
 }];
 
 const MAVEN_TESTS: &[ReportKind] = &[ReportKind {
+    name: "tests",
     pattern: "**/target/surefire-reports/TEST-*.xml",
     parse: parse::junit,
 }];
@@ -70,23 +80,49 @@ fn kinds_for(build_system: BuildSystem, stage: Stage) -> &'static [ReportKind] {
     }
 }
 
-/// Read every report a stage should have written and return the findings.
-///
-/// A stage that ran cleanly writes reports containing nothing, so an empty
-/// result here means "the tools found nothing", not "the tools did not run" —
-/// the two are distinguished by the caller, which knows whether the stage
-/// exited non-zero.
-pub fn collect(root: &Path, build_system: BuildSystem, stage: Stage) -> Vec<Finding> {
+/// What a stage's reports contained, and which never appeared.
+pub struct StageReports {
+    pub findings: Vec<Finding>,
+    /// Analysers that left no report file at all.
+    ///
+    /// This is the distinction that matters most here. An analyser that ran and
+    /// found nothing writes an empty report; one that crashed writes none, and
+    /// in the findings the two are identical — both contribute zero. SpotBugs
+    /// aborting on an unsupported class file version is exactly this shape: the
+    /// build still exits zero, the other analysers still report, and a dead
+    /// security scanner is invisible.
+    ///
+    /// An absent report is not proof of breakage — a project that does not
+    /// configure PMD will never write a PMD report — so this is surfaced as
+    /// information rather than treated as a failure.
+    pub missing: Vec<&'static str>,
+}
+
+/// Read every report a stage should have written.
+pub fn collect_stage(root: &Path, build_system: BuildSystem, stage: Stage) -> StageReports {
     let mut findings = Vec::new();
+    let mut missing = Vec::new();
+
     for kind in kinds_for(build_system, stage) {
-        for path in matching_files(root, kind.pattern) {
+        let paths = matching_files(root, kind.pattern);
+        if paths.is_empty() {
+            missing.push(kind.name);
+            continue;
+        }
+        for path in paths {
             match std::fs::read_to_string(&path) {
                 Ok(xml) => findings.extend((kind.parse)(&xml)),
                 Err(e) => tracing::warn!("could not read report {}: {e}", path.display()),
             }
         }
     }
-    findings
+
+    StageReports { findings, missing }
+}
+
+/// Findings only, for callers that do not care which analysers were silent.
+pub fn collect(root: &Path, build_system: BuildSystem, stage: Stage) -> Vec<Finding> {
+    collect_stage(root, build_system, stage).findings
 }
 
 /// Files under `root` matching a relative glob.

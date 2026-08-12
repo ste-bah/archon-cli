@@ -82,7 +82,7 @@ $Packages = [ordered]@{
 $PackageArgs = @{
     'Microsoft.VisualStudio.2022.BuildTools' =
         @('--override', '--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
-    'EclipseAdoptium.Temurin.21.JDK' =
+    'EclipseAdoptium.Temurin.25.JDK' =
         @('--custom', 'ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJavaHome')
 }
 
@@ -101,8 +101,17 @@ if ($WithOcr) { $Packages['Python.Python.3.12'] = @('python') }
 # repository at all (searching either name returns unrelated packages), so both
 # are installed from their projects' official archives by Install-JavaBuildTools
 # below.
+#
+# Temurin 25 rather than 26: 26 is a six-month feature release that goes out of
+# support when 27 ships, so pinning it means pinning something already at the
+# end of its life. 25 is the current LTS. Gradle 9 runs on 17-26, so both would
+# work — this is about how long the pin stays good, not compatibility.
+#
+# Note this JDK's job is to RUN Gradle and Maven. What a project compiles
+# against is that project's own choice, through Gradle toolchains or
+# maven.compiler.release, and is not constrained by the version here.
 if ($WithJava) {
-    $Packages['EclipseAdoptium.Temurin.21.JDK'] = @('java', 'javac')
+    $Packages['EclipseAdoptium.Temurin.25.JDK'] = @('java', 'javac')
 }
 
 # poppler ships three binaries and the PDF pipeline needs all of them:

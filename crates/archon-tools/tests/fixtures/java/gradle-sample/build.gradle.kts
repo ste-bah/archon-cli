@@ -20,10 +20,15 @@ repositories {
     mavenCentral()
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
+// Deliberately NOT a `toolchain { languageVersion = ... }` block. A toolchain
+// pins an exact JDK, and Gradle fails outright with "no matching toolchains"
+// when that JDK is absent rather than using the one it is already running on —
+// so a fixture pinned to 21 breaks on a machine that has only 25. Setting the
+// release instead compiles with whatever JDK is running, targeting 21 bytecode,
+// which any JDK from 21 up can emit. This mirrors what the Maven half does with
+// `maven.compiler.release`.
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 21
 }
 
 sourceSets {

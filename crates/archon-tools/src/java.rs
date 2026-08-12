@@ -182,12 +182,27 @@ async fn run(
 
     // Compile is the one stage with no report file to read; its diagnostics
     // only exist in what javac wrote.
-    let findings = match stage {
-        Stage::Compile => parse::javac(&outcome.output),
-        _ => reports::collect(&project.root, project.build_system, stage),
+    let (findings, missing) = match stage {
+        Stage::Compile => (parse::javac(&outcome.output), Vec::new()),
+        _ => {
+            let collected = reports::collect_stage(&project.root, project.build_system, stage);
+            (collected.findings, collected.missing)
+        }
     };
 
     let mut body = render_findings(project, stage.as_str(), &findings, limit);
+
+    // Said plainly, because an analyser that produced nothing contributes
+    // exactly as many findings as one that ran clean.
+    if !missing.is_empty() {
+        body.push_str(&format!(
+            "\nNo report from: {}. That analyser is either not configured in \
+             this build or failed to run — which is NOT the same as it finding \
+             nothing. Check the build output before treating this stage as \
+             clean.\n",
+            missing.join(", ")
+        ));
+    }
 
     // A non-zero exit with nothing parsed means the failure is not one the
     // reports describe — a missing plugin, an unresolvable dependency, a broken

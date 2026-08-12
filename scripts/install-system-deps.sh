@@ -151,11 +151,19 @@ PKG_VIDEO=""
 PKG_DOCKER=""
 PKG_OPENSHELL_PREREQ=""
 PKG_TRADING_TOOLS=""
-# JDK + Maven for --with-java. Gradle is deliberately NOT in here on Linux:
-# see install_gradle below.
+# Maven (and unzip) for --with-java. The JDK is resolved separately by
+# resolve_jdk_package, and Gradle is deliberately absent on Linux — see
+# install_gradle below.
 PKG_JAVA=""
+# OpenJDK packages to try, newest first. The first that the distribution
+# actually carries wins.
+JDK_CANDIDATES=""
 # True where the package manager ships a Gradle new enough to be worth using.
 GRADLE_FROM_PKG_MGR=false
+# Homebrew cask for the macOS JDK. Pinned to the current LTS rather than the
+# bare `temurin` cask: that tracks the newest six-month feature release, which
+# is out of support as soon as its successor ships.
+MACOS_JDK_CASK="temurin@25"
 CHECK_WHISPER_CLI=false
 # Set for distros whose repos do not package tesseract at all (Amazon Linux
 # 2023). --check and post-install verification then treat tesseract as a
@@ -179,7 +187,11 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker.io"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 python3-venv"
-        PKG_JAVA="default-jdk maven unzip"
+        PKG_JAVA="maven unzip"
+        # `default-jdk` is not used: it tracks the release's default, which is
+        # frequently several LTS versions behind (Ubuntu 24.04 still defaults
+        # to 21). It remains the last candidate so there is always something.
+        JDK_CANDIDATES="openjdk-25-jdk openjdk-21-jdk default-jdk"
         ;;
     fedora|rhel|rocky|almalinux|centos)
         PKG_MGR="dnf"
@@ -192,7 +204,8 @@ case "$DISTRO_ID" in
         PKG_DOCKER="moby-engine docker-cli"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3"
-        PKG_JAVA="java-21-openjdk-devel maven unzip"
+        PKG_JAVA="maven unzip"
+        JDK_CANDIDATES="java-25-openjdk-devel java-21-openjdk-devel"
         ;;
     amzn)
         # Amazon Linux. AL2023+ uses dnf against a deliberately small core
@@ -220,7 +233,9 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3"
-        PKG_JAVA="java-21-amazon-corretto-devel maven unzip"
+        PKG_JAVA="maven unzip"
+        # Corretto is Amazon's OpenJDK build; it is what AL2023 packages.
+        JDK_CANDIDATES="java-25-amazon-corretto-devel java-21-amazon-corretto-devel"
         ;;
     arch|manjaro|endeavouros|garuda)
         PKG_MGR="pacman"
@@ -235,6 +250,8 @@ case "$DISTRO_ID" in
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python python-virtualenv"
         # Arch tracks Gradle upstream closely, so its package is worth using.
+        # Arch's `jdk-openjdk` always tracks the newest release, so there is
+        # nothing to probe for.
         PKG_JAVA="jdk-openjdk maven gradle unzip"
         GRADLE_FROM_PKG_MGR=true
         ;;
@@ -253,7 +270,8 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 python3-virtualenv"
-        PKG_JAVA="java-21-openjdk-devel maven unzip"
+        PKG_JAVA="maven unzip"
+        JDK_CANDIDATES="java-25-openjdk-devel java-21-openjdk-devel"
         ;;
     alpine)
         # Alpine — common in containers. Note busybox `sh` already; the
@@ -269,7 +287,8 @@ case "$DISTRO_ID" in
         PKG_DOCKER="docker"
         PKG_OPENSHELL_PREREQ="curl"
         PKG_TRADING_TOOLS="nodejs npm python3 py3-virtualenv"
-        PKG_JAVA="openjdk21 maven unzip"
+        PKG_JAVA="maven unzip"
+        JDK_CANDIDATES="openjdk25 openjdk21"
         ;;
     macos)
         PKG_MGR="brew"
@@ -290,6 +309,9 @@ case "$DISTRO_ID" in
         # root-owned symlink into /Library/Java before any build tool sees it.
         PKG_JAVA="maven gradle"
         GRADLE_FROM_PKG_MGR=true
+        # Version-pinned rather than the bare `temurin` cask, which tracks the
+        # newest feature release — see MACOS_JDK_CASK below.
+        MACOS_JDK_CASK="temurin@25"
         ;;
     *)
         echo "install-system-deps.sh: unsupported OS (uname=$UNAME_S, distro=$DISTRO_ID)" >&2
@@ -456,6 +478,42 @@ fi
 # ---------------------------------------------------------------------------
 # Dry-run prints the commands; otherwise execute
 # ---------------------------------------------------------------------------
+# The newest OpenJDK package the distribution actually carries.
+#
+# A single pinned version is wrong on any release that does not carry it, and
+# the distribution's own default is frequently several LTS versions behind
+# (Ubuntu 24.04 still defaults to 21). So the candidates are tried newest-first
+# and the first that exists wins. The last candidate in each list is one that is
+# always present, so this cannot come back empty.
+#
+# `JDK_CANDIDATES` is empty where the package manager's JDK package already
+# tracks the newest release (Arch) or the JDK does not come from the package
+# manager at all (macOS, where it is a cask).
+resolve_jdk_package() {
+    if [ -z "$JDK_CANDIDATES" ]; then
+        return 0
+    fi
+    for candidate in $JDK_CANDIDATES; do
+        case "$PKG_MGR" in
+            apt)    apt-cache show "$candidate" >/dev/null 2>&1 || continue ;;
+            dnf)    dnf info "$candidate" >/dev/null 2>&1 || continue ;;
+            zypper) zypper --non-interactive info "$candidate" 2>/dev/null | grep -q '^Version' || continue ;;
+            apk)    apk info "$candidate" >/dev/null 2>&1 || continue ;;
+            *)      : ;;
+        esac
+        echo "$candidate"
+        return 0
+    done
+    # Every candidate probe failed — most likely because the package index has
+    # never been fetched. Fall back to the last candidate rather than silently
+    # installing no JDK at all, and let the package manager report the real
+    # error.
+    for candidate in $JDK_CANDIDATES; do
+        LAST_JDK_CANDIDATE="$candidate"
+    done
+    echo "$LAST_JDK_CANDIDATE"
+}
+
 ALL_PKGS="$PKG_BUILD $PKG_PDF $PKG_OCR $PKG_VIDEO"
 if [ "$WITH_DOCKER" = true ]; then
     ALL_PKGS="$ALL_PKGS $PKG_DOCKER"
@@ -467,7 +525,7 @@ if [ "$WITH_TRADING_TOOLS" = true ]; then
     ALL_PKGS="$ALL_PKGS $PKG_TRADING_TOOLS"
 fi
 if [ "$WITH_JAVA" = true ]; then
-    ALL_PKGS="$ALL_PKGS $PKG_JAVA"
+    ALL_PKGS="$ALL_PKGS $PKG_JAVA $(resolve_jdk_package)"
 fi
 # Trim leading space if PKG_BUILD was empty (macOS case)
 ALL_PKGS=$(echo "$ALL_PKGS" | sed 's/^ *//')
@@ -626,11 +684,11 @@ install_java_macos() {
         return 0
     fi
     if [ "$DRY_RUN" = true ]; then
-        echo "[dry-run] brew install --cask temurin"
+        echo "[dry-run] brew install --cask $MACOS_JDK_CASK"
         return 0
     fi
-    echo "+ brew install --cask temurin"
-    brew install --cask temurin || {
+    echo "+ brew install --cask $MACOS_JDK_CASK"
+    brew install --cask "$MACOS_JDK_CASK" || {
         echo "install-system-deps.sh: Temurin JDK install failed" >&2
         exit 3
     }

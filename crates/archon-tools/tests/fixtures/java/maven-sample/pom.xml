@@ -75,10 +75,17 @@
         </configuration>
       </plugin>
 
+      <!--
+        SpotBugs reads bytecode, including the JDK's own runtime classes, so its
+        bundled ASM has to understand the class file version of the JDK it is
+        running on. 4.8.6.6 aborts on JDK 25 with "Unsupported class file major
+        version 69" and writes NO report at all — which looks identical to a
+        clean run unless something checks that the report exists.
+      -->
       <plugin>
         <groupId>com.github.spotbugs</groupId>
         <artifactId>spotbugs-maven-plugin</artifactId>
-        <version>4.8.6.6</version>
+        <version>4.10.3.0</version>
         <configuration>
           <failOnError>false</failOnError>
           <plugins>

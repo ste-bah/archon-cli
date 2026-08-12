@@ -21,6 +21,21 @@ scripts\install-system-deps.ps1 -WithJava
 
 This installs exactly three things: **a JDK, Gradle and Maven**.
 
+The JDK is OpenJDK — Eclipse Temurin on Windows and macOS (Adoptium's TCK-certified
+build of the OpenJDK sources), and the distribution's own OpenJDK packages on
+Linux. Pinned to **25**, the current LTS, rather than the newest feature release:
+a six-month release is out of support as soon as its successor ships, so pinning
+one means pinning something already at the end of its life.
+
+On Linux the version is not hard-pinned at all — the installer probes for the
+newest OpenJDK the distribution actually carries, newest-first, because a fixed
+version is wrong on any release that lacks it and the distribution default is
+often several LTS versions behind (Ubuntu 24.04 still defaults to 21).
+
+This JDK's job is to **run** Gradle and Maven. What a project compiles against is
+that project's own choice, via Gradle toolchains or `maven.compiler.release`, and
+is not constrained by the version installed here.
+
 Nothing else is needed. Checkstyle, PMD, SpotBugs, FindSecBugs, Error Prone,
 NullAway and PIT are all declared as plugins in the project's own build and
 fetched by it, so they need no system install and behave identically on every
@@ -33,7 +48,7 @@ Two platform notes:
   from their projects' official archives into `%LOCALAPPDATA%\Programs`, with
   the published checksum verified before extraction, and their `bin`
   directories appended to the user PATH. Nothing requires elevation. The JDK is
-  Temurin 21 from winget, installed with `FeatureJavaHome` so `JAVA_HOME` is
+  Temurin 25 from winget, installed with `FeatureJavaHome` so `JAVA_HOME` is
   set — Maven reads it directly and fails without it.
 - **Linux**: the JDK and Maven come from the distribution. Gradle does not:
   Ubuntu 22.04 ships Gradle 4.4.1 and the Fedora/RHEL family does not package
@@ -102,6 +117,25 @@ If the project ships `gradlew` or `mvnw`, that is what runs. The wrapper pins
 the build-tool version the project was written against, so using it is the
 difference between reproducing the project's build and running a different one.
 `detect` says which of the two it chose.
+
+### An analyser that produced nothing is named
+
+An analyser that ran and found nothing writes an empty report. One that crashed
+writes none at all. Both contribute zero findings, so without checking that the
+report *exists*, a dead analyser is indistinguishable from a clean pass. When a
+report is absent, `analyze` says so explicitly rather than reporting a clean
+stage.
+
+This is not hypothetical. SpotBugs reads bytecode including the JDK's own
+runtime classes, so its bundled ASM must understand the class file version of
+the JDK it runs on. `spotbugs-maven-plugin` 4.8.6.6 aborts on JDK 25 with
+`Unsupported class file major version 69` and writes nothing — while Checkstyle
+and PMD carry on and the build still exits zero. If you see that message, the
+plugin is older than the JDK; 4.10.3.0 handles 25.
+
+An absent report is not proof of breakage — a project that does not configure
+PMD will never write a PMD report — so it is surfaced as information rather than
+treated as a failure.
 
 ### Findings
 
