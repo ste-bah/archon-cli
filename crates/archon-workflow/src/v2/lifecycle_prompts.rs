@@ -115,6 +115,8 @@ pub const RETRY_VERIFICATION_WAVE_TASK: &str = "Run repaired focused verificatio
 
 pub const BLOCKED_VERIFICATION_FAILED_TASK: &str = "Stop because bounded JS-owned verification triage, verification repair, and write remediation did not produce accepted/noop evidence. Report exact commands/results, remediation attempts, and unresolved gaps.";
 
+pub const WAVE_COMPLETION_REMEDIATION_TASK: &str = "Close the completion gaps that stopped this dependency-ready wave from finishing. You are write-capable: fix the work itself rather than restating the gap. Add the missing tests, implement the missing behaviour, and correct claims that do not match what is on disk, then run the item's focused_verification and return the captured results. Every tool named in required_tools must appear in a command you actually executed and reported in commands_run. Return one structured outcome per item with item_id, canonical_task_ids, snake_case status, evidence, changed files, commands/tests, artifacts, and residual gaps. Use accepted only when the acceptance criteria are genuinely met with concrete task-linked proof; report an honest blocked status with captured evidence when the work cannot be completed.";
+
 pub const WAVE_COMPLETION_EVIDENCE_REPAIR_TASK: &str = "Repair a dependency-ready wave that produced no newly completed canonical task IDs. Return concrete completion evidence to re-check, or exact evidence-backed gaps that prevent safe unblocking.";
 
 pub const BLOCKED_NO_COMPLETION_TASK: &str = "Stop because the dependency-ready wave produced no new verified accepted/noop canonical task IDs after JS-owned completion evidence repair.";
