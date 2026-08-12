@@ -140,6 +140,28 @@ fn compile_builds_test_sources_too() {
     assert!(stage_args(BuildSystem::Maven, Stage::Compile).contains(&"test-compile"));
 }
 
+/// Every Gradle invocation, without exception.
+///
+/// A surviving Gradle daemon inherits the build's handles and outlives it — and
+/// on Windows a child inherits every inheritable handle in the spawning process,
+/// not just its redirected stdio. So a daemon left running holds open a copy of
+/// whatever pipe archon's output goes to, and the caller reading that pipe hangs
+/// long after the build finished. This is not a tuning knob.
+#[test]
+fn every_gradle_stage_refuses_to_leave_a_daemon_running() {
+    for stage in [Stage::Compile, Stage::Analyze, Stage::Test] {
+        let args = stage_args(BuildSystem::Gradle, stage);
+        assert!(
+            args.contains(&"--no-daemon"),
+            "{stage:?} would leave a daemon holding the caller's pipe: {args:?}"
+        );
+        assert!(
+            args.contains(&"--console=plain"),
+            "{stage:?} would write an ANSI progress bar into a captured pipe: {args:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Issue selection
 // ---------------------------------------------------------------------------

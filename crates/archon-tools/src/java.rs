@@ -213,9 +213,7 @@ async fn run(
             return ToolResult::error(body);
         }
 
-        body.push_str(
-            "Check the build output before treating this stage as clean.\n",
-        );
+        body.push_str("Check the build output before treating this stage as clean.\n");
     }
 
     // A non-zero exit with nothing parsed means the failure is not one the

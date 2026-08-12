@@ -127,28 +127,49 @@ impl Stage {
     }
 }
 
+/// Flags on every Gradle invocation.
+///
+/// `--console=plain` keeps Gradle from emitting an ANSI progress bar into a
+/// captured pipe. Report files are the source of truth either way, but
+/// unreadable console output helps nobody diagnose a failure.
+///
+/// `--no-daemon` is a correctness requirement, not a preference. Gradle's
+/// launcher forks a daemon that inherits the build's handles and then
+/// deliberately outlives it — and on Windows a child inherits *every*
+/// inheritable handle in the spawning process, not only its redirected stdio.
+/// A surviving daemon therefore holds open a copy of whatever pipe archon's own
+/// output is going to, so a caller reading archon's stdout never sees
+/// end-of-stream and hangs long after the build finished. The daemon also keeps
+/// handles into the project's build directory, which breaks later stages.
+///
+/// The cost is a JVM start per stage. That is real, and it is worth paying:
+/// these are one-shot analysis runs, not an interactive edit-compile loop, and
+/// a process that hangs the caller is not made acceptable by being fast.
+const GRADLE_FLAGS: &[&str] = &["--console=plain", "--no-daemon"];
+
 /// Arguments for one stage.
 ///
 /// `--offline` is deliberately absent: both tools resolve their analysis
 /// plugins from the network on first run, and forcing offline mode turns a
 /// slow first build into a confusing failure.
 pub fn stage_args(build_system: BuildSystem, stage: Stage) -> Vec<&'static str> {
+    let gradle = |tasks: &[&'static str]| -> Vec<&'static str> {
+        GRADLE_FLAGS
+            .iter()
+            .copied()
+            .chain(tasks.iter().copied())
+            .collect()
+    };
+
     match (build_system, stage) {
-        // `--console=plain` keeps Gradle from emitting the ANSI progress bar
-        // into a captured pipe. Report files are the source of truth either
-        // way, but unreadable console output helps nobody diagnose a failure.
-        (BuildSystem::Gradle, Stage::Compile) => vec!["--console=plain", "classes", "testClasses"],
-        (BuildSystem::Gradle, Stage::Analyze) => vec![
-            "--console=plain",
-            // Keep going after the first violating task: a run that stops at
-            // Checkstyle never reaches SpotBugs, and the point of the pass is
-            // to collect everything the tools can see in one go.
-            "--continue",
-            "checkstyleMain",
-            "pmdMain",
-            "spotbugsMain",
-        ],
-        (BuildSystem::Gradle, Stage::Test) => vec!["--console=plain", "--continue", "test"],
+        (BuildSystem::Gradle, Stage::Compile) => gradle(&["classes", "testClasses"]),
+        // `--continue` keeps going after the first violating task: a run that
+        // stops at Checkstyle never reaches SpotBugs, and the point of the pass
+        // is to collect everything the tools can see in one go.
+        (BuildSystem::Gradle, Stage::Analyze) => {
+            gradle(&["--continue", "checkstyleMain", "pmdMain", "spotbugsMain"])
+        }
+        (BuildSystem::Gradle, Stage::Test) => gradle(&["--continue", "test"]),
         (BuildSystem::Maven, Stage::Compile) => vec!["-B", "test-compile"],
         (BuildSystem::Maven, Stage::Analyze) => vec![
             "-B",
