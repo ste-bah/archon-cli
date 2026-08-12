@@ -3,9 +3,11 @@
 //! Production correction detection is a phrase table: lowercase the turn, then
 //! `starts_with("no,")`, `contains("i said")`, and so on. It has no notion of
 //! how sure it is, so every match is treated as certain, and a match is what
-//! reinforces a behavioural rule. `reports/core-audit-2026-07-11.md:281`
-//! records the cost: the heuristics "misfire constantly and every misfire
-//! becomes a permanent rule". A turn that pastes a build log containing
+//! reinforces a behavioural rule. The 2026-07-11 core audit records the cost at
+//! its line 281 -- the heuristics "misfire constantly and every misfire becomes
+//! a permanent rule" -- and that audit is a working document held outside the
+//! repository, so the finding is quoted here rather than linked. A turn that
+//! pastes a build log containing
 //! "should have" is, to that table, indistinguishable from a user saying it.
 //!
 //! What the roadmap asks for is not a better phrase table. It is a classifier

@@ -6,9 +6,14 @@
 # WHAT THIS FILE IS
 # -----------------
 # The roadmap says no behaviour-changing slice (R1-R8, W5-W6) may be PROMOTED
-# until findings 9, 11, 17, and 40-43 from reports/core-audit-2026-07-11.md have
-# verified closure evidence, and that closure must be recorded as immutable
-# evidence references rather than inferred from the roadmap prose.
+# until findings 9, 11, 17, and 40-43 of the 2026-07-11 core audit have verified
+# closure evidence, and that closure must be recorded as immutable evidence
+# references rather than inferred from the roadmap prose.
+#
+# That audit is a working document held outside the repository -- it is not in a
+# checkout, and nothing here reads it. Each block below restates the finding it
+# closes in its own `title`, so this file stands on its own: the gate verifies
+# closure against source, tests and git history, never against the audit text.
 #
 # This is that record, in a form a script can re-verify. It is consumed by
 # scripts/check-r0-entry-gate.sh, which runs in CI (job `r0-entry-gate` in

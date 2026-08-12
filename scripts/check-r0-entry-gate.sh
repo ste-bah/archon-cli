@@ -6,7 +6,10 @@
 # history, and prints an explicit PASS/FAIL for the R0 entry gate.
 #
 # Reference: docs/development/learning-roadmap-r1-r8-w5-w6.md line 35 (R0 entry
-# gate) and reports/core-audit-2026-07-11.md findings 9, 11, 17, 40-43.
+# gate) and findings 9, 11, 17, 40-43 of the 2026-07-11 core audit, a working
+# document held outside the repository. Nothing here reads it: each finding is
+# restated in its own block in the evidence file, and this script checks source,
+# tests and git history rather than the audit text.
 #
 # The roadmap forbids promoting any behaviour-changing slice (R1-R8, W5-W6)
 # while R0 is open, and forbids inferring closure from prose. This script is the
