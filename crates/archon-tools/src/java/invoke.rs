@@ -33,6 +33,14 @@ impl RunOutcome {
 /// otherwise produce tens of megabytes.
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
+/// How long to keep reading the pipes after the build process has exited.
+///
+/// Gradle forks a daemon that inherits the build's stdout and stderr and then
+/// outlives it, so the write end of those pipes stays open after the build is
+/// over. Waiting for end-of-stream would therefore never return on the first
+/// Gradle run in a project — the build completes and the caller hangs.
+const PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
 /// Run one stage of `project` and return what the tool printed and exited with.
 pub async fn run_stage(
     project: &JavaProject,
@@ -69,6 +77,7 @@ pub async fn run_stage(
     // timeout rather than as the deadlock it is.
     let stdout = child.stdout.take().map(drain);
     let stderr = child.stderr.take().map(drain);
+    let readers: Vec<_> = [stdout, stderr].into_iter().flatten().collect();
 
     let cancel = cancel.unwrap_or_default();
     let status = tokio::select! {
@@ -93,9 +102,29 @@ pub async fn run_stage(
         tracing::info!(reason, "java: terminated the build process");
     }
 
-    for task in [stdout, stderr].into_iter().flatten() {
-        if let Ok(text) = task.await {
-            output.push_str(&text);
+    for (mut task, buffer) in readers {
+        // Bounded, and this is the reason it has to be: Gradle's launcher hands
+        // its inherited stdout and stderr to the daemon it forks, and that
+        // daemon outlives the build. The write end of the pipe therefore never
+        // closes, so reading to end-of-stream never returns — the build
+        // finishes and the caller waits forever on output that will not arrive.
+        //
+        // Everything the build itself wrote is in the buffer by the time it
+        // exits, so the grace period costs nothing in the normal case.
+        if tokio::time::timeout(PIPE_DRAIN_GRACE, &mut task)
+            .await
+            .is_err()
+        {
+            tracing::debug!(
+                "build output pipe still open after the process exited; a forked \
+                 daemon is holding it. Using what was read."
+            );
+            task.abort();
+        }
+        // Read from the shared buffer rather than the task's return value, so
+        // output already received survives an aborted read.
+        if let Ok(bytes) = buffer.lock() {
+            output.push_str(&String::from_utf8_lossy(&bytes));
         }
     }
 
@@ -113,19 +142,42 @@ pub async fn run_stage(
     }
 }
 
-/// Read a pipe to end-of-stream on its own task.
-fn drain<R>(mut pipe: R) -> tokio::task::JoinHandle<String>
+/// Shared buffer a reader task appends into.
+type SharedOutput = std::sync::Arc<std::sync::Mutex<Vec<u8>>>;
+
+/// Read a pipe on its own task, accumulating into a buffer the caller can read
+/// even if the task has to be abandoned.
+///
+/// Deliberately not `read_to_end` into a returned `String`: that value only
+/// materialises when the read completes, so a pipe held open by a surviving
+/// daemon would mean losing every byte the build actually wrote. Appending to
+/// shared storage as it arrives makes the output recoverable at any point.
+fn drain<R>(mut pipe: R) -> (tokio::task::JoinHandle<()>, SharedOutput)
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
-    tokio::spawn(async move {
+    let buffer: SharedOutput = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = std::sync::Arc::clone(&buffer);
+    let handle = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
-        let mut buffer = Vec::new();
-        if let Err(e) = pipe.read_to_end(&mut buffer).await {
-            tracing::warn!("could not read build output: {e}");
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk).await {
+                Ok(0) => break,
+                // The lock is taken and released around the copy, never held
+                // across the await above.
+                Ok(read) => match sink.lock() {
+                    Ok(mut bytes) => bytes.extend_from_slice(&chunk[..read]),
+                    Err(_) => break,
+                },
+                Err(e) => {
+                    tracing::warn!("could not read build output: {e}");
+                    break;
+                }
+            }
         }
-        String::from_utf8_lossy(&buffer).into_owned()
-    })
+    });
+    (handle, buffer)
 }
 
 fn truncate(mut text: String) -> String {
