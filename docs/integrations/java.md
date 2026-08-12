@@ -197,10 +197,15 @@ configured rather than an instruction to be remembered — a limit that exists
 only in a prompt is not a limit. The same applies to method length, parameter
 count and cognitive complexity.
 
-Build conventions it follows: for Gradle, convention plugins in a `build-logic`
-composite build rather than `buildSrc`, no `allprojects`/`subprojects`, version
-catalogs, flat modules. For Maven, versions in `<dependencyManagement>` and
-plugins pinned in `<pluginManagement>`.
+Build conventions it follows: for Gradle, convention plugins in preference to
+`allprojects`/`subprojects`, version catalogs, flat modules. For Maven, versions
+in `<dependencyManagement>` and plugins pinned in `<pluginManagement>`.
+
+It does **not** claim `buildSrc` is wrong. Gradle documents both `buildSrc` and a
+`build-logic` composite build and recommends neither over the other; the
+difference worth knowing is that changes to `buildSrc` invalidate the
+configuration phase and force re-execution of all tasks, which is expensive on a
+large build whose convention logic changes often.
 
 ## Fixture projects
 

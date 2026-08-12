@@ -152,9 +152,16 @@ degrades fix quality. Take the batch, fix it, re-run.
   finding nothing. Treat it as an unrun check until you know why.
 - Prefer adding a rule to the project's Checkstyle config over policing a
   convention by hand
-- Gradle: convention plugins in a `build-logic` composite build rather than
-  `buildSrc`, and never `allprojects`/`subprojects` — both couple every module
-  to the root and defeat configuration-on-demand
+- Gradle: prefer convention plugins over `allprojects {}` / `subprojects {}`.
+  Gradle's own reason is legibility rather than performance — with cross-project
+  configuration, "build logic can be injected into a subproject which is not
+  obvious when looking at its build script"
+- Gradle: `buildSrc` and a `build-logic` composite build are **both** valid, and
+  the docs endorse both. The trade-off worth knowing is that "changes to code in
+  `buildSrc` will invalidate the configuration phase and require re-execution of
+  all tasks". On a large multi-module build that is expensive, which is why a
+  composite build is often the better home for logic that changes often. Do not
+  migrate an existing `buildSrc` without a reason.
 - Maven: versions in `<dependencyManagement>`, plugins pinned in
   `<pluginManagement>` — an unpinned plugin makes the build non-reproducible
 - Use `gradle dependencyInsight --dependency <name>` or

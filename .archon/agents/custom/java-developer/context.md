@@ -42,9 +42,16 @@ and fetched by it, so they behave identically on every OS.
   one place routinely raises it in another.
 
 ## Common Patterns
-- **Convention plugins**: shared build logic as plugins in a `build-logic`
-  composite build, applied per module. Replaces `allprojects`/`subprojects`,
-  which couple every module to the root and defeat configuration-on-demand.
+- **Convention plugins**: shared build logic as plugins, applied per module.
+  Preferred over `allprojects {}` / `subprojects {}` because cross-project
+  configuration hides what is happening — Gradle's stated objection is that
+  "build logic can be injected into a subproject which is not obvious when
+  looking at its build script".
+- **Where convention plugins live**: `buildSrc` or a `build-logic` composite
+  build. Gradle documents both and recommends neither over the other. The
+  distinction that matters in practice is that "changes to code in `buildSrc`
+  will invalidate the configuration phase and require re-execution of all
+  tasks" — costly on a large build if that logic changes often.
 - **Version catalogs** (`gradle/libs.versions.toml`): dependency coordinates in
   one typed place.
 - **BOM import** (Maven): a dependency's own bill of materials instead of
