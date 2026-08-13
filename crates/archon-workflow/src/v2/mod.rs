@@ -22,6 +22,7 @@ pub mod decomposed_prd_plan;
 pub mod deliverable_contract;
 pub mod host_api;
 pub mod implementation_inspection;
+pub(crate) mod inventory_artifact_seeding;
 pub mod lifecycle_driver;
 pub mod lifecycle_policy;
 pub mod lifecycle_prompts;
