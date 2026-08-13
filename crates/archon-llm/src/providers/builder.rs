@@ -83,6 +83,16 @@ pub fn build_llm_provider_with_policy(
     let api_key = match descriptor.auth_flavor {
         AuthFlavor::None => ApiKey::new(String::new()),
         _ if descriptor.id == "openai-codex" => ApiKey::new(String::new()),
+        // Bedrock signs each request with SigV4 from credentials resolved at
+        // call time — environment, then `~/.aws/credentials`, then IMDS. The
+        // env var is only one of the three, so requiring it here refused to
+        // construct the provider on any EC2 box carrying an instance profile
+        // and nothing else: the very case IMDS exists for, and the one that
+        // keeps a static secret off the machine entirely.
+        //
+        // `descriptor.env_key_var` stays as documentation of the env source;
+        // it is simply no longer a precondition.
+        _ if descriptor.id == "bedrock" => ApiKey::new(String::new()),
         _ => {
             let var = cfg
                 .api_key_env

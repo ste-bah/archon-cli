@@ -205,9 +205,24 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.9.0** — [release notes](docs/release-notes/v1.9.0.md)
+**Current release: v1.9.1** — [release notes](docs/release-notes/v1.9.1.md)
 
-A knowledge base is now one thing rather than two. `archon kb kbs` and the web
+Prompt caching works on every provider archon talks to, rather than on the one
+endpoint whose URL it recognised. Against anything else it used to *strip* the
+directive, so a gateway that would have honoured caching was billed in full on
+every token of every turn. Every provider now declares how it caches and a guard
+test enforces it; the volatile part of each turn moves behind the message
+history, which is the only lever the implicitly-caching providers have; and
+cache reads and writes are priced at 0.1x and 1.25x base input instead of at
+zero and at par — so a checkpoint that never pays for itself now shows up as the
+loss it is.
+
+Four Bedrock models could not be called at all: SigV4 requires the request path
+encoded twice, and the colon in a dated model id was encoded once, which
+presented as a bad secret key. Verified live on five models, on Anthropic
+subscription OAuth, and on the OpenAI Codex subscription.
+
+Built on v1.9.0, where a knowledge base stopped being two disjoint things. `archon kb kbs` and the web
 Ingest tab list the same union, so a name created on either surface is visible
 and usable from both — and a name you did not write down is recoverable at all.
 Corrections only reinforce a rule once something has been shown to have caused
@@ -238,6 +253,14 @@ called.
 > refusal as success. Enter still submits; **Shift+Enter inserts a newline**, and
 > Ctrl+L forces a redraw. See the
 > [release notes](docs/release-notes/v1.9.0.md#upgrade-notes).
+>
+> From v1.9.1: **cost figures move in both directions** — cache reads were
+> priced at zero and writes at par, so caching could only ever look like a
+> saving. `prompt_cache_conversation = false` no longer disables the tools and
+> system checkpoints along with the message one. This turn's volatile system
+> blocks move onto the last user message (`prompt_cache_reorder`, default on),
+> which changes where the model sees them. `RUST_LOG` now reaches the session
+> log. See the [release notes](docs/release-notes/v1.9.1.md#upgrade-notes).
 >
 > From v1.8.0: project capability manifests no longer hoist tools, a declared
 > artifact must be a regular non-empty file, and `events.jsonl` gained a

@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "archon-accel"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "serde",
  "sysinfo",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "archon-bench"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "arc-swap",
  "archon-core",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cli-workspace"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-accel",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cognitive"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-cozo",
  "archon-policy",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "archon-completion"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "archon-consciousness"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "archon-constellation"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-cozo",
  "archon-meaning",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "archon-context"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "archon-core"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "archon-cozo"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "cozo-ce",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "archon-docs"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-accel",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "archon-draft"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-lanham",
  "archon-llm",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "archon-ingest-ext"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "regex",
  "serde_json",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "archon-knowledge"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-context",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "archon-lanham"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "once_cell",
  "regex",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "archon-leann"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "archon-learning"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "archon-llm"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -748,7 +748,7 @@ dependencies = [
 
 [[package]]
 name = "archon-mcp"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-tools",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "archon-meaning"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-cozo",
  "chrono",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "archon-memory"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-context",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "archon-observability"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "archon-permissions"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "glob",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "archon-pipeline"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-context",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "archon-plugin"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "archon-policy"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "dirs",
  "serde",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "archon-provenance"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-cozo",
  "chrono",
@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "archon-reasoning-quality"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "archon-sdk"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cognitive",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "archon-session"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "archon-shell"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "tempfile",
  "which",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "archon-test-support"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-memory",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tools"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "archon-topology"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-write-plan",
  "dashmap 6.1.0",
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "archon-trading"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-core",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "archon-tui-test-support"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "criterion",
  "dashmap 5.5.3",
@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "archon-video"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-docs",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "archon-workflow"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "archon-llm",
  "archon-shell",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "archon-world-model"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "archon-cozo",
@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "archon-write-plan"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "globset",
  "serde",

@@ -139,6 +139,81 @@ fn codex_model_info(id: &str) -> ModelInfo {
 
 /// Append `id` unless it is empty or already listed, preserving first-seen order
 /// — which is what makes `models().first()` the configured model.
+/// Whether this model takes explicit `prompt_cache_breakpoint` markers.
+///
+/// GPT-5.6 is the cutoff; everything before it caches automatically on a stable
+/// prefix and accepts no annotation. Parsed rather than listed because the ids
+/// carry suffixes (`gpt-5.6-sol`, `gpt-5.3-codex`) and a fixed list would miss
+/// the next one silently.
+fn supports_responses_breakpoints(model: &str) -> bool {
+    let lowered = model.trim().to_ascii_lowercase();
+    let Some(rest) = lowered.strip_prefix("gpt-") else {
+        return false;
+    };
+    let version: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let mut parts = version.split('.');
+    let major: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor) >= (5, 6)
+}
+
+/// A stable routing key for the prompt cache.
+///
+/// This used to be `Uuid::new_v4()`, minted inside `build_request_body` and so
+/// fresh on every request. That is the one value the field must not take.
+/// `prompt_cache_key` is how the service groups requests that share a prefix:
+/// requests carrying the same key are routed to the same cache, and OpenAI
+/// documents that a high-cardinality key lowers the hit rate. A key that never
+/// repeats therefore guarantees a miss on every turn of every session, however
+/// stable the prefix in front of it.
+///
+/// It hashes exactly the cached prefix — model, instructions, tool schemas — and
+/// deliberately **not** the conversation input. Including the messages would
+/// rebuild the original bug by hand, since they change every turn. Two turns of
+/// one session share a key; a session with different tools or a different system
+/// prompt gets its own, which is right, because a different prefix cannot hit
+/// the same cache anyway.
+///
+/// Hashing the prefix rather than using a session id is the deliberate choice:
+/// two archon sessions with the same tools and system prompt genuinely can share
+/// a cached prefix, and a per-session key would stop them. The documented limit
+/// on that is throughput — OpenAI routes on the key combined with a hash of the
+/// leading tokens, and a single prefix-plus-key pair saturates around 15
+/// requests per minute before excess traffic is spread over more machines, each
+/// spread costing a one-time miss. One interactive CLI is nowhere near that; a
+/// deployment fanning out many concurrent sessions would want the key salted per
+/// session, and this is the function to do it in.
+fn prompt_cache_key(
+    model: &str,
+    instructions: Option<&str>,
+    tools: Option<&[super::types::ResponseTool]>,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(model.as_bytes());
+    hasher.update([0]);
+    hasher.update(instructions.unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    if let Some(tools) = tools
+        && let Ok(encoded) = serde_json::to_vec(tools)
+    {
+        hasher.update(&encoded);
+    }
+
+    // Half the digest is ample for a routing key and keeps the header-adjacent
+    // body field short.
+    let digest = hasher.finalize();
+    digest[..16].iter().fold(String::new(), |mut key, byte| {
+        use std::fmt::Write;
+        let _ = write!(key, "{byte:02x}");
+        key
+    })
+}
+
 fn push_unique_model(models: &mut Vec<ModelInfo>, id: &str) {
     if id.is_empty() || models.iter().any(|model| model.id == id) {
         return;
@@ -226,7 +301,6 @@ impl CodexProvider {
     }
 
     pub fn build_request_body(&self, req: &LlmRequest) -> Result<ResponsesRequest, LlmError> {
-        let session_id = Uuid::new_v4().to_string();
         let input = messages_to_responses_input(req)?;
         let instructions = join_system_prompt(&req.system);
         let tools = if req.tools.is_empty() {
@@ -235,6 +309,7 @@ impl CodexProvider {
             Some(tools_to_responses_tools(&req.tools)?)
         };
         let reasoning = build_reasoning_config(&req.model, req.effort.as_deref());
+        let cache_key = prompt_cache_key(&req.model, instructions.as_deref(), tools.as_deref());
 
         Ok(ResponsesRequest {
             model: req.model.clone(),
@@ -252,7 +327,7 @@ impl CodexProvider {
                 verbosity: Some("low".into()),
             }),
             include: Some(vec!["reasoning.encrypted_content".into()]),
-            prompt_cache_key: Some(session_id),
+            prompt_cache_key: Some(cache_key),
         })
     }
 
@@ -283,6 +358,21 @@ impl CodexProvider {
                 .map_err(auth_to_llm_error)?;
             let session_id = Uuid::new_v4().to_string();
             let headers = build_codex_headers(&creds, &self.spoof, &session_id)?;
+            // Only ever serialised when the level is enabled — the body is
+            // large and this is the hot path. Without it there is no way to see
+            // what actually went out, which is what made a silent prompt-cache
+            // miss on this provider impossible to diagnose from the outside:
+            // the counters read zero whether the cache missed or the service
+            // simply did not report a hit.
+            if tracing::enabled!(tracing::Level::DEBUG)
+                && let Ok(rendered) = serde_json::to_string(body)
+            {
+                tracing::debug!(
+                    provider = "openai-codex",
+                    "Codex request body: {}",
+                    crate::debug_body::debug_body(&rendered)
+                );
+            }
             let response = self
                 .http
                 .post(self.resolve_url())
@@ -353,6 +443,52 @@ impl CodexProvider {
 impl LlmProvider for CodexProvider {
     fn name(&self) -> &str {
         "openai-codex"
+    }
+
+    /// The Codex subscription and an OpenAI API key reach the same service; only
+    /// the credential differs, and a credential does not move a threshold.
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        crate::cache_models::CachePlatform::OpenAiApi
+    }
+
+    /// GPT-5.5 and earlier cache automatically on a stable prefix, with nothing
+    /// to annotate. That is [`CacheStrategy::Automatic`] rather than
+    /// [`CacheStrategy::None`], and the distinction matters in both directions:
+    /// `Automatic` reports as caching, so these models are not shown as
+    /// uncached, but it emits no markers, because a marker here would be an
+    /// unsupported field rather than a harmless hint.
+    ///
+    /// From GPT-5.6 the Responses API accepts explicit breakpoints, and the
+    /// strategy carries their limits — but archon does not emit them here, for a
+    /// documented reason rather than an unfinished one.
+    ///
+    /// A breakpoint has to sit on a content block, and OpenAI states plainly
+    /// that top-level `instructions` cannot carry one; reusable instructions
+    /// have to be moved into an `input_text` block inside a developer message to
+    /// be markable. Archon's stable content is exactly that top-level
+    /// `instructions` field, and this provider impersonates the Codex CLI, whose
+    /// captured traffic puts it there. Restructuring the request to mark it
+    /// would change the shape being impersonated.
+    ///
+    /// Little is lost. The default `implicit` mode already places a breakpoint
+    /// at the latest message, so the prefix it caches is instructions, tools and
+    /// history — the same span an explicit breakpoint after the instructions
+    /// would cover, plus more. What that mode genuinely needs is a stable
+    /// `prompt_cache_key`, which it was not getting; see `prompt_cache_key`.
+    ///
+    /// Emitting `prompt_cache_options` would also be actively unsafe on the
+    /// shared path: models before 5.6 reject both it and `prompt_cache_breakpoint`
+    /// outright.
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        if !supports_responses_breakpoints(model) {
+            return crate::cache_strategy::CacheStrategy::Automatic;
+        }
+        let params = crate::cache_models::ModelCacheTable::default()
+            .lookup_on(model, crate::cache_models::CachePlatform::OpenAiApi);
+        crate::cache_strategy::CacheStrategy::ResponsesBreakpoints {
+            max: params.max_checkpoints,
+            min_tokens: params.min_tokens,
+        }
     }
 
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {

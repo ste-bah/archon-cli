@@ -356,6 +356,46 @@ impl LlmProvider for OpenAiCompatProvider {
         &self.descriptor.display_name
     }
 
+    /// Which of the 31 OpenAI-compatible endpoints actually cache.
+    ///
+    /// Answered per provider rather than by blanket assumption, because this one
+    /// struct serves everything from DeepSeek to a laptop running Ollama. The
+    /// wrong answer is costly in both directions: claiming caching where there
+    /// is none makes a cost report understate spend, and claiming none where
+    /// there is some — the state this was in — makes archon report every request
+    /// as uncached.
+    ///
+    /// DeepSeek is the one that mattered. `archon_core::cost` already prices its
+    /// cache hits at 0.003625/Mtok against 0.435 for a miss, so archon was
+    /// *billing* DeepSeek as a caching provider while its provider reported
+    /// `CacheStrategy::None`. Those two cannot both be right.
+    ///
+    /// All of these cache automatically on a stable prefix with nothing to
+    /// annotate, hence `Automatic`; none of them accept breakpoint markers.
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        let _ = model;
+        match self.descriptor.id.as_str() {
+            // Documented automatic prefix caching, billed at a reduced rate.
+            "deepseek" | "zai" | "zhipu" | "qwen" | "moonshot" | "siliconflow" => {
+                crate::cache_strategy::CacheStrategy::Automatic
+            }
+            // A router, not a service: whether a request is cached depends on
+            // which upstream it lands on, which archon cannot see. Reporting
+            // "unknown" is honest; claiming either answer is not.
+            "openrouter" => crate::cache_strategy::CacheStrategy::None,
+            // Everything else — local runtimes, plain inference hosts — has no
+            // documented prompt cache.
+            _ => crate::cache_strategy::CacheStrategy::None,
+        }
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        // Not OpenAI's stack, whatever the wire format. `Unknown` takes the
+        // strictest per-model figures, which is right for an endpoint whose
+        // backing service archon cannot identify.
+        crate::cache_models::CachePlatform::Unknown
+    }
+
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
         crate::compaction_policy::ProviderFamily::OpenAiCompatible
     }

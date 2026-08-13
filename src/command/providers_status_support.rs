@@ -189,6 +189,21 @@ fn credentials_present(descriptor: &ProviderDescriptor, env: &ProviderStatusEnv)
     match descriptor.id.as_str() {
         "anthropic" => env.anthropic_oauth || env.has_env_var(&descriptor.env_key_var),
         "openai-codex" => env.codex_oauth,
+        // Bedrock has three credential sources, and `AWS_ACCESS_KEY_ID` is only
+        // the first: `resolve_credentials` falls through to
+        // `~/.aws/credentials` and then to the EC2 instance metadata service.
+        // Judging it on the env var alone reported `missing-credentials` on
+        // every box configured the normal AWS way — a credentials file, or an
+        // attached instance profile, which is the whole point of IMDS and the
+        // configuration that keeps a static secret off the machine.
+        //
+        // IMDS is deliberately not probed here: it is a network call on a
+        // link-local address, and a status command must not block for a second
+        // on every non-EC2 machine. `aws_configured` is the cheap local
+        // evidence; a box with only an instance profile still reports
+        // unknown-local rather than a false "missing", and the request path
+        // resolves it for real.
+        "bedrock" => env.has_env_var(&descriptor.env_key_var) || env.aws_configured,
         _ if matches!(descriptor.auth_flavor, AuthFlavor::None) => true,
         _ => env.has_env_var(&descriptor.env_key_var),
     }
@@ -258,6 +273,8 @@ pub(super) struct ProviderStatusEnv {
     pub(super) anthropic_oauth: bool,
     pub(super) anthropic_bearer_env: bool,
     pub(super) codex_oauth: bool,
+    /// `~/.aws/credentials` exists — the second of Bedrock's three sources.
+    pub(super) aws_configured: bool,
 }
 
 impl ProviderStatusEnv {
@@ -272,6 +289,9 @@ impl ProviderStatusEnv {
         env.anthropic_bearer_env = std::env::var("ANTHROPIC_API_KEY")
             .map(|value| value.starts_with("sk-ant-oat"))
             .unwrap_or(false);
+        env.aws_configured = dirs::home_dir()
+            .map(|home| home.join(".aws").join("credentials").exists())
+            .unwrap_or(false);
         let path = archon_llm::tokens::credentials_path();
         if let Ok(json) = std::fs::read_to_string(path) {
             env.anthropic_oauth = archon_llm::auth::parse_credentials_json(&json).is_ok();
@@ -282,5 +302,67 @@ impl ProviderStatusEnv {
 
     fn has_env_var(&self, name: &str) -> bool {
         !name.is_empty() && self.env_vars.contains(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archon_llm::providers::native_registry::NATIVE_REGISTRY;
+
+    fn descriptor(id: &str) -> ProviderDescriptor {
+        NATIVE_REGISTRY
+            .get(id)
+            .unwrap_or_else(|| panic!("{id} is a registered provider"))
+            .clone()
+    }
+
+    fn env(vars: &[&str]) -> ProviderStatusEnv {
+        ProviderStatusEnv {
+            env_vars: vars.iter().map(|name| (*name).to_string()).collect(),
+            ..ProviderStatusEnv::default()
+        }
+    }
+
+    /// The regression. Bedrock resolves credentials from the environment, then
+    /// `~/.aws/credentials`, then IMDS — so judging it on the env var alone
+    /// reported `missing-credentials` on every box configured the normal AWS
+    /// way, including one carrying only an instance profile.
+    #[test]
+    fn bedrock_credentials_are_present_from_the_aws_config_file() {
+        let from_file = ProviderStatusEnv {
+            aws_configured: true,
+            ..env(&[])
+        };
+
+        assert!(credentials_present(&descriptor("bedrock"), &from_file));
+    }
+
+    #[test]
+    fn bedrock_credentials_are_present_from_the_environment() {
+        assert!(credentials_present(
+            &descriptor("bedrock"),
+            &env(&["AWS_ACCESS_KEY_ID"])
+        ));
+    }
+
+    /// With neither local source, the honest answer is still "no evidence".
+    /// IMDS is not probed here — a link-local network call would stall the
+    /// status command on every machine that is not EC2.
+    #[test]
+    fn bedrock_with_no_local_evidence_reports_absent() {
+        assert!(!credentials_present(&descriptor("bedrock"), &env(&[])));
+    }
+
+    /// The AWS file must not vouch for anything else.
+    #[test]
+    fn the_aws_file_does_not_satisfy_other_providers() {
+        let aws_only = ProviderStatusEnv {
+            aws_configured: true,
+            ..env(&[])
+        };
+
+        assert!(!credentials_present(&descriptor("openai"), &aws_only));
+        assert!(!credentials_present(&descriptor("anthropic"), &aws_only));
     }
 }

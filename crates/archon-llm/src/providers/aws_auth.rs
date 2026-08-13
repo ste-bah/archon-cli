@@ -154,13 +154,35 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
+/// The canonical URI for a SigV4 canonical request.
+///
+/// SigV4 outside S3 requires the path to be URI-encoded **twice**: once to build
+/// the request line, and again to build the canonical request. `path` arrives
+/// already encoded once — it comes from a parsed URL — so this applies the
+/// second pass, per segment so the separators survive.
+///
+/// Almost every Bedrock model id is unreserved characters throughout, where a
+/// second pass is a no-op and this changes nothing. The exception is the dated,
+/// versioned ids — `anthropic.claude-haiku-4-5-20251001-v1:0` — whose colon
+/// encodes to `%3A` in the path and must appear as `%253A` in the signature.
+/// Without this, every one of those models fails with *"The request signature we
+/// calculated does not match"*, which reads as a credentials problem and is not
+/// one: the same credentials work perfectly against any model whose id happens
+/// to contain no special characters.
+fn canonical_uri(path: &str) -> String {
+    path.split('/')
+        .map(|segment| urlencoding::encode(segment).into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Build a SigV4 `Authorization` header value for an HTTP request.
 ///
 /// # Arguments
 /// - `creds` — resolved AWS credentials
 /// - `method` — HTTP method (e.g. `"POST"`)
 /// - `host` — hostname without scheme (e.g. `"bedrock-runtime.us-east-1.amazonaws.com"`)
-/// - `path` — URL path (e.g. `"/model/anthropic.claude-v2/converse-stream"`)
+/// - `path` — URL path, already encoded once (e.g. `"/model/anthropic.claude-v2/converse-stream"`)
 /// - `region` — AWS region
 /// - `service` — AWS service name (e.g. `"bedrock"`)
 /// - `body` — request body bytes
@@ -193,7 +215,7 @@ pub fn build_authorization_header(
         canonical_headers.push_str(&format!("x-amz-security-token:{token}\n"));
         signed_headers.push_str(";x-amz-security-token");
     }
-    let canonical_uri = path;
+    let canonical_uri = canonical_uri(path);
     let canonical_query_string = "";
 
     let canonical_request = format!(
@@ -265,6 +287,30 @@ pub fn signed_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact string AWS said the canonical request should have contained,
+    /// from a live rejection of `eu.anthropic.claude-haiku-4-5-20251001-v1:0`.
+    #[test]
+    fn a_versioned_model_id_is_encoded_twice_in_the_canonical_uri() {
+        assert_eq!(
+            canonical_uri("/model/eu.anthropic.claude-haiku-4-5-20251001-v1%3A0/converse-stream"),
+            "/model/eu.anthropic.claude-haiku-4-5-20251001-v1%253A0/converse-stream"
+        );
+    }
+
+    /// The ids that already worked must sign byte-for-byte as before — the
+    /// second pass has to be a no-op on unreserved characters, or this fix
+    /// breaks every model it was not aimed at.
+    #[test]
+    fn an_unreserved_path_is_unchanged() {
+        for path in [
+            "/model/eu.anthropic.claude-sonnet-4-6/converse-stream",
+            "/model/anthropic.claude-opus-4-6-v1/converse-stream",
+            "/model/global.anthropic.claude-opus-5/converse-stream",
+        ] {
+            assert_eq!(canonical_uri(path), path);
+        }
+    }
 
     #[test]
     fn parse_ini_credentials_default_profile() {

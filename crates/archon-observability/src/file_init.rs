@@ -40,8 +40,10 @@
 //!   * Applies the same third-party noise filters (`cozo=warn`,
 //!     `cozo_ce=warn`, `hyper_util=warn`, `reqwest=warn`) as the
 //!     pre-LIFT function.
-//!   * `EnvFilter` source: `ARCHON_LOG` env var takes precedence, then
-//!     the `log_level` arg, then `"info"` as the final fallback.
+//!   * `EnvFilter` source: `ARCHON_LOG` takes precedence, then `RUST_LOG`,
+//!     then the `log_level` arg, then `"info"` as the final fallback.
+//!     `RUST_LOG` was added after it turned out to be ignored outright —
+//!     see `session_filter`.
 //!
 //! # Behavioural delta from pre-LIFT `init_logging`
 //!
@@ -102,6 +104,49 @@ fn secure_file_permissions(path: &Path) -> Result<(), std::io::Error> {
     std::fs::set_permissions(path, perms)
 }
 
+/// The filter for a session log: `ARCHON_LOG`, then `RUST_LOG`, then the
+/// caller's level, then `info`.
+///
+/// `RUST_LOG` is honoured because it is the universal Rust convention and the
+/// first thing anyone reaches for. Without it this silently ignored
+/// `RUST_LOG=archon_llm=debug` and fell back to the caller's level — `info` by
+/// default — so every debug event was filtered out and the session log looked
+/// empty. Nothing failed and nothing warned; the events simply never reached
+/// the writer, which is indistinguishable from logging being broken.
+///
+/// Noise filters for third-party crates are layered on top regardless, so
+/// `debug` at the root does not drown the log in cozo/hyper/reqwest chatter.
+fn session_filter(log_level: &str) -> EnvFilter {
+    session_filter_from(
+        std::env::var("ARCHON_LOG").ok().as_deref(),
+        std::env::var("RUST_LOG").ok().as_deref(),
+        log_level,
+    )
+}
+
+/// The precedence itself, with the environment passed in.
+///
+/// Split out so the tests can exercise every branch without mutating
+/// process-wide state — which this crate could not do anyway, since it denies
+/// `unsafe` and `set_var` is unsafe as of the 2024 edition.
+fn session_filter_from(
+    archon_log: Option<&str>,
+    rust_log: Option<&str>,
+    log_level: &str,
+) -> EnvFilter {
+    let base = archon_log
+        .and_then(|value| EnvFilter::try_new(value).ok())
+        .or_else(|| rust_log.and_then(|value| EnvFilter::try_new(value).ok()))
+        .unwrap_or_else(|| {
+            EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("info"))
+        });
+
+    base.add_directive("cozo_ce=warn".parse().expect("valid directive"))
+        .add_directive("cozo=warn".parse().expect("valid directive"))
+        .add_directive("hyper_util=warn".parse().expect("valid directive"))
+        .add_directive("reqwest=warn".parse().expect("valid directive"))
+}
+
 /// Install the global tracing subscriber with `RedactionLayer` as the
 /// SOLE event emitter, writing to `{session_id}.log` inside `log_dir`.
 ///
@@ -138,18 +183,7 @@ pub fn init_tracing_file(
     // LogGuard and MUST outlive the process.
     let (file_writer, guard) = tracing_appender::non_blocking(log_file);
 
-    // Build the env filter: ARCHON_LOG wins, then the caller's level,
-    // then "info" as the safe default. Noise filters for third-party
-    // crates are always layered on top so `debug` on the root level
-    // doesn't drown the session log in cozo/hyper/reqwest chatter.
-    let base_filter = EnvFilter::try_from_env("ARCHON_LOG").unwrap_or_else(|_| {
-        EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("info"))
-    });
-    let filter = base_filter
-        .add_directive("cozo_ce=warn".parse().expect("valid directive"))
-        .add_directive("cozo=warn".parse().expect("valid directive"))
-        .add_directive("hyper_util=warn".parse().expect("valid directive"))
-        .add_directive("reqwest=warn".parse().expect("valid directive"));
+    let filter = session_filter(log_level);
 
     // RedactionLayer is the SOLE emitter. See module-level security
     // architecture comment for the parallel-sinks tombstone rationale.
@@ -164,4 +198,69 @@ pub fn init_tracing_file(
     Ok(LogGuard {
         _worker_guard: guard,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression. `RUST_LOG` was ignored outright, so the one knob
+    /// everybody reaches for did nothing and the session log looked empty.
+    #[test]
+    fn rust_log_reaches_the_session_filter() {
+        let rendered = session_filter_from(None, Some("archon_llm=debug"), "info").to_string();
+
+        assert!(
+            rendered.contains("archon_llm=debug"),
+            "RUST_LOG must reach the filter, got: {rendered}"
+        );
+    }
+
+    /// `ARCHON_LOG` stays the more specific knob and keeps winning.
+    #[test]
+    fn archon_log_still_takes_precedence_over_rust_log() {
+        let rendered =
+            session_filter_from(Some("archon_core=trace"), Some("archon_llm=debug"), "info")
+                .to_string();
+
+        assert!(rendered.contains("archon_core=trace"), "{rendered}");
+        assert!(!rendered.contains("archon_llm=debug"), "{rendered}");
+    }
+
+    #[test]
+    fn the_callers_level_applies_when_neither_is_set() {
+        let rendered = session_filter_from(None, None, "debug").to_string();
+
+        assert!(rendered.contains("debug"), "{rendered}");
+    }
+
+    /// A malformed value must fall through to the next source rather than
+    /// taking the whole filter down to the default.
+    #[test]
+    fn an_unparseable_value_falls_through() {
+        let rendered =
+            session_filter_from(Some("=@!not a filter="), Some("archon_llm=debug"), "info")
+                .to_string();
+
+        assert!(rendered.contains("archon_llm=debug"), "{rendered}");
+    }
+
+    /// The noise filters must survive whichever source won, or a root-level
+    /// `debug` buries the session log in third-party chatter.
+    #[test]
+    fn third_party_noise_filters_are_always_applied() {
+        let rendered = session_filter_from(None, Some("debug"), "info").to_string();
+
+        for directive in [
+            "cozo=warn",
+            "cozo_ce=warn",
+            "hyper_util=warn",
+            "reqwest=warn",
+        ] {
+            assert!(
+                rendered.contains(directive),
+                "missing {directive}: {rendered}"
+            );
+        }
+    }
 }

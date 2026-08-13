@@ -13,7 +13,7 @@ use anyhow::Result;
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::env_vars::{self, ArchonEnvVars};
-use archon_core::logging::{default_log_dir, init_logging};
+use archon_core::logging::{init_logging, resolve_log_dir};
 
 use crate::cli_args::Cli;
 
@@ -54,10 +54,13 @@ pub fn strip_cache_control_if_disabled(
 /// Initialize logging system and return the log directory.
 /// The log guard is stored internally and will be dropped when the function returns,
 /// but that's acceptable since the logging system is already initialized.
+///
+/// `ARCHON_DEBUG_LOG_DIR` wins over `ARCHON_LOG_DIR`, being the more deliberate
+/// of the two. It was parsed into `ArchonEnvVars::debug_log_dir` and printed by
+/// the env dump, but nothing anywhere read it — so setting it did nothing at
+/// all, silently, while appearing in the documented list of knobs.
 pub fn setup_logging(session_id: &str, log_level: &str) -> Result<PathBuf> {
-    let log_dir = std::env::var_os("ARCHON_LOG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_log_dir);
+    let log_dir = resolve_log_dir();
 
     init_logging(session_id, log_level, &log_dir)
         .map_err(|e| anyhow::anyhow!("logging init failed: {e}"))?;
@@ -226,6 +229,12 @@ pub fn load_config(
 
     // Apply env var overrides on top of config file
     env_vars::apply_env_overrides(&mut config, env_vars);
+
+    // #178: the cost estimator is reachable from the TUI event loop, the status
+    // line and two slash commands, none of which carry configuration. This is
+    // the one point where the merged config exists and every one of them is
+    // downstream, so `[context.model_pricing]` is installed here.
+    archon_core::cost::install_pricing_overrides(config.context.model_pricing.clone());
 
     (config, config_path)
 }

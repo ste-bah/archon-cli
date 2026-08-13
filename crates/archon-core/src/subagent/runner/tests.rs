@@ -48,8 +48,12 @@ impl LlmProvider for MockProvider {
         false
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        self.provider_family == ProviderFamily::AnthropicApi
+    fn cache_strategy(&self, _model: &str) -> archon_llm::cache_strategy::CacheStrategy {
+        if self.provider_family == ProviderFamily::AnthropicApi {
+            archon_llm::cache_strategy::ANTHROPIC_API
+        } else {
+            archon_llm::cache_strategy::CacheStrategy::None
+        }
     }
 
     fn compaction_provider_family(&self) -> ProviderFamily {

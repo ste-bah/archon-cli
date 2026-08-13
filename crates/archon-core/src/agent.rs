@@ -51,9 +51,11 @@ mod message_delivery;
 mod payloads;
 mod permission_gate;
 mod process_message;
+// #178: keep this turn's volatile blocks behind the cacheable prefix.
 mod process_message_recovery;
 mod process_message_steps;
 mod process_message_support;
+mod prompt_ordering;
 pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;

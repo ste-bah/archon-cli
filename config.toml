@@ -384,6 +384,132 @@ rate_limit_pressure_body_bytes = 320000
 large_request_retry_body_bytes = 320000
 # Use cache_control breakpoints on static system prompt blocks
 prompt_cache = true
+# Which cache wire format the endpoint accepts, when it cannot be inferred.
+#
+# "auto" asks the provider, which recognises the official Anthropic Messages
+# endpoint and nothing else. A gateway URL (LiteLLM, an OpenAI-compatible proxy,
+# anything self-hosted) tells Archon nothing about what is behind it, so caching
+# stays OFF and every request is billed in full -- the whole system prompt, the
+# whole tool schema block and the whole conversation, every turn.
+#
+# Set this explicitly when you know the endpoint forwards cache directives.
+# LiteLLM, for one, translates `cache_control` into Bedrock `cachePoint`.
+#
+# This names the WIRE FORMAT Archon should emit, not the service that ends up
+# answering. Behind a gateway they are different things: pointing Archon at
+# LiteLLM in front of Bedrock still wants "anthropic" here, because Archon
+# speaks the Anthropic Messages format and LiteLLM is what converts
+# `cache_control` into Bedrock's `cachePoint`. "bedrock" is for Archon's own
+# Converse client talking to AWS directly.
+#
+#   auto       ask the provider (default; safe, and off for every gateway)
+#   anthropic  cache_control blocks -- Anthropic API, and ANY gateway speaking
+#              its Messages format, whatever is behind it
+#   bedrock    cachePoint elements -- Archon's native Bedrock Converse client
+#   responses  prompt_cache_breakpoint -- GPT-5.6 and later
+#   automatic  provider caches a stable prefix by itself; emit nothing (OpenAI)
+#   off        strip every directive
+#
+# What this setting does NOT choose is the token minimums, because those are not
+# yours to pick -- they belong to whichever service answers the request, and the
+# services disagree. Sonnet 4.5 caches from 1,024 tokens on Anthropic's own
+# endpoint and 4,096 on Bedrock; Opus 4.6 takes a one-hour TTL on the first and
+# five minutes only on the second.
+#
+# Archon takes those from the provider, not from this line. Talking to Bedrock
+# directly it uses AWS's figures, to Anthropic or a subscription it uses
+# Anthropic's, to Vertex it uses Anthropic's again. Behind a GATEWAY it cannot
+# tell, so it assumes the STRICTEST of them: the highest minimum, and an
+# extended TTL only where every candidate service allows one. That is the safe
+# direction -- a checkpoint set too high just starts caching later, where one set
+# too low is discarded in silence and billed in full. If you know what your proxy
+# forwards to and want the exact figures, state them per model below.
+prompt_cache_strategy = "auto"
+
+# Per-model cache parameters, keyed by a substring of the model id.
+#
+# No provider exposes these through an API. Bedrock's ListFoundationModels and
+# GetFoundationModel return modalities, streaming support and lifecycle status --
+# nothing about cache minimums, checkpoint limits or TTL -- so Archon ships a
+# built-in table taken from the published documentation. Entries here override
+# and extend it, which is what lets a model released after your binary work
+# correctly without waiting for a release.
+#
+# min_tokens is the one that costs money when wrong. A checkpoint below a
+# model's real minimum is SILENTLY DISCARDED: the request succeeds, is billed in
+# full, and looks exactly like a cache hit. A checkpoint above the minimum only
+# means caching starts a little later. Archon therefore assumes the LARGER
+# minimum for any model it does not recognise -- override that here once you
+# know the real figure.
+#
+# Substring matching, because the same model arrives bare
+# (anthropic.claude-sonnet-4-5-...), region-prefixed (eu., us.) and as
+# inference-profile ARNs. The most specific matching key wins.
+#
+# [context.prompt_cache_models."claude-opus-5"]
+# min_tokens = 4096      # AWS does not document this model's minimum
+# max_checkpoints = 4
+# ttl_1h = true
+#
+# min_tokens and ttl_1h describe the first-party Anthropic API. Where AWS
+# documents something different for the same model, add the Bedrock figure too
+# and Archon applies it only to Bedrock traffic -- there is no single number that
+# is right for both, and a gateway of unknown backing takes the stricter one.
+#
+# [context.prompt_cache_models."claude-sonnet-4-5"]
+# min_tokens = 1024          # Anthropic's own endpoint
+# max_checkpoints = 4
+# ttl_1h = true
+# bedrock_min_tokens = 4096  # what AWS requires for the same model
+# bedrock_ttl_1h = false     # five minutes only on Bedrock
+
+# Move this turn's volatile system blocks behind the message history.
+#
+# Archon appends recalled memories, the inner voice and the turn's reminders to
+# the end of the system prompt, which puts content that changes almost every
+# turn IN FRONT OF the tools and the entire conversation. Every provider caches
+# by common prefix and a prefix is a hit only up to its first changed byte, so
+# one different memory invalidates the whole history behind it -- and a cache
+# write bills at 1.25x plain input, so re-writing it every turn costs more than
+# not caching at all.
+#
+# With this on, those blocks are appended to the last user message instead --
+# where Archon's <system-reminder> content already goes -- leaving the stable
+# system prompt, the tools and the full history as one uninterrupted prefix.
+#
+# On providers that place breakpoints this is an optimisation. On the ones that
+# cache implicitly (GPT-5.5 and earlier, DeepSeek) it is the ONLY lever there
+# is: there is no marker to place.
+#
+# Turn it off if you need those blocks to stay in the system prompt -- it does
+# change where the model sees them, later and closer to the user's message.
+prompt_cache_reorder = true
+
+# Per-model token prices, keyed by a substring of the model id.
+#
+# Overrides and extends the built-in table. Same reasoning as
+# prompt_cache_models: a model released after the binary, or a vendor revising
+# a figure, should not need a new release to be costed correctly.
+#
+# input_per_mtok and output_per_mtok are required and are USD per million
+# tokens. The three cache multipliers default to the ratios Anthropic publishes
+# and every Claude model uses -- 0.1x to read, 1.25x to write, 2x at the
+# one-hour tier -- so most entries need only two numbers.
+#
+# Regional Bedrock and Vertex endpoints (eu., us., apac. prefixes) carry a 10%
+# premium over global ones. Archon applies that on top, from the model id, so
+# state the GLOBAL price here.
+#
+# [context.model_pricing."gpt-5.6"]
+# input_per_mtok = 1.25
+# output_per_mtok = 10.0
+#
+# [context.model_pricing."some-model-with-a-cheap-cache"]
+# input_per_mtok = 0.4
+# output_per_mtok = 0.8
+# cache_read_multiplier = 0.01
+# cache_write_multiplier = 1.0
+# cache_write_1h_multiplier = 1.0
 # Max characters of hierarchical ARCHON.md (alias: claudemd_max_tokens)
 archonmd_max_tokens = 8192
 

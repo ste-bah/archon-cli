@@ -118,6 +118,65 @@ fn clean_system_blocks_no_cache_scope() {
     }
 }
 
+/// The Claude Code identity must never reach the wire outside spoof mode.
+///
+/// It exists for one reason: Anthropic's first-party endpoint accepts a Claude
+/// Code subscription token only from something that looks like Claude Code.
+/// Every other route — Bedrock, Vertex, an API key, a gateway — has no use for
+/// it, and asserting an identity archon is not is a claim it should not make
+/// where it buys nothing.
+///
+/// The headers are already covered above. This covers the SYSTEM PROMPT, which
+/// was not asserted on: `clean_system_blocks_no_cache_scope` checks the cache
+/// scopes on those same blocks and says nothing about their text.
+#[test]
+fn clean_system_blocks_carry_no_claude_code_identity() {
+    let blocks = clean_provider().system_prompt_blocks("msg", "static", "dynamic");
+    let text = blocks
+        .iter()
+        .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !text.contains("You are Claude Code"),
+        "clean mode must not claim to be Claude Code, got: {text}"
+    );
+    assert!(
+        !text.contains("x-anthropic-billing-header:"),
+        "clean mode must not emit the Claude Code billing header, got: {text}"
+    );
+}
+
+/// `Custom` is a third mode and takes the same branch as `Clean`. It is asserted
+/// separately because "not spoof" is the property that matters, and a future
+/// mode added to that match arm would otherwise inherit the claim silently.
+#[test]
+fn custom_mode_carries_no_claude_code_identity() {
+    let provider = IdentityProvider::new(
+        IdentityMode::Custom {
+            user_agent: "my-tool/1.0".into(),
+            x_app: "my-tool".into(),
+            extra_headers: std::collections::HashMap::new(),
+        },
+        "sess-test".into(),
+        "dev-test".into(),
+        "acct-test".into(),
+    );
+
+    let text = provider
+        .system_prompt_blocks("msg", "static", "dynamic")
+        .iter()
+        .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !text.contains("You are Claude Code"),
+        "custom mode must not claim to be Claude Code, got: {text}"
+    );
+}
+
 #[test]
 fn clean_only_four_headers() {
     let headers = clean_provider().request_headers("req-6");

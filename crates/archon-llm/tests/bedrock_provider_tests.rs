@@ -166,8 +166,72 @@ fn bedrock_missing_usage_fields_remain_unavailable() {
             ..
         }] if usage.input_tokens_available
             && !usage.output_tokens_available
+            && !usage.cache_read_input_tokens_available
+            && !usage.cache_creation_input_tokens_available
             && usage.input_tokens == 0
     ));
+}
+
+/// Bedrock reports cache usage under camelCase names that differ from
+/// Anthropic's, and `cacheWriteInputTokens` is what Anthropic calls
+/// `cache_creation`. These were previously hardcoded to zero, which made a
+/// cache that never worked look identical to one working perfectly.
+#[test]
+fn bedrock_cache_usage_is_read_from_its_own_field_names() {
+    let event = serde_json::json!({
+        "metadata": {
+            "usage": {
+                "inputTokens": 120,
+                "outputTokens": 40,
+                "cacheReadInputTokens": 8000,
+                "cacheWriteInputTokens": 0
+            }
+        }
+    });
+
+    let stream_events = archon_llm::providers::bedrock::parse_bedrock_event(&event);
+
+    let archon_llm::streaming::StreamEvent::MessageDelta {
+        usage: Some(usage), ..
+    } = &stream_events[0]
+    else {
+        panic!("expected a usage delta, got: {stream_events:?}");
+    };
+    assert_eq!(usage.cache_read_input_tokens, 8000);
+    assert!(usage.cache_read_input_tokens_available);
+    assert_eq!(usage.cache_creation_input_tokens, 0);
+}
+
+/// On Bedrock `inputTokens` counts ONLY the tokens that were neither read from
+/// nor written to cache — unlike Anthropic, where it is the total. Reporting it
+/// verbatim would under-count the real prompt by exactly the amount caching
+/// saves, so enabling caching would look like traffic collapsing rather than
+/// moving between categories.
+#[test]
+fn bedrock_input_tokens_are_totalled_across_the_cache_categories() {
+    let event = serde_json::json!({
+        "metadata": {
+            "usage": {
+                "inputTokens": 120,
+                "outputTokens": 40,
+                "cacheReadInputTokens": 8000,
+                "cacheWriteInputTokens": 500
+            }
+        }
+    });
+
+    let stream_events = archon_llm::providers::bedrock::parse_bedrock_event(&event);
+
+    let archon_llm::streaming::StreamEvent::MessageDelta {
+        usage: Some(usage), ..
+    } = &stream_events[0]
+    else {
+        panic!("expected a usage delta, got: {stream_events:?}");
+    };
+    assert_eq!(
+        usage.input_tokens, 8620,
+        "total input is inputTokens + cacheRead + cacheWrite"
+    );
 }
 
 // ---------------------------------------------------------------------------

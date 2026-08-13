@@ -6,6 +6,8 @@ mod interfaces;
 mod io;
 mod learning;
 // Inherent impl on `MemoryConfig` only — nothing to re-export.
+#[path = "config/context_section.rs"]
+mod context_section;
 mod memory_open;
 mod providers;
 mod runtime;
@@ -15,6 +17,7 @@ mod topology;
 mod validation;
 mod world_model;
 
+pub use context_section::ContextConfig;
 pub use generated_shape::*;
 pub use generated_tuning::*;
 pub use interfaces::*;

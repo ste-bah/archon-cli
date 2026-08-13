@@ -88,10 +88,48 @@ impl VertexProvider {
         Ok(access_token)
     }
 
-    /// Build the request body for Claude on Vertex (Anthropic Messages format).
-    fn build_claude_body(request: &LlmRequest) -> serde_json::Value {
-        let system_text: String = request
-            .system
+    /// Render the `system` field for Claude on Vertex.
+    ///
+    /// Vertex serves the Anthropic Messages API, so a `cache_control` marker on
+    /// a system block reaches the wire untouched — but only in the *array* form.
+    /// Flattening every block into one string, as this did, silently discarded
+    /// the marker, which is why the system prefix was never cached here even
+    /// though `cache_strategy` advertised that it was.
+    ///
+    /// The array is emitted only when a marker is actually present. Requests
+    /// that are not caching keep the exact string body Vertex has always
+    /// received, so nothing changes for existing deployments.
+    pub fn build_system_field(system: &[serde_json::Value]) -> Option<serde_json::Value> {
+        if system.is_empty() {
+            return None;
+        }
+
+        if system.iter().any(|b| b.get("cache_control").is_some()) {
+            let blocks: Vec<serde_json::Value> = system
+                .iter()
+                .filter(|b| {
+                    b.get("text")
+                        .and_then(|t| t.as_str())
+                        .is_some_and(|s| !s.is_empty())
+                })
+                .map(|b| {
+                    let mut block = b.clone();
+                    // Anthropic requires the discriminant; archon's own blocks
+                    // carry it, but a caller-supplied one may not.
+                    if let Some(obj) = block.as_object_mut() {
+                        obj.entry("type")
+                            .or_insert_with(|| serde_json::Value::String("text".into()));
+                    }
+                    block
+                })
+                .collect();
+
+            if !blocks.is_empty() {
+                return Some(serde_json::Value::Array(blocks));
+            }
+        }
+
+        let system_text: String = system
             .iter()
             .filter_map(|b| {
                 b.get("text")
@@ -101,6 +139,15 @@ impl VertexProvider {
             .collect::<Vec<_>>()
             .join("\n");
 
+        if system_text.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::String(system_text))
+        }
+    }
+
+    /// Build the request body for Claude on Vertex (Anthropic Messages format).
+    pub fn build_claude_body(request: &LlmRequest) -> serde_json::Value {
         let mut body = serde_json::json!({
             "anthropic_version": "vertex-2023-10-16",
             "max_tokens": request.max_tokens,
@@ -108,8 +155,8 @@ impl VertexProvider {
             "stream": true
         });
 
-        if !system_text.is_empty() {
-            body["system"] = serde_json::Value::String(system_text);
+        if let Some(system) = Self::build_system_field(&request.system) {
+            body["system"] = system;
         }
 
         if !request.tools.is_empty() {
@@ -479,6 +526,34 @@ fn map_http_error(status: u16, body: String) -> LlmError {
 impl LlmProvider for VertexProvider {
     fn name(&self) -> &str {
         "vertex"
+    }
+
+    /// Vertex serves Anthropic's own figures. It is still named rather than
+    /// folded into `AnthropicApi`, because Google does withhold the extended TTL
+    /// on several older Claude models — that simply costs nothing to express
+    /// today, since none of them carry a documented one-hour TTL on any stack.
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        crate::cache_models::CachePlatform::Vertex
+    }
+
+    /// Claude on Vertex takes Anthropic-style `cache_control`, and
+    /// `build_claude_body` passes `request.messages` through verbatim, so a
+    /// marker written by `apply_conversation_cache` reaches the wire as-is.
+    /// `build_system_field` now does the same for system blocks, so the
+    /// stable-head breakpoint survives too — it used to be flattened away.
+    ///
+    /// Gemini has no such field and gets nothing rather than a 400.
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        // One provider instance serves one deployed model; `self.model` names
+        // it whatever alias the request carries.
+        let _ = model;
+        if !self.is_claude_model() {
+            return crate::cache_strategy::CacheStrategy::None;
+        }
+        crate::cache_strategy::anthropic_for_model(
+            &self.model,
+            crate::cache_models::CachePlatform::Vertex,
+        )
     }
 
     fn models(&self) -> Vec<ModelInfo> {
