@@ -29,6 +29,7 @@ use crate::generated_contract::{
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
 
+mod size_retry;
 mod target_budgets;
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;

@@ -115,17 +115,44 @@ pub(super) async fn run_worktree_branch_agent(
     // precedence the two-parameter host function applied.
     let repository_root =
         Some(branch.workspace_root.display().to_string()).or(target_repository_root);
-    let result = dispatch
-        .run_call(
-            task,
-            repository_root,
-            &branch.execution,
-            &adapter,
-            Some(v2_store),
-            task_universe,
-        )
-        .await;
-    normalize_worktree_agent_result(result, branch)
+    // A wholesale line-cap rejection discards the branch's ENTIRE patch and
+    // says exactly how to avoid it. That is a correctable instruction, not a
+    // verdict on the work, so it is fed back and the branch re-asked for as
+    // long as it keeps getting closer to the cap.
+    let mut prompt = task.to_string();
+    let mut previous_overshoot: Option<u32> = None;
+    for _ in 0..=super::size_retry::MAX_SIZE_RETRIES {
+        let result = dispatch
+            .run_call(
+                &prompt,
+                repository_root.clone(),
+                &branch.execution,
+                &adapter,
+                Some(v2_store),
+                task_universe,
+            )
+            .await;
+        let Err(err) = &result else {
+            return normalize_worktree_agent_result(result, branch);
+        };
+        let text = err.to_string();
+        if !super::size_retry::is_line_cap_rejection(&text) {
+            return normalize_worktree_agent_result(result, branch);
+        }
+        let overshoot = super::size_retry::rejected_line_count(&text);
+        if !super::size_retry::should_retry(previous_overshoot, overshoot) {
+            return normalize_worktree_agent_result(result, branch);
+        }
+        previous_overshoot = overshoot;
+        prompt = format!("{}\n\n{}", task, super::size_retry::retry_notice(&text));
+    }
+    normalize_worktree_agent_result(
+        Err(crate::WorkflowError::port(format!(
+            "write branch '{}' could not fit its patch under the source-file line cap",
+            branch.id
+        ))),
+        branch,
+    )
 }
 
 pub(super) fn normalize_worktree_agent_result(
