@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use archon_workflow::StageRunRequest;
 // The key vocabulary and its scrub live in archon-workflow so the collector
 // here and the write layer's strip cannot drift apart.
-use archon_workflow::tool_declarations::is_tool_field;
+use archon_workflow::tool_declarations::{is_tool_field, raw_tool_name as raw_name};
 
 pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
     let project_root = project_root(request);
@@ -65,13 +65,6 @@ fn project_root(request: &StageRunRequest) -> PathBuf {
         .and_then(serde_json::Value::as_str)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
-}
-
-fn raw_name(name: &str) -> &str {
-    name.strip_prefix("mcp__")
-        .and_then(|suffix| suffix.split_once("__"))
-        .map(|(_, raw)| raw)
-        .unwrap_or(name)
 }
 
 #[cfg(test)]
