@@ -32,7 +32,11 @@ pub(super) fn stamp_target_file_budgets(
         return;
     };
     for branch in branches {
-        let Some(object) = branch.input.as_object_mut() else {
+        // Into `input.item`, beside `required_tools` and `target_files`. The
+        // prompt renders that object; a key written at the input's top level is
+        // carried in the record and never shown to the agent — which is exactly
+        // what happened on the first attempt at this fix.
+        let Some(object) = branch.input.get_mut("item").and_then(Value::as_object_mut) else {
             continue;
         };
         let budgets = budgets_for(object.get("target_files"), root, max_source_file_lines);

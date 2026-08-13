@@ -14,12 +14,12 @@ fn branch(targets: &[&str]) -> WorkflowV2FanoutItem {
             write_mode: Some(WorkflowV2WriteMode::Coordinated),
             options: WorkflowV2HostOptions::default(),
         },
-        input: serde_json::json!({ "target_files": targets }),
+        input: serde_json::json!({ "item": { "target_files": targets } }),
     }
 }
 
 fn budgets(branch: &WorkflowV2FanoutItem) -> Vec<serde_json::Value> {
-    branch.input["target_file_budgets"]
+    branch.input["item"]["target_file_budgets"]
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -75,7 +75,11 @@ fn a_branch_without_targets_is_not_stamped() {
     let dir = tempfile::tempdir().expect("root");
     let mut branches = vec![branch(&[])];
     stamp_target_file_budgets(&mut branches, dir.path().to_str(), 500);
-    assert!(branches[0].input.get("target_file_budgets").is_none());
+    assert!(
+        branches[0].input["item"]
+            .get("target_file_budgets")
+            .is_none()
+    );
 }
 
 /// No repository root: nothing can be measured, so nothing is claimed.
@@ -83,5 +87,9 @@ fn a_branch_without_targets_is_not_stamped() {
 fn without_a_repository_root_nothing_is_stamped() {
     let mut branches = vec![branch(&["src/thing.rs"])];
     stamp_target_file_budgets(&mut branches, None, 500);
-    assert!(branches[0].input.get("target_file_budgets").is_none());
+    assert!(
+        branches[0].input["item"]
+            .get("target_file_budgets")
+            .is_none()
+    );
 }
