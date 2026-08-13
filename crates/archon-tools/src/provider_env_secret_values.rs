@@ -21,6 +21,7 @@
 /// and reintroduce exactly the corruption this filter exists to stop.
 const SECRET_KEY_MARKERS: &[&str] = &[
     "AUTH",
+    "BEARER",
     "CERT",
     "CREDENTIAL",
     "KEY",
@@ -31,7 +32,15 @@ const SECRET_KEY_MARKERS: &[&str] = &[
     "SECRET",
     "SESSION",
     "SIGNATURE",
+    "SIGNING",
     "TOKEN",
+];
+
+/// Short credential words that must match a key word EXACTLY. Suffix-matching
+/// these would be worse than useless: `PAT` would make `COMPAT` a credential,
+/// which is the same over-redaction this filter exists to prevent.
+const SECRET_KEY_WORDS: &[&str] = &[
+    "DSN", "HMAC", "JWT", "NONCE", "OTP", "PAT", "PIN", "SALT", "SEED",
 ];
 
 /// Literal prefixes used by issuers of opaque credentials. A value carrying
@@ -65,10 +74,28 @@ pub(crate) fn is_redactable(key: &str, value: &str) -> bool {
     if value.len() < MIN_REDACTABLE_LEN {
         return false;
     }
-    if has_credential_prefix(value) {
+    if has_credential_prefix(value) || url_carries_a_password(value) {
         return true;
     }
     key_names_a_credential(key) && !is_structural_value(value)
+}
+
+/// A connection string with userinfo — `postgres://user:pw@host/db`,
+/// `redis://:pw@host` — IS the credential, whatever its key is called. This is
+/// the single most common way a secret reaches an environment variable, and
+/// treating every `://` value as structural leaked every one of them.
+fn url_carries_a_password(value: &str) -> bool {
+    let Some((_scheme, rest)) = value.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let Some((userinfo, _host)) = authority.rsplit_once('@') else {
+        return false;
+    };
+    // `user@host` carries no secret; `user:pw@host` and `:pw@host` do.
+    userinfo
+        .split_once(':')
+        .is_some_and(|(_, pw)| !pw.is_empty())
 }
 
 fn has_credential_prefix(value: &str) -> bool {
@@ -89,21 +116,37 @@ fn word_names_a_credential(word: &str) -> bool {
     SECRET_KEY_MARKERS
         .iter()
         .any(|marker| singular.ends_with(marker))
+        || SECRET_KEY_WORDS.contains(&singular)
 }
 
-/// Paths, URLs and bare numbers are load-bearing in output: they name files the
-/// agent is about to open and ports it is about to reach. Rewriting one breaks
-/// the agent's next action, so they are never replaced — not even under a
-/// credential-named key, where they are a location for a secret rather than the
-/// secret itself (`SSH_PRIVATE_KEY_PATH`, `TOKEN_URL`).
+/// Paths, plain URLs and addresses are load-bearing in output: they name files
+/// the agent is about to open and hosts it is about to reach. Rewriting one
+/// breaks the agent's next action, so they are never replaced — not even under
+/// a credential-named key, where they locate a secret rather than being one
+/// (`SSH_PRIVATE_KEY_PATH`, `TOKEN_URL`).
+///
+/// A URL carrying a password is NOT structural; `url_carries_a_password`
+/// catches it before this is consulted.
 fn is_structural_value(value: &str) -> bool {
     value.starts_with('/')
         || value.starts_with("~/")
         || value.starts_with("./")
         || value.contains("://")
-        || value
-            .chars()
-            .all(|character| character.is_ascii_digit() || character == '.')
+        || is_ipv4_address(value)
+}
+
+/// Dotted-quad only. The old rule exempted *any* digits-and-dots string, which
+/// silently spared numeric secrets — an eight-digit PIN under `ACCOUNT_PIN` was
+/// treated as structural and printed verbatim.
+fn is_ipv4_address(value: &str) -> bool {
+    let mut octets = 0;
+    for part in value.split('.') {
+        if part.is_empty() || part.len() > 3 || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        octets += 1;
+    }
+    octets == 4
 }
 
 #[cfg(test)]

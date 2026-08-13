@@ -70,6 +70,77 @@ fn paths_and_urls_survive_even_under_a_credential_key() {
     assert!(!is_redactable("SECRET_DIR", "~/secrets/provider"));
 }
 
+/// Regression: the first version of this filter exempted every value
+/// containing "://" as structural, which leaked the most common form a secret
+/// takes in an environment variable — a connection string with userinfo.
+#[test]
+fn connection_strings_with_embedded_passwords_are_redacted() {
+    assert!(is_redactable(
+        "DATABASE_URL",
+        "postgres://user:hunter2pass@db.host/app"
+    ));
+    assert!(is_redactable(
+        "REDIS_DSN",
+        "redis://:s3cr3tpassword@127.0.0.1:6379/0"
+    ));
+    // Key name is irrelevant — the value itself carries the credential.
+    assert!(is_redactable(
+        "PROVIDER_ENDPOINT",
+        "amqp://svc:pw0rd1234@broker.internal:5672"
+    ));
+}
+
+/// A URL with no password, or with a bare username, is still structural.
+#[test]
+fn plain_urls_remain_structural() {
+    assert!(!is_redactable(
+        "TOKEN_URL",
+        "https://auth.example.com/token"
+    ));
+    assert!(!is_redactable(
+        "API_KEY_URL",
+        "https://user@example.com/keys"
+    ));
+    assert!(!is_redactable("OPENBB_URL", "http://127.0.0.1:6900/api"));
+}
+
+/// Regression: "all digits and dots" exempted numeric secrets, not just
+/// addresses. Only a real dotted quad is structural.
+#[test]
+fn numeric_secrets_are_redacted_but_addresses_are_not() {
+    assert!(is_redactable("ACCOUNT_PIN", "192837465566"));
+    assert!(is_redactable("CARD_SECRET", "40000000000000000002"));
+    assert!(!is_redactable("SECRET_HOST", "192.168.100.14"));
+}
+
+/// Regression: short credential words were missing from the marker list, so
+/// keys naming real credentials were treated as ordinary config.
+#[test]
+fn short_credential_words_are_recognised() {
+    for key in [
+        "OPENBB_PAT",
+        "GH_BEARER",
+        "APP_JWT",
+        "HMAC_SALT",
+        "WALLET_SEED",
+        "REQUEST_NONCE",
+        "LOGIN_OTP",
+    ] {
+        assert!(
+            is_redactable(key, "abcdefghijklmnopqrst"),
+            "{key} names a credential"
+        );
+    }
+}
+
+/// ...but matching those short words by suffix would recreate the original
+/// over-redaction bug.
+#[test]
+fn short_words_never_match_as_a_suffix() {
+    assert!(!is_redactable("BUILD_COMPAT", "abcdefghijklmnopqrst"));
+    assert!(!is_redactable("SPIN_COUNT", "abcdefghijklmnopqrst"));
+}
+
 /// A key word that merely *contains* a marker is not a credential. Matching
 /// `AUTH` inside `AUTHOR` would rewrite every commit author in git output —
 /// the same corruption the filter exists to prevent.
