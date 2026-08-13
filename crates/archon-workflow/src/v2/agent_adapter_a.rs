@@ -413,13 +413,36 @@ fn collect_required_tool_names(input: &serde_json::Value, output: &mut Vec<Strin
     }
 }
 
-/// Strip an `mcp__server__` qualifier to the bare tool name; other names are
-/// returned trimmed and unchanged.
+/// Reduce a declared tool name to the bare name a command would actually
+/// contain.
+///
+/// Two qualifier conventions are in use and BOTH must reduce, or the exercise
+/// check compares a string no command can ever hold:
+///
+/// - `mcp__server__tool` — the wire form.
+/// - `mcp_action:tool`, `mcp_server:name` — the form task specs use.
+///
+/// Only the first was handled. A task declaring `mcp_action:tv_health_check`
+/// therefore kept the whole qualified string as its required name, and the gate
+/// asked whether any command contained the literal `mcp_action:tv_health_check`.
+/// An invocation of the configured tool — `.mcp.json` names it plain
+/// `tv_health_check` — never matches that, so every task requiring a live MCP
+/// action was unsatisfiable no matter what the agent did.
 fn raw_tool_name(name: &str) -> &str {
-    name.strip_prefix("mcp__")
+    let name = name.trim();
+    if let Some(raw) = name
+        .strip_prefix("mcp__")
         .and_then(|suffix| suffix.split_once("__"))
         .map(|(_, raw)| raw)
-        .unwrap_or(name)
-        .trim()
+    {
+        return raw.trim();
+    }
+    // Any `mcp*:` qualifier, so a new one does not silently break the gate.
+    if let Some((qualifier, raw)) = name.split_once(':')
+        && qualifier.to_ascii_lowercase().starts_with("mcp")
+    {
+        return raw.trim();
+    }
+    name
 }
 

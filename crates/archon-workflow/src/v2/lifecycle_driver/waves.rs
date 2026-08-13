@@ -424,7 +424,22 @@ impl LifecycleDriver {
         dependency_iteration: usize,
         evidence: &mut LifecycleEvidence,
     ) -> crate::WorkflowResult<Vec<String>> {
-        if ready_implementation_items.is_empty() {
+        // Dispatch only what is outstanding. `completed_ids` used to filter the
+        // RETURN value alone, so a wave with three of four tasks done still
+        // sent all four to a writer — agents re-opening finished work whose
+        // results were then discarded as already-completed.
+        let outstanding: Vec<serde_json::Value> = ready_implementation_items
+            .iter()
+            .filter(|item| {
+                let ids = support::array(item.get("canonical_task_ids"));
+                ids.is_empty()
+                    || ids
+                        .iter()
+                        .any(|id| id.as_str().is_some_and(|id| !completed_ids.contains(id)))
+            })
+            .cloned()
+            .collect();
+        if outstanding.is_empty() {
             return Ok(Vec::new());
         }
         let contract = self.contract();
@@ -432,7 +447,7 @@ impl LifecycleDriver {
         let wave = self
             .write_fanout(
                 &call_id,
-                serde_json::json!(ready_implementation_items),
+                serde_json::json!(&outstanding),
                 prompts::WAVE_COMPLETION_REMEDIATION_TASK,
             )
             .await?;
@@ -440,19 +455,17 @@ impl LifecycleDriver {
             &mut evidence.repair_attempts,
             &call_id,
             "completion_gap_remediation",
-            ready_implementation_items,
+            &outstanding,
             &wave,
         );
         evidence.implementation.push(wave.clone());
         let outcomes = crate::v2::outcome_envelope::outcomes_of(&wave);
-        Ok(support::matching_accepted_completion_ids(
-            &contract,
-            ready_implementation_items,
-            &outcomes,
+        Ok(
+            support::matching_accepted_completion_ids(&contract, &outstanding, &outcomes)
+                .into_iter()
+                .filter(|id| !completed_ids.contains(id))
+                .collect(),
         )
-        .into_iter()
-        .filter(|id| !completed_ids.contains(id))
-        .collect())
     }
 }
 

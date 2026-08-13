@@ -18,9 +18,14 @@
 //! This admits the exact declared path instead, under two conditions that
 //! together need no repository at all:
 //!
-//! 1. **The item is artifact-only** — it declares no repository `target_files`,
-//!    so by construction it produces nothing but artifacts. An item with repo
-//!    targets keeps the strict declared-target rules untouched.
+//! 1. **The item is artifact-only** — no repository `target_files` AND concrete
+//!    `artifact_requirements`, the same test the inventory gate applies in
+//!    `generated_lifecycle_outcomes`. Both halves matter. An earlier version of
+//!    this file checked only the absence of `target_files`, but that is a state
+//!    a CODE item can legitimately be in: contract validation permits "no
+//!    target_files + has a deliverable contract". Such an item inherited its
+//!    task's source-file contracts as writable artifacts, reclassifying
+//!    `crates/.../thing.rs` as a document and skipping write-ownership.
 //! 2. **The path is host-parsed** — it appears as a `deliverable_contracts`
 //!    entry for one of the item's canonical task ids in the authoritative task
 //!    universe. Contracts are read from the task files by the host, never
@@ -41,7 +46,7 @@ pub(crate) fn contract_artifact_paths_for_item(
     universe: &WorkflowV2TaskUniverse,
     item: &Value,
 ) -> Vec<String> {
-    if declares_repository_targets(item) {
+    if !is_artifact_only(item) {
         return Vec::new();
     }
     let task_ids = canonical_task_ids(item);
@@ -65,8 +70,16 @@ pub(crate) fn contract_artifact_paths_for_item(
     paths
 }
 
-/// Does the item claim repository files? An absent or empty `target_files`
-/// means artifact-only; anything present keeps the strict repository rules.
+/// The inventory gate's test, applied here so one definition governs both:
+/// no repository `target_files` AND concrete `artifact_requirements`.
+///
+/// Absence of `target_files` alone is not enough. It is a state a code item can
+/// hold, and admitting it hands that item's source-file deliverable contracts
+/// out as writable artifacts.
+fn is_artifact_only(item: &Value) -> bool {
+    !declares_repository_targets(item) && declares_artifact_requirements(item)
+}
+
 fn declares_repository_targets(item: &Value) -> bool {
     match item.get("target_files") {
         None | Some(Value::Null) => false,
@@ -74,6 +87,17 @@ fn declares_repository_targets(item: &Value) -> bool {
             .iter()
             .any(|target| target.as_str().is_some_and(|text| !text.trim().is_empty())),
         Some(_) => true,
+    }
+}
+
+/// Concrete requirements — a non-empty array or object. An empty list declares
+/// no work and must not qualify.
+fn declares_artifact_requirements(item: &Value) -> bool {
+    match item.get("artifact_requirements") {
+        Some(Value::Array(requirements)) => !requirements.is_empty(),
+        Some(Value::Object(requirements)) => !requirements.is_empty(),
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        _ => false,
     }
 }
 
@@ -143,7 +167,40 @@ mod tests {
             "item_id": "impl-item",
             "canonical_task_ids": [task_id],
             "target_files": [],
+            "artifact_requirements": ["a written gap audit"],
         })
+    }
+
+    /// The reachable hole: contract validation permits an item with no
+    /// `target_files` that carries a deliverable contract, which is what a CODE
+    /// task's items look like. Without concrete `artifact_requirements` it is
+    /// not artifact-only, and must NOT be handed its task's source paths as
+    /// writable artifacts — that would reclassify source as a document and skip
+    /// write-ownership.
+    #[test]
+    fn a_code_item_without_target_files_is_not_artifact_only() {
+        let universe = universe_with(
+            "TASK-TDL-040",
+            &["crates/archon-trading/src/data_lake/tradingview_mcp.rs"],
+        );
+        let item = serde_json::json!({
+            "item_id": "impl-tdl-040",
+            "canonical_task_ids": ["TASK-TDL-040"],
+        });
+        assert!(
+            contract_artifact_paths_for_item(&universe, &item).is_empty(),
+            "absent target_files alone must not grant source paths"
+        );
+        let empty_requirements = serde_json::json!({
+            "item_id": "impl-tdl-040",
+            "canonical_task_ids": ["TASK-TDL-040"],
+            "target_files": [],
+            "artifact_requirements": [],
+        });
+        assert!(
+            contract_artifact_paths_for_item(&universe, &empty_requirements).is_empty(),
+            "an empty requirements list declares no work of either kind"
+        );
     }
 
     /// The live case: TASK-TDL-001 declares one report and no repo targets, so
