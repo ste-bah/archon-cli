@@ -1,14 +1,7 @@
 use super::*;
 use crate::data_lake::{CoverageWindow, DataType, GapSummary};
-#[test]
-fn first_dataset_write_initializes_missing_registry_under_data_root() {
-    let temp = tempfile::tempdir().unwrap();
-    let lake = TradingDataLake::new(temp.path());
-    assert!(!lake.registry_path().exists());
-    lake.store_ohlcv(request()).unwrap();
-    assert_eq!(lake.registry_path(), lake.data_root().join("registry.json"));
-    assert!(lake.registry_path().exists());
-}
+mod quarantine;
+mod runtime_validation;
 #[test]
 fn stores_and_loads_ohlcv_dataset() {
     let temp = tempfile::tempdir().unwrap();
@@ -25,7 +18,7 @@ fn stores_and_loads_ohlcv_dataset() {
         temp.path().join(".archon/trading-lab/data/registry.json")
     );
     let registry = lake.status().unwrap();
-    assert_eq!(registry.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(registry.schema_version, REGISTRY_SCHEMA_V1);
     assert!(temp.path().join(&record.validation_path).exists());
     assert!(temp.path().join(&record.manifest_path).exists());
     assert_eq!(record.symbol, "BTCUSD");
@@ -130,7 +123,7 @@ fn changed_content_refuses_existing_dataset_version() {
     assert!(matches!(
         result,
         Err(DataStoreError::InvalidMetadata(message))
-            if message.contains("different normalized checksum")
+            if message.contains("different normalized or raw bytes")
     ));
 }
 
@@ -495,55 +488,4 @@ fn bar(timestamp: &str, close: f64) -> OhlcvBar {
         close,
         volume: close * 1_000.0,
     }
-}
-
-/// Registry status is DERIVED on every load, so a quarantine that lives only in
-/// metadata is silently undone by the next read. Live installation: 33 datasets
-/// were marked quarantined and every one of them was stamped `Healthy` again,
-/// because their validation.json still said `passed`. Marking a dataset
-/// untrustworthy has to survive the reconciliation that follows it.
-#[test]
-fn a_quarantined_dataset_is_never_reconciled_back_to_healthy() {
-    let temp = tempfile::tempdir().unwrap();
-    let lake = TradingDataLake::new(temp.path());
-    let record = lake.store_ohlcv(request()).unwrap();
-
-    // Baseline: this dataset earns Healthy on its own merits.
-    let before = lake.status().unwrap();
-    let key = registry_key(&record.dataset_id, &record.version);
-    assert_eq!(
-        before.datasets[&key].status,
-        DatasetStatus::Healthy,
-        "fixture must start Healthy or the test proves nothing"
-    );
-    assert!(before.datasets[&key].production_eligible);
-
-    // Quarantine it the way an operator does — a marker in its metadata, with
-    // the validation report left untouched and still claiming it passed.
-    let metadata_path = temp.path().join(&record.metadata_path);
-    let mut metadata: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
-    metadata["quarantined_at"] = serde_json::json!("2026-08-09T09:00:00Z");
-    metadata["quarantine_reason"] = serde_json::json!("provenance unprovable");
-    std::fs::write(
-        &metadata_path,
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .unwrap();
-
-    let after = lake.status().unwrap();
-    assert_eq!(
-        after.datasets[&key].status,
-        DatasetStatus::Degraded,
-        "a quarantined dataset must not be reconciled back to Healthy"
-    );
-    assert!(
-        !after.datasets[&key].production_eligible,
-        "nor may it stay production-eligible"
-    );
-
-    // And it must STAY demoted across repeated loads — the reconciliation
-    // rewrites the registry, so a fix that only held for one read is no fix.
-    let again = lake.status().unwrap();
-    assert_eq!(again.datasets[&key].status, DatasetStatus::Degraded);
 }

@@ -159,6 +159,8 @@ fn contradictory_validation_report_is_rejected_on_load() {
             "severity": "error",
             "message": "failed"
         }],
+        "normalized_sha256": "normalized-sha256",
+        "content_sha256": "content-sha256",
         "summary": {
             "row_count": 1,
             "duplicate_timestamp_count": 0,

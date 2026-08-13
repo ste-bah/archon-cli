@@ -100,8 +100,8 @@ fn add_validation_report_fields(object: &mut serde_json::Map<String, serde_json:
             "metadata.complete",
             "metadata.production_contract",
             "metadata.coverage_minimum",
-            "metadata.native_interval",
-            "metadata.not_derived_or_resampled",
+            "metadata.native_observation_evidence",
+            "metadata.lineage.underived",
             "metadata.production_eligible",
         ],
     );
@@ -184,4 +184,9 @@ pub(super) fn write_schema_json_with_backup<T: Serialize>(
 
 fn json_error(error: serde_json::Error) -> DataStoreError {
     DataStoreError::Json(error.to_string())
+}
+
+/// The governed writer emits v1; v2 remains readable only for legacy artifact casing.
+pub(super) fn governed_registry_schema() -> &'static str {
+    REGISTRY_SCHEMA_V1
 }
