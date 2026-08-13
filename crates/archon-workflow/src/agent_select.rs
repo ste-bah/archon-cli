@@ -28,7 +28,16 @@ pub fn select_workflow_agent_key(request: &StageRunRequest, available_agents: &[
     } else if request.provider_tier == ProviderTier::Reducer
         || matches!(request.stage_kind, StageKind::Reduce)
     {
-        &["doc-writer", "researcher", "general-purpose"]
+        // A reduction classifies structured evidence and returns JSON. Both
+        // former leaders prescribe a conflicting output of their own:
+        // `doc-writer` exists to "generate technical documentation" and must
+        // "not guess", so asked to repair wave-completion evidence it looked
+        // for a document to write and blocked the run for having no target
+        // file; `researcher` is told to emit a `research_findings:` YAML block.
+        // A charter that names a different deliverable competes with the task
+        // prompt for the whole stage, and the schema is what loses — routes
+        // nested under `items`, protected fields dropped in a "shape" repair.
+        &["reducer", "doc-writer", "researcher", "general-purpose"]
     } else if request.provider_tier == ProviderTier::Planner {
         &["planner", "plan", "system-designer", "general-purpose"]
     } else if command_like(&text) {
@@ -367,5 +376,41 @@ mod tests {
         let mut req = request(StageKind::Agent, ProviderTier::Critic, "Review");
         req.agent = Some("code-reviewer".into());
         assert_eq!(select_workflow_agent_key(&req, &agents), "code-reviewer");
+    }
+
+    /// A reduction returns JSON. `doc-writer` led this list and its charter
+    /// names a different deliverable — asked to repair wave-completion
+    /// evidence it answered "no actionable documentation task, target file, or
+    /// requested scope was provided" and blocked the run.
+    #[test]
+    fn a_reduce_stage_prefers_the_reducer_agent() {
+        let agents = vec![
+            "doc-writer".into(),
+            "researcher".into(),
+            "reducer".into(),
+            "general-purpose".into(),
+        ];
+        let req = request(
+            StageKind::Reduce,
+            ProviderTier::Reducer,
+            "Classify failed focused verification outcomes",
+        );
+        assert_eq!(select_workflow_agent_key(&req, &agents), "reducer");
+    }
+
+    /// Projects without the agent keep the previous routing exactly.
+    #[test]
+    fn a_reduce_stage_falls_back_when_no_reducer_exists() {
+        let agents = vec!["doc-writer".into(), "general-purpose".into()];
+        let req = request(StageKind::Reduce, ProviderTier::Reducer, "Classify");
+        assert_eq!(select_workflow_agent_key(&req, &agents), "doc-writer");
+    }
+
+    /// The tier alone routes it, whatever the stage kind says.
+    #[test]
+    fn the_reducer_tier_selects_the_reducer_agent() {
+        let agents = vec!["reducer".into(), "doc-writer".into()];
+        let req = request(StageKind::Agent, ProviderTier::Reducer, "Reduce evidence");
+        assert_eq!(select_workflow_agent_key(&req, &agents), "reducer");
     }
 }
