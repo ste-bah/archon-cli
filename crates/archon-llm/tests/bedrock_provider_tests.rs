@@ -203,12 +203,18 @@ fn bedrock_cache_usage_is_read_from_its_own_field_names() {
 }
 
 /// On Bedrock `inputTokens` counts ONLY the tokens that were neither read from
-/// nor written to cache — unlike Anthropic, where it is the total. Reporting it
-/// verbatim would under-count the real prompt by exactly the amount caching
-/// saves, so enabling caching would look like traffic collapsing rather than
-/// moving between categories.
+/// nor written to cache — verified live at `inputTokens: 3` on a 4,424-token
+/// request. That is already the DISJOINT form `UsageAccumulator` expects, so it
+/// is passed through untouched.
+///
+/// This used to fold `cacheRead` and `cacheWrite` back into `input_tokens` to
+/// stop the context figure collapsing once caching started working. The intent
+/// was right; the mechanism double-counted, because the accumulator sums the
+/// three buckets itself. Measured live: a ~12,091-token prompt reported 28,255
+/// tokens of context, and the cached tokens were charged at the full input rate
+/// on top of the cache-read rate.
 #[test]
-fn bedrock_input_tokens_are_totalled_across_the_cache_categories() {
+fn bedrock_reports_the_cache_buckets_disjoint_from_input() {
     let event = serde_json::json!({
         "metadata": {
             "usage": {
@@ -228,10 +234,48 @@ fn bedrock_input_tokens_are_totalled_across_the_cache_categories() {
     else {
         panic!("expected a usage delta, got: {stream_events:?}");
     };
+
     assert_eq!(
-        usage.input_tokens, 8620,
-        "total input is inputTokens + cacheRead + cacheWrite"
+        usage.input_tokens, 120,
+        "Bedrock's own figure already excludes the cached tokens; adding them \
+         back counts every one of them twice"
     );
+    assert_eq!(usage.cache_read_input_tokens, 8000);
+    assert_eq!(usage.cache_creation_input_tokens, 500);
+}
+
+/// The other half of the contract: the context total the old code was trying to
+/// protect is still correct, because the accumulator is what sums the buckets.
+/// Nothing is lost by keeping them disjoint — the collapse the old comment
+/// feared cannot happen.
+#[test]
+fn the_accumulator_still_sees_the_full_prompt_size() {
+    let event = serde_json::json!({
+        "metadata": {
+            "usage": {
+                "inputTokens": 120,
+                "outputTokens": 40,
+                "cacheReadInputTokens": 8000,
+                "cacheWriteInputTokens": 500
+            }
+        }
+    });
+
+    let mut accumulator = archon_llm::usage::UsageAccumulator::default();
+    for event in archon_llm::providers::bedrock::parse_bedrock_event(&event) {
+        accumulator.record_event(&event);
+    }
+
+    assert_eq!(
+        accumulator.context_input_tokens, 8620,
+        "the full prompt is inputTokens + cacheRead + cacheWrite, summed ONCE"
+    );
+    assert_eq!(
+        accumulator.billable_input_tokens, 120,
+        "only the uncached tokens are billed at the full input rate"
+    );
+    assert_eq!(accumulator.cache_read_input_tokens, 8000);
+    assert_eq!(accumulator.cache_creation_input_tokens, 500);
 }
 
 // ---------------------------------------------------------------------------
