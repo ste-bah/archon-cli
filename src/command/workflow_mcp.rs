@@ -12,7 +12,8 @@ pub(crate) async fn install_project_tools(
     registry: &mut ToolRegistry,
     rules: &mut RuleSet,
 ) {
-    let configs = match archon_mcp::config::load_merged_configs(project_root) {
+    let root = mcp_config_root(project_root);
+    let configs = match archon_mcp::config::load_merged_configs(&root) {
         Ok(configs) => configs,
         Err(error) => {
             tracing::warn!(%error, "workflow MCP config unavailable");
@@ -20,6 +21,15 @@ pub(crate) async fn install_project_tools(
         }
     };
     if configs.is_empty() {
+        // Say so. This returning silently is how project MCP tools vanished
+        // from workflow subagents without a single error: the agents simply
+        // had no tradingview tools, and every task requiring one failed for
+        // "never exercised" instead of "no config found".
+        tracing::warn!(
+            searched = %root.display(),
+            from = %project_root.display(),
+            "no project MCP servers configured; subagents get no MCP tools"
+        );
         return;
     }
     let policies = policy_by_server(&configs);
@@ -38,6 +48,26 @@ pub(crate) async fn install_project_tools(
         count = names.len(),
         "registered project MCP tools for workflow subagents"
     );
+}
+
+/// The nearest ancestor of `start` holding a `.mcp.json`, else `start`.
+///
+/// `load_merged_configs` joins `.mcp.json` to exactly one directory. That was
+/// fine while subagents ran in the project root, and stopped being fine when
+/// write branches moved into git worktrees: a worktree is a checkout of the
+/// REPOSITORY, `.mcp.json` is untracked project configuration, so the file is
+/// absent there and can never appear. Every worktree agent silently lost its
+/// project MCP tools — while the worktrees themselves sit under the very
+/// project root that holds the file.
+///
+/// Walking up recovers it wherever the agent is placed, and leaves a run in an
+/// unrelated directory exactly as it was.
+fn mcp_config_root(start: &Path) -> std::path::PathBuf {
+    start
+        .ancestors()
+        .find(|ancestor| ancestor.join(".mcp.json").is_file())
+        .unwrap_or(start)
+        .to_path_buf()
 }
 
 async fn start_servers(
@@ -145,5 +175,49 @@ mod tests {
         apply_explicit_policy(&mut rules, &names, &policies);
         assert_eq!(rules.always_allow.len(), 2);
         assert_eq!(rules.always_deny.len(), 2);
+    }
+
+    /// The live regression: a write branch runs inside
+    /// `<project>/.archon/workflows/<run>/v2/worktrees/<branch>/<item>`, a
+    /// checkout of the REPOSITORY. `.mcp.json` is untracked project config, so
+    /// it is absent there and always will be — and the lookup joined
+    /// `.mcp.json` to that directory alone, so every worktree agent silently
+    /// got no MCP tools at all.
+    #[test]
+    fn a_worktree_agent_finds_the_project_mcp_config_above_it() {
+        let project = tempfile::tempdir().expect("project");
+        let project_root = project.path();
+        std::fs::write(project_root.join(".mcp.json"), "{\"mcpServers\":{}}").expect("config");
+        let worktree =
+            project_root.join(".archon/workflows/wf-1/v2/worktrees/implementation-wave-1/item-abc");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+
+        assert_eq!(
+            mcp_config_root(&worktree),
+            project_root,
+            "the config above the worktree must be found"
+        );
+    }
+
+    /// A directory with its own `.mcp.json` still wins over any ancestor.
+    #[test]
+    fn the_nearest_config_wins() {
+        let outer = tempfile::tempdir().expect("outer");
+        std::fs::write(outer.path().join(".mcp.json"), "{}").expect("outer config");
+        let inner = outer.path().join("nested/project");
+        std::fs::create_dir_all(&inner).expect("inner");
+        std::fs::write(inner.join(".mcp.json"), "{}").expect("inner config");
+
+        assert_eq!(mcp_config_root(&inner), inner);
+    }
+
+    /// No config anywhere: the caller's own root is returned unchanged, so a
+    /// run outside any project behaves exactly as before.
+    #[test]
+    fn a_root_with_no_config_anywhere_is_returned_unchanged() {
+        let bare = tempfile::tempdir().expect("bare");
+        let nested = bare.path().join("a/b");
+        std::fs::create_dir_all(&nested).expect("nested");
+        assert_eq!(mcp_config_root(&nested), nested);
     }
 }
