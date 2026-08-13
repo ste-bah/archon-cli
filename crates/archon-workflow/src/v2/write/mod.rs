@@ -28,6 +28,8 @@ use crate::generated_contract::{
 };
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
+
+mod target_budgets;
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
 use crate::v2::completion_evidence::attach_completion_evidence_for_call;
@@ -115,6 +117,14 @@ pub async fn run_write_capable_v2_fanout(
     // dynamic_source_kind, so no graph exists for them and the graph-based
     // stamp never runs. Stamp straight from the task universe instead.
     stamp_required_tools_from_universe(&mut branches, task_universe);
+    // The line cap is enforced when the manifest is validated — after the agent
+    // has written everything. Give it the budget first, or it discovers the cap
+    // by losing the whole patch.
+    target_budgets::stamp_target_file_budgets(
+        &mut branches,
+        target_repository_root,
+        crate::write_coordinator::config::WriteCoordinatorConfig::default().max_source_file_lines,
+    );
     let all_write_items =
         write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let planner = WorkflowV2WritePlanner::new(
