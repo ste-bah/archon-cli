@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<ruleset name="archon-java-fixture"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+  <description>
+    The two PMD rules the fixture is built to trip. Deliberately not a whole
+    category: a fixture that reports dozens of incidental violations makes it
+    impossible to tell whether the rule under test actually fired.
+
+    Note the category names. PMD 7 reports a rule reference it cannot resolve
+    as "An XML validation error occurred" at the referencing line, with no
+    indication that the rule simply lives elsewhere now — so a stale category
+    here reads as a malformed file.
+  </description>
+
+  <rule ref="category/java/errorprone.xml/EmptyCatchBlock"/>
+  <!--
+    ExcessiveParameterList only reports above 10 parameters by default, so the
+    nine-parameter method in the fixture would slip past it untouched. Eight
+    matches what Checkstyle's ParameterNumber is set to, so the two tools agree
+    on where the line is.
+  -->
+  <rule ref="category/java/design.xml/ExcessiveParameterList">
+    <properties>
+      <property name="minimum" value="8"/>
+    </properties>
+  </rule>
+</ruleset>

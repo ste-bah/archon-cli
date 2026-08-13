@@ -93,6 +93,7 @@ pub mod team_delete;
 pub mod team_message;
 
 pub mod cartographer;
+pub mod java;
 
 pub mod leann_find_similar;
 pub mod leann_search;

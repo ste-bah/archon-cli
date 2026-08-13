@@ -357,6 +357,12 @@ pub fn create_default_registry(
     // Code Cartographer — symbol indexing and codebase navigation.
     registry.register(Box::new(archon_tools::cartographer::CartographerTool));
 
+    // Java build-and-analysis toolchain. Registered unconditionally: it
+    // detects the build system per invocation and says so when a directory is
+    // not a Java project, which is a more useful answer than the tool being
+    // absent from the surface entirely.
+    registry.register(Box::new(archon_tools::java::JavaToolchain));
+
     // LEANN semantic code search — only registered when the index is
     // available (graceful no-op when LEANN initialisation fails).
     if let Some(ref idx) = leann_index {

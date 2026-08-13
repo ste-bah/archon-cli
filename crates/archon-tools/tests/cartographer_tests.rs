@@ -1,4 +1,5 @@
 use archon_tools::cartographer::CartographerTool;
+use archon_tools::cartographer::deps::extract_dependencies;
 use archon_tools::cartographer::index::{CodebaseIndex, Symbol, SymbolKind};
 use archon_tools::cartographer::parser::{language_for_file, parse_file};
 use archon_tools::cartographer::summary::generate_summary;
@@ -316,4 +317,21 @@ fn empty_source_returns_empty() {
 fn unknown_language_returns_empty() {
     let syms = parse_file("file.unknown", "some content", "cobol");
     assert!(syms.is_empty(), "Unknown language should yield no symbols");
+}
+
+// ---------------------------------------------------------------------------
+// Import extraction
+//
+// Java has its own file: cartographer_java_tests.rs.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rust_imports_extracted() {
+    let deps = extract_dependencies("use std::collections::HashMap;\n", "rust");
+    assert_eq!(deps, vec!["std::collections::HashMap".to_string()]);
+}
+
+#[test]
+fn unknown_language_yields_no_dependencies() {
+    assert!(extract_dependencies("IMPORT FOO.", "cobol").is_empty());
 }

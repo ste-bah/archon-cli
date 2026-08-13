@@ -147,9 +147,10 @@ questions instead of dumping the corpus into the model context.
 | Tool | Permission | Purpose |
 |---|---|---|
 | `lsp` | Safe | LSP dispatch: `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`. Returns empty when no language server is connected. |
-| `CartographerScan` | Safe | Index a codebase for symbols (Rust, Python, TS, JS, Go) |
+| `CartographerScan` | Safe | Index a codebase for symbols (Rust, Python, TS, JS, Go, Java) |
 | `LeannSearch` | Safe | Semantic code search via HNSW over embeddings. Conditionally registered when the LEANN index is available at startup. |
 | `LeannFindSimilar` | Safe | Find similar code chunks. Conditionally registered when the LEANN index is available. |
+| `JavaToolchain` | Safe (`detect`, `report`) / Risky (`compile`, `analyze`, `test`) | Drive a Java project's Gradle or Maven build and read its analysis reports. See [Java support](../integrations/java.md). |
 
 ## Scheduling
 

@@ -10,6 +10,7 @@ pub fn language_for_file(path: &str) -> Option<&'static str> {
         "ts" | "tsx" => Some("typescript"),
         "js" | "jsx" => Some("javascript"),
         "go" => Some("go"),
+        "java" => Some("java"),
         _ => None,
     }
 }
@@ -73,6 +74,7 @@ fn extract_node_symbol(node: Node, source: &str, language: &str, file: &str) -> 
         "python" => extract_python_symbol(node, source, kind_str, file, line),
         "typescript" | "javascript" => extract_ts_symbol(node, source, kind_str, file, line),
         "go" => extract_go_symbol(node, source, kind_str, file, line),
+        "java" => extract_java_symbol(node, source, kind_str, file, line),
         _ => None,
     }
 }
@@ -200,6 +202,120 @@ fn extract_go_symbol(
     })
 }
 
+/// Java declaration node kinds that introduce a named type.
+///
+/// Used both to classify a node and to reconstruct the enclosing-type chain of
+/// a nested declaration, so `Inner` is recorded as `Outer.Inner`.
+const JAVA_TYPE_KINDS: &[&str] = &[
+    "class_declaration",
+    "interface_declaration",
+    "enum_declaration",
+    "record_declaration",
+    "annotation_type_declaration",
+];
+
+fn extract_java_symbol(
+    node: Node,
+    source: &str,
+    kind_str: &str,
+    file: &str,
+    line: usize,
+) -> Option<Symbol> {
+    let sym_kind = match kind_str {
+        "class_declaration" => SymbolKind::Class,
+        "interface_declaration" => SymbolKind::Interface,
+        "enum_declaration" => SymbolKind::Enum,
+        "record_declaration" => SymbolKind::Record,
+        "annotation_type_declaration" => SymbolKind::Annotation,
+        "method_declaration" | "constructor_declaration" => SymbolKind::Method,
+        _ => return None,
+    };
+
+    let own_name = node
+        .child_by_field_name("name")
+        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+        .map(|s| s.to_string())?;
+
+    // Java allows arbitrarily nested types and repeats method names freely
+    // across classes, so a bare `Inner` or `process` does not identify anything.
+    // Qualifying by the enclosing-type chain is what makes a lookup answerable.
+    let mut name = java_enclosing_types(node, source);
+    name.push(own_name);
+    let name = name.join(".");
+
+    Some(Symbol {
+        name,
+        kind: sym_kind,
+        file: file.to_string(),
+        line,
+        signature: java_signature(node, source, 120),
+    })
+}
+
+/// Names of the type declarations enclosing `node`, outermost first.
+fn java_enclosing_types(node: Node, source: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        if JAVA_TYPE_KINDS.contains(&ancestor.kind())
+            && let Some(name) = ancestor
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+        {
+            names.push(name.to_string());
+        }
+        current = ancestor.parent();
+    }
+    names.reverse();
+    names
+}
+
+/// Build a Java signature from the declaration's own text, excluding its body.
+///
+/// The generic first-line rule does not work here: tree-sitter puts annotations
+/// inside the declaration node, so an `@Override`-annotated method would record
+/// `@Override` as its signature. Declarations also wrap across lines far more
+/// often than in the other indexed languages, so the text is collapsed onto one
+/// line rather than truncated at the first newline.
+fn java_signature(node: Node, source: &str, max_chars: usize) -> String {
+    let start = java_signature_start(node);
+    let end = node
+        .child_by_field_name("body")
+        .map(|body| body.start_byte())
+        .unwrap_or_else(|| node.end_byte())
+        .max(start);
+
+    source
+        .get(start..end)
+        .unwrap_or("")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
+/// Byte offset of the first non-annotation token of a Java declaration.
+///
+/// Modifiers and annotations share one `modifiers` node, so the annotations are
+/// skipped individually to keep `public`/`static`/`final` in the signature.
+fn java_signature_start(node: Node) -> usize {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "modifiers" {
+            return child.start_byte();
+        }
+        let mut modifier_cursor = child.walk();
+        for modifier in child.children(&mut modifier_cursor) {
+            if !matches!(modifier.kind(), "marker_annotation" | "annotation") {
+                return modifier.start_byte();
+            }
+        }
+    }
+    node.start_byte()
+}
+
 /// Get the first line of a node's text as its signature, up to `max_chars`.
 fn extract_signature(node: Node, source: &str, max_chars: usize) -> String {
     node.utf8_text(source.as_bytes())
@@ -220,6 +336,7 @@ fn get_ts_language(language: &str) -> Option<tree_sitter::Language> {
         "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "javascript" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         "go" => Some(tree_sitter_go::LANGUAGE.into()),
+        "java" => Some(tree_sitter_java::LANGUAGE.into()),
         _ => None,
     }
 }

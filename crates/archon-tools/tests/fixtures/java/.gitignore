@@ -1,0 +1,5 @@
+# Build output from the end-to-end tests. These projects are compiled and
+# analysed in place, so running the tests leaves artefacts here.
+build/
+target/
+.gradle/

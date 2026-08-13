@@ -63,6 +63,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Identity & spoofing](integrations/identity-spoofing.md) — OAuth, API key, Claude Code mimicry
 - [VLM image descriptions](integrations/vlm.md) — Ollama, Gemini, and Anthropic vision providers for image ingest
 - [LSP integration](integrations/lsp.md) — language server discovery and operations
+- [Java support](integrations/java.md) — cartographer indexing, the Gradle/Maven analysis toolchain, and the java-developer agent
 - [IDE extensions](integrations/ide-extensions.md) — VS Code, JetBrains protocol
 
 ## Providers
