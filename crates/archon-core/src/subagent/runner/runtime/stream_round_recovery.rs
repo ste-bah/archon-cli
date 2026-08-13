@@ -190,10 +190,11 @@ fn request_with_messages(
         &mut projected,
         runner.provider.as_ref(),
         &runner.agent_config.context.prompt_cache_strategy,
-        runner.agent_config.context.prompt_cache
-            && runner.agent_config.context.prompt_cache_conversation,
+        runner.agent_config.context.prompt_cache,
+        runner.agent_config.context.prompt_cache_conversation,
         &runner.agent_config.context.prompt_cache_mode,
         &runner.agent_config.context.prompt_cache_ttl,
+        &runner.agent_config.context.prompt_cache_models,
     );
     projected
 }

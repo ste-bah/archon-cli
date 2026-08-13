@@ -251,8 +251,12 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.compaction_provider_family()
     }
 
-    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
-        self.inner.cache_strategy()
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        self.inner.cache_strategy(model)
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        self.inner.cache_platform()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
@@ -420,7 +424,7 @@ mod tests {
             false
         }
 
-        fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+        fn cache_strategy(&self, _model: &str) -> crate::cache_strategy::CacheStrategy {
             crate::cache_strategy::ANTHROPIC_API
         }
 
@@ -440,7 +444,7 @@ mod tests {
         let provider = RetryProvider::new(Arc::new(AnthropicCacheProvider), RetryPolicy::default());
 
         assert_eq!(
-            provider.cache_strategy(),
+            provider.cache_strategy("claude-sonnet-4-6"),
             crate::cache_strategy::ANTHROPIC_API
         );
     }

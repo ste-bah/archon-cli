@@ -5,6 +5,7 @@ use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
 };
+use crate::providers::openai_cache::{supports_explicit_prompt_cache, system_content_parts};
 use crate::providers::openai_protocol::map_http_error;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
@@ -47,25 +48,50 @@ impl OpenAiProvider {
         system: &[serde_json::Value],
         messages: &[serde_json::Value],
     ) -> Vec<serde_json::Value> {
+        Self::build_openai_messages_cached(system, messages, None)
+    }
+
+    /// As [`Self::build_openai_messages`], optionally closing the stable head of
+    /// the system prompt with a `prompt_cache_breakpoint`.
+    ///
+    /// The breakpoint has to be built here because it rides on a content *part*,
+    /// and this is the only place the parts exist. Without a placement the
+    /// system prompt stays the single joined string every OpenAI-compatible host
+    /// has always received.
+    pub fn build_openai_messages_cached(
+        system: &[serde_json::Value],
+        messages: &[serde_json::Value],
+        cache: Option<&crate::cache_wire::OpenAiCachePlacement>,
+    ) -> Vec<serde_json::Value> {
         let mut result = Vec::new();
 
-        // Collect system text.
-        let system_text: String = system
-            .iter()
-            .filter_map(|block| {
-                block
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        if let Some(cache) = cache {
+            let parts = system_content_parts(system, cache.stable_system_blocks);
+            if !parts.is_empty() {
+                result.push(serde_json::json!({
+                    "role": "system",
+                    "content": parts
+                }));
+            }
+        } else {
+            // Collect system text.
+            let system_text: String = system
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
-        if !system_text.is_empty() {
-            result.push(serde_json::json!({
-                "role": "system",
-                "content": system_text
-            }));
+            if !system_text.is_empty() {
+                result.push(serde_json::json!({
+                    "role": "system",
+                    "content": system_text
+                }));
+            }
         }
 
         // Pass-through messages, remapping tool_result blocks.
@@ -154,12 +180,19 @@ impl OpenAiProvider {
 
     /// Build and send the streaming request, return the mpsc receiver.
     async fn do_stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-        let body = build_openai_stream_request_body(
+        let cache = crate::cache_wire::openai_cache_placement(
+            &request.extra,
+            &request.system,
+            &request.messages,
+            &request.tools,
+        );
+        let body = build_openai_stream_request_body_cached(
             &request.model,
             request.max_tokens,
             &request.system,
             &request.messages,
             &request.tools,
+            cache.as_ref(),
         );
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -248,7 +281,25 @@ pub fn build_openai_request_body(
     tools: &[serde_json::Value],
     stream: bool,
 ) -> serde_json::Value {
-    let openai_messages = OpenAiProvider::build_openai_messages(system, messages);
+    build_openai_request_body_cached(model, max_tokens, system, messages, tools, stream, None)
+}
+
+/// As [`build_openai_request_body`], with an optional prompt-cache placement.
+///
+/// `prompt_cache_options` is sent only for `explicit` mode, because it turns
+/// OpenAI's own implicit breakpoints **off**. In `hybrid` the breakpoint is
+/// added alongside them, so a misjudged placement costs nothing rather than
+/// costing the caching that would otherwise have happened by itself.
+pub fn build_openai_request_body_cached(
+    model: &str,
+    max_tokens: u32,
+    system: &[serde_json::Value],
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+    stream: bool,
+    cache: Option<&crate::cache_wire::OpenAiCachePlacement>,
+) -> serde_json::Value {
+    let openai_messages = OpenAiProvider::build_openai_messages_cached(system, messages, cache);
     let openai_tools = OpenAiProvider::map_tools_to_openai(tools);
 
     let mut body = serde_json::json!({
@@ -262,6 +313,13 @@ pub fn build_openai_request_body(
         body["tools"] = serde_json::Value::Array(openai_tools);
     }
 
+    if let Some(cache) = cache {
+        body["prompt_cache_key"] = serde_json::json!(cache.cache_key);
+        if cache.explicit_only {
+            body["prompt_cache_options"] = serde_json::json!({ "mode": "explicit" });
+        }
+    }
+
     body
 }
 
@@ -272,7 +330,19 @@ pub fn build_openai_stream_request_body(
     messages: &[serde_json::Value],
     tools: &[serde_json::Value],
 ) -> serde_json::Value {
-    let mut body = build_openai_request_body(model, max_tokens, system, messages, tools, true);
+    build_openai_stream_request_body_cached(model, max_tokens, system, messages, tools, None)
+}
+
+pub fn build_openai_stream_request_body_cached(
+    model: &str,
+    max_tokens: u32,
+    system: &[serde_json::Value],
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+    cache: Option<&crate::cache_wire::OpenAiCachePlacement>,
+) -> serde_json::Value {
+    let mut body =
+        build_openai_request_body_cached(model, max_tokens, system, messages, tools, true, cache);
     body["stream_options"] = serde_json::json!({"include_usage": true});
     body
 }
@@ -289,6 +359,44 @@ pub(crate) use super::openai_stream::parse_openai_sse_chunk;
 impl LlmProvider for OpenAiProvider {
     fn name(&self) -> &str {
         "openai"
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        crate::cache_models::CachePlatform::OpenAiApi
+    }
+
+    /// OpenAI caches a stable prefix automatically above 1,024 tokens, with
+    /// nothing to annotate — so this is [`CacheStrategy::Automatic`], not
+    /// [`CacheStrategy::None`].
+    ///
+    /// The distinction is not cosmetic. `None` means "this endpoint does not
+    /// cache", and `caches()` is false for it, so cost reporting treats every
+    /// request as uncached. Requests were still being cached server-side; archon
+    /// simply could not see it. `Automatic` reports the caching while still
+    /// emitting no markers, which is the correct pair for this API.
+    ///
+    /// From GPT-5.6 the automatic behaviour is joined by an explicit one:
+    /// `prompt_cache_breakpoint` on a content part, which archon does emit —
+    /// see [`supports_explicit_prompt_cache`]. Older models reject
+    /// `prompt_cache_options` outright, so the version gate is not optional.
+    ///
+    /// Gated on the endpoint too, because `base_url` is overridable and the same
+    /// struct is pointed at Azure and other compatible hosts whose caching
+    /// behaviour is not OpenAI's to promise. An operator who knows better can
+    /// say so with `prompt_cache_strategy = "responses"`.
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        let base = self.base_url.trim_end_matches('/');
+        if !base.starts_with("https://api.openai.com") {
+            return crate::cache_strategy::CacheStrategy::None;
+        }
+        if supports_explicit_prompt_cache(model) {
+            crate::cache_strategy::CacheStrategy::ResponsesBreakpoints {
+                max: 4,
+                min_tokens: 1024,
+            }
+        } else {
+            crate::cache_strategy::CacheStrategy::Automatic
+        }
     }
 
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {

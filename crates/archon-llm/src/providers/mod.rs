@@ -9,6 +9,8 @@ pub mod codex;
 pub mod gcp_auth;
 pub mod local;
 pub mod openai;
+// #178: GPT-5.6 breakpoint helpers, split out for the file-size gate.
+pub mod openai_cache;
 mod openai_protocol;
 // #123: SSE chunk parsing, split out of `openai` to stay under the 500-line gate.
 mod openai_stream;

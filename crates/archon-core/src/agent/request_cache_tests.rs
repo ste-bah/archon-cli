@@ -1,10 +1,9 @@
 //! Tests for `request_cache.rs`, held in their own file to keep that module
 //! under the 500-line ceiling.
 
-use super::{
-    CacheStrategy, apply_conversation_cache, apply_system_cache, cache_marker, cache_strategy,
-    resolve_strategy,
-};
+use std::collections::BTreeMap;
+
+use super::{CacheStrategy, cache_marker, cache_strategy};
 use archon_llm::anthropic::AnthropicClient;
 use archon_llm::auth::AuthProvider;
 use archon_llm::identity::{IdentityMode, IdentityProvider};
@@ -14,6 +13,56 @@ use archon_llm::provider::{
 use archon_llm::providers::AnthropicProvider;
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::Secret;
+
+// Most tests here are about strategy resolution and marker placement, not the
+// config table, so these shims pin the empty-override case once instead of
+// threading `&BTreeMap::new()` through every call. The override path has its
+// own tests at the bottom of the file, against the full signatures.
+
+fn resolve_strategy(provider: &dyn LlmProvider, model: &str, configured: &str) -> CacheStrategy {
+    super::resolve_strategy(provider, model, configured, &BTreeMap::new())
+}
+
+fn apply_system_cache(
+    request: &mut LlmRequest,
+    provider: &dyn LlmProvider,
+    configured: &str,
+    enabled: bool,
+    mode: &str,
+    ttl: &str,
+) {
+    super::apply_system_cache(
+        request,
+        provider,
+        configured,
+        enabled,
+        mode,
+        ttl,
+        &BTreeMap::new(),
+    );
+}
+
+fn apply_conversation_cache(
+    request: &mut LlmRequest,
+    provider: &dyn LlmProvider,
+    configured: &str,
+    enabled: bool,
+    mode: &str,
+    ttl: &str,
+) {
+    super::apply_conversation_cache(
+        request,
+        provider,
+        configured,
+        enabled,
+        // These tests are about the marker itself; declining the conversation
+        // checkpoint has its own test in `request_cache_config_tests`.
+        true,
+        mode,
+        ttl,
+        &BTreeMap::new(),
+    );
+}
 
 fn provider(api_url: Option<&str>) -> AnthropicProvider {
     let identity = IdentityProvider::new(
@@ -43,6 +92,20 @@ impl LlmProvider for NativeCachingProvider {
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         feature == ProviderFeature::PromptCaching
+    }
+
+    /// Mirrors the real Bedrock provider: a Converse checkpoint strategy with
+    /// AWS's Sonnet 4.5 figures.
+    fn cache_strategy(&self, _model: &str) -> CacheStrategy {
+        CacheStrategy::BedrockCachePoint {
+            max: 4,
+            min_tokens: 4096,
+            ttl_1h: true,
+        }
+    }
+
+    fn cache_platform(&self) -> archon_llm::cache_models::CachePlatform {
+        archon_llm::cache_models::CachePlatform::Bedrock
     }
 
     async fn stream(
@@ -291,9 +354,13 @@ fn automatic_writes_no_markers() {
 
     assert_eq!(request.messages[2]["content"][0].get("cache_control"), None);
     assert!(
-        cache_strategy::parse_override("automatic")
-            .unwrap()
-            .caches()
+        cache_strategy::parse_override(
+            "automatic",
+            "claude-sonnet-4-6",
+            archon_llm::cache_models::CachePlatform::AnthropicApi,
+        )
+        .unwrap()
+        .caches()
     );
 }
 
@@ -304,13 +371,40 @@ fn an_unknown_strategy_falls_back_to_the_provider() {
     let direct = provider(None);
     let proxy = provider(Some("http://127.0.0.1:1234/v1/messages"));
 
+    const MODEL: &str = "claude-sonnet-4-6";
+
     assert_eq!(
-        resolve_strategy(&direct, "enabled"),
-        direct.cache_strategy()
+        resolve_strategy(&direct, MODEL, "enabled"),
+        direct.cache_strategy(MODEL)
     );
-    assert_eq!(resolve_strategy(&proxy, "enabled"), CacheStrategy::None);
+    assert_eq!(
+        resolve_strategy(&proxy, MODEL, "enabled"),
+        CacheStrategy::None
+    );
     // Empty is treated as unset, not as "off".
-    assert_eq!(resolve_strategy(&direct, ""), direct.cache_strategy());
+    assert_eq!(
+        resolve_strategy(&direct, MODEL, ""),
+        direct.cache_strategy(MODEL)
+    );
+}
+
+/// The minimum comes from the model, not from the wire format. Declaring an
+/// endpoint "anthropic" says how to phrase a breakpoint; it says nothing about
+/// how large the prefix must be before one takes effect, and that ranges from
+/// 512 to 4,096 across Claude models with no relationship to the version
+/// number — Opus 4.5 needs 4,096 while Opus 5 needs 512.
+#[test]
+fn the_declared_strategy_still_takes_its_limits_from_the_model() {
+    let proxy = provider(Some("http://127.0.0.1:1234/v1/messages"));
+
+    let opus_5 = resolve_strategy(&proxy, "claude-opus-5", "anthropic");
+    assert_eq!(opus_5.min_tokens(), 512);
+
+    let opus_4_5 = resolve_strategy(&proxy, "claude-opus-4-5", "anthropic");
+    assert_eq!(opus_4_5.min_tokens(), 4096);
+
+    let sonnet_4_6 = resolve_strategy(&proxy, "claude-sonnet-4-6", "anthropic");
+    assert_eq!(sonnet_4_6.min_tokens(), 1024);
 }
 
 /// `1h` is rejected by models that do not support it, so the strategy's own

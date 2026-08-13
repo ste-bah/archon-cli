@@ -359,13 +359,37 @@ pub trait LlmProvider: Send + Sync {
         }
     }
 
-    /// How this provider wants prompt-cache breakpoints expressed.
+    /// How this provider wants prompt-cache breakpoints expressed, for a
+    /// specific model.
+    ///
+    /// The model is a parameter because the limits are per-model, not
+    /// per-provider, and they are **not derivable from the name**: on Anthropic,
+    /// Opus 4.5 requires a 4,096-token prefix while Opus 5 requires 512, and
+    /// Sonnet 4.6 requires 1,024 where its same-generation siblings require
+    /// 4,096. A provider-wide constant is wrong for most of its own models.
     ///
     /// Defaults to [`CacheStrategy::None`] — an endpoint nothing is known about
     /// gets its directives stripped rather than risking a 400 on every request.
-    /// Overriding this is what turns caching on for a provider.
-    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        let _ = model;
         crate::cache_strategy::CacheStrategy::None
+    }
+
+    /// Which inference stack this provider actually reaches.
+    ///
+    /// Separate from [`LlmProvider::cache_strategy`] because the two answer
+    /// different questions, and only this one is consulted when an operator
+    /// overrides the strategy by config. The override names a *wire format*; it
+    /// cannot name the stack, since a LiteLLM proxy in front of Bedrock is
+    /// declared `anthropic` and translates to `cachePoint` itself. Without this,
+    /// such a deployment resolves Sonnet 4.5 at Anthropic's 1,024-token floor
+    /// against Bedrock's real 4,096 and the checkpoint is dropped in silence.
+    ///
+    /// Defaults to [`CachePlatform::Unknown`], which takes the strictest figure
+    /// across every candidate stack. A provider that knows better should say so;
+    /// one that forgets pays slightly more rather than caching not at all.
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        crate::cache_models::CachePlatform::Unknown
     }
 
     // `supports_anthropic_message_caching` used to live here. It was removed

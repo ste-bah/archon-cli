@@ -326,6 +326,22 @@ impl LlmProvider for LocalProvider {
         "local"
     }
 
+    /// No prompt cache, and stated rather than inherited.
+    ///
+    /// `None` is what the trait default would have given anyway, but silence is
+    /// how three other providers ended up reporting "does not cache" by
+    /// accident. Ollama and llama.cpp reuse KV state within a running process as
+    /// an implementation detail; there is no billed, addressable prompt cache to
+    /// report, and tokens are free here regardless.
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        let _ = model;
+        crate::cache_strategy::CacheStrategy::None
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        crate::cache_models::CachePlatform::Unknown
+    }
+
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
         crate::compaction_policy::ProviderFamily::Local
     }

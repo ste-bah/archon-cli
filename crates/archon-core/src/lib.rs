@@ -22,6 +22,8 @@ pub mod config_source;
 pub mod config_watcher;
 pub mod cost;
 pub mod cost_alerts;
+// #178: per-model prices and the cache tiers derived from them.
+pub mod cost_table;
 pub mod dispatch;
 pub mod env_vars;
 pub mod git;

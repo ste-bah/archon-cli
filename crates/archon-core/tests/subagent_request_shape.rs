@@ -167,7 +167,7 @@ impl LlmProvider for CapturingMockProvider {
     fn models(&self) -> Vec<ModelInfo> {
         vec![]
     }
-    fn cache_strategy(&self) -> archon_llm::cache_strategy::CacheStrategy {
+    fn cache_strategy(&self, _model: &str) -> archon_llm::cache_strategy::CacheStrategy {
         archon_llm::cache_strategy::ANTHROPIC_API
     }
 

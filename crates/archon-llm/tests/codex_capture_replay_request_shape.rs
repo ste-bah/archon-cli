@@ -155,7 +155,10 @@ async fn consecutive_captured_tool_sections_are_byte_stable() {
     let second: serde_json::Value = serde_json::from_slice(&codex_posts[1].body).unwrap();
     assert_ne!(first["input"], second["input"]);
     assert_eq!(first["instructions"], second["instructions"]);
-    assert_ne!(first["prompt_cache_key"], second["prompt_cache_key"]);
+    // Same session, same instructions, same tools — so the same cache key. This
+    // asserted the opposite while the key was a per-request UUID, which meant
+    // every turn was routed to a fresh cache and none of them could hit.
+    assert_eq!(first["prompt_cache_key"], second["prompt_cache_key"]);
     assert_eq!(
         serde_json::to_vec(&first["tools"]).unwrap(),
         serde_json::to_vec(&second["tools"]).unwrap()

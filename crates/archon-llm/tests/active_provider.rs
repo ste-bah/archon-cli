@@ -41,7 +41,7 @@ impl LlmProvider for AnthropicCacheProvider {
         false
     }
 
-    fn cache_strategy(&self) -> archon_llm::cache_strategy::CacheStrategy {
+    fn cache_strategy(&self, _model: &str) -> archon_llm::cache_strategy::CacheStrategy {
         archon_llm::cache_strategy::ANTHROPIC_API
     }
 
@@ -70,7 +70,7 @@ fn active_provider_preserves_current_anthropic_message_cache_capability() {
     );
 
     assert_eq!(
-        active.cache_strategy(),
+        active.cache_strategy("claude-sonnet-4-6"),
         archon_llm::cache_strategy::ANTHROPIC_API
     );
 }

@@ -216,8 +216,12 @@ impl LlmProvider for ActiveProvider {
         self.current().compaction_provider_family()
     }
 
-    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
-        self.current().cache_strategy()
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        self.current().cache_strategy(model)
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        self.current().cache_platform()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

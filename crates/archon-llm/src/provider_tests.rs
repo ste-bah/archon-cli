@@ -67,7 +67,7 @@ fn request_model_resolution_falls_back_for_tier_aliases() {
 fn the_default_provider_declares_no_caching() {
     let provider = DefaultAliasProvider;
     assert_eq!(
-        provider.cache_strategy(),
+        provider.cache_strategy("claude-sonnet-4-6"),
         crate::cache_strategy::CacheStrategy::None
     );
 }

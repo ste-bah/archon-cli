@@ -223,6 +223,7 @@ async fn build_llm_request(
         runner.agent_config.context.prompt_cache,
         &runner.agent_config.context.prompt_cache_mode,
         &runner.agent_config.context.prompt_cache_ttl,
+        &runner.agent_config.context.prompt_cache_models,
     );
     // Runs against the empty message array on purpose: the conversation marker
     // itself is placed by the projection in `stream_round`, but on a provider
@@ -232,10 +233,11 @@ async fn build_llm_request(
         &mut request,
         runner.provider.as_ref(),
         &runner.agent_config.context.prompt_cache_strategy,
-        runner.agent_config.context.prompt_cache
-            && runner.agent_config.context.prompt_cache_conversation,
+        runner.agent_config.context.prompt_cache,
+        runner.agent_config.context.prompt_cache_conversation,
         &runner.agent_config.context.prompt_cache_mode,
         &runner.agent_config.context.prompt_cache_ttl,
+        &runner.agent_config.context.prompt_cache_models,
     );
     request
 }

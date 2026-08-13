@@ -48,7 +48,7 @@ impl LlmProvider for MockProvider {
         false
     }
 
-    fn cache_strategy(&self) -> archon_llm::cache_strategy::CacheStrategy {
+    fn cache_strategy(&self, _model: &str) -> archon_llm::cache_strategy::CacheStrategy {
         if self.provider_family == ProviderFamily::AnthropicApi {
             archon_llm::cache_strategy::ANTHROPIC_API
         } else {
