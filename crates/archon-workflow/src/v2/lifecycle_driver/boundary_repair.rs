@@ -27,6 +27,63 @@ impl LifecycleDriver {
         .map(|_| ())
     }
 
+    /// One corrective re-ask after a preservation rejection.
+    ///
+    /// A rejected repair costs a full round: the original triage stays
+    /// authoritative, its routes get retried, and the next round asks the same
+    /// reducer the same question. Observed twice in one run — 20 violations
+    /// across 6 items, the same four fields dropped both times — while the
+    /// repair prompt already stated the preservation contract verbatim. The
+    /// reducer never sees the rejection, so it cannot learn from it.
+    ///
+    /// This shows it the exact violations. Adopted only if the corrected
+    /// attempt preserves identity AND accounts for more outcomes than the
+    /// pre-repair triage — the same bar the first attempt had to clear, so a
+    /// second failure costs one call and changes nothing.
+    pub(crate) async fn preservation_corrected_repair(
+        &self,
+        repair_id: &str,
+        violations: &[String],
+        unaccounted: &[serde_json::Value],
+        triage: &serde_json::Value,
+        failed_outcomes: &[serde_json::Value],
+        evidence: &mut LifecycleEvidence,
+    ) -> crate::WorkflowResult<Option<serde_json::Value>> {
+        let retry_id = format!("{repair_id}-preservation-retry");
+        let corrected = self
+            .reduce(
+                &retry_id,
+                serde_json::json!([violations, unaccounted, triage]),
+                "reducer",
+                prompts::VERIFICATION_TRIAGE_PRESERVATION_RETRY_TASK,
+            )
+            .await?;
+        let corrected = lifecycle_policy::verify_routing::harvest_nested_triage_routes(&corrected);
+        support::record_repair_attempt(
+            &mut evidence.repair_attempts,
+            &retry_id,
+            "verification_triage_preservation_retry",
+            &semantic_preservation::violation_issues(violations),
+            &corrected,
+        );
+        let preservation = semantic_preservation::check_items(
+            &semantic_preservation::canonical_route_entries(triage),
+            &semantic_preservation::canonical_route_entries(&corrected),
+        );
+        if !preservation.passed() {
+            self.record_preservation_rejection(&retry_id, &preservation.violations)
+                .await?;
+            return Ok(None);
+        }
+        let before =
+            lifecycle_policy::verify_routing::unaccounted_failed_outcomes(triage, failed_outcomes);
+        let after = lifecycle_policy::verify_routing::unaccounted_failed_outcomes(
+            &corrected,
+            failed_outcomes,
+        );
+        Ok((after.len() < before.len()).then_some(corrected))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn enforce_outcome_repair_accounting(
         &self,

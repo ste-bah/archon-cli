@@ -126,6 +126,8 @@ mod board_drain_tests;
 #[cfg(test)]
 mod completion_gap_remediation_tests;
 #[cfg(test)]
+mod preservation_retry_tests;
+#[cfg(test)]
 mod review_assignment_invalid_tests;
 #[cfg(test)]
 mod review_remediation_tests;

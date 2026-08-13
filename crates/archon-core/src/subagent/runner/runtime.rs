@@ -15,12 +15,7 @@ impl SubagentRunner {
     /// Returns the accumulated text output from the final turn.
     pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
         // AGT-024: Use initial_messages for resume, or start fresh
-        let mut messages = MessageHistory::new(
-            self.initial_messages
-                .as_ref()
-                .map(Clone::clone)
-                .unwrap_or_default(),
-        );
+        let mut messages = MessageHistory::new(self.initial_messages.clone().unwrap_or_default());
         let user_msg = serde_json::json!({
             "role": "user",
             "content": initial_prompt,

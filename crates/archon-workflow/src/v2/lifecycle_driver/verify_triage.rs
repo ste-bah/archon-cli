@@ -216,7 +216,20 @@ impl LifecycleDriver {
             );
             self.record_preservation_rejection(&repair_id, &preservation.violations)
                 .await?;
-            return Ok(triage);
+            // The reducer never sees its own rejection, so without this it
+            // repeats the identical field loss next round. One corrective
+            // re-ask, adopted only on the same terms the first attempt faced.
+            let corrected = self
+                .preservation_corrected_repair(
+                    &repair_id,
+                    &preservation.violations,
+                    &unaccounted,
+                    &triage,
+                    failed_outcomes,
+                    evidence,
+                )
+                .await?;
+            return Ok(corrected.unwrap_or(triage));
         }
         if still_unaccounted.len() < unaccounted.len() {
             Ok(repaired)

@@ -275,8 +275,10 @@ fn stable_system_blocks() -> Vec<serde_json::Value> {
 }
 
 fn fixture_config(pressure: bool) -> AgentConfig {
-    let mut config = AgentConfig::default();
-    config.session_id = "issue-171-fixture".into();
+    let mut config = AgentConfig {
+        session_id: "issue-171-fixture".into(),
+        ..AgentConfig::default()
+    };
     config.context.context_window_override = Some(2_000_000);
     if !pressure {
         config.context.rate_limit_pressure_tokens = None;

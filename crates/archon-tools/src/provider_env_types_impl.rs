@@ -51,14 +51,21 @@ impl ProviderEnvResolution {
         }
     }
 
+    /// Replace resolved credentials in agent-visible output.
+    ///
+    /// Only values that `secret_values::is_redactable` accepts are replaced.
+    /// The rule used to be "every non-empty resolved value", which quietly
+    /// rewrote ports, hosts and run ids wherever they appeared in a command's
+    /// output — see `provider_env_secret_values.rs` for the failures that
+    /// motivated the filter.
     pub fn redact_text(&self, text: &str) -> String {
         self.env
             .iter()
             .fold(text.to_string(), |current, (key, value)| {
-                if value.is_empty() {
-                    current
-                } else {
+                if super::secret_values::is_redactable(key, value) {
                     current.replace(value, &format!("<redacted:{key}>"))
+                } else {
+                    current
                 }
             })
     }
