@@ -231,8 +231,8 @@ impl LlmProvider for AnthropicTestProvider {
         Vec::new()
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        true
+    fn cache_strategy(&self, _model: &str) -> archon_llm::cache_strategy::CacheStrategy {
+        archon_llm::cache_strategy::ANTHROPIC_API
     }
 
     fn supports_feature(&self, _: ProviderFeature) -> bool {

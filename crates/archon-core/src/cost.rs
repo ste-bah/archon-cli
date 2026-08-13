@@ -1,36 +1,75 @@
+//! Turn and session cost estimates from provider-reported usage.
+//!
+//! What this replaced priced every non-DeepSeek model at a flat Sonnet estimate,
+//! charged cache reads at **zero**, and folded cache writes into plain input at
+//! **1.0x**. Each of those is wrong in the same direction: it makes caching look
+//! free. A deployment writing checkpoints it never read back showed a falling
+//! per-turn cost while the invoice climbed, which is precisely the shape of the
+//! overspend that opened #178.
+//!
+//! Cache reads and writes are now priced from their published multipliers of
+//! base input — see [`crate::cost_table`] — so a checkpoint that does not pay
+//! for itself shows up as the loss it is.
+
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
+pub use crate::cost_table::Pricing;
+use crate::cost_table::{UNKNOWN_MODEL_ESTIMATE, lookup, platform_multiplier};
+
 const TOKENS_PER_MILLION: f64 = 1_000_000.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Pricing {
-    input_cache_miss_per_mtok: f64,
-    input_cache_hit_per_mtok: f64,
-    output_per_mtok: f64,
+/// Operator-supplied prices, keyed by model-id substring, matched the same way
+/// as the built-in table.
+static OVERRIDES: OnceLock<BTreeMap<String, Pricing>> = OnceLock::new();
+
+/// Install `[context.model_pricing]` for the life of the process.
+///
+/// A global rather than a parameter because the cost functions are called from
+/// the TUI event loop, the status line and two slash commands, none of which
+/// hold configuration — and threading it to all of them to change a *displayed
+/// estimate* would be a large change for a small one. Installed once at startup;
+/// later calls are ignored, so a subagent cannot silently reprice a session.
+///
+/// The knob exists for the same reason the cache-parameter one does: a model
+/// released after the binary, or a vendor revising a figure, should not require
+/// a release to cost correctly.
+pub fn install_pricing_overrides(overrides: BTreeMap<String, Pricing>) {
+    if overrides.is_empty() {
+        return;
+    }
+    let _ = OVERRIDES.set(overrides);
 }
 
-const LEGACY_SONNET_ESTIMATE: Pricing = Pricing {
-    input_cache_miss_per_mtok: 3.0,
-    input_cache_hit_per_mtok: 3.0,
-    output_per_mtok: 15.0,
-};
+/// Prices in force for a model, including any regional platform premium.
+pub fn pricing_for_model(model: &str) -> Pricing {
+    let normalized = model.trim().to_ascii_lowercase();
+    let configured = OVERRIDES.get().and_then(|overrides| {
+        overrides
+            .iter()
+            .filter(|(marker, _)| normalized.contains(marker.trim().to_ascii_lowercase().as_str()))
+            .max_by_key(|(marker, _)| marker.len())
+            .map(|(_, pricing)| *pricing)
+    });
 
-const DEEPSEEK_V4_PRO: Pricing = Pricing {
-    input_cache_miss_per_mtok: 0.435,
-    input_cache_hit_per_mtok: 0.003625,
-    output_per_mtok: 0.87,
-};
+    let base = configured
+        .or_else(|| lookup(model))
+        .unwrap_or(UNKNOWN_MODEL_ESTIMATE);
+    base.scaled(platform_multiplier(model))
+}
 
-const DEEPSEEK_V4_FLASH: Pricing = Pricing {
-    input_cache_miss_per_mtok: 0.14,
-    input_cache_hit_per_mtok: 0.0028,
-    output_per_mtok: 0.28,
-};
-
-/// Estimate the current turn cost from provider-reported usage.
+/// Estimate the cost of one turn from the usage the provider reported.
 ///
-/// `input_tokens` is the non-cache input reported by the provider for this
-/// turn. `cache_creation_tokens` are treated as cache-miss input for DeepSeek.
-/// Legacy providers keep the old Sonnet display estimate to avoid surprise
-/// churn outside the DeepSeek path.
+/// `input_tokens` is the non-cache input for this turn. Bedrock's `inputTokens`
+/// already excludes cached tokens — verified live, `inputTokens: 3` on a
+/// 4,424-token request — and the Anthropic Messages API reports the same split,
+/// so the three buckets do not overlap and are simply summed.
+///
+/// The five-minute write tier is assumed. `prompt_cache_ttl = "1h"` writes at
+/// 2x rather than 1.25x, which this understates; the counters the providers
+/// return do not distinguish the two, so the alternative would be to guess in
+/// the more expensive direction on every deployment that never asked for an
+/// hour. See [`estimate_turn_cost_usd_with_ttl`] where the caller does know.
 pub fn estimate_turn_cost_usd(
     model: &str,
     input_tokens: u64,
@@ -38,23 +77,39 @@ pub fn estimate_turn_cost_usd(
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
 ) -> f64 {
-    let pricing = pricing_for_model(model);
-    let cache_miss_input = input_tokens.saturating_add(cache_creation_tokens);
-    estimate_with_pricing(
-        pricing,
-        cache_miss_input,
+    estimate_turn_cost_usd_with_ttl(
+        model,
+        input_tokens,
         output_tokens,
+        cache_creation_tokens,
         cache_read_tokens,
-        is_deepseek_model(model),
+        false,
     )
 }
 
-/// Estimate cumulative session cost from cumulative context/input counters.
+/// As [`estimate_turn_cost_usd`], for a caller that knows the retention tier.
+pub fn estimate_turn_cost_usd_with_ttl(
+    model: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+    ttl_1h: bool,
+) -> f64 {
+    let pricing = pricing_for_model(model);
+    per_mtok(input_tokens, pricing.input_per_mtok)
+        + per_mtok(output_tokens, pricing.output_per_mtok)
+        + per_mtok(cache_creation_tokens, pricing.cache_write_per_mtok(ttl_1h))
+        + per_mtok(cache_read_tokens, pricing.cache_read_per_mtok())
+}
+
+/// Estimate cumulative session cost from the running counters.
 ///
-/// For DeepSeek, `context_input_tokens` is split into cache-miss and cache-hit
-/// buckets because cache hits are priced separately. For legacy providers this
-/// preserves the existing rough Sonnet estimate that charged all cumulative
-/// input at the same rate.
+/// `context_input_tokens` is the cumulative input total, which *includes* the
+/// cached buckets — so they are subtracted before the remainder is priced as
+/// plain input, or the same tokens would be charged twice. The previous version
+/// did charge them twice for every provider except DeepSeek, at the full input
+/// rate, while separately reporting the cache as free.
 pub fn estimate_session_cost_usd(
     model: &str,
     context_input_tokens: u64,
@@ -62,85 +117,44 @@ pub fn estimate_session_cost_usd(
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
 ) -> f64 {
-    if is_deepseek_model(model) {
-        let cache_miss_input =
-            context_input_tokens.saturating_sub(cache_creation_tokens + cache_read_tokens);
-        return estimate_turn_cost_usd(
-            model,
-            cache_miss_input,
-            output_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-        );
-    }
+    let cached = cache_creation_tokens.saturating_add(cache_read_tokens);
+    let uncached_input = context_input_tokens.saturating_sub(cached);
 
-    estimate_with_pricing(
-        LEGACY_SONNET_ESTIMATE,
-        context_input_tokens,
+    estimate_turn_cost_usd(
+        model,
+        uncached_input,
         output_tokens,
-        0,
-        false,
+        cache_creation_tokens,
+        cache_read_tokens,
     )
 }
 
-fn estimate_with_pricing(
-    pricing: Pricing,
-    input_cache_miss_tokens: u64,
+/// What a turn would have cost with no caching at all.
+///
+/// The comparison that makes a checkpoint's worth legible: every cached token,
+/// read or written, would otherwise have been plain input. Against
+/// [`estimate_turn_cost_usd`] this shows whether the cache paid for itself —
+/// and a write that is never read back makes this figure the *smaller* of the
+/// two.
+pub fn uncached_equivalent_usd(
+    model: &str,
+    input_tokens: u64,
     output_tokens: u64,
+    cache_creation_tokens: u64,
     cache_read_tokens: u64,
-    price_cache_hits: bool,
 ) -> f64 {
-    let input_cost =
-        input_cache_miss_tokens as f64 * pricing.input_cache_miss_per_mtok / TOKENS_PER_MILLION;
-    let cache_cost = if price_cache_hits {
-        cache_read_tokens as f64 * pricing.input_cache_hit_per_mtok / TOKENS_PER_MILLION
-    } else {
-        0.0
-    };
-    let output_cost = output_tokens as f64 * pricing.output_per_mtok / TOKENS_PER_MILLION;
-    input_cost + cache_cost + output_cost
+    let pricing = pricing_for_model(model);
+    let all_input = input_tokens
+        .saturating_add(cache_creation_tokens)
+        .saturating_add(cache_read_tokens);
+
+    per_mtok(all_input, pricing.input_per_mtok) + per_mtok(output_tokens, pricing.output_per_mtok)
 }
 
-fn pricing_for_model(model: &str) -> Pricing {
-    let normalized = model.trim().to_ascii_lowercase();
-    if normalized.starts_with("deepseek-v4-pro") {
-        DEEPSEEK_V4_PRO
-    } else if normalized.starts_with("deepseek-v4-flash")
-        || normalized == "deepseek-chat"
-        || normalized == "deepseek-reasoner"
-    {
-        DEEPSEEK_V4_FLASH
-    } else {
-        LEGACY_SONNET_ESTIMATE
-    }
-}
-
-fn is_deepseek_model(model: &str) -> bool {
-    model.trim().to_ascii_lowercase().starts_with("deepseek-")
+fn per_mtok(tokens: u64, price_per_mtok: f64) -> f64 {
+    tokens as f64 * price_per_mtok / TOKENS_PER_MILLION
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deepseek_pro_turn_uses_deepseek_pricing() {
-        let cost = estimate_turn_cost_usd("deepseek-v4-pro[1m]", 1_000_000, 1_000_000, 0, 0);
-
-        assert!((cost - 1.305).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn deepseek_pro_cache_hits_are_cheap() {
-        let cost = estimate_turn_cost_usd("deepseek-v4-pro[1m]", 0, 0, 0, 1_000_000);
-
-        assert!((cost - 0.003625).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn legacy_estimate_keeps_sonnet_rates() {
-        let cost = estimate_turn_cost_usd("claude-sonnet-4-6", 1_000_000, 1_000_000, 0, 0);
-
-        assert!((cost - 18.0).abs() < f64::EPSILON);
-    }
-}
+#[path = "cost_tests.rs"]
+mod tests;

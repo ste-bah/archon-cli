@@ -3,7 +3,7 @@ use archon_core::cli_flags::{ResolvedFlags, resolve_flags};
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::env_vars::{self, ArchonEnvVars};
-use archon_core::logging::{LogGuard, default_log_dir, init_logging, rotate_logs};
+use archon_core::logging::{LogGuard, init_logging, resolve_log_dir, rotate_logs};
 
 use crate::cli_args::Cli;
 
@@ -115,9 +115,7 @@ fn apply_cli_logging_and_model_overrides(
 }
 
 fn init_session_logging(session_id: &str, config: &archon_core::config::ArchonConfig) -> LogGuard {
-    let log_dir = std::env::var_os("ARCHON_LOG_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(default_log_dir);
+    let log_dir = resolve_log_dir();
     let log_guard =
         init_logging(session_id, &config.logging.level, &log_dir).unwrap_or_else(|error| {
             eprintln!("fatal: logging init failed: {error}");

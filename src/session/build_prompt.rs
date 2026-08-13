@@ -96,7 +96,23 @@ pub(super) fn build_interactive_system_prompt(
     let git_branch = git_info.as_ref().map(|g| g.branch.as_str());
     let env_section = build_environment_section(working_dir, git_branch);
 
-    let identity_blocks = identity.system_prompt_blocks("", &archon_md, &env_section);
+    // Identity PREFIX only -- the billing header and the Claude Code opener.
+    //
+    // `system_prompt_blocks` folds its second and third arguments into blocks of
+    // their own, and this path passes ARCHON.md and the environment section to
+    // the assembler below as `project_instructions` and `environment`. Handing
+    // them to both put the whole of ARCHON.md into the request TWICE, word for
+    // word: measured at 8,632 and 8,463 bytes on a live turn, ~2,100 tokens on
+    // every single request, 46% of the system prompt.
+    //
+    // The empty arguments are what stops that. This caller wants the prefix and
+    // nothing else -- note it immediately flattens the blocks to a string, which
+    // discards their `cache_control` scopes anyway, so nothing is lost by not
+    // asking for content blocks it is about to dissolve.
+    //
+    // `build_system_prompt` above is NOT affected: it uses the blocks directly,
+    // as blocks, and never reaches the assembler.
+    let identity_blocks = identity.system_prompt_blocks("", "", "");
     let identity_text = identity_blocks
         .iter()
         .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
@@ -288,6 +304,50 @@ mod tests {
         apply_prompt_cache_policy(&mut blocks, &config, "openai-codex");
 
         assert!(blocks[0].get("cache_control").is_none());
+    }
+
+    /// The interactive path asks the identity provider for the PREFIX only and
+    /// gives ARCHON.md to the assembler instead. This pins the half of that
+    /// contract the provider owns: with no content passed in, it must emit no
+    /// content blocks.
+    ///
+    /// Passing ARCHON.md here as well as to the assembler put the whole file in
+    /// the request twice, word for word -- 8,632 and 8,463 bytes on a measured
+    /// turn, ~2,100 tokens on every request. If a future change makes this
+    /// function synthesise content from thin air, that returns.
+    #[test]
+    fn identity_prefix_carries_no_project_content() {
+        for mode in [
+            archon_llm::identity::IdentityMode::Clean,
+            archon_llm::identity::IdentityMode::Spoof {
+                version: "2.1.89".into(),
+                entrypoint: "cli".into(),
+                workload: None,
+                betas: Vec::new(),
+                anti_distillation: false,
+            },
+        ] {
+            let identity = IdentityProvider::new(
+                mode.clone(),
+                "session".into(),
+                "device".into(),
+                String::new(),
+            );
+
+            let text = identity
+                .system_prompt_blocks("", "", "")
+                .iter()
+                .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            assert!(
+                !text.contains("ARCHON.md") && !text.contains("Working directory"),
+                "{mode:?}: the prefix must not carry project or environment \
+                 content -- the assembler owns those, and emitting them here \
+                 duplicates the whole of ARCHON.md into every request:\n{text}"
+            );
+        }
     }
 
     #[test]

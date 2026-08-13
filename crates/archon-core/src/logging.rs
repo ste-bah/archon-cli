@@ -38,6 +38,21 @@ pub fn default_log_dir() -> PathBuf {
         .join("logs")
 }
 
+/// Where session logs go: `ARCHON_DEBUG_LOG_DIR`, then `ARCHON_LOG_DIR`, then
+/// [`default_log_dir`].
+///
+/// One function because there are two entry points — `main_bootstrap` for the
+/// TUI and `setup` for the command paths — and they had drifted. Only the
+/// second honoured `ARCHON_DEBUG_LOG_DIR`, which is the one the TUI never
+/// takes, so the variable appeared in the documented list of knobs and did
+/// nothing on the surface anybody actually runs.
+pub fn resolve_log_dir() -> PathBuf {
+    std::env::var_os("ARCHON_DEBUG_LOG_DIR")
+        .or_else(|| std::env::var_os("ARCHON_LOG_DIR"))
+        .map(PathBuf::from)
+        .unwrap_or_else(default_log_dir)
+}
+
 /// Rotate log files in `log_dir`, keeping only the `max_files` most recent.
 ///
 /// Files are sorted by modification time (oldest first). The oldest files

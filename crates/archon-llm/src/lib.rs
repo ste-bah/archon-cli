@@ -6,6 +6,13 @@ pub(crate) mod anthropic_stream;
 pub(crate) mod anthropic_support;
 pub(crate) mod anthropic_url;
 pub mod auth;
+// #178: per-model cache parameters as data, overridable from config.
+pub mod cache_models;
+mod cache_models_table;
+// #178: how each provider wants prompt-cache breakpoints expressed.
+pub mod cache_strategy;
+// #178: wire-layer helpers for providers that build their own checkpoints.
+pub mod cache_wire;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod compaction_policy;
 pub(crate) mod completion_accumulator;

@@ -75,6 +75,11 @@ impl Agent {
         agentic_iterations: u32,
     ) -> Result<PreparedTurnRequest, AgentLoopError> {
         self.fire_before_prompt_build_hook(agentic_iterations).await;
+        // Everything `inject_memories` returns beyond the configured blocks, and
+        // everything appended after it, is rebuilt per turn. Recording the
+        // boundary here is what lets the stable head be cached separately from
+        // the churn — see `apply_stable_system_cache`.
+        let mut stable_system_blocks = self.config.system_prompt.len();
         let mut system = self.inject_memories().await;
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
@@ -90,7 +95,27 @@ impl Agent {
         let (max_tokens, thinking, speed) = self
             .config
             .build_base_request_fields_with(&active_model, ultrathink);
-        let messages = self.messages_for_turn_request(&active_model)?;
+        let mut messages = self.messages_for_turn_request(&active_model)?;
+
+        // #178: the blocks appended above change almost every turn and sit in
+        // front of the tools and the entire history, so they invalidate the
+        // prefix for every provider. Moving them onto the last user turn — where
+        // archon's own reminders already go — leaves one uninterrupted prefix.
+        // On the implicitly-caching providers this is the only lever there is;
+        // there is no breakpoint to place.
+        if self.config.context.prompt_cache_reorder {
+            let moved = prompt_ordering::move_volatile_system_to_last_turn(
+                &mut system,
+                &mut messages,
+                stable_system_blocks,
+            );
+            if moved > 0 {
+                // Everything left is stable, so there is no boundary inside the
+                // system prompt any more and a second breakpoint there would be
+                // spent for nothing.
+                stable_system_blocks = system.len();
+            }
+        }
 
         let mut request = LlmRequest {
             model: active_model.clone(),
@@ -112,12 +137,25 @@ impl Agent {
             request_origin: Some("main_session".into()),
             reasoning_encrypted: None,
         };
+        request_cache::apply_stable_system_cache(
+            &mut request,
+            self.client.as_ref(),
+            stable_system_blocks,
+            &self.config.context.prompt_cache_strategy,
+            self.config.context.prompt_cache,
+            &self.config.context.prompt_cache_mode,
+            &self.config.context.prompt_cache_ttl,
+            &self.config.context.prompt_cache_models,
+        );
         request_cache::apply_conversation_cache(
             &mut request,
             self.client.as_ref(),
-            self.config.context.prompt_cache && self.config.context.prompt_cache_conversation,
+            &self.config.context.prompt_cache_strategy,
+            self.config.context.prompt_cache,
+            self.config.context.prompt_cache_conversation,
             &self.config.context.prompt_cache_mode,
             &self.config.context.prompt_cache_ttl,
+            &self.config.context.prompt_cache_models,
         );
         self.fire_after_prompt_build_hook(&request, agentic_iterations)
             .await;
@@ -278,6 +316,19 @@ impl Agent {
     }
 
     pub(super) fn record_stream_usage(&mut self, usage: &UsageAccumulator) -> TurnUsage {
+        // The single point where a stream's accumulated usage becomes the
+        // numbers the status bar and the cost estimate are built from. Logged
+        // because a zero here and a zero at the provider look identical from
+        // the outside, and telling them apart is the whole diagnosis when a
+        // cache appears not to be working.
+        tracing::debug!(
+            billable_input = usage.billable_input_tokens,
+            context_input = usage.context_input_tokens,
+            output = usage.output_tokens,
+            cache_creation = usage.cache_creation_input_tokens,
+            cache_read = usage.cache_read_input_tokens,
+            "turn usage accumulated"
+        );
         self.state.total_input_tokens += usage.context_input_tokens;
         self.state.last_known_context_tokens = usage.context_input_tokens;
         self.state.total_output_tokens += usage.output_tokens;
