@@ -251,8 +251,8 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.compaction_provider_family()
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        self.inner.supports_anthropic_message_caching()
+    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+        self.inner.cache_strategy()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {
@@ -420,8 +420,8 @@ mod tests {
             false
         }
 
-        fn supports_anthropic_message_caching(&self) -> bool {
-            true
+        fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+            crate::cache_strategy::ANTHROPIC_API
         }
 
         async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
@@ -433,10 +433,15 @@ mod tests {
         }
     }
 
+    /// The retry wrapper must forward the strategy. Dropping it here would
+    /// disable caching for every retried request without any error.
     #[test]
     fn retry_provider_preserves_anthropic_message_cache_capability() {
         let provider = RetryProvider::new(Arc::new(AnthropicCacheProvider), RetryPolicy::default());
 
-        assert!(provider.supports_anthropic_message_caching());
+        assert_eq!(
+            provider.cache_strategy(),
+            crate::cache_strategy::ANTHROPIC_API
+        );
     }
 }

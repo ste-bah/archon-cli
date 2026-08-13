@@ -180,8 +180,20 @@ impl LlmProvider for AnthropicProvider {
         }
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        crate::anthropic_url::is_official_messages_url(self.client.api_url())
+    /// The official Messages endpoint is known to preserve `cache_control`.
+    ///
+    /// Anything else is left at `None` here and must be declared through
+    /// `[llm] cache_strategy` instead. That is deliberately conservative: a
+    /// gateway that mangles the directive would 400 on every request, which is
+    /// worse than paying more. It is also the reason gateway deployments were
+    /// silently paying full price for every token, so the override exists to be
+    /// used.
+    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+        if crate::anthropic_url::is_official_messages_url(self.client.api_url()) {
+            crate::cache_strategy::ANTHROPIC_API
+        } else {
+            crate::cache_strategy::CacheStrategy::None
+        }
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

@@ -216,8 +216,8 @@ impl LlmProvider for ActiveProvider {
         self.current().compaction_provider_family()
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        self.current().supports_anthropic_message_caching()
+    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+        self.current().cache_strategy()
     }
 
     fn as_anthropic(&self) -> Option<&AnthropicClient> {

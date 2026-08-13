@@ -391,8 +391,8 @@ impl LlmProvider for ObservedLlmProvider {
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
     }
-    fn supports_anthropic_message_caching(&self) -> bool {
-        self.inner.supports_anthropic_message_caching()
+    fn cache_strategy(&self) -> archon_llm::cache_strategy::CacheStrategy {
+        self.inner.cache_strategy()
     }
 
     fn as_anthropic(&self) -> Option<&archon_llm::anthropic::AnthropicClient> {

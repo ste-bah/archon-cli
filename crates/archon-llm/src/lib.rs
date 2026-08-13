@@ -6,6 +6,8 @@ pub(crate) mod anthropic_stream;
 pub(crate) mod anthropic_support;
 pub(crate) mod anthropic_url;
 pub mod auth;
+// #178: how each provider wants prompt-cache breakpoints expressed.
+pub mod cache_strategy;
 // TASK-AGS-706: LlmConfig + resolve_descriptor — feeds build_llm_provider.
 pub mod compaction_policy;
 pub(crate) mod completion_accumulator;

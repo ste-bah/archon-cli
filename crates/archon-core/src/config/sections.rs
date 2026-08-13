@@ -372,6 +372,15 @@ pub struct ContextConfig {
     pub prompt_cache_mode: String,
     pub prompt_cache_ttl: String,
     pub prompt_cache_conversation: bool,
+    /// Which cache wire format the endpoint accepts, when it cannot be inferred.
+    ///
+    /// `"auto"` asks the provider, which recognises the official Anthropic
+    /// Messages endpoint and nothing else — a gateway URL tells archon nothing
+    /// about what is behind it, so caching stays off and every request is
+    /// billed in full. Set this explicitly to declare a known-good endpoint.
+    ///
+    /// `auto` | `anthropic` | `bedrock` | `responses` | `automatic` | `off`
+    pub prompt_cache_strategy: String,
     /// Maximum characters for hierarchical ARCHON.md content.
     #[serde(alias = "claudemd_max_tokens")]
     pub archonmd_max_tokens: u32,
@@ -396,6 +405,7 @@ impl Default for ContextConfig {
             prompt_cache_mode: "explicit".into(),
             prompt_cache_ttl: "5m".into(),
             prompt_cache_conversation: true,
+            prompt_cache_strategy: "auto".into(),
             archonmd_max_tokens: 8192,
         }
     }

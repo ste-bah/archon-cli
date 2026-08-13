@@ -262,17 +262,31 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
     {
         let input_tokens = usage.get("inputTokens").and_then(|t| t.as_u64());
         let output_tokens = usage.get("outputTokens").and_then(|t| t.as_u64());
+        // Bedrock names these differently from Anthropic — camelCase, and
+        // `creation` is `write`. They were previously hardcoded to zero, which
+        // made a cache that was never working indistinguishable from one that
+        // was working perfectly.
+        let cache_write = usage.get("cacheWriteInputTokens").and_then(|t| t.as_u64());
+        let cache_read = usage.get("cacheReadInputTokens").and_then(|t| t.as_u64());
         events.push(StreamEvent::MessageDelta {
             stop_reason: None,
             usage: Some(Usage {
-                input_tokens: input_tokens.unwrap_or(0),
+                // `inputTokens` on Bedrock counts only the tokens that were
+                // NOT served from or written to cache, unlike Anthropic where
+                // it is the total. Reporting it verbatim would under-count the
+                // real prompt size by exactly the amount caching is saving —
+                // so the moment caching starts working, usage would appear to
+                // collapse rather than shift between categories.
+                input_tokens: input_tokens.unwrap_or(0)
+                    + cache_read.unwrap_or(0)
+                    + cache_write.unwrap_or(0),
                 output_tokens: output_tokens.unwrap_or(0),
-                cache_creation_input_tokens: 0,
-                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: cache_write.unwrap_or(0),
+                cache_read_input_tokens: cache_read.unwrap_or(0),
                 input_tokens_available: input_tokens.is_some(),
                 output_tokens_available: output_tokens.is_some(),
-                cache_creation_input_tokens_available: false,
-                cache_read_input_tokens_available: false,
+                cache_creation_input_tokens_available: cache_write.is_some(),
+                cache_read_input_tokens_available: cache_read.is_some(),
             }),
         });
     }

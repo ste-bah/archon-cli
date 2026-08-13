@@ -41,8 +41,8 @@ impl LlmProvider for AnthropicCacheProvider {
         false
     }
 
-    fn supports_anthropic_message_caching(&self) -> bool {
-        true
+    fn cache_strategy(&self) -> archon_llm::cache_strategy::CacheStrategy {
+        archon_llm::cache_strategy::ANTHROPIC_API
     }
 
     async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
@@ -69,7 +69,10 @@ fn active_provider_preserves_current_anthropic_message_cache_capability() {
         RetryPolicy::default(),
     );
 
-    assert!(active.supports_anthropic_message_caching());
+    assert_eq!(
+        active.cache_strategy(),
+        archon_llm::cache_strategy::ANTHROPIC_API
+    );
 }
 
 /// Set a unique env var for the duration of a closure. Safe under

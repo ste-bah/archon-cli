@@ -359,11 +359,20 @@ pub trait LlmProvider: Send + Sync {
         }
     }
 
-    /// Whether this provider sends requests directly to Anthropic's official
-    /// Messages endpoint and preserves Anthropic message `cache_control` blocks.
-    fn supports_anthropic_message_caching(&self) -> bool {
-        false
+    /// How this provider wants prompt-cache breakpoints expressed.
+    ///
+    /// Defaults to [`CacheStrategy::None`] — an endpoint nothing is known about
+    /// gets its directives stripped rather than risking a 400 on every request.
+    /// Overriding this is what turns caching on for a provider.
+    fn cache_strategy(&self) -> crate::cache_strategy::CacheStrategy {
+        crate::cache_strategy::CacheStrategy::None
     }
+
+    // `supports_anthropic_message_caching` used to live here. It was removed
+    // rather than kept as a derived helper: nothing consults it any more, so an
+    // implementor overriding it would be writing a method that silently does
+    // nothing and losing caching without a compile error. Implement
+    // `cache_strategy` instead.
 
     /// Downcast to the underlying `AnthropicClient` if this provider wraps one.
     ///
@@ -436,63 +445,5 @@ impl Default for ProviderRegistry {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classifies_local_and_cloud_endpoints() {
-        assert_eq!(
-            classify_data_flow_endpoint("http://localhost:11434/v1"),
-            DataFlowClassification::Local
-        );
-        assert_eq!(
-            classify_data_flow_endpoint("http://192.168.1.10:8080/v1"),
-            DataFlowClassification::Local
-        );
-        assert_eq!(
-            classify_data_flow_endpoint("https://api.anthropic.com/v1"),
-            DataFlowClassification::Cloud
-        );
-    }
-
-    struct DefaultAliasProvider;
-
-    #[async_trait::async_trait]
-    impl LlmProvider for DefaultAliasProvider {
-        fn name(&self) -> &str {
-            "default-alias"
-        }
-
-        fn models(&self) -> Vec<ModelInfo> {
-            vec![ModelInfo {
-                id: "provider-default".into(),
-                display_name: "Provider Default".into(),
-                context_window: 128_000,
-            }]
-        }
-
-        async fn stream(&self, _: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-            let (_tx, rx) = tokio::sync::mpsc::channel(1);
-            Ok(rx)
-        }
-
-        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Err(LlmError::Unsupported("test".into()))
-        }
-
-        fn supports_feature(&self, _: ProviderFeature) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn request_model_resolution_falls_back_for_tier_aliases() {
-        let provider = DefaultAliasProvider;
-        let mut request = LlmRequest {
-            model: "opus".into(),
-            ..LlmRequest::default()
-        };
-        provider.resolve_request_model(&mut request);
-        assert_eq!(request.model, "provider-default");
-    }
-}
+#[path = "provider_tests.rs"]
+mod tests;
