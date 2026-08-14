@@ -48,8 +48,12 @@ impl Agent {
         match pre.tool_name.as_str() {
             "EnterPlanMode" => {
                 let prev = self.config.permission_mode.lock().await.clone();
-                self.previous_permission_mode = Some(prev);
-                *self.config.permission_mode.lock().await = "plan".to_string();
+                let previous_mode = prev.parse::<PermissionMode>().unwrap_or_default();
+                self.plan_mode_state.record_entry(
+                    previous_mode,
+                    plan_mode_state::PlanEntryPath::EnterPlanModeTool,
+                );
+                *self.config.permission_mode.lock().await = PermissionMode::Plan.to_string();
                 self.state.mode = AgentMode::Plan;
                 result
             }
@@ -65,11 +69,13 @@ impl Agent {
     }
 
     async fn restore_mode_after_plan(&mut self) {
-        let restore = self
-            .previous_permission_mode
-            .take()
-            .unwrap_or_else(|| "auto".to_string());
-        *self.config.permission_mode.lock().await = restore;
+        let restore = plan_mode_state::safe_restore_mode(
+            self.plan_mode_state.previous_permission_mode.take(),
+            false,
+        );
+        *self.config.permission_mode.lock().await = restore.to_string();
+        self.plan_mode_state.active_plan_id = None;
+        self.plan_mode_state.entered_via = None;
         self.state.mode = AgentMode::Normal;
     }
 
@@ -417,7 +423,10 @@ impl Agent {
         };
         let sid = self.config.session_id.clone();
         if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
-            && (plan.status == "active" || plan.status == "draft")
+            && matches!(
+                plan.status,
+                archon_session::plan::PlanStatus::Executing | archon_session::plan::PlanStatus::Draft
+            )
         {
             for step in &plan.steps {
                 if plan_step_matches_file(step, fp)

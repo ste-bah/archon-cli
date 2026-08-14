@@ -18,6 +18,7 @@ use archon_observability::{
 };
 use archon_permissions::auto::AutoModeEvaluator;
 use archon_permissions::is_default_safe_tool;
+use archon_permissions::mode::PermissionMode;
 use archon_session::checkpoint::CheckpointStore;
 use archon_session::plan::PlanStore;
 use archon_tools::tool::{
@@ -50,6 +51,7 @@ mod memory_integration_corrections;
 mod message_delivery;
 mod payloads;
 mod permission_gate;
+pub mod plan_mode_state;
 mod process_message;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
 mod process_message_recovery;
@@ -197,8 +199,8 @@ pub struct Agent {
     /// Channel for receiving user answers when AskUserQuestion is invoked.
     /// The TUI sends the user's response through the paired sender.
     pub ask_user_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<String>>>>,
-    /// Saved permission mode before entering plan mode, so ExitPlanMode can restore it.
-    previous_permission_mode: Option<String>,
+    /// State captured on plan-mode entry for safe restoration on exit.
+    plan_mode_state: plan_mode_state::PlanModeState,
     /// Append-only log of permission denials for audit / `/denials` display.
     pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
     /// Custom agent registry (built-in + project + user agents).

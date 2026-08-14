@@ -1002,6 +1002,7 @@ name = "archon-session"
 version = "1.9.1"
 dependencies = [
  "anyhow",
+ "archon-completion",
  "archon-cozo",
  "chrono",
  "cozo-ce",

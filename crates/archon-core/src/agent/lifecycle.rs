@@ -53,7 +53,7 @@ impl Agent {
             permission_response_rx: None,
             inner_voice: None,
             ask_user_response_rx: None,
-            previous_permission_mode: None,
+            plan_mode_state: plan_mode_state::PlanModeState::default(),
             denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
             agent_registry,
             personality_briefing: None,
