@@ -89,26 +89,32 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
     let module_dir = module_directory_for_target(target_path)?;
     let mut expanded = BTreeSet::new();
     let mut notes = Vec::new();
-    for module_name in declared_file_modules(&source) {
-        let file_candidate = repository_root
-            .join(&module_dir)
-            .join(format!("{module_name}.rs"));
-        let mod_rs_candidate = repository_root
-            .join(&module_dir)
-            .join(&module_name)
-            .join("mod.rs");
-        if file_candidate.is_file() {
-            if let Some(relative) = repo_relative(repository_root, &file_candidate) {
-                expanded.insert(relative);
+    // `#[path]` is relative to the directory holding the declaring file, not
+    // to the module directory the convention would use.
+    let declaring_dir = target_path.parent().unwrap_or_else(|| Path::new(""));
+    for module in declared_file_modules(&source) {
+        let module_name = &module.name;
+        let candidates = match &module.explicit_path {
+            Some(path) => vec![repository_root.join(declaring_dir).join(path)],
+            None => vec![
+                repository_root
+                    .join(&module_dir)
+                    .join(format!("{module_name}.rs")),
+                repository_root
+                    .join(&module_dir)
+                    .join(module_name)
+                    .join("mod.rs"),
+            ],
+        };
+        match candidates.iter().find(|candidate| candidate.is_file()) {
+            Some(resolved) => {
+                if let Some(relative) = repo_relative(repository_root, resolved) {
+                    expanded.insert(relative);
+                }
             }
-        } else if mod_rs_candidate.is_file() {
-            if let Some(relative) = repo_relative(repository_root, &mod_rs_candidate) {
-                expanded.insert(relative);
-            }
-        } else {
-            notes.push(format!(
+            None => notes.push(format!(
                 "declared module '{module_name}' from '{target}' has no file-backed target"
-            ));
+            )),
         }
     }
     let dir_scopes = module_dir_scope(repository_root, &module_dir);
@@ -140,32 +146,92 @@ fn module_directory_for_target(target: &Path) -> Option<PathBuf> {
     Some(parent.join(stem))
 }
 
-fn declared_file_modules(source: &str) -> Vec<String> {
-    let mut modules = BTreeSet::new();
+/// A module a file declares, and the `#[path]` it was given if any.
+///
+/// `#[path]` is not decoration: it moves the module's file somewhere the
+/// name-to-path convention will never look. Resolving by convention alone
+/// reported "no file-backed target" for a file that plainly exists, so the
+/// task never owned it, and the agent that had to edit it lost its whole
+/// branch to a write-scope escape on a file it legitimately owned.
+struct DeclaredModule {
+    name: String,
+    explicit_path: Option<String>,
+}
+
+fn declared_file_modules(source: &str) -> Vec<DeclaredModule> {
+    let mut modules = Vec::new();
+    let mut seen = BTreeSet::new();
+    // `#[path = "..."]` applies to the next `mod` declaration, and is written
+    // on its own line as often as inline.
+    let mut pending_path = None;
     for line in source.lines() {
-        let line = line.split("//").next().unwrap_or("").trim();
+        let mut line = line.split("//").next().unwrap_or("").trim();
+        if let Some((path, remainder)) = path_attribute(line) {
+            pending_path = Some(path);
+            // The attribute may lead a `mod` on the same line; keep parsing
+            // what follows it rather than discarding the declaration.
+            line = remainder;
+            if line.is_empty() {
+                continue;
+            }
+        }
         if !line.ends_with(';') || line.contains('{') {
+            // An attribute only survives to the declaration it precedes — but
+            // other attributes may sit between the two. `#[cfg(test)]` and
+            // `#[path]` are written in either order, and clearing on any
+            // non-empty line dropped the path for one of those orders.
+            if !line.is_empty() && !line.starts_with("#[") {
+                pending_path = None;
+            }
             continue;
         }
-        let line = line.trim_end_matches(';').trim();
-        let tokens = line.split_whitespace().collect::<Vec<_>>();
+        let declaration = line.trim_end_matches(';').trim();
+        let tokens = declaration.split_whitespace().collect::<Vec<_>>();
+        let mut declared_here = false;
         for (index, token) in tokens.iter().enumerate() {
             if *token != "mod" || index + 1 >= tokens.len() {
                 continue;
             }
-            let prefix_allowed = tokens[..index]
-                .iter()
-                .all(|prefix| *prefix == "pub" || prefix.starts_with("pub("));
+            let prefix_allowed = tokens[..index].iter().all(|prefix| {
+                *prefix == "pub" || prefix.starts_with("pub(") || prefix.starts_with("#[")
+            });
             if !prefix_allowed {
                 continue;
             }
             let module_name = tokens[index + 1].trim_start_matches("r#");
-            if is_rust_identifier(module_name) {
-                modules.insert(module_name.to_string());
+            if is_rust_identifier(module_name) && seen.insert(module_name.to_string()) {
+                modules.push(DeclaredModule {
+                    name: module_name.to_string(),
+                    explicit_path: pending_path.clone(),
+                });
+                declared_here = true;
             }
         }
+        if declared_here || !declaration.is_empty() {
+            pending_path = None;
+        }
     }
-    modules.into_iter().collect()
+    modules
+}
+
+/// The value of a `#[path = "..."]` attribute plus whatever follows it on the
+/// line, so an attribute leading a `mod` on the same line does not hide the
+/// declaration it applies to.
+fn path_attribute(line: &str) -> Option<(String, &str)> {
+    let start = line.find("#[path")?;
+    let rest = line[start..].strip_prefix("#[path")?.trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start();
+    let quoted = rest.strip_prefix('"')?;
+    let value = quoted.split('"').next()?;
+    if value.trim().is_empty() {
+        return None;
+    }
+    let after = quoted.get(value.len()..)?;
+    let remainder = after
+        .split_once(']')
+        .map(|(_, tail)| tail.trim())
+        .unwrap_or("");
+    Some((value.to_string(), remainder))
 }
 
 fn is_rust_identifier(value: &str) -> bool {
@@ -242,6 +308,37 @@ mod tests {
         );
     }
 
+    /// `#[cfg(test)]` and `#[path]` are written in either order in this
+    /// repository. Both must resolve, or whichever order is unhandled silently
+    /// loses ownership of the file.
+    #[test]
+    fn a_path_attribute_survives_a_neighbouring_attribute() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/compression")).expect("dir");
+        fs::write(repo.join("src/compression/tests.rs"), "").expect("tests");
+
+        for source in [
+            "#[cfg(test)]\n#[path = \"compression/tests.rs\"]\nmod tests;\n",
+            "#[path = \"compression/tests.rs\"]\n#[cfg(test)]\nmod tests;\n",
+        ] {
+            fs::write(repo.join("src/compression.rs"), source).expect("declaring file");
+            let expanded = expand_declared_rust_module_targets(
+                "item",
+                &["src/compression.rs".to_string()],
+                repo.to_str(),
+            )
+            .expect("expansion");
+            assert!(
+                expanded
+                    .target_files
+                    .contains(&"src/compression/tests.rs".to_string()),
+                "attribute order must not change ownership: {source:?} -> {:?}",
+                expanded.target_files
+            );
+        }
+    }
+
     #[test]
     fn inline_modules_do_not_invent_file_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -289,5 +386,118 @@ mod tests {
         .expect_err("unsafe target");
 
         assert!(error.to_string().contains("unsafe"));
+    }
+
+    /// The live failure. `validation_tests.rs` declares its cases with
+    /// `#[path = "tests/…"]`, which puts them outside the module directory the
+    /// convention searches. Resolving by convention left them unowned, and the
+    /// branch that edited one lost on write-scope for touching its own file.
+    #[test]
+    fn a_module_moved_by_a_path_attribute_is_still_owned() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/data_store/tests")).expect("tests dir");
+        fs::create_dir_all(repo.join("src/data_store/validation_tests")).expect("module dir");
+        fs::write(
+            repo.join("src/data_store/validation_tests.rs"),
+            "#[path = \"tests/validation_atomicity.rs\"]\nmod validation_atomicity;\n\
+             #[path = \"validation_tests/contract_core.rs\"]\nmod contract_core;\n",
+        )
+        .expect("declaring file");
+        fs::write(
+            repo.join("src/data_store/tests/validation_atomicity.rs"),
+            "",
+        )
+        .expect("relocated");
+        fs::write(
+            repo.join("src/data_store/validation_tests/contract_core.rs"),
+            "",
+        )
+        .expect("conventional");
+
+        let expanded = expand_declared_rust_module_targets(
+            "item",
+            &["src/data_store/validation_tests.rs".to_string()],
+            repo.to_str(),
+        )
+        .expect("expansion");
+
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/data_store/tests/validation_atomicity.rs".to_string()),
+            "a #[path]-relocated module must be owned: {:?}",
+            expanded.target_files
+        );
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/data_store/validation_tests/contract_core.rs".to_string())
+        );
+        assert!(
+            expanded
+                .target_file_expansions
+                .iter()
+                .all(|expansion| expansion.notes.is_empty()),
+            "no module should be reported unresolvable"
+        );
+    }
+
+    /// An inline attribute is the same declaration written differently.
+    #[test]
+    fn an_inline_path_attribute_resolves_too() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/elsewhere")).expect("dir");
+        fs::write(
+            repo.join("src/foo.rs"),
+            "#[path = \"elsewhere/bar.rs\"] mod bar;\n",
+        )
+        .expect("foo");
+        fs::write(repo.join("src/elsewhere/bar.rs"), "").expect("bar");
+
+        let expanded =
+            expand_declared_rust_module_targets("item", &["src/foo.rs".to_string()], repo.to_str())
+                .expect("expansion");
+
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/elsewhere/bar.rs".to_string()),
+            "{:?}",
+            expanded.target_files
+        );
+    }
+
+    /// A `#[path]` must not leak onto an unrelated later declaration.
+    #[test]
+    fn a_path_attribute_applies_only_to_the_next_module() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/foo")).expect("dir");
+        fs::write(
+            repo.join("src/foo.rs"),
+            "#[path = \"foo/moved.rs\"]\nmod moved;\nmod plain;\n",
+        )
+        .expect("foo");
+        fs::write(repo.join("src/foo/moved.rs"), "").expect("moved");
+        fs::write(repo.join("src/foo/plain.rs"), "").expect("plain");
+
+        let expanded =
+            expand_declared_rust_module_targets("item", &["src/foo.rs".to_string()], repo.to_str())
+                .expect("expansion");
+
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/foo/moved.rs".to_string())
+        );
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/foo/plain.rs".to_string()),
+            "the second module resolves by convention, not by the earlier attribute: {:?}",
+            expanded.target_files
+        );
     }
 }
