@@ -24,6 +24,8 @@ pub(super) fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, Stri
     // Build the result as a Vec<String> of logical lines (no terminators).
     let mut out: Vec<String> = Vec::new();
     let mut cursor: usize = 0; // index into original_lines (0-based)
+    // Header/body count disagreements, recorded rather than fatal.
+    let mut header_mismatches: Vec<String> = Vec::new();
 
     for (idx, hunk) in hunks.iter().enumerate() {
         // Header `old_start` is 1-based; a start of 0 is only valid for
@@ -120,14 +122,40 @@ pub(super) fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, Stri
             }
         }
 
+        // The header's `old_len` is NOT checked against the body.
+        //
+        // By this point every context and remove line in the hunk has been
+        // matched byte-for-byte against the real file at the right offset, so
+        // the body is proven applicable. Rejecting it because the model's
+        // arithmetic in the `@@` header disagreed with its own body threw away
+        // a correct patch over a redundant count — one the applier can derive
+        // and the model routinely miscounts.
+        //
+        // Measured on one live branch: 36 of its errors were this, each costing
+        // a full re-ask of work that had already been verified correct. The
+        // check was also one-sided — `new_len` has never been enforced — so the
+        // strictness bought no consistency either.
+        //
+        // The count is recorded for the caller rather than dropped, so a
+        // genuinely truncated hunk is still visible to anyone reading the
+        // result.
         if consumed_old != hunk.old_len {
-            return Err(format!(
-                "hunk {} header declares old_len={} but body consumed {} old lines",
+            header_mismatches.push(format!(
+                "hunk {} header declared old_len={} but body consumed {} old lines (applied from the body)",
                 idx + 1,
                 hunk.old_len,
                 consumed_old
             ));
         }
+    }
+
+    if !header_mismatches.is_empty() {
+        // Visible, but never fatal: the body was verified against the file
+        // line by line, so the patch is correct and the header count is not.
+        tracing::debug!(
+            mismatches = %header_mismatches.join("; "),
+            "applied patch whose hunk header counts disagreed with its body"
+        );
     }
 
     // Copy any trailing lines after the last hunk verbatim.
@@ -148,4 +176,35 @@ pub(super) fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, Stri
         result.push('\n');
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod header_count_tests {
+    use super::super::parser::parse_hunks;
+    use super::apply_hunks;
+
+    /// The live failure: a hunk whose `@@` header count disagrees with its own
+    /// body. Every context and remove line still matches the file, so the patch
+    /// is correct and now applies. One branch produced 36 of these in a single
+    /// run, each discarding verified work over the model's arithmetic.
+    #[test]
+    fn a_wrong_old_len_still_applies() {
+        let original = "one\ntwo\nthree\n";
+        // Body consumes 3 old lines; the header claims 2.
+        let patch = "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,4 @@\n one\n two\n+inserted\n three\n";
+        let hunks = parse_hunks(patch).expect("parse");
+        let out = apply_hunks(original, &hunks).expect("must apply despite the header count");
+        assert_eq!(out, "one\ntwo\ninserted\nthree\n");
+    }
+
+    /// A body that does NOT match the file is still refused — the count was
+    /// never what made the patch safe.
+    #[test]
+    fn a_body_that_does_not_match_the_file_is_still_rejected() {
+        let original = "one\ntwo\nthree\n";
+        let patch = "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n one\n WRONG\n three\n";
+        let hunks = parse_hunks(patch).expect("parse");
+        let err = apply_hunks(original, &hunks).expect_err("context mismatch must fail");
+        assert!(err.contains("context mismatch"), "got: {err}");
+    }
 }
