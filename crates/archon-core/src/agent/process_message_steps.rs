@@ -90,6 +90,7 @@ impl Agent {
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
         self.inject_turn_requirements(&mut system);
+        self.inject_plan_mode_reminder(&mut system, self.effective_agent_mode().await);
 
         let active_model = self.active_model().await;
         let effort = self.turn_effort(user_input).await;

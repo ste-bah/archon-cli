@@ -45,6 +45,8 @@ impl LlmProvider for GuardrailCompletionProvider {
     }
 }
 
+include!("finalization_plan_reminder.rs");
+
 #[tokio::test]
 async fn blocked_finalization_retries_once_without_turn_complete() {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -283,7 +285,7 @@ async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(archon_tools::plan_mode::ExitPlanModeTool));
     let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
-    let mut config = AgentConfig {
+    let config = AgentConfig {
         session_id: "guarded-plan-session".into(),
         max_turns: Some(1),
         ..AgentConfig::default()

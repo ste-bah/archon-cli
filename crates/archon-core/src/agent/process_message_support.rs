@@ -309,7 +309,7 @@ impl Agent {
         self.check_agentic_turn_limit(*agentic_iterations).await
     }
 
-    async fn effective_agent_mode(&self) -> AgentMode {
+    pub(super) async fn effective_agent_mode(&self) -> AgentMode {
         let pm = self.config.permission_mode.lock().await;
         if pm.as_str() == "plan" {
             AgentMode::Plan

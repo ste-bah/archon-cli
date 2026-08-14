@@ -78,6 +78,21 @@ impl Agent {
         }
     }
 
+    pub(super) fn inject_plan_mode_reminder(
+        &self,
+        system: &mut Vec<serde_json::Value>,
+        effective_mode: archon_tools::tool::AgentMode,
+    ) {
+        if effective_mode != archon_tools::tool::AgentMode::Plan {
+            return;
+        }
+
+        system.push(serde_json::json!({
+            "type": "text",
+            "text": "<system-reminder>Plan mode is read-only: use only read-only tools while preparing the plan. State the goal, files to change, ordered dependency steps, and verification shape. Persist the complete plan, then submit it for approval with ExitPlanMode; do not implement changes until approval.</system-reminder>",
+        }));
+    }
+
     /// GAP 7: Inject recalled memories into the system prompt for this turn.
     ///
     /// The memory work is synchronous, can be slow on a large store, and

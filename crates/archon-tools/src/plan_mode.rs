@@ -23,7 +23,10 @@ impl Tool for EnterPlanModeTool {
         })
     }
 
-    async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        if ctx.subagent_id.is_some() {
+            return ToolResult::error("subagents cannot enter plan mode");
+        }
         // The agent loop will intercept this and set AgentMode::Plan.
         // The tool itself just signals the intent.
         ToolResult::success("Plan mode entered. Only read-only tools are available.")
@@ -56,6 +59,9 @@ impl Tool for ExitPlanModeTool {
     }
 
     async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        if ctx.subagent_id.is_some() {
+            return ToolResult::error("subagents cannot exit plan mode");
+        }
         if ctx.mode != AgentMode::Plan {
             return ToolResult::error("Not in plan mode. Use EnterPlanMode first.");
         }
@@ -139,6 +145,36 @@ impl From<&archon_permissions::mode::PermissionMode> for AgentMode {
 mod bridge_tests {
     use super::*;
     use archon_permissions::mode::PermissionMode;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn subagent_enter_plan_mode_errors_without_mode_change() {
+        let ctx = ToolContext {
+            subagent_id: Some("child-1".into()),
+            ..Default::default()
+        };
+
+        let result = EnterPlanModeTool.execute(json!({}), &ctx).await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("subagents cannot enter plan mode"));
+        assert_eq!(ctx.mode, AgentMode::Normal);
+    }
+
+    #[tokio::test]
+    async fn subagent_exit_plan_mode_errors_without_mode_change() {
+        let ctx = ToolContext {
+            subagent_id: Some("child-1".into()),
+            mode: AgentMode::Plan,
+            ..Default::default()
+        };
+
+        let result = ExitPlanModeTool.execute(json!({}), &ctx).await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("subagents cannot exit plan mode"));
+        assert_eq!(ctx.mode, AgentMode::Plan);
+    }
 
     #[test]
     fn plan_bridges_to_plan() {
