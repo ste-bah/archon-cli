@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     WorkflowV2Artifact, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap,
     WorkflowV2Result, WorkflowV2Status, WorkflowV2WriteSafetyError,
-    artifact_path_guard::artifact_file_defect,
+    artifact_path_guard::declared_artifact_defect,
     project_artifact_contract::{artifact_path_is_templated, artifact_requirement_paths},
 };
 
@@ -370,7 +370,7 @@ fn project_artifact_status(
 ) -> Result<ProjectArtifactPath, WorkflowV2WriteSafetyError> {
     let absolute = absolute_artifact_candidate(project_root, relative, context);
     ensure_project_path_parent_safe(item_id, project_root, &absolute, relative)?;
-    if let Some(defect) = artifact_file_defect(&absolute) {
+    if let Some(defect) = declared_artifact_defect(relative, &absolute) {
         return Ok(ProjectArtifactPath::Missing(output_path, defect));
     }
     ensure_existing_project_path(item_id, project_root, &absolute, relative)?;

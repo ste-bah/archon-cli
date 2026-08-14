@@ -21,7 +21,7 @@
 
 use std::path::Path;
 
-use super::artifact_path_guard::artifact_file_defect;
+use super::artifact_path_guard::declared_artifact_defect;
 use super::host_api::WorkflowV2ArtifactRequirement;
 use super::project_artifact_prompt::declared_project_artifacts;
 use super::{
@@ -46,7 +46,7 @@ pub(super) fn enforce_declared_artifact_requirements(
     let mut unsatisfied = Vec::new();
     let mut missing = Vec::new();
     for (raw, absolute) in &declared.entries {
-        match artifact_file_defect(Path::new(absolute)) {
+        match declared_artifact_defect(raw, Path::new(absolute)) {
             None => record_declared_artifact(result, raw),
             Some(defect) => {
                 missing.push(raw.clone());
