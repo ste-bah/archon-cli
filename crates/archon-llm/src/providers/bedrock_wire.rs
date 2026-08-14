@@ -275,7 +275,15 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
             .get("contentBlockIndex")
             .and_then(|i| i.as_u64())
             .unwrap_or(0) as u32;
-        let block = start.get("contentBlock");
+        // `start`, not `contentBlock`. Converse's ContentBlockStartEvent is
+        // `{"contentBlockIndex": n, "start": {"toolUse": {...}}}` — the name
+        // `contentBlock` belongs to the non-streaming Converse response, and
+        // reading it here matched nothing. Every tool-use block was therefore
+        // announced as plain text with no id and no name, so the arguments
+        // streamed in with no call open to attach them to and the turn ended
+        // with `stopReason: tool_use` and nothing to run. Text was unaffected,
+        // which is why this looked like a model that would chat but not act.
+        let block = start.get("start");
         let has_tool_use = block.and_then(|b| b.get("toolUse")).is_some();
 
         if has_tool_use {
