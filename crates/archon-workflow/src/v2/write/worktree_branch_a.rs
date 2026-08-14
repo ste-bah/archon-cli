@@ -121,6 +121,10 @@ pub(super) async fn run_worktree_branch_agent(
     // long as it keeps getting closer to the cap.
     let mut prompt = task.to_string();
     let mut previous_overshoot: Option<u32> = None;
+    // Transport failures are counted separately: a dropped provider connection
+    // is not an answer about the work, so it must not consume the budget that
+    // exists for correcting a rejection.
+    let mut transport_failures = 0usize;
     for _ in 0..=super::size_retry::MAX_SIZE_RETRIES {
         let result = dispatch
             .run_call(
@@ -136,6 +140,18 @@ pub(super) async fn run_worktree_branch_agent(
             return normalize_worktree_agent_result(result, branch);
         };
         let text = err.to_string();
+        // The provider dropped the call. Nothing landed and no verdict was
+        // produced, so re-ask rather than ending the branch and, with it, the
+        // wave — two runs died this way in one morning on `response_failed`.
+        if super::transport_retry::is_transport_failure(&text)
+            && !super::transport_retry::is_content_rejection(&text)
+        {
+            if transport_failures >= super::transport_retry::MAX_TRANSPORT_RETRIES {
+                return normalize_worktree_agent_result(result, branch);
+            }
+            transport_failures += 1;
+            continue;
+        }
         if !super::size_retry::is_line_cap_rejection(&text) {
             return normalize_worktree_agent_result(result, branch);
         }
