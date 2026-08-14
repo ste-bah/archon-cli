@@ -119,6 +119,13 @@ pub async fn run_write_capable_v2_fanout(
     // dynamic_source_kind, so no graph exists for them and the graph-based
     // stamp never runs. Stamp straight from the task universe instead.
     stamp_required_tools_from_universe(&mut branches, task_universe);
+    // A task states what it produces in `deliverable_contracts`. When one of
+    // those is repository source, the item that owns the task must be able to
+    // KEEP it: the write layer captures declared targets only, so a contract
+    // that never reached `target_files` was produced by the agent and then
+    // dropped with the worktree. TASK-TDL-080 lost `data_store/coverage.rs`
+    // and `coverage_tests.rs` exactly that way, then failed for their absence.
+    stamp_contract_code_targets(&mut branches, task_universe, v2_store);
     // The line cap is enforced when the manifest is validated — after the agent
     // has written everything. Give it the budget first, or it discovers the cap
     // by losing the whole patch.
@@ -262,6 +269,52 @@ pub fn stamp_project_artifact_policy(
 /// works for authored (v3) and generated (v2) call ids alike. Agent-authored
 /// tool declarations were already stripped at the shared builder, so this is
 /// the only writer of the field.
+/// Admit each item's declared repository deliverables to its writable targets.
+///
+/// Host-parsed contracts only, and only for items that already own repository
+/// code — an artifact-only item is served by `add_contract_artifact_paths` and
+/// must not acquire code writes here. Paths under an artifact root stay
+/// artifacts.
+fn stamp_contract_code_targets(
+    branches: &mut [crate::WorkflowV2FanoutItem],
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
+    v2_store: &WorkflowV2ResultStore,
+) {
+    let Some(universe) = task_universe else {
+        return;
+    };
+    let artifact_roots =
+        crate::v2::project_artifacts::project_artifact_context_from_v2_root(v2_store.root())
+            .artifact_roots;
+    for branch in branches.iter_mut() {
+        let Some(item) = branch.input.get("item") else {
+            continue;
+        };
+        let added = crate::v2::contract_code_targets::contract_code_targets_for_item(
+            universe,
+            item,
+            &artifact_roots,
+        );
+        if added.is_empty() {
+            continue;
+        }
+        let mut targets = branch.call.options.target_files.clone();
+        for path in &added {
+            if !targets.contains(path) {
+                targets.push(path.clone());
+            }
+        }
+        branch.call.options.target_files = targets.clone();
+        if let Some(object) = branch
+            .input
+            .get_mut("item")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            object.insert("target_files".to_string(), serde_json::json!(targets));
+        }
+    }
+}
+
 fn stamp_required_tools_from_universe(
     branches: &mut [crate::WorkflowV2FanoutItem],
     task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,

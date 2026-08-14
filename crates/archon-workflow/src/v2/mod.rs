@@ -18,6 +18,7 @@ pub mod call_data;
 pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;
+pub(crate) mod contract_code_targets;
 pub mod decomposed_prd_plan;
 pub mod deliverable_contract;
 pub mod host_api;

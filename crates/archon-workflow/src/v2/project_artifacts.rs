@@ -23,6 +23,12 @@ pub struct WorkflowV2ProjectArtifactContext {
     /// host-parsed task universe. Matched exactly, never as a prefix.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_paths: Vec<String>,
+    /// Where repository SOURCE lives, when that is a different tree from the
+    /// project artifact root. Existence checks only — write confinement still
+    /// answers to the project root alone. See `project_artifact_completion`
+    /// for why the second candidate exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_evidence_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,6 +90,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         run_id,
         artifact_roots,
         artifact_paths: Vec::new(),
+        repository_root: None,
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
     }
