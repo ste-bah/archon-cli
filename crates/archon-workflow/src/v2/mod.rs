@@ -33,6 +33,7 @@ pub mod orchestrator_actions;
 pub mod outcome_envelope;
 pub mod plan_metadata;
 pub mod prd_intake;
+pub(crate) mod project_artifact_admission;
 mod project_artifact_completion;
 pub mod project_artifact_contract;
 pub(crate) mod project_artifact_contract_roots;

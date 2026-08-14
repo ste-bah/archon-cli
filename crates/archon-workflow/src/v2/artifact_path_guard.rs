@@ -290,8 +290,12 @@ pub fn artifact_file_is_evidence(path: &Path) -> bool {
 /// A declared directory still has to be real evidence: it must exist and hold
 /// something. The litter this module exists to stop is an UNDECLARED directory
 /// standing in for a file, and that is untouched.
-pub fn declared_artifact_defect(declared: &str, path: &Path) -> Option<&'static str> {
-    if !declares_directory(declared) {
+pub fn declared_artifact_defect(
+    declared: &str,
+    path: &Path,
+    declared_as_directory: bool,
+) -> Option<&'static str> {
+    if !declared_as_directory && !declares_directory(declared) {
         return artifact_file_defect(path);
     }
     match std::fs::metadata(path) {
@@ -370,7 +374,7 @@ mod declared_directory_tests {
         std::fs::create_dir_all(&history).expect("mkdir");
         std::fs::write(history.join("20260814T111500Z.json"), "{}\n").expect("archive");
         assert_eq!(
-            declared_artifact_defect("coverage/history/", &history),
+            declared_artifact_defect("coverage/history/", &history, false),
             None
         );
     }
@@ -382,7 +386,7 @@ mod declared_directory_tests {
         let empty = dir.path().join("history");
         std::fs::create_dir_all(&empty).expect("mkdir");
         assert_eq!(
-            declared_artifact_defect("coverage/history/", &empty),
+            declared_artifact_defect("coverage/history/", &empty, false),
             Some("is an empty directory")
         );
     }
@@ -395,7 +399,7 @@ mod declared_directory_tests {
         let stray = dir.path().join("latest.json");
         std::fs::create_dir_all(&stray).expect("mkdir");
         assert_eq!(
-            declared_artifact_defect("coverage/latest.json", &stray),
+            declared_artifact_defect("coverage/latest.json", &stray, false),
             Some("is a directory, not the declared file")
         );
     }
@@ -407,7 +411,7 @@ mod declared_directory_tests {
         let f = dir.path().join("history");
         std::fs::write(&f, "not a dir\n").expect("write");
         assert_eq!(
-            declared_artifact_defect("coverage/history/", &f),
+            declared_artifact_defect("coverage/history/", &f, false),
             Some("is not a directory, but the contract declares one")
         );
     }
@@ -418,12 +422,39 @@ mod declared_directory_tests {
         let dir = tempfile::tempdir().expect("root");
         let f = dir.path().join("latest.json");
         std::fs::write(&f, "{}\n").expect("write");
-        assert_eq!(declared_artifact_defect("coverage/latest.json", &f), None);
+        assert_eq!(
+            declared_artifact_defect("coverage/latest.json", &f, false),
+            None
+        );
         let empty = dir.path().join("empty.json");
         std::fs::write(&empty, "").expect("write");
         assert_eq!(
-            declared_artifact_defect("coverage/empty.json", &empty),
+            declared_artifact_defect("coverage/empty.json", &empty, false),
             Some("is an empty file")
+        );
+    }
+
+    /// The live shape: by the time the check runs the separator is gone, so
+    /// the intent must arrive as its own value. Without the flag this is the
+    /// exact failure that killed TASK-TDL-080 three times.
+    #[test]
+    fn the_intent_flag_works_when_the_separator_is_already_lost() {
+        let dir = tempfile::tempdir().expect("root");
+        let history = dir.path().join("history");
+        std::fs::create_dir_all(&history).expect("mkdir");
+        std::fs::write(history.join("20260814T111500Z.json"), "{}\n").expect("archive");
+
+        // Absolute, no trailing slash — what the completion check receives.
+        let declared = history.display().to_string();
+        assert_eq!(
+            declared_artifact_defect(&declared, &history, false),
+            Some("is a directory, not the declared file"),
+            "without the flag it still reads as a file"
+        );
+        assert_eq!(
+            declared_artifact_defect(&declared, &history, true),
+            None,
+            "with the flag the declared directory is evidence"
         );
     }
 }

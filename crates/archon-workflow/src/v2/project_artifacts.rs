@@ -23,6 +23,19 @@ pub struct WorkflowV2ProjectArtifactContext {
     /// host-parsed task universe. Matched exactly, never as a prefix.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_paths: Vec<String>,
+    /// Declared deliverables the TASK wrote as directories, normalised without
+    /// the trailing separator.
+    ///
+    /// Carried as its own list because the separator does not survive the
+    /// journey: `admissible_path` rebuilds a path with `segments.join("/")`,
+    /// `Path::join(..).display()` drops it again, and by the time a value
+    /// reaches the completion check it is an absolute path with no way to tell
+    /// a declared directory from a declared file. TASK-TDL-080 declares
+    /// `.archon/trading-lab/data/coverage/history/` and was failed three times
+    /// for "is a directory, not the declared file" — including once after a fix
+    /// that read the separator off the string, which by then was gone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directory_artifacts: Vec<String>,
     /// Where repository SOURCE lives, when that is a different tree from the
     /// project artifact root. Existence checks only — write confinement still
     /// answers to the project root alone. See `project_artifact_completion`
@@ -42,26 +55,6 @@ impl WorkflowV2ProjectArtifactContext {
             .unwrap_or_default()
             .trim()
             .is_empty()
-    }
-
-    /// Admit the exact deliverables an artifact-only item is entitled to write.
-    ///
-    /// Only for items with no repository `target_files`, and only paths the
-    /// host parsed from the task files for that item's canonical tasks — so an
-    /// agent cannot widen its own rights and code tasks are untouched. See
-    /// `project_artifact_contract_roots` for the rule.
-    pub fn add_contract_artifact_paths(
-        &mut self,
-        universe: &crate::task_universe::WorkflowV2TaskUniverse,
-        item: &serde_json::Value,
-    ) {
-        for path in
-            super::project_artifact_contract_roots::contract_artifact_paths_for_item(universe, item)
-        {
-            if !self.artifact_paths.contains(&path) {
-                self.artifact_paths.push(path);
-            }
-        }
     }
 
     pub fn add_artifact_requirements(&mut self, value: &serde_json::Value) {
@@ -90,6 +83,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         run_id,
         artifact_roots,
         artifact_paths: Vec::new(),
+        directory_artifacts: Vec::new(),
         repository_root: None,
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
@@ -377,7 +371,9 @@ fn project_artifact_status(
 ) -> Result<ProjectArtifactPath, WorkflowV2WriteSafetyError> {
     let absolute = absolute_artifact_candidate(project_root, relative, context);
     ensure_project_path_parent_safe(item_id, project_root, &absolute, relative)?;
-    if let Some(defect) = declared_artifact_defect(relative, &absolute) {
+    if let Some(defect) =
+        declared_artifact_defect(relative, &absolute, context.declared_as_directory(relative))
+    {
         return Ok(ProjectArtifactPath::Missing(output_path, defect));
     }
     ensure_existing_project_path(item_id, project_root, &absolute, relative)?;

@@ -46,7 +46,8 @@ pub(super) fn enforce_declared_artifact_requirements(
     let mut unsatisfied = Vec::new();
     let mut missing = Vec::new();
     for (raw, absolute) in &declared.entries {
-        match declared_artifact_defect(raw, Path::new(absolute)) {
+        match declared_artifact_defect(raw, Path::new(absolute), context.declared_as_directory(raw))
+        {
             None => record_declared_artifact(result, raw),
             // Not under the project artifact root — try the repository. A
             // deliverable contract may name a source file, and source does not
@@ -58,7 +59,14 @@ pub(super) fn enforce_declared_artifact_requirements(
             // Existence only. Nothing here grants a write anywhere: ownership
             // and confinement still answer to the project root alone.
             Some(defect) => match repository_candidate(raw, context) {
-                Some(candidate) if declared_artifact_defect(raw, &candidate).is_none() => {
+                Some(candidate)
+                    if declared_artifact_defect(
+                        raw,
+                        &candidate,
+                        context.declared_as_directory(raw),
+                    )
+                    .is_none() =>
+                {
                     record_declared_artifact(result, raw)
                 }
                 _ => {

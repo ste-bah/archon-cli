@@ -80,6 +80,44 @@ fn is_artifact_only(item: &Value) -> bool {
     !declares_repository_targets(item) && declares_artifact_requirements(item)
 }
 
+/// Declared deliverables this item's tasks wrote as DIRECTORIES, normalised
+/// without the trailing separator.
+///
+/// Read from the universe, where the separator the task author typed still
+/// exists. Every downstream form loses it — `admissible_path` rebuilds with
+/// `segments.join("/")` and `Path::join(..).display()` drops it again — so the
+/// intent has to travel as its own value rather than as a character on a
+/// string. TASK-TDL-080 declares `.../coverage/history/` and was failed three
+/// times for "is a directory, not the declared file", once even after a fix
+/// that read the separator off a string it no longer had.
+pub(crate) fn declared_directory_paths_for_item(
+    universe: &WorkflowV2TaskUniverse,
+    item: &Value,
+) -> Vec<String> {
+    let task_ids = canonical_task_ids(item);
+    if task_ids.is_empty() {
+        return Vec::new();
+    }
+    let mut paths: Vec<String> = Vec::new();
+    for task in &universe.tasks {
+        if !task_ids.iter().any(|id| id == &task.canonical_task_id) {
+            continue;
+        }
+        for contract in &task.deliverable_contracts {
+            let raw = contract.artifact_path.trim();
+            if !raw.ends_with('/') && !raw.ends_with('\\') {
+                continue;
+            }
+            if let Some(path) = admissible_path(raw)
+                && !paths.contains(&path)
+            {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
 fn declares_repository_targets(item: &Value) -> bool {
     match item.get("target_files") {
         None | Some(Value::Null) => false,
