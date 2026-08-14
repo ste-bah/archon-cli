@@ -340,6 +340,7 @@ pub(crate) async fn spawn_web_session(
             show_thinking,
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,
+            plan_mode_state: agent.plan_mode_state(),
             session_id: session_id.to_string(),
             session_store: Arc::clone(&session_store),
             cost_config: config.cost.clone(),

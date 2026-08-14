@@ -154,6 +154,9 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
         CommandEffect::SetPermissionMode(_) => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
+        CommandEffect::EnterPlanMode { .. } => {
+            unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+        }
         CommandEffect::StartPipelineWork(_) => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
@@ -174,8 +177,6 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
     );
 }
 
-// -----------------------------------------------------------------
-// TASK-AGS-809: /cost snapshot routing. Same rationale as AGS-807 +
 // AGS-808 — we pin the routing decision via
 // `resolve_primary_from_input` because standing up a full
 // `SlashCommandContext` fixture drags McpServerManager /

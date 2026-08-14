@@ -200,7 +200,7 @@ pub struct Agent {
     /// The TUI sends the user's response through the paired sender.
     pub ask_user_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<String>>>>,
     /// State captured on plan-mode entry for safe restoration on exit.
-    plan_mode_state: plan_mode_state::PlanModeState,
+    plan_mode_state: Arc<tokio::sync::Mutex<plan_mode_state::PlanModeState>>,
     /// Append-only log of permission denials for audit / `/denials` display.
     pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
     /// Custom agent registry (built-in + project + user agents).

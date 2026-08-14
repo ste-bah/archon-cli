@@ -53,7 +53,9 @@ impl Agent {
             permission_response_rx: None,
             inner_voice: None,
             ask_user_response_rx: None,
-            plan_mode_state: plan_mode_state::PlanModeState::default(),
+            plan_mode_state: Arc::new(tokio::sync::Mutex::new(
+                plan_mode_state::PlanModeState::default(),
+            )),
             denial_log: Arc::new(Mutex::new(archon_permissions::denial_log::DenialLog::new())),
             agent_registry,
             personality_briefing: None,
@@ -91,6 +93,19 @@ impl Agent {
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
         }
+    }
+
+    /// Share the plan lifecycle state with external session components.
+    pub fn plan_mode_state(&self) -> Arc<tokio::sync::Mutex<plan_mode_state::PlanModeState>> {
+        Arc::clone(&self.plan_mode_state)
+    }
+
+    /// Install externally constructed shared plan lifecycle state.
+    pub fn set_plan_mode_state(
+        &mut self,
+        plan_mode_state: Arc<tokio::sync::Mutex<plan_mode_state::PlanModeState>>,
+    ) {
+        self.plan_mode_state = plan_mode_state;
     }
 
     /// TASK-AGS-105: install the `AgentSubagentExecutor` into the process

@@ -16,6 +16,8 @@ pub(super) struct SlashContextBuildInput {
     pub show_thinking: Arc<AtomicBool>,
     pub session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub permission_mode: Arc<tokio::sync::Mutex<String>>,
+    pub plan_mode_state:
+        Arc<tokio::sync::Mutex<archon_core::agent::plan_mode_state::PlanModeState>>,
     pub session_id: String,
     pub session_store: Arc<archon_session::storage::SessionStore>,
     pub cost_config: archon_core::config::CostConfig,
@@ -67,6 +69,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         show_thinking: input.show_thinking,
         session_stats: input.session_stats,
         permission_mode: input.permission_mode,
+        plan_mode_state: input.plan_mode_state,
         session_id: input.session_id,
         session_store: input.session_store,
         cost_config: input.cost_config,

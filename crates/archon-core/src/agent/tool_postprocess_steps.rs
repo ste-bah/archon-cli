@@ -49,7 +49,7 @@ impl Agent {
             "EnterPlanMode" => {
                 let prev = self.config.permission_mode.lock().await.clone();
                 let previous_mode = prev.parse::<PermissionMode>().unwrap_or_default();
-                self.plan_mode_state.record_entry(
+                self.plan_mode_state.lock().await.record_entry(
                     previous_mode,
                     plan_mode_state::PlanEntryPath::EnterPlanModeTool,
                 );
@@ -69,13 +69,15 @@ impl Agent {
     }
 
     async fn restore_mode_after_plan(&mut self) {
+        let mut plan_mode_state = self.plan_mode_state.lock().await;
         let restore = plan_mode_state::safe_restore_mode(
-            self.plan_mode_state.previous_permission_mode.take(),
+            plan_mode_state.previous_permission_mode.take(),
             false,
         );
+        plan_mode_state.active_plan_id = None;
+        plan_mode_state.entered_via = None;
+        drop(plan_mode_state);
         *self.config.permission_mode.lock().await = restore.to_string();
-        self.plan_mode_state.active_plan_id = None;
-        self.plan_mode_state.entered_via = None;
         self.state.mode = AgentMode::Normal;
     }
 
@@ -425,7 +427,8 @@ impl Agent {
         if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
             && matches!(
                 plan.status,
-                archon_session::plan::PlanStatus::Executing | archon_session::plan::PlanStatus::Draft
+                archon_session::plan::PlanStatus::Executing
+                    | archon_session::plan::PlanStatus::Draft
             )
         {
             for step in &plan.steps {

@@ -108,6 +108,12 @@ pub(crate) enum CommandEffect {
     /// `AddExtraDir`, and B11 `SetEffortLevelShared` effect-slot
     /// precedent.
     SetPermissionMode(String),
+    /// Record an explicit `/plan` entry before changing the shared
+    /// permission mode. The previous mode is typed while the handler is
+    /// synchronous; `apply_effect` owns the async shared-state mutation.
+    EnterPlanMode {
+        previous_mode: archon_permissions::mode::PermissionMode,
+    },
     /// Start pipeline watcher/resume work only after synchronous handler events
     /// have drained through the bounded TUI channel.
     StartPipelineWork(PipelineWork),

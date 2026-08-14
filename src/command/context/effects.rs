@@ -99,6 +99,16 @@ pub(crate) fn apply_effect<'a>(
                     *mode = resolved.clone();
                     previous
                 };
+                if resolved == archon_permissions::mode::PermissionMode::Default.as_str() {
+                    let mut plan_mode_state = slash_ctx.plan_mode_state.lock().await;
+                    if plan_mode_state.entered_via
+                        == Some(archon_core::agent::plan_mode_state::PlanEntryPath::SlashCommand)
+                    {
+                        plan_mode_state.previous_permission_mode = None;
+                        plan_mode_state.active_plan_id = None;
+                        plan_mode_state.entered_via = None;
+                    }
+                }
                 crate::runtime::permission_events::record_permission_mode_event(
                     slash_ctx.governed_learning_db.as_ref(),
                     Some(&slash_ctx.session_id),
@@ -111,6 +121,32 @@ pub(crate) fn apply_effect<'a>(
                     .send_async(TuiEvent::PermissionModeChanged(resolved.clone()))
                     .await;
                 tracing::info!(mode = %resolved, "set permission mode via /permissions");
+            }
+            CommandEffect::EnterPlanMode { previous_mode } => {
+                let mut plan_mode_state = slash_ctx.plan_mode_state.lock().await;
+                let mut mode = slash_ctx.permission_mode.lock().await;
+                let previous = mode.clone();
+                plan_mode_state.record_entry(
+                    previous_mode,
+                    archon_core::agent::plan_mode_state::PlanEntryPath::SlashCommand,
+                );
+                *mode = archon_permissions::mode::PermissionMode::Plan.to_string();
+                drop(mode);
+                drop(plan_mode_state);
+                crate::runtime::permission_events::record_permission_mode_event(
+                    slash_ctx.governed_learning_db.as_ref(),
+                    Some(&slash_ctx.session_id),
+                    Some(&previous),
+                    archon_permissions::mode::PermissionMode::Plan.as_str(),
+                    "mode_changed",
+                    "slash_plan",
+                );
+                let _ = tui_tx
+                    .send_async(TuiEvent::PermissionModeChanged(
+                        archon_permissions::mode::PermissionMode::Plan.to_string(),
+                    ))
+                    .await;
+                tracing::info!("entered plan mode via /plan");
             }
             CommandEffect::StartPipelineWork(work) => {
                 crate::command::pipeline_slash::start_pipeline_work(slash_ctx, tui_tx, work).await;

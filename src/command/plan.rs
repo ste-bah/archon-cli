@@ -1,173 +1,118 @@
-//! `/plan` slash-command handler — Plan Mode state + plan-file surface.
+//! `/plan` slash-command handler — typed Plan Mode lifecycle and plan-file surface.
 //!
-//! TASK-TUI-626 landed the Plan Mode TOGGLE (SNAPSHOT+EFFECT via
-//! `CommandEffect::SetPermissionMode("plan")`). TASK-P0-B.3 (#174) lands
-//! the remaining four surfaces the TUI-626 spec deferred:
-//!
-//! 1. `/plan open` — spawn `$EDITOR` on `.archon/plan.md` (no mode flip).
-//! 2. Bare `/plan` (and `/plan show`) — show the current plan-file
-//!    content inline via `TextDelta`, then flip into Plan Mode.
-//! 3. Plan-file I/O helpers — live in
-//!    `crate::command::plan_file` (re-exporting from
-//!    `archon_core::plan_file`, see shim rationale in that module).
-//! 4. Dispatch-layer interception now appends each blocked tool call
-//!    to `.archon/plan.md` so the user has a written record.
-//!
-//! # Architecture
-//!
-//! Uses the existing SNAPSHOT+EFFECT plumbing from `/permissions`
-//! (`src/command/permissions.rs`). Handler body stays small: emit
-//! confirmation + plan-file content TextDelta, stash
-//! `CommandEffect::SetPermissionMode("plan")`. The dispatcher's
-//! `apply_effect` post-handler does the async write to
-//! `slash_ctx.permission_mode.lock().await` AND emits
-//! `TuiEvent::PermissionModeChanged("plan")`.
-//!
-//! # Arg contract
-//!
-//! * `/plan` (bare) — show current plan content (or "No plan written
-//!   yet.") AND stash SetPermissionMode("plan"). The TUI-626 precedent
-//!   was "always flip"; we PRESERVE that bit-for-bit in the bare-call
-//!   case so the 4 shipped TUI-626 tests keep passing byte-identical.
-//! * `/plan show` — same as bare.
-//! * `/plan open` — spawn `$EDITOR` on the plan file; do NOT stash the
-//!   mode-flip effect. This branch is the one the TUI-626 spec
-//!   explicitly left to the P0-B.3 followup (#174).
-//! * Any other arg — fall through to the default (bare) behaviour so
-//!   unknown args cannot silently disable the mode flip.
-//!
-//! We deliberately did NOT add a `current_permission_mode` SNAPSHOT
-//! field to `CommandContext` here (the spec's "preferred" option): the
-//! bare-call already produces the correct downstream state (enter Plan
-//! Mode + show the plan-file), and the apply_effect path is idempotent
-//! when Plan Mode is already set. Adding a cross-cutting SNAPSHOT
-//! field would touch `build_command_context`, every `CtxBuilder`
-//! setter, and all 24+ handler test fixtures for no behavioural
-//! benefit — the simpler "always flip" interpretation is therefore the
-//! one we ship.
-//!
-//! # Reconciliation with TASK-TUI-626.md spec
-//!
-//! Spec references `crates/archon-tui/src/slash/plan.rs` +
-//! `SlashCommand` + `SlashOutcome::Message`. Actual: bin-crate
-//! `src/command/plan.rs` + `CommandHandler` (re-exported as
-//! `SlashCommand` at `src/command/mod.rs:86`). Mode write goes via
-//! `ctx.pending_effect = Some(CommandEffect::SetPermissionMode("plan"))`,
-//! not direct enum assignment — matches the `/permissions` precedent
-//! for sync `CommandHandler::execute` + async mutex write.
+//! The synchronous handler only reads its owned [`PlanSnapshot`] and emits an
+//! owned [`CommandEffect`]. `apply_effect` records the shared lifecycle state
+//! before it changes the lock-protected permission mode.
 
+use archon_permissions::mode::PermissionMode;
 use archon_tui::app::TuiEvent;
 
 use crate::command::plan_file;
 use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 
-/// `/plan` handler — enables Plan Mode via the SNAPSHOT+EFFECT pattern
-/// AND routes the `open` sub-argument to `$EDITOR` on the plan file.
+#[derive(Clone, Debug)]
+pub(crate) struct PlanSnapshot {
+    pub(crate) current_mode: PermissionMode,
+}
+
+/// `/plan` handler — displays the plan file and changes mode through effects.
 pub(crate) struct PlanHandler;
 
 impl PlanHandler {
-    /// Resolve the plan file path for the current session. Prefers
-    /// `CommandContext::working_dir` (clone from
-    /// `SlashCommandContext::working_dir`) so tests can redirect the
-    /// lookup to a tempdir; falls back to the process CWD for the
-    /// (vanishingly-rare) case where the builder left `working_dir`
-    /// `None`. Final HOME-fallback is handled inside
-    /// `plan_file::plan_path`.
     fn resolve_plan_path(ctx: &CommandContext) -> std::path::PathBuf {
         let cwd_owned;
         let base: &std::path::Path = match ctx.working_dir.as_ref() {
-            Some(p) => p.as_path(),
+            Some(path) => path.as_path(),
             None => {
                 cwd_owned =
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                // Widen lifetime via the owned buffer above.
-                // (We can't return a reference to a local without it.)
                 return plan_file::plan_path(&cwd_owned);
             }
         };
         plan_file::plan_path(base)
     }
-}
 
-impl CommandHandler for PlanHandler {
-    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
-        // Normalise the first positional arg — whitespace-tolerant to
-        // match the /permissions precedent at permissions.rs:258.
-        let joined = args.join(" ");
-        let arg = joined.trim().to_ascii_lowercase();
-
-        // ── Branch: /plan open ───────────────────────────────────────
-        // Open the plan file in $EDITOR. Do NOT flip the mode — the
-        // user can flip separately with a bare /plan call. This is
-        // important because "edit the plan" and "enter Plan Mode" are
-        // distinct intents.
-        if arg == "open" {
-            let path = Self::resolve_plan_path(ctx);
-            match plan_file::open_plan_in_editor(&path) {
-                Ok(()) => {
-                    ctx.emit(TuiEvent::TextDelta(format!(
-                        "\nOpened plan in $EDITOR: {}\n",
-                        path.display()
-                    )));
-                }
-                Err(e) => {
-                    ctx.emit(TuiEvent::Error(format!(
-                        "Failed to open plan file {}: {}",
-                        path.display(),
-                        e
-                    )));
-                }
-            }
+    fn enter_or_show(ctx: &mut CommandContext) -> anyhow::Result<()> {
+        let current_mode = ctx
+            .plan_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.current_mode)
+            .unwrap_or_default();
+        if current_mode == PermissionMode::Plan {
+            ctx.emit(TuiEvent::TextDelta(
+                "Already in plan mode — /plan off to exit, or tell the agent to proceed."
+                    .to_string(),
+            ));
             return Ok(());
         }
 
-        // ── Default branch: /plan (bare) and /plan show ──────────────
-        // Emit the current plan-file content (or a "no plan yet" hint)
-        // inline, THEN the confirmation line, THEN stash the mode-flip
-        // effect. The legacy confirmation emission is preserved
-        // byte-for-byte so the TUI-626 shipped tests still assert on it.
         let path = Self::resolve_plan_path(ctx);
         let plan_body = match plan_file::read_plan_file(&path) {
             Ok(Some(content)) if !content.trim().is_empty() => {
                 format!("\nCurrent plan ({}):\n\n{}\n", path.display(), content)
             }
-            Ok(_) => {
-                // Missing file OR empty file — same hint.
-                format!(
-                    "\nNo plan written yet at {} — tool calls blocked while in \
-                     Plan Mode will be appended here for review.\n",
-                    path.display()
-                )
-            }
-            Err(e) => {
-                // IO error reading the plan (permissions / filesystem) —
-                // surface as an Error event but continue flipping the
-                // mode so the user is not stuck in a half-enabled state.
+            Ok(_) => format!(
+                "\nNo plan written yet at {} — tool calls blocked while in \
+                 Plan Mode will be appended here for review.\n",
+                path.display()
+            ),
+            Err(error) => {
                 ctx.emit(TuiEvent::Error(format!(
                     "Failed to read plan file {}: {}",
                     path.display(),
-                    e
+                    error
                 )));
                 String::new()
             }
         };
-
-        // Single TextDelta carrying the plan body + legacy confirmation
-        // so the TUI-626 "exactly one TextDelta" invariant survives.
-        // Invariant: the string MUST start AND end with '\n' (matches
-        // the shipped assertion `s.starts_with('\n') && s.ends_with('\n')`).
-        let msg = format!(
-            "{plan_body}\nPlan mode enabled. You will be asked to approve each tool call.\n"
-        );
-        ctx.emit(TuiEvent::TextDelta(msg));
-
-        // Stash the shared-mutex write. apply_effect at the dispatch
-        // site performs:
-        //   *slash_ctx.permission_mode.lock().await = PermissionMode::Plan
-        // AND emits TuiEvent::PermissionModeChanged("plan") AFTER the
-        // write lands.
-        ctx.pending_effect = Some(CommandEffect::SetPermissionMode("plan".to_string()));
+        ctx.emit(TuiEvent::TextDelta(format!(
+            "{plan_body}\nPlan mode enabled. Use /plan off to exit.\n"
+        )));
+        ctx.pending_effect = Some(CommandEffect::EnterPlanMode {
+            previous_mode: current_mode,
+        });
         Ok(())
+    }
+
+    fn open_document(ctx: &mut CommandContext) -> anyhow::Result<()> {
+        let path = Self::resolve_plan_path(ctx);
+        match plan_file::open_plan_in_editor(&path) {
+            Ok(()) => ctx.emit(TuiEvent::TextDelta(format!(
+                "\nOpened plan in $EDITOR: {}\n",
+                path.display()
+            ))),
+            Err(error) => ctx.emit(TuiEvent::Error(format!(
+                "Failed to open plan file {}: {}",
+                path.display(),
+                error
+            ))),
+        }
+        Ok(())
+    }
+
+    fn exit_plan(ctx: &mut CommandContext) -> anyhow::Result<()> {
+        ctx.emit(TuiEvent::TextDelta("Plan mode disabled.".to_string()));
+        ctx.pending_effect = Some(CommandEffect::SetPermissionMode("default".to_string()));
+        Ok(())
+    }
+
+    fn emit_valid_forms_error(ctx: &mut CommandContext) -> anyhow::Result<()> {
+        ctx.emit(TuiEvent::Error(
+            "Valid /plan forms: show, open, off, exit, done.".to_string(),
+        ));
+        Ok(())
+    }
+}
+
+impl CommandHandler for PlanHandler {
+    fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
+        let arg = args.join(" ").trim().to_ascii_lowercase();
+        match arg.as_str() {
+            "" | "show" => Self::enter_or_show(ctx),
+            "open" => Self::open_document(ctx),
+            "off" | "exit" | "done" => Self::exit_plan(ctx),
+            _ => Self::emit_valid_forms_error(ctx),
+        }
     }
 
     fn description(&self) -> &str {
@@ -204,15 +149,18 @@ mod tests {
     }
 
     #[test]
-    fn plan_stashes_set_permission_mode_effect() {
+    fn plan_stashes_enter_plan_mode_effect() {
         let (mut ctx, _rx) = make_bug_ctx();
         PlanHandler.execute(&mut ctx, &[]).unwrap();
         match ctx.pending_effect {
-            Some(CommandEffect::SetPermissionMode(ref mode)) => {
-                assert_eq!(mode, "plan", "effect must carry mode='plan'");
+            Some(CommandEffect::EnterPlanMode { previous_mode }) => {
+                assert_eq!(
+                    previous_mode,
+                    archon_permissions::mode::PermissionMode::Default
+                );
             }
             other => panic!(
-                "expected Some(SetPermissionMode(\"plan\")), got {:?}",
+                "expected Some(EnterPlanMode {{ previous_mode: Default }}), got {:?}",
                 other
             ),
         }
@@ -260,12 +208,72 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
-    fn plan_dispatches_via_registry() {
-        // Gate 5 smoke: Registry::get("plan") must return Some(handler).
-        // Dispatched execute must emit exactly one TextDelta containing
-        // "Plan mode" AND stash CommandEffect::SetPermissionMode("plan")
-        // on the context — proves plumbing end-to-end.
+    fn plan_off_stashes_default_and_confirms_exit() {
+        let (mut ctx, mut rx) = make_bug_ctx();
+        PlanHandler
+            .execute(&mut ctx, &[String::from("off")])
+            .unwrap();
+
+        assert!(matches!(
+            ctx.pending_effect.as_ref(),
+            Some(CommandEffect::SetPermissionMode(mode)) if mode == "default"
+        ));
+        let events = drain_tui_events(&mut rx);
+        assert!(matches!(
+            events.as_slice(),
+            [TuiEvent::TextDelta(message)] if message.contains("Plan mode disabled")
+        ));
+    }
+
+    #[test]
+    fn plan_exit_and_done_alias_off() {
+        for alias in ["exit", "done"] {
+            let (mut ctx, _rx) = make_bug_ctx();
+            PlanHandler.execute(&mut ctx, &[alias.to_string()]).unwrap();
+            assert!(matches!(
+                ctx.pending_effect.as_ref(),
+                Some(CommandEffect::SetPermissionMode(mode)) if mode == "default"
+            ));
+        }
+    }
+
+    #[test]
+    fn plan_bogus_errors_and_does_not_change_mode() {
+        let (mut ctx, mut rx) = make_bug_ctx();
+        PlanHandler
+            .execute(&mut ctx, &[String::from("bogus")])
+            .unwrap();
+
+        assert!(ctx.pending_effect.is_none());
+        let events = drain_tui_events(&mut rx);
+        assert!(matches!(
+            events.as_slice(),
+            [TuiEvent::Error(message)] if ["show", "open", "off", "exit", "done"]
+                .iter()
+                .all(|form| message.contains(form))
+        ));
+    }
+
+    #[test]
+    fn plan_while_active_reports_already_in_plan_mode() {
+        let (mut ctx, mut rx) = CtxBuilder::new()
+            .with_plan_snapshot(crate::command::plan::PlanSnapshot {
+                current_mode: archon_permissions::mode::PermissionMode::Plan,
+            })
+            .build();
+        PlanHandler.execute(&mut ctx, &[]).unwrap();
+
+        assert!(ctx.pending_effect.is_none());
+        let events = drain_tui_events(&mut rx);
+        assert!(matches!(
+            events.as_slice(),
+            [TuiEvent::TextDelta(message)]
+                if message == "Already in plan mode — /plan off to exit, or tell the agent to proceed."
+        ));
+    }
+
+    #[test]
+    fn plan_is_registered_and_stashes_entry_effect() {
         use crate::command::registry::default_registry;
 
         let registry = default_registry();
@@ -278,35 +286,14 @@ mod tests {
             .execute(&mut ctx, &[])
             .expect("dispatched /plan must not error");
 
-        // Assertion 1: TextDelta emitted.
         let events = drain_tui_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            1,
-            "expected exactly one TextDelta; got: {:?}",
-            events
+        assert!(
+            matches!(events.as_slice(), [TuiEvent::TextDelta(message)] if message.to_lowercase().contains("plan mode"))
         );
-        match &events[0] {
-            TuiEvent::TextDelta(s) => {
-                assert!(
-                    s.to_lowercase().contains("plan mode"),
-                    "TextDelta must contain 'plan mode' (case-insensitive); got: {}",
-                    s
-                );
-            }
-            other => panic!("expected TextDelta, got {:?}", other),
-        }
-
-        // Assertion 2: SetPermissionMode("plan") effect stashed.
-        match ctx.pending_effect {
-            Some(CommandEffect::SetPermissionMode(ref mode)) => {
-                assert_eq!(mode, "plan", "effect must carry mode='plan'");
-            }
-            other => panic!(
-                "expected Some(SetPermissionMode(\"plan\")), got {:?}",
-                other
-            ),
-        }
+        assert!(matches!(
+            ctx.pending_effect,
+            Some(CommandEffect::EnterPlanMode { .. })
+        ));
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -402,16 +389,12 @@ mod tests {
             }
             other => panic!("expected TextDelta, got {:?}", other),
         }
-        // Mode flip effect still stashed.
-        match ctx.pending_effect {
-            Some(CommandEffect::SetPermissionMode(ref mode)) => {
-                assert_eq!(mode, "plan");
-            }
-            other => panic!(
-                "expected Some(SetPermissionMode(\"plan\")), got {:?}",
-                other
-            ),
-        }
+        assert!(matches!(
+            ctx.pending_effect,
+            Some(CommandEffect::EnterPlanMode {
+                previous_mode: PermissionMode::Default
+            })
+        ));
     }
 
     /// Bare `/plan` with NO plan file emits a "no plan yet" hint AND
@@ -444,10 +427,11 @@ mod tests {
             }
             other => panic!("expected TextDelta, got {:?}", other),
         }
-        // Mode flip still applied.
         assert!(matches!(
             ctx.pending_effect,
-            Some(CommandEffect::SetPermissionMode(_))
+            Some(CommandEffect::EnterPlanMode {
+                previous_mode: PermissionMode::Default
+            })
         ));
     }
 }

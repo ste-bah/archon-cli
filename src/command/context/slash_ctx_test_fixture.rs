@@ -102,6 +102,9 @@ pub(super) fn build_test_slash_context(
             archon_core::agent::SessionStats::default(),
         )),
         permission_mode: Arc::new(tokio::sync::Mutex::new(initial_permission_mode.to_string())),
+        plan_mode_state: Arc::new(tokio::sync::Mutex::new(
+            archon_core::agent::plan_mode_state::PlanModeState::default(),
+        )),
         session_id: session_id.to_string(),
         session_store,
         cost_config: archon_core::config::CostConfig::default(),
