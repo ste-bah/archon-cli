@@ -78,6 +78,9 @@ pub struct ContextConfig {
     /// Maximum characters for hierarchical ARCHON.md content.
     #[serde(alias = "claudemd_max_tokens")]
     pub archonmd_max_tokens: u32,
+    /// Approval policy when the agent runs without an interactive AskUser channel.
+    /// `reject` fails closed; every other value defaults to approval.
+    pub noninteractive_plan_approval: String,
 }
 
 impl Default for ContextConfig {
@@ -104,6 +107,7 @@ impl Default for ContextConfig {
             prompt_cache_models: std::collections::BTreeMap::new(),
             model_pricing: std::collections::BTreeMap::new(),
             archonmd_max_tokens: 8192,
+            noninteractive_plan_approval: "approve".into(),
         }
     }
 }

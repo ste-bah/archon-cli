@@ -157,7 +157,7 @@ impl WebSessionHandle {
                      Change permissions in the TUI or config before retrying from web chat"
                 );
             }
-            TuiEvent::AskUserPrompt { question } => {
+            TuiEvent::AskUserPrompt { question, .. } => {
                 let _ = self.ask_user_tx.send(String::new()).await;
                 anyhow::bail!(
                     "AskUserQuestion requires an interactive TUI answer: {question}. \

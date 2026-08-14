@@ -9,9 +9,9 @@ pub use crate::plan_store::PlanStore;
 /// Returns None if no active plan exists.
 pub fn plan_context_for_compaction(store: &PlanStore, session_id: &str) -> Option<String> {
     match store.load_latest_plan(session_id) {
-        Ok(Some(plan)) if matches!(plan.status, PlanStatus::Executing | PlanStatus::Draft) => {
-            Some(format!("\n\n---\n[Active Plan]\n{}", plan.to_context_string()))
-        }
+        Ok(Some(plan)) if matches!(plan.status, PlanStatus::Executing | PlanStatus::Draft) => Some(
+            format!("\n\n---\n[Active Plan]\n{}", plan.to_context_string()),
+        ),
         _ => None,
     }
 }
@@ -28,7 +28,8 @@ mod tests {
 
     #[test]
     fn legacy_plan_json_loads_with_safe_defaults() {
-        let json = r#"{"id":"p","title":"Legacy","steps":[],"risks":[],"questions":[],"status":"active"}"#;
+        let json =
+            r#"{"id":"p","title":"Legacy","steps":[],"risks":[],"questions":[],"status":"active"}"#;
         let plan = PlanDocument::from_json(json).unwrap();
         assert_eq!(plan.status, PlanStatus::Executing);
         assert_legacy_defaults(&plan);
@@ -58,7 +59,10 @@ mod tests {
         };
         store.record_approval_event(&record).expect("record");
         let duplicate = store.record_approval_event(&record);
-        assert!(duplicate.is_err(), "approval ledger must not overwrite events");
+        assert!(
+            duplicate.is_err(),
+            "approval ledger must not overwrite events"
+        );
         assert_eq!(
             store
                 .load_approval_events("session-approval", "plan-approval")
@@ -68,12 +72,92 @@ mod tests {
     }
 
     #[test]
+    fn terminal_plan_and_approval_are_persisted_atomically() {
+        let db = test_db();
+        let store = PlanStore::new(&db).expect("init");
+        let mut plan = PlanDocument::new("terminal-plan", "Terminal Plan");
+        plan.status = PlanStatus::Approved;
+        let record = PlanApprovalRecord {
+            plan_id: plan.id.clone(),
+            session_id: "terminal-session".into(),
+            approval: PlanApproval {
+                decision: PlanApprovalDecision::Approve,
+                source: PlanApprovalSource::Interactive,
+                decided_at: "2026-08-14T00:00:00Z".into(),
+                user_edited: false,
+            },
+        };
+        plan.approval = Some(record.approval.clone());
+
+        store
+            .save_terminal_plan_with_approval("terminal-session", &plan, &record)
+            .expect("atomic save");
+
+        let loaded = store
+            .load_plan("terminal-session", "terminal-plan")
+            .expect("load")
+            .expect("terminal plan");
+        assert_eq!(loaded.status, PlanStatus::Approved);
+        assert_eq!(loaded.approval, Some(record.approval.clone()));
+        assert_eq!(
+            store
+                .load_approval_events("terminal-session", "terminal-plan")
+                .expect("ledger"),
+            vec![record]
+        );
+    }
+
+    #[test]
+    fn terminal_plan_and_approval_roll_back_together_on_second_write_failure() {
+        let db = test_db();
+        let store = PlanStore::new(&db).expect("init");
+        let mut plan = PlanDocument::new("rollback-plan", "Rollback Plan");
+        plan.status = PlanStatus::Approved;
+        let record = PlanApprovalRecord {
+            plan_id: plan.id.clone(),
+            session_id: "rollback-session".into(),
+            approval: PlanApproval {
+                decision: PlanApprovalDecision::Approve,
+                source: PlanApprovalSource::Interactive,
+                decided_at: "2026-08-14T00:00:00Z".into(),
+                user_edited: false,
+            },
+        };
+        plan.approval = Some(record.approval.clone());
+        store
+            .record_approval_event(&record)
+            .expect("seed colliding immutable ledger event");
+
+        let error = store
+            .save_terminal_plan_with_approval("rollback-session", &plan, &record)
+            .expect_err("duplicate ledger event must abort the transaction");
+        assert!(error.to_string().contains("plan_approval_events"));
+        assert!(
+            store
+                .load_plan("rollback-session", "rollback-plan")
+                .expect("load")
+                .is_none(),
+            "failed terminal save must not leave a plan document"
+        );
+        assert_eq!(
+            store
+                .load_approval_events("rollback-session", "rollback-plan")
+                .expect("ledger")
+                .len(),
+            1,
+            "rollback must leave only the original event"
+        );
+    }
+
+    #[test]
     fn plan_roundtrip() {
         let db = test_db();
         let store = PlanStore::new(&db).expect("init");
         let mut plan = PlanDocument::new("plan-1", "Test Plan");
-        plan.steps.push(step(1, "First step", PlanStepStatus::Pending));
-        plan.steps.push(step(2, "Second step", PlanStepStatus::Pending));
+        plan.steps
+            .push(step(1, "First step", PlanStepStatus::Pending));
+        plan.steps
+            .push(step(2, "Second step", PlanStepStatus::Pending));
         plan.risks.push("Might break things".to_string());
         store.save_plan("sess1", &plan).expect("save");
         let loaded = store
@@ -91,7 +175,8 @@ mod tests {
         let db = test_db();
         let store = PlanStore::new(&db).expect("init");
         let mut plan = PlanDocument::new("plan-2", "Step Test");
-        plan.steps.push(step(1, "Do something", PlanStepStatus::Pending));
+        plan.steps
+            .push(step(1, "Do something", PlanStepStatus::Pending));
         store.save_plan("sess1", &plan).expect("save");
         store
             .update_step_status("sess1", "plan-2", 1, PlanStepStatus::Complete)
@@ -118,8 +203,10 @@ mod tests {
     fn to_context_string_format() {
         let mut plan = PlanDocument::new("p", "My Plan");
         plan.status = PlanStatus::Executing;
-        plan.steps.push(step(1, "Step one", PlanStepStatus::Complete));
-        plan.steps.push(step(2, "Step two", PlanStepStatus::Pending));
+        plan.steps
+            .push(step(1, "Step one", PlanStepStatus::Complete));
+        plan.steps
+            .push(step(2, "Step two", PlanStepStatus::Pending));
         plan.steps[0].affected_files.push("a.rs".into());
         let context = plan.to_context_string();
         assert!(context.contains("My Plan"));

@@ -57,47 +57,12 @@ impl Agent {
                 self.state.mode = AgentMode::Plan;
                 result
             }
-            "ExitPlanMode" => {
-                self.restore_mode_after_plan().await;
-                if !self.buffers_finalization_text() {
-                    self.persist_latest_plan_from_assistant();
-                }
-                result
-            }
+            "ExitPlanMode" => self.handle_exit_plan_mode_approval(result).await,
             _ => result,
         }
     }
 
-    async fn restore_mode_after_plan(&mut self) {
-        let mut plan_mode_state = self.plan_mode_state.lock().await;
-        let restore = plan_mode_state::safe_restore_mode(
-            plan_mode_state.previous_permission_mode.take(),
-            false,
-        );
-        plan_mode_state.active_plan_id = None;
-        plan_mode_state.entered_via = None;
-        drop(plan_mode_state);
-        *self.config.permission_mode.lock().await = restore.to_string();
-        self.state.mode = AgentMode::Normal;
-    }
-
-    pub(super) fn persist_latest_plan_from_assistant(&self) {
-        let Some(ref plan_store) = self.plan_store else {
-            return;
-        };
-        let plan_text = self.latest_assistant_text();
-        if plan_text.is_empty() {
-            return;
-        }
-        let plan = parse_plan_from_text(&plan_text);
-        let sid = self.config.session_id.clone();
-        match plan_store.save_plan(&sid, &plan) {
-            Ok(()) => tracing::info!("plan saved: {} ({} steps)", plan.title, plan.steps.len()),
-            Err(e) => tracing::warn!("failed to save plan: {e}"),
-        }
-    }
-
-    fn latest_assistant_text(&self) -> String {
+    pub(super) fn latest_assistant_text(&self) -> String {
         self.state
             .messages
             .iter()
@@ -167,9 +132,10 @@ impl Agent {
         ToolResult::success(auto_response)
     }
 
-    async fn ask_user(&mut self, question: String) -> ToolResult {
+    pub(super) async fn ask_user(&mut self, question: String) -> ToolResult {
         self.send_event(AgentEvent::AskUser {
             question: question.clone(),
+            kind: AskUserPromptKind::Ordinary,
         })
         .await;
         if let Some(rx) = &self.ask_user_response_rx {

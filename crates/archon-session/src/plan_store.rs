@@ -107,17 +107,87 @@ impl PlanStore {
         Ok(())
     }
 
-    /// Append an immutable approval decision to the plan's durable audit ledger.
-    pub fn record_approval_event(&self, record: &PlanApprovalRecord) -> Result<(), std::io::Error> {
+    /// Append an immutable approval decision and save the terminal plan in one
+    /// Cozo transaction, so no reader can observe one without the other.
+    pub fn save_terminal_plan_with_approval(
+        &self,
+        session_id: &str,
+        plan: &PlanDocument,
+        record: &PlanApprovalRecord,
+    ) -> Result<(), std::io::Error> {
+        if record.session_id != session_id || record.plan_id != plan.id {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "plan approval record does not match terminal plan",
+            ));
+        }
+
+        let plan_json = plan.to_json();
         let approval_json = serde_json::to_string(&record.approval).map_err(db_err)?;
+        let updated_at = chrono::Utc::now().to_rfc3339();
         let mut params = BTreeMap::new();
-        params.insert("session_id".to_string(), DataValue::from(record.session_id.as_str()));
-        params.insert("plan_id".to_string(), DataValue::from(record.plan_id.as_str()));
+        params.insert("session_id".to_string(), DataValue::from(session_id));
+        params.insert("plan_id".to_string(), DataValue::from(plan.id.as_str()));
+        params.insert("plan_json".to_string(), DataValue::from(plan_json.as_str()));
+        params.insert(
+            "updated_at".to_string(),
+            DataValue::from(updated_at.as_str()),
+        );
         params.insert(
             "decided_at".to_string(),
             DataValue::from(record.approval.decided_at.as_str()),
         );
-        params.insert("approval_json".to_string(), DataValue::from(approval_json.as_str()));
+        params.insert(
+            "approval_json".to_string(),
+            DataValue::from(approval_json.as_str()),
+        );
+
+        let transaction = self.db.multi_transaction(true);
+        let result = (|| -> Result<(), std::io::Error> {
+            transaction
+                .run_script(
+                    "?[session_id, plan_id, plan_json, updated_at] <- [[$session_id, $plan_id, $plan_json, $updated_at]]
+                     :put plans {session_id, plan_id => plan_json, updated_at}",
+                    params.clone(),
+                )
+                .map_err(db_err)?;
+            transaction
+                .run_script(
+                    "?[session_id, plan_id, decided_at, approval_json] <- [[$session_id, $plan_id, $decided_at, $approval_json]]
+                     :insert plan_approval_events {session_id, plan_id, decided_at => approval_json}",
+                    params,
+                )
+                .map_err(db_err)?;
+            Ok(())
+        })();
+        if result.is_ok() {
+            transaction.commit().map_err(db_err)?;
+        } else {
+            let _ = transaction.abort();
+        }
+        result
+    }
+
+    /// Append an immutable approval decision to the plan's durable audit ledger.
+    pub fn record_approval_event(&self, record: &PlanApprovalRecord) -> Result<(), std::io::Error> {
+        let approval_json = serde_json::to_string(&record.approval).map_err(db_err)?;
+        let mut params = BTreeMap::new();
+        params.insert(
+            "session_id".to_string(),
+            DataValue::from(record.session_id.as_str()),
+        );
+        params.insert(
+            "plan_id".to_string(),
+            DataValue::from(record.plan_id.as_str()),
+        );
+        params.insert(
+            "decided_at".to_string(),
+            DataValue::from(record.approval.decided_at.as_str()),
+        );
+        params.insert(
+            "approval_json".to_string(),
+            DataValue::from(approval_json.as_str()),
+        );
         self.run_mutable(
             "?[session_id, plan_id, decided_at, approval_json] <- [[$session_id, $plan_id, $decided_at, $approval_json]]
              :insert plan_approval_events {session_id, plan_id, decided_at => approval_json}",
@@ -181,7 +251,10 @@ impl PlanStore {
     }
 
     /// Load the most recent plan for a session.
-    pub fn load_latest_plan(&self, session_id: &str) -> Result<Option<PlanDocument>, std::io::Error> {
+    pub fn load_latest_plan(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<PlanDocument>, std::io::Error> {
         let mut params = BTreeMap::new();
         params.insert("sid".to_string(), DataValue::from(session_id));
         let result = self

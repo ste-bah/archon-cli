@@ -44,6 +44,12 @@ pub(super) enum ToolLoopAction {
     Break,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum StreamRoundDraftState {
+    Pending,
+    InsertedEarly,
+}
+
 impl Agent {
     pub(super) async fn begin_process_turn(&mut self, user_input: &str) {
         self.turn_number += 1;
@@ -371,26 +377,10 @@ impl Agent {
         content.splice(0..0, drafts);
     }
 
-    pub(super) fn persist_guarded_plan_after_draft_admission(&self, round: &StreamRound) {
-        let exited_plan = round
-            .pending_tools
-            .iter()
-            .any(|tool| tool.name == "ExitPlanMode" && self.tool_result_passed(&tool.id));
-        if exited_plan {
-            self.persist_latest_plan_from_assistant();
-        }
-    }
-
-    fn tool_result_passed(&self, tool_id: &str) -> bool {
-        self.state.messages.iter().rev().any(|message| {
-            message["content"].as_array().is_some_and(|blocks| {
-                blocks.iter().any(|block| {
-                    block["type"] == "tool_result"
-                        && block["tool_use_id"] == tool_id
-                        && block["is_error"] == false
-                })
-            })
-        })
+    pub(super) fn persist_guarded_plan_after_draft_admission(&self, _round: &StreamRound) {
+        // ExitPlanMode persists the Draft before requesting approval. Keeping
+        // persistence there prevents an admitted tool result from bypassing the
+        // structured lifecycle ordering.
     }
 
     fn stream_round_drafts(

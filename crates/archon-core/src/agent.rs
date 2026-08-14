@@ -51,6 +51,7 @@ mod memory_integration_corrections;
 mod message_delivery;
 mod payloads;
 mod permission_gate;
+pub mod plan_approval;
 pub mod plan_mode_state;
 mod process_message;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
@@ -93,7 +94,9 @@ pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
-pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
+pub use types::{
+    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, TimestampedEvent,
+};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 

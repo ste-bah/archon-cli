@@ -38,6 +38,14 @@ impl Default for SessionStats {
     }
 }
 
+/// Semantic purpose of an AskUser prompt. Consumers must use this metadata
+/// rather than inferring approval behavior from untrusted prompt text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskUserPromptKind {
+    Ordinary,
+    PlanApproval,
+}
+
 // ---------------------------------------------------------------------------
 // Agent events -- emitted to the UI/consumer
 // ---------------------------------------------------------------------------
@@ -97,6 +105,7 @@ pub enum AgentEvent {
     /// Emitted when the agent invokes AskUserQuestion and needs real user input.
     AskUser {
         question: String,
+        kind: AskUserPromptKind,
     },
     /// Emitted when SendMessage is invoked to deliver a message to another agent.
     MessageSent {

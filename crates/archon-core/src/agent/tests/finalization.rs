@@ -188,7 +188,34 @@ async fn blocked_trivial_finalization_enters_bounded_repair_loop() {
     );
 }
 
-struct ExitPlanCompletionProvider;
+struct ExitPlanCompletionProvider {
+    streams: std::sync::Mutex<std::collections::VecDeque<(&'static str, &'static str)>>,
+}
+
+impl Default for ExitPlanCompletionProvider {
+    fn default() -> Self {
+        Self {
+            streams: std::sync::Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+}
+
+impl ExitPlanCompletionProvider {
+    fn two_plan_revisions() -> Self {
+        Self {
+            streams: std::sync::Mutex::new(std::collections::VecDeque::from([
+                (
+                    "exit-plan-rejected",
+                    "# Plan: Initial Plan\n## Steps\n1. Missing tests",
+                ),
+                (
+                    "exit-plan-approved",
+                    "# Plan: Revised Plan\n## Steps\n1. Add tests\n2. Execute safely",
+                ),
+            ])),
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl LlmProvider for ExitPlanCompletionProvider {
@@ -208,17 +235,26 @@ impl LlmProvider for ExitPlanCompletionProvider {
         &self,
         _: LlmRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+        let (tool_use_id, plan) = self
+            .streams
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or((
+                "exit-plan-tool",
+                "# Plan: Guarded Plan\n## Steps\n1. Persist this step",
+            ));
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         tx.send(StreamEvent::TextDelta {
             index: 0,
-            text: "# Plan: Guarded Plan\n## Steps\n1. Persist this step".into(),
+            text: plan.into(),
         })
         .await
         .unwrap();
         tx.send(StreamEvent::ContentBlockStart {
             index: 1,
             block_type: archon_llm::types::ContentBlockType::ToolUse,
-            tool_use_id: Some("exit-plan-tool".into()),
+            tool_use_id: Some(tool_use_id.into()),
             tool_name: Some("ExitPlanMode".into()),
         })
         .await
@@ -252,16 +288,9 @@ async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
         max_turns: Some(1),
         ..AgentConfig::default()
     };
-    config
-        .permission_rules
-        .always_allow
-        .push(archon_permissions::rules::ToolRule {
-            tool: "ExitPlanMode".into(),
-            pattern: "*".into(),
-        });
     *config.permission_mode.lock().await = "plan".into();
     let mut agent = Agent::new(
-        Arc::new(ExitPlanCompletionProvider),
+        Arc::new(ExitPlanCompletionProvider::default()),
         registry,
         config,
         tx,
@@ -270,11 +299,7 @@ async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
         ))),
     );
     agent.state.mode = AgentMode::Plan;
-    agent
-        .plan_mode_state
-        .lock()
-        .await
-        .previous_permission_mode = Some(PermissionMode::Auto);
+    agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Auto);
     agent.set_plan_store(plan_store);
     agent.set_guardrail_action_id(Some("guarded-plan-action".into()));
     agent.set_turn_finalization_callback(Arc::new(|_, _| TurnFinalizationVerdict::Allowed));
@@ -439,4 +464,6 @@ async fn scoped_tool_loop_break_requires_finalization_verdict() {
     assert!(matches!(error, AgentLoopError::FinalizationBlocked(_)));
 }
 
+include!("plan_approval.rs");
+include!("plan_approval_live_smoke.rs");
 include!("finalization_preview.rs");
