@@ -31,8 +31,15 @@ mod tests {
         let json = r#"{"id":"p","title":"Legacy","steps":[],"risks":[],"questions":[],"status":"active"}"#;
         let plan = PlanDocument::from_json(json).unwrap();
         assert_eq!(plan.status, PlanStatus::Executing);
-        assert!(plan.approval.is_none());
-        assert!(plan.reconciliation.is_empty());
+        assert_legacy_defaults(&plan);
+    }
+
+    #[test]
+    fn legacy_complete_plan_json_loads_with_safe_defaults() {
+        let json = r#"{"id":"p","title":"Legacy complete","steps":[],"risks":[],"questions":[],"status":"complete"}"#;
+        let plan = PlanDocument::from_json(json).unwrap();
+        assert_eq!(plan.status, PlanStatus::Completed);
+        assert_legacy_defaults(&plan);
     }
 
     #[test]
@@ -126,6 +133,15 @@ mod tests {
         let db = test_db();
         let store = PlanStore::new(&db).expect("init");
         assert!(store.load_plan("sess1", "nope").expect("load").is_none());
+    }
+
+    fn assert_legacy_defaults(plan: &PlanDocument) {
+        assert!(plan.approval.is_none());
+        assert!(plan.reconciliation.is_empty());
+        assert!(plan.session_id.is_none());
+        assert!(plan.branch.is_none());
+        assert!(plan.commits.is_empty());
+        assert!(!plan.user_edited);
     }
 
     fn step(number: u32, description: &str, status: PlanStepStatus) -> PlanStep {

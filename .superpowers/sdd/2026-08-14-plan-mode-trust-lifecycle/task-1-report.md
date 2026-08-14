@@ -19,8 +19,8 @@ All six required dev-flow gates passed:
 1. `01-tests-written-first` — recorded RED test evidence.
 2. `02-implementation-complete` — recorded compile/file-size evidence.
 3. `03-sherlock-code-review` — APPROVED independent review.
-4. `04-tests-passing` — 11 focused tests passed:
-   - `cargo test -p archon-session plan::tests --locked`: 7 passed.
+4. `04-tests-passing` — 12 focused tests passed:
+   - `cargo test -p archon-session plan::tests --locked`: 8 passed.
    - `cargo test -p archon-core plan_mode_state --locked`: 4 passed.
 5. `05-live-smoke-test` — executed successfully:
    ```bash
@@ -38,6 +38,38 @@ Final gate command:
 ```
 
 Result: `ALL 6 GATES PASSED`.
+
+## Inspectable Gate Evidence
+
+The following artifacts were read directly from the task worktree:
+
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/01-tests-written-first.passed` — `PASSED`; evidence: `RED: legacy plan defaults and safe permission restoration tests failed before implementation`.
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/02-implementation-complete.passed` — `PASSED`; evidence: typed lifecycle and safe restore compile, focused tests pass, and `FileSizeGuard: exit 0`.
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/03-sherlock-code-review.passed` — `PASSED`; verdict text: `APPROVED: independent Sherlock review verified serde compatibility, immutable approval ledger, re-entry preservation, and exhaustive safe restore`.
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/04-tests-passing.passed` — `PASSED`; updated after the compatibility regression fix with the exact focused test count below.
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/05-live-smoke-test.passed` — `PASSED`; evidence: `EXEC_VERIFIED (exit 0): cargo test -p archon-core plan_mode_state::tests::missing_previous_mode_restores_default_not_auto --locked -- --exact`.
+- `.gates/TASK-ISSUE-181-PLAN-CONTRACT/06-sherlock-final-review.passed` — `PASSED`; verdict text: `APPROVED: cold final Sherlock review verified legacy serde compatibility, append-only Cozo ledger, exhaustive safe permission restoration, and re-entry preservation; locked focused tests and check passed`.
+
+### Commands and Output Summaries
+
+Initial regression RED command:
+
+```bash
+cargo test -p archon-session legacy_complete_plan_json_loads_with_safe_defaults --locked
+```
+
+Before the alias fix this exited `101` with `unknown variant 'complete'`, demonstrating the legacy-deserialization defect.
+
+After adding `#[serde(alias = "complete")]` to `PlanStatus::Completed`, the following commands succeeded:
+
+```bash
+cargo test -p archon-session legacy_complete_plan_json_loads_with_safe_defaults --locked
+cargo test -p archon-session plan::tests --locked
+cargo test -p archon-core plan_mode_state --locked
+cargo check -p archon-session -p archon-core --all-targets --locked
+```
+
+Results: the targeted compatibility test passed `1`; session plan tests passed `8`; plan-mode-state tests passed `4`; the locked all-target check completed successfully. The expanded legacy tests assert defaults for `approval`, `reconciliation`, `session_id`, `branch`, `commits`, and `user_edited`.
 
 ## Key Files
 

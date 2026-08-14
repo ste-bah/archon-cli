@@ -40,6 +40,7 @@ pub enum PlanStatus {
     Approved,
     #[serde(alias = "active")]
     Executing,
+    #[serde(alias = "complete")]
     Completed,
     Abandoned,
 }
