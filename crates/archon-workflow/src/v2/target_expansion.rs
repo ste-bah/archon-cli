@@ -41,17 +41,38 @@ pub fn expand_declared_rust_module_targets(
     let mut effective_targets = BTreeSet::new();
     let mut effective_scopes = BTreeSet::new();
     let mut target_file_expansions = Vec::new();
-    for target in &declared_target_files {
+    // Ownership is transitive: a declared `a.rs` owns `a/b.rs`, and `a/b.rs`
+    // owns `a/b/c.rs` just as directly. Expanding the declared list in one
+    // pass stopped at the first generation, so a grandchild module was left
+    // unowned and the branch that edited it failed write-scope on its own
+    // file. Walk until nothing new appears instead.
+    let declared_lookup: BTreeSet<String> = declared_target_files.iter().cloned().collect();
+    let mut pending: Vec<String> = declared_target_files.clone();
+    let mut visited: BTreeSet<String> = BTreeSet::new();
+    while let Some(target) = pending.pop() {
+        if !visited.insert(target.clone()) {
+            // A module cycle would otherwise queue forever.
+            continue;
+        }
         effective_targets.insert(target.clone());
         let Some(root) = repository_root.as_deref() else {
             continue;
         };
-        if let Some(expansion) = rust_module_expansion(root, target) {
+        if let Some(expansion) = rust_module_expansion(root, &target) {
             for expanded in &expansion.expanded {
                 effective_targets.insert(expanded.clone());
+                if !visited.contains(expanded) {
+                    pending.push(expanded.clone());
+                }
             }
-            for scope in &expansion.dir_scopes {
-                effective_scopes.insert(scope.clone());
+            // Directory scope stays with the *declared* targets. It exists so
+            // a declared file at the size cap can split into its own module
+            // directory; granting it for every transitively owned file would
+            // widen write scope well past the ownership this fix restores.
+            if declared_lookup.contains(&target) {
+                for scope in &expansion.dir_scopes {
+                    effective_scopes.insert(scope.clone());
+                }
             }
             if !expansion.expanded.is_empty()
                 || !expansion.dir_scopes.is_empty()
@@ -337,6 +358,62 @@ mod tests {
                 expanded.target_files
             );
         }
+    }
+
+    /// The live failure after the `#[path]` fix. `data_lake.rs` declares
+    /// `mod tests;`, and `data_lake/tests.rs` declares `mod
+    /// artifact_tolerance;`. One pass found the child and stopped, so the
+    /// grandchild was unowned and its branch failed write-scope.
+    #[test]
+    fn ownership_reaches_a_grandchild_module() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/data_lake/tests")).expect("dirs");
+        fs::write(repo.join("src/data_lake.rs"), "mod tests;\n").expect("root");
+        fs::write(
+            repo.join("src/data_lake/tests.rs"),
+            "mod artifact_tolerance;\n",
+        )
+        .expect("child");
+        fs::write(repo.join("src/data_lake/tests/artifact_tolerance.rs"), "").expect("grandchild");
+
+        let expanded = expand_declared_rust_module_targets(
+            "item",
+            &["src/data_lake.rs".to_string()],
+            repo.to_str(),
+        )
+        .expect("expansion");
+
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/data_lake/tests.rs".to_string())
+        );
+        assert!(
+            expanded
+                .target_files
+                .contains(&"src/data_lake/tests/artifact_tolerance.rs".to_string()),
+            "a grandchild module must be owned: {:?}",
+            expanded.target_files
+        );
+    }
+
+    /// Transitive walking must terminate even if two files declare each other.
+    #[test]
+    fn a_module_cycle_terminates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("src/a")).expect("dir a");
+        fs::create_dir_all(repo.join("src/a/b")).expect("dir b");
+        fs::write(repo.join("src/a.rs"), "mod b;\n").expect("a");
+        // `a/b.rs` points back at `a.rs` through an explicit path.
+        fs::write(repo.join("src/a/b.rs"), "#[path = \"../a.rs\"]\nmod a;\n").expect("b");
+
+        let expanded =
+            expand_declared_rust_module_targets("item", &["src/a.rs".to_string()], repo.to_str())
+                .expect("expansion");
+
+        assert!(expanded.target_files.contains(&"src/a/b.rs".to_string()));
     }
 
     #[test]
