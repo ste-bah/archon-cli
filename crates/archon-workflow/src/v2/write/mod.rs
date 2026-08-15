@@ -29,6 +29,7 @@ use crate::generated_contract::{
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
 
+mod repository_root;
 mod size_retry;
 mod target_budgets;
 mod transport_retry;
@@ -129,6 +130,9 @@ pub async fn run_write_capable_v2_fanout(
     // The line cap is enforced when the manifest is validated — after the agent
     // has written everything. Give it the budget first, or it discovers the cap
     // by losing the whole patch.
+    // An agent that is not told where the repository is guesses the artifact
+    // root and hunts for `<project>/crates/...` files that cannot exist.
+    repository_root::stamp_target_repository_root(&mut branches, target_repository_root);
     target_budgets::stamp_target_file_budgets(
         &mut branches,
         target_repository_root,
