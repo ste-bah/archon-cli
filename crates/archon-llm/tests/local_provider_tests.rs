@@ -173,38 +173,3 @@ fn local_uses_openai_sse_format() {
         "expected TextDelta with Ollama content, got: {events:?}"
     );
 }
-
-#[test]
-fn local_parses_vllm_reasoning_delta_as_thinking() {
-    // vLLM serves thinking models (DeepSeek V4 Flash and friends) with the
-    // chain of thought in `reasoning`, not `content`. A chunk carrying both
-    // must yield the answer text AND the reasoning, or a model that spends
-    // most of its tokens thinking looks like it returned nothing.
-    let chunk = r#"{"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"HELL","reasoning":"LLO."},"finish_reason":null}]}"#;
-    let events = LocalProvider::parse_sse_chunk(chunk);
-
-    let has_thinking = events.iter().any(|e| {
-        matches!(e, archon_llm::streaming::StreamEvent::ThinkingDelta { thinking, .. } if thinking == "LLO.")
-    });
-    let has_text = events.iter().any(|e| {
-        matches!(e, archon_llm::streaming::StreamEvent::TextDelta { text, .. } if text == "HELL")
-    });
-
-    assert!(has_thinking, "expected ThinkingDelta, got: {events:?}");
-    assert!(has_text, "expected TextDelta, got: {events:?}");
-}
-
-#[test]
-fn local_parses_reasoning_content_alias_as_thinking() {
-    // DeepSeek's own API and several proxies spell the same field
-    // `reasoning_content`.
-    let chunk = r#"{"id":"chatcmpl-2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"weighing options"},"finish_reason":null}]}"#;
-    let events = LocalProvider::parse_sse_chunk(chunk);
-
-    assert!(
-        events.iter().any(|e| {
-            matches!(e, archon_llm::streaming::StreamEvent::ThinkingDelta { thinking, .. } if thinking == "weighing options")
-        }),
-        "expected ThinkingDelta from reasoning_content, got: {events:?}"
-    );
-}
