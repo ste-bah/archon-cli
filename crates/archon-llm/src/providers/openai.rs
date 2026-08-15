@@ -309,6 +309,29 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
 
     let mut events = Vec::new();
 
+    // Reasoning delta. Thinking models served over the OpenAI-compatible API
+    // carry their chain of thought outside `content`: vLLM emits `reasoning`,
+    // DeepSeek's own API and several proxies emit `reasoning_content`. Without
+    // this branch every reasoning token is dropped on the floor, and a model
+    // that answers entirely in reasoning tokens looks like an empty response.
+    if let Some(reasoning) = delta
+        .get("reasoning")
+        .or_else(|| delta.get("reasoning_content"))
+        .and_then(|r| r.as_str())
+        && !reasoning.is_empty()
+    {
+        events.push(StreamEvent::ContentBlockStart {
+            index: 0,
+            block_type: ContentBlockType::Thinking,
+            tool_use_id: None,
+            tool_name: None,
+        });
+        events.push(StreamEvent::ThinkingDelta {
+            index: 0,
+            thinking: reasoning.to_string(),
+        });
+    }
+
     // Text content delta.
     if let Some(content) = delta.get("content").and_then(|c| c.as_str())
         && !content.is_empty()

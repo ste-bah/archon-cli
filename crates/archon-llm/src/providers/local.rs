@@ -15,6 +15,47 @@ use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
 // ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Render a request failure with its full source chain.
+///
+/// `reqwest::Error`'s own `Display` stops at "error sending request for url
+/// (...)" and drops every underlying cause, so a blocked socket, a refused
+/// connection, a proxy with no route and a TLS failure all print the same
+/// useless sentence. Walking `source()` recovers the operating system's
+/// reason — "Connection refused", "Operation not permitted", "Too many open
+/// files" — which is the only part that tells you what to fix.
+fn send_error(url: &str, error: &reqwest::Error) -> LlmError {
+    use std::error::Error as _;
+
+    let mut causes = Vec::new();
+    let mut source: Option<&(dyn std::error::Error + 'static)> = error.source();
+    while let Some(cause) = source {
+        causes.push(cause.to_string());
+        source = cause.source();
+    }
+
+    let kind = if error.is_connect() {
+        "could not open a connection to"
+    } else if error.is_timeout() {
+        "timed out talking to"
+    } else if error.is_request() {
+        "failed to send the request to"
+    } else {
+        "request failed against"
+    };
+
+    let detail = if causes.is_empty() {
+        error.to_string()
+    } else {
+        causes.join(": ")
+    };
+
+    LlmError::Http(format!("{kind} {url}: {detail}"))
+}
+
+// ---------------------------------------------------------------------------
 // LocalProvider
 // ---------------------------------------------------------------------------
 
@@ -87,20 +128,16 @@ impl LocalProvider {
         parse_openai_sse_chunk(chunk)
     }
 
-    /// Check if Ollama is running.
+    /// Check if the server is running.
     ///
     /// Returns `Err` if the server is not reachable.
     pub async fn health_check(&self) -> Result<(), LlmError> {
         let url = self.health_check_url();
-        self.http.get(&url).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::Http(format!(
-                    "Ollama not running? Could not connect to {url}: {e}"
-                ))
-            } else {
-                LlmError::Http(e.to_string())
-            }
-        })?;
+        self.http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| send_error(&url, &e))?;
         Ok(())
     }
 
@@ -141,16 +178,13 @@ impl LocalProvider {
         );
 
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::Http(format!(
-                    "Ollama not running? Could not connect to {}: {e}",
-                    self.base_url
-                ))
-            } else {
-                LlmError::Http(e.to_string())
-            }
-        })?;
+        let resp = self
+            .http
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| send_error(&url, &e))?;
 
         let status = resp.status().as_u16();
         if status >= 400 {
