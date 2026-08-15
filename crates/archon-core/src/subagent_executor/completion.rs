@@ -116,7 +116,7 @@ impl AgentSubagentExecutor {
                 Ok(_) => {
                     // Clean vs. has_changes split.
                     match archon_tools::worktree_manager::WorktreeManager::cleanup_session(
-                        &format!("subagent-{subagent_id}"),
+                        &archon_tools::worktree_ownership::subagent_owner_key(&subagent_id),
                     ) {
                         Ok(()) => {
                             tracing::info!(subagent_id = %subagent_id, "clean worktree auto-removed");
@@ -135,7 +135,7 @@ impl AgentSubagentExecutor {
                 Err(_) => {
                     // Silent cleanup on failure.
                     let _ = archon_tools::worktree_manager::WorktreeManager::cleanup_session(
-                        &format!("subagent-{subagent_id}"),
+                        &archon_tools::worktree_ownership::subagent_owner_key(&subagent_id),
                     );
                     tracing::info!(subagent_id = %subagent_id, "worktree cleaned up after failure");
                 }

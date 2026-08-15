@@ -61,7 +61,7 @@ impl AgentSubagentExecutor {
             return Ok(None);
         }
         let source_root = requested_cwd.unwrap_or(&self.working_dir);
-        match super::paths::create_worktree(source_root, manager_id) {
+        match super::paths::create_worktree(source_root, &self.session_id, manager_id) {
             Ok(info) => {
                 tracing::info!(
                     subagent_id = %manager_id,

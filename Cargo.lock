@@ -1056,6 +1056,7 @@ dependencies = [
  "cron",
  "dashmap 6.1.0",
  "dirs",
+ "fd-lock",
  "futures-util",
  "git2",
  "glob",

@@ -15,13 +15,17 @@ pub(super) fn resolve_cwd(base: &Path, cwd: Option<&str>) -> Option<PathBuf> {
 
 pub(super) fn create_worktree(
     source_root: &Path,
+    session_id: &str,
     subagent_id: &str,
 ) -> Result<WorktreeInfo, String> {
-    WorktreeManager::create_worktree_from_path(source_root, &format!("subagent-{subagent_id}"))
-        .map_err(|err| {
-            format!(
-                "failed to create worktree from {}: {err}",
-                source_root.display()
-            )
-        })
+    // The `subagent-` prefix used to be spelled out here and at both cleanup
+    // sites; it is now one function, so create and cleanup cannot drift onto
+    // different directories (#184 M4).
+    let owner_id = archon_tools::worktree_ownership::subagent_owner_key(subagent_id);
+    WorktreeManager::create_worktree_from_path(source_root, session_id, &owner_id).map_err(|err| {
+        format!(
+            "failed to create worktree from {}: {err}",
+            source_root.display()
+        )
+    })
 }

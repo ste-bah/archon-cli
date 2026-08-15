@@ -64,7 +64,9 @@ pub mod task_stop;
 pub mod task_update;
 
 pub mod worktree;
+pub mod worktree_exit;
 pub mod worktree_manager;
+pub mod worktree_ownership;
 
 pub mod board;
 pub mod cron_create;
