@@ -141,6 +141,30 @@ pub fn claim(agent_id: &str, label: Option<&str>, declared: &[String]) -> Vec<Cl
     overlaps
 }
 
+/// Live overlaps against a claim `agent_id` has already recorded.
+///
+/// The spawn path records the claim and reports overlaps in one step; the
+/// executor needs to ask again slightly later, when deciding isolation, without
+/// re-recording anything. Empty when the agent declared nothing — which is why
+/// declaring is what buys the protection.
+pub fn overlaps_for(agent_id: &str) -> Vec<ClaimOverlap> {
+    let map = claims();
+    let Some(mine) = map.get(agent_id) else {
+        return Vec::new();
+    };
+
+    map.values()
+        .filter(|held| held.agent_id != agent_id && is_live(&held.agent_id))
+        .filter_map(|held| {
+            let paths = held.conflicts_with(&mine.keys);
+            (!paths.is_empty()).then(|| ClaimOverlap {
+                holder: held.clone(),
+                paths,
+            })
+        })
+        .collect()
+}
+
 /// Drop `agent_id`'s claim.
 ///
 /// Not required for correctness — a dead agent's claim is already ignored — but

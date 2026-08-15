@@ -20,6 +20,36 @@ pub(super) struct PreparedSubagentRun {
     pub(super) isolation: Option<String>,
 }
 
+/// Whether this agent can write to the tree at all (#184 M3).
+///
+/// A read-only agent cannot collide with anyone, so it never earns a worktree
+/// however the policy is set — and isolating one would spend disk on an agent
+/// with nothing to isolate.
+///
+/// An agent with no explicit allowlist is assumed write-capable: the tools it
+/// inherits include `Write` and `Edit`, and guessing the safe-looking answer
+/// here would silently disable isolation for the common case.
+fn is_write_capable(definition: Option<&CustomAgentDefinition>) -> bool {
+    const WRITING_TOOLS: &[&str] = &[
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "ApplyPatch",
+        "NotebookEdit",
+        "Bash",
+    ];
+
+    let Some(allowed) = definition.and_then(|def| def.allowed_tools.as_ref()) else {
+        return true;
+    };
+    if allowed.is_empty() {
+        return true;
+    }
+    allowed
+        .iter()
+        .any(|tool| WRITING_TOOLS.contains(&tool.as_str()))
+}
+
 impl AgentSubagentExecutor {
     pub(super) async fn register_subagent_run(
         &self,
@@ -102,10 +132,37 @@ impl AgentSubagentExecutor {
             .unwrap_or("general-purpose")
             .to_string();
         let def_effort = resolved_def.as_ref().and_then(|d| d.effort.clone());
-        let isolation = request
+        // Resolve the ladder rung here rather than passing the raw string on.
+        //
+        // `auto_isolation` and `isolation_max_tier` were otherwise dead config:
+        // the downstream check only asked whether the *requested* string needed
+        // a worktree, so an overlapping writer was never isolated automatically
+        // and the cap never clamped anything (#184 M3).
+        let requested_isolation = request
             .isolation
             .clone()
             .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.clone()));
+        let (tier, reason) = archon_tools::isolation::resolve_tier(
+            &archon_tools::isolation::IsolationRequest {
+                explicit: requested_isolation,
+                // M2's claims are recorded against this agent at spawn, so an
+                // overlap is already known by the time we get here.
+                overlaps_live_claim: !archon_tools::write_claims::overlaps_for(manager_id)
+                    .is_empty(),
+                write_capable: is_write_capable(resolved_def.as_ref()),
+            },
+            self.agent_config.subagent_auto_isolation,
+            self.agent_config.subagent_isolation_max_tier,
+        );
+        if let archon_tools::isolation::IsolationReason::Clamped(wanted) = &reason {
+            tracing::warn!(
+                subagent_id = %manager_id,
+                wanted = wanted.as_str(),
+                granted = tier.as_str(),
+                "isolation clamped by subagent.isolation_max_tier"
+            );
+        }
+        let isolation = Some(tier.as_str().to_string());
 
         Ok(PreparedSubagentRun {
             resolved_def,
