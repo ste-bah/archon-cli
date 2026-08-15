@@ -105,8 +105,8 @@ pub(super) fn input_schema() -> serde_json::Value {
             },
             "isolation": {
                 "type": "string",
-                "enum": ["none", "worktree"],
-                "description": "Optional isolation mode. Use 'none' or omit this field for normal/read-only subagents. Use 'worktree' only when isolated file edits are required."
+                "enum": ["none", "worktree", "worktree-with-builds"],
+                "description": "Optional isolation mode. Use 'none' or omit for normal/read-only subagents. Use 'worktree' when isolated file edits are required — build and test commands are refused at that tier, because a single build in a fresh worktree creates a cold target directory worth gigabytes. Use 'worktree-with-builds' only when the subagent genuinely must compile or test, and accept that disk cost."
             },
             "expected_target_files": {
                 "type": "array",
