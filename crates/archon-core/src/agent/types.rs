@@ -192,6 +192,12 @@ pub struct AgentConfig {
     /// [`crate::subagent::SubagentManager`] so the live fan-out cap is
     /// configurable rather than a hardcoded constant.
     pub max_subagent_concurrency: usize,
+    /// Seconds a subagent's LLM stream may go silent before the round is
+    /// abandoned, threaded from `config.subagent.stream_idle_timeout_secs`.
+    ///
+    /// Threaded the same way as `max_subagent_concurrency` rather than passed
+    /// to the runner constructor, which several call sites share.
+    pub subagent_stream_idle_timeout_secs: u64,
 }
 
 impl AgentConfig {
@@ -267,6 +273,7 @@ impl Default for AgentConfig {
             activity_sink: None,
             context: crate::config::ContextConfig::default(),
             max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
+            subagent_stream_idle_timeout_secs: crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS,
         }
     }
 }

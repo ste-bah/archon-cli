@@ -123,6 +123,11 @@ impl SubagentRunner {
         }
     }
 
+    /// The parent agent configuration threaded into this runner.
+    pub(crate) fn agent_config(&self) -> &crate::agent::AgentConfig {
+        &self.agent_config
+    }
+
     pub fn model(&self) -> &str {
         &self.model
     }

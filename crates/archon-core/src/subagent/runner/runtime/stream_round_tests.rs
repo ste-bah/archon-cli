@@ -102,3 +102,54 @@ fn rebuilt_request_marks_latest_tool_result_without_mutating_history() {
     );
     assert!(messages[2]["content"][0].get("cache_control").is_none());
 }
+
+/// The idle guard is a stalled-provider check, not a thinking budget. It was
+/// hardcoded at 120s — sixty times tighter than the host_call_timeout_secs
+/// stage it runs inside — and killed a live inventory reducer three turns in.
+#[test]
+fn the_idle_timeout_comes_from_configuration() {
+    let mut agent_config = crate::agent::AgentConfig {
+        subagent_stream_idle_timeout_secs: 900,
+        ..Default::default()
+    };
+    let runner = |config: &crate::agent::AgentConfig| {
+        SubagentRunner::new(
+            Arc::new(StalledProvider {
+                started: Mutex::new(None),
+                dropped: Mutex::new(None),
+            }),
+            String::new(),
+            Vec::new(),
+            Arc::new(crate::dispatch::ToolRegistry::new()),
+            ToolContext::default(),
+            "model".into(),
+            1,
+            60,
+            Arc::new(config.clone()),
+            Arc::new(test_identity()),
+        )
+    };
+
+    assert_eq!(
+        super::stream_idle_timeout(&runner(&agent_config)),
+        std::time::Duration::from_secs(900)
+    );
+
+    // A zero would make every round fail instantly, so it is floored at one.
+    agent_config.subagent_stream_idle_timeout_secs = 0;
+    assert_eq!(
+        super::stream_idle_timeout(&runner(&agent_config)),
+        std::time::Duration::from_secs(1)
+    );
+}
+
+/// The shipped default must be generous enough that only a genuinely stalled
+/// provider trips it, and still well inside the enclosing stage timeout.
+#[test]
+fn the_default_idle_timeout_is_not_a_thinking_budget() {
+    assert_eq!(
+        crate::agent::AgentConfig::default().subagent_stream_idle_timeout_secs,
+        crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS
+    );
+    assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600);
+}

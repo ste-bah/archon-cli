@@ -252,12 +252,28 @@ impl Default for CustomIdentityConfig {
 #[serde(default)]
 pub struct SubagentConfig {
     pub max_concurrent: usize,
+    /// Seconds a subagent's LLM stream may go silent before the round is
+    /// abandoned.
+    ///
+    /// This guards against a provider that has stopped sending without closing
+    /// the connection. It is not a thinking budget, and the two are easy to
+    /// confuse: a reducer on a large context routinely pauses longer between
+    /// stream events than a short guard allows, and the agent is then killed
+    /// mid-work with everything it had done discarded. The hardcoded 120s was
+    /// sixty times tighter than the `host_call_timeout_secs` stage it runs
+    /// inside, and killed a live inventory reducer three turns into its work.
+    pub stream_idle_timeout_secs: u64,
 }
+
+/// Generous enough that only a genuinely stalled provider trips it, and still
+/// far inside the enclosing stage timeout.
+pub const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 600;
 
 impl Default for SubagentConfig {
     fn default() -> Self {
         Self {
             max_concurrent: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
+            stream_idle_timeout_secs: DEFAULT_STREAM_IDLE_TIMEOUT_SECS,
         }
     }
 }

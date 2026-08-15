@@ -2,8 +2,22 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const STREAM_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
+
+/// How long the provider may go silent before the round is abandoned.
+///
+/// Configurable via `[subagent] stream_idle_timeout_secs`. This is a
+/// stalled-provider guard, not a thinking budget: the hardcoded 120s was sixty
+/// times tighter than the enclosing `host_call_timeout_secs` stage, and killed
+/// a live inventory reducer three turns into its work.
+fn stream_idle_timeout(runner: &SubagentRunner) -> Duration {
+    Duration::from_secs(
+        runner
+            .agent_config()
+            .subagent_stream_idle_timeout_secs
+            .max(1),
+    )
+}
 
 pub(super) struct StreamRoundResult {
     pub text_content: String,
@@ -44,7 +58,7 @@ pub(super) async fn collect_stream_round(
             projected_request(runner, messages.as_slice(), &template)
         };
         match tokio::time::timeout(
-            STREAM_IDLE_TIMEOUT,
+            stream_idle_timeout(runner),
             open_stream_with_retries(
                 runner,
                 messages,
@@ -78,18 +92,21 @@ pub(super) async fn collect_stream_round(
     let mut pending_tool_indices: Vec<u32> = Vec::new();
     let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
     let mut retry_after_compact = false;
-    let mut received_event = false;
 
     loop {
-        let event = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, rx.recv()).await {
+        let event = match tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await {
             Ok(event) => event,
-            Err(_) if !received_event && !reconnected => {
+            // Reconnect once whether or not events have already arrived. The
+            // old guard also required `!received_event`, so a stream that went
+            // quiet mid-round was fatal with no retry — which is exactly when a
+            // reconnect is worth attempting.
+            Err(_) if !reconnected => {
                 drop(rx);
                 reconnected = true;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
                 let retry_request = projected_request(runner, messages.as_slice(), &request);
                 rx = tokio::time::timeout(
-                    STREAM_IDLE_TIMEOUT,
+                    stream_idle_timeout(runner),
                     runner.provider.stream(retry_request),
                 )
                 .await
@@ -101,14 +118,13 @@ pub(super) async fn collect_stream_round(
             Err(_) => {
                 anyhow::bail!(
                     "Subagent LLM stream idle timeout: no event received for {}s",
-                    STREAM_IDLE_TIMEOUT.as_secs()
+                    stream_idle_timeout(runner).as_secs()
                 )
             }
         };
         let Some(event) = event else {
             break;
         };
-        received_event = true;
         usage_acc.record_event(&event);
         match event {
             StreamEvent::ContentBlockStart {
