@@ -178,6 +178,63 @@ pub fn build_structured_envelope(req: &SendMessageRequest) -> String {
     out
 }
 
+/// What an agent's status envelope reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentStatusKind {
+    /// Finished and produced a result.
+    Completed,
+    /// Ended without producing one. Cancellation arrives here too: the
+    /// completion path sees only `Result<String, String>`, so a cancelled agent
+    /// is indistinguishable from a failed one by the time it reports.
+    Failed,
+    /// Exceeded the auto-background timer and is still running.
+    ///
+    /// The case the whole envelope exists for: without it a wedged agent and a
+    /// busy one look identical to the lead.
+    Idle,
+}
+
+impl AgentStatusKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Idle => "idle",
+        }
+    }
+}
+
+/// Build the envelope announcing an agent's status to its lead (#184 M6).
+///
+/// Shares [`xml_escape`] with [`build_structured_envelope`] deliberately: agent
+/// names and error text are not caller-controlled in the same way a
+/// `request_id` is, but they are model-influenced, and one escaping rule is
+/// easier to keep right than two.
+pub fn build_agent_status_envelope(
+    agent_id: &str,
+    name: Option<&str>,
+    status: AgentStatusKind,
+    detail: Option<&str>,
+) -> String {
+    let mut out = format!(
+        "<archon_agent_status agent_id=\"{}\" name=\"{}\" status=\"{}\">\n",
+        xml_escape(agent_id),
+        xml_escape(name.unwrap_or("")),
+        status.as_str(),
+    );
+
+    if let Some(detail) = detail.filter(|d| !d.trim().is_empty()) {
+        let tag = match status {
+            AgentStatusKind::Failed => "error",
+            _ => "result",
+        };
+        out.push_str(&format!("<{tag}>{}</{tag}>\n", xml_escape(detail)));
+    }
+
+    out.push_str("</archon_agent_status>");
+    out
+}
+
 impl SendMessageTool {
     fn validate_and_build(
         &self,

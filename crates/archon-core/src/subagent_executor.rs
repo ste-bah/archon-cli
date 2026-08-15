@@ -378,4 +378,41 @@ impl SubagentExecutor for AgentSubagentExecutor {
         self.handle_visible_complete(subagent_id, result, nested)
             .await
     }
+
+    /// Announce that an agent outlived the auto-background timer.
+    ///
+    /// Synchronous by contract — see the trait — so the work is spawned rather
+    /// than awaited. The timer path returns immediately either way; the lead
+    /// picks the envelope up at its next round boundary.
+    ///
+    /// The manager is the only state this touches, and it is an `Arc`, so the
+    /// spawned task holds nothing borrowed from the executor.
+    fn on_auto_backgrounded(&self, subagent_id: &str) {
+        let manager = Arc::clone(&self.subagent_manager);
+        let subagent_id = subagent_id.to_string();
+
+        archon_observability::spawn_named("subagent-idle-notice", async move {
+            let name = {
+                let mgr = manager.lock().await;
+                mgr.get_status(&subagent_id)
+                    .and_then(|info| info.request.subagent_type.clone())
+            };
+
+            let envelope = archon_tools::send_message::build_agent_status_envelope(
+                &subagent_id,
+                name.as_deref(),
+                archon_tools::send_message::AgentStatusKind::Idle,
+                Some("still running after the auto-background timer expired"),
+            );
+
+            let mut mgr = manager.lock().await;
+            if mgr.pending_message_count(crate::message_router::LEAD_QUEUE_ID)
+                >= crate::message_router::MAX_PENDING_MESSAGES
+            {
+                tracing::warn!(subagent_id, "lead inbox is full; dropping an idle notice");
+                return;
+            }
+            mgr.queue_pending_message(crate::message_router::LEAD_QUEUE_ID, envelope);
+        });
+    }
 }

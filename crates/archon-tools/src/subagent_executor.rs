@@ -193,6 +193,25 @@ pub trait SubagentExecutor: Send + Sync {
     /// `run_subagent` takes the no-timer branch of the `select!`).
     fn auto_background_ms(&self) -> u64;
 
+    /// The auto-background timer fired and this agent is still running.
+    ///
+    /// **Synchronous on purpose.** The `AutoBackgrounded` arm must not await:
+    /// `preserve_d5_agt025.rs` reads `run.rs` as source text and fails if the
+    /// arm body contains `.await`, because awaiting there is what re-entered
+    /// the join handle the timer had just abandoned. Implementations that need
+    /// to do async work spawn it; nothing here blocks the timer path.
+    ///
+    /// This does not weaken PRESERVE-D5. That invariant says an abandoned agent
+    /// gets no *visible hooks* and no *worktree cleanup*, both of which act on
+    /// the agent. Telling the lead the agent is still alive is neither — it is
+    /// the one signal that distinguishes a wedged agent from a busy one, and
+    /// auto-background is precisely when the distinction stops being obvious
+    /// (#184 M6).
+    ///
+    /// Default no-op so existing executors, including the test doubles, are
+    /// unaffected.
+    fn on_auto_backgrounded(&self, _subagent_id: &str) {}
+
     /// Classify a request as foreground vs. explicit-background.
     /// Called by `AgentTool::execute` BEFORE spawning `run_subagent`
     /// so the tool can fork between the immediate-return background
