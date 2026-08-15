@@ -30,8 +30,67 @@ pub(super) async fn replay_tool_round(
     let prepared = prepare_tools_for_execution(runner, &pending_tools);
     record_assistant_tool_use_message(runner, messages, text_content, thinking_blocks, &prepared);
     let exec_results = execute_prepared_tools(runner, &prepared, round_cancel).await;
+    // Before the results are recorded, not after: recording is what writes the
+    // text into the history and the transcript, and an unrouted SendMessage
+    // writes its own request envelope there as though it had been delivered.
+    let exec_results = route_send_message_results(runner, &prepared, exec_results).await;
     record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
+}
+
+/// Deliver any `SendMessage` this round produced.
+///
+/// Without this a subagent's `SendMessage` returned its own serialized request
+/// as the tool result: the model read that as confirmation and carried on,
+/// while nothing had been routed anywhere (#184 M1).
+///
+/// The subagent host cannot resume a stopped target — see
+/// [`crate::message_router::RouterHost::resume_stopped_agent`] — so a message
+/// to a stopped peer is reported unreachable rather than silently starting a
+/// whole agent run inside this one's tool round.
+async fn route_send_message_results(
+    runner: &SubagentRunner,
+    prepared: &[PreparedTool],
+    results: Vec<archon_tools::tool::ToolResult>,
+) -> Vec<archon_tools::tool::ToolResult> {
+    let (Some(manager), Some(self_id)) = (runner.subagent_manager(), runner.runner_agent_id())
+    else {
+        // No manager or no identity means this runner is not registered with a
+        // session — a test harness or a bare runner. Routing would have nowhere
+        // to deliver, so leave the results alone.
+        return results;
+    };
+
+    if !prepared.iter().any(|tool| tool.name == "SendMessage") {
+        return results;
+    }
+
+    let ctx = crate::message_router::RouterContext::new(
+        manager,
+        crate::message_router::SenderIdentity::Subagent {
+            id: self_id.to_string(),
+            lead_id: Some(crate::message_router::LEAD_QUEUE_ID.to_string()),
+        },
+    );
+    let host = SubagentRouterHost;
+
+    let mut routed = Vec::with_capacity(results.len());
+    for (tool, result) in prepared.iter().zip(results) {
+        routed.push(
+            crate::message_router::maybe_route_send_message(&ctx, &host, &tool.name, result).await,
+        );
+    }
+    routed
+}
+
+/// The subagent's side of the router: delivery only, no resume.
+struct SubagentRouterHost;
+
+#[async_trait::async_trait]
+impl crate::message_router::RouterHost for SubagentRouterHost {
+    async fn on_delivered(&self, target_id: &str, _message: &str) {
+        tracing::debug!(target_id, "subagent routed a message");
+    }
 }
 
 fn record_assistant_tool_use_message(

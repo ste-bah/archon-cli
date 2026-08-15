@@ -236,8 +236,12 @@ impl AgentSubagentExecutor {
         runner: &mut crate::subagent::runner::SubagentRunner,
         manager_id: &str,
     ) {
-        if let Some(resume_msgs) = self.pending_resume_messages.lock().await.take() {
+        // Take only OUR history. This used to be a bare `.take()` on a single
+        // shared slot, so a runner could pick up whichever transcript happened
+        // to be sitting there — including another agent's (#184 M1).
+        if let Some(resume_msgs) = self.pending_resume_messages.lock().await.remove(manager_id) {
             tracing::info!(
+                subagent_id = %manager_id,
                 count = resume_msgs.len(),
                 "Injecting resume messages into SubagentRunner"
             );

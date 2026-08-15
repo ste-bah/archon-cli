@@ -96,7 +96,7 @@ pub struct AgentSubagentExecutor {
     /// Shared pending resume messages slot (written from
     /// `Agent::process_message` SendMessage resume path, read from
     /// `run_to_completion` when building the runner).
-    pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+    pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).
     agent_config: Arc<crate::agent::AgentConfig>,
@@ -158,7 +158,7 @@ impl AgentSubagentExecutor {
         parent_model: String,
         parent_system_prompt: Vec<serde_json::Value>,
         parent_permission_mode: Arc<Mutex<String>>,
-        pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+        pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {

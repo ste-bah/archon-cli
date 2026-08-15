@@ -48,7 +48,8 @@ impl LlmProvider for MockLlmProvider {
 async fn build_subagent_tools_does_not_panic_from_async_context() {
     let project_dir = std::env::temp_dir();
     let parent_permission_mode = Arc::new(tokio::sync::Mutex::new("default".to_string()));
-    let pending_resume_messages = Arc::new(tokio::sync::Mutex::new(None));
+    let pending_resume_messages =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
     let executor = AgentSubagentExecutor::new(
         Arc::new(MockLlmProvider::new()),
