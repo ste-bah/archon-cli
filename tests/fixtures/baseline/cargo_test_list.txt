@@ -2739,6 +2739,7 @@ archon-core::test::archonmd_tests::project_archonmd_loaded
 archon-core::test::archonmd_tests::section_headers_present
 archon-core::test::archonmd_tests::truncation_removes_global_first
 archon-core::test::baseline_inventory_superset::test_baseline_inventory_superset_placeholder
+archon-core::test::build_subagent_tools_async::a_subagent_can_always_reach_send_message
 archon-core::test::build_subagent_tools_async::build_subagent_tools_does_not_panic_from_async_context
 archon-core::test::cli_flags_tests::filter_blacklist_removes_named_tools
 archon-core::test::cli_flags_tests::filter_blacklist_unknown_tool_is_noop

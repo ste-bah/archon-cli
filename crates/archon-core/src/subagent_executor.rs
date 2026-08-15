@@ -251,18 +251,34 @@ impl AgentSubagentExecutor {
             "BoardResolve",
         ];
 
-        // The board is how a subagent hands work back. Withholding it does not
-        // restrict what an agent can DO — it removes its ability to say what it
-        // found. So these are unioned in however `base_allowed` was derived.
+        // How a subagent talks: the board is how it hands work back, and
+        // `SendMessage` is how it reaches its lead and its peers. Withholding
+        // either does not restrict what an agent can DO — it removes its ability
+        // to say what it found. So these are unioned in however `base_allowed`
+        // was derived.
         //
         // Without this, an agent spawned with an explicit `allowed_tools` list
         // could not reach the board at all, and most pipeline agents name their
         // tools. The feature was therefore absent from exactly the runs it was
         // built for: fan-outs where several agents share one run.
         //
+        // `SendMessage` is here for the same reason and was found the same way.
+        // #184 M1 fixed the routing so a subagent's message actually reaches its
+        // target, and M5 made team members addressable by role — but no built-in
+        // definition names `SendMessage`, so a live two-agent team could not use
+        // any of it. The `explore` agent, asked to message a teammate, correctly
+        // reported it had no such tool. Routing an agent can never invoke is
+        // exactly the #153 shape: the machinery works and nothing reaches it.
+        //
         // `DENYLIST` still wins, so this is an always-OFFER set rather than an
         // override of a deliberate refusal.
-        const ALWAYS_ALLOWED: &[&str] = &["BoardRaise", "BoardClaim", "BoardList", "BoardResolve"];
+        const ALWAYS_ALLOWED: &[&str] = &[
+            "BoardRaise",
+            "BoardClaim",
+            "BoardList",
+            "BoardResolve",
+            "SendMessage",
+        ];
 
         let mut base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request
