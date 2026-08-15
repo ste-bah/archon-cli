@@ -183,6 +183,18 @@ pub fn live_claims() -> Vec<WriteClaim> {
         .collect()
 }
 
+/// What one agent said it would write, as declared.
+///
+/// Empty when it declared nothing, or when its claim has already been swept —
+/// callers that need the declaration to outlive the agent copy it while the
+/// agent is starting (see `coordination_record`).
+pub fn declared_by(agent_id: &str) -> Vec<String> {
+    claims()
+        .get(agent_id)
+        .map(|claim| claim.declared.clone())
+        .unwrap_or_default()
+}
+
 /// Render overlaps as the warning that goes back in the spawn result.
 ///
 /// A warning, not an error: the declaration is advisory, and refusing the spawn

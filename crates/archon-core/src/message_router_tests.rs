@@ -17,7 +17,7 @@ use super::*;
 /// Records what the host was asked to do, so tests can assert on side effects
 /// rather than only on the returned text.
 #[derive(Default)]
-struct RecordingHost {
+pub(super) struct RecordingHost {
     delivered: StdMutex<Vec<(String, String)>>,
     resume_reply: Option<String>,
     resumed: StdMutex<Vec<String>>,
@@ -25,7 +25,7 @@ struct RecordingHost {
 
 impl RecordingHost {
     /// A host that cannot resume — the subagent side.
-    fn without_resume() -> Self {
+    pub(super) fn without_resume() -> Self {
         Self::default()
     }
 
@@ -63,7 +63,7 @@ impl RouterHost for RecordingHost {
     }
 }
 
-fn sample_request() -> SubagentRequest {
+pub(super) fn sample_request() -> SubagentRequest {
     serde_json::from_value(json!({"prompt": "p", "max_turns": 5, "timeout_secs": 60}))
         .expect("SubagentRequest fixture")
 }
@@ -75,7 +75,7 @@ fn manager_with_running_agent() -> (Arc<Mutex<SubagentManager>>, String) {
     (Arc::new(Mutex::new(mgr)), id)
 }
 
-fn req(to: &str, message_type: &str) -> SendMessageRequest {
+pub(super) fn req(to: &str, message_type: &str) -> SendMessageRequest {
     serde_json::from_value(json!({
         "to": to,
         "message": "hello",
@@ -87,7 +87,7 @@ fn req(to: &str, message_type: &str) -> SendMessageRequest {
     .expect("SendMessageRequest fixture")
 }
 
-fn lead_ctx(manager: Arc<Mutex<SubagentManager>>) -> RouterContext {
+pub(super) fn lead_ctx(manager: Arc<Mutex<SubagentManager>>) -> RouterContext {
     RouterContext::new(manager, SenderIdentity::Lead)
 }
 

@@ -58,6 +58,11 @@ impl AgentSubagentExecutor {
             }
         }
 
+        // Vacate the team seat, if this agent held one (#184 M5). This is also
+        // the acknowledgement `TeamDelete` waits on, so it has to happen on
+        // every terminal state and not only on success.
+        archon_tools::team_roster::leave(&subagent_id);
+
         // Tell the lead. Without this a subagent ends into the background
         // task-notification path and the lead learns nothing — a failed agent
         // and a finished one are equally silent (#184 M6).

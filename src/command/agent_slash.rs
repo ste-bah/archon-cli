@@ -47,7 +47,7 @@ impl CommandHandler for AgentHandler {
             return crate::command::run_agent::RunAgentHandler.execute(ctx, rest);
         }
 
-        let msg = match subcommand {
+        let mut msg = match subcommand {
             "" | "list" => render_list(registry_arc.as_ref()),
             "info" | "show" => match rest.first() {
                 Some(name) => render_info(registry_arc.as_ref(), name),
@@ -55,6 +55,13 @@ impl CommandHandler for AgentHandler {
             },
             other => render_usage(&format!("unknown subcommand `{}`", other)),
         };
+
+        // The listing above is definitions — what could run. The roster is what
+        // is running, and on a team that is the thing you actually want (#184
+        // M5). Absent when no team is active, which is most of the time.
+        if matches!(subcommand, "" | "list") {
+            msg.push_str(&render_roster());
+        }
 
         ctx.emit(TuiEvent::TextDelta(msg));
         Ok(())
@@ -72,6 +79,10 @@ impl CommandHandler for AgentHandler {
 // Width constants kept module-private so list/info/usage stay aligned.
 const COL_NAME: usize = 28;
 const COL_SOURCE: usize = 12;
+
+#[path = "agent_slash_roster.rs"]
+mod roster;
+use roster::render_roster;
 
 fn render_list(registry: &RwLock<AgentRegistry>) -> String {
     // Acquire read lock + clone what we need into owned strings while

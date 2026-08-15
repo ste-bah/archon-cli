@@ -211,11 +211,16 @@ async fn route_text(
 
     let running = target.is_lead || ctx.manager.lock().await.is_running(&target.id);
 
+    // Attribute the message when both ends are on a team. Without it a member
+    // reading "please review src/foo.rs" cannot tell who asked, so it cannot
+    // reply — the one thing a team needs it to be able to do (#184 M5).
+    let message = team_envelope(ctx, &target, req).unwrap_or_else(|| req.message.clone());
+
     if running {
-        if let Err(full) = enqueue(ctx, &target.id, req.message.clone()).await {
+        if let Err(full) = enqueue(ctx, &target.id, message.clone()).await {
             return full;
         }
-        host.on_delivered(&target.id, &req.message).await;
+        host.on_delivered(&target.id, &message).await;
         return ToolResult::success(format!(
             "Message queued for delivery to {} at its next tool round.",
             req.to
@@ -223,12 +228,55 @@ async fn route_text(
     }
 
     // Not running: resume it from its transcript, where the host can.
-    if let Some(outcome) = host.resume_stopped_agent(&target.id, &req.message).await {
-        host.on_delivered(&target.id, &req.message).await;
+    if let Some(outcome) = host.resume_stopped_agent(&target.id, &message).await {
+        host.on_delivered(&target.id, &message).await;
         return outcome;
     }
 
     stopped_target_error(ctx, req, &target.id).await
+}
+
+/// Wrap a member-to-member message so the recipient knows who wrote it.
+///
+/// `None` when this is not team traffic — no team active, or the recipient is
+/// not on it — which leaves ordinary lead-to-subagent messaging exactly as it
+/// was. The sender's role comes from its seat on the roster, never from the
+/// message: `SendMessageRequest` has no author field, and if it had one the
+/// model would control it.
+fn team_envelope(ctx: &RouterContext, target: &Target, req: &SendMessageRequest) -> Option<String> {
+    use archon_tools::team_roster;
+
+    let members = team_roster::members();
+    if members.is_empty() {
+        return None;
+    }
+    let role_of = |agent_id: &str| {
+        members
+            .iter()
+            .find(|m| m.agent_id.as_deref() == Some(agent_id))
+            .map(|m| m.role.clone())
+    };
+
+    let from = match &ctx.sender {
+        SenderIdentity::Lead => archon_tools::send_message::LEAD_ADDRESS.to_string(),
+        SenderIdentity::Subagent { id, .. } => role_of(id)?,
+    };
+    // A lead target is the session itself, which holds no seat.
+    let to = if target.is_lead {
+        archon_tools::send_message::LEAD_ADDRESS.to_string()
+    } else {
+        role_of(&target.id)?
+    };
+
+    Some(
+        archon_tools::team_message::TeamMessage::now(
+            from,
+            to,
+            req.message.clone(),
+            archon_tools::team_message::MessageType::Chat,
+        )
+        .render(),
+    )
 }
 
 async fn route_shutdown_request(ctx: &RouterContext, req: &SendMessageRequest) -> ToolResult {
@@ -342,3 +390,7 @@ async fn stopped_target_error(
 #[cfg(test)]
 #[path = "message_router_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "message_router_team_tests.rs"]
+mod team_tests;

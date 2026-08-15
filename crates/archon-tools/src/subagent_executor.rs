@@ -229,6 +229,23 @@ pub trait SubagentExecutor: Send + Sync {
     fn max_concurrency(&self) -> Option<usize> {
         None
     }
+
+    /// Ask a running agent to stop at its next check, cooperatively.
+    ///
+    /// The same signal `SendMessage`'s `shutdown_request` frame carries — it
+    /// trips the agent's shutdown flag and lets it finish the round it is in.
+    /// `TeamDelete` needs it from `archon-tools`, which cannot reach the
+    /// `SubagentManager` that owns the flag, so it goes through the executor
+    /// seam like everything else that crosses that boundary.
+    ///
+    /// Returns whether the agent was found and running. The default is `false`:
+    /// an executor with no manager behind it cannot stop anything, and saying
+    /// so is the honest answer — a `true` here would report a shutdown that
+    /// never happened and `TeamDelete` would delete the roster out from under a
+    /// live agent.
+    async fn request_shutdown(&self, _subagent_id: &str) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------

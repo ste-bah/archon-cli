@@ -369,6 +369,17 @@ impl SubagentExecutor for AgentSubagentExecutor {
         self.handle_inner_complete(subagent_id, result).await;
     }
 
+    /// Trip an agent's shutdown flag, the same one `shutdown_request` sets.
+    ///
+    /// `TeamDelete` reaches the manager through here, because archon-tools
+    /// cannot reach it directly (#184 M5).
+    async fn request_shutdown(&self, subagent_id: &str) -> bool {
+        self.subagent_manager
+            .lock()
+            .await
+            .request_shutdown(subagent_id)
+    }
+
     async fn on_visible_complete(
         &self,
         subagent_id: String,

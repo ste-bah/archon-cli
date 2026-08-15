@@ -13,9 +13,7 @@ use super::*;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::background_agents::{
-    self, AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle,
-};
+use crate::background_agents::{self, AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle};
 
 fn declared(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|p| p.to_string()).collect()

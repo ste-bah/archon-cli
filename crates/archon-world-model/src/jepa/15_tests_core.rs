@@ -210,6 +210,10 @@
             WorldActionKind::Verification,
             WorldActionKind::Retry,
             WorldActionKind::Resume,
+            WorldActionKind::MessageSend,
+            WorldActionKind::TaskClaim,
+            WorldActionKind::Handoff,
+            WorldActionKind::WorktreeMerge,
             WorldActionKind::Unknown,
         ];
         let slots: std::collections::HashSet<usize> = kinds.iter().map(action_kind_slot).collect();

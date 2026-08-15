@@ -23,6 +23,10 @@ impl CommandHandler for WorktreesHandler {
         let subcommand = args.first().map(|s| s.as_str()).unwrap_or("list");
         let rest: &[String] = if args.is_empty() { &[] } else { &args[1..] };
 
+        // Merge outcomes are recorded against the session that made them, and
+        // the session id is only reachable from the context (#184 M9).
+        let session = ctx.session_id.clone().unwrap_or_else(|| "unknown".into());
+
         let message = match subcommand {
             "" | "list" | "ls" => render_list(false),
             // Sizing walks every file under a worktree and its build
@@ -31,9 +35,9 @@ impl CommandHandler for WorktreesHandler {
             // path — so the common case stays instant and the expensive one is
             // asked for by name.
             "sizes" | "du" => render_list(true),
-            "merge" => act(rest, ExitAction::Merge),
-            "discard" => act(rest, ExitAction::Discard),
-            "keep" => act(rest, ExitAction::Keep),
+            "merge" => act(rest, ExitAction::Merge, "merge", &session),
+            "discard" => act(rest, ExitAction::Discard, "discard", &session),
+            "keep" => act(rest, ExitAction::Keep, "keep", &session),
             "prune" => render_prune(),
             other => usage(&format!("unknown subcommand `{other}`")),
         };
@@ -124,17 +128,52 @@ fn render_list(with_sizes: bool) -> String {
     out
 }
 
-fn act(args: &[String], action: ExitAction) -> String {
+fn act(args: &[String], action: ExitAction, action_name: &str, session: &str) -> String {
     let Some(owner) = args.first() else {
         return usage("missing <owner> — run `/worktrees` to see the list");
     };
 
+    // The diffstat has to be read before the merge, because the merge removes
+    // the branch it would be measured against.
+    let files_changed = WorktreeManager::find_by_owner(owner)
+        .and_then(|info| worktree_review::review_for(&info))
+        .map_or(0, |review| review.stats.files_changed);
+
     // Refuses while the owner is still running — the same rule that stops a
     // spawn from reclaiming a live worktree, and for the same reason (#184 M4).
-    match WorktreeManager::exit_by_owner(owner, action) {
+    let result = WorktreeManager::exit_by_owner(owner, action);
+
+    record_outcome(session, owner, action_name, &result, files_changed);
+
+    match result {
         Ok(message) => format!("\n{message}\n"),
         Err(error) => format!("\nFailed: {error}\n"),
     }
+}
+
+/// Feed the merge result to the learning systems (#184 M9).
+///
+/// Git merge results are ground truth, which makes this the one coordination
+/// signal a model can train against without trusting a labeler. Best-effort: the
+/// merge already happened, and failing to record it must not fail the command.
+fn record_outcome(
+    session: &str,
+    owner: &str,
+    action: &str,
+    result: &Result<String, String>,
+    files_changed: usize,
+) {
+    use crate::command::world_model::coordination::{
+        MergeOutcome, coordination_root, record_merge_outcome,
+    };
+
+    let Some(outcome) = MergeOutcome::classify(action, result) else {
+        return;
+    };
+    let Some(root) = coordination_root() else {
+        return;
+    };
+    record_merge_outcome(&root, session, owner, outcome, files_changed);
 }
 
 /// Remove every finished agent's worktree.

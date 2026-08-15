@@ -110,7 +110,7 @@ pub fn is_decision_frame(message_type: &str) -> bool {
 /// Used for attribute values as well as inner text — `"` is escaped precisely
 /// so a caller-supplied `request_id` cannot close the attribute and inject
 /// another one. See [`build_structured_envelope`].
-fn xml_escape(s: &str) -> String {
+pub(crate) fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

@@ -9,7 +9,7 @@ use super::*;
 
 #[test]
 fn acting_without_an_owner_explains_itself() {
-    let message = act(&[], ExitAction::Merge);
+    let message = act(&[], ExitAction::Merge, "merge", "session-test");
     assert!(message.contains("missing <owner>"), "{message}");
     assert!(message.contains("/worktrees merge"), "{message}");
 }
@@ -19,6 +19,8 @@ fn acting_on_an_unknown_owner_says_so_rather_than_failing_silently() {
     let message = act(
         &["subagent-does-not-exist".to_string()],
         ExitAction::Discard,
+        "discard",
+        "session-test",
     );
     assert!(message.contains("no worktree owned by"), "{message}");
     assert!(

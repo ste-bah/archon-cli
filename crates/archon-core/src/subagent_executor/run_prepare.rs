@@ -67,6 +67,15 @@ impl AgentSubagentExecutor {
                 .lock()
                 .await
                 .register_name(agent_type.clone(), manager_id.clone());
+
+            // Seat it on the session's team, if there is one (#184 M5). The
+            // spawn's `subagent_type` is both the role it fills and the address
+            // other members reach it at, because it is what the router's name
+            // registry resolves. No team active is the ordinary case and does
+            // nothing.
+            if let Some(team_id) = archon_tools::team_roster::join(&manager_id, agent_type) {
+                tracing::info!(subagent_id = %manager_id, role = %agent_type, %team_id, "seated on team");
+            }
         }
         tracing::info!(
             subagent_id = %manager_id,
@@ -142,17 +151,32 @@ impl AgentSubagentExecutor {
             .isolation
             .clone()
             .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.clone()));
+        // M2's claims are recorded against this agent at spawn, so an overlap is
+        // already known by the time we get here.
+        let claim_overlap = !archon_tools::write_claims::overlaps_for(manager_id).is_empty();
         let (tier, reason) = archon_tools::isolation::resolve_tier(
             &archon_tools::isolation::IsolationRequest {
                 explicit: requested_isolation,
-                // M2's claims are recorded against this agent at spawn, so an
-                // overlap is already known by the time we get here.
-                overlaps_live_claim: !archon_tools::write_claims::overlaps_for(manager_id)
-                    .is_empty(),
+                overlaps_live_claim: claim_overlap,
                 write_capable: is_write_capable(resolved_def.as_ref()),
             },
             self.agent_config.subagent_auto_isolation,
             self.agent_config.subagent_isolation_max_tier,
+        );
+
+        // Copy the spawn-time facts somewhere that outlives the agent, so the
+        // merge an hour from now can be labelled against what was known when it
+        // started (#184 M9). Claims cannot carry this: they are liveness-derived
+        // and vanish with their holder.
+        archon_tools::coordination_record::record_spawn(
+            manager_id,
+            archon_tools::coordination_record::SpawnFacts {
+                label: request.subagent_type.clone(),
+                declared: archon_tools::write_claims::declared_by(manager_id),
+                claim_overlap,
+                isolated: tier != archon_tools::isolation::IsolationTier::Shared,
+                coordination_run_id: archon_tools::team_roster::active().map(|t| t.team_id),
+            },
         );
         if let archon_tools::isolation::IsolationReason::Clamped(wanted) = &reason {
             tracing::warn!(
