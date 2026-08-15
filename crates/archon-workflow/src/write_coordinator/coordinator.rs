@@ -5,7 +5,7 @@
 //! redirected there via `input["target_repository_root"]`), detects canonical
 //! mutation, then applies + verifies validated patches under ONE repo lock.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 pub use super::WriteBoundaryProbe;
@@ -347,8 +347,13 @@ fn capture_and_validate(
         let output = outputs.get(&it.plan.item_id).ok_or_else(|| {
             FanoutError::Workflow(format!("missing output for {}", it.plan.item_id))
         })?;
+        let claimed_by_others = items
+            .iter()
+            .filter(|other| other.plan.item_id != it.plan.item_id)
+            .flat_map(|other| other.plan.target_files.iter().cloned())
+            .collect::<BTreeSet<_>>();
         let (captured, active_plan) =
-            match target_adoption::capture_with_target_adoption(cfg, items.len(), it) {
+            match target_adoption::capture_with_target_adoption(cfg, &claimed_by_others, it) {
                 Ok(capture) => capture,
                 Err(err) => {
                     let reason = err.to_string();
