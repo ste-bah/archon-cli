@@ -112,6 +112,15 @@ pub(super) fn input_schema() -> serde_json::Value {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Optional file paths that must be changed by a foreground mutating subagent. Archon snapshots these paths before launch and fails the Agent result if they are unchanged after completion."
+            },
+            "intended_writes": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional paths or globs this subagent intends to write. Declaring them lets Archon warn at spawn time when another running agent has already declared overlapping writes, before either has edited anything. Advisory: it does not restrict what the agent may write. Distinct from expected_target_files, which asserts what MUST have changed by the end."
+            },
+            "task_id": {
+                "type": "string",
+                "description": "Optional id of an existing task this subagent is taking on. Sets the task's owner and marks it running, so TaskList shows who is working on what."
             }
         }
     })

@@ -67,6 +67,7 @@ pub mod worktree;
 pub mod worktree_exit;
 pub mod worktree_manager;
 pub mod worktree_ownership;
+pub mod write_claims;
 
 pub mod board;
 pub mod cron_create;

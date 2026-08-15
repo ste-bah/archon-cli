@@ -24,7 +24,11 @@ use std::sync::{Arc, OnceLock};
 
 use archon_memory::board::BoardAccess;
 
-mod leases;
+/// `pub(crate)` so write-intent claims can ask the same liveness question the
+/// board's own lease sweep asks, from the one registry (#184 M2). Exposing the
+/// module rather than re-deriving liveness is the point — `leases.rs` documents
+/// at length why a second opinion here goes wrong.
+pub(crate) mod leases;
 mod mirror;
 mod tools;
 mod tools_lifecycle;

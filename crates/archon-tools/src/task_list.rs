@@ -35,6 +35,11 @@ impl Tool for TaskListTool {
                     "status": t.status,
                     "created_at": t.created_at.to_rfc3339(),
                     "cost": t.cost,
+                    // Who is working on it. Setting the owner without
+                    // projecting it here would make ownership real but
+                    // invisible — the point of the linkage is that a lead can
+                    // see who has what (#184 M2).
+                    "agent_id": t.agent_id,
                 })
             })
             .collect();
