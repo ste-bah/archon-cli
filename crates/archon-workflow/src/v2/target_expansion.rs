@@ -138,6 +138,21 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
             )),
         }
     }
+    // `include!` splices a file's text into this one, so the included file is
+    // literally part of the declaring file — editing it edits the owner. It is
+    // not a `mod`, so module resolution never saw it and the file stayed
+    // unowned while its owner was owned.
+    for included in included_files(&source) {
+        let candidate = repository_root.join(declaring_dir).join(&included);
+        match repo_relative(repository_root, &candidate) {
+            Some(relative) if candidate.is_file() => {
+                expanded.insert(relative);
+            }
+            _ => notes.push(format!(
+                "included file '{included}' from '{target}' does not resolve"
+            )),
+        }
+    }
     let dir_scopes = module_dir_scope(repository_root, &module_dir);
     Some(TargetFileExpansion {
         source: target.to_string(),
@@ -165,6 +180,32 @@ fn module_directory_for_target(target: &Path) -> Option<PathBuf> {
         return Some(parent.to_path_buf());
     }
     Some(parent.join(stem))
+}
+
+/// Files spliced in with `include!("literal")`, relative to the declaring
+/// file's directory.
+///
+/// Only a bare string literal is taken. `include!(concat!(env!("OUT_DIR"), …))`
+/// names a build-time artefact, not a repository file, and resolving it would
+/// invent a target that no task can own.
+fn included_files(source: &str) -> Vec<String> {
+    let mut included = Vec::new();
+    for line in source.lines() {
+        let line = line.split("//").next().unwrap_or("").trim();
+        let Some(rest) = line.split_once("include!(") else {
+            continue;
+        };
+        let Some(quoted) = rest.1.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let Some(value) = quoted.split('"').next() else {
+            continue;
+        };
+        if !value.trim().is_empty() {
+            included.push(value.to_string());
+        }
+    }
+    included
 }
 
 /// A module a file declares, and the `#[path]` it was given if any.

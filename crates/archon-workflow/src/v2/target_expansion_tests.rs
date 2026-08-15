@@ -139,6 +139,102 @@ fn a_module_cycle_terminates() {
     assert!(expanded.target_files.contains(&"src/a/b.rs".to_string()));
 }
 
+/// The live failure. `ahdm_test_support.rs` is owned and splices its two
+/// halves in with `include!`. Those halves are part of the owning file, but
+/// they are not modules, so expansion never saw them and the branch that
+/// edited them failed write-scope.
+#[test]
+fn an_included_file_is_owned_by_the_file_that_includes_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path();
+    fs::create_dir_all(repo.join("src/data_store")).expect("dir");
+    fs::write(
+        repo.join("src/data_store/ahdm_test_support.rs"),
+        "include!(\"ahdm_test_support_a.rs\");\ninclude!(\"ahdm_test_support_b.rs\");\n",
+    )
+    .expect("owner");
+    fs::write(repo.join("src/data_store/ahdm_test_support_a.rs"), "").expect("a");
+    fs::write(repo.join("src/data_store/ahdm_test_support_b.rs"), "").expect("b");
+
+    let expanded = expand_declared_rust_module_targets(
+        "item",
+        &["src/data_store/ahdm_test_support.rs".to_string()],
+        repo.to_str(),
+    )
+    .expect("expansion");
+
+    for half in ["a", "b"] {
+        assert!(
+            expanded
+                .target_files
+                .contains(&format!("src/data_store/ahdm_test_support_{half}.rs")),
+            "included half {half} must be owned: {:?}",
+            expanded.target_files
+        );
+    }
+}
+
+/// An include may sit in a subdirectory, and the recursion must follow it.
+#[test]
+fn a_nested_include_is_followed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path();
+    fs::create_dir_all(repo.join("src/world_model/root")).expect("dir");
+    fs::write(
+        repo.join("src/world_model.rs"),
+        "include!(\"world_model/root/00_dispatch.rs\");\n",
+    )
+    .expect("owner");
+    fs::write(
+        repo.join("src/world_model/root/00_dispatch.rs"),
+        "include!(\"01_helpers.rs\");\n",
+    )
+    .expect("dispatch");
+    fs::write(repo.join("src/world_model/root/01_helpers.rs"), "").expect("helpers");
+
+    let expanded = expand_declared_rust_module_targets(
+        "item",
+        &["src/world_model.rs".to_string()],
+        repo.to_str(),
+    )
+    .expect("expansion");
+
+    assert!(
+        expanded
+            .target_files
+            .contains(&"src/world_model/root/00_dispatch.rs".to_string())
+    );
+    assert!(
+        expanded
+            .target_files
+            .contains(&"src/world_model/root/01_helpers.rs".to_string()),
+        "recursion must follow an include inside an include: {:?}",
+        expanded.target_files
+    );
+}
+
+/// A build-artefact include names no repository file and must not become one.
+#[test]
+fn a_generated_include_is_not_treated_as_a_target() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path();
+    fs::create_dir_all(repo.join("src")).expect("dir");
+    fs::write(
+        repo.join("src/generated.rs"),
+        "include!(concat!(env!(\"OUT_DIR\"), \"/bindings.rs\"));\n",
+    )
+    .expect("owner");
+
+    let expanded = expand_declared_rust_module_targets(
+        "item",
+        &["src/generated.rs".to_string()],
+        repo.to_str(),
+    )
+    .expect("expansion");
+
+    assert_eq!(expanded.target_files, vec!["src/generated.rs".to_string()]);
+}
+
 #[test]
 fn inline_modules_do_not_invent_file_targets() {
     let temp = tempfile::tempdir().expect("tempdir");
