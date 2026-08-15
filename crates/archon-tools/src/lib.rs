@@ -63,7 +63,9 @@ pub mod task_output;
 pub mod task_stop;
 pub mod task_update;
 
+pub mod isolation;
 pub mod worktree;
+pub mod worktree_disk;
 pub mod worktree_exit;
 pub mod worktree_manager;
 pub mod worktree_ownership;

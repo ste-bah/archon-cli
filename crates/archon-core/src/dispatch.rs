@@ -49,6 +49,33 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
+    /// Restrict this registry's `Bash` to the agent's isolation tier (#184 M3).
+    ///
+    /// The registry is built per subagent, which makes it the one place a
+    /// per-agent restriction can live: `ToolContext` is inherited verbatim from
+    /// the parent, and the admission callback is skipped for `Safe` tools.
+    ///
+    /// Returns `false` when there is no `Bash` to restrict — a read-only agent
+    /// whose allowlist excluded it, which needs no restriction anyway.
+    pub fn set_bash_isolation_tier(
+        &mut self,
+        tier: archon_tools::isolation::IsolationTier,
+    ) -> bool {
+        // Nothing to enforce, and rebuilding the tool would discard whatever
+        // provider-env configuration was attached moments earlier.
+        if tier.may_build() {
+            return true;
+        }
+        let Some(bash) = self.tools.get("Bash") else {
+            return false;
+        };
+        let Some(restricted) = bash.with_isolation_tier(tier) else {
+            return false;
+        };
+        self.replace(restricted);
+        true
+    }
+
     pub fn attach_provider_env_to_bash(
         &mut self,
         provider_env: archon_tools::provider_env::ProviderEnvSource,

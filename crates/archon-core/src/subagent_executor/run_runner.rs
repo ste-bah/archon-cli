@@ -3,6 +3,20 @@ use std::sync::Arc;
 use super::run_prepare::{PreparedSubagentRun, RunIdentity};
 use super::*;
 
+/// The isolation tier a prepared run resolved to.
+///
+/// `Shared` for anything unrecognised: an unknown value must not be read as
+/// *more* isolation than was asked for, and it must never silently become less
+/// than the caller believes — the caller is told at spawn time which tier it
+/// got, so the honest floor here is no isolation.
+fn isolation_tier(prepared: &PreparedSubagentRun) -> archon_tools::isolation::IsolationTier {
+    prepared
+        .isolation
+        .as_deref()
+        .and_then(archon_tools::isolation::IsolationTier::parse)
+        .unwrap_or(archon_tools::isolation::IsolationTier::Shared)
+}
+
 impl AgentSubagentExecutor {
     pub(super) async fn build_subagent_runner(
         &self,
@@ -18,6 +32,9 @@ impl AgentSubagentExecutor {
         if let Some(provider_env) = request.provider_env.clone() {
             tool_reg.attach_provider_env_to_bash(provider_env);
         }
+        // After the provider env, because restricting rebuilds the tool and
+        // would otherwise discard it (#184 M3).
+        tool_reg.set_bash_isolation_tier(isolation_tier(prepared));
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
         let worktree_info = self
             .create_run_worktree(&ids.manager_id, requested_cwd.as_deref(), prepared)
@@ -57,7 +74,11 @@ impl AgentSubagentExecutor {
         requested_cwd: Option<&std::path::Path>,
         prepared: &PreparedSubagentRun,
     ) -> Result<Option<WorktreeInfo>, ExecutorError> {
-        if prepared.isolation.as_deref() != Some("worktree") {
+        // Asked of the tier, not of the string. This was a literal
+        // `== Some("worktree")`, so `worktree-with-builds` fell through and got
+        // no worktree at all — the most expensive tier silently becoming the
+        // cheapest (#184 M3).
+        if !isolation_tier(prepared).needs_worktree() {
             return Ok(None);
         }
         let source_root = requested_cwd.unwrap_or(&self.working_dir);

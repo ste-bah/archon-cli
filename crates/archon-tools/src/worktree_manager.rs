@@ -311,9 +311,31 @@ impl WorktreeManager {
             }
         }
 
+        // The scratch build directory first, while its path is still derivable
+        // and before anything can fail. A pruned worktree that leaves gigabytes
+        // of `target/` behind has not been pruned (#184 M3).
+        let scratch = Self::scratch_target_dir(owner_id);
+        if scratch.exists() {
+            fs::remove_dir_all(&scratch)
+                .map_err(|e| format!("Failed to remove worktree build directory: {e}"))?;
+        }
+
         // Remove the directory
         fs::remove_dir_all(&wt_path)
             .map_err(|e| format!("Failed to remove worktree directory: {e}"))?;
+
+        // git still holds a worktree registration and an `archon/<owner>`
+        // branch. Leaving them made the directory removable but the worktree
+        // unreclaimable: the replacement failed with "a reference with that
+        // name already exists". Best-effort, because a missing one is the state
+        // we want.
+        let branch_name = format!("archon/{}", branch_component_from_session_id(owner_id));
+        if let Ok(repo) = Repository::open(&wt_path).or_else(|_| Repository::open(".")) {
+            let _ = prune_worktree(&repo, &branch_name);
+            if let Ok(mut branch) = repo.find_branch(&branch_name, BranchType::Local) {
+                let _ = branch.delete();
+            }
+        }
 
         // Release the lock and drop the marker only once the tree is actually
         // gone, so a failure above leaves the ownership record intact.
