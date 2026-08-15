@@ -24,7 +24,10 @@ impl Agent {
         {
             return None;
         }
-        if !self.plan_mode_allows_tool(tool, effective_mode).await {
+        if !self
+            .plan_mode_allows_tool(tool, &input, effective_mode)
+            .await
+        {
             return None;
         }
         if !self.run_pre_tool_hooks(tool, &perm_mode, &mut input).await {

@@ -119,13 +119,33 @@ impl Agent {
     pub(super) async fn plan_mode_allows_tool(
         &mut self,
         tool: &PendingToolCall,
+        input: &serde_json::Value,
         effective_mode: AgentMode,
     ) -> bool {
         if is_tool_allowed_in_mode(&tool.name, effective_mode) {
             return true;
         }
+        match crate::plan_file::plan_audit_path(&self.config.working_dir, &self.config.session_id) {
+            Ok(audit_path) => {
+                if let Err(error) = crate::plan_file::append_plan_entry(&audit_path, &tool.name, input) {
+                    tracing::warn!(
+                        error = %error,
+                        audit_path = %audit_path.display(),
+                        tool = %tool.name,
+                        "failed to append preflight Plan Mode rejection to audit log"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(
+                error = %error,
+                session_id = %self.config.session_id,
+                tool = %tool.name,
+                "refused unsafe session ID for preflight Plan Mode audit log"
+            ),
+        }
         let result = ToolResult::error(format!(
-            "Tool '{}' is not available in plan mode. Only read-only tools are allowed.",
+            "Tool '{}' is not available in plan mode. Only read-only tools are allowed. \
+             The call has been recorded in the session audit for review.",
             tool.name
         ));
         self.send_event(AgentEvent::ToolCallComplete {

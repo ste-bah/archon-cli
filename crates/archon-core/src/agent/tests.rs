@@ -49,6 +49,59 @@ pub(super) fn test_agent() -> Agent {
 }
 
 #[tokio::test]
+async fn plan_mode_preflight_writes_to_the_session_audit() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut agent = test_agent();
+    agent.config.working_dir = temp.path().to_path_buf();
+    agent.config.session_id = "preflight-session".to_string();
+    let tool = PendingToolCall {
+        id: "tool-1".to_string(),
+        name: "Write".to_string(),
+        input_json: r#"{"file_path":"/tmp/preflight"}"#.to_string(),
+    };
+
+    assert!(
+        !agent
+            .plan_mode_allows_tool(
+                &tool,
+                &serde_json::json!({"file_path": "/tmp/preflight"}),
+                AgentMode::Plan,
+            )
+            .await
+    );
+
+    let audit_path = crate::plan_file::plan_audit_path(temp.path(), "preflight-session").unwrap();
+    let audit = std::fs::read_to_string(audit_path).unwrap();
+    assert!(audit.contains("Write (intercepted in Plan Mode)"));
+    assert!(audit.contains("/tmp/preflight"));
+}
+
+#[tokio::test]
+async fn plan_mode_preflight_rejects_unsafe_session_id_without_creating_audit() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut agent = test_agent();
+    agent.config.working_dir = temp.path().to_path_buf();
+    agent.config.session_id = "../../escape".to_string();
+    let tool = PendingToolCall {
+        id: "tool-unsafe".to_string(),
+        name: "Write".to_string(),
+        input_json: r#"{"file_path":"/tmp/preflight"}"#.to_string(),
+    };
+
+    assert!(
+        !agent
+            .plan_mode_allows_tool(
+                &tool,
+                &serde_json::json!({"file_path": "/tmp/preflight"}),
+                AgentMode::Plan,
+            )
+            .await
+    );
+    assert!(!temp.path().join("escape.md").exists());
+    assert!(!temp.path().join(".archon/plan-audit").exists());
+}
+
+#[tokio::test]
 async fn auto_extraction_flush_waits_for_pending_tasks() {
     let mut agent = test_agent();
     let completed = Arc::new(AtomicUsize::new(0));

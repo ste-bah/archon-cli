@@ -307,7 +307,16 @@ pub(crate) fn build_command_context<'a>(
                     .await
                     .parse()
                     .unwrap_or_default();
-                ctx.plan_snapshot = Some(crate::command::plan::PlanSnapshot { current_mode });
+                let active_plan_id = slash_ctx
+                    .plan_mode_state
+                    .lock()
+                    .await
+                    .active_plan_id
+                    .clone();
+                ctx.plan_snapshot = Some(crate::command::plan::PlanSnapshot {
+                    current_mode,
+                    active_plan_id,
+                });
             }
             Some("permissions") => {
                 // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS snapshot population.

@@ -148,6 +148,9 @@ pub(crate) fn apply_effect<'a>(
                     .await;
                 tracing::info!("entered plan mode via /plan");
             }
+            CommandEffect::SetActivePlanId(plan_id) => {
+                slash_ctx.plan_mode_state.lock().await.active_plan_id = Some(plan_id);
+            }
             CommandEffect::StartPipelineWork(work) => {
                 crate::command::pipeline_slash::start_pipeline_work(slash_ctx, tui_tx, work).await;
             }

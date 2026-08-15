@@ -323,6 +323,9 @@ fn command_effect_debug_and_clone() {
         CommandEffect::EnterPlanMode { .. } => {
             unreachable!("this test only constructs SetModelOverride")
         }
+        CommandEffect::SetActivePlanId(_) => {
+            unreachable!("this test only constructs SetModelOverride")
+        }
         CommandEffect::StartPipelineWork(_) => {
             unreachable!("this test only constructs SetModelOverride")
         }

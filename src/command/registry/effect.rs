@@ -114,6 +114,9 @@ pub(crate) enum CommandEffect {
     EnterPlanMode {
         previous_mode: archon_permissions::mode::PermissionMode,
     },
+    /// Bind the current session to the editable plan document selected or
+    /// created by `/plan open`. The handler cannot await `plan_mode_state`.
+    SetActivePlanId(String),
     /// Start pipeline watcher/resume work only after synchronous handler events
     /// have drained through the bounded TUI channel.
     StartPipelineWork(PipelineWork),

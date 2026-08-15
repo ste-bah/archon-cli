@@ -118,21 +118,28 @@ impl ToolRegistry {
     ) -> ToolResult {
         // Check if tool is allowed in current mode
         if !is_tool_allowed_in_mode(tool_name, ctx.mode) {
-            // TASK-P0-B.3 (#174): append the intercepted call to
-            // `.archon/plan.md` so the user can review it later via
-            // `/plan` or edit via `/plan open`. IO failures are logged
-            // but MUST NOT replace the block: the interception contract
-            // (return an error so the model sees the tool failed) is
-            // the primary behaviour; the plan-file append is an
-            // additive audit trail.
-            let plan_path = crate::plan_file::plan_path(&ctx.working_dir);
-            if let Err(e) = crate::plan_file::append_plan_entry(&plan_path, tool_name, &input) {
-                tracing::warn!(
-                    error = %e,
-                    plan_path = %plan_path.display(),
+            // Append the intercepted call to the session-scoped immutable audit
+            // log. The editable document remains separate and is only opened by
+            // `/plan open`. IO failures are logged but MUST NOT replace the
+            // block: returning an error so the model sees the tool failed is the
+            // primary behaviour; the audit append is additive.
+            match crate::plan_file::plan_audit_path(&ctx.working_dir, &ctx.session_id) {
+                Ok(audit_path) => {
+                    if let Err(error) = crate::plan_file::append_plan_entry(&audit_path, tool_name, &input) {
+                        tracing::warn!(
+                            error = %error,
+                            audit_path = %audit_path.display(),
+                            tool = tool_name,
+                            "failed to append intercepted tool call to session audit log"
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    session_id = %ctx.session_id,
                     tool = tool_name,
-                    "failed to append intercepted tool call to plan file"
-                );
+                    "refused unsafe session ID for Plan Mode audit log"
+                ),
             }
             emit_tool_activity(
                 ctx,
@@ -142,7 +149,7 @@ impl ToolRegistry {
             );
             return ToolResult::error(format!(
                 "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed. \
-                 The call has been queued in the plan file for review — use `/plan` to view or `/plan open` to edit."
+                 The call has been recorded in the session audit for review."
             ));
         }
 
@@ -384,6 +391,9 @@ pub fn create_default_registry(
     registry
 }
 
+#[cfg(test)]
+#[path = "dispatch_registry_tests.rs"]
+mod registry_tests;
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod tests;
