@@ -2743,7 +2743,9 @@ archon-core::test::build_subagent_tools_async::a_subagent_can_always_reach_send_
 archon-core::test::build_subagent_tools_async::build_subagent_tools_does_not_panic_from_async_context
 archon-core::test::cli_flags_tests::filter_blacklist_removes_named_tools
 archon-core::test::cli_flags_tests::filter_blacklist_unknown_tool_is_noop
-archon-core::test::cli_flags_tests::filter_whitelist_empty_list_removes_all
+archon-core::test::cli_flags_tests::filter_blacklist_can_still_refuse_an_always_available_tool
+archon-core::test::cli_flags_tests::filter_whitelist_cannot_strip_the_tools_agents_talk_with
+archon-core::test::cli_flags_tests::filter_whitelist_empty_list_removes_everything_but_the_talking_tools
 archon-core::test::cli_flags_tests::filter_whitelist_retains_only_named_tools
 archon-core::test::cli_flags_tests::resolve_add_dirs
 archon-core::test::cli_flags_tests::resolve_agent

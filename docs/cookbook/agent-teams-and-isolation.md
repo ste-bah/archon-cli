@@ -32,9 +32,15 @@ The pieces below are the fix. You can use any of them alone; they compose.
 
 ## Talking
 
-Every subagent has `SendMessage`. You do not have to grant it — it is unioned
-into the toolset alongside the board tools, whatever the agent's allowlist says.
-An agent that cannot answer its lead is not a teammate.
+Every agent has `SendMessage`. You do not have to grant it — it is in
+`ALWAYS_AVAILABLE_TOOLS` alongside the board tools and `Sleep`, so no allowlist
+removes it: not the agent definition's, not `--tools`, not one applied when the
+session started. An agent that cannot answer its lead is not a teammate, and
+withholding the tool restricts what it can *say*, not what it can *do*.
+
+A denylist still wins. `disallowed_tools` on a definition, or
+`--disallowed-tools`, refuses it deliberately — the always-available rule offers
+these tools, it does not override a refusal.
 
 ```
 SendMessage
@@ -71,6 +77,14 @@ SendMessage  to "reviewer"  message_type "shutdown_request"  message "we are don
 
 Cooperative: it trips a flag the agent checks at its next round, so it finishes
 what it is doing rather than being killed mid-write.
+
+### Waiting for a teammate
+
+`Sleep` is always available for the same reason. An agent coordinating with
+another has to be able to wait for it; without the tool, the only ways to pause
+are to burn a model round doing nothing, or to shell out to a `sleep` command the
+environment may not have — on Windows subagents, `powershell` is not on the
+`PATH`, so that second option fails with exit 127.
 
 `shutdown_response` and `plan_approval_response` carry `approve`, so sending one
 *is* giving consent. They are honoured **only from the lead session**. A peer or

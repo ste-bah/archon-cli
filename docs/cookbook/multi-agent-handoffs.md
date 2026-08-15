@@ -60,14 +60,22 @@ dies mid-work, its claim is released automatically the next time anything lists
 or claims on that run — no stale-claim heuristics, no "treat that as old state
 unless there is evidence someone is working on it" instruction in your prompt.
 
-You do not have to name the board tools — or `SendMessage` — when you spawn an
-agent with an explicit `allowed_tools` list. `ALWAYS_ALLOWED` in
-`subagent_executor.rs` unions all five into a subagent's tool set however that set
-was derived: from the request, from the agent definition, or from the defaults.
-Most pipeline agents name their tools explicitly, so without that the board would
-have been absent from exactly the fan-outs it exists to coordinate. A denylist
-entry still wins, so this offers the tools rather than overriding a deliberate
-refusal.
+You do not have to name the board tools — or `SendMessage`, or `Sleep` — when you
+spawn an agent with an explicit `allowed_tools` list.
+`archon_core::dispatch::ALWAYS_AVAILABLE_TOOLS` unions all six into a subagent's
+tool set however that set was derived: from the request, from the agent
+definition, or from the defaults. Most pipeline agents name their tools
+explicitly, so without that the board would have been absent from exactly the
+fan-outs it exists to coordinate.
+
+The same list is retained by `ToolRegistry::filter_whitelist`, so a session
+started under a restrictive agent definition cannot drop these either. That
+matters because the whitelist *deletes* from the registry, and a subagent's
+toolset is taken from that same registry by name — a tool dropped at session
+start could not be restored downstream however loudly the spawn asked for it.
+
+A denylist entry still wins, so this offers the tools rather than overriding a
+deliberate refusal.
 
 `SendMessage` joined the set for the same reason and was found the same way. #184
 made a subagent's messages route properly and made team members addressable by
