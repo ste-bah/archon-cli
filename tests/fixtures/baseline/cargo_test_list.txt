@@ -3373,6 +3373,10 @@ archon-core::test::task_store_result::test_result_pending_returns_error
 archon-core::test::task_store_result::test_snapshot_write_is_atomic
 archon-core::test::task_store_result::test_sqlite_index_rehydrates_cache_on_open
 archon-core::test::team_tests::team_config_round_trips_json
+archon-core::test::coordination_hooks_wired::a_completion_vacates_its_team_seat
+archon-core::test::coordination_hooks_wired::a_spawn_records_what_the_merge_will_need
+archon-core::test::coordination_hooks_wired::a_spawn_seats_its_agent_on_the_team
+archon-core::test::coordination_hooks_wired::the_overlap_check_feeds_both_isolation_and_the_record
 archon-core::test::team_tests::a_member_message_carries_its_sender
 archon-core::test::team_tests::a_vacant_seat_omits_the_agent_id
 archon-core::test::team_tests::listing_a_project_with_no_teams_is_empty_not_an_error
