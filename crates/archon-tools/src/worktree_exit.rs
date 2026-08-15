@@ -50,6 +50,36 @@ impl WorktreeManager {
     }
 }
 
+impl WorktreeManager {
+    /// Act on the worktree owned by `owner_id`, opening its repository first.
+    ///
+    /// Exists so callers without git2 — the `/worktrees` command among them —
+    /// can merge or discard without taking the dependency for one call, and so
+    /// the liveness refusal lives in one place rather than at every caller.
+    pub fn exit_by_owner(owner_id: &str, action: ExitAction) -> Result<String, String> {
+        let root = Self::worktrees_dir();
+        if worktree_ownership::owner_liveness(&root, owner_id)
+            == worktree_ownership::OwnerLiveness::Foreign
+        {
+            return Err(format!(
+                "worktree '{owner_id}' is still in use by {}",
+                worktree_ownership::describe_owner(&root, owner_id)
+            ));
+        }
+
+        let info = Self::find_by_owner(owner_id)
+            .ok_or_else(|| format!("no worktree owned by '{owner_id}'"))?;
+
+        // The base repository, not the worktree: a discard removes the worktree
+        // out from under an open handle, and git2 needs somewhere to prune from
+        // afterwards.
+        let repo = Repository::open(&info.original_dir)
+            .map_err(|e| format!("cannot open the base repository: {e}"))?;
+
+        Self::exit_worktree(&repo, &info, action)
+    }
+}
+
 /// Remove the directory and give up ownership of it.
 ///
 /// The lock and marker are dropped only once the tree is actually gone, so a

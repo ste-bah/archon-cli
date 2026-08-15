@@ -262,6 +262,7 @@ pub(crate) mod trading_spec;
 pub(crate) mod trading_tools;
 pub(crate) mod trading_tv;
 pub(crate) mod trading_workflow;
+pub(crate) mod worktrees;
 // TASK-TUI-623: /tag session tag toggle.
 pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on

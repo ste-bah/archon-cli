@@ -88,7 +88,7 @@ impl IsolationTier {
 }
 
 /// When to isolate an agent that did not ask to be isolated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AutoIsolation {
     /// Never. Every agent shares the tree unless it says otherwise.
@@ -97,15 +97,10 @@ pub enum AutoIsolation {
     ///
     /// The default, and the only trigger: isolation costs disk, and disjoint
     /// writers do not need it.
+    #[default]
     Overlap,
     /// Every write-capable agent, whether or not anything overlaps.
     Always,
-}
-
-impl Default for AutoIsolation {
-    fn default() -> Self {
-        Self::Overlap
-    }
 }
 
 /// What the caller asked for and what the situation demands.

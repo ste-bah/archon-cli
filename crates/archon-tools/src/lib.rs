@@ -69,6 +69,7 @@ pub mod worktree_disk;
 pub mod worktree_exit;
 pub mod worktree_manager;
 pub mod worktree_ownership;
+pub mod worktree_review;
 pub mod write_claims;
 
 pub mod board;

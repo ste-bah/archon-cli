@@ -119,6 +119,34 @@ impl AgentSubagentExecutor {
     }
 }
 
+/// What an isolated agent left behind, and what to do with it (#184 M7).
+///
+/// The note used to be a path and a branch name. That tells the lead where the
+/// work is but nothing about whether it is worth looking at, so a run of five
+/// isolated agents produced five identical-looking notes and no way to triage
+/// them. It now carries the diffstat, how far the branch diverged, and the
+/// commands that act on it.
+///
+/// The review is best-effort: a repository that cannot be opened yields the
+/// old shape rather than nothing, because knowing where the work is beats
+/// knowing nothing.
+fn preserved_worktree_note(wt: &archon_tools::worktree_manager::WorktreeInfo) -> String {
+    let summary = match archon_tools::worktree_review::review_for(wt) {
+        Some(review) => review.describe(),
+        None => format!("branch '{}'", wt.branch_name),
+    };
+    let usage = archon_tools::worktree_manager::WorktreeManager::disk_usage(&wt.owner_id);
+
+    format!(
+        "\n\n[Worktree preserved: {summary}, {}]\n\
+         Path: {}\n\
+         Review with `/worktrees`, then merge or discard it — an isolated \
+         agent's work is not in your tree until you say so.",
+        usage.describe(),
+        wt.worktree_path.display(),
+    )
+}
+
 /// Trim a completion result down to something worth putting in an envelope.
 ///
 /// The full text already reaches the lead as the tool result; the envelope is
@@ -199,12 +227,7 @@ impl AgentSubagentExecutor {
                             tracing::info!(subagent_id = %subagent_id, "clean worktree auto-removed");
                         }
                         Err(_has_changes) => {
-                            let wt_note = format!(
-                                "\n\n[Worktree: {} (branch: {})]",
-                                wt.worktree_path.display(),
-                                wt.branch_name
-                            );
-                            side_effects.text_suffix = Some(wt_note);
+                            side_effects.text_suffix = Some(preserved_worktree_note(&wt));
                             tracing::info!(subagent_id = %subagent_id, branch = %wt.branch_name, "worktree preserved with changes");
                         }
                     }

@@ -200,7 +200,7 @@ impl Tool for BashTool {
         // `target/` the tier exists to avoid, and there is no undoing it
         // afterwards (#184 M3).
         if !self.isolation_tier.may_build()
-            && let Some(segment) = crate::isolation::build_command_in(&raw_command)
+            && let Some(segment) = crate::isolation::build_command_in(raw_command)
         {
             return limit_tool_result(
                 self.max_output_bytes,
