@@ -197,6 +197,7 @@ fn materialization_rejects_existing_durable_task_id_without_overwrite() {
         status: "Running".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store

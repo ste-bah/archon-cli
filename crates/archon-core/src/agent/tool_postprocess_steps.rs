@@ -1,6 +1,10 @@
+use std::path::{Component, Path};
+
 use super::tool_types::{PreflightResult, tool_transcript_summary};
 use super::*;
 
+#[path = "tool_postprocess_plan.rs"]
+mod plan;
 #[derive(Default)]
 pub(super) struct PostprocessFlow {
     pub(super) prevent_continuation_reason: Option<String>,
@@ -17,13 +21,13 @@ impl Agent {
     ) {
         let mut result = self.prepare_tool_result(pre, result, active_model).await;
         self.run_post_tool_hooks(pre, &mut result, ctx, flow).await;
+        self.record_plan_execution(pre, &mut result, ctx);
         self.fire_path_hooks(pre).await;
         self.fire_worktree_hooks(pre).await;
         self.record_tool_completion(pre, &result).await;
         self.update_plan_progress(pre, &result).await;
         self.add_context_tool_result(pre, &result);
     }
-
     async fn prepare_tool_result(
         &mut self,
         pre: &PreflightResult,
@@ -412,6 +416,15 @@ impl Agent {
         }
     }
 
+    fn record_plan_execution(
+        &mut self,
+        pre: &PreflightResult,
+        result: &mut ToolResult,
+        ctx: &ToolContext,
+    ) {
+        plan::record_plan_execution(self, pre, result, ctx);
+    }
+
     fn add_context_tool_result(&mut self, pre: &PreflightResult, result: &ToolResult) {
         self.state
             .add_tool_result(&pre.tool_id, &result.content, result.is_error);
@@ -419,14 +432,34 @@ impl Agent {
 }
 
 fn command_changes_cwd(cmd: &str) -> bool {
-    let trimmed = cmd.trim_start();
-    trimmed.starts_with("cd ") || cmd.contains(" && cd ") || cmd.contains("; cd ")
+    cmd.trim_start().starts_with("cd ") || cmd.contains(" && cd ") || cmd.contains("; cd ")
 }
-
 fn plan_step_matches_file(step: &archon_session::plan::PlanStep, file_path: &str) -> bool {
     step.status == archon_session::plan::PlanStepStatus::Pending
         && step
             .affected_files
             .iter()
-            .any(|f| file_path.ends_with(f) || f.ends_with(file_path))
+            .any(|approved| same_normalized_relative_path(approved, file_path))
+}
+
+fn same_normalized_relative_path(approved: &str, actual: &str) -> bool {
+    normalized_relative_path(approved)
+        .zip(normalized_relative_path(actual))
+        .is_some_and(|(approved, actual)| approved == actual)
+}
+
+fn normalized_relative_path(path: &str) -> Option<std::path::PathBuf> {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return None;
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(component) => normalized.push(component),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    (!normalized.as_os_str().is_empty()).then_some(normalized)
 }

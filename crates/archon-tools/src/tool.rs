@@ -16,6 +16,30 @@ pub enum PermissionLevel {
     Dangerous,
 }
 
+/// Whether a tool can mutate files below the session working tree.
+///
+/// New tools conservatively default to [`Arbitrary`], so a newly registered
+/// mutator cannot silently evade working-tree observation. `ExternalOnly`
+/// covers network, process, or storage effects that do not write beneath
+/// `ToolContext::working_dir`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkingTreeEffect {
+    None,
+    /// Mutates a caller-declared path but may also create parent directories.
+    DeclaredPaths,
+    /// Can create, modify, or delete arbitrary paths under the working tree.
+    #[default]
+    Arbitrary,
+    /// Has side effects outside the observed working tree.
+    ExternalOnly,
+}
+
+impl WorkingTreeEffect {
+    pub fn requires_filesystem_observation(self) -> bool {
+        matches!(self, Self::DeclaredPaths | Self::Arbitrary)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolRunAdmissionRequest {
     pub session_id: String,
@@ -227,6 +251,11 @@ pub trait Tool: Send + Sync {
 
     /// Classify the permission level for a specific invocation.
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel;
+
+    /// Declare whether this tool can mutate files below the session working tree.
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::default()
+    }
 
     /// Clone this tool with a provider environment overlay when supported.
     fn with_provider_env_source(

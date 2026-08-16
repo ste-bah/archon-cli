@@ -136,6 +136,7 @@ async fn approval_task_collision_rolls_back_terminal_plan_and_ledger() {
                     status: "Pending".into(),
                     blocked_by: vec![],
                     required_evidence: vec![],
+                    completion_evidence: vec![],
                     updated_at: "2026-08-15T00:00:00Z".into(),
                 },
             )

@@ -194,6 +194,7 @@ fn terminal_plan_approval_and_tasks_roll_back_on_task_collision() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store
@@ -275,6 +276,7 @@ fn save_plan_with_tasks_rejects_second_generation_for_same_plan() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store
@@ -341,6 +343,7 @@ fn legacy_coherent_plan_tasks_are_claimed_without_rewrite() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store.save_plan(session_id, &plan).expect("legacy plan");
@@ -366,6 +369,9 @@ fn legacy_coherent_plan_tasks_are_claimed_without_rewrite() {
         .expect("claimed generation is idempotent");
     assert_eq!(store.load_plan_tasks(session_id).unwrap().len(), 1);
 }
+#[path = "plan_store_transition_tests.rs"]
+mod transition_tests;
+
 #[test]
 fn raw_plan_task_status_mutator_is_test_only_and_rejects_all_writes() {
     let db = test_db();
@@ -385,6 +391,7 @@ fn raw_plan_task_status_mutator_is_test_only_and_rejects_all_writes() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store
@@ -422,6 +429,7 @@ fn raw_plan_task_status_mutator_rejects_invalid_status_without_mutating() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     store

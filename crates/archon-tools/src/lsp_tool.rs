@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use crate::lsp_formatters;
 use crate::lsp_manager::LspServerManager;
 use crate::lsp_types::{LspInput, LspOperation, LspOutput};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 // ---------------------------------------------------------------------------
 // LspTool
@@ -337,6 +337,10 @@ impl Tool for LspTool {
         };
 
         ToolResult::success(serde_json::to_string_pretty(&output).unwrap_or_default())
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

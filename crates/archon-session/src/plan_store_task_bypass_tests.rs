@@ -28,6 +28,7 @@ fn claimed_generation() -> (PlanDocument, PersistedPlanTask) {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![archon_completion::RequiredEvidenceKind::Tests],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     (plan, task)
@@ -65,6 +66,7 @@ fn public_task_snapshot_write_cannot_replace_claimed_task_metadata() {
         description: "forged description".into(),
         status: "Completed".into(),
         required_evidence: vec![],
+        completion_evidence: vec![],
         ..task.clone()
     };
 

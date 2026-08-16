@@ -45,13 +45,21 @@ impl Agent {
         self.emit_buffered_round_output(&round.text_content).await;
     }
 
-    fn finalization_verdict(&self, output: &str) -> TurnFinalizationVerdict {
-        let Some(callback) = &self.turn_finalization_callback else {
+    pub(super) fn finalization_verdict(&mut self, output: &str) -> TurnFinalizationVerdict {
+        if self.turn_finalization_callback.is_none() {
             return TurnFinalizationVerdict::Allowed;
-        };
-        callback(
-            self.guardrail_action_id.as_deref().unwrap_or_default(),
-            output,
+        }
+        if let Some(repair_prompt) = self.plan_completion_block() {
+            return TurnFinalizationVerdict::Blocked { repair_prompt };
+        }
+        self.turn_finalization_callback.as_ref().map_or(
+            TurnFinalizationVerdict::Allowed,
+            |callback| {
+                callback(
+                    self.guardrail_action_id.as_deref().unwrap_or_default(),
+                    output,
+                )
+            },
         )
     }
 

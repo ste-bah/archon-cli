@@ -5,7 +5,7 @@ use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct PowerShellTool {
     pub timeout_secs: u64,
@@ -120,6 +120,10 @@ impl Tool for PowerShellTool {
                 ToolResult::error("PowerShell command timed out")
             }
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {

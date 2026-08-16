@@ -1,10 +1,12 @@
 pub use crate::plan_authority_secret::load_or_create_approval_secret;
 pub use crate::plan_models::{
     PersistedPlanTask, PlanApproval, PlanApprovalDecision, PlanApprovalRecord, PlanApprovalSource,
-    PlanDocument, PlanReconciliationStatus, PlanStatus, PlanStep, PlanStepDependency,
-    PlanStepReconciliation, PlanStepStatus,
+    PlanDocument, PlanExecutionEvidence, PlanReconciliationStatus, PlanStatus, PlanStep,
+    PlanStepDependency, PlanStepReconciliation, PlanStepStatus,
 };
-pub use crate::plan_store::{PlanApprovalAuthority, PlanStore};
+pub use crate::plan_store::{
+    PlanApprovalAuthority, PlanStore, reconcile_durable_plan, reconciliation_summary,
+};
 
 /// Build a plan context string suitable for injection into compaction summaries.
 /// Returns None if no active plan exists.

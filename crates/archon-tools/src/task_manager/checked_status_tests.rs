@@ -66,6 +66,56 @@ fn checked_status_rejects_forged_required_evidence_fields() {
 }
 
 #[test]
+fn transient_task_metadata_cannot_complete_a_durable_plan_task() {
+    let manager = TaskManager::new();
+    let (_db, store) = test_store();
+    let mut plan = evidence_plan();
+    let id = materialize_plan_tasks(
+        &manager,
+        &store,
+        &test_plan_approval_authority(&store, "transient-metadata-evidence"),
+        "transient-metadata-evidence",
+        &mut plan,
+    )
+    .expect("materialize plan")
+    .remove(0);
+    manager
+        .set_status_checked_with_evidence_ids(&id, TaskStatus::Running, "", &[])
+        .expect("start task");
+    {
+        let mut tasks = manager.tasks.lock().expect("task manager lock");
+        let task = tasks.get_mut(&id).expect("task");
+        task.output = "tests passed; evidence_run_id=made-up-run; evidence_ids=made-up".into();
+    }
+
+    assert!(matches!(
+        manager.set_status_checked_with_evidence_ids(
+            &id,
+            TaskStatus::Completed,
+            "made-up-run",
+            &["made-up".into()],
+        ),
+        Err(TaskTransitionError::UntrustedEvidence(_))
+            | Err(TaskTransitionError::EvidenceResolution(_))
+    ));
+    assert_eq!(manager.get_task(&id).unwrap().status, TaskStatus::Running);
+    let persisted = store
+        .load_plan_tasks("transient-metadata-evidence")
+        .unwrap();
+    assert_eq!(persisted[0].status, "Running");
+    let plan = store
+        .load_plan("transient-metadata-evidence", "evidence-plan")
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.steps[0].status, PlanStepStatus::InProgress);
+    assert!(
+        plan.reconciliation
+            .iter()
+            .any(|entry| entry.status == archon_session::plan::PlanReconciliationStatus::Omitted)
+    );
+}
+
+#[test]
 fn checked_status_atomically_persists_task_and_mirrored_plan_step() {
     let manager = TaskManager::new();
     let (_db, store) = test_store();

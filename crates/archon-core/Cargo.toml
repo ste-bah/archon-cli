@@ -10,6 +10,7 @@ archon-tools = { path = "../archon-tools" }
 archon-permissions = { path = "../archon-permissions" }
 archon-context = { path = "../archon-context" }
 archon-session = { path = "../archon-session" }
+archon-completion = { path = "../archon-completion" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-cognitive = { path = "../archon-cognitive" }
 archon-memory = { path = "../archon-memory" }

@@ -18,13 +18,11 @@ pub(crate) fn turn_requirements_for_action(session_id: &str, action_id: &str) ->
     ))
 }
 
-pub(crate) fn turn_finalization_verdict_for_action(
+pub(crate) fn turn_finalization_verdict_for_action_at_session_database(
+    session_database: &std::path::Path,
     session_id: &str,
     action_id: &str,
 ) -> archon_core::agent::TurnFinalizationVerdict {
-    if action_id.is_empty() {
-        return archon_core::agent::TurnFinalizationVerdict::Allowed;
-    }
     let root = match super::world_model_root() {
         Ok(root) => root,
         Err(error) => {
@@ -33,14 +31,37 @@ pub(crate) fn turn_finalization_verdict_for_action(
             ));
         }
     };
-    turn_finalization_verdict_at_root(&root, session_id, action_id)
+    turn_finalization_verdict_with_plan_db(&root, session_database, session_id, action_id)
 }
 
+#[cfg(test)]
 fn turn_finalization_verdict_at_root(
     root: &std::path::Path,
     session_id: &str,
     action_id: &str,
 ) -> archon_core::agent::TurnFinalizationVerdict {
+    turn_finalization_verdict_with_plan_db(
+        root,
+        &archon_session::storage::default_db_path(),
+        session_id,
+        action_id,
+    )
+}
+
+fn turn_finalization_verdict_with_plan_db(
+    root: &std::path::Path,
+    session_database: &std::path::Path,
+    session_id: &str,
+    action_id: &str,
+) -> archon_core::agent::TurnFinalizationVerdict {
+    if let Some(repair_prompt) =
+        archon_tools::plan_reconciliation::completion_block_for_session_at_path(
+            session_database,
+            session_id,
+        )
+    {
+        return blocked_verdict(repair_prompt);
+    }
     if action_id.is_empty() {
         return archon_core::agent::TurnFinalizationVerdict::Allowed;
     }

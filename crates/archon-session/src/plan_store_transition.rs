@@ -1,20 +1,94 @@
 use std::collections::BTreeMap;
 
-use crate::plan_models::PlanStep;
+use super::plan_store_reconciliation::reconcile_durable_plan;
+use crate::plan_models::{PlanStep, PlanStepStatus};
 use archon_completion::check_required_evidence;
 use chrono::Utc;
 use cozo::DataValue;
 
 use super::{
-    PersistedPlanTask, PlanDocument, PlanStepStatus, PlanStore, db_err,
+    PersistedPlanTask, PlanDocument, PlanStore, db_err,
     plan_store_materialization::validate_canonical_task_generation,
 };
 
 impl PlanStore {
-    /// Atomically apply a validated plan-task transition and mirror its step.
-    ///
-    /// This is the only cross-crate status writer. It independently reloads and
-    /// validates canonical durable state, dependency completion, and evidence.
+    /// Rebuild and persist reconciliation only from the immutable approved plan,
+    /// canonical durable tasks, and durable execution evidence.
+    pub fn reconcile_plan_execution(
+        &self,
+        session_id: &str,
+        plan_id: &str,
+    ) -> Result<(), std::io::Error> {
+        let transaction = self.db.multi_transaction(true);
+        let result = (|| {
+            let mut plan = self.load_plan_in(&transaction, session_id, plan_id)?;
+            let tasks = self.load_plan_tasks_in(&transaction, session_id, plan_id)?;
+            validate_canonical_task_generation(&plan, &tasks)?;
+            plan.reconciliation = reconcile_durable_plan(&plan, &tasks);
+            self.write_plan_in(&transaction, session_id, &plan, &Utc::now().to_rfc3339())
+        })();
+        self.finish_transaction(transaction, result)
+    }
+
+    /// Persist a successful file mutation before later terminal task
+    /// transitions. This makes unplanned-file reconciliation durable across
+    /// context clearing and includes it in the same plan record later written
+    /// by an atomic terminal transition.
+    pub fn record_plan_file_mutation(
+        &self,
+        session_id: &str,
+        plan_id: &str,
+        file_path: &str,
+    ) -> Result<(), std::io::Error> {
+        #[cfg(any(test, feature = "test-support"))]
+        if self
+            .fail_next_mutation_persistence
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(std::io::Error::other(
+                "injected mutation persistence failure",
+            ));
+        }
+        let transaction = self.db.multi_transaction(true);
+        let result = (|| {
+            let mut plan = self.load_plan_in(&transaction, session_id, plan_id)?;
+            plan.execution_evidence
+                .touched_files
+                .insert(file_path.to_string());
+            let tasks = self.load_plan_tasks_in(&transaction, session_id, plan_id)?;
+            plan.reconciliation = reconcile_durable_plan(&plan, &tasks);
+            self.write_plan_in(&transaction, session_id, &plan, &Utc::now().to_rfc3339())
+        })();
+        self.finish_transaction(transaction, result)
+    }
+
+    /// Persist a failed post-mutation observation as an explicit completion blocker.
+    pub fn record_plan_observation_failure(
+        &self,
+        session_id: &str,
+        plan_id: &str,
+        failure: &str,
+    ) -> Result<(), std::io::Error> {
+        #[cfg(any(test, feature = "test-support"))]
+        if self
+            .fail_next_observation_failure_persistence
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(std::io::Error::other(
+                "injected observation failure persistence failure",
+            ));
+        }
+        let transaction = self.db.multi_transaction(true);
+        let result = (|| {
+            let mut plan = self.load_plan_in(&transaction, session_id, plan_id)?;
+            plan.execution_evidence.observation_failure = Some(failure.to_string());
+            let tasks = self.load_plan_tasks_in(&transaction, session_id, plan_id)?;
+            plan.reconciliation = reconcile_durable_plan(&plan, &tasks);
+            self.write_plan_in(&transaction, session_id, &plan, &Utc::now().to_rfc3339())
+        })();
+        self.finish_transaction(transaction, result)
+    }
+
     pub fn transition_plan_task_checked(
         &self,
         session_id: &str,
@@ -110,10 +184,19 @@ impl PlanStore {
                         "plan task completion lacks valid required evidence",
                     ));
                 }
+                task.completion_evidence = evidence.clone();
             }
             task.status = next_status.to_string();
             task.updated_at = Utc::now().to_rfc3339();
-            self.write_task_and_step_in(&transaction, session_id, &plan, &task)
+            let mut reconciled_tasks = all_tasks;
+            let persisted_task = reconciled_tasks
+                .iter_mut()
+                .find(|candidate| candidate.task_id == task.task_id)
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "plan task not found")
+                })?;
+            *persisted_task = task.clone();
+            self.write_task_and_step_in(&transaction, session_id, &plan, &task, &reconciled_tasks)
         })();
         self.finish_transaction(transaction, result)
     }
@@ -223,6 +306,7 @@ impl PlanStore {
         session_id: &str,
         plan: &PlanDocument,
         task: &PersistedPlanTask,
+        all_tasks: &[PersistedPlanTask],
     ) -> Result<(), std::io::Error> {
         let mut updated_plan = plan.clone();
         let step = updated_plan
@@ -231,30 +315,53 @@ impl PlanStore {
             .find(|step| step.number == task.plan_step)
             .expect("validated plan step exists");
         step.status = plan_step_status(&task.status)?;
+        updated_plan.reconciliation = reconcile_durable_plan(&updated_plan, all_tasks);
+        self.write_plan_in(transaction, session_id, &updated_plan, &task.updated_at)?;
+        #[cfg(any(test, feature = "test-support"))]
+        if self
+            .fail_next_task_transition_after_plan_write
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(std::io::Error::other("injected task transition failure"));
+        }
         let task_json = serde_json::to_string(task).map_err(db_err)?;
         let mut params = BTreeMap::new();
         params.insert("sid".into(), DataValue::from(session_id));
         params.insert("pid".into(), DataValue::from(task.plan_id.as_str()));
         params.insert("tid".into(), DataValue::from(task.task_id.as_str()));
         params.insert("step".into(), DataValue::from(i64::from(task.plan_step)));
-        params.insert(
-            "plan".into(),
-            DataValue::from(updated_plan.to_json().as_str()),
-        );
         params.insert("task".into(), DataValue::from(task_json.as_str()));
         params.insert("updated".into(), DataValue::from(task.updated_at.as_str()));
         transaction
             .run_script(
-                "?[session_id, plan_id, plan_json, updated_at] <- [[$sid, $pid, $plan, $updated]]
-             :put plans {session_id, plan_id => plan_json, updated_at}",
-                params.clone(),
+                "?[session_id, task_id, plan_id, plan_step, task_json, updated_at] <- [[$sid, $tid, $pid, $step, $task, $updated]]
+             :put plan_tasks {session_id, task_id => plan_id, plan_step, task_json, updated_at}",
+                params,
             )
             .map_err(db_err)?;
-        transaction.run_script(
-            "?[session_id, task_id, plan_id, plan_step, task_json, updated_at] <- [[$sid, $tid, $pid, $step, $task, $updated]]
-             :put plan_tasks {session_id, task_id => plan_id, plan_step, task_json, updated_at}",
-            params,
-        ).map_err(db_err)?;
+        Ok(())
+    }
+
+    fn write_plan_in(
+        &self,
+        transaction: &cozo::MultiTransaction,
+        session_id: &str,
+        plan: &PlanDocument,
+        updated_at: &str,
+    ) -> Result<(), std::io::Error> {
+        let plan_json = plan.to_json();
+        let mut params = BTreeMap::new();
+        params.insert("sid".into(), DataValue::from(session_id));
+        params.insert("pid".into(), DataValue::from(plan.id.as_str()));
+        params.insert("plan".into(), DataValue::from(plan_json.as_str()));
+        params.insert("updated".into(), DataValue::from(updated_at));
+        transaction
+            .run_script(
+                "?[session_id, plan_id, plan_json, updated_at] <- [[$sid, $pid, $plan, $updated]]
+                 :put plans {session_id, plan_id => plan_json, updated_at}",
+                params,
+            )
+            .map_err(db_err)?;
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct GlobTool;
 
@@ -90,6 +90,10 @@ impl Tool for GlobTool {
             .join("\n");
 
         ToolResult::success(result)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

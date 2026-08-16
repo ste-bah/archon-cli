@@ -140,6 +140,7 @@ fn persisted_plan_task(info: &TaskInfo) -> Result<PersistedPlanTask, TaskTransit
         status: info.status.to_string(),
         blocked_by: metadata.blocked_by.clone(),
         required_evidence: metadata.required_evidence.clone(),
+        completion_evidence: Vec::new(),
         updated_at: Utc::now().to_rfc3339(),
     })
 }

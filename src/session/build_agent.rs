@@ -198,10 +198,33 @@ pub(crate) async fn build_session_agent(
         agent_event_tx,
         agent_registry,
     );
-    super::world_model_callbacks::install(&mut agent, config, session_id);
+    let session_database = crate::command::store_paths::session_db_path(config);
+    super::world_model_callbacks::install(&mut agent, config, session_id, &session_database);
     let session_store =
         open_noninteractive_session_store(config, session_id, &working_dir, &selected_model)?;
+    let plan_store = super::interactive_agent::initialize_plan_store(
+        session_store.db(),
+        archon_session::plan::PlanStore::new,
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "non-interactive plan store startup failed");
+        archon_core::print_mode::EXIT_ERROR
+    })?;
+    let secret_path =
+        crate::command::store_paths::session_db_path(config).with_extension("plan-approval.secret");
+    let authority =
+        super::interactive_agent::initialize_plan_authority(&plan_store, &secret_path, session_id)
+            .map_err(|error| {
+                tracing::error!(%error, "non-interactive plan authority startup failed");
+                archon_core::print_mode::EXIT_ERROR
+            })?;
     agent.set_session_store(session_store);
+    agent
+        .set_plan_store(plan_store, authority)
+        .map_err(|error| {
+            tracing::error!(%error, "failed to rehydrate non-interactive plan tasks");
+            archon_core::print_mode::EXIT_ERROR
+        })?;
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);
     if let Some(store) = cognitive_store {

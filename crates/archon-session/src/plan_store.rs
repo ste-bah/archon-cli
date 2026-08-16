@@ -4,6 +4,8 @@ mod plan_store_authority;
 mod plan_store_evidence;
 #[path = "plan_store_materialization.rs"]
 mod plan_store_materialization;
+#[path = "plan_store_reconciliation.rs"]
+mod plan_store_reconciliation;
 #[path = "plan_store_tasks.rs"]
 mod plan_store_tasks;
 #[path = "plan_store_transition.rs"]
@@ -13,6 +15,8 @@ mod plan_store_writes;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+#[cfg(any(test, feature = "test-support"))]
+use std::sync::{Arc, atomic::AtomicBool};
 
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
@@ -28,6 +32,7 @@ pub(super) enum PlanStoreIdentity {
 }
 
 pub use plan_store_authority::PlanApprovalAuthority;
+pub use plan_store_reconciliation::{reconcile_durable_plan, reconciliation_summary};
 
 /// Persistence layer for plans using CozoDB.
 ///
@@ -41,6 +46,12 @@ pub struct PlanStore {
     /// the guard registry keys on pointer identity, so the config has to be
     /// captured up front and carried explicitly.
     guard: archon_cozo::CozoGuardConfig,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_task_transition_after_plan_write: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_mutation_persistence: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_observation_failure_persistence: Arc<AtomicBool>,
 }
 
 fn db_err(e: impl std::fmt::Display) -> std::io::Error {
@@ -74,6 +85,12 @@ impl PlanStore {
             db: db.clone(),
             identity,
             guard,
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_task_transition_after_plan_write: Arc::new(AtomicBool::new(false)),
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_mutation_persistence: Arc::new(AtomicBool::new(false)),
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_observation_failure_persistence: Arc::new(AtomicBool::new(false)),
         };
         store.init_schema()?;
         Ok(store)
@@ -93,6 +110,24 @@ impl PlanStore {
             context,
             &self.guard,
         )
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_next_task_transition_after_plan_write(&self) {
+        self.fail_next_task_transition_after_plan_write
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_next_mutation_persistence(&self) {
+        self.fail_next_mutation_persistence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_next_observation_failure_persistence(&self) {
+        self.fail_next_observation_failure_persistence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn init_schema(&self) -> Result<(), std::io::Error> {

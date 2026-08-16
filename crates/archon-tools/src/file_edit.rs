@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_file_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct EditTool;
 
@@ -100,6 +100,10 @@ impl Tool for EditTool {
             Ok(()) => ToolResult::success(format!("File {file_path} updated successfully.")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::DeclaredPaths
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

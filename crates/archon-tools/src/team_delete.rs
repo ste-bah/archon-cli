@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct TeamDeleteTool {
     project_dir: PathBuf,
@@ -71,6 +71,10 @@ impl Tool for TeamDeleteTool {
         ToolResult::success(
             serde_json::to_string(&json!({ "deleted": team_id })).unwrap_or_default(),
         )
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

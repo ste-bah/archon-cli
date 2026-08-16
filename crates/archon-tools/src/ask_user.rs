@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct AskUserTool;
 
@@ -63,6 +63,10 @@ impl Tool for AskUserTool {
         // This result will be replaced by the agent loop with actual user input.
         // The tool itself just validates the input and formats the question.
         ToolResult::success(format!("[PENDING_USER_INPUT]{prompt}"))
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

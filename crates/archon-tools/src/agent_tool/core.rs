@@ -19,7 +19,7 @@ use crate::background_agents::{
 use crate::board::DelegatedOutcome;
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::subagent_request::SubagentRequest;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 // Re-exported so `agent_tool.rs`'s existing `core::AGENT_DESCRIPTION_LIMIT_BYTES`
 // path keeps resolving after the constant moved into the `descriptor` child.
@@ -415,6 +415,10 @@ impl Tool for AgentTool {
                 ToolResult::error(format!("{} {}", classify_failure_prefix(&msg), msg))
             }
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

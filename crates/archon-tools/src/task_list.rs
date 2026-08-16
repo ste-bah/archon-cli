@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool that lists all tracked tasks.
 pub struct TaskListTool;
@@ -30,6 +30,10 @@ impl Tool for TaskListTool {
             Ok(s) => ToolResult::success(s),
             Err(e) => ToolResult::error(format!("failed to serialize task list: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

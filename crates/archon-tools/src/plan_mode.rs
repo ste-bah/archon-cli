@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool to enter plan mode. In plan mode, only read-only tools are allowed.
 pub struct EnterPlanModeTool;
@@ -30,6 +30,10 @@ impl Tool for EnterPlanModeTool {
         // The agent loop will intercept this and set AgentMode::Plan.
         // The tool itself just signals the intent.
         ToolResult::success("Plan mode entered. Only read-only tools are available.")
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -67,6 +71,10 @@ impl Tool for ExitPlanModeTool {
         }
         // The agent loop will intercept this and set AgentMode::Normal.
         ToolResult::success("Plan mode exited. All tools are now available.")
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

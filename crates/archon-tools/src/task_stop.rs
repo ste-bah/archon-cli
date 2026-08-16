@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool that stops a running task by setting its cancellation token.
 pub struct TaskStopTool;
@@ -38,6 +38,10 @@ impl Tool for TaskStopTool {
             Ok(()) => ToolResult::success(format!("task {task_id} stopped")),
             Err(e) => ToolResult::error(e),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

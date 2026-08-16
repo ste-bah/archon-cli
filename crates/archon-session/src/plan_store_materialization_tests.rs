@@ -56,6 +56,7 @@ fn legacy_adoption_does_not_claim_rows_changed_after_validation() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:01Z".into(),
     };
     let competing_task_write = std::thread::spawn(move || {
@@ -192,6 +193,7 @@ fn legacy_generation(plan_id: &str, task_id: &str) -> (PlanDocument, PersistedPl
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     (plan, task)

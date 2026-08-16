@@ -19,6 +19,7 @@ fn canonical_generation_validator_rejects_invalid_input_before_claim() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
 

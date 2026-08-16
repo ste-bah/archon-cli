@@ -53,6 +53,7 @@ mod payloads;
 mod permission_gate;
 pub mod plan_approval;
 pub mod plan_mode_state;
+mod plan_reconciliation;
 mod process_message;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
 mod process_message_recovery;
@@ -77,6 +78,7 @@ mod tool_postprocess_steps;
 #[cfg(test)]
 mod tool_postprocess_steps_tests;
 mod tool_preflight;
+mod tool_preflight_filesystem;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
 pub(crate) mod tool_result_context;
@@ -134,6 +136,9 @@ pub struct Agent {
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
     plan_approval_authority: Option<PlanApprovalAuthority>,
+    plan_execution_evidence: plan_reconciliation::PlanExecutionEvidence,
+    /// Fail-closed backup when a post-mutation observation blocker cannot be persisted.
+    observation_failure_blocker: Option<String>,
     turn_number: u64,
     /// Corrections recalled for the current turn, and the turn they belong to.
     ///

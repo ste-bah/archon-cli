@@ -27,12 +27,26 @@ pub(super) fn tool_transcript_summary(
     Some(format!("{}…", &normalized[..end]))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ObservedEntry {
+    File(String),
+    Directory,
+    Symlink(std::path::PathBuf),
+}
+
+pub(super) struct FileSystemObservation {
+    pub(super) root: std::path::PathBuf,
+    pub(super) entries: std::collections::BTreeMap<std::path::PathBuf, ObservedEntry>,
+}
+
 pub(super) struct PreflightResult {
     pub(super) tool_name: String,
     pub(super) tool_id: String,
     pub(super) input: serde_json::Value,
     pub(super) tool_arc: Arc<dyn archon_tools::tool::Tool>,
     pub(super) file_path: Option<String>,
+    pub(super) filesystem_effect: archon_tools::tool::WorkingTreeEffect,
+    pub(super) filesystem_before: Option<FileSystemObservation>,
     pub(super) sandbox_prechecked: bool,
 }
 

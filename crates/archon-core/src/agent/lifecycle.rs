@@ -33,6 +33,8 @@ impl Agent {
             checkpoint_store: None,
             plan_store: None,
             plan_approval_authority: None,
+            plan_execution_evidence: plan_reconciliation::PlanExecutionEvidence::default(),
+            observation_failure_blocker: None,
             turn_number: 0,
             recalled_corrections: None,
             corrections_since_extraction: Vec::new(),

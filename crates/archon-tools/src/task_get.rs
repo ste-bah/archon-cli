@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool that retrieves detailed information about a task.
 pub struct TaskGetTool;
@@ -44,6 +44,10 @@ impl Tool for TaskGetTool {
             }
             None => ToolResult::error(format!("task not found: {task_id}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

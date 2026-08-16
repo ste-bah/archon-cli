@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::agent_tool::{SubagentRequest, run_subagent_foreground, run_subagent_with_completion};
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Appended to every delegated prompt.
 ///
@@ -349,6 +349,10 @@ impl Tool for TaskCreateTool {
                 }
             }
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {

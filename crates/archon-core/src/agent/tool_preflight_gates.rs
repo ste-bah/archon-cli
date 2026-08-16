@@ -365,17 +365,9 @@ impl Agent {
     }
 }
 
-/// Longest argument excerpt carried into a permission prompt.
 pub(super) const INTENT_EXCERPT_LIMIT: usize = 160;
 
-/// Describe what a tool is about to do, for the human being asked to approve it.
-///
-/// This used to be `format!("use {}", tool.name)`, which produced prompts like
-/// "Tool 'Bash' wants to: use Bash" — approving a shell command without being
-/// shown the command. The argument that decides whether the call is safe is the
-/// one worth naming, so the primary argument is quoted here, bounded and on one
-/// line. Anything unrecognised falls back to the bare name rather than dumping
-/// a whole JSON blob into a dialog.
+/// Describe tool intent for a permission prompt.
 pub(super) fn describe_tool_intent(name: &str, input_json: &str) -> String {
     let Ok(input) = serde_json::from_str::<serde_json::Value>(input_json) else {
         return format!("use {name}");

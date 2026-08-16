@@ -266,6 +266,7 @@ pub(crate) async fn run_interactive_session(
     let interactive_bootstrap::Bootstrap {
         config_path,
         layer_filter,
+        session_database,
         session_store,
         memory,
         working_dir,
@@ -340,6 +341,7 @@ pub(crate) async fn run_interactive_session(
     } = interactive_agent::build(
         config,
         session_id,
+        session_database,
         cli,
         working_dir.clone(),
         Arc::clone(&hook_registry),

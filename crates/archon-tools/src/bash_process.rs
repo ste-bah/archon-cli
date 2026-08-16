@@ -182,10 +182,8 @@ pub(super) fn spawn_bash_child(
     ctx: &ToolContext,
     prepared: &PreparedBashCommand,
 ) -> std::io::Result<Box<dyn ChildWrapper>> {
-    let mut command = Command::new(BASH_PROGRAM.as_path());
+    let mut command = contained_bash_command(&prepared.command);
     command
-        .arg("-c")
-        .arg(&prepared.command)
         .current_dir(&ctx.working_dir)
         .env_clear()
         .envs(prepared.env_vars.clone())
@@ -193,6 +191,32 @@ pub(super) fn spawn_bash_child(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
     spawn_wrapped_child(command)
+}
+
+fn contained_bash_command(command_text: &str) -> Command {
+    #[cfg(unix)]
+    {
+        let mut command = Command::new("/usr/bin/unshare");
+        command
+            .args([
+                "--user",
+                "--map-root-user",
+                "--pid",
+                "--fork",
+                "--mount-proc",
+                "--",
+            ])
+            .arg(BASH_PROGRAM.as_path())
+            .arg("-c")
+            .arg(command_text);
+        command
+    }
+    #[cfg(not(unix))]
+    {
+        let mut command = Command::new(BASH_PROGRAM.as_path());
+        command.arg("-c").arg(command_text);
+        command
+    }
 }
 
 pub(super) async fn await_bash_child(
@@ -319,6 +343,23 @@ pub(super) async fn completed_bash_result(
     state: &mut BashChildState<'_>,
     status: std::io::Result<std::process::ExitStatus>,
 ) -> ToolResult {
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            return state
+                .fail(
+                    "process wait failure",
+                    format!("Failed to wait for bash process: {error}"),
+                )
+                .await;
+        }
+    };
+    if let Some(error) = terminate_completed_process_group(state.process_group) {
+        abort_pipe_tasks(state.stdout_task, state.stderr_task);
+        return ToolResult::error(format!(
+            "[BASH_PROCESS_TREE_INCOMPLETE] Bash exited but its process group could not be terminated: {error}"
+        ));
+    }
     let (stdout, stderr) =
         match join_pipe_tasks(state.deadline, state.stdout_task, state.stderr_task).await {
             Some(pipes) => pipes,
@@ -331,17 +372,6 @@ pub(super) async fn completed_bash_result(
                     .await;
             }
         };
-    let status = match status {
-        Ok(status) => status,
-        Err(error) => {
-            return state
-                .fail(
-                    "process wait failure",
-                    format!("Failed to wait for bash process: {error}"),
-                )
-                .await;
-        }
-    };
     if let Some(error) = stdout.read_error.as_ref().or(stderr.read_error.as_ref()) {
         return state
             .fail(
@@ -352,6 +382,31 @@ pub(super) async fn completed_bash_result(
     }
     let exit_code = status.code().unwrap_or(-1);
     bash_result_from_pipes(tool.max_output_bytes, stdout, stderr, exit_code)
+}
+
+fn terminate_completed_process_group(process_group: Option<u32>) -> Option<String> {
+    #[cfg(unix)]
+    {
+        let pid = process_group?;
+        // The direct shell has already exited. Killing its process group prevents
+        // a background descendant from writing after the tool result is observed.
+        let result = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        if result == 0 {
+            tracing::debug!(
+                process_group = pid,
+                "bash: terminated completed process group"
+            );
+            None
+        } else {
+            let error = std::io::Error::last_os_error();
+            (error.raw_os_error() != Some(libc::ESRCH)).then(|| error.to_string())
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = process_group;
+        None
+    }
 }
 
 pub(super) async fn terminate_child(

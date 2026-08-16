@@ -40,6 +40,25 @@ impl Agent {
             return None;
         }
         self.snapshot_before_mutation(tool, &input).await;
+        let filesystem_effect = tool_arc.working_tree_effect();
+        let filesystem_before = match self.observe_filesystem_before_mutation(filesystem_effect) {
+            Ok(observation) => observation,
+            Err(error) => {
+                let result = ToolResult::error(format!(
+                    "Tool '{}' was blocked because its filesystem baseline could not be observed: {error}",
+                    tool.name
+                ));
+                self.send_event(AgentEvent::ToolCallComplete {
+                    name: tool.name.clone(),
+                    id: tool.id.clone(),
+                    result: result.clone(),
+                    transcript_summary: None,
+                })
+                .await;
+                self.state.add_tool_result(&tool.id, &result.content, true);
+                return None;
+            }
+        };
         let file_path = file_path_for_tool(tool, &input);
         self.fire_before_tool_call_hook(&tool.name, &tool.id, &input)
             .await;
@@ -50,6 +69,8 @@ impl Agent {
             input,
             tool_arc,
             file_path,
+            filesystem_effect,
+            filesystem_before,
             sandbox_prechecked: false,
         })
     }

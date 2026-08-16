@@ -45,6 +45,7 @@ fn rejected_approval_cannot_persist_a_terminal_task_generation() {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-16T00:00:00Z".into(),
     };
 

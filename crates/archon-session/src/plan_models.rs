@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use archon_completion::RequiredEvidenceKind;
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +117,15 @@ pub struct PlanStepReconciliation {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanExecutionEvidence {
+    #[serde(default)]
+    pub touched_files: BTreeSet<String>,
+    /// A failed post-mutation observation is a durable completion blocker.
+    #[serde(default)]
+    pub observation_failure: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistedPlanTask {
     pub task_id: String,
@@ -126,6 +137,9 @@ pub struct PersistedPlanTask {
     pub blocked_by: Vec<String>,
     #[serde(default)]
     pub required_evidence: Vec<RequiredEvidenceKind>,
+    /// Canonical evidence resolved and persisted with a completed task.
+    #[serde(default)]
+    pub completion_evidence: Vec<archon_completion::RequiredEvidence>,
     pub updated_at: String,
 }
 
@@ -157,6 +171,8 @@ pub struct PlanDocument {
     #[serde(default)]
     pub reconciliation: Vec<PlanStepReconciliation>,
     #[serde(default)]
+    pub execution_evidence: PlanExecutionEvidence,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub branch: Option<String>,
@@ -177,6 +193,7 @@ impl PlanDocument {
             status: PlanStatus::Draft,
             approval: None,
             reconciliation: Vec::new(),
+            execution_evidence: PlanExecutionEvidence::default(),
             session_id: None,
             branch: None,
             commits: Vec::new(),

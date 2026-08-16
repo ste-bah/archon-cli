@@ -110,6 +110,8 @@ async fn post_tool_result(
         input,
         tool_arc: Arc::new(StubTool(tool_name.to_string())),
         file_path: file_path.map(|p| p.to_string_lossy().into_owned()),
+        filesystem_effect: archon_tools::tool::WorkingTreeEffect::None,
+        filesystem_before: None,
         sandbox_prechecked: true,
     };
     let mut result = ToolResult::success("The file has been updated.");
@@ -236,12 +238,18 @@ async fn verdict_is_recorded_in_the_conversation_transcript() {
     let target = repo.path().join("src").join("big.rs");
     write_lines(&target, 501);
     let mut agent = agent_in(repo.path(), shipped_registry(home.path()));
+    let filesystem_effect = archon_tools::tool::WorkingTreeEffect::DeclaredPaths;
+    let filesystem_before = agent
+        .observe_filesystem_before_mutation(filesystem_effect)
+        .expect("filesystem baseline");
     let pre = PreflightResult {
         tool_name: "Edit".into(),
         tool_id: "tool-use-1".into(),
         input: edit_input(&target),
         tool_arc: Arc::new(StubTool("Edit".into())),
         file_path: Some(target.to_string_lossy().into_owned()),
+        filesystem_effect,
+        filesystem_before,
         sandbox_prechecked: true,
     };
 

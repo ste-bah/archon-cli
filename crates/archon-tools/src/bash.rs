@@ -4,7 +4,7 @@ use serde_json::json;
 use std::sync::LazyLock;
 
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use crate::workflow_resource_env::CargoResourceLimits;
 
 #[path = "bash_output.rs"]
@@ -190,6 +190,10 @@ impl Tool for BashTool {
             return result;
         }
         run_prepared_bash_command(self, ctx, raw_command, prepared).await
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {

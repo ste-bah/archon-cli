@@ -33,6 +33,7 @@ fn claimed_generation() -> (PlanDocument, PersistedPlanTask) {
         status: "Pending".into(),
         blocked_by: vec![],
         required_evidence: vec![],
+        completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
     (plan, task)

@@ -271,15 +271,27 @@ fn completed_plan_remains_available_after_cozo_reopen() {
     let mut completed = PlanDocument::new("completed-plan", "Completed work");
     completed.status = PlanStatus::Completed;
     {
-        let db = cozo::DbInstance::new("sqlite", &database_path, "").unwrap();
-        PlanStore::new(&db)
+        let config = archon_cozo::CozoGuardConfig::for_db_path(&database_path);
+        let db = archon_cozo::open_sqlite_guarded_instance(
+            database_path.to_str().unwrap(),
+            "plan reopen test: create",
+            config,
+        )
+        .unwrap();
+        PlanStore::new(db.db())
             .unwrap()
             .save_plan("reopen-session", &completed)
             .unwrap();
     }
-    let db = cozo::DbInstance::new("sqlite", &database_path, "").unwrap();
+    let config = archon_cozo::CozoGuardConfig::for_db_path(&database_path);
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        database_path.to_str().unwrap(),
+        "plan reopen test: reopen",
+        config,
+    )
+    .unwrap();
     assert_eq!(
-        PlanStore::new(&db)
+        PlanStore::new(db.db())
             .unwrap()
             .load_plan("reopen-session", "completed-plan")
             .unwrap()

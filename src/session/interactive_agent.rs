@@ -22,17 +22,17 @@ use crate::runtime::provider_observer::{
     observe_llm_provider_with_profile, record_provider_fallback, runtime_mode_for_provider_name,
 };
 
-type PlanStoreFactory =
+pub(super) type PlanStoreFactory =
     fn(&cozo::DbInstance) -> Result<archon_session::plan::PlanStore, std::io::Error>;
 
-fn initialize_plan_store(
+pub(super) fn initialize_plan_store(
     db: &cozo::DbInstance,
     factory: PlanStoreFactory,
 ) -> Result<archon_session::plan::PlanStore> {
     factory(db).map_err(|error| anyhow::anyhow!("failed to initialize plan store: {error}"))
 }
 
-fn initialize_plan_authority(
+pub(super) fn initialize_plan_authority(
     store: &archon_session::plan::PlanStore,
     secret_path: &std::path::Path,
     session_id: &str,
@@ -72,6 +72,7 @@ pub(super) struct Runtime {
 pub(super) async fn build(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,
+    session_database: PathBuf,
     cli: &Cli,
     working_dir: PathBuf,
     hook_registry: Arc<archon_core::hooks::HookRegistry>,
@@ -204,7 +205,7 @@ pub(super) async fn build(
         agent_event_tx,
         agent_registry,
     );
-    super::world_model_callbacks::install(&mut agent, config, session_id);
+    super::world_model_callbacks::install(&mut agent, config, session_id, &session_database);
     agent.set_session_store(Arc::clone(&session_store));
     let metrics_sink: Arc<dyn ChannelMetricSink> = metrics.clone();
     agent.set_channel_metrics(metrics_sink);

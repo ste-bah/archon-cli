@@ -5,7 +5,7 @@ use archon_consciousness::rules::RuleSource;
 use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 use archon_memory::MemoryGraph;
 
-struct MockLlmProvider;
+pub(super) struct MockLlmProvider;
 
 #[async_trait::async_trait]
 impl LlmProvider for MockLlmProvider {

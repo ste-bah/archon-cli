@@ -1,5 +1,125 @@
 use super::*;
-use archon_tools::tool::AgentMode;
+use archon_tools::tool::{AgentMode, WorkingTreeEffect};
+
+#[test]
+fn production_tool_effects_match_the_registry_contract() {
+    let mut actual = effects_by_name(create_default_registry(std::env::temp_dir(), None));
+    actual.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut expected = PRODUCTION_TOOL_EFFECTS
+        .iter()
+        .map(|(name, effect)| ((*name).to_owned(), *effect))
+        .collect::<Vec<_>>();
+    expected.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        actual, expected,
+        "registry changed without a reviewed effect"
+    );
+}
+
+#[test]
+fn arbitrary_effects_are_explicitly_reviewed() {
+    let actual = effects_by_name(create_default_registry(std::env::temp_dir(), None));
+    let actual_arbitrary = actual
+        .into_iter()
+        .filter_map(|(name, effect)| (effect == WorkingTreeEffect::Arbitrary).then_some(name))
+        .collect::<std::collections::BTreeSet<_>>();
+    let reviewed_arbitrary = approved_arbitrary_tools()
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(
+        actual_arbitrary, reviewed_arbitrary,
+        "Arbitrary tools must be reviewed in both directions"
+    );
+}
+
+fn effects_by_name(registry: ToolRegistry) -> Vec<(String, WorkingTreeEffect)> {
+    registry
+        .tool_names()
+        .into_iter()
+        .map(|name| {
+            let effect = registry
+                .get(name)
+                .expect("registered production tool")
+                .working_tree_effect();
+            (name.to_owned(), effect)
+        })
+        .collect()
+}
+
+fn approved_arbitrary_tools() -> &'static [&'static str] {
+    &[
+        "Agent",
+        "Bash",
+        "BehaviourApprove",
+        "BehaviourProposals",
+        "BehaviourRollback",
+        "CronCreate",
+        "CronDelete",
+        "DocAnswer",
+        "DocGet",
+        "DocIngest",
+        "DocInspect",
+        "DocList",
+        "DocModelStatus",
+        "DocProvenance",
+        "DocSearch",
+        "DocStatus",
+        "EnterWorktree",
+        "ExitWorktree",
+        "GameTheoryCallSpecialist",
+        "GameTheoryClassify",
+        "GameTheoryInspect",
+        "GameTheoryReplay",
+        "GameTheoryRun",
+        "GameTheorySpecimens",
+        "GameTheoryStatus",
+        "JavaToolchain",
+        "LargeEditAbort",
+        "LargeEditBegin",
+        "LargeEditCommit",
+        "LargeEditDeleteSection",
+        "LargeEditInsertAfter",
+        "LargeEditReplaceSection",
+        "LearningInspect",
+        "LearningStatus",
+        "Monitor",
+        "PowerShell",
+        "Skill",
+        "TaskCreate",
+        "TeamCreate",
+        "TeamDelete",
+        "lsp",
+    ]
+}
+
+#[test]
+fn optional_leann_tools_are_read_only() {
+    use std::sync::Arc;
+
+    let database = cozo::DbInstance::new("mem", "", Default::default()).expect("in-memory Cozo");
+    let config = archon_leann::indexer::EmbeddingConfig {
+        provider: archon_leann::indexer::EmbeddingProviderKind::Mock,
+        dimension: 8,
+    };
+    let index = Arc::new(
+        archon_leann::CodeIndex::from_db(database, config).expect("LEANN index test fixture"),
+    );
+    let registry = create_default_registry(std::env::temp_dir(), Some(index));
+
+    for name in ["LeannSearch", "LeannFindSimilar"] {
+        assert_eq!(
+            registry
+                .get(name)
+                .expect("optional LEANN tool registration")
+                .working_tree_effect(),
+            WorkingTreeEffect::None,
+            "{name} must remain read-only"
+        );
+    }
+}
 
 #[test]
 fn clone_filtered_does_not_mutate_original() {

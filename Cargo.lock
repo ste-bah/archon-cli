@@ -486,6 +486,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "archon-cognitive",
+ "archon-completion",
  "archon-consciousness",
  "archon-context",
  "archon-leann",

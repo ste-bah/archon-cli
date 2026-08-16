@@ -4,7 +4,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 static RE_RESULT_LINK: OnceLock<Regex> = OnceLock::new();
 static RE_RESULT_SNIPPET: OnceLock<Regex> = OnceLock::new();
@@ -244,6 +244,10 @@ impl Tool for WebSearchTool {
         }
 
         ToolResult::success(format_results(&results))
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

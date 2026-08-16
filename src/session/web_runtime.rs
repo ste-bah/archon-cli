@@ -182,6 +182,7 @@ pub(crate) async fn spawn_web_session(
     let super::interactive_bootstrap::Bootstrap {
         config_path,
         layer_filter,
+        session_database,
         session_store,
         memory,
         working_dir,
@@ -257,6 +258,7 @@ pub(crate) async fn spawn_web_session(
     } = super::interactive_agent::build(
         config,
         session_id,
+        session_database,
         cli,
         working_dir.clone(),
         Arc::clone(&hook_registry),
