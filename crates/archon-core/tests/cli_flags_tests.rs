@@ -276,7 +276,39 @@ fn filter_whitelist_retains_only_named_tools() {
     assert!(names.contains(&"Write"));
     assert!(!names.contains(&"Bash"));
     assert!(!names.contains(&"Grep"));
-    assert_eq!(names.len(), 2);
+    assert_eq!(
+        names.len(),
+        2 + archon_core::dispatch::ALWAYS_AVAILABLE_TOOLS.len(),
+        "the whitelist keeps what it named plus the always-available set"
+    );
+}
+
+/// The hole this closes: a whitelist applied at session start *deletes* tools
+/// from the registry, and a subagent's toolset is later taken from that same
+/// registry by name. A coordination tool dropped here could not be restored
+/// downstream however loudly the spawn asked for it, because an intersection
+/// cannot produce what the source no longer holds (#184).
+#[test]
+fn filter_whitelist_cannot_strip_the_tools_agents_talk_with() {
+    let mut registry = create_default_registry(std::env::temp_dir(), None);
+    registry.filter_whitelist(&["Read"]);
+    let names = registry.tool_names();
+
+    for tool in archon_core::dispatch::ALWAYS_AVAILABLE_TOOLS {
+        assert!(
+            names.contains(tool),
+            "'{tool}' must survive a whitelist that does not name it"
+        );
+    }
+}
+
+/// A denial is a deliberate refusal and still wins — otherwise there would be
+/// no way to withhold one of these at all.
+#[test]
+fn filter_blacklist_can_still_refuse_an_always_available_tool() {
+    let mut registry = create_default_registry(std::env::temp_dir(), None);
+    registry.filter_blacklist(&["SendMessage"]);
+    assert!(!registry.tool_names().contains(&"SendMessage"));
 }
 
 #[test]
@@ -291,11 +323,19 @@ fn filter_blacklist_removes_named_tools() {
     assert_eq!(names.len(), original_count - 2);
 }
 
+/// Naming nothing removes everything an agent can act with, and leaves only the
+/// tools it talks and waits with. `--tools` with an empty list is a request for
+/// no capability, not a request to be unable to answer.
 #[test]
-fn filter_whitelist_empty_list_removes_all() {
+fn filter_whitelist_empty_list_removes_everything_but_the_talking_tools() {
     let mut registry = create_default_registry(std::env::temp_dir(), None);
     registry.filter_whitelist(&[]);
-    assert!(registry.tool_names().is_empty());
+    let mut names = registry.tool_names();
+    names.sort_unstable();
+
+    let mut expected: Vec<&str> = archon_core::dispatch::ALWAYS_AVAILABLE_TOOLS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(names, expected);
 }
 
 #[test]

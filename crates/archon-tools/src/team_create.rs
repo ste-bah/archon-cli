@@ -1,7 +1,14 @@
-//! TeamCreate tool for TASK-CLI-312.
+//! `TeamCreate` — establish the session's team (TASK-CLI-312, wired in #184 M5).
 //!
-//! Creates a team config file and per-member inbox files.
-//! Does NOT spawn agent processes — returns config for the caller to use.
+//! This used to write a `team.json` nothing read and one empty `inbox-<role>
+//! .jsonl` per member that nothing drained, then report success — the shape #153
+//! rules out, because a broken subsystem looked healthy. The file mailboxes are
+//! gone: every agent shares one process, so member messaging is `SendMessage`
+//! through the router, and transcripts already give crash-recoverable delivery.
+//!
+//! What it does now is establish the team. A spawn while a team is active takes
+//! a seat on it, and the roster is what `/agents`, `archon team list` and
+//! `TeamDelete` all read.
 
 use std::path::PathBuf;
 
@@ -9,6 +16,7 @@ use async_trait::async_trait;
 use serde_json::json;
 
 use crate::team_config::{MemberConfig, TeamConfig};
+use crate::team_roster;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct TeamCreateTool {
@@ -28,8 +36,10 @@ impl Tool for TeamCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a new agent team. Writes team.json and per-member inbox files. \
-         Does NOT spawn agent processes — returns team ID and role names for the caller to use."
+        "Establish a team of agents for this session. Declares the roles the team wants; \
+         spawning an agent whose subagent_type matches a role seats it on the team. \
+         Members address each other by role with SendMessage. Does not spawn anything \
+         itself — use the Agent tool for that, then TeamDelete to shut the team down."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -39,6 +49,9 @@ impl Tool for TeamCreateTool {
                 "name": { "type": "string", "description": "Human-readable team name" },
                 "members": {
                     "type": "array",
+                    "description": "The roles this team wants. A role is the subagent_type \
+                                    of the agent that fills it, and the address other members \
+                                    send to.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -65,6 +78,22 @@ impl Tool for TeamCreateTool {
             None => return ToolResult::error("missing 'members'"),
         };
 
+        // One team per session. Switching while agents are seated would leave
+        // them on a roster nothing reads and route their departures into the
+        // new team's file.
+        if let Some(active) = team_roster::active() {
+            let seated = team_roster::seated_agent_ids();
+            if !seated.is_empty() {
+                return ToolResult::error(format!(
+                    "team '{}' is still running {} agent(s): {}. \
+                     Shut it down with TeamDelete before creating another.",
+                    active.team_id,
+                    seated.len(),
+                    seated.join(", "),
+                ));
+            }
+        }
+
         let team_id = uuid::Uuid::new_v4()
             .to_string()
             .chars()
@@ -74,65 +103,49 @@ impl Tool for TeamCreateTool {
         let mut members = Vec::new();
         for m in members_val {
             let role = match m["role"].as_str() {
-                Some(r) => r.to_string(),
+                Some(r) => r.trim().to_string(),
                 None => return ToolResult::error("member missing 'role'"),
             };
-            let system_prompt = m["system_prompt"].as_str().unwrap_or("").to_string();
-            let model = m["model"].as_str().map(String::from);
-            let tools: Vec<String> = m["tools"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
+            if role.is_empty() {
+                return ToolResult::error("member 'role' is empty");
+            }
             members.push(MemberConfig {
                 role,
-                system_prompt,
-                model,
-                tools,
+                system_prompt: m["system_prompt"].as_str().unwrap_or("").to_string(),
+                model: m["model"].as_str().map(String::from),
+                tools: m["tools"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                agent_id: None,
+                declared: true,
             });
         }
 
         let config = TeamConfig {
             id: team_id.clone(),
             name,
-            members: members.clone(),
+            members,
         };
 
-        let teams_dir = self.project_dir.join(".archon").join("teams");
-        let team_dir = teams_dir.join(&team_id);
-        if let Err(e) = std::fs::create_dir_all(&team_dir) {
-            return ToolResult::error(format!("failed to create team directory: {e}"));
+        if let Err(error) = team_roster::save(&self.project_dir, &config) {
+            return ToolResult::error(format!("failed to write the team roster: {error}"));
         }
+        team_roster::activate(self.project_dir.clone(), team_id.clone());
 
-        // Write team.json
-        let json_str = match serde_json::to_string_pretty(&config) {
-            Ok(s) => s,
-            Err(e) => return ToolResult::error(format!("serialization error: {e}")),
-        };
-        if let Err(e) = std::fs::write(team_dir.join("team.json"), &json_str) {
-            return ToolResult::error(format!("failed to write team.json: {e}"));
-        }
-
-        // Create empty inbox files for each member
-        for member in &members {
-            let inbox_path = team_dir.join(format!("inbox-{}.jsonl", member.role));
-            if let Err(e) = std::fs::write(&inbox_path, "") {
-                return ToolResult::error(format!(
-                    "failed to create inbox for '{}': {e}",
-                    member.role
-                ));
-            }
-        }
-
-        let roles: Vec<&str> = members.iter().map(|m| m.role.as_str()).collect();
+        let roles: Vec<&str> = config.members.iter().map(|m| m.role.as_str()).collect();
         ToolResult::success(
             serde_json::to_string_pretty(&json!({
                 "team_id": team_id,
                 "roles": roles,
-                "team_dir": team_dir.to_string_lossy()
+                "team_dir": team_roster::team_dir(&self.project_dir, &team_id).to_string_lossy(),
+                "next": "Spawn agents with the Agent tool using subagent_type set to a role \
+                         above; each one is seated on this team automatically. Members reach \
+                         each other by role with SendMessage."
             }))
             .unwrap_or_default(),
         )
@@ -146,3 +159,7 @@ impl Tool for TeamCreateTool {
         PermissionLevel::Safe
     }
 }
+
+#[cfg(test)]
+#[path = "team_create_tests.rs"]
+mod tests;

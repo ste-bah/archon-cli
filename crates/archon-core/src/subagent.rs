@@ -337,6 +337,18 @@ impl SubagentManager {
             .push(message);
     }
 
+    /// Undelivered messages currently queued for `agent_id`.
+    ///
+    /// The queue itself is deliberately unbounded here — backpressure is the
+    /// router's decision, not the store's, because only the router knows who to
+    /// report the refusal to (#184 M1).
+    pub fn pending_message_count(&self, agent_id: &str) -> usize {
+        self.pending_messages
+            .get(agent_id)
+            .map(Vec::len)
+            .unwrap_or(0)
+    }
+
     /// Drain all pending messages for an agent (take + clear).
     /// Returns empty vec if no messages queued.
     pub fn drain_pending_messages(&mut self, agent_id: &str) -> Vec<String> {

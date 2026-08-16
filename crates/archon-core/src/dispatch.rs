@@ -89,6 +89,36 @@ pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
     ("lsp", WorkingTreeEffect::Arbitrary),
 ];
 
+/// Tools no allowlist removes: how an agent talks, and how it waits.
+///
+/// These are offered to every agent and every subagent however its toolset was
+/// derived. The shared reason is that withholding one does not restrict what an
+/// agent can **do** — it removes its ability to say what it found, reach the
+/// agent that spawned it, or wait for something it depends on. An agent that
+/// cannot answer is not a teammate, and a coordination layer nothing can invoke
+/// is machinery pretending to be a feature (#153, #184).
+///
+/// This is an always-OFFER set, not an override of a deliberate refusal:
+/// [`ToolRegistry::filter_blacklist`] and the subagent denylist both still win.
+pub const ALWAYS_AVAILABLE_TOOLS: &[&str] = &[
+    // The board: how a subagent hands work back.
+    "BoardRaise",
+    "BoardClaim",
+    "BoardList",
+    "BoardResolve",
+    // The router: how it reaches its lead and its peers.
+    "SendMessage",
+    // Waiting: an agent coordinating with another has to be able to wait for
+    // it. Without this the only way to pause is to burn a tool round, or to
+    // shell out to a sleep command it may not have.
+    "Sleep",
+];
+
+/// Whether `name` is in [`ALWAYS_AVAILABLE_TOOLS`].
+pub fn is_always_available(name: &str) -> bool {
+    ALWAYS_AVAILABLE_TOOLS.contains(&name)
+}
+
 /// Registry of available tools.
 #[derive(Clone)]
 pub struct ToolRegistry {
@@ -131,6 +161,33 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
+    /// Restrict this registry's `Bash` to the agent's isolation tier (#184 M3).
+    ///
+    /// The registry is built per subagent, which makes it the one place a
+    /// per-agent restriction can live: `ToolContext` is inherited verbatim from
+    /// the parent, and the admission callback is skipped for `Safe` tools.
+    ///
+    /// Returns `false` when there is no `Bash` to restrict — a read-only agent
+    /// whose allowlist excluded it, which needs no restriction anyway.
+    pub fn set_bash_isolation_tier(
+        &mut self,
+        tier: archon_tools::isolation::IsolationTier,
+    ) -> bool {
+        // Nothing to enforce, and rebuilding the tool would discard whatever
+        // provider-env configuration was attached moments earlier.
+        if tier.may_build() {
+            return true;
+        }
+        let Some(bash) = self.tools.get("Bash") else {
+            return false;
+        };
+        let Some(restricted) = bash.with_isolation_tier(tier) else {
+            return false;
+        };
+        self.replace(restricted);
+        true
+    }
+
     pub fn attach_provider_env_to_bash(
         &mut self,
         provider_env: archon_tools::provider_env::ProviderEnvSource,
@@ -150,11 +207,23 @@ impl ToolRegistry {
         self.tools.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Keep only the tools whose names appear in the whitelist.
+    /// Keep only the tools whose names appear in the whitelist, plus
+    /// [`ALWAYS_AVAILABLE_TOOLS`].
     ///
-    /// Any tool not in `names` is removed from the registry.
+    /// The retention is here rather than at each caller because the caller is
+    /// the wrong place to remember it. A whitelist applied at session start
+    /// *deletes* tools from the registry, and a subagent's toolset is later
+    /// taken from that same registry by name — so a tool dropped here could not
+    /// be restored downstream however loudly the spawn asked for it. The
+    /// subagent path unions the same names into its request and would silently
+    /// get nothing back, because an intersection cannot produce what the source
+    /// no longer holds.
+    ///
+    /// Use [`Self::filter_blacklist`] to refuse one of these deliberately;
+    /// a denial still wins.
     pub fn filter_whitelist(&mut self, names: &[&str]) {
-        self.tools.retain(|k, _| names.contains(&k.as_str()));
+        self.tools
+            .retain(|k, _| names.contains(&k.as_str()) || is_always_available(k));
     }
 
     /// Create a new registry containing only the tools whose names appear

@@ -8,6 +8,14 @@ pub struct GuardrailRiskScores {
     pub predicted_plan_drift: Option<f32>,
     pub predicted_high_cost: Option<f32>,
     pub predicted_slow_run: Option<f32>,
+    /// Probability that this agent's work will conflict when merged back (#184 M9).
+    ///
+    /// Trained against `WorldLabelSet::merge_conflict`, which is the outcome of
+    /// an actual git merge rather than a labeler's judgement. That makes it the
+    /// one head here with ground truth behind it, and it is the question worth
+    /// asking at spawn time: overlapping claims on a shared module mean
+    /// serialize rather than parallelize.
+    pub predicted_merge_conflict: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -246,6 +254,9 @@ pub fn risk_score(scores: GuardrailRiskScores) -> f32 {
         scores.predicted_provider_incident.unwrap_or(0.0) * 0.50,
         scores.predicted_high_cost.unwrap_or(0.0) * 0.50,
         scores.predicted_slow_run.unwrap_or(0.0) * 0.40,
+        // Full weight: a conflicting merge costs the work of every agent that
+        // has to be re-run, which is the same order as an outright failure.
+        scores.predicted_merge_conflict.unwrap_or(0.0),
     ]
     .into_iter()
     .fold(0.0_f32, f32::max)

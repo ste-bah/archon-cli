@@ -147,6 +147,8 @@ fn bedrock_message_stop_parsed() {
     assert!(has_stop, "expected MessageStop, got: {stream_events:?}");
 }
 
+// Tool use over ConverseStream lives in `bedrock_tool_use_tests.rs`.
+
 #[test]
 fn bedrock_missing_usage_fields_remain_unavailable() {
     let event = serde_json::json!({

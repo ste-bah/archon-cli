@@ -277,6 +277,10 @@ pub(crate) fn default_registry() -> Registry {
     // Reads the new agent_registry field on CommandContext (DIRECT
     // pattern; populated unconditionally from SlashCommandContext).
     b.insert_primary("agent", Arc::new(crate::command::agent_slash::AgentHandler));
+    b.insert_primary(
+        "worktrees",
+        Arc::new(crate::command::worktrees::WorktreesHandler),
+    );
     // TASK-#212 SLASH-MANAGED-AGENTS: /managed-agents remote-registry
     // status + how-to. Pure status command — no async fetch (deferred
     // to a follow-up; see managed_agents.rs module rustdoc).

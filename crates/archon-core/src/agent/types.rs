@@ -201,6 +201,12 @@ pub struct AgentConfig {
     /// [`crate::subagent::SubagentManager`] so the live fan-out cap is
     /// configurable rather than a hardcoded constant.
     pub max_subagent_concurrency: usize,
+    /// `config.subagent.auto_isolation` — when to isolate an agent that did not
+    /// ask to be isolated (#184 M3).
+    pub subagent_auto_isolation: archon_tools::isolation::AutoIsolation,
+    /// `config.subagent.isolation_max_tier` — the most isolation any agent may
+    /// have, however it was requested.
+    pub subagent_isolation_max_tier: archon_tools::isolation::IsolationTier,
 }
 
 impl AgentConfig {
@@ -276,6 +282,8 @@ impl Default for AgentConfig {
             activity_sink: None,
             context: crate::config::ContextConfig::default(),
             max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
+            subagent_auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
+            subagent_isolation_max_tier: archon_tools::isolation::IsolationTier::Worktree,
         }
     }
 }

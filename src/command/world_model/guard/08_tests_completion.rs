@@ -217,6 +217,7 @@ fn pending_durable_world_model_plan(
                 status: "Pending".into(),
                 blocked_by: Vec::new(),
                 required_evidence: vec![archon_completion::RequiredEvidenceKind::Tests],
+                completion_evidence: Vec::new(),
                 updated_at: "2026-08-15T00:00:00Z".into(),
             }],
         )

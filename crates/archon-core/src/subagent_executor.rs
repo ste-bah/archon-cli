@@ -96,7 +96,7 @@ pub struct AgentSubagentExecutor {
     /// Shared pending resume messages slot (written from
     /// `Agent::process_message` SendMessage resume path, read from
     /// `run_to_completion` when building the runner).
-    pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+    pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).
     agent_config: Arc<crate::agent::AgentConfig>,
@@ -158,7 +158,7 @@ impl AgentSubagentExecutor {
         parent_model: String,
         parent_system_prompt: Vec<serde_json::Value>,
         parent_permission_mode: Arc<Mutex<String>>,
-        pending_resume_messages: Arc<Mutex<Option<Vec<serde_json::Value>>>>,
+        pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {
@@ -251,18 +251,19 @@ impl AgentSubagentExecutor {
             "BoardResolve",
         ];
 
-        // The board is how a subagent hands work back. Withholding it does not
-        // restrict what an agent can DO — it removes its ability to say what it
-        // found. So these are unioned in however `base_allowed` was derived.
+        // The board is how a subagent hands work back, `SendMessage` is how it
+        // reaches its lead and its peers, and `Sleep` is how it waits for one.
+        // These are unioned in however `base_allowed` was derived — see
+        // [`crate::dispatch::ALWAYS_AVAILABLE_TOOLS`] for why.
         //
-        // Without this, an agent spawned with an explicit `allowed_tools` list
-        // could not reach the board at all, and most pipeline agents name their
-        // tools. The feature was therefore absent from exactly the runs it was
-        // built for: fan-outs where several agents share one run.
+        // One list, shared with the session-level whitelist, because two copies
+        // would drift and the failure is silent: a tool the session dropped
+        // cannot be restored here, since `clone_filtered` intersects with a
+        // registry that no longer holds it.
         //
         // `DENYLIST` still wins, so this is an always-OFFER set rather than an
         // override of a deliberate refusal.
-        const ALWAYS_ALLOWED: &[&str] = &["BoardRaise", "BoardClaim", "BoardList", "BoardResolve"];
+        const ALWAYS_ALLOWED: &[&str] = crate::dispatch::ALWAYS_AVAILABLE_TOOLS;
 
         let mut base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request
@@ -369,6 +370,17 @@ impl SubagentExecutor for AgentSubagentExecutor {
         self.handle_inner_complete(subagent_id, result).await;
     }
 
+    /// Trip an agent's shutdown flag, the same one `shutdown_request` sets.
+    ///
+    /// `TeamDelete` reaches the manager through here, because archon-tools
+    /// cannot reach it directly (#184 M5).
+    async fn request_shutdown(&self, subagent_id: &str) -> bool {
+        self.subagent_manager
+            .lock()
+            .await
+            .request_shutdown(subagent_id)
+    }
+
     async fn on_visible_complete(
         &self,
         subagent_id: String,
@@ -377,5 +389,42 @@ impl SubagentExecutor for AgentSubagentExecutor {
     ) -> OutcomeSideEffects {
         self.handle_visible_complete(subagent_id, result, nested)
             .await
+    }
+
+    /// Announce that an agent outlived the auto-background timer.
+    ///
+    /// Synchronous by contract — see the trait — so the work is spawned rather
+    /// than awaited. The timer path returns immediately either way; the lead
+    /// picks the envelope up at its next round boundary.
+    ///
+    /// The manager is the only state this touches, and it is an `Arc`, so the
+    /// spawned task holds nothing borrowed from the executor.
+    fn on_auto_backgrounded(&self, subagent_id: &str) {
+        let manager = Arc::clone(&self.subagent_manager);
+        let subagent_id = subagent_id.to_string();
+
+        archon_observability::spawn_named("subagent-idle-notice", async move {
+            let name = {
+                let mgr = manager.lock().await;
+                mgr.get_status(&subagent_id)
+                    .and_then(|info| info.request.subagent_type.clone())
+            };
+
+            let envelope = archon_tools::send_message::build_agent_status_envelope(
+                &subagent_id,
+                name.as_deref(),
+                archon_tools::send_message::AgentStatusKind::Idle,
+                Some("still running after the auto-background timer expired"),
+            );
+
+            let mut mgr = manager.lock().await;
+            if mgr.pending_message_count(crate::message_router::LEAD_QUEUE_ID)
+                >= crate::message_router::MAX_PENDING_MESSAGES
+            {
+                tracing::warn!(subagent_id, "lead inbox is full; dropping an idle notice");
+                return;
+            }
+            mgr.queue_pending_message(crate::message_router::LEAD_QUEUE_ID, envelope);
+        });
     }
 }

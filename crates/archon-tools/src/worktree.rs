@@ -37,11 +37,19 @@ impl Tool for EnterWorktreeTool {
             Err(e) => return ToolResult::error(format!("Cannot open git repo: {e}")),
         };
 
-        match WorktreeManager::create_worktree(&repo, &ctx.session_id) {
+        // Keyed by the calling agent, not the session. `session_id` is copied
+        // verbatim from parent to child, so it cannot separate one agent from
+        // its siblings — every agent in a session resolved to one directory
+        // and the second deleted the first's work (#184 M4).
+        let owner_id =
+            crate::worktree_ownership::owner_key_for(&ctx.session_id, ctx.subagent_id.as_deref());
+
+        match WorktreeManager::create_worktree(&repo, &ctx.session_id, &owner_id) {
             Ok(info) => ToolResult::success(format!(
-                "Worktree created.\n  Path: {}\n  Branch: {}\n  Session: {}",
+                "Worktree created.\n  Path: {}\n  Branch: {}\n  Owner: {}\n  Session: {}",
                 info.worktree_path.display(),
                 info.branch_name,
+                info.owner_id,
                 info.session_id,
             )),
             Err(e) => ToolResult::error(format!("Failed to create worktree: {e}")),
@@ -108,19 +116,23 @@ impl Tool for ExitWorktreeTool {
             Err(e) => return ToolResult::error(format!("Cannot open git repo: {e}")),
         };
 
-        // Find the worktree info for this session
-        let worktrees = WorktreeManager::list_worktrees();
-        let info = match worktrees.iter().find(|w| w.session_id == ctx.session_id) {
+        // Resolve by OWNER, not session. Matching on `session_id` handed a
+        // subagent its parent's worktree — because subagent trees are filed
+        // under a different key, the lookup skipped past its own and found the
+        // parent's — so `discard` destroyed the parent's work (#184 M4).
+        let owner_id =
+            crate::worktree_ownership::owner_key_for(&ctx.session_id, ctx.subagent_id.as_deref());
+
+        let info = match WorktreeManager::find_by_owner(&owner_id) {
             Some(i) => i,
             None => {
                 return ToolResult::error(format!(
-                    "No active worktree found for session '{}'",
-                    ctx.session_id
+                    "No active worktree found for agent '{owner_id}'"
                 ));
             }
         };
 
-        match WorktreeManager::exit_worktree(&repo, info, action) {
+        match WorktreeManager::exit_worktree(&repo, &info, action) {
             Ok(msg) => ToolResult::success(msg),
             Err(e) => ToolResult::error(format!("Failed to exit worktree: {e}")),
         }

@@ -8,6 +8,29 @@ use archon_core::orchestrator::{Orchestrator, RealSubtaskExecutor};
 use crate::cli_args::TeamAction;
 use crate::runtime::llm::build_configured_llm_provider;
 
+/// The roles a team's roster declares, in declaration order.
+///
+/// An empty roster is refused rather than run: `run_team` would plan zero
+/// subtasks, execute nothing, and print a successful-looking result.
+fn load_team_agents(team_id: &str) -> Result<Vec<String>, String> {
+    use archon_core::team::TeamManager;
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let manager = TeamManager::new(cwd);
+    let config = manager.load_team(team_id).map_err(|e| {
+        format!(
+            "Team '{team_id}' not found in {}: {e}\nRun `archon team list` to see what is there.",
+            manager.teams_dir().display()
+        )
+    })?;
+
+    let agents: Vec<String> = config.members.into_iter().map(|m| m.role).collect();
+    if agents.is_empty() {
+        return Err(format!("Team '{team_id}' has no members — nothing to run."));
+    }
+    Ok(agents)
+}
+
 pub(crate) async fn handle_team_command(
     action: &TeamAction,
     config: &ArchonConfig,
@@ -32,9 +55,20 @@ pub(crate) async fn handle_team_command(
                 team_agent_registry,
                 session_store,
             ));
-            let team_cfg = archon_core::orchestrator::config::TeamConfig {
-                name: team.clone(),
-                ..Default::default()
+            // The roster is what says who is on the team. Building the config
+            // with `..Default::default()` left `agents` empty, and `run_team`
+            // plans one subtask per agent — so every run decomposed to zero
+            // subtasks and reported success having done nothing (#184 M5).
+            let team_cfg = match load_team_agents(team) {
+                Ok(agents) => archon_core::orchestrator::config::TeamConfig {
+                    name: team.clone(),
+                    agents,
+                    ..Default::default()
+                },
+                Err(problem) => {
+                    eprintln!("{problem}");
+                    std::process::exit(1);
+                }
             };
             // Milestone 2 topology tap. `OrchestratorEvent` has no subscriber
             // registry — `Orchestrator::run_team` takes one `mpsc::Sender` and
@@ -110,16 +144,18 @@ pub(crate) async fn handle_team_command(
             let manager = TeamManager::new(cwd.clone());
             match manager.list_teams() {
                 Ok(ids) if ids.is_empty() => {
-                    println!("No teams found in {}/teams", cwd.display());
+                    println!("No teams found in {}", manager.teams_dir().display());
                 }
                 Ok(ids) => {
                     println!("Teams ({}):", ids.len());
                     for id in ids {
                         match manager.load_team(&id) {
                             Ok(cfg) => println!(
-                                "  {id:<24}  {name}  ({n} members)",
+                                "  {id:<24}  {name}  ({n} member{s}, {filled} running)",
                                 name = cfg.name,
-                                n = cfg.members.len()
+                                n = cfg.members.len(),
+                                s = if cfg.members.len() == 1 { "" } else { "s" },
+                                filled = cfg.members.iter().filter(|m| m.is_filled()).count(),
                             ),
                             Err(e) => {
                                 println!("  {id:<24}  <unreadable team.json: {e}>")

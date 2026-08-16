@@ -38,6 +38,10 @@ impl AgentSubagentExecutor {
                 }
             }
         }
+        // The agent's name, read BEFORE `cleanup_agent` strips it from the
+        // registry a few lines below.
+        let name = self.registered_name_for(&subagent_id).await;
+
         // Best-effort manager update. The caller id is now the manager id,
         // so visible status, SendMessage, progress, transcripts, and cleanup
         // all converge on the same identifier.
@@ -53,8 +57,114 @@ impl AgentSubagentExecutor {
                 mgr.cleanup_agent(&subagent_id);
             }
         }
+
+        // Vacate the team seat, if this agent held one (#184 M5). This is also
+        // the acknowledgement `TeamDelete` waits on, so it has to happen on
+        // every terminal state and not only on success.
+        archon_tools::team_roster::leave(&subagent_id);
+
+        // Tell the lead. Without this a subagent ends into the background
+        // task-notification path and the lead learns nothing — a failed agent
+        // and a finished one are equally silent (#184 M6).
+        //
+        // Note a cancelled agent arrives here as `Err("subagent cancelled")`:
+        // this path is handed a `Result<String, String>`, so it cannot tell
+        // cancellation from failure. Reporting it as failed with that reason is
+        // the honest reading of what it knows.
+        let (status, detail) = match &result {
+            Ok(text) => (
+                archon_tools::send_message::AgentStatusKind::Completed,
+                summarize(text),
+            ),
+            Err(reason) => (
+                archon_tools::send_message::AgentStatusKind::Failed,
+                Some(reason.clone()),
+            ),
+        };
+        self.notify_lead(&subagent_id, name.as_deref(), status, detail.as_deref())
+            .await;
     }
 
+    /// The name this agent was registered under, if any.
+    async fn registered_name_for(&self, subagent_id: &str) -> Option<String> {
+        let mgr = self.subagent_manager.lock().await;
+        mgr.get_status(subagent_id)
+            .and_then(|info| info.request.subagent_type.clone())
+    }
+
+    /// Queue a status envelope for the lead to read at its next round.
+    pub(super) async fn notify_lead(
+        &self,
+        subagent_id: &str,
+        name: Option<&str>,
+        status: archon_tools::send_message::AgentStatusKind,
+        detail: Option<&str>,
+    ) {
+        let envelope = archon_tools::send_message::build_agent_status_envelope(
+            subagent_id,
+            name,
+            status,
+            detail,
+        );
+
+        let mut mgr = self.subagent_manager.lock().await;
+        // Bounded like every other inbox. A storm of failing agents must not
+        // grow the lead's queue without limit; dropping the newest and saying
+        // so in the log beats an unbounded Vec nobody drains.
+        if mgr.pending_message_count(crate::message_router::LEAD_QUEUE_ID)
+            >= crate::message_router::MAX_PENDING_MESSAGES
+        {
+            tracing::warn!(
+                subagent_id,
+                "lead inbox is full; dropping an agent status envelope"
+            );
+            return;
+        }
+        mgr.queue_pending_message(crate::message_router::LEAD_QUEUE_ID, envelope);
+    }
+}
+
+/// What an isolated agent left behind, and what to do with it (#184 M7).
+///
+/// The note used to be a path and a branch name. That tells the lead where the
+/// work is but nothing about whether it is worth looking at, so a run of five
+/// isolated agents produced five identical-looking notes and no way to triage
+/// them. It now carries the diffstat, how far the branch diverged, and the
+/// commands that act on it.
+///
+/// The review is best-effort: a repository that cannot be opened yields the
+/// old shape rather than nothing, because knowing where the work is beats
+/// knowing nothing.
+fn preserved_worktree_note(wt: &archon_tools::worktree_manager::WorktreeInfo) -> String {
+    let summary = match archon_tools::worktree_review::review_for(wt) {
+        Some(review) => review.describe(),
+        None => format!("branch '{}'", wt.branch_name),
+    };
+    let usage = archon_tools::worktree_manager::WorktreeManager::disk_usage(&wt.owner_id);
+
+    format!(
+        "\n\n[Worktree preserved: {summary}, {}]\n\
+         Path: {}\n\
+         Review with `/worktrees`, then merge or discard it — an isolated \
+         agent's work is not in your tree until you say so.",
+        usage.describe(),
+        wt.worktree_path.display(),
+    )
+}
+
+/// Trim a completion result down to something worth putting in an envelope.
+///
+/// The full text already reaches the lead as the tool result; the envelope is
+/// a signal, not a second copy of the output.
+fn summarize(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(280).collect())
+}
+
+impl AgentSubagentExecutor {
     pub(super) async fn handle_visible_complete(
         &self,
         subagent_id: String,
@@ -116,18 +226,13 @@ impl AgentSubagentExecutor {
                 Ok(_) => {
                     // Clean vs. has_changes split.
                     match archon_tools::worktree_manager::WorktreeManager::cleanup_session(
-                        &format!("subagent-{subagent_id}"),
+                        &archon_tools::worktree_ownership::subagent_owner_key(&subagent_id),
                     ) {
                         Ok(()) => {
                             tracing::info!(subagent_id = %subagent_id, "clean worktree auto-removed");
                         }
                         Err(_has_changes) => {
-                            let wt_note = format!(
-                                "\n\n[Worktree: {} (branch: {})]",
-                                wt.worktree_path.display(),
-                                wt.branch_name
-                            );
-                            side_effects.text_suffix = Some(wt_note);
+                            side_effects.text_suffix = Some(preserved_worktree_note(&wt));
                             tracing::info!(subagent_id = %subagent_id, branch = %wt.branch_name, "worktree preserved with changes");
                         }
                     }
@@ -135,7 +240,7 @@ impl AgentSubagentExecutor {
                 Err(_) => {
                     // Silent cleanup on failure.
                     let _ = archon_tools::worktree_manager::WorktreeManager::cleanup_session(
-                        &format!("subagent-{subagent_id}"),
+                        &archon_tools::worktree_ownership::subagent_owner_key(&subagent_id),
                     );
                     tracing::info!(subagent_id = %subagent_id, "worktree cleaned up after failure");
                 }

@@ -65,7 +65,9 @@ impl Agent {
             memory_briefing: None,
             permission_store,
             critical_system_reminder: None,
-            pending_resume_messages: Arc::new(tokio::sync::Mutex::new(None)),
+            pending_resume_messages: Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             metrics: None,
             // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
             // Wired by the binary at startup via set_record_memory_callback /

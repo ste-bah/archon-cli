@@ -185,8 +185,20 @@ questions instead of dumping the corpus into the model context.
 
 | Tool | Permission | Purpose |
 |---|---|---|
-| `TeamCreate` | Safe | Create a team (writes `team.json` + per-member inboxes; does NOT spawn agents) |
-| `TeamDelete` | Risky | Delete a team and its inbox files |
+| `TeamCreate` | Safe | Establish the session's team: declare the roles it wants. Does not spawn agents |
+| `TeamDelete` | Risky | Shut the team down — `shutdown_request` to every member, then remove it |
+
+A team's roster lives at `<project>/.archon/teams/<team-id>/team.json`. Spawning an
+agent whose `subagent_type` matches a declared role seats it on the team; the seat
+is vacated when the agent reaches any terminal state. Members address each other by
+role with `SendMessage`, and what they receive is attributed to the sender's role.
+`/agent` shows the roster with each member's status, task and declared writes, and
+`archon team list` shows every team on the project.
+
+`TeamDelete` waits up to 60s for members to stop. A member that does not stop leaves
+the team intact and is named in the refusal — a half-deleted team is worse than one
+that is still there. One team per session: creating a second while members are
+running is refused.
 
 ## Runtime control
 

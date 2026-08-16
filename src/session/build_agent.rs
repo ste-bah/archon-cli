@@ -130,6 +130,8 @@ pub(crate) async fn build_session_agent(
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,
+        subagent_auto_isolation: config.subagent.auto_isolation,
+        subagent_isolation_max_tier: config.subagent.isolation_max_tier,
     };
     apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli).await;
 

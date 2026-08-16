@@ -30,6 +30,7 @@ pub mod git;
 pub mod hooks;
 pub mod input_format;
 pub mod logging;
+pub mod message_router;
 pub mod orchestrator;
 pub mod output_format;
 // Plan document and session-audit I/O helpers. Lives in the library so both

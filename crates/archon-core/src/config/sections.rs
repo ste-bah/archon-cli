@@ -252,12 +252,35 @@ impl Default for CustomIdentityConfig {
 #[serde(default)]
 pub struct SubagentConfig {
     pub max_concurrent: usize,
+
+    /// When to isolate an agent that did not ask to be isolated (#184 M3).
+    ///
+    /// `overlap` by default, and the choice is about disk rather than
+    /// correctness. A worktree itself is cheap — it shares `.git` and checks
+    /// out working files only — but an agent *building* inside one grows a
+    /// fresh `target/`, which on this workspace is gigabytes. Isolating every
+    /// parallel writer would trade an invisible conflict for an invisible disk
+    /// fire, so isolation is spent where two agents actually collide.
+    pub auto_isolation: archon_tools::isolation::AutoIsolation,
+
+    /// The most isolation any agent may have, however it was requested.
+    ///
+    /// `worktree` by default: an agent gets its own checkout but not its own
+    /// build directory, and verification runs once after merge in the main
+    /// tree. Raise it to `worktree-with-builds` when agents genuinely must
+    /// build before their work can be reviewed, and expect the disk cost.
+    pub isolation_max_tier: archon_tools::isolation::IsolationTier,
 }
 
 impl Default for SubagentConfig {
     fn default() -> Self {
         Self {
             max_concurrent: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
+            auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
+            // Deliberately not the top rung. Reaching the expensive tier should
+            // be an operator's decision, not something a spawn can talk itself
+            // into.
+            isolation_max_tier: archon_tools::isolation::IsolationTier::Worktree,
         }
     }
 }

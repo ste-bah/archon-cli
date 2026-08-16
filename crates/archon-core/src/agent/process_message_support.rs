@@ -305,8 +305,34 @@ impl Agent {
             tracing::info!("Hook requested conversation stop: {}", reason);
             return ToolLoopAction::Break;
         }
+        self.drain_messages_from_agents().await;
         *agentic_iterations += 1;
         self.check_agentic_turn_limit(*agentic_iterations).await
+    }
+
+    /// Inject anything subagents have sent to the lead, as user turns.
+    ///
+    /// The mirror of the subagent's `drain_pending_user_turns`, and the half of
+    /// child->lead delivery that did not exist: children could be given a
+    /// reserved address to write to, but nobody read it (#184 M1).
+    ///
+    /// Placed after tool results are recorded and before the next request, so a
+    /// message arrives at a round boundary rather than mid-flight — the
+    /// contract is delivery at boundaries only, never mutating an in-flight
+    /// provider request.
+    async fn drain_messages_from_agents(&mut self) {
+        let messages = {
+            let mut mgr = self.subagent_manager.lock().await;
+            mgr.drain_pending_messages(crate::message_router::LEAD_QUEUE_ID)
+        };
+
+        for message in messages {
+            tracing::info!(
+                chars = message.len(),
+                "delivering a message from a subagent to the lead"
+            );
+            self.state.add_user_message(&message);
+        }
     }
 
     pub(super) async fn effective_agent_mode(&self) -> AgentMode {

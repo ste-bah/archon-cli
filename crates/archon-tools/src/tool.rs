@@ -257,6 +257,15 @@ pub trait Tool: Send + Sync {
         WorkingTreeEffect::default()
     }
 
+    /// Clone this tool restricted to an isolation tier, when it has anything to
+    /// restrict (#184 M3).
+    ///
+    /// `None` by default: most tools do not care how isolated their agent is.
+    /// `Bash` does, because building inside a worktree is what costs disk.
+    fn with_isolation_tier(&self, _tier: crate::isolation::IsolationTier) -> Option<Box<dyn Tool>> {
+        None
+    }
+
     /// Clone this tool with a provider environment overlay when supported.
     fn with_provider_env_source(
         &self,

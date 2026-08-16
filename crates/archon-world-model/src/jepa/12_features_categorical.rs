@@ -9,7 +9,12 @@
 // which is what happened when all five were hashed across the whole vector
 // alongside every excerpt token.
 const SOURCE_SLOTS: usize = 12;
-const ACTION_KIND_SLOTS: usize = 9;
+// 13 since #184 M9 added the four coordination verbs. Widening this shifts
+// PROVIDER_BASE and everything after it, so a checkpoint trained before the
+// change encodes a different layout — `EVAL_SCHEMA_VERSION` and the projection
+// version are bumped alongside so the mismatch is caught rather than silently
+// compared.
+const ACTION_KIND_SLOTS: usize = 13;
 const PROVIDER_SLOTS: usize = 8;
 const AGENT_SLOTS: usize = 8;
 const MODEL_SLOTS: usize = 8;
@@ -63,7 +68,11 @@ fn action_kind_slot(kind: &WorldActionKind) -> usize {
         WorldActionKind::Verification => 5,
         WorldActionKind::Retry => 6,
         WorldActionKind::Resume => 7,
-        WorldActionKind::Unknown => 8,
+        WorldActionKind::MessageSend => 8,
+        WorldActionKind::TaskClaim => 9,
+        WorldActionKind::Handoff => 10,
+        WorldActionKind::WorktreeMerge => 11,
+        WorldActionKind::Unknown => 12,
     }
 }
 

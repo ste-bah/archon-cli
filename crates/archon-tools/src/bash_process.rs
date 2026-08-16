@@ -33,6 +33,22 @@ pub(super) async fn prepare_command(
         raw_command,
         &tool.cargo_limits,
     );
+    // An agent allowed to build inside its own worktree builds into a scratch
+    // directory beside it, so prune can remove the build output along with the
+    // checkout. Without this the build lands in the worktree's own `target/`
+    // and disappears with it — which sounds fine until the worktree is *kept*,
+    // and the gigabytes are kept with it invisibly (#184 M3).
+    if let Some(subagent_id) = ctx.subagent_id.as_deref()
+        && tool.isolation_tier == crate::isolation::IsolationTier::WorktreeWithBuilds
+    {
+        let owner_id = crate::worktree_ownership::subagent_owner_key(subagent_id);
+        let scratch = crate::worktree_manager::WorktreeManager::scratch_target_dir(&owner_id);
+        env_vars.push((
+            "CARGO_TARGET_DIR".to_string(),
+            scratch.to_string_lossy().into_owned(),
+        ));
+    }
+
     let provider_env = provider_env_overlay(tool.provider_env.as_ref()).await;
     if let Some(provider_env) = &provider_env {
         provider_env.apply_to_env(&mut env_vars);
