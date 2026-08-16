@@ -22,7 +22,7 @@ static AUDIT_PATH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = Onc
 fn invalid_id(kind: &str, id: &str) -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::InvalidInput,
-        format!("unsafe {kind} ID {id:?}: use ASCII letters, digits, '-' or '_'")
+        format!("unsafe {kind} ID {id:?}: use ASCII letters, digits, '-' or '_'"),
     )
 }
 
@@ -39,7 +39,12 @@ fn validate_artifact_id(kind: &str, id: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn artifact_path(working_dir: &Path, directory: &str, kind: &str, id: &str) -> std::io::Result<PathBuf> {
+fn artifact_path(
+    working_dir: &Path,
+    directory: &str,
+    kind: &str,
+    id: &str,
+) -> std::io::Result<PathBuf> {
     validate_artifact_id(kind, id)?;
     Ok(working_dir
         .join(".archon")
@@ -50,7 +55,9 @@ fn artifact_path(working_dir: &Path, directory: &str, kind: &str, id: &str) -> s
 fn audit_path_lock(path: &Path) -> std::io::Result<Arc<Mutex<()>>> {
     let key = path.to_path_buf();
     let locks = AUDIT_PATH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut locks = locks.lock().map_err(|_| std::io::Error::other("audit lock registry poisoned"))?;
+    let mut locks = locks
+        .lock()
+        .map_err(|_| std::io::Error::other("audit lock registry poisoned"))?;
     Ok(locks
         .entry(key)
         .or_insert_with(|| Arc::new(Mutex::new(())))
@@ -98,18 +105,29 @@ fn plan_document_markdown(plan: &PlanDocument) -> String {
 /// temporary file. The replacement rename is atomic on a single filesystem;
 /// concurrent writers in different processes remain last-writer-wins.
 pub fn write_plan_document(path: &Path, plan: &PlanDocument) -> std::io::Result<()> {
-    let parent = path.parent().ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        "plan document path has no parent directory",
-    ))?;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "plan document path has no parent directory",
+        )
+    })?;
     std::fs::create_dir_all(parent)?;
 
-    let filename = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "plan document has no UTF-8 file name")
-    })?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "plan document has no UTF-8 file name",
+            )
+        })?;
     let temporary = parent.join(format!(".{filename}.{}.tmp", Uuid::new_v4()));
     let result = (|| -> std::io::Result<()> {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         file.write_all(plan_document_markdown(plan).as_bytes())?;
         file.flush()?;
         file.sync_all()?;
@@ -145,9 +163,15 @@ fn format_plan_audit_entry(
 /// Append a structured entry about an intercepted tool call to a session audit
 /// log. A complete formatted block is written with one `write_all` while an
 /// in-process lock keyed by audit path prevents entries from interleaving.
-pub fn append_plan_entry(path: &Path, tool_name: &str, input: &serde_json::Value) -> std::io::Result<()> {
+pub fn append_plan_entry(
+    path: &Path,
+    tool_name: &str,
+    input: &serde_json::Value,
+) -> std::io::Result<()> {
     let lock = audit_path_lock(path)?;
-    let _guard = lock.lock().map_err(|_| std::io::Error::other("audit path lock poisoned"))?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| std::io::Error::other("audit path lock poisoned"))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -169,10 +193,18 @@ pub fn open_plan_in_editor(path: &Path) -> std::io::Result<()> {
     }
     let editor = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
-        .unwrap_or_else(|_| if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() });
+        .unwrap_or_else(|_| {
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "vi".to_string()
+            }
+        });
     let status = std::process::Command::new(&editor).arg(path).status()?;
     if !status.success() {
-        return Err(std::io::Error::other(format!("editor '{editor}' exited with status {status}")));
+        return Err(std::io::Error::other(format!(
+            "editor '{editor}' exited with status {status}"
+        )));
     }
     Ok(())
 }
@@ -192,14 +224,19 @@ mod tests {
             required_evidence: Vec::new(),
             task_id: None,
         });
-        plan.risks.push("Do not mix audit history into the document".to_string());
+        plan.risks
+            .push("Do not mix audit history into the document".to_string());
         plan
     }
 
     #[test]
     fn read_plan_document_returns_none_when_missing() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(read_plan_document(&tmp.path().join("plan.md")).unwrap().is_none());
+        assert!(
+            read_plan_document(&tmp.path().join("plan.md"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -207,21 +244,49 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("plan.md");
         std::fs::write(&path, "hello").unwrap();
-        assert_eq!(read_plan_document(&path).unwrap(), Some("hello".to_string()));
+        assert_eq!(
+            read_plan_document(&path).unwrap(),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
     fn artifact_paths_reject_unsafe_ids_and_remain_confined() {
         let tmp = tempfile::tempdir().unwrap();
-        let unsafe_ids = ["", ".", "..", "/tmp/x", "a/b", "a\\b", "C:\\x", "with space", "plan.md", "å"];
+        let unsafe_ids = [
+            "",
+            ".",
+            "..",
+            "/tmp/x",
+            "a/b",
+            "a\\b",
+            "C:\\x",
+            "with space",
+            "plan.md",
+            "å",
+        ];
         for id in unsafe_ids {
-            assert!(plan_document_path(tmp.path(), id).is_err(), "plan ID {id:?} must fail");
-            assert!(plan_audit_path(tmp.path(), id).is_err(), "session ID {id:?} must fail");
+            assert!(
+                plan_document_path(tmp.path(), id).is_err(),
+                "plan ID {id:?} must fail"
+            );
+            assert!(
+                plan_audit_path(tmp.path(), id).is_err(),
+                "session ID {id:?} must fail"
+            );
         }
         let document = plan_document_path(tmp.path(), "plan_42-a").unwrap();
         let audit = plan_audit_path(tmp.path(), "session_42-a").unwrap();
-        assert!(document.strip_prefix(tmp.path().join(".archon").join("plans")).is_ok());
-        assert!(audit.strip_prefix(tmp.path().join(".archon").join("plan-audit")).is_ok());
+        assert!(
+            document
+                .strip_prefix(tmp.path().join(".archon").join("plans"))
+                .is_ok()
+        );
+        assert!(
+            audit
+                .strip_prefix(tmp.path().join(".archon").join("plan-audit"))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -246,7 +311,9 @@ mod tests {
 
     #[test]
     fn audit_entry_matches_the_existing_byte_format() {
-        let timestamp = chrono::DateTime::parse_from_rfc3339("2026-08-15T12:34:56Z").unwrap().with_timezone(&chrono::Utc);
+        let timestamp = chrono::DateTime::parse_from_rfc3339("2026-08-15T12:34:56Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(
             format_plan_audit_entry(timestamp, "Write", &serde_json::json!({"path":"/tmp/x"})),
             "\n## 2026-08-15T12:34:56+00:00 — Write (intercepted in Plan Mode)\n\n```json\n{\n  \"path\": \"/tmp/x\"\n}\n```\n\n"
@@ -273,7 +340,12 @@ mod tests {
         for number in 0..16 {
             let path = Arc::clone(&path);
             writers.push(std::thread::spawn(move || {
-                append_plan_entry(&path, &format!("Tool{number}"), &serde_json::json!({"writer":number})).unwrap();
+                append_plan_entry(
+                    &path,
+                    &format!("Tool{number}"),
+                    &serde_json::json!({"writer":number}),
+                )
+                .unwrap();
             }));
         }
         for writer in writers {

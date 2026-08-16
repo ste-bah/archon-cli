@@ -34,7 +34,8 @@ pub mod verification_gates;
 mod test_support;
 
 pub use models::{
-    RequiredEvidence, RequiredEvidenceCheck, RequiredEvidenceKind, RequiredEvidenceStatus,
+    CompletionEvidence, EvidenceKind, EvidenceStatus, RequiredEvidence, RequiredEvidenceCheck,
+    RequiredEvidenceKind, RequiredEvidenceStatus,
 };
 pub use required_evidence::check_required_evidence;
 

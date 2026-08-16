@@ -302,7 +302,10 @@ async fn guarded_exit_plan_persists_draft_after_allowed_finalization() {
     );
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Auto);
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.set_guardrail_action_id(Some("guarded-plan-action".into()));
     agent.set_turn_finalization_callback(Arc::new(|_, _| TurnFinalizationVerdict::Allowed));
 

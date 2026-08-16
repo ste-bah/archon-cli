@@ -7,6 +7,7 @@ pub enum PlanStepStatus {
     InProgress,
     Complete,
     Skipped,
+    Failed,
 }
 
 impl std::fmt::Display for PlanStepStatus {
@@ -16,6 +17,7 @@ impl std::fmt::Display for PlanStepStatus {
             Self::InProgress => write!(f, "in_progress"),
             Self::Complete => write!(f, "complete"),
             Self::Skipped => write!(f, "skipped"),
+            Self::Failed => write!(f, "failed"),
         }
     }
 }
@@ -27,6 +29,7 @@ impl PlanStepStatus {
             "in_progress" => Self::InProgress,
             "complete" => Self::Complete,
             "skipped" => Self::Skipped,
+            "failed" => Self::Failed,
             _ => Self::Pending,
         }
     }
@@ -112,6 +115,20 @@ pub struct PlanStepReconciliation {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedPlanTask {
+    pub task_id: String,
+    pub plan_id: String,
+    pub plan_step: u32,
+    pub description: String,
+    pub status: String,
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
+    #[serde(default)]
+    pub required_evidence: Vec<RequiredEvidenceKind>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub number: u32,
@@ -185,7 +202,12 @@ impl PlanDocument {
         let done = self
             .steps
             .iter()
-            .filter(|s| matches!(s.status, PlanStepStatus::Complete | PlanStepStatus::Skipped))
+            .filter(|s| {
+                matches!(
+                    s.status,
+                    PlanStepStatus::Complete | PlanStepStatus::Skipped | PlanStepStatus::Failed
+                )
+            })
             .count();
         (done as f32 / self.steps.len() as f32) * 100.0
     }
@@ -203,6 +225,7 @@ impl PlanDocument {
                 PlanStepStatus::Complete => "[x]",
                 PlanStepStatus::InProgress => "[>]",
                 PlanStepStatus::Skipped => "[-]",
+                PlanStepStatus::Failed => "[!]",
                 PlanStepStatus::Pending => "[ ]",
             };
             out.push_str(&format!(

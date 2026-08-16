@@ -61,11 +61,15 @@ mod tests {
                     kind: RequiredEvidenceKind::Tests,
                     status: RequiredEvidenceStatus::Failed,
                     sequence: 1,
+                    evidence_id: None,
+                    run_id: None,
                 },
                 RequiredEvidence {
                     kind: RequiredEvidenceKind::Tests,
                     status: RequiredEvidenceStatus::Passed,
                     sequence: 2,
+                    evidence_id: None,
+                    run_id: None,
                 },
             ],
         );

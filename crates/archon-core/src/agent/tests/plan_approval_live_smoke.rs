@@ -30,7 +30,10 @@ async fn plan_approval_live_smoke() {
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(response_rx)));
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     let preflight = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_preflight = Arc::clone(&preflight);
     agent.set_guardrail_action_id(Some("plan-approval-live-smoke".into()));

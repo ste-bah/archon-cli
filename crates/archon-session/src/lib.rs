@@ -8,6 +8,7 @@ pub mod listing;
 pub mod metadata;
 pub mod naming;
 pub mod plan;
+mod plan_authority_secret;
 mod plan_models;
 mod plan_store;
 pub mod registry;

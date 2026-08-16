@@ -80,7 +80,10 @@ async fn exit_plan_waits_for_approval_before_restoring_default() {
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(response_rx)));
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Stored Approval Plan\n## Steps\n1. Keep Plan Mode until approval"}]
@@ -102,6 +105,31 @@ async fn exit_plan_waits_for_approval_before_restoring_default() {
     let prompt = prompt.expect("approval prompt must be emitted before approval can restore mode");
     assert!(prompt.contains("Stored Approval Plan"));
     assert!(prompt.contains("Keep Plan Mode until approval"));
+    let persisted = agent
+        .plan_store
+        .as_ref()
+        .unwrap()
+        .load_latest_plan("approval-prompt-session")
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, archon_session::plan::PlanStatus::Approved);
+    assert_eq!(persisted.steps.len(), 1);
+    let task_id = persisted.steps[0].task_id.as_ref().unwrap();
+    assert!(
+        archon_tools::task_manager::TASK_MANAGER
+            .get_task(task_id)
+            .is_some_and(|task| task.metadata.is_some())
+    );
+    assert_eq!(
+        agent
+            .plan_store
+            .as_ref()
+            .unwrap()
+            .load_plan_tasks("approval-prompt-session")
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -129,7 +157,10 @@ async fn rejected_exit_returns_reason_and_keeps_write_blocked() {
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(response_rx)));
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Rejected Plan\n## Steps\n1. Do not write"}]
@@ -175,7 +206,10 @@ async fn approve_edits_restores_accept_edits() {
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(response_rx)));
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Edit Plan\n## Steps\n1. Permit edits"}]
@@ -211,7 +245,10 @@ async fn slash_entry_restores_recorded_default_not_auto() {
     );
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Slash Plan\n## Steps\n1. Restore default"}]
@@ -253,7 +290,10 @@ async fn invalid_interactive_approval_reprompts_without_terminal_persistence() {
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
     agent.ask_user_response_rx = Some(Arc::new(tokio::sync::Mutex::new(response_rx)));
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Reprompt Plan\n## Steps\n1. Await valid approval"}]
@@ -318,7 +358,10 @@ async fn noninteractive_exit_auto_approves_and_persists_ledger_event() {
     );
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Durable Plan\n## Steps\n1. Persist approval"}]
@@ -372,7 +415,10 @@ async fn noninteractive_reject_policy_fails_closed_and_retains_plan_mode() {
     );
     agent.state.mode = AgentMode::Plan;
     agent.plan_mode_state.lock().await.previous_permission_mode = Some(PermissionMode::Default);
-    agent.set_plan_store(plan_store);
+    let authority = plan_store
+        .bootstrap_approval_authority_for_test(&agent.config.session_id)
+        .unwrap();
+    agent.set_plan_store(plan_store, authority).unwrap();
     agent.state.messages.push(serde_json::json!({
         "role": "assistant",
         "content": [{"type": "text", "text": "# Plan: Rejected by Policy\n## Steps\n1. Stay blocked"}]
@@ -386,4 +432,66 @@ async fn noninteractive_reject_policy_fails_closed_and_retains_plan_mode() {
     assert!(result.content.contains("rejected by policy"));
     assert_eq!(*agent.config.permission_mode.lock().await, "plan");
     assert_eq!(agent.state.mode, AgentMode::Plan);
+}
+
+#[path = "plan_approval_materialization.rs"]
+mod materialization;
+
+#[test]
+fn plan_store_attachment_rejects_corrupt_durable_task_state() {
+    use archon_session::plan::{PersistedPlanTask, PlanDocument, PlanStatus, PlanStep, PlanStepStatus};
+
+    let db = cozo::DbInstance::new("mem", "", "").unwrap();
+    let store = archon_session::plan::PlanStore::new(&db).unwrap();
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
+    let config = AgentConfig {
+        session_id: format!("corrupt-rehydrate-{}", uuid::Uuid::new_v4()),
+        ..AgentConfig::default()
+    };
+    let session_id = config.session_id.clone();
+    let mut agent = Agent::new(
+        Arc::new(MockLlmProvider),
+        ToolRegistry::new(),
+        config,
+        event_tx,
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(
+            &std::env::temp_dir(),
+        ))),
+    );
+    let plan_id = "corrupt-plan";
+    let task_id = format!("corrupt-{}", uuid::Uuid::new_v4());
+    let mut plan = PlanDocument::new(plan_id, "Corrupt plan");
+    plan.status = PlanStatus::Approved;
+    plan.steps = vec![PlanStep {
+        number: 1,
+        description: "corrupt durable task".into(),
+        affected_files: vec![],
+        status: PlanStepStatus::Pending,
+        blocked_by: vec![],
+        required_evidence: vec![],
+        task_id: Some(task_id.clone()),
+    }];
+    store.save_plan(&session_id, &plan).unwrap();
+    store
+        .save_plan_task_fixture(
+            &session_id,
+            &PersistedPlanTask {
+                task_id,
+                plan_id: plan_id.into(),
+                plan_step: 1,
+                description: "corrupt durable task".into(),
+                status: "Corrupt".into(),
+                blocked_by: vec![],
+                required_evidence: vec![],
+                updated_at: "2026-08-15T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+    let authority = store
+        .bootstrap_approval_authority_for_test(&session_id)
+        .unwrap();
+    let error = agent.set_plan_store(store, authority).unwrap_err();
+    assert!(error.contains("unknown persisted task status: Corrupt"));
+    assert!(agent.plan_store.is_none());
 }

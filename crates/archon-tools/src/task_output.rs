@@ -22,7 +22,7 @@ impl Tool for TaskOutputTool {
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "The 8-character task ID"
+                    "description": "The full task ID"
                 },
                 "offset": {
                     "type": "integer",

@@ -1,9 +1,10 @@
+pub use crate::plan_authority_secret::load_or_create_approval_secret;
 pub use crate::plan_models::{
-    PlanApproval, PlanApprovalDecision, PlanApprovalRecord, PlanApprovalSource, PlanDocument,
-    PlanReconciliationStatus, PlanStatus, PlanStep, PlanStepDependency, PlanStepReconciliation,
-    PlanStepStatus,
+    PersistedPlanTask, PlanApproval, PlanApprovalDecision, PlanApprovalRecord, PlanApprovalSource,
+    PlanDocument, PlanReconciliationStatus, PlanStatus, PlanStep, PlanStepDependency,
+    PlanStepReconciliation, PlanStepStatus,
 };
-pub use crate::plan_store::PlanStore;
+pub use crate::plan_store::{PlanApprovalAuthority, PlanStore};
 
 /// Build a plan context string suitable for injection into compaction summaries.
 /// Returns None if no active plan exists.
@@ -15,6 +16,26 @@ pub fn plan_context_for_compaction(store: &PlanStore, session_id: &str) -> Optio
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "plan_store_task_bypass_tests.rs"]
+mod plan_store_task_bypass_tests;
+
+#[cfg(test)]
+#[path = "plan_store_claim_safety_tests.rs"]
+mod plan_store_claim_safety_tests;
+
+#[cfg(test)]
+#[path = "plan_store_materialization_tests.rs"]
+mod plan_store_materialization_tests;
+
+#[cfg(test)]
+#[path = "plan_store_terminal_approval_tests.rs"]
+mod plan_store_terminal_approval_tests;
+
+#[cfg(test)]
+#[path = "plan_store_tests.rs"]
+mod plan_store_tests;
 
 #[cfg(test)]
 mod tests {
@@ -41,112 +62,6 @@ mod tests {
         let plan = PlanDocument::from_json(json).unwrap();
         assert_eq!(plan.status, PlanStatus::Completed);
         assert_legacy_defaults(&plan);
-    }
-
-    #[test]
-    fn approval_events_roundtrip_in_durable_ledger() {
-        let db = test_db();
-        let store = PlanStore::new(&db).expect("init");
-        let record = PlanApprovalRecord {
-            plan_id: "plan-approval".into(),
-            session_id: "session-approval".into(),
-            approval: PlanApproval {
-                decision: PlanApprovalDecision::ApproveAcceptEdits,
-                source: PlanApprovalSource::NonInteractive,
-                decided_at: "2026-08-14T00:00:00Z".into(),
-                user_edited: true,
-            },
-        };
-        store.record_approval_event(&record).expect("record");
-        let duplicate = store.record_approval_event(&record);
-        assert!(
-            duplicate.is_err(),
-            "approval ledger must not overwrite events"
-        );
-        assert_eq!(
-            store
-                .load_approval_events("session-approval", "plan-approval")
-                .expect("load"),
-            vec![record]
-        );
-    }
-
-    #[test]
-    fn terminal_plan_and_approval_are_persisted_atomically() {
-        let db = test_db();
-        let store = PlanStore::new(&db).expect("init");
-        let mut plan = PlanDocument::new("terminal-plan", "Terminal Plan");
-        plan.status = PlanStatus::Approved;
-        let record = PlanApprovalRecord {
-            plan_id: plan.id.clone(),
-            session_id: "terminal-session".into(),
-            approval: PlanApproval {
-                decision: PlanApprovalDecision::Approve,
-                source: PlanApprovalSource::Interactive,
-                decided_at: "2026-08-14T00:00:00Z".into(),
-                user_edited: false,
-            },
-        };
-        plan.approval = Some(record.approval.clone());
-
-        store
-            .save_terminal_plan_with_approval("terminal-session", &plan, &record)
-            .expect("atomic save");
-
-        let loaded = store
-            .load_plan("terminal-session", "terminal-plan")
-            .expect("load")
-            .expect("terminal plan");
-        assert_eq!(loaded.status, PlanStatus::Approved);
-        assert_eq!(loaded.approval, Some(record.approval.clone()));
-        assert_eq!(
-            store
-                .load_approval_events("terminal-session", "terminal-plan")
-                .expect("ledger"),
-            vec![record]
-        );
-    }
-
-    #[test]
-    fn terminal_plan_and_approval_roll_back_together_on_second_write_failure() {
-        let db = test_db();
-        let store = PlanStore::new(&db).expect("init");
-        let mut plan = PlanDocument::new("rollback-plan", "Rollback Plan");
-        plan.status = PlanStatus::Approved;
-        let record = PlanApprovalRecord {
-            plan_id: plan.id.clone(),
-            session_id: "rollback-session".into(),
-            approval: PlanApproval {
-                decision: PlanApprovalDecision::Approve,
-                source: PlanApprovalSource::Interactive,
-                decided_at: "2026-08-14T00:00:00Z".into(),
-                user_edited: false,
-            },
-        };
-        plan.approval = Some(record.approval.clone());
-        store
-            .record_approval_event(&record)
-            .expect("seed colliding immutable ledger event");
-
-        let error = store
-            .save_terminal_plan_with_approval("rollback-session", &plan, &record)
-            .expect_err("duplicate ledger event must abort the transaction");
-        assert!(error.to_string().contains("plan_approval_events"));
-        assert!(
-            store
-                .load_plan("rollback-session", "rollback-plan")
-                .expect("load")
-                .is_none(),
-            "failed terminal save must not leave a plan document"
-        );
-        assert_eq!(
-            store
-                .load_approval_events("rollback-session", "rollback-plan")
-                .expect("ledger")
-                .len(),
-            1,
-            "rollback must leave only the original event"
-        );
     }
 
     #[test]

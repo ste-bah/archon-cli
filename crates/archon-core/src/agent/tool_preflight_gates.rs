@@ -127,7 +127,9 @@ impl Agent {
         }
         match crate::plan_file::plan_audit_path(&self.config.working_dir, &self.config.session_id) {
             Ok(audit_path) => {
-                if let Err(error) = crate::plan_file::append_plan_entry(&audit_path, &tool.name, input) {
+                if let Err(error) =
+                    crate::plan_file::append_plan_entry(&audit_path, &tool.name, input)
+                {
                     tracing::warn!(
                         error = %error,
                         audit_path = %audit_path.display(),

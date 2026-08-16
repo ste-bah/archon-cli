@@ -1007,13 +1007,17 @@ dependencies = [
  "chrono",
  "cozo-ce",
  "dirs",
+ "getrandom 0.3.4",
+ "hex",
  "libc",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1043,12 +1047,14 @@ name = "archon-tools"
 version = "1.9.1"
 dependencies = [
  "anyhow",
+ "archon-completion",
  "archon-docs",
  "archon-leann",
  "archon-memory",
  "archon-observability",
  "archon-permissions",
  "archon-policy",
+ "archon-session",
  "archon-shell",
  "async-lsp",
  "async-trait",

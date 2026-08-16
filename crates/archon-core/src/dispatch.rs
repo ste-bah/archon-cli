@@ -125,7 +125,9 @@ impl ToolRegistry {
             // primary behaviour; the audit append is additive.
             match crate::plan_file::plan_audit_path(&ctx.working_dir, &ctx.session_id) {
                 Ok(audit_path) => {
-                    if let Err(error) = crate::plan_file::append_plan_entry(&audit_path, tool_name, &input) {
+                    if let Err(error) =
+                        crate::plan_file::append_plan_entry(&audit_path, tool_name, &input)
+                    {
                         tracing::warn!(
                             error = %error,
                             audit_path = %audit_path.display(),

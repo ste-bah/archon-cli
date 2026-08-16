@@ -83,6 +83,8 @@ rayon.workspace = true
 serde_yaml_ng.workspace = true
 
 [dev-dependencies]
+archon-session = { path = "../archon-session", features = ["test-support"] }
+archon-tools = { path = "../archon-tools", features = ["test-support"] }
 archon-permissions = { path = "../archon-permissions" }
 # TASK-AGS-506: test-util feature needed for tokio::time::pause/advance in
 # circuit_breaker tests. This only affects test builds.

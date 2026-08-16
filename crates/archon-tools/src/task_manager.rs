@@ -2,15 +2,30 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
+use archon_session::plan::PlanStore;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::board::{DelegatedOutcome, close_delegated_task};
+pub use plan_persistence::{PlanTaskMetadata, TaskTransitionError};
 
+#[path = "task_manager/checked_status.rs"]
+mod checked_status;
 mod drain;
+#[path = "task_manager/plan_installation.rs"]
+pub mod plan_installation;
+#[path = "task_manager/plan_persistence.rs"]
+mod plan_persistence;
+#[cfg(any(test, feature = "test-support"))]
+#[path = "task_manager/plan_restore.rs"]
+mod plan_restore;
+#[path = "task_manager/runtime.rs"]
+mod runtime;
 
+#[cfg(test)]
+#[path = "task_manager/checked_status_tests.rs"]
+mod checked_status_tests;
 #[cfg(test)]
 mod resolve_tests;
 
@@ -54,25 +69,6 @@ impl std::fmt::Display for TaskStatus {
     }
 }
 
-/// Returns true if transitioning from `from` to `to` is valid.
-///
-/// Valid transitions:
-///   Pending  -> Running | Failed | Stopped
-///   Running  -> Completed | Failed | Stopped
-///
-/// Terminal states (Completed, Failed, Stopped) cannot transition further.
-fn is_valid_transition(from: &TaskStatus, to: &TaskStatus) -> bool {
-    matches!(
-        (from, to),
-        (TaskStatus::Pending, TaskStatus::Running)
-            | (TaskStatus::Pending, TaskStatus::Failed)
-            | (TaskStatus::Pending, TaskStatus::Stopped)
-            | (TaskStatus::Running, TaskStatus::Completed)
-            | (TaskStatus::Running, TaskStatus::Failed)
-            | (TaskStatus::Running, TaskStatus::Stopped)
-    )
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskInfo {
     pub id: String,
@@ -100,6 +96,9 @@ pub struct TaskInfo {
     /// any process with no memory service open — mirroring is best-effort.
     #[serde(default)]
     pub board_item_id: Option<String>,
+    /// Plan linkage is absent for manual, process-scoped tasks.
+    #[serde(default)]
+    pub metadata: Option<PlanTaskMetadata>,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +109,9 @@ pub struct TaskManager {
     tasks: Mutex<HashMap<String, TaskInfo>>,
     cancellation_tokens: Mutex<HashMap<String, Arc<AtomicBool>>>,
     execution_tokens: Mutex<HashMap<String, CancellationToken>>,
+    plan_persistence: Mutex<HashMap<String, PlanStore>>,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_plan_installation: Mutex<Option<String>>,
 }
 
 impl TaskManager {
@@ -118,10 +120,36 @@ impl TaskManager {
             tasks: Mutex::new(HashMap::new()),
             cancellation_tokens: Mutex::new(HashMap::new()),
             execution_tokens: Mutex::new(HashMap::new()),
+            plan_persistence: Mutex::new(HashMap::new()),
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_plan_installation: Mutex::new(None),
         }
     }
 
-    /// Create a new task and return its 8-character ID.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn attach_plan_store(
+        &self,
+        store: PlanStore,
+        session_id: impl Into<String>,
+    ) -> Result<(), TaskTransitionError> {
+        let mut persistence = self
+            .plan_persistence
+            .lock()
+            .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+        let session_id = session_id.into();
+        if persistence
+            .get(&session_id)
+            .is_some_and(|existing| !existing.is_same_store(&store))
+        {
+            return Err(TaskTransitionError::Persistence(format!(
+                "session {session_id} is already attached to a different plan store"
+            )));
+        }
+        persistence.entry(session_id).or_insert(store);
+        Ok(())
+    }
+
+    /// Create a new task and return its collision-resistant UUID ID.
     pub fn create_task(&self, description: &str) -> String {
         self.create_task_with_parent(description, None)
     }
@@ -132,8 +160,7 @@ impl TaskManager {
         description: &str,
         parent: Option<&CancellationToken>,
     ) -> String {
-        let full_uuid = Uuid::new_v4().to_string().replace('-', "");
-        let id = full_uuid[..8].to_string();
+        let id = Uuid::new_v4().simple().to_string();
         let execution_token = parent
             .map(CancellationToken::child_token)
             .unwrap_or_default();
@@ -148,6 +175,7 @@ impl TaskManager {
             cost: 0.0,
             agent_id: None,
             board_item_id: None,
+            metadata: None,
         };
 
         if let Ok(mut tasks) = self.tasks.lock() {
@@ -171,13 +199,10 @@ impl TaskManager {
     /// Resolve a task by task id, by the agent id it dispatched, or by an
     /// unambiguous prefix of either.
     ///
-    /// Task ids are eight characters; subagent ids are full dashed UUIDs minted
-    /// by a different registry. An agent that spawns work and then asks about
-    /// it holds the SUBAGENT id, and naturally shortens it — a live run called
-    /// `TaskGet` with `8949f93a` while its subagent was
-    /// `8949f93a-90bf-4d35-…`, and got "task not found" for work that existed.
-    /// Exact lookup on one namespace cannot answer a question asked in the
-    /// other.
+    /// Task IDs and subagent IDs are UUIDs minted by different registries. An
+    /// agent that spawns work and then asks about it holds the subagent ID and
+    /// may naturally shorten it. Exact lookup on one namespace cannot answer a
+    /// question asked in the other.
     ///
     /// A prefix matching more than one task returns `None` rather than a guess:
     /// reporting the wrong task's status is worse than reporting none.
@@ -245,20 +270,27 @@ impl TaskManager {
     }
 
     /// Update a task's description.
-    pub fn update_task(&self, id: &str, description: Option<&str>) -> Result<(), String> {
+    pub fn update_task(
+        &self,
+        id: &str,
+        description: Option<&str>,
+    ) -> Result<(), TaskTransitionError> {
         let mut tasks = self
             .tasks
             .lock()
-            .map_err(|e| format!("lock poisoned: {e}"))?;
-
+            .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
         let info = tasks
             .get_mut(id)
-            .ok_or_else(|| format!("task not found: {id}"))?;
+            .ok_or_else(|| TaskTransitionError::NotFound(id.to_string()))?;
 
-        if let Some(desc) = description {
-            info.description = desc.to_string();
+        if description.is_some() && info.metadata.is_some() {
+            return Err(TaskTransitionError::PlanTaskDescriptionImmutable(
+                id.to_string(),
+            ));
         }
-
+        if let Some(description) = description {
+            info.description = description.to_string();
+        }
         Ok(())
     }
 
@@ -272,38 +304,10 @@ impl TaskManager {
 
     /// Stop a task by setting its cancellation token and status.
     pub fn stop_task(&self, id: &str) -> Result<(), String> {
-        // Set cancellation token
-        {
-            let tokens = self
-                .cancellation_tokens
-                .lock()
-                .map_err(|e| format!("lock poisoned: {e}"))?;
-
-            let token = tokens
-                .get(id)
-                .ok_or_else(|| format!("task not found: {id}"))?;
-
-            token.store(true, Ordering::SeqCst);
-        }
-
-        {
-            let tokens = self
-                .execution_tokens
-                .lock()
-                .map_err(|e| format!("lock poisoned: {e}"))?;
-            let token = tokens
-                .get(id)
-                .ok_or_else(|| format!("task not found: {id}"))?;
-            token.cancel();
-        }
-
-        // Update status
-        self.set_status(id, TaskStatus::Stopped);
-
-        Ok(())
+        runtime::stop_task(self, id)
     }
 
-    /// Get captured output, optionally with offset and limit (byte-based).
+    /// Get captured output, optionally with offset (byte-based).
     pub fn get_output(
         &self,
         id: &str,
@@ -329,42 +333,58 @@ impl TaskManager {
         Ok(output[start..end].to_string())
     }
 
-    /// Set the status of a task. Invalid transitions are silently ignored.
-    pub fn set_status(&self, id: &str, status: TaskStatus) {
-        // What the board has to be told, decided under the lock and acted on
-        // after it. A board write goes to storage, and holding the task map
-        // across it would serialise every other task's status update behind a
-        // database round-trip. Deciding here also means the mirror fires only
-        // on a transition that was actually applied — an invalid transition
-        // returns early and must not close an item out.
-        let mut mirror = None;
+    /// Legacy adapter for tool payloads that already separate durable evidence
+    /// IDs from their run. New callers should use [`Self::set_status_checked`].
+    pub fn set_status_checked_with_evidence_ids(
+        &self,
+        id: &str,
+        status: TaskStatus,
+        evidence_run_id: &str,
+        evidence_ids: &[String],
+    ) -> Result<(), TaskTransitionError> {
+        let task = self
+            .get_task(id)
+            .ok_or_else(|| TaskTransitionError::NotFound(id.to_string()))?;
+        let trusted = match &task.metadata {
+            Some(metadata) if status == TaskStatus::Completed => {
+                let persistence = self
+                    .plan_persistence
+                    .lock()
+                    .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+                let store = persistence.get(&metadata.session_id).ok_or_else(|| {
+                    TaskTransitionError::Persistence(format!(
+                        "plan-linked task session {} has no attached plan store",
+                        metadata.session_id
+                    ))
+                })?;
+                store
+                    .resolve_required_evidence(
+                        evidence_run_id,
+                        evidence_ids,
+                        &metadata.required_evidence,
+                    )
+                    .map_err(|error| {
+                        if error.kind() == std::io::ErrorKind::PermissionDenied {
+                            TaskTransitionError::UntrustedEvidence(error.to_string())
+                        } else {
+                            TaskTransitionError::EvidenceResolution(error.to_string())
+                        }
+                    })?
+            }
+            _ => Vec::new(),
+        };
+        plan_persistence::set_status_checked(self, id, status, &trusted)
+    }
 
-        if let Ok(mut tasks) = self.tasks.lock()
-            && let Some(info) = tasks.get_mut(id)
+    /// Set the status of a task and report invalid or persistence failures.
+    pub fn set_status(&self, id: &str, status: TaskStatus) -> Result<(), TaskTransitionError> {
+        if self
+            .get_task(id)
+            .is_some_and(|task| task.metadata.is_some())
         {
-            if !is_valid_transition(&info.status, &status) {
-                return;
-            }
-            info.status = status.clone();
-            if status == TaskStatus::Completed
-                || status == TaskStatus::Failed
-                || status == TaskStatus::Stopped
-            {
-                info.completed_at = Some(Utc::now());
-                if let Some(item) = info.board_item_id.clone() {
-                    let outcome = match status {
-                        TaskStatus::Completed => DelegatedOutcome::Completed,
-                        TaskStatus::Stopped => DelegatedOutcome::Stopped,
-                        _ => DelegatedOutcome::Failed,
-                    };
-                    mirror = Some((item, outcome));
-                }
-            }
+            return self.set_status_checked_with_evidence_ids(id, status, "", &[]);
         }
-
-        if let Some((item, outcome)) = mirror {
-            close_delegated_task(&item, outcome);
-        }
+        runtime::set_status(self, id, status)
     }
 
     /// Mirrored board items whose task has not reached a terminal status.

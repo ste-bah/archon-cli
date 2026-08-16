@@ -1,3 +1,8 @@
+use archon_tools::plan_tasks::{
+    build_plan_task_infos, persisted_records, reject_plan_task_collisions,
+};
+use archon_tools::task_manager::TASK_MANAGER;
+
 use archon_permissions::mode::PermissionMode;
 use archon_session::plan::{
     PlanApproval, PlanApprovalDecision, PlanApprovalRecord, PlanApprovalSource, PlanDocument,
@@ -103,8 +108,68 @@ impl Agent {
             PlanApprovalDecision::Edit => PlanStatus::Draft,
         };
 
-        if let Err(error) = self.persist_approval(&plan, approval) {
-            return ToolResult::error(format!("Failed to persist plan approval: {error}"));
+        let approved = matches!(
+            decision,
+            PlanApprovalDecision::Approve | PlanApprovalDecision::ApproveAcceptEdits
+        );
+        let task_infos = if approved {
+            match build_plan_task_infos(&self.config.session_id, &mut plan) {
+                Ok(infos) => Some(infos),
+                Err(error) => {
+                    return ToolResult::error(format!(
+                        "Failed to materialize approved plan tasks: {error}"
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        {
+            let prepared_installation = if let Some(task_infos) = task_infos.clone() {
+                let Some(store) = self.plan_store.as_ref() else {
+                    return ToolResult::error(
+                        "Failed to prepare approved plan tasks: plan store is not configured",
+                    );
+                };
+                if let Err(error) = reject_plan_task_collisions(
+                    &TASK_MANAGER,
+                    store,
+                    &self.config.session_id,
+                    &task_infos,
+                ) {
+                    return ToolResult::error(format!(
+                        "Failed to prepare approved plan tasks: {error}"
+                    ));
+                }
+                let Some(authority) = self.plan_approval_authority.as_ref() else {
+                    return ToolResult::error(
+                        "Failed to prepare approved plan tasks: plan approval authority is not configured",
+                    );
+                };
+                match TASK_MANAGER.prepare_plan_task_installation(
+                    authority,
+                    &self.config.session_id,
+                    store.clone(),
+                    task_infos,
+                ) {
+                    Ok(prepared) => Some(prepared),
+                    Err(error) => {
+                        return ToolResult::error(format!(
+                            "Failed to prepare approved plan tasks: {error}"
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Err(error) = self.persist_approval(&plan, approval, task_infos.as_deref()) {
+                return ToolResult::error(format!("Failed to persist plan approval: {error}"));
+            }
+            if let Some(prepared) = prepared_installation {
+                prepared.install();
+            }
         }
 
         match decision {
@@ -194,17 +259,38 @@ impl Agent {
         &self,
         plan: &PlanDocument,
         approval: PlanApproval,
+        task_infos: Option<&[archon_tools::task_manager::TaskInfo]>,
     ) -> Result<(), std::io::Error> {
         let plan_store = self
             .plan_store
             .as_ref()
             .ok_or_else(|| std::io::Error::other("plan store is not configured"))?;
+        let authority = self
+            .plan_approval_authority
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("plan approval authority is not configured"))?;
         let record = PlanApprovalRecord {
             plan_id: plan.id.clone(),
             session_id: self.config.session_id.clone(),
             approval,
         };
-        plan_store.save_terminal_plan_with_approval(&self.config.session_id, plan, &record)
+        if let Some(task_infos) = task_infos {
+            let task_records = persisted_records(task_infos).map_err(std::io::Error::other)?;
+            plan_store.save_terminal_plan_with_approval_and_tasks(
+                authority,
+                &self.config.session_id,
+                plan,
+                &record,
+                &task_records,
+            )
+        } else {
+            plan_store.save_terminal_plan_with_approval(
+                authority,
+                &self.config.session_id,
+                plan,
+                &record,
+            )
+        }
     }
 
     async fn restore_mode_after_approved_plan(&mut self, override_mode: Option<PermissionMode>) {

@@ -75,7 +75,7 @@ fn dispatch_task_agent(status: TaskStatus) -> String {
     let task_id = TASK_MANAGER.create_task("board lease test");
     let agent_id = Uuid::new_v4().to_string();
     TASK_MANAGER.set_agent_id(&task_id, &agent_id);
-    TASK_MANAGER.set_status(&task_id, status);
+    TASK_MANAGER.set_status(&task_id, status).unwrap();
     agent_id
 }
 

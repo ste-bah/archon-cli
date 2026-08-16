@@ -245,7 +245,11 @@ impl Tool for TaskCreateTool {
             SubagentClassification::ExplicitBackground => {
                 // Transition Pending → Running synchronously so the response
                 // we hand back reflects the dispatched state.
-                TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+                if let Err(error) = TASK_MANAGER.set_status(&task_id, TaskStatus::Running) {
+                    return ToolResult::error(format!(
+                        "failed to mark dispatched task running: {error}"
+                    ));
+                }
 
                 // Spawn detached. The closure owns task_id so it can update
                 // TASK_MANAGER when run_subagent returns.
@@ -258,8 +262,10 @@ impl Tool for TaskCreateTool {
                 archon_observability::spawn_named("task-create-subagent-background", async move {
                     let outcome =
                         run_subagent_foreground(sid_spawn, request, cancel, ctx_spawn).await;
-                    if let Some(final_status) = map_outcome_to_status(&outcome) {
-                        TASK_MANAGER.set_status(&task_id_spawn, final_status);
+                    if let Some(final_status) = map_outcome_to_status(&outcome)
+                        && let Err(error) = TASK_MANAGER.set_status(&task_id_spawn, final_status)
+                    {
+                        tracing::error!(%error, task_id = %task_id_spawn, "failed to finalize delegated task");
                     }
                 });
                 let response = json!({
@@ -275,7 +281,11 @@ impl Tool for TaskCreateTool {
             SubagentClassification::Foreground => {
                 // Transition Pending → Running before awaiting the runner so
                 // any concurrent /tasks query sees Running, not Pending.
-                TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+                if let Err(error) = TASK_MANAGER.set_status(&task_id, TaskStatus::Running) {
+                    return ToolResult::error(format!(
+                        "failed to mark dispatched task running: {error}"
+                    ));
+                }
 
                 let cancel = TASK_MANAGER
                     .execution_token(&task_id)
@@ -290,7 +300,9 @@ impl Tool for TaskCreateTool {
                 )
                 .await;
                 if let Some(final_status) = map_outcome_to_status(&outcome) {
-                    TASK_MANAGER.set_status(&task_id, final_status);
+                    if let Err(error) = TASK_MANAGER.set_status(&task_id, final_status) {
+                        tracing::error!(%error, task_id = %task_id, "failed to finalize delegated task");
+                    }
                 } else {
                     let task_id_completion = task_id.clone();
                     archon_observability::spawn_named(
@@ -301,7 +313,11 @@ impl Tool for TaskCreateTool {
                                 .ok()
                                 .and_then(|outcome| map_outcome_to_status(&outcome))
                                 .unwrap_or(TaskStatus::Failed);
-                            TASK_MANAGER.set_status(&task_id_completion, final_status);
+                            if let Err(error) =
+                                TASK_MANAGER.set_status(&task_id_completion, final_status)
+                            {
+                                tracing::error!(%error, task_id = %task_id_completion, "failed to finalize delegated task");
+                            }
                         },
                     );
                 }
@@ -409,6 +425,33 @@ mod tests {
         assert!(
             response.get("agent_id").is_none(),
             "manual task path must not spawn a subagent"
+        );
+        let task_id = response["task_id"].as_str().expect("task id");
+        assert!(
+            crate::task_manager::TASK_MANAGER
+                .get_task(task_id)
+                .expect("manual task stored")
+                .metadata
+                .is_none(),
+            "manual tasks must remain process-scoped and unlinked to a plan"
+        );
+        let db = cozo::DbInstance::new("mem", "", "").unwrap();
+        let store = archon_session::plan::PlanStore::new(&db).unwrap();
+        let session_id = format!("manual-task-{}", uuid::Uuid::new_v4());
+        crate::task_manager::TASK_MANAGER
+            .attach_plan_store(store.clone(), &session_id)
+            .expect("plan store attached");
+        crate::task_manager::TASK_MANAGER
+            .set_status_checked_with_evidence_ids(
+                task_id,
+                crate::task_manager::TaskStatus::Running,
+                "",
+                &[],
+            )
+            .expect("manual task status transition");
+        assert!(
+            store.load_plan_tasks(&session_id).unwrap().is_empty(),
+            "manual tasks must not be written to plan persistence"
         );
     }
 }

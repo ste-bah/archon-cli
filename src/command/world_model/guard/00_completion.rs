@@ -45,7 +45,9 @@ fn turn_finalization_verdict_at_root(
         return archon_core::agent::TurnFinalizationVerdict::Allowed;
     }
     if let Some(failure) = reclassification_failure(action_id) {
-        return blocked_verdict(format!("Action {action_id} cannot finalize because {failure}"));
+        return blocked_verdict(format!(
+            "Action {action_id} cannot finalize because {failure}"
+        ));
     }
     let Some(record) = active_guardrail_for_action(session_id, action_id) else {
         return blocked_verdict(format!(
@@ -134,6 +136,8 @@ fn completion_evidence(
                     kind,
                     status: completion_evidence_status(outcome),
                     sequence: sequence as u64,
+                    evidence_id: None,
+                    run_id: None,
                 })
         })
         .collect()

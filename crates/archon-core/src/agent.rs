@@ -20,7 +20,7 @@ use archon_permissions::auto::AutoModeEvaluator;
 use archon_permissions::is_default_safe_tool;
 use archon_permissions::mode::PermissionMode;
 use archon_session::checkpoint::CheckpointStore;
-use archon_session::plan::PlanStore;
+use archon_session::plan::{PlanApprovalAuthority, PlanStore};
 use archon_tools::tool::{
     AgentMode, ToolContext, ToolResult, ToolRunAdmissionCallback, ToolRunOutcomeCallback,
 };
@@ -133,6 +133,7 @@ pub struct Agent {
     event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
+    plan_approval_authority: Option<PlanApprovalAuthority>,
     turn_number: u64,
     /// Corrections recalled for the current turn, and the turn they belong to.
     ///

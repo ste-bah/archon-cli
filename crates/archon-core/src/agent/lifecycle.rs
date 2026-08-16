@@ -32,6 +32,7 @@ impl Agent {
             event_tx,
             checkpoint_store: None,
             plan_store: None,
+            plan_approval_authority: None,
             turn_number: 0,
             recalled_corrections: None,
             corrections_since_extraction: Vec::new(),
@@ -272,9 +273,28 @@ impl Agent {
         self.checkpoint_store = Some(Arc::new(Mutex::new(store)));
     }
 
-    /// Set the plan store for plan persistence.
-    pub fn set_plan_store(&mut self, store: PlanStore) {
+    /// Set the plan store for plan persistence and rehydrate this session's
+    /// durable plan-linked tasks without minting replacement task IDs.
+    ///
+    /// A failed rehydration is a startup error, not a best-effort warning: task
+    /// tools must never run against an incomplete in-memory view of a plan.
+    pub fn set_plan_store(
+        &mut self,
+        store: PlanStore,
+        authority: PlanApprovalAuthority,
+    ) -> Result<(), String> {
+        store
+            .validate_approval_authority(&authority, &self.config.session_id)
+            .map_err(|error| error.to_string())?;
+        archon_tools::plan_tasks::rehydrate_plan_tasks(
+            &archon_tools::task_manager::TASK_MANAGER,
+            &store,
+            &authority,
+            &self.config.session_id,
+        )?;
         self.plan_store = Some(store);
+        self.plan_approval_authority = Some(authority);
+        Ok(())
     }
 
     /// Set the memory graph for per-turn injection (GAP 7) and extraction (GAP 5).

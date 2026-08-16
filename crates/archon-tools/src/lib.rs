@@ -31,6 +31,7 @@ pub mod large_edit;
 pub mod monitor;
 pub(crate) mod path_guard;
 pub mod plan_mode;
+pub mod plan_tasks;
 pub mod powershell;
 pub mod provider_env;
 pub mod push_notification;

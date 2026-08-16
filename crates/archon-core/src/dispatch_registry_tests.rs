@@ -39,14 +39,30 @@ async fn dispatch_blocked_in_plan_mode_writes_session_scoped_audit() {
         ..Default::default()
     };
 
-    let first_result = registry.dispatch("Write", serde_json::json!({"file_path": "/tmp/one"}), &first).await;
-    let second_result = registry.dispatch("Bash", serde_json::json!({"command": "true"}), &second).await;
+    let first_result = registry
+        .dispatch(
+            "Write",
+            serde_json::json!({"file_path": "/tmp/one"}),
+            &first,
+        )
+        .await;
+    let second_result = registry
+        .dispatch("Bash", serde_json::json!({"command": "true"}), &second)
+        .await;
 
     assert!(first_result.is_error && second_result.is_error);
     let first_audit = crate::plan_file::plan_audit_path(tmp.path(), "session-one").unwrap();
     let second_audit = crate::plan_file::plan_audit_path(tmp.path(), "session-two").unwrap();
-    assert!(std::fs::read_to_string(first_audit).unwrap().contains("Write (intercepted in Plan Mode)"));
-    assert!(std::fs::read_to_string(second_audit).unwrap().contains("Bash (intercepted in Plan Mode)"));
+    assert!(
+        std::fs::read_to_string(first_audit)
+            .unwrap()
+            .contains("Write (intercepted in Plan Mode)")
+    );
+    assert!(
+        std::fs::read_to_string(second_audit)
+            .unwrap()
+            .contains("Bash (intercepted in Plan Mode)")
+    );
 }
 
 #[tokio::test]
@@ -61,7 +77,13 @@ async fn dispatch_rejects_unsafe_session_id_without_writing_outside_audit_root()
         ..Default::default()
     };
 
-    let result = registry.dispatch("Write", serde_json::json!({"file_path": "/tmp/one"}), &context).await;
+    let result = registry
+        .dispatch(
+            "Write",
+            serde_json::json!({"file_path": "/tmp/one"}),
+            &context,
+        )
+        .await;
     assert!(result.is_error);
     assert!(result.content.contains("not available in plan mode"));
     assert!(!tmp.path().join("escape.md").exists());

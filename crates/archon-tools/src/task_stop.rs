@@ -22,7 +22,7 @@ impl Tool for TaskStopTool {
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "The 8-character task ID to stop"
+                    "description": "The full task ID to stop"
                 }
             }
         })

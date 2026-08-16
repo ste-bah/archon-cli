@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use archon_cli_workspace::event_coalescer::{
     EventCoalescer, HARD_CAP, Priority, RENDER_EVENT_BUDGET, SOFT_CAP, priority,
 };
-use archon_core::agent::AgentEvent;
+use archon_core::agent::{AgentEvent, AskUserPromptKind};
 use archon_tools::tool::ToolResult;
 
 fn repo_root() -> PathBuf {
@@ -107,7 +107,8 @@ fn priority_classifies_state_transitions_as_state() {
     assert_eq!(priority(&AgentEvent::SessionComplete), Priority::State);
     assert_eq!(
         priority(&AgentEvent::AskUser {
-            question: "q".into()
+            question: "q".into(),
+            kind: AskUserPromptKind::Ordinary,
         }),
         Priority::State
     );
