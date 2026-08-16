@@ -25,8 +25,29 @@ pub(super) fn spawn_wrapped_child(
 
     let mut wrapper = CommandWrap::from(command);
     wrapper.wrap(KillOnDrop);
+    // A new SESSION, not just a new process group.
+    //
+    // A process group still inherits the controlling terminal, and a program
+    // that wants to ask the operator something opens `/dev/tty` directly rather
+    // than reading stdin — so redirecting stdin to null does not stop it. Doing
+    // that from a background process group raises SIGTTIN and the child is
+    // *stopped*, not failed: it sits in state `T` forever, holding the pipes
+    // open, with nothing to answer it.
+    //
+    // Live: an agent ran `git diff HEAD | patch -p1`, patch could not place a
+    // hunk, prompted "File to patch:", and stopped. It held that state for
+    // 30 minutes and froze an eleven-item wave behind it — one item ever got a
+    // worktree. No timeout caught it, correctly: the model was not waiting and
+    // the command was not slow, so a deadline would only have punished honest
+    // long-running work like a build.
+    //
+    // `setsid` leaves the child with no controlling terminal at all, so opening
+    // `/dev/tty` fails with ENXIO and the program errors out promptly. The agent
+    // then reads a real error and can choose a better command, which is what it
+    // was already trying to do. ProcessSession reuses ProcessGroup's child
+    // wrapper, so group-kill and kill-on-drop behave exactly as before.
     #[cfg(unix)]
-    wrapper.wrap(process_wrap::tokio::ProcessGroup::leader());
+    wrapper.wrap(process_wrap::tokio::ProcessSession);
     #[cfg(windows)]
     wrapper.wrap(process_wrap::tokio::JobObject);
     wrapper.spawn()

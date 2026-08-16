@@ -313,3 +313,61 @@ fn assert_within_output_limit(result: &ToolResult, max_output_bytes: usize) {
 #[cfg(windows)]
 #[path = "bash_process_windows_tests.rs"]
 mod windows;
+
+/// The live wedge. A program that wants to ask the operator something opens
+/// `/dev/tty` rather than reading stdin, so `Stdio::null()` does not stop it.
+/// From a background process group that raises SIGTTIN and the child is
+/// *stopped* — state `T`, pipes held, nothing to answer it. An agent's
+/// `git diff HEAD | patch -p1` prompted "File to patch:" and sat there for 30
+/// minutes, freezing an eleven-item wave behind it.
+///
+/// In its own session there is no controlling terminal, so the open fails and
+/// the command returns promptly with an error the agent can act on. This must
+/// finish well inside the tool's own timeout: the point is that it fails,
+/// not that something eventually kills it.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_command_that_wants_the_terminal_fails_instead_of_stopping() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool {
+        timeout_secs: 30,
+        max_output_bytes: 4096,
+        ..Default::default()
+    };
+    let started = std::time::Instant::now();
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        tool.execute(
+            // Reading the controlling terminal directly is what `patch`, `ssh`
+            // and `git` prompts all do.
+            json!({ "command": "read -r line < /dev/tty; echo \"got:$line\"" }),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        ),
+    )
+    .await
+    .expect("a terminal read must not hang the tool");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "must fail promptly rather than block: {:?}",
+        started.elapsed()
+    );
+    // The open fails with ENXIO — "Device not configured" on macOS, "No such
+    // device or address" on Linux — rather than the process being stopped.
+    let content = result.content.to_ascii_lowercase();
+    assert!(
+        content.contains("/dev/tty")
+            && (content.contains("device not configured") || content.contains("no such device")),
+        "the terminal open must fail outright: {}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("got:x"),
+        "no terminal input can have been read: {}",
+        result.content
+    );
+}
