@@ -337,6 +337,7 @@ pub struct WorldGuardrailPredictionContext {
     pub predicted_plan_drift: Option<f32>,
     pub predicted_high_cost: Option<f32>,
     pub predicted_slow_run: Option<f32>,
+    pub predicted_merge_conflict: Option<f32>,
     pub risk_score: f32,
     pub risk_tier: WorldRiskTier,
 }
@@ -361,6 +362,7 @@ impl WorldGuardrailPredictionContext {
             predicted_plan_drift: scores.predicted_plan_drift,
             predicted_high_cost: scores.predicted_high_cost,
             predicted_slow_run: scores.predicted_slow_run,
+            predicted_merge_conflict: scores.predicted_merge_conflict,
             risk_score,
             risk_tier,
         }
@@ -380,6 +382,7 @@ impl Default for WorldGuardrailPredictionContext {
             predicted_plan_drift: None,
             predicted_high_cost: None,
             predicted_slow_run: None,
+            predicted_merge_conflict: None,
             risk_score: 0.0,
             risk_tier: WorldRiskTier::Low,
         }

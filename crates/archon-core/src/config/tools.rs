@@ -61,6 +61,10 @@ impl ToolsConfig {
             dangerous_commands: permissions.dangerous_commands.clone(),
             provider_env: None,
             cargo_limits: self.cargo.to_limits(),
+            // Unrestricted as built. A subagent's registry is narrowed to its
+            // tier afterwards, by `ToolRegistry::set_bash_isolation_tier`
+            // (#184 M3); the main agent's is never narrowed.
+            isolation_tier: archon_tools::isolation::IsolationTier::Shared,
         }
     }
 }

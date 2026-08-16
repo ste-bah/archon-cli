@@ -108,6 +108,8 @@ fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str
         session_id: session_id.to_string(),
         max_tool_concurrency: config.tools.max_concurrency as usize,
         max_subagent_concurrency: config.subagent.max_concurrent.max(1),
+        subagent_auto_isolation: config.subagent.auto_isolation,
+        subagent_isolation_max_tier: config.subagent.isolation_max_tier,
         context: config.context.clone(),
         ..AgentConfig::default()
     }
@@ -150,7 +152,7 @@ async fn install_workflow_cli_subagent_executor(
         agent_config.model.clone(),
         agent_config.system_prompt.clone(),
         Arc::clone(&agent_config.permission_mode),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(agent_config),
         identity,
     );

@@ -8,6 +8,8 @@ use crate::cli_args::WorldAction;
 
 mod actions;
 mod candidate;
+/// Coordination outcomes as trace rows (#184 M9).
+pub(crate) mod coordination;
 mod embedding_runtime;
 mod guard;
 mod ingest_files;

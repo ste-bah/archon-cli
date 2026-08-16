@@ -193,6 +193,25 @@ pub trait SubagentExecutor: Send + Sync {
     /// `run_subagent` takes the no-timer branch of the `select!`).
     fn auto_background_ms(&self) -> u64;
 
+    /// The auto-background timer fired and this agent is still running.
+    ///
+    /// **Synchronous on purpose.** The `AutoBackgrounded` arm must not await:
+    /// `preserve_d5_agt025.rs` reads `run.rs` as source text and fails if the
+    /// arm body contains `.await`, because awaiting there is what re-entered
+    /// the join handle the timer had just abandoned. Implementations that need
+    /// to do async work spawn it; nothing here blocks the timer path.
+    ///
+    /// This does not weaken PRESERVE-D5. That invariant says an abandoned agent
+    /// gets no *visible hooks* and no *worktree cleanup*, both of which act on
+    /// the agent. Telling the lead the agent is still alive is neither — it is
+    /// the one signal that distinguishes a wedged agent from a busy one, and
+    /// auto-background is precisely when the distinction stops being obvious
+    /// (#184 M6).
+    ///
+    /// Default no-op so existing executors, including the test doubles, are
+    /// unaffected.
+    fn on_auto_backgrounded(&self, _subagent_id: &str) {}
+
     /// Classify a request as foreground vs. explicit-background.
     /// Called by `AgentTool::execute` BEFORE spawning `run_subagent`
     /// so the tool can fork between the immediate-return background
@@ -209,6 +228,23 @@ pub trait SubagentExecutor: Send + Sync {
     /// configured cap.
     fn max_concurrency(&self) -> Option<usize> {
         None
+    }
+
+    /// Ask a running agent to stop at its next check, cooperatively.
+    ///
+    /// The same signal `SendMessage`'s `shutdown_request` frame carries — it
+    /// trips the agent's shutdown flag and lets it finish the round it is in.
+    /// `TeamDelete` needs it from `archon-tools`, which cannot reach the
+    /// `SubagentManager` that owns the flag, so it goes through the executor
+    /// seam like everything else that crosses that boundary.
+    ///
+    /// Returns whether the agent was found and running. The default is `false`:
+    /// an executor with no manager behind it cannot stop anything, and saying
+    /// so is the honest answer — a `true` here would report a shutdown that
+    /// never happened and `TeamDelete` would delete the roster out from under a
+    /// live agent.
+    async fn request_shutdown(&self, _subagent_id: &str) -> bool {
+        false
     }
 }
 

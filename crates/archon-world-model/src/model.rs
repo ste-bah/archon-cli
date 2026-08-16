@@ -354,6 +354,7 @@ fn auxiliary_labels() -> Vec<&'static str> {
         "plan_drift",
         "high_cost",
         "slow_run",
+        "merge_conflict",
     ]
 }
 
@@ -367,6 +368,7 @@ fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
         "plan_drift" => labels.plan_drift,
         "high_cost" => labels.high_cost,
         "slow_run" => labels.slow_run,
+        "merge_conflict" => labels.merge_conflict,
         _ => false,
     }
 }
@@ -419,7 +421,12 @@ mod tests {
 
         assert_eq!(model.metadata.backend, BackendKind::Cpu);
         assert_eq!(model.mean_delta, vec![1.0, 2.0]);
-        assert_eq!(model.metadata.parameter_count, 3 * 2 + 8 * (1 + 2 + 2));
+        // Derived rather than hardcoded: one auxiliary head per label, so the
+        // count moves whenever the label set does (it did in #184 M9).
+        assert_eq!(
+            model.metadata.parameter_count,
+            3 * 2 + auxiliary_labels().len() as u64 * (1 + 2 + 2)
+        );
         assert_eq!(predicted, vec![3.0, 4.0]);
     }
 

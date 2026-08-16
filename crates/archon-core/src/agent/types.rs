@@ -198,6 +198,12 @@ pub struct AgentConfig {
     /// Threaded the same way as `max_subagent_concurrency` rather than passed
     /// to the runner constructor, which several call sites share.
     pub subagent_stream_idle_timeout_secs: u64,
+    /// `config.subagent.auto_isolation` — when to isolate an agent that did not
+    /// ask to be isolated (#184 M3).
+    pub subagent_auto_isolation: archon_tools::isolation::AutoIsolation,
+    /// `config.subagent.isolation_max_tier` — the most isolation any agent may
+    /// have, however it was requested.
+    pub subagent_isolation_max_tier: archon_tools::isolation::IsolationTier,
 }
 
 impl AgentConfig {
@@ -274,6 +280,8 @@ impl Default for AgentConfig {
             context: crate::config::ContextConfig::default(),
             max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
             subagent_stream_idle_timeout_secs: crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS,
+            subagent_auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
+            subagent_isolation_max_tier: archon_tools::isolation::IsolationTier::Worktree,
         }
     }
 }

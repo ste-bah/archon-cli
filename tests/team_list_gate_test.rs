@@ -3,10 +3,10 @@
 //! Gate 1 test-first — written BEFORE implementation.
 //!
 //! Assertions:
-//!   * `archon team list` with no `teams/` dir prints "No teams found"
+//!   * `archon team list` with no `.archon/teams/` dir prints "No teams found"
 //!   * `archon team list` with 2 team subdirs containing team.json prints
 //!     both team ids AND names
-//!   * Empty `teams/` directory prints "No teams found"
+//!   * Empty `.archon/teams/` directory prints "No teams found"
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -114,7 +114,7 @@ fn run_team_list(work_dir: &std::path::Path, tmp: &std::path::Path) -> (String, 
 }
 
 fn write_team(work_dir: &std::path::Path, id: &str, name: &str) {
-    let team_dir = work_dir.join("teams").join(id);
+    let team_dir = work_dir.join(".archon").join("teams").join(id);
     std::fs::create_dir_all(&team_dir).expect("create team dir");
     let team_json = format!(r#"{{"id":"{id}","name":"{name}","members":[]}}"#);
     std::fs::write(team_dir.join("team.json"), team_json).expect("write team.json");
@@ -128,7 +128,7 @@ fn team_list_no_teams_dir_prints_empty() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let work_dir = tmp.path().join("work");
     std::fs::create_dir_all(&work_dir).expect("create work dir");
-    // No teams/ subdirectory exists
+    // No .archon/teams/ subdirectory exists
     let (stdout, stderr, code) = run_team_list(&work_dir, tmp.path());
     assert_eq!(code, 0, "should exit 0; stderr:\n{stderr}");
     assert!(
@@ -144,7 +144,7 @@ fn team_list_empty_teams_dir_prints_empty() {
     }
     let tmp = tempfile::tempdir().expect("tempdir");
     let work_dir = tmp.path().join("work");
-    std::fs::create_dir_all(work_dir.join("teams")).expect("create empty teams/");
+    std::fs::create_dir_all(work_dir.join(".archon").join("teams")).expect("create empty teams/");
     let (stdout, stderr, code) = run_team_list(&work_dir, tmp.path());
     assert_eq!(code, 0, "should exit 0; stderr:\n{stderr}");
     assert!(

@@ -40,6 +40,15 @@ process-wrap.workspace = true
 # archon-core to break the archon-core <-> archon-tools cycle.
 dashmap.workspace = true
 once_cell.workspace = true
+# M2 (#184): "do these two declared write sets overlap?" is already answered by
+# the resource-key table the write coordinator and topology admission both use.
+# It is a leaf with no archon-* deps precisely so callers share one table
+# instead of carrying a second opinion, so this edge costs nothing.
+archon-write-plan = { path = "../archon-write-plan" }
+# M4 (#184): advisory lock proving a worktree's owner is still alive. Chosen
+# over a PID marker because PID reuse on Windows can make a dead owner look
+# live; a held lock is immune to reuse and releases itself on crash.
+fd-lock.workspace = true
 tower.workspace = true
 which.workspace = true
 tree-sitter.workspace = true

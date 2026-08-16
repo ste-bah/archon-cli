@@ -275,7 +275,15 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
             .get("contentBlockIndex")
             .and_then(|i| i.as_u64())
             .unwrap_or(0) as u32;
-        let block = start.get("contentBlock");
+        // `start`, not `contentBlock`. Converse's ContentBlockStartEvent is
+        // `{"contentBlockIndex": n, "start": {"toolUse": {...}}}` — the name
+        // `contentBlock` belongs to the non-streaming Converse response, and
+        // reading it here matched nothing. Every tool-use block was therefore
+        // announced as plain text with no id and no name, so the arguments
+        // streamed in with no call open to attach them to and the turn ended
+        // with `stopReason: tool_use` and nothing to run. Text was unaffected,
+        // which is why this looked like a model that would chat but not act.
+        let block = start.get("start");
         let has_tool_use = block.and_then(|b| b.get("toolUse")).is_some();
 
         if has_tool_use {
@@ -372,14 +380,26 @@ pub fn parse_bedrock_event(event: &serde_json::Value) -> Vec<StreamEvent> {
             stop_reason: None,
             usage: Some(Usage {
                 // `inputTokens` on Bedrock counts only the tokens that were
-                // NOT served from or written to cache, unlike Anthropic where
-                // it is the total. Reporting it verbatim would under-count the
-                // real prompt size by exactly the amount caching is saving —
-                // so the moment caching starts working, usage would appear to
-                // collapse rather than shift between categories.
-                input_tokens: input_tokens.unwrap_or(0)
-                    + cache_read.unwrap_or(0)
-                    + cache_write.unwrap_or(0),
+                // NOT served from or written to cache — verified live at
+                // `inputTokens: 3` on a 4,424-token request. That is already
+                // the DISJOINT form `UsageAccumulator` expects, the same shape
+                // the Anthropic Messages API reports, so it is passed through
+                // untouched.
+                //
+                // This used to add `cache_read` and `cache_write` back in, to
+                // stop the context figure collapsing the moment caching started
+                // working. The intent was right and the mechanism was wrong:
+                // the accumulator computes the context as
+                // `input + cache_creation + cache_read`, so folding them into
+                // `input` as well counted every cached token TWICE. Measured on
+                // a live turn: a ~12,091-token prompt reported 28,255 tokens of
+                // context, and the cached tokens were charged at the full input
+                // rate on top of the cache-read rate.
+                //
+                // Leaving it disjoint achieves what the old comment wanted
+                // anyway — the accumulator's sum is the true total, so the
+                // context does not collapse, it moves between buckets.
+                input_tokens: input_tokens.unwrap_or(0),
                 output_tokens: output_tokens.unwrap_or(0),
                 cache_creation_input_tokens: cache_write.unwrap_or(0),
                 cache_read_input_tokens: cache_read.unwrap_or(0),

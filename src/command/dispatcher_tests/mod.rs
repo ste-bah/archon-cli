@@ -155,7 +155,8 @@ fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow
 /// → 84 (v1.3.11 Trading Lab: /trading)
 /// → 85 (FCDP in-session drafting: /draft)
 /// → 87 (Phase 6 traceability: /requirements).
-const EXPECTED_PRIMARY_COUNT: usize = 88;
+// → 89 (#184 M7 isolated-agent review and merge: /worktrees).
+const EXPECTED_PRIMARY_COUNT: usize = 89;
 
 /// Drain every currently-queued event from `rx` using `try_recv`
 /// until the channel reports empty, returning the drained events

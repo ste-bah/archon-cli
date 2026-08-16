@@ -11,7 +11,15 @@ use crate::guardrail::{
 use crate::schema::{WorldLabelSet, WorldTraceRow};
 
 pub const MATERIALIZED_LABELS_LEDGER: &str = "world-materialized-labels.jsonl";
-pub const LABEL_DEFINITION_VERSION: u32 = 1;
+/// Bumped to 2 by #184 M9, which added `merge_conflict`, `claim_overlap` and
+/// `isolated` to [`WorldLabelSet`].
+///
+/// The materialization key is `(action_attempt_id, label_definition_version)`.
+/// Leaving it at 1 would have rows labelled under the old definition and rows
+/// labelled under the new one sharing a key, so the second silently overwrites
+/// the first and the corpus mixes two definitions with no way to tell them
+/// apart afterwards.
+pub const LABEL_DEFINITION_VERSION: u32 = 2;
 
 pub fn with_materialization_lock<T>(
     root: &Path,

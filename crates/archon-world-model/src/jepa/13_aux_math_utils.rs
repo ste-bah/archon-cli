@@ -287,6 +287,7 @@ fn auxiliary_labels() -> Vec<&'static str> {
         "plan_drift",
         "high_cost",
         "slow_run",
+        "merge_conflict",
     ]
 }
 
@@ -300,6 +301,7 @@ fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
         "plan_drift" => labels.plan_drift,
         "high_cost" => labels.high_cost,
         "slow_run" => labels.slow_run,
+        "merge_conflict" => labels.merge_conflict,
         _ => false,
     }
 }
@@ -317,6 +319,7 @@ fn jepa_guardrail_scores_from_auxiliary(scores: &[(String, f32)]) -> GuardrailRi
             "plan_drift" => guardrail_scores.predicted_plan_drift = probability,
             "high_cost" => guardrail_scores.predicted_high_cost = probability,
             "slow_run" => guardrail_scores.predicted_slow_run = probability,
+            "merge_conflict" => guardrail_scores.predicted_merge_conflict = probability,
             _ => {}
         }
     }

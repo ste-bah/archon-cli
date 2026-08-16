@@ -154,6 +154,34 @@ valid ingest. Oversized transcript rows are truncated for the labeling prompt
 only, and batches split recursively until the prompt fits `max_prompt_chars`;
 the persisted world-model row still keeps the configured storage/retention form.
 
+## Coordination signals
+
+Multi-agent coordination writes its own rows (#184 M9). `WorldActionKind` carries
+`MessageSend`, `TaskClaim`, `Handoff` and `WorktreeMerge`; `WorldLabelSet` carries
+`merge_conflict`, `claim_overlap` and `isolated`; and `WorldTraceRow` carries
+`coordination_run_id`, which groups the agents that were working together — the
+team id when there is a team. All of it is additive and serde-defaulted, so rows
+written before it existed still load.
+
+`WorktreeMerge` rows are the valuable ones, because they are **ground truth**: a
+git merge either conflicted or it did not, with no labeler in the loop. `/worktrees
+merge` and `/worktrees discard` write one per isolated agent, carrying what was
+known at spawn — declared writes, whether they overlapped a running agent's claim,
+which isolation tier was granted — against what actually happened. The spawn-side
+facts are copied at spawn into `archon_tools::coordination_record`, because write
+claims are liveness-derived and disappear with their agent long before the merge.
+
+That gives the guardrail a new prediction target, `predicted_merge_conflict`,
+trained as an auxiliary head like the others and weighted into `risk_score` at
+full weight: the question worth asking at spawn time is whether two agents on a
+shared module should be serialized rather than parallelized.
+
+Note the categorical feature block widened by four slots to fit the new action
+kinds, which shifts every categorical base after it. `projection_version` is now
+`world-model-projection-v2` and `LABEL_DEFINITION_VERSION` is `2`, so latents and
+materialized labels from before the change are detectably different rather than
+silently incomparable.
+
 ## Commands
 
 ```bash

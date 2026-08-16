@@ -194,6 +194,8 @@ pub(super) async fn prepare(
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,
         subagent_stream_idle_timeout_secs: config.subagent.stream_idle_timeout_secs,
+        subagent_auto_isolation: config.subagent.auto_isolation,
+        subagent_isolation_max_tier: config.subagent.isolation_max_tier,
     };
     super::build_agent::apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli)
         .await;

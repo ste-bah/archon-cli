@@ -116,13 +116,41 @@ pub(super) fn validate_and_build(
 pub(super) fn expected_target_files(
     input: &serde_json::Value,
 ) -> Result<Vec<String>, AgentToolError> {
-    let Some(value) = input.get("expected_target_files") else {
+    string_array(input, "expected_target_files")
+}
+
+/// Paths or globs this subagent says it intends to write (#184 M2).
+///
+/// Kept beside `SubagentRequest` rather than inside it, following
+/// `expected_target_files`: the struct is built by ~24 literal expressions with
+/// no `Default`, so a new field is a compile break at every one of them for a
+/// value only `AgentTool::execute` reads.
+pub(super) fn intended_writes(input: &serde_json::Value) -> Result<Vec<String>, AgentToolError> {
+    string_array(input, "intended_writes")
+}
+
+/// The existing task this subagent is taking on, if it named one.
+pub(super) fn task_id(input: &serde_json::Value) -> Option<String> {
+    input
+        .get("task_id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// Shared reader for the tool's array-of-non-empty-strings fields.
+fn string_array(
+    input: &serde_json::Value,
+    field: &'static str,
+) -> Result<Vec<String>, AgentToolError> {
+    let Some(value) = input.get(field) else {
         return Ok(Vec::new());
     };
     let Some(array) = value.as_array() else {
-        return Err(AgentToolError::InvalidInput(
-            "expected_target_files must be an array of strings".into(),
-        ));
+        return Err(AgentToolError::InvalidInput(format!(
+            "{field} must be an array of strings"
+        )));
     };
     array
         .iter()
@@ -133,9 +161,9 @@ pub(super) fn expected_target_files(
                 .filter(|path| !path.is_empty())
                 .map(ToOwned::to_owned)
                 .ok_or_else(|| {
-                    AgentToolError::InvalidInput(
-                        "expected_target_files must contain only non-empty strings".into(),
-                    )
+                    AgentToolError::InvalidInput(format!(
+                        "{field} must contain only non-empty strings"
+                    ))
                 })
         })
         .collect()

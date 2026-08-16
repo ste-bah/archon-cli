@@ -30,6 +30,7 @@ pub mod git;
 pub mod hooks;
 pub mod input_format;
 pub mod logging;
+pub mod message_router;
 pub mod orchestrator;
 pub mod output_format;
 // TASK-P0-B.3 (#174): Plan-file I/O helpers (`.archon/plan.md`).

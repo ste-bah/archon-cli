@@ -242,6 +242,7 @@ fn guardrail_scores_from_auxiliary<'a>(
             "plan_drift" => scores.predicted_plan_drift = probability,
             "high_cost" => scores.predicted_high_cost = probability,
             "slow_run" => scores.predicted_slow_run = probability,
+            "merge_conflict" => scores.predicted_merge_conflict = probability,
             _ => {}
         }
     }

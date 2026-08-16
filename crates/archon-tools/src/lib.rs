@@ -63,8 +63,15 @@ pub mod task_output;
 pub mod task_stop;
 pub mod task_update;
 
+pub mod coordination_record;
+pub mod isolation;
 pub mod worktree;
+pub mod worktree_disk;
+pub mod worktree_exit;
 pub mod worktree_manager;
+pub mod worktree_ownership;
+pub mod worktree_review;
+pub mod write_claims;
 
 pub mod board;
 pub mod cron_create;
@@ -86,11 +93,11 @@ pub mod lsp_manager;
 pub mod lsp_tool;
 pub mod lsp_types;
 
-pub mod team_backend;
 pub mod team_config;
 pub mod team_create;
 pub mod team_delete;
 pub mod team_message;
+pub mod team_roster;
 
 pub mod cartographer;
 pub mod java;

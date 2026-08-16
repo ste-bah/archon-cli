@@ -164,7 +164,7 @@ pub(super) fn install_canary_executor(provider: Arc<dyn LlmProvider>, root: &std
         "controlled-canary-model".into(),
         Vec::new(),
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(agent_config),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,

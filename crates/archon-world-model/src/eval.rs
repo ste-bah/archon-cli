@@ -270,6 +270,7 @@ fn label_value(labels: &WorldLabelSet, label: &str) -> bool {
         "plan_drift" => labels.plan_drift,
         "high_cost" => labels.high_cost,
         "slow_run" => labels.slow_run,
+        "merge_conflict" => labels.merge_conflict,
         _ => false,
     }
 }

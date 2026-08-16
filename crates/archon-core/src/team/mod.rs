@@ -2,11 +2,16 @@
 //!
 //! Types live in archon-tools to avoid circular dependencies.
 //! archon-core re-exports them here for the archon_core::team namespace.
+//!
+//! `TeamManager` used to keep its own idea of where teams live — `<project>/
+//! teams/` against the tools' `<project>/.archon/teams/` — so `archon team
+//! list` could never see a team `TeamCreate` had made. It now delegates to
+//! `archon_tools::team_roster`, which is the single writer (#184 M5).
 
 // Re-export shared types from archon-tools
-pub use archon_tools::team_backend as backend;
 pub use archon_tools::team_config;
 pub use archon_tools::team_message as message;
+pub use archon_tools::team_roster as roster;
 
 use std::path::PathBuf;
 
@@ -16,48 +21,33 @@ use archon_tools::team_config::TeamConfig;
 // TeamManager
 // ---------------------------------------------------------------------------
 
-/// Manages team lifecycle: create, load, delete.
+/// Manages team lifecycle: load and list.
 ///
-/// All team state lives under `<teams_root>/teams/<team-id>/`.
+/// All team state lives under `<project_dir>/.archon/teams/<team-id>/`.
 pub struct TeamManager {
-    /// Root directory containing all team subdirectories.
-    teams_root: PathBuf,
+    project_dir: PathBuf,
 }
 
 impl TeamManager {
     /// Create a manager rooted at `project_dir`.
-    ///
-    /// Teams are stored in `<project_dir>/teams/`.
     pub fn new(project_dir: PathBuf) -> Self {
-        Self {
-            teams_root: project_dir.join("teams"),
-        }
+        Self { project_dir }
+    }
+
+    /// The directory teams are read from — worth printing, because "no teams
+    /// found" is otherwise indistinguishable from "looked in the wrong place".
+    pub fn teams_dir(&self) -> PathBuf {
+        roster::teams_dir(&self.project_dir)
     }
 
     /// Load a team configuration from disk.
     pub fn load_team(&self, team_id: &str) -> Result<TeamConfig, TeamError> {
-        let config_path = self.teams_root.join(team_id).join("team.json");
-        let json = std::fs::read_to_string(&config_path)?;
-        let config: TeamConfig = serde_json::from_str(&json).map_err(TeamError::Serde)?;
-        Ok(config)
+        roster::load(&self.project_dir, team_id).map_err(TeamError::Roster)
     }
 
     /// List all team IDs currently on disk.
     pub fn list_teams(&self) -> Result<Vec<String>, TeamError> {
-        if !self.teams_root.exists() {
-            return Ok(vec![]);
-        }
-        let ids = std::fs::read_dir(&self.teams_root)?
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                if entry.file_type().ok()?.is_dir() {
-                    entry.file_name().into_string().ok()
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(ids)
+        Ok(roster::list(&self.project_dir))
     }
 }
 
@@ -69,8 +59,8 @@ impl TeamManager {
 pub enum TeamError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Serialization error: {0}")]
-    Serde(serde_json::Error),
+    #[error("{0}")]
+    Roster(String),
     #[error("Team not found: {0}")]
     NotFound(String),
 }

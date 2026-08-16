@@ -409,6 +409,20 @@ fn schema_includes_isolation() {
     assert_eq!(props["isolation"]["type"], "string");
     assert_eq!(props["isolation"]["enum"][0], "none");
     assert_eq!(props["isolation"]["enum"][1], "worktree");
+    // Every rung of the ladder has to be askable. #184 M3 added the third tier
+    // and left the schema at two, so the only way to reach it was an agent
+    // definition — a tier the tool refuses to accept is a tier that does not
+    // exist for anyone calling the tool.
+    assert_eq!(props["isolation"]["enum"][2], "worktree-with-builds");
+
+    // Each enum value must round-trip through the parser that consumes it.
+    for value in props["isolation"]["enum"].as_array().unwrap() {
+        let raw = value.as_str().unwrap();
+        assert!(
+            crate::isolation::IsolationTier::parse(raw).is_some(),
+            "the schema offers '{raw}' but IsolationTier::parse rejects it"
+        );
+    }
 }
 
 #[test]

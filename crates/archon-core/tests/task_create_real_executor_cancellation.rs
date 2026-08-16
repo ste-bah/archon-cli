@@ -72,7 +72,7 @@ fn install_real_executor(
         "stalled-model".into(),
         Vec::new(),
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,

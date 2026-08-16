@@ -67,7 +67,8 @@ Beyond the 87 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>`; `run` delegates to `/run-agent` |
+| `/agent` | — | Umbrella: `/agent list`, `/agent info <name>`, `/agent run <name>`; `run` delegates to `/run-agent`. `list` also shows the session's team roster when a team is active |
+| `/worktrees` | `/wt` | Review, merge or discard isolated agents' worktrees: `list` (default), `sizes`, `merge <owner>`, `discard <owner>`, `keep <owner>`, `prune`. Merging is always explicit — a completion never merges for you. `sizes` walks every file, so it is opt-in; `prune` removes every finished agent's worktree and refuses the ones with unreviewed work |
 | `/run-agent` | — | Invoke a custom agent by name with a task description (async via TaskService, using the active provider) |
 | `/archon-code` | — | Start the 50-agent coding pipeline on a task using the active provider |
 | `/archon-research` | — | Start the 47-agent PhD research pipeline on a topic using the active provider |

@@ -289,7 +289,15 @@ async fn run_subagent_with_auto_background(
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
                 .await;
         }
-        SubagentOutcome::AutoBackgrounded => {}
+        // Still no visible hooks and no worktree cleanup — PRESERVE-D5 holds.
+        // What does happen is a status signal to the lead, which acts on
+        // nothing and is the only thing separating "wedged" from "busy" once
+        // the timer has abandoned the join. Synchronous by contract: this arm
+        // must not await, and `preserve_d5_agt025.rs` reads this file as text
+        // to enforce it (#184 M6).
+        SubagentOutcome::AutoBackgrounded => {
+            exec.on_auto_backgrounded(&subagent_id);
+        }
         SubagentOutcome::Cancelled => {
             let _ = exec
                 .on_visible_complete(

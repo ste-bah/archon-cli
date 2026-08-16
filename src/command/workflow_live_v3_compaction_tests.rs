@@ -240,7 +240,7 @@ async fn run_fixture(scenario: FixtureScenario) {
         "claude-sonnet-4-6".into(),
         Vec::new(),
         Arc::new(tokio::sync::Mutex::new("default".into())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(config),
         Arc::new(test_identity()),
     );

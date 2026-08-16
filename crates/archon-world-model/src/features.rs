@@ -14,7 +14,11 @@ impl ProjectionMetadata {
         Self {
             source_dimensions,
             projection_dimensions,
-            projection_version: "world-model-projection-v1".into(),
+            // v2 since #184 M9 widened the action-kind block by four slots,
+            // which shifts every categorical base after it. A latent encoded
+            // under v1 is not comparable to one encoded now, and tagging is
+            // what makes that detectable instead of quietly wrong.
+            projection_version: "world-model-projection-v2".into(),
         }
     }
 }
