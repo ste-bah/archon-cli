@@ -39,6 +39,7 @@ mod leann_startup;
 mod model_selection;
 mod modes;
 mod pipeline_adapter;
+pub(crate) mod plan_hint;
 mod reasoning_quality;
 mod slash_context_builder;
 mod splash;

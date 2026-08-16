@@ -499,6 +499,7 @@ dependencies = [
  "archon-test-support",
  "archon-tools",
  "archon-topology",
+ "archon-world-model",
  "async-trait",
  "axum",
  "chrono",
@@ -1259,9 +1260,11 @@ name = "archon-world-model"
 version = "1.9.1"
 dependencies = [
  "anyhow",
+ "archon-completion",
  "archon-cozo",
  "archon-llm",
  "archon-memory",
+ "archon-permissions",
  "async-trait",
  "candle-core",
  "candle-nn",

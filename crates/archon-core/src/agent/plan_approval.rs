@@ -73,6 +73,17 @@ pub fn noninteractive_decision(value: Option<&str>) -> PlanApprovalDecision {
     }
 }
 
+pub(crate) fn apply_default_evidence_requirements(plan: &mut PlanDocument) {
+    let default = archon_world_model::guardrail::required_evidence_kind(
+        archon_world_model::GuardrailRequiredAction::RunTests,
+    );
+    for step in &mut plan.steps {
+        if step.required_evidence.is_empty() {
+            step.required_evidence = vec![default];
+        }
+    }
+}
+
 impl Agent {
     pub(super) async fn handle_exit_plan_mode_approval(
         &mut self,
@@ -100,6 +111,12 @@ impl Agent {
             decided_at: chrono::Utc::now().to_rfc3339(),
         };
         plan.approval = Some(approval.clone());
+        if matches!(
+            decision,
+            PlanApprovalDecision::Approve | PlanApprovalDecision::ApproveAcceptEdits
+        ) {
+            apply_default_evidence_requirements(&mut plan);
+        }
         plan.status = match decision {
             PlanApprovalDecision::Approve | PlanApprovalDecision::ApproveAcceptEdits => {
                 PlanStatus::Approved

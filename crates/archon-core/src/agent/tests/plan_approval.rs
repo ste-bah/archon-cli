@@ -1,6 +1,27 @@
 use std::sync::Arc;
 
 #[test]
+fn approved_plan_steps_without_requirements_default_to_canonical_tests_evidence() {
+    use archon_completion::RequiredEvidenceKind;
+    use archon_session::plan::{PlanDocument, PlanStep, PlanStepStatus};
+
+    let mut plan = PlanDocument::new("default-evidence", "Default evidence");
+    plan.steps = vec![PlanStep {
+        number: 1,
+        description: "implement change".into(),
+        affected_files: Vec::new(),
+        status: PlanStepStatus::Pending,
+        blocked_by: Vec::new(),
+        required_evidence: Vec::new(),
+        task_id: None,
+    }];
+
+    crate::agent::plan_approval::apply_default_evidence_requirements(&mut plan);
+
+    assert_eq!(plan.steps[0].required_evidence, vec![RequiredEvidenceKind::Tests]);
+}
+
+#[test]
 fn approval_prompt_renders_stored_title_and_ordered_steps() {
     use archon_session::plan::{PlanDocument, PlanStep, PlanStepStatus};
 
@@ -115,10 +136,12 @@ async fn exit_plan_waits_for_approval_before_restoring_default() {
     assert_eq!(persisted.status, archon_session::plan::PlanStatus::Approved);
     assert_eq!(persisted.steps.len(), 1);
     let task_id = persisted.steps[0].task_id.as_ref().unwrap();
-    assert!(
-        archon_tools::task_manager::TASK_MANAGER
-            .get_task(task_id)
-            .is_some_and(|task| task.metadata.is_some())
+    let task = archon_tools::task_manager::TASK_MANAGER
+        .get_task(task_id)
+        .expect("approved plan task must be installed");
+    assert_eq!(
+        task.metadata.expect("plan metadata").required_evidence,
+        vec![archon_completion::RequiredEvidenceKind::Tests]
     );
     assert_eq!(
         agent

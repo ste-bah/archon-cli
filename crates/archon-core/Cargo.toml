@@ -14,6 +14,7 @@ archon-completion = { path = "../archon-completion" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-cognitive = { path = "../archon-cognitive" }
 archon-memory = { path = "../archon-memory" }
+archon-world-model = { path = "../archon-world-model" }
 archon-leann = { path = "../archon-leann" }
 # TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from
 # archon-observability (trait was moved there in OBS-901 so the trait + type
