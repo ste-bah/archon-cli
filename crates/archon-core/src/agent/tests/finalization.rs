@@ -1,6 +1,6 @@
 struct GuardrailCompletionProvider {
     calls: Arc<AtomicUsize>,
-    captured_system: Arc<std::sync::Mutex<Vec<Vec<serde_json::Value>>>>,
+    captured_requests: Arc<std::sync::Mutex<Vec<LlmRequest>>>,
 }
 
 #[async_trait::async_trait]
@@ -21,7 +21,7 @@ impl LlmProvider for GuardrailCompletionProvider {
         &self,
         request: LlmRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-        self.captured_system.lock().unwrap().push(request.system);
+        self.captured_requests.lock().unwrap().push(request);
         self.calls.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = tokio::sync::mpsc::channel(3);
         tx.send(StreamEvent::ThinkingDelta {
@@ -55,7 +55,7 @@ async fn blocked_finalization_retries_once_without_turn_complete() {
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),
-            captured_system: Arc::clone(&captured_system),
+            captured_requests: Arc::clone(&captured_system),
         }),
         ToolRegistry::new(),
         AgentConfig::default(),
@@ -85,7 +85,7 @@ async fn blocked_finalization_retries_once_without_turn_complete() {
 
     assert!(matches!(error, AgentLoopError::FinalizationBlocked(_)));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert!(captured_system.lock().unwrap()[0].iter().any(|block| {
+    assert!(captured_system.lock().unwrap()[0].system.iter().any(|block| {
         block["text"]
             .as_str()
             .is_some_and(|text| text.contains("RunTests"))
@@ -152,7 +152,7 @@ async fn blocked_trivial_finalization_enters_bounded_repair_loop() {
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),
-            captured_system,
+            captured_requests: captured_system,
         }),
         ToolRegistry::new(),
         AgentConfig::default(),
@@ -447,7 +447,7 @@ async fn scoped_tool_loop_break_requires_finalization_verdict() {
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls,
-            captured_system,
+            captured_requests: captured_system,
         }),
         ToolRegistry::new(),
         AgentConfig::default(),

@@ -90,9 +90,10 @@ impl Agent {
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
         self.inject_turn_requirements(&mut system);
-        self.inject_plan_mode_reminder(&mut system, self.effective_agent_mode().await);
+        let effective_mode = self.effective_agent_mode().await;
+        self.inject_plan_mode_reminder(&mut system, effective_mode);
 
-        let active_model = self.active_model().await;
+        let active_model = self.active_model_for_mode(effective_mode).await;
         let effort = self.turn_effort(user_input).await;
         // #123: `ultrathink` escalates BOTH knobs for this turn — effort to
         // `Max` (above, inside `turn_effort`) and the thinking budget here.
@@ -141,7 +142,14 @@ impl Agent {
                 agentic_iterations,
                 self.context_window_for(&active_model),
             ),
-            request_origin: Some("main_session".into()),
+            request_origin: Some(
+                if effective_mode == AgentMode::Plan {
+                    "plan_mode"
+                } else {
+                    "main_session"
+                }
+                .into(),
+            ),
             reasoning_encrypted: None,
         };
         request_cache::apply_stable_system_cache(

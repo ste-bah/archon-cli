@@ -23,6 +23,8 @@ pub struct ContextConfig {
     pub max_tool_result_bytes: usize,
     /// Optional explicit model used by background segment summarization.
     pub compaction_model: Option<String>,
+    /// Optional explicit model used while the agent is in Plan Mode.
+    pub plan_model: Option<String>,
     /// Whether to use prompt caching (cache_control breakpoints on static blocks).
     pub prompt_cache: bool,
     pub prompt_cache_mode: String,
@@ -98,6 +100,7 @@ impl Default for ContextConfig {
             large_request_retry_body_bytes: Some(320_000),
             max_tool_result_bytes: crate::agent::tool_result_context::DEFAULT_MAX_TOOL_RESULT_BYTES,
             compaction_model: None,
+            plan_model: None,
             prompt_cache: true,
             prompt_cache_mode: "explicit".into(),
             prompt_cache_ttl: "5m".into(),

@@ -130,6 +130,16 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             crate::agent::tool_result_context::MIN_MAX_TOOL_RESULT_BYTES,
         )));
     }
+    if config
+        .context
+        .plan_model
+        .as_deref()
+        .is_some_and(|model| model.trim().is_empty())
+    {
+        return Err(ConfigError::ValidationError(
+            "context.plan_model must not be empty or whitespace-only when set".into(),
+        ));
+    }
 
     // consciousness.energy_decay_rate
     if !(0.0..=1.0).contains(&config.consciousness.energy_decay_rate) {
