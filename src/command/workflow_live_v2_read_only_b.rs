@@ -36,6 +36,12 @@ pub(super) async fn run_read_only_v2_fanout(
     // branch's self-report. See enforce_declared_contracts.
     let declared_contracts = declared_contracts_by_item(&items);
     let item_order = branch_item_order(&items);
+    // Cargo-running branches share one serial scheduling role; everything else
+    // runs at the wave's configured width. This replaces the wave-level
+    // maxParallelism=1 pin that serialized entire verification waves for one
+    // cargo item. Retagging changes only scheduling identity, never the input
+    // (input hashes drive outcome reuse below).
+    let items = archon_workflow::v2::lifecycle_policy::cargo_serial::tag_cargo_serial_roles(items);
     let (reused_outcomes, pending_items) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, items)?;
     let max_parallelism =
@@ -44,6 +50,8 @@ pub(super) async fn run_read_only_v2_fanout(
         read_only_branch_timeout_secs(&execution.call.id, &runtime.generated_config);
     let scheduler = WorkflowV2Scheduler::new(WorkflowV2SchedulerConfig {
         max_parallelism,
+        role_limits: archon_workflow::v2::lifecycle_policy::cargo_serial::cargo_serial_role_limits(
+        ),
         branch_timeout: None,
         ..WorkflowV2SchedulerConfig::default()
     });
@@ -141,16 +149,17 @@ pub(super) async fn run_read_only_v2_fanout(
                             manifest_scope_verification_result(&branch_execution.input)
                         {
                             Some(result) => result,
-                            None => run_single_v2_agent_call(
-                                &task,
-                                target_repository_root.clone(),
-                                &branch_execution,
-                                &adapter,
-                                &branch_client,
-                                Some(&artifact_store),
-                                None,
-                            )
-                            .await?,
+                            None => {
+                                run_read_only_call_with_transport_retry(
+                                    &task,
+                                    &target_repository_root,
+                                    &branch_execution,
+                                    &adapter,
+                                    &branch_client,
+                                    &artifact_store,
+                                )
+                                .await?
+                            }
                         };
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
                         Ok(result)
@@ -198,6 +207,54 @@ pub(super) async fn run_read_only_v2_fanout(
         );
     }
     Ok(result)
+}
+
+/// The read-only twin of the write path's transport re-ask
+/// (`worktree_branch_a`): a dropped provider connection is not a verdict on
+/// the work, so the branch is re-asked instead of permanently failed. Control
+/// signals (pause/cancel) and content rejections propagate untouched — only
+/// errors `transport_retry` classifies as transport are retried, and only
+/// `MAX_TRANSPORT_RETRIES` times.
+async fn run_read_only_call_with_transport_retry(
+    task: &str,
+    target_repository_root: &Option<String>,
+    branch_execution: &WorkflowV2CallExecution,
+    adapter: &WorkflowV2AgentAdapter,
+    branch_client: &LiveV2AgentClient,
+    artifact_store: &WorkflowV2ResultStore,
+) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+    use archon_workflow::v2::transport_retry;
+    let mut transport_failures = 0usize;
+    loop {
+        let result = run_single_v2_agent_call(
+            task,
+            target_repository_root.clone(),
+            branch_execution,
+            adapter,
+            branch_client,
+            Some(artifact_store),
+            None,
+        )
+        .await;
+        let Err(err) = &result else {
+            return result;
+        };
+        if matches!(
+            err,
+            archon_workflow::WorkflowError::ControlPaused(_)
+                | archon_workflow::WorkflowError::ControlCancelled(_)
+        ) {
+            return result;
+        }
+        let text = err.to_string();
+        if !transport_retry::is_transport_failure(&text)
+            || transport_retry::is_content_rejection(&text)
+            || transport_failures >= transport_retry::MAX_TRANSPORT_RETRIES
+        {
+            return result;
+        }
+        transport_failures += 1;
+    }
 }
 
 fn read_only_branch_timeout_secs(call_id: &str, config: &GeneratedWorkflowConfig) -> u64 {

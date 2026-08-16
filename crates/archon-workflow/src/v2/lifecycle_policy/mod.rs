@@ -15,6 +15,8 @@
 pub mod adversarial;
 pub mod assignment_invalid;
 pub mod boundary_repair;
+pub mod cargo_serial;
+pub mod verify_batching;
 pub mod cross_cutting;
 pub mod drain_gate;
 pub mod inventory_items;

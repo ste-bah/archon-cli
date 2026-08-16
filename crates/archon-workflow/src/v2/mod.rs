@@ -54,6 +54,7 @@ pub(crate) mod semantic_preservation;
 pub mod source_graph;
 pub mod source_pack;
 pub mod target_expansion;
+pub mod transport_retry;
 pub mod task_record;
 pub mod validation;
 pub mod verification;

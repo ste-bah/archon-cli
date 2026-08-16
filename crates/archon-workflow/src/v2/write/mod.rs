@@ -32,7 +32,7 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 mod repository_root;
 mod size_retry;
 mod target_budgets;
-mod transport_retry;
+
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
 use crate::v2::completion_evidence::attach_completion_evidence_for_call;
@@ -124,7 +124,7 @@ pub async fn run_write_capable_v2_fanout(
     // those is repository source, the item that owns the task must be able to
     // KEEP it: the write layer captures declared targets only, so a contract
     // that never reached `target_files` was produced by the agent and then
-    // dropped with the worktree. TASK-TDL-080 lost `data_store/coverage.rs`
+    // dropped with the worktree. One live task lost a 455-line source file
     // and `coverage_tests.rs` exactly that way, then failed for their absence.
     stamp_contract_code_targets(&mut branches, task_universe, v2_store);
     // The line cap is enforced when the manifest is validated — after the agent

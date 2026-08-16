@@ -33,3 +33,16 @@ fn a_rejection_about_the_work_is_not_transport() {
         assert!(is_content_rejection(e), "{e}");
     }
 }
+
+/// A prompt the provider refuses for its size is refused identically every
+/// time; re-asking multiplies the compaction path's recovery requests.
+#[test]
+fn a_context_window_rejection_is_never_retried_as_transport() {
+    for e in [
+        "agent transport failed: context window exceeded: maximum context length exceeded",
+        "agent transport failed: prompt is too long for this model",
+        "agent transport failed: request too large",
+    ] {
+        assert!(is_content_rejection(e), "{e}");
+    }
+}

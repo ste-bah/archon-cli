@@ -143,10 +143,10 @@ pub(super) async fn run_worktree_branch_agent(
         // The provider dropped the call. Nothing landed and no verdict was
         // produced, so re-ask rather than ending the branch and, with it, the
         // wave — two runs died this way in one morning on `response_failed`.
-        if super::transport_retry::is_transport_failure(&text)
-            && !super::transport_retry::is_content_rejection(&text)
+        if crate::v2::transport_retry::is_transport_failure(&text)
+            && !crate::v2::transport_retry::is_content_rejection(&text)
         {
-            if transport_failures >= super::transport_retry::MAX_TRANSPORT_RETRIES {
+            if transport_failures >= crate::v2::transport_retry::MAX_TRANSPORT_RETRIES {
                 return normalize_worktree_agent_result(result, branch);
             }
             transport_failures += 1;

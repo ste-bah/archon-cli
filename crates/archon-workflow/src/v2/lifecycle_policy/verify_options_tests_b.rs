@@ -289,7 +289,11 @@ fn wf9_contaminated_fixture_replay_fails_substantive_contract() {
 }
 
 #[test]
-fn cargo_verification_waves_are_serialized() {
+fn cargo_verification_waves_are_no_longer_wave_pinned() {
+    // Cargo serialization moved to the scheduler's per-role limits
+    // (`cargo_serial`): only cargo-running branches serialize, the wave keeps
+    // its configured width. A wave-level pin here would re-serialize entire
+    // waves for one cargo item.
     let items = vec![serde_json::json!({
         "item_id": "verify-cargo",
         "focused_verification": ["cargo test focused"]
@@ -297,7 +301,7 @@ fn cargo_verification_waves_are_serialized() {
 
     let options = verification_options(&items, "verify", true);
 
-    assert_eq!(options["maxParallelism"], 1);
+    assert!(options.get("maxParallelism").is_none());
 }
 
 #[test]
