@@ -105,17 +105,48 @@ fn a_glob_overlaps_a_file_it_covers() {
 }
 
 /// Windows and Unix spellings of one path are the same resource. The shared
-/// table folds case and separators; doing it here too would be a second
-/// opinion that could disagree.
+/// table unifies separators on every platform; doing it here too would be a
+/// second opinion that could disagree.
 #[test]
-fn separator_and_case_differences_still_overlap() {
+fn separator_differences_still_overlap() {
     let a = live_agent("sep-a");
     let b = live_agent("sep-b");
     claim(&a, None, &declared(&["src\\SepCase\\Mod.rs"]));
 
-    let overlaps = claim(&b, None, &declared(&["src/sepcase/mod.rs"]));
+    let overlaps = claim(&b, None, &declared(&["src/SepCase/Mod.rs"]));
 
     assert_eq!(overlaps.len(), 1, "{overlaps:?}");
+    release(&a);
+    release(&b);
+}
+
+/// Case folding follows the filesystem, not the table.
+///
+/// On Windows and macOS `Mod.rs` and `mod.rs` are one file, so two agents
+/// writing them collide. On Linux they are two files and do not. Asserting a
+/// single answer everywhere would have to be wrong on one of them — which is
+/// exactly what this test did before, passing on Windows and macOS and failing
+/// on Linux. `fold_case_for_os` is per-OS for the same reason.
+#[test]
+fn case_differences_overlap_only_where_the_filesystem_folds_them() {
+    let a = live_agent("case-a");
+    let b = live_agent("case-b");
+    claim(&a, None, &declared(&["src/CaseFold/Mod.rs"]));
+
+    let overlaps = claim(&b, None, &declared(&["src/casefold/mod.rs"]));
+
+    if cfg!(any(target_os = "windows", target_os = "macos")) {
+        assert_eq!(
+            overlaps.len(),
+            1,
+            "a case-insensitive filesystem makes these one file: {overlaps:?}"
+        );
+    } else {
+        assert!(
+            overlaps.is_empty(),
+            "a case-sensitive filesystem makes these two files: {overlaps:?}"
+        );
+    }
     release(&a);
     release(&b);
 }
