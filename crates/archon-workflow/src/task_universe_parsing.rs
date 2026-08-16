@@ -318,11 +318,7 @@ fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
         if !in_section {
             continue;
         }
-        if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let item = item.trim();
+        if let Some(item) = list_item_text(trimmed) {
             if !item.is_empty() {
                 items.push(item.to_string());
             }
@@ -471,3 +467,11 @@ mod tests {
         assert_eq!(contract.registry_allowed_statuses, ["Healthy"]);
     }
 }
+
+#[path = "task_universe_list_items.rs"]
+mod list_items;
+use list_items::list_item_text;
+
+#[cfg(test)]
+#[path = "task_universe_parsing_list_tests.rs"]
+mod list_tests;
