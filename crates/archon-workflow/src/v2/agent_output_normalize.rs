@@ -21,21 +21,24 @@ pub(super) fn normalize_agent_output(
 
 /// Parse the agent reply as one JSON envelope. Providers routinely wrap an
 /// otherwise-valid envelope in markdown fences or prose; when the whole reply
-/// is not bare JSON, accept it only if it contains exactly one complete
-/// top-level JSON object carrying a `status` member. Location only — no
-/// content is invented, ambiguity stays a loud failure, the forbidden-text
+/// is not bare JSON, take the LAST complete top-level object that looks like a
+/// result envelope. Location only — no content is invented, the forbidden-text
 /// guard has already seen the full raw reply, and every schema and validation
 /// gate still runs on whatever parses here.
+///
+/// Last-wins is not a guess: agent output is sequential, so in both observed
+/// multi-object shapes — an echoed schema example followed by the real
+/// envelope, and a fenced draft followed by "now as pure JSON" and the final
+/// envelope — the reply the agent means is the one it wrote last. Rejecting
+/// instead (the previous behavior) failed branches whose final envelope was
+/// complete and valid, live: a verify branch drafted its envelope, restated it
+/// verbatim, and was binned as "expected value at line 1 column 1".
 fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
     let root_error = match serde_json::from_str(output.trim()) {
         Ok(value) => return Ok(value),
         Err(error) => error,
     };
-    // Tolerate EXACTLY ONE complete top-level object wrapped in fences or
-    // prose. Two or more complete objects is an ambiguous reply (echoed
-    // schema example + real envelope, draft + final): never guess which is
-    // the envelope — surface the root error so the repair loop re-asks.
-    let mut found: Option<Value> = None;
+    let mut last_envelope: Option<Value> = None;
     let mut skip_until = 0;
     for (index, _) in output.match_indices(['{', '[']) {
         if index < skip_until {
@@ -51,13 +54,13 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
                 if value.is_array() {
                     return Err(root_error);
                 }
-                if !value.is_object() {
-                    continue;
+                // Every envelope declares `status`; evidence items lack it,
+                // and task_coverage entries are told apart inside
+                // `is_result_envelope`. Non-envelope objects (echoed
+                // examples, prose-adjacent fragments) are skipped, not fatal.
+                if is_result_envelope(&value) {
+                    last_envelope = Some(value);
                 }
-                if found.is_some() {
-                    return Err(root_error);
-                }
-                found = Some(value);
             }
             // An unterminated object is a truncation signature: the reply is
             // structurally incomplete, and any complete object inside it (an
@@ -70,15 +73,7 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
             _ => {}
         }
     }
-    // Every envelope declares `status`; a lone complete NESTED object inside
-    // a truncated envelope must not impersonate the reply. Evidence items
-    // lack `status`; task_coverage entries carry `status` AND `task_id` —
-    // and `task_id` is never a top-level envelope key, so its presence marks
-    // a fragment.
-    match found {
-        Some(value) if is_result_envelope(&value) => Ok(value),
-        _ => Err(root_error),
-    }
+    last_envelope.ok_or(root_error)
 }
 
 /// Distinguish the real result envelope from a nested task_coverage entry when

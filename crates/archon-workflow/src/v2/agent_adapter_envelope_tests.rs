@@ -5,7 +5,7 @@
 // authoring retry of anything to correct (run-8 failure class).
 
 use super::*;
-use crate::{WorkflowV2HostMethod, WorkflowV2HostOptions};
+use crate::{WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Status};
 
 fn read_only_request() -> WorkflowV2AgentRequest {
     WorkflowV2AgentRequest {
@@ -78,27 +78,67 @@ fn prose_preamble_with_stray_brace_still_locates_the_envelope() {
 }
 
 #[test]
-fn two_complete_objects_are_ambiguous_and_fail_loudly() {
+fn a_non_envelope_decoy_object_does_not_poison_the_reply() {
     let adapter = WorkflowV2AgentAdapter::new();
-    // Echoed schema example + real envelope: guessing between them is how a
-    // failed reply gets recorded as an accepted no-op. Never guess.
+    // Echoed non-envelope fragment + real envelope: the fragment carries no
+    // `status`, so it cannot be the reply and must not make the reply
+    // unparseable either (previously any second object binned the whole
+    // branch).
     let output = format!("{{\"note\": \"decoy\"}}\n{}", envelope_json());
-    let error = adapter
+    let result = adapter
         .parse_agent_output(&read_only_request(), &output)
-        .expect_err("ambiguous multi-object reply goes to repair");
-    assert!(error.to_string().contains("output begins:"), "{error}");
+        .expect("the sole envelope parses despite the decoy");
+    assert_eq!(result.summary, "authored workflow script");
 }
 
 #[test]
-fn draft_then_final_envelope_is_ambiguous_and_fails_loudly() {
+fn draft_then_final_envelope_takes_the_final_one() {
     let adapter = WorkflowV2AgentAdapter::new();
+    // Agent output is sequential: when two envelopes appear, the later one is
+    // the agent's final word. Taking the draft here would surface a
+    // needs_review result over the failed verdict the agent actually reached.
     let output = format!(
         "{}\n{{\"status\": \"failed\", \"summary\": \"final verdict: regression found\"}}",
         envelope_json()
     );
+    let result = adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect("the final envelope parses");
+    assert_eq!(result.status, WorkflowV2Status::Failed);
+    assert_eq!(result.summary, "final verdict: regression found");
+}
+
+#[test]
+fn fenced_draft_then_fenced_final_takes_the_final_one() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    // The live failure shape: a verify branch fenced its draft, said "now as
+    // pure JSON", fenced the identical envelope again, and the branch was
+    // failed with "expected value at line 1 column 1" after doing all the
+    // work.
+    let final_envelope = r#"{"status": "failed", "summary": "final: one check failed"}"#;
+    let output = format!(
+        "Draft first:\n```json\n{}\n```\nNow I need to return this as pure JSON:\n```json\n{final_envelope}\n```",
+        envelope_json()
+    );
+    let result = adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect("the final fenced envelope parses");
+    assert_eq!(result.summary, "final: one check failed");
+}
+
+#[test]
+fn truncation_after_a_complete_envelope_still_fails_loudly() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    // A complete envelope followed by a truncated one: the truncated object is
+    // the agent's actual last word, so promoting the earlier complete envelope
+    // would report a verdict the agent superseded. Truncation always re-asks.
+    let output = format!(
+        "{}\n{{\"status\": \"failed\", \"summary\": \"the real final verdi",
+        envelope_json()
+    );
     adapter
         .parse_agent_output(&read_only_request(), &output)
-        .expect_err("draft plus final is ambiguous; repair must re-ask");
+        .expect_err("truncated final envelope refuses extraction entirely");
 }
 
 #[test]
