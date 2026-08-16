@@ -105,13 +105,22 @@ pub(super) fn input_schema() -> serde_json::Value {
             },
             "isolation": {
                 "type": "string",
-                "enum": ["none", "worktree"],
-                "description": "Optional isolation mode. Use 'none' or omit this field for normal/read-only subagents. Use 'worktree' only when isolated file edits are required."
+                "enum": ["none", "worktree", "worktree-with-builds"],
+                "description": "Optional isolation mode. Use 'none' or omit for normal/read-only subagents. Use 'worktree' when isolated file edits are required — build and test commands are refused at that tier, because a single build in a fresh worktree creates a cold target directory worth gigabytes. Use 'worktree-with-builds' only when the subagent genuinely must compile or test, and accept that disk cost."
             },
             "expected_target_files": {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Optional file paths that must be changed by a foreground mutating subagent. Archon snapshots these paths before launch and fails the Agent result if they are unchanged after completion."
+            },
+            "intended_writes": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional paths or globs this subagent intends to write. Declaring them lets Archon warn at spawn time when another running agent has already declared overlapping writes, before either has edited anything. Advisory: it does not restrict what the agent may write. Distinct from expected_target_files, which asserts what MUST have changed by the end."
+            },
+            "task_id": {
+                "type": "string",
+                "description": "Optional id of an existing task this subagent is taking on. Sets the task's owner and marks it running, so TaskList shows who is working on what."
             }
         }
     })

@@ -1,4 +1,7 @@
+mod coordination;
 mod descriptor;
+
+use coordination::{claim_task_for_agent, declare_writes, settle_claimed_task};
 
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -10,7 +13,7 @@ use uuid::Uuid;
 
 use super::failure::classify_failure_prefix;
 use super::request::AgentToolError;
-use super::request::{expected_target_files, validate_and_build};
+use super::request::{expected_target_files, intended_writes, task_id, validate_and_build};
 use super::run::run_subagent_with_completion;
 use crate::agent_mutation_guard::{snapshot_expected_targets, verify_expected_mutations};
 use crate::background_agents::{
@@ -106,6 +109,11 @@ impl Tool for AgentTool {
             Ok(paths) => paths,
             Err(e) => return ToolResult::error(e.to_string()),
         };
+        let intended_writes = match intended_writes(&input) {
+            Ok(paths) => paths,
+            Err(e) => return ToolResult::error(e.to_string()),
+        };
+        let claimed_task_id = task_id(&input);
 
         let agent_id: Uuid = Uuid::new_v4();
         let subagent_id = agent_id.to_string();
@@ -136,6 +144,27 @@ impl Tool for AgentTool {
                 Ok(snapshots) => snapshots,
                 Err(err) => return ToolResult::error(err),
             };
+
+        // Record what this agent says it will write, and warn if a running
+        // agent already declared something overlapping (#184 M2).
+        //
+        // Here, before anything is spawned: coordination at dispatch time beats
+        // reconciliation at merge time, and once both agents are running the
+        // cheap moment has passed. Advisory — the spawn is not refused, because
+        // making a declaration cost you the spawn would teach models to stop
+        // declaring.
+        let claim_warning = declare_writes(
+            &subagent_id,
+            request.subagent_type.as_deref(),
+            &intended_writes,
+        );
+
+        // Take ownership of the referenced task, so `TaskList` shows who is
+        // working on what rather than a list of unattributed work.
+        if let Some(task_id) = claimed_task_id.as_deref() {
+            claim_task_for_agent(task_id, &subagent_id);
+        }
+        let task_id_spawn = claimed_task_id.clone();
 
         // TASK-AGS-107: if the parent agent has a cancel_parent token,
         // create a child so cancelling the parent (Ctrl+C) cascades to
@@ -244,6 +273,21 @@ impl Tool for AgentTool {
                     crate::board::close_delegated_task(item, closing);
                 }
 
+                // Settle the claimed task on the same terminal outcome, for the
+                // same reason the board item is closed here: this closure is
+                // where both the foreground and background paths converge.
+                //
+                // `AutoBackgrounded` is deliberately left `Running` — the agent
+                // is still working, and marking it terminal would be a lie that
+                // `TaskStatus`'s absorbing terminal states could never undo.
+                settle_claimed_task(task_id_spawn.as_ref(), &outcome);
+
+                // Drop the write-intent claim. Not required for correctness —
+                // a dead agent's claim is already ignored, which is what keeps
+                // the auto-background hole from mattering — but it keeps the
+                // map from carrying an entry per agent for the whole session.
+                crate::write_claims::release(&sid_spawn);
+
                 *status_child
                     .lock()
                     .expect("status mutex poisoned in AgentTool::execute spawn") = final_status;
@@ -294,10 +338,15 @@ impl Tool for AgentTool {
             }
             drop(cancel_for_failure);
 
+            // The claim warning rides on the spawn result. A background spawn
+            // returns immediately, so this is the only moment the caller is
+            // still deciding what to do — telling it after the agent has
+            // finished writing would be a report, not a warning (#184 M2).
             return ToolResult::success(
                 json!({
                     "agent_id": agent_id.to_string(),
                     "status": "spawned",
+                    "write_claim_warning": claim_warning,
                 })
                 .to_string(),
             );
@@ -372,7 +421,14 @@ impl Tool for AgentTool {
         match outcome {
             SubagentOutcome::Completed(text) => {
                 match verify_expected_mutations(&expected_mutations) {
-                    Ok(()) => ToolResult::success(text),
+                    // A foreground agent has already finished writing by the
+                    // time this returns, so the warning is after the fact — but
+                    // the caller is about to decide what to spawn next, and an
+                    // overlap it never heard about is one it will repeat.
+                    Ok(()) => ToolResult::success(match &claim_warning {
+                        Some(warning) => format!("{warning}\n\n{text}"),
+                        None => text,
+                    }),
                     Err(err) => {
                         ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))
                     }

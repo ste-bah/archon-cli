@@ -111,6 +111,15 @@ pub struct BashTool {
     pub provider_env: Option<ProviderEnvSource>,
     /// Resource defaults for agent-run `cargo` commands, from `[tools.cargo]`.
     pub cargo_limits: CargoResourceLimits,
+    /// How isolated the agent owning this tool is (#184 M3).
+    ///
+    /// Carried on the tool rather than on `ToolContext` because the registry is
+    /// already built per subagent, and because the two existing gates cannot be
+    /// relied on: `tool_run_admission` is inherited verbatim from the parent and
+    /// is skipped entirely for `PermissionLevel::Safe` — which a user's own
+    /// `safe_commands` entry for `cargo` would trigger — and `sandbox` is `None`
+    /// unless the operator turned it on.
+    pub isolation_tier: crate::isolation::IsolationTier,
 }
 
 impl Default for BashTool {
@@ -124,6 +133,8 @@ impl Default for BashTool {
             dangerous_commands: Vec::new(),
             provider_env: None,
             cargo_limits: CargoResourceLimits::default(),
+            // The main agent and any non-isolated subagent: unrestricted.
+            isolation_tier: crate::isolation::IsolationTier::Shared,
         }
     }
 }
@@ -141,6 +152,12 @@ impl BashTool {
 
     pub fn with_provider_env_source(mut self, provider_env: ProviderEnvSource) -> Self {
         self.provider_env = Some(provider_env);
+        self
+    }
+
+    /// Restrict this tool to what its agent's isolation tier permits (#184 M3).
+    pub fn with_isolation_tier(mut self, tier: crate::isolation::IsolationTier) -> Self {
+        self.isolation_tier = tier;
         self
     }
 }
@@ -177,6 +194,20 @@ impl Tool for BashTool {
             Ok(command) => command,
             Err(error) => return limit_tool_result(self.max_output_bytes, error),
         };
+
+        // Refuse before anything is prepared or spawned: at
+        // `IsolationTier::Worktree` a single `cargo check` creates the cold
+        // `target/` the tier exists to avoid, and there is no undoing it
+        // afterwards (#184 M3).
+        if !self.isolation_tier.may_build()
+            && let Some(segment) = crate::isolation::build_command_in(raw_command)
+        {
+            return limit_tool_result(
+                self.max_output_bytes,
+                ToolResult::error(crate::isolation::build_refusal(&segment)),
+            );
+        }
+
         let timeout_ms = effective_timeout_ms(
             input.get("timeout").and_then(|value| value.as_u64()),
             self.timeout_secs * 1000,
@@ -211,6 +242,10 @@ impl Tool for BashTool {
         Some(Box::new(
             self.clone().with_provider_env_source(provider_env),
         ))
+    }
+
+    fn with_isolation_tier(&self, tier: crate::isolation::IsolationTier) -> Option<Box<dyn Tool>> {
+        Some(Box::new(self.clone().with_isolation_tier(tier)))
     }
 }
 

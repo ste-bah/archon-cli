@@ -160,6 +160,21 @@ impl SubagentRunner {
         self.shutdown_flag = flag;
     }
 
+    /// The session's subagent manager, if this runner is registered with one.
+    ///
+    /// `None` for a bare runner in a test harness — routing has nowhere to
+    /// deliver, so callers leave tool results alone rather than failing.
+    pub(crate) fn subagent_manager(
+        &self,
+    ) -> Option<Arc<tokio::sync::Mutex<super::SubagentManager>>> {
+        self.subagent_manager.as_ref().map(Arc::clone)
+    }
+
+    /// This runner's own agent id — the sender identity for outbound messages.
+    pub(crate) fn runner_agent_id(&self) -> Option<&str> {
+        self.runner_agent_id.as_deref()
+    }
+
     /// Drain pending messages and return them as user turn JSON values.
     async fn drain_pending_as_user_turns(&self) -> Vec<serde_json::Value> {
         let (Some(mgr), Some(aid)) = (&self.subagent_manager, &self.runner_agent_id) else {

@@ -78,7 +78,7 @@ fn fixture(memory: Option<Arc<dyn MemoryTrait>>) -> (AgentSubagentExecutor, Temp
         "claude-sonnet-4-6".into(),
         vec![],
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,

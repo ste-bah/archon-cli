@@ -1122,6 +1122,42 @@ max_retries = 2
 [subagent]
 max_concurrent = 4
 
+# When to isolate an agent that did not ask to be isolated.
+#
+#   "overlap"  only when this agent's declared writes collide with a running
+#              agent's (default)
+#   "always"   every write-capable agent
+#   "off"      never; agents share the tree unless they ask otherwise
+#
+# This is a disk decision more than a correctness one. A worktree is cheap --
+# it shares .git and checks out working files only, a couple of hundred MB in
+# under a second. What costs is an agent BUILDING inside one: a fresh target/
+# on this workspace runs to ~10GB. Isolating every parallel writer would trade
+# an invisible conflict for an invisible disk fire, so isolation is spent where
+# two agents actually collide.
+#
+# Overlap is detected from `intended_writes` on the Agent call. An agent that
+# declares nothing cannot be found to overlap with anything, so declaring is
+# what buys the protection.
+auto_isolation = "overlap"
+
+# The most isolation any agent may have, however it was requested.
+#
+#   "none"                  no worktrees at all
+#   "worktree"              own checkout, build and test commands REFUSED
+#                           (default)
+#   "worktree-with-builds"  own checkout and own target/
+#
+# An agent at "worktree" that runs cargo/npm/make is refused and told to either
+# finish edit-only -- verification runs once after merge, in the main tree --
+# or respawn at "worktree-with-builds". The refusal is deliberate rather than a
+# warning: one `cargo check` creates the cold target/ the tier exists to avoid,
+# and silent promotion would reintroduce the cost invisibly.
+#
+# A request above this cap is clamped and the spawn result says so; it is never
+# quietly downgraded.
+isolation_max_tier = "worktree"
+
 # ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------

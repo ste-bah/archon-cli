@@ -161,7 +161,7 @@ fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path)
         "claude-sonnet-4-6".into(),
         Vec::new(),
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(agent_config),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,

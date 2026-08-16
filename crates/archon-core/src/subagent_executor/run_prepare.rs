@@ -20,6 +20,36 @@ pub(super) struct PreparedSubagentRun {
     pub(super) isolation: Option<String>,
 }
 
+/// Whether this agent can write to the tree at all (#184 M3).
+///
+/// A read-only agent cannot collide with anyone, so it never earns a worktree
+/// however the policy is set — and isolating one would spend disk on an agent
+/// with nothing to isolate.
+///
+/// An agent with no explicit allowlist is assumed write-capable: the tools it
+/// inherits include `Write` and `Edit`, and guessing the safe-looking answer
+/// here would silently disable isolation for the common case.
+fn is_write_capable(definition: Option<&CustomAgentDefinition>) -> bool {
+    const WRITING_TOOLS: &[&str] = &[
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "ApplyPatch",
+        "NotebookEdit",
+        "Bash",
+    ];
+
+    let Some(allowed) = definition.and_then(|def| def.allowed_tools.as_ref()) else {
+        return true;
+    };
+    if allowed.is_empty() {
+        return true;
+    }
+    allowed
+        .iter()
+        .any(|tool| WRITING_TOOLS.contains(&tool.as_str()))
+}
+
 impl AgentSubagentExecutor {
     pub(super) async fn register_subagent_run(
         &self,
@@ -37,6 +67,15 @@ impl AgentSubagentExecutor {
                 .lock()
                 .await
                 .register_name(agent_type.clone(), manager_id.clone());
+
+            // Seat it on the session's team, if there is one (#184 M5). The
+            // spawn's `subagent_type` is both the role it fills and the address
+            // other members reach it at, because it is what the router's name
+            // registry resolves. No team active is the ordinary case and does
+            // nothing.
+            if let Some(team_id) = archon_tools::team_roster::join(&manager_id, agent_type) {
+                tracing::info!(subagent_id = %manager_id, role = %agent_type, %team_id, "seated on team");
+            }
         }
         tracing::info!(
             subagent_id = %manager_id,
@@ -102,10 +141,52 @@ impl AgentSubagentExecutor {
             .unwrap_or("general-purpose")
             .to_string();
         let def_effort = resolved_def.as_ref().and_then(|d| d.effort.clone());
-        let isolation = request
+        // Resolve the ladder rung here rather than passing the raw string on.
+        //
+        // `auto_isolation` and `isolation_max_tier` were otherwise dead config:
+        // the downstream check only asked whether the *requested* string needed
+        // a worktree, so an overlapping writer was never isolated automatically
+        // and the cap never clamped anything (#184 M3).
+        let requested_isolation = request
             .isolation
             .clone()
             .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.clone()));
+        // M2's claims are recorded against this agent at spawn, so an overlap is
+        // already known by the time we get here.
+        let claim_overlap = !archon_tools::write_claims::overlaps_for(manager_id).is_empty();
+        let (tier, reason) = archon_tools::isolation::resolve_tier(
+            &archon_tools::isolation::IsolationRequest {
+                explicit: requested_isolation,
+                overlaps_live_claim: claim_overlap,
+                write_capable: is_write_capable(resolved_def.as_ref()),
+            },
+            self.agent_config.subagent_auto_isolation,
+            self.agent_config.subagent_isolation_max_tier,
+        );
+
+        // Copy the spawn-time facts somewhere that outlives the agent, so the
+        // merge an hour from now can be labelled against what was known when it
+        // started (#184 M9). Claims cannot carry this: they are liveness-derived
+        // and vanish with their holder.
+        archon_tools::coordination_record::record_spawn(
+            manager_id,
+            archon_tools::coordination_record::SpawnFacts {
+                label: request.subagent_type.clone(),
+                declared: archon_tools::write_claims::declared_by(manager_id),
+                claim_overlap,
+                isolated: tier != archon_tools::isolation::IsolationTier::Shared,
+                coordination_run_id: archon_tools::team_roster::active().map(|t| t.team_id),
+            },
+        );
+        if let archon_tools::isolation::IsolationReason::Clamped(wanted) = &reason {
+            tracing::warn!(
+                subagent_id = %manager_id,
+                wanted = wanted.as_str(),
+                granted = tier.as_str(),
+                "isolation clamped by subagent.isolation_max_tier"
+            );
+        }
+        let isolation = Some(tier.as_str().to_string());
 
         Ok(PreparedSubagentRun {
             resolved_def,

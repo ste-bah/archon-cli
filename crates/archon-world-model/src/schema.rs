@@ -75,6 +75,21 @@ pub enum WorldActionKind {
     Verification,
     Retry,
     Resume,
+    // Coordination verbs (#184 M9). Subagent activity already reached learning
+    // through transcripts and activity events, but the verbs multi-agent
+    // coordination introduced had no representation — so the learning systems
+    // were blind to exactly the behaviour that issue created.
+    /// One agent sent another a message.
+    MessageSend,
+    /// An agent took a task, or declared what it would write.
+    TaskClaim,
+    /// Work passed from one agent to another.
+    Handoff,
+    /// An isolated agent's branch was merged back, or discarded.
+    ///
+    /// The highest-value one: git merge results are ground truth, so these rows
+    /// are labelled deterministically with no heuristic labeler involved.
+    WorktreeMerge,
     #[default]
     Unknown,
 }
@@ -92,6 +107,16 @@ pub struct WorldLabelSet {
     pub plan_drift: bool,
     pub high_cost: bool,
     pub slow_run: bool,
+    /// The merge back into the base branch conflicted (#184 M9).
+    ///
+    /// Ground truth from git, not a judgement: it is the outcome of an actual
+    /// merge. That makes it the one label here a model can be trained against
+    /// without trusting a labeler.
+    pub merge_conflict: bool,
+    /// This agent's declared writes overlapped a running agent's at spawn time.
+    pub claim_overlap: bool,
+    /// The agent ran in its own worktree rather than the shared tree.
+    pub isolated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,6 +140,18 @@ pub struct WorldTraceRow {
     pub action_attempt_id: Option<String>,
     pub session_id: String,
     pub run_id: Option<String>,
+    /// Groups the rows produced by agents coordinating with each other (#184 M9).
+    ///
+    /// Separate from `run_id`, which is already three things depending on who
+    /// wrote the row — a real run id, a plan id, a synthesised phase-ordinal —
+    /// and overloading it a fourth time would make every existing consumer
+    /// wrong. This one has a single meaning: the team a set of agents belongs
+    /// to, or the lead that spawned them when there is no team.
+    ///
+    /// `None` on every row written outside a coordinated run, which is most of
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordination_run_id: Option<String>,
     pub source: WorldTraceSource,
     pub action_kind: WorldActionKind,
     pub provider: Option<String>,
@@ -150,6 +187,7 @@ impl Default for WorldTraceRow {
             action_attempt_id: None,
             session_id: String::new(),
             run_id: None,
+            coordination_run_id: None,
             source: WorldTraceSource::default(),
             action_kind: WorldActionKind::default(),
             provider: None,

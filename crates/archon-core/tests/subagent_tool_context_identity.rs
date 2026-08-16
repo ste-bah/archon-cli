@@ -186,7 +186,7 @@ fn fixture(hook_registry: Option<Arc<HookRegistry>>) -> Fixture {
         "mock-model".into(),
         vec![],
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(None)),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
