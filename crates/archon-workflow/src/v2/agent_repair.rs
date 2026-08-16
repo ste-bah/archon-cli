@@ -5,6 +5,15 @@ use super::agent_adapter::{WorkflowV2AgentAdapter, WorkflowV2AgentClient, Workfl
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RepairErrorClass {
+    /// The reply could not be located or parsed as one envelope at all.
+    ///
+    /// Distinct from `Contract` (a parsed envelope that violates the schema or
+    /// validation): a branch that first failed validation and then failed to
+    /// parse has made two DIFFERENT mistakes, and collapsing them into one
+    /// class spent the whole repair budget on the first — observed live, where
+    /// a verify branch died on a missing-evidence error followed by a fenced
+    /// draft+final reply it was never re-asked about.
+    Malformed,
     Contract,
     Ownership,
     Execution,
@@ -80,6 +89,7 @@ impl WorkflowV2AgentError {
 
     fn repair_class(&self) -> RepairErrorClass {
         match self {
+            Self::MalformedOutput(_) => RepairErrorClass::Malformed,
             Self::ImplementationChangedFilesOutsideOwnership(_) | Self::ReadOnlyChangedFiles => {
                 RepairErrorClass::Ownership
             }
@@ -156,3 +166,7 @@ fn repair_exhausted(
         repair_error: Box::new(last_error),
     }
 }
+
+#[cfg(test)]
+#[path = "agent_repair_tests.rs"]
+mod tests;
