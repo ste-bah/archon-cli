@@ -4,7 +4,7 @@
 //! after the agent has done all its work. A branch that grows one file past the
 //! cap has its ENTIRE patch rejected — every file in it, however correct.
 //!
-//! Observed live: a TASK-TDL-020 remediation made 21 edits across five files,
+//! Observed live: a remediation made 21 edits across five files,
 //! and lost all of them because one test file would have gone 495 -> 512
 //! against a cap of 500. The rejection names the remedy, but by then the work
 //! is gone and the branch is a failure.

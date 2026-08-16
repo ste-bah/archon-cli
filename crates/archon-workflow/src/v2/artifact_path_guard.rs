@@ -280,8 +280,8 @@ pub fn artifact_file_is_evidence(path: &Path) -> bool {
 /// declaration as a file and a contract asking for a directory could never be
 /// satisfied by anything.
 ///
-/// Observed live: TASK-TDL-080 declares
-/// `.archon/trading-lab/data/coverage/history/`. The branch produced exactly
+/// Observed live: one task declares
+/// `<project-data>/coverage/history/`. The branch produced exactly
 /// that, holding an archived `20260814T111500Z-c43a833b32ee.json`, and was
 /// failed for "is a directory, not the declared file". Its patch had landed and
 /// the work was correct; no retry could pass, because passing required creating

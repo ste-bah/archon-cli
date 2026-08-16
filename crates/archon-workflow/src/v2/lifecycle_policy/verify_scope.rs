@@ -101,9 +101,9 @@ fn matching_scope<'a>(item: &Value, scopes: &'a [ManifestScope]) -> Option<&'a M
     // Matching on any overlap hands a single-task verification the write scope
     // of a branch that also covered other tasks, and every file those other
     // tasks legitimately wrote then reads as an out-of-scope write. Observed
-    // live: TASK-TDL-050's focused verification failed on
+    // live: one task's focused verification failed on
     // `data_store/validation.rs`, a file TDL-050 neither declares nor appends
-    // to — it belongs to TASK-TDL-020, whose remediation ran in the same wave.
+    // to — it belonged to a sibling task whose remediation ran in the same wave.
     // The deliverable checks passed every round; only the scope check failed,
     // and no retry could change it because the write and the declaration were
     // both correct and simply belonged to different tasks.

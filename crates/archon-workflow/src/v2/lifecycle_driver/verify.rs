@@ -152,7 +152,7 @@ impl LifecycleDriver {
                         // through to plan, reshape and re-verify against an
                         // unchanged tree until the budget dies.
                         //
-                        // Observed live: TASK-TDL-020 failed five branches with
+                        // Observed live: one task failed five branches with
                         // precise, fixable findings — "implement all 17 exact
                         // stable validation IDs", "add the seven missing focused
                         // test functions" — none of which carried a marker.

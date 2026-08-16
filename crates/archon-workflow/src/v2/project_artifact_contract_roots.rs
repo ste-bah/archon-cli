@@ -87,7 +87,7 @@ fn is_artifact_only(item: &Value) -> bool {
 /// exists. Every downstream form loses it — `admissible_path` rebuilds with
 /// `segments.join("/")` and `Path::join(..).display()` drops it again — so the
 /// intent has to travel as its own value rather than as a character on a
-/// string. TASK-TDL-080 declares `.../coverage/history/` and was failed three
+/// string. A live task declares `.../coverage/history/` and was failed three
 /// times for "is a directory, not the declared file", once even after a fix
 /// that read the separator off a string it no longer had.
 pub(crate) fn declared_directory_paths_for_item(

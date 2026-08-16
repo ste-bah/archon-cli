@@ -30,8 +30,8 @@ pub struct WorkflowV2ProjectArtifactContext {
     /// journey: `admissible_path` rebuilds a path with `segments.join("/")`,
     /// `Path::join(..).display()` drops it again, and by the time a value
     /// reaches the completion check it is an absolute path with no way to tell
-    /// a declared directory from a declared file. TASK-TDL-080 declares
-    /// `.archon/trading-lab/data/coverage/history/` and was failed three times
+    /// a declared directory from a declared file. One live task declares
+    /// `<project-data>/coverage/history/` and was failed three times
     /// for "is a directory, not the declared file" — including once after a fix
     /// that read the separator off the string, which by then was gone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

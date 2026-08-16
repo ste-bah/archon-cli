@@ -208,7 +208,7 @@ fn classify_required_tasks(
         // touched it.
         //
         // Classifying by "any record ever failed" made remediation incapable of
-        // clearing a failure: TASK-TDL-010 was reported Missing by the
+        // clearing a failure: one live task was reported Missing by the
         // implementation wave (its files genuinely did not exist yet), then
         // Accepted by remediation once all eleven were written — and stayed
         // failed, because the stale record outvoted the current one. Everything

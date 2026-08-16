@@ -8,7 +8,7 @@
 //! produce the file, produced it, and the write layer dropped it: it was not a
 //! declared target, so it never entered the patch and died with the worktree.
 //!
-//! Observed live on TASK-TDL-080. Its declared targets were six files;
+//! Observed live. One task's declared targets were six files;
 //! `data_store/coverage.rs` and `data_store/coverage_tests.rs` were declared as
 //! contracts instead. The agent edited both, the branch reported
 //! `patch_landed: true` for the other six, and the completion check then failed

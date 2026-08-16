@@ -4,7 +4,7 @@
 //! grows one file past it has the ENTIRE patch rejected — every other file in
 //! it included — and the branch fails as a contract error with nothing landed.
 //!
-//! Observed live on TASK-TDL-020: 21 edits across five files lost because one
+//! Observed live: 21 edits across five files lost because one
 //! test file would have gone 495 -> 512 against a cap of 500, then lost again
 //! at 504 on the next run. Both times the rejection named the remedy — relocate
 //! into the module directory the branch already owns — and both times the

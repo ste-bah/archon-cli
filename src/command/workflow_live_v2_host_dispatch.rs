@@ -200,8 +200,8 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         let mut context = archon_workflow::project_artifact_context_from_v2_root(store.root());
         // A deliverable contract may name repository SOURCE, which does not
         // live under the project artifact root. Without this the completion
-        // check reports an existing file as absent — TASK-TDL-080 failed on
-        // `data_store/coverage.rs (does not exist)` with 455 lines of it in the
+        // check reports an existing file as absent — observed live as a task
+        // failing on "does not exist" for a 455-line file present in the
         // repository. Existence only; write confinement is unchanged.
         context.repository_root = request.repository_root.clone();
         context.add_artifact_requirements(&request.input);

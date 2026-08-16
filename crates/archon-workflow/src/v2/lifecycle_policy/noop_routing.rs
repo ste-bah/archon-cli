@@ -71,7 +71,7 @@ pub fn route_refuted_noops(
     // whole run blocked.
     //
     // Live: twelve identical iterations on that one message, while the paired
-    // evidence repair had already established that TASK-TDL-020 was no no-op
+    // evidence repair had already established that the task was no no-op
     // and listed three concrete implementation failures. Repair knew the work,
     // the demotion route existed, and the run halted between them.
     //

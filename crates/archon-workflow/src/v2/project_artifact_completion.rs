@@ -51,7 +51,7 @@ pub(super) fn enforce_declared_artifact_requirements(
             None => record_declared_artifact(result, raw),
             // Not under the project artifact root — try the repository. A
             // deliverable contract may name a source file, and source does not
-            // live in the artifact tree. TASK-TDL-080 was failed for
+            // live in the artifact tree. A live task was failed for
             // `data_store/coverage.rs (does not exist)` while that file sat in
             // the repository with 455 lines; passing would have meant writing
             // source into the artifact root, so no retry could have worked.

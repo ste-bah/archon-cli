@@ -25,7 +25,7 @@ pub fn is_tool_field(key: &str) -> bool {
 }
 
 /// Reduce a declared tool name to the bare name a grant and a command both
-/// speak: `mcp__tradingview__quote_get` and `mcp_action:quote_get` alike become
+/// speak: `mcp__provider__quote_get` and `mcp_action:quote_get` alike become
 /// `quote_get`.
 ///
 /// Two qualifier conventions are in use, and this must reduce BOTH or the two
@@ -33,7 +33,7 @@ pub fn is_tool_field(key: &str) -> bool {
 /// filter intersected task-declared names against project-permitted ones, each
 /// side reduced by a copy of this function that knew only `mcp__server__`. A
 /// task declaring `mcp_action:tv_health_check` kept its qualifier, the
-/// permitted `mcp__tradingview__tv_health_check` reduced to `tv_health_check`,
+/// permitted `mcp__provider__x_health_check` reduced to `x_health_check`,
 /// the intersection came out empty, and the stage fell back to the hardcoded
 /// tool list — so no agent on that task ever received an MCP tool, while the
 /// separate exercise gate failed it for never using one.

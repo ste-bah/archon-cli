@@ -18,7 +18,7 @@ use super::ItemState;
 /// adopting the same file and colliding on merge. A file no other item claims
 /// cannot collide, so the wave's size is not the question — ownership is.
 ///
-/// The blanket rule cost real work. A live TASK-TDL-020 branch needed exactly
+/// The blanket rule cost real work. A live branch needed exactly
 /// one undeclared file, `src/command/trading_data_tests.rs`, in a fifteen-item
 /// wave. Adoption was refused on item count alone and all thirty-one files of
 /// correct, compiling work were discarded, with an adoption budget of sixty-four
