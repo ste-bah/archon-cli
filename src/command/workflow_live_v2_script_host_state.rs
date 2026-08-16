@@ -171,9 +171,10 @@ impl WorkflowScriptHost {
                 "next_action": next_action,
             }),
         );
+        let summary = self.summary().await;
         if emit_terminal_status {
-            self.emit_terminal_status(WorkflowV2Status::Failed);
+            self.emit_terminal_status(&summary);
         }
-        self.summary().await
+        summary
     }
 }
