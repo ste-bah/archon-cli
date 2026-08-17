@@ -32,19 +32,22 @@ fn submit_clears_and_adds_history() {
 
 #[test]
 fn init_test_catalog() {
-    use crate::commands;
+    use crate::commands::{self, CommandKind};
     commands::set_catalog(vec![
         commands::CommandInfo {
             name: "/model".into(),
             description: "Switch model".into(),
+            kind: CommandKind::Primary,
         },
         commands::CommandInfo {
             name: "/cost".into(),
             description: "Show cost".into(),
+            kind: CommandKind::Primary,
         },
         commands::CommandInfo {
             name: "/help".into(),
             description: "Show help".into(),
+            kind: CommandKind::Primary,
         },
     ]);
 }

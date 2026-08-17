@@ -355,6 +355,11 @@ pub fn draw_suggestions_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             // column lines up whatever the name contains.
             let line = Line::from(vec![
                 ratatui::text::Span::styled(super::width::fit_to_width(&cmd.name, 16), style),
+                ratatui::text::Span::styled(
+                    super::width::fit_to_width(cmd.kind.label(), 10),
+                    desc_style,
+                ),
+                ratatui::text::Span::raw(" "),
                 ratatui::text::Span::styled(cmd.description.as_str(), desc_style),
             ]);
             ListItem::new(line)

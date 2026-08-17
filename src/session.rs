@@ -21,6 +21,7 @@ pub(crate) mod build_agent;
 mod build_prompt;
 mod cognitive_daemon_startup;
 mod cognitive_store;
+mod command_catalog;
 mod config_watcher;
 mod consolidation_reuse;
 mod event_forwarder;
