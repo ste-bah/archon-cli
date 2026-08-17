@@ -6,7 +6,6 @@ use axum::body::Body;
 use axum::http::{Request, header};
 use futures_util::StreamExt;
 use tower::ServiceExt;
-
 /// Anything longer than this and the stream is not streaming.
 const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -53,7 +52,6 @@ async fn first_sse_payload(app: Router, uri: &str) -> String {
     .await
     .expect("live stream frame")
 }
-
 #[tokio::test]
 async fn live_stream_emits_events_after_the_supplied_cursor() {
     let config = WebConfig {
@@ -211,7 +209,9 @@ async fn agents_live_includes_task_manager_spawned_agents() {
     // TaskCreate-spawned agents never reach BACKGROUND_AGENTS, so a projection
     // that reads only that registry silently reports them as nothing running.
     let task_id = TASK_MANAGER.create_task("web dashboard projection probe");
-    TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+    TASK_MANAGER
+        .set_status(&task_id, TaskStatus::Running)
+        .unwrap();
 
     let snapshot = get_json(build_app(&config, state.clone()), "/api/agents/live").await;
     let entry = snapshot["agents"]
@@ -288,7 +288,9 @@ async fn a_task_create_agent_is_listed_once_as_its_task() {
     let subagent_id = uuid::Uuid::new_v4().to_string();
     let task_id = TASK_MANAGER.create_task("web dashboard dedupe probe");
     TASK_MANAGER.set_agent_id(&task_id, &subagent_id);
-    TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+    TASK_MANAGER
+        .set_status(&task_id, TaskStatus::Running)
+        .unwrap();
     BACKGROUND_AGENTS
         .register(BackgroundAgentHandle {
             agent_id: uuid::Uuid::parse_str(&subagent_id).expect("uuid-shaped"),

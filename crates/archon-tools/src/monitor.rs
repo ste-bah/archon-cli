@@ -33,7 +33,7 @@ use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Default collection window in milliseconds.
 const DEFAULT_TIMEOUT_MS: u64 = 3_000;
@@ -93,6 +93,10 @@ impl Tool for MonitorTool {
             .min(MAX_TIMEOUT_MS);
 
         run_monitor(command, timeout_ms, ctx).await
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use archon_core::agent::Agent;
@@ -71,11 +72,8 @@ pub(super) async fn dispatch_user_prompt(
             )
             .await;
     }
-    let effective_input = if let Some(prefix) = initial_prompt_pending.take() {
-        format!("{prefix}\n\n{input}")
-    } else {
-        input.clone()
-    };
+    let current_mode = current_permission_mode(cmd_ctx).await;
+    let effective_input = compose_turn_input(input, initial_prompt_pending, current_mode);
     let dispatch =
         dispatch_turn_after_generation_started(dispatcher, effective_input, turn_runner).await;
     if dispatch.is_none() {
@@ -92,6 +90,29 @@ async fn notify_generation_started(tui_tx: &archon_tui::event_channel::TuiEventS
         return false;
     }
     true
+}
+
+async fn current_permission_mode(
+    cmd_ctx: &SlashCommandContext,
+) -> archon_permissions::mode::PermissionMode {
+    let mode = cmd_ctx.permission_mode.lock().await;
+    archon_permissions::mode::PermissionMode::from_str(&mode).unwrap_or_else(|error| {
+        tracing::warn!(%error, mode = %mode, "invalid interactive permission mode; using default");
+        archon_permissions::mode::PermissionMode::Default
+    })
+}
+
+fn compose_turn_input(
+    input: String,
+    initial_prompt_pending: &mut Option<String>,
+    current_mode: archon_permissions::mode::PermissionMode,
+) -> String {
+    let input = if let Some(prefix) = initial_prompt_pending.take() {
+        format!("{prefix}\n\n{input}")
+    } else {
+        input
+    };
+    crate::session::plan_hint::inject_plan_mode_hint(input, current_mode)
 }
 
 async fn dispatch_turn_after_generation_started(
@@ -164,6 +185,18 @@ mod tests {
         }
     }
 
+    struct RecordingRunner(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl archon_tui::TurnRunner for RecordingRunner {
+        fn run_turn<'a>(
+            &'a self,
+            prompt: String,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+            self.0.lock().expect("prompt capture").push(prompt);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
     #[test]
     fn generation_started_uses_async_backpressure() {
         let source = include_str!("prompt_turn.rs");
@@ -187,6 +220,61 @@ mod tests {
             .expect("guardrail creation");
 
         assert!(notification < guardrail);
+    }
+
+    #[tokio::test]
+    async fn dispatch_boundary_forwards_plan_hint_to_turn_runner() {
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let runner = Arc::new(RecordingRunner(captured.clone()));
+        let (agent_event_tx, _agent_event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatcher = Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
+            Arc::new(NoopRouter),
+            agent_event_tx,
+        )));
+
+        let mut initial_prompt = None;
+        dispatch_turn_after_generation_started(
+            &dispatcher,
+            compose_turn_input(
+                "Update src/a.rs and src/b.rs".into(),
+                &mut initial_prompt,
+                archon_permissions::mode::PermissionMode::Default,
+            ),
+            runner,
+        )
+        .await;
+        tokio::task::yield_now().await;
+
+        let prompts = captured.lock().expect("prompt capture");
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].starts_with("This request spans multiple implementation concerns."));
+        assert!(prompts[0].ends_with("Update src/a.rs and src/b.rs"));
+        drop(prompts);
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let runner = Arc::new(RecordingRunner(captured.clone()));
+        let (agent_event_tx, _agent_event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatcher = Arc::new(std::sync::Mutex::new(archon_tui::AgentDispatcher::new(
+            Arc::new(NoopRouter),
+            agent_event_tx,
+        )));
+        let mut initial_prompt = None;
+        dispatch_turn_after_generation_started(
+            &dispatcher,
+            compose_turn_input(
+                "What update happened in src/a.rs and src/b.rs?".into(),
+                &mut initial_prompt,
+                archon_permissions::mode::PermissionMode::Default,
+            ),
+            runner,
+        )
+        .await;
+        tokio::task::yield_now().await;
+
+        assert_eq!(
+            captured.lock().expect("prompt capture").as_slice(),
+            ["What update happened in src/a.rs and src/b.rs?"],
+        );
     }
 
     #[tokio::test]

@@ -16,6 +16,8 @@ pub(super) struct SlashContextBuildInput {
     pub show_thinking: Arc<AtomicBool>,
     pub session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub permission_mode: Arc<tokio::sync::Mutex<String>>,
+    pub plan_mode_state:
+        Arc<tokio::sync::Mutex<archon_core::agent::plan_mode_state::PlanModeState>>,
     pub session_id: String,
     pub session_store: Arc<archon_session::storage::SessionStore>,
     pub cost_config: archon_core::config::CostConfig,
@@ -54,6 +56,14 @@ pub(super) struct SlashContextBuildInput {
 pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
     let registry: Arc<crate::command::registry::Registry> =
         Arc::new(crate::command::registry::default_registry());
+    let skill_registry = Arc::new(build_skill_registry(&input.working_dir));
+    super::command_catalog::warn_primary_skill_collisions(
+        registry
+            .primaries_with_descriptions()
+            .into_iter()
+            .map(|(name, _)| name),
+        skill_registry.as_ref(),
+    );
     let dispatcher = Arc::new(crate::command::dispatcher::Dispatcher::new(Arc::clone(
         &registry,
     )));
@@ -67,6 +77,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         show_thinking: input.show_thinking,
         session_stats: input.session_stats,
         permission_mode: input.permission_mode,
+        plan_mode_state: input.plan_mode_state,
         session_id: input.session_id,
         session_store: input.session_store,
         cost_config: input.cost_config,
@@ -87,7 +98,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
             input.layer_filter.as_deref(),
         )
         .unwrap_or_default(),
-        skill_registry: Arc::new(build_skill_registry(&input.working_dir)),
+        skill_registry,
         last_assistant_response: input.last_assistant_response,
         system_prompt_chars: input.system_prompt_chars,
         tool_defs_chars: input.tool_defs_chars,
@@ -113,7 +124,9 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
     }
 }
 
-fn build_skill_registry(working_dir: &std::path::Path) -> archon_core::skills::SkillRegistry {
+pub(super) fn build_skill_registry(
+    working_dir: &std::path::Path,
+) -> archon_core::skills::SkillRegistry {
     let mut reg = archon_core::skills::builtin::register_builtins();
     for skill in archon_core::skills::discovery::discover_user_skills(working_dir) {
         tracing::debug!("discovered user skill: {}", skill.name);

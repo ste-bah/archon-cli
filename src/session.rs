@@ -21,6 +21,7 @@ pub(crate) mod build_agent;
 mod build_prompt;
 mod cognitive_daemon_startup;
 mod cognitive_store;
+mod command_catalog;
 mod completion_gate;
 mod config_watcher;
 mod consolidation_reuse;
@@ -40,6 +41,7 @@ mod leann_startup;
 mod model_selection;
 mod modes;
 mod pipeline_adapter;
+pub(crate) mod plan_hint;
 mod reasoning_quality;
 mod slash_context_builder;
 mod splash;
@@ -267,6 +269,7 @@ pub(crate) async fn run_interactive_session(
     let interactive_bootstrap::Bootstrap {
         config_path,
         layer_filter,
+        session_database,
         session_store,
         memory,
         working_dir,
@@ -341,6 +344,7 @@ pub(crate) async fn run_interactive_session(
     } = interactive_agent::build(
         config,
         session_id,
+        session_database,
         cli,
         working_dir.clone(),
         Arc::clone(&hook_registry),
@@ -393,6 +397,8 @@ pub(crate) async fn run_interactive_session(
     )
     .await;
 
+    let plan_mode_state = agent.plan_mode_state();
+
     interactive_ui::run(
         config,
         session_id,
@@ -416,6 +422,7 @@ pub(crate) async fn run_interactive_session(
         effort_state,
         model_override_shared,
         permission_mode_shared,
+        plan_mode_state,
         extra_dirs_shared,
         show_thinking,
         session_stats_shared,

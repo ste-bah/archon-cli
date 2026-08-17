@@ -6,7 +6,7 @@ async fn unscoped_turn_keeps_streaming_text_with_callback_installed() {
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls,
-            captured_system,
+            captured_requests: captured_system,
         }),
         ToolRegistry::new(),
         AgentConfig::default(),
@@ -37,7 +37,7 @@ async fn allowed_finalization_emits_turn_complete_once() {
     let mut agent = Agent::new(
         Arc::new(GuardrailCompletionProvider {
             calls: Arc::clone(&calls),
-            captured_system,
+            captured_requests: captured_system,
         }),
         ToolRegistry::new(),
         AgentConfig::default(),

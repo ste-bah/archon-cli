@@ -18,13 +18,11 @@ pub(crate) fn turn_requirements_for_action(session_id: &str, action_id: &str) ->
     ))
 }
 
-pub(crate) fn turn_finalization_verdict_for_action(
+pub(crate) fn turn_finalization_verdict_for_action_at_session_database(
+    session_database: &std::path::Path,
     session_id: &str,
     action_id: &str,
 ) -> archon_core::agent::TurnFinalizationVerdict {
-    if action_id.is_empty() {
-        return archon_core::agent::TurnFinalizationVerdict::Allowed;
-    }
     let root = match super::world_model_root() {
         Ok(root) => root,
         Err(error) => {
@@ -33,19 +31,44 @@ pub(crate) fn turn_finalization_verdict_for_action(
             ));
         }
     };
-    turn_finalization_verdict_at_root(&root, session_id, action_id)
+    turn_finalization_verdict_with_plan_db(&root, session_database, session_id, action_id)
 }
 
+#[cfg(test)]
 fn turn_finalization_verdict_at_root(
     root: &std::path::Path,
     session_id: &str,
     action_id: &str,
 ) -> archon_core::agent::TurnFinalizationVerdict {
+    turn_finalization_verdict_with_plan_db(
+        root,
+        &archon_session::storage::default_db_path(),
+        session_id,
+        action_id,
+    )
+}
+
+fn turn_finalization_verdict_with_plan_db(
+    root: &std::path::Path,
+    session_database: &std::path::Path,
+    session_id: &str,
+    action_id: &str,
+) -> archon_core::agent::TurnFinalizationVerdict {
+    if let Some(repair_prompt) =
+        archon_tools::plan_reconciliation::completion_block_for_session_at_path(
+            session_database,
+            session_id,
+        )
+    {
+        return blocked_verdict(repair_prompt);
+    }
     if action_id.is_empty() {
         return archon_core::agent::TurnFinalizationVerdict::Allowed;
     }
     if let Some(failure) = reclassification_failure(action_id) {
-        return blocked_verdict(format!("Action {action_id} cannot finalize because {failure}"));
+        return blocked_verdict(format!(
+            "Action {action_id} cannot finalize because {failure}"
+        ));
     }
     let Some(record) = active_guardrail_for_action(session_id, action_id) else {
         return blocked_verdict(format!(
@@ -80,7 +103,7 @@ fn turn_finalization_verdict_at_root(
         .required_actions
         .iter()
         .copied()
-        .map(required_evidence_kind)
+        .map(archon_world_model::guardrail::required_evidence_kind)
         .collect::<Vec<_>>();
     let evidence = completion_evidence(&outcomes);
     let check = check_required_evidence(&required, &evidence);
@@ -91,32 +114,6 @@ fn turn_finalization_verdict_at_root(
             "Action {action_id} cannot finalize. Missing verification: {:?}; failed verification: {:?}. Run the required checks before finalizing.",
             check.missing, check.failed
         ))
-    }
-}
-
-fn required_evidence_kind(
-    required: archon_world_model::GuardrailRequiredAction,
-) -> RequiredEvidenceKind {
-    match required {
-        archon_world_model::GuardrailRequiredAction::RunTests => RequiredEvidenceKind::Tests,
-        archon_world_model::GuardrailRequiredAction::RunBuild => RequiredEvidenceKind::Build,
-        archon_world_model::GuardrailRequiredAction::RunLint => RequiredEvidenceKind::Lint,
-        archon_world_model::GuardrailRequiredAction::RunTypecheck => {
-            RequiredEvidenceKind::Typecheck
-        }
-        archon_world_model::GuardrailRequiredAction::RunVerifier => RequiredEvidenceKind::Verifier,
-        archon_world_model::GuardrailRequiredAction::ReviewPlanAgainstUserGoal => {
-            RequiredEvidenceKind::PlanReview
-        }
-        archon_world_model::GuardrailRequiredAction::CheckSourceEvidence => {
-            RequiredEvidenceKind::SourceEvidence
-        }
-        archon_world_model::GuardrailRequiredAction::RecordManualOutcome => {
-            RequiredEvidenceKind::ManualOutcome
-        }
-        archon_world_model::GuardrailRequiredAction::RequireUserApproval => {
-            RequiredEvidenceKind::HumanApproval
-        }
     }
 }
 
@@ -134,6 +131,8 @@ fn completion_evidence(
                     kind,
                     status: completion_evidence_status(outcome),
                     sequence: sequence as u64,
+                    evidence_id: None,
+                    run_id: None,
                 })
         })
         .collect()

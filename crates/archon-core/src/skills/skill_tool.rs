@@ -17,7 +17,7 @@
 
 use serde_json::{Value, json};
 
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 use super::{SkillContext, SkillOutput, builtin, discovery};
 
@@ -119,6 +119,10 @@ impl Tool for SkillTool {
             }
             other => ToolResult::error(format!("action must be 'list' or 'invoke', got '{other}'")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &Value) -> PermissionLevel {

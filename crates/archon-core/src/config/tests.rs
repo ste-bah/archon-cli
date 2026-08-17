@@ -43,6 +43,18 @@ fn initial_rules_max_50_enforced() {
 }
 
 #[test]
+fn context_plan_model_rejects_whitespace_and_preserves_configured_value() {
+    let mut cfg = ArchonConfig::default();
+    cfg.context.plan_model = Some("   ".into());
+    let error = validate(&cfg).expect_err("whitespace plan model must be rejected");
+    assert!(error.to_string().contains("context.plan_model"));
+
+    cfg.context.plan_model = Some("planner".into());
+    validate(&cfg).expect("configured plan model must validate");
+    assert_eq!(cfg.context.plan_model.as_deref(), Some("planner"));
+}
+
+#[test]
 fn write_example_config_is_valid_toml() {
     let s = write_example_config();
     let cfg: ArchonConfig = toml::from_str(&s).expect("should parse as ArchonConfig");

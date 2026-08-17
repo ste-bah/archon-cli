@@ -194,8 +194,9 @@ mod tests {
         );
     }
 
-    /// A project skill must reach the model without a restart-time config
-    /// step — dropping a `SKILL.md` in is the whole interface.
+    /// A project skill must reach the model with no registration step and
+    /// nothing added to config — dropping a `SKILL.md` in is the whole
+    /// interface. (It is picked up at session start, like slash autocomplete.)
     #[test]
     fn a_project_skill_is_advertised() {
         let tmp = tempfile::TempDir::new().unwrap();

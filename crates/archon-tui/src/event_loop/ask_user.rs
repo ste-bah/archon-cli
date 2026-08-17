@@ -15,12 +15,24 @@ pub(super) fn handle_ask_user_key(app: &mut App, code: &KeyCode) -> Option<AskUs
         KeyCode::Enter => {
             let answer = std::mem::take(&mut app.ask_user_draft);
             app.ask_user_prompt = None;
+            app.ask_user_prompt_kind = None;
             Some(AskUserKeyOutcome::Submit(answer))
         }
         KeyCode::Esc => {
+            let is_plan_approval = matches!(
+                app.ask_user_prompt_kind,
+                Some(archon_core::agent::AskUserPromptKind::PlanApproval)
+            );
             app.ask_user_draft.clear();
             app.ask_user_prompt = None;
-            Some(AskUserKeyOutcome::Cancel)
+            app.ask_user_prompt_kind = None;
+            if is_plan_approval {
+                Some(AskUserKeyOutcome::Submit(
+                    "reject: cancelled by user".into(),
+                ))
+            } else {
+                Some(AskUserKeyOutcome::Cancel)
+            }
         }
         KeyCode::Backspace => {
             app.ask_user_draft.pop();
@@ -84,6 +96,35 @@ mod tests {
         assert_eq!(outcome, Some(AskUserKeyOutcome::Cancel));
         assert!(app.ask_user_prompt.is_none());
         assert!(app.ask_user_draft.is_empty());
+    }
+
+    #[test]
+    fn plan_approval_escape_submits_cancelled_rejection() {
+        let mut app = App::new();
+        app.ask_user_prompt =
+            Some("Plan approval: approve / approve-edits / edit / reject: <reason>".into());
+        app.ask_user_prompt_kind = Some(archon_core::agent::AskUserPromptKind::PlanApproval);
+
+        let outcome = handle_ask_user_key(&mut app, &KeyCode::Esc);
+
+        assert_eq!(
+            outcome,
+            Some(AskUserKeyOutcome::Submit(
+                "reject: cancelled by user".into()
+            ))
+        );
+        assert!(app.ask_user_prompt_kind.is_none());
+    }
+
+    #[test]
+    fn ordinary_prompt_with_plan_approval_text_still_cancels() {
+        let mut app = App::new();
+        app.ask_user_prompt = Some("Plan approval: this is an ordinary question".into());
+        app.ask_user_prompt_kind = Some(archon_core::agent::AskUserPromptKind::Ordinary);
+
+        let outcome = handle_ask_user_key(&mut app, &KeyCode::Esc);
+
+        assert_eq!(outcome, Some(AskUserKeyOutcome::Cancel));
     }
 
     #[test]

@@ -95,6 +95,7 @@ mod tests {
                 Some(SandboxCommandResult {
                     content: "sandboxed".into(),
                     is_error: false,
+                    exit_code: Some(0),
                 })
             })
         }

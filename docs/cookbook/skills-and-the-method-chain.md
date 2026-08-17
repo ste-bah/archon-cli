@@ -11,8 +11,9 @@ You still can — `/tdd`, `/diagnose`, `/verify-done` all work by hand.
 
 ## Add a skill to a project
 
-Drop a file in `.archon/skills/<name>/SKILL.md`. That is the whole interface:
-no registration, no restart config.
+Drop a file in `.archon/skills/<name>/SKILL.md`. That is the whole interface —
+no registration step and nothing to add to config. Restart the session to pick
+it up: both the prompt catalogue and slash autocomplete are built at startup.
 
 ```markdown
 ---

@@ -94,13 +94,10 @@ fn plan_mode_denies_bash() {
 }
 
 #[test]
-fn plan_mode_denies_exit_plan_mode() {
+fn plan_mode_admits_exit_plan_mode_for_structured_approval() {
     let checker = PermissionChecker::new(PermissionMode::Plan, RuleSet::empty());
-    let result = checker.check("ExitPlanMode", "exit plan mode", "");
-    assert!(
-        matches!(result, PermissionDecision::Deny(_)),
-        "Plan mode must deny ExitPlanMode, got: {result:?}"
-    );
+    let result = checker.check("ExitPlanMode", "request structured plan approval", "");
+    assert_eq!(result, PermissionDecision::Allow);
 }
 
 #[test]

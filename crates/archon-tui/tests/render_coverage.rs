@@ -165,10 +165,35 @@ fn suggestions_popup_renders_when_active() {
         app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
             name: "/help".into(),
             description: "show help".into(),
+            kind: archon_tui::commands::CommandKind::Primary,
         }];
     }
     let rendered = render_once(&mut app);
     assert!(rendered.contains("Commands"), "buffer:\n{rendered}");
+}
+
+#[test]
+fn suggestions_popup_labels_primary_and_skill_rows() {
+    let mut app = App::new();
+    app.show_splash = false;
+    app.input.suggestions.active = true;
+    app.input.suggestions.suggestions = vec![
+        archon_tui::commands::CommandInfo {
+            name: "/help".into(),
+            description: "show help".into(),
+            kind: archon_tui::commands::CommandKind::Primary,
+        },
+        archon_tui::commands::CommandInfo {
+            name: "/deploy-check".into(),
+            description: "check deployment".into(),
+            kind: archon_tui::commands::CommandKind::Skill,
+        },
+    ];
+
+    let rendered = render_once(&mut app);
+
+    assert!(rendered.contains("[command]"), "buffer:\n{rendered}");
+    assert!(rendered.contains("[skill]"), "buffer:\n{rendered}");
 }
 
 #[test]
@@ -180,6 +205,7 @@ fn suggestions_popup_suppressed_while_generating() {
     app.input.suggestions.suggestions = vec![archon_tui::commands::CommandInfo {
         name: "/help".into(),
         description: "show help".into(),
+        kind: archon_tui::commands::CommandKind::Primary,
     }];
     let rendered = render_once(&mut app);
     // Popup box must not be drawn while generating — "Commands" title should

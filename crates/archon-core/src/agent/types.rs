@@ -38,6 +38,14 @@ impl Default for SessionStats {
     }
 }
 
+/// Semantic purpose of an AskUser prompt. Consumers must use this metadata
+/// rather than inferring approval behavior from untrusted prompt text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskUserPromptKind {
+    Ordinary,
+    PlanApproval,
+}
+
 // ---------------------------------------------------------------------------
 // Agent events -- emitted to the UI/consumer
 // ---------------------------------------------------------------------------
@@ -97,6 +105,7 @@ pub enum AgentEvent {
     /// Emitted when the agent invokes AskUserQuestion and needs real user input.
     AskUser {
         question: String,
+        kind: AskUserPromptKind,
     },
     /// Emitted when SendMessage is invoked to deliver a message to another agent.
     MessageSent {
@@ -165,6 +174,9 @@ pub struct AgentConfig {
     pub model_override: Arc<Mutex<String>>,
     /// Shared permission mode (toggled by /permissions slash command: "auto", "ask", "yolo").
     pub permission_mode: Arc<Mutex<String>>,
+    /// Whether the operator explicitly authorized bypassPermissions through
+    /// the dangerous CLI flag. Plan Mode may restore bypass only when true.
+    pub allow_bypass_permissions: bool,
     /// Fine-grained permission rules applied before mode-level preflight.
     pub permission_rules: archon_permissions::rules::RuleSet,
     /// Additional working directories added at runtime via `/add-dir`.
@@ -264,6 +276,7 @@ impl Default for AgentConfig {
             effort_level: Arc::new(Mutex::new(EffortLevel::Medium)),
             model_override: Arc::new(Mutex::new(String::new())),
             permission_mode: Arc::new(Mutex::new("auto".to_string())),
+            allow_bypass_permissions: false,
             permission_rules: archon_permissions::rules::RuleSet::empty(),
             extra_dirs: Arc::new(Mutex::new(Vec::new())),
             max_tool_concurrency: archon_tools::concurrency::DEFAULT_MAX_CONCURRENCY,

@@ -512,6 +512,12 @@ prompt_cache_reorder = true
 # cache_write_1h_multiplier = 1.0
 # Max characters of hierarchical ARCHON.md (alias: claudemd_max_tokens)
 archonmd_max_tokens = 8192
+# Optional model override for requests made while the agent is in Plan Mode.
+# Comment out to use the active session model.
+# plan_model = "claude-sonnet-4-6"
+# Approval policy when no interactive AskUser channel is available.
+# "reject" fails closed; every other value approves. Default: "approve".
+noninteractive_plan_approval = "approve"
 
 
 # ----------------------------------------------------------------------------

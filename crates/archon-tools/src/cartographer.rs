@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use index::CodebaseIndex;
 use parser::{language_for_file, parse_file};
 
@@ -103,6 +103,10 @@ impl Tool for CartographerTool {
                 "Unknown operation '{other}'. Valid: scan, query, summary, focus"
             )),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
