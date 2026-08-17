@@ -196,6 +196,7 @@ fn normalize_commands(object: &mut Map<String, Value>) {
             continue;
         };
         insert_missing(fields, "kind", Value::String("other".to_string()));
+        derive_command_status_from_exit_code(fields);
         normalize_command_status(fields);
         synthesize_missing_output_summary(fields);
     }
@@ -225,6 +226,31 @@ fn synthesize_missing_output_summary(fields: &mut Map<String, Value>) {
             "(no output_summary provided by agent; command status: {status})"
         )),
     );
+}
+
+/// Derive a missing command status from the exit code the agent already gave.
+///
+/// A `commands_run` entry with no `status` fails the WHOLE reply — the field
+/// has no default, deliberately, because a wrongly-normalised command status
+/// is how a failed test gets recorded as a pass. Observed live: a verification
+/// branch recorded two commands, the second carrying `command`, `kind`,
+/// `output_summary` and `exit_code` but no `status`, and the entire envelope
+/// was rejected with "missing field `status`" after the branch had done all
+/// its work.
+///
+/// The exit code is not a guess — it is the outcome, stated by the agent, in
+/// the same record. `0` succeeded, anything else failed. Where there is no
+/// exit code there is nothing to infer from and the reply is still rejected,
+/// so this cannot invent a pass out of silence.
+fn derive_command_status_from_exit_code(fields: &mut Map<String, Value>) {
+    if fields.get("status").is_some_and(value_present) {
+        return;
+    }
+    let Some(code) = fields.get("exit_code").and_then(Value::as_i64) else {
+        return;
+    };
+    let derived = if code == 0 { "succeeded" } else { "failed" };
+    fields.insert("status".to_string(), Value::String(derived.to_string()));
 }
 
 fn normalize_command_status(fields: &mut Map<String, Value>) {
