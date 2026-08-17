@@ -363,7 +363,7 @@ fn current_user_sid_sddl() -> io::Result<String> {
         return Err(last_error("convert current user SID"));
     }
     let result = (|| {
-        let allocated_bytes = unsafe { LocalSize(text) };
+        let allocated_bytes = unsafe { LocalSize(text as *mut c_void) };
         let len = allocated_wide_len(text, allocated_bytes, MAX_SID_SDDL_UNITS)?;
         String::from_utf16(unsafe { std::slice::from_raw_parts(text, len) })
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid current user SID"))
