@@ -313,3 +313,40 @@ fn explicit_compaction_model_wins_then_policy_default_then_active_fallback() {
         Some("explicit model unavailable; provider policy model unavailable")
     );
 }
+
+/// The reactive compaction path resolves through this same function now, so
+/// the property that keeps that change safe is pinned here: a deployment that
+/// configures nothing keeps summarising with the model it already used.
+#[test]
+fn unconfigured_compaction_falls_back_to_the_active_model() {
+    let available = ["active", "cheap"];
+
+    let resolved = resolve_compaction_model(None, None, "active", &available);
+
+    assert_eq!(resolved.model, "active");
+    assert_eq!(resolved.source, CompactionModelSource::ActiveFallback);
+}
+
+/// A configured model the provider does not actually serve must not be sent —
+/// the request would 404 and every compaction would fail instead of one.
+#[test]
+fn a_configured_but_unserved_model_falls_back_to_the_active_model() {
+    let available = ["active"];
+
+    let resolved = resolve_compaction_model(Some("nothink"), None, "active", &available);
+
+    assert_eq!(resolved.model, "active");
+    assert_eq!(resolved.source, CompactionModelSource::ActiveFallback);
+}
+
+/// The case this exists for: the non-reasoning twin is live, so summarising
+/// uses it rather than the reasoning model that returns an empty summary.
+#[test]
+fn a_served_compaction_model_is_used_for_the_summary() {
+    let available = ["active", "nothink"];
+
+    let resolved = resolve_compaction_model(Some("nothink"), None, "active", &available);
+
+    assert_eq!(resolved.model, "nothink");
+    assert_eq!(resolved.source, CompactionModelSource::Explicit);
+}
