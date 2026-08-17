@@ -117,6 +117,8 @@ pub(crate) async fn build_session_agent(
         effort_level: effort_level_shared,
         model_override: model_override_shared,
         permission_mode: permission_mode_shared,
+        allow_bypass_permissions: cli.allow_dangerously_skip_permissions
+            || cli.dangerously_skip_permissions,
         permission_rules: archon_permissions::rules::RuleSet {
             always_allow: config.permissions.always_allow.clone(),
             always_deny: config.permissions.always_deny.clone(),
