@@ -4,12 +4,12 @@ use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
 use process_wrap::tokio::ChildWrapper;
-use tokio::process::Command;
 use tokio::task::JoinHandle;
 
 use crate::cargo_target_env::CargoTargetDirLock;
 use crate::execution_deadline::{ExecutionDeadline, abort_pipe_tasks, join_pipe_tasks};
 
+use super::bash_containment::{contained_bash_command, terminate_completed_process_tree};
 use super::bash_output::{
     CapturedOutput, bounded_command_output, bounded_text, shared_output_budget,
     spawn_counted_pipe_capture, spawn_wrapped_child,
@@ -233,32 +233,6 @@ pub(super) fn spawn_bash_child(
     spawn_wrapped_child(command)
 }
 
-fn contained_bash_command(command_text: &str) -> Command {
-    #[cfg(unix)]
-    {
-        let mut command = Command::new("/usr/bin/unshare");
-        command
-            .args([
-                "--user",
-                "--map-root-user",
-                "--pid",
-                "--fork",
-                "--mount-proc",
-                "--",
-            ])
-            .arg(BASH_PROGRAM.as_path())
-            .arg("-c")
-            .arg(command_text);
-        command
-    }
-    #[cfg(not(unix))]
-    {
-        let mut command = Command::new(BASH_PROGRAM.as_path());
-        command.arg("-c").arg(command_text);
-        command
-    }
-}
-
 pub(super) async fn await_bash_child(
     tool: &BashTool,
     ctx: &ToolContext,
@@ -398,7 +372,7 @@ pub(super) async fn completed_bash_result(
                 .await;
         }
     };
-    if let Some(error) = terminate_completed_process_group(state.process_group) {
+    if let Some(error) = terminate_completed_process_tree(state.process_group) {
         abort_pipe_tasks(state.stdout_task, state.stderr_task);
         return ToolResult::error(format!(
             "[BASH_PROCESS_TREE_INCOMPLETE] Bash exited but its process group could not be terminated: {error}"
@@ -435,31 +409,6 @@ pub(super) async fn completed_bash_result(
     )
 }
 
-fn terminate_completed_process_group(process_group: Option<u32>) -> Option<String> {
-    #[cfg(unix)]
-    {
-        let pid = process_group?;
-        // The direct shell has already exited. Killing its process group prevents
-        // a background descendant from writing after the tool result is observed.
-        let result = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
-        if result == 0 {
-            tracing::debug!(
-                process_group = pid,
-                "bash: terminated completed process group"
-            );
-            None
-        } else {
-            let error = std::io::Error::last_os_error();
-            (error.raw_os_error() != Some(libc::ESRCH)).then(|| error.to_string())
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = process_group;
-        None
-    }
-}
-
 pub(super) async fn terminate_child(
     child: &mut Box<dyn ChildWrapper>,
     process_group: Option<u32>,
@@ -468,11 +417,7 @@ pub(super) async fn terminate_child(
     #[cfg(not(unix))]
     let _ = process_group;
     #[cfg(unix)]
-    let kill_error = process_group.and_then(|pid| {
-        // SAFETY: the wrapped command is the process-group leader created above.
-        let result = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
-        (result != 0).then(|| std::io::Error::last_os_error().to_string())
-    });
+    let kill_error = terminate_completed_process_tree(process_group);
     #[cfg(not(unix))]
     let kill_error = child.start_kill().err().map(|error| error.to_string());
     let wait_error = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {

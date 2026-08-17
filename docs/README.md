@@ -95,6 +95,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Cookbook
 
+- [Plan Mode trusted execution](cookbook/plan-mode-trusted-execution.md) — inspect first, revise/reject/approve structured plans, restore permissions safely, configure noninteractive approval, resume durable plan tasks, and review signed evidence plus reconciliation
 - [Strategic engagement research](cookbook/strategic-engagement.md) — 22-document intelligence package workflow
 - [Real-world Evidence Engine examples](cookbook/real-world-evidence-engine.md) — research, education, business, trading, coding, and strategic analysis workflows
 - [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, caption-first ingest, `ffmpeg`, `whisper-cpp`, optional frame OCR fallbacks, TUI monitoring, and timecoded evidence consumption

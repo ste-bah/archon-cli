@@ -31,6 +31,10 @@ fn store_and_authority() -> (cozo::DbInstance, PlanStore, Arc<PlanApprovalAuthor
     (db, store, authority)
 }
 
+fn bash_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\\"'\\\"'"))
+}
+
 fn fixture_test_command() -> String {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../archon-completion/Cargo.toml")
@@ -38,7 +42,7 @@ fn fixture_test_command() -> String {
         .unwrap();
     format!(
         "cargo test --manifest-path {} schema::tests::test_ensure_schema_idempotent --lib",
-        manifest.display()
+        bash_quote(&manifest.to_string_lossy())
     )
 }
 
@@ -69,6 +73,14 @@ async fn record_real_test(
     )
     .unwrap()
     .unwrap()
+}
+
+#[test]
+fn fixture_manifest_path_is_shell_quoted() {
+    let command = fixture_test_command();
+
+    assert!(command.contains("--manifest-path '"), "{command}");
+    assert!(command.contains("Cargo.toml'"), "{command}");
 }
 
 #[test]

@@ -93,43 +93,6 @@ async fn normal_completion_kills_delayed_background_mutation() {
 }
 
 #[tokio::test]
-#[cfg(unix)]
-async fn normal_completion_kills_setsid_escaped_mutation() {
-    let dir = tempfile::tempdir().unwrap();
-    let started_file = dir.path().join("setsid-started");
-    let escaped_file = dir.path().join("escaped-write");
-    let tool = BashTool {
-        max_output_bytes: 1024,
-        ..Default::default()
-    };
-
-    let result = tool
-        .execute(
-            json!({
-                "command": format!(
-                    "setsid sh -c 'printf started > {}; sleep 0.2; printf escaped > {}' & while [ ! -s {} ]; do sleep 0.01; done",
-                    shell_quote(&started_file),
-                    shell_quote(&escaped_file),
-                    shell_quote(&started_file),
-                )
-            }),
-            &ToolContext {
-                working_dir: dir.path().to_path_buf(),
-                ..ToolContext::default()
-            },
-        )
-        .await;
-
-    assert!(!result.is_error, "{}", result.content);
-    assert!(started_file.exists(), "setsid child never detached");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !escaped_file.exists(),
-        "setsid descendant mutated the tree after Bash returned"
-    );
-}
-
-#[tokio::test]
 async fn stderr_redirection_and_heredoc_are_not_background_commands() {
     let dir = tempfile::tempdir().unwrap();
     let tool = BashTool::default();

@@ -1,6 +1,15 @@
 use super::{fs, load_or_create_approval_secret, owner_only_sddl, windows_secret};
+use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
+use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, SetFileSecurityW};
+
+const SDDL_REVISION_1: u32 = 1;
 
 static NATIVE_FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -67,11 +76,43 @@ fn native_acl_tampering_is_rejected() {
     let fixture = native_secret_fixture();
     load_or_create_approval_secret(&fixture.path).unwrap();
     assert!(fixture.path.is_file());
-    windows_secret::replace_acl_for_test(&fixture.path, "D:(A;;FA;;;WD)").unwrap();
+    replace_acl_for_test(&fixture.path, "D:(A;;FA;;;WD)").unwrap();
     assert_eq!(
         load_or_create_approval_secret(&fixture.path)
             .unwrap_err()
             .kind(),
         std::io::ErrorKind::PermissionDenied
     );
+}
+
+fn replace_acl_for_test(path: &std::path::Path, sddl: &str) -> std::io::Result<()> {
+    let mut descriptor = null_mut();
+    let encoded = std::ffi::OsStr::new(sddl)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            encoded.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            null_mut(),
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result =
+        if unsafe { SetFileSecurityW(path.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) } == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        };
+    unsafe { LocalFree(descriptor as *mut c_void) };
+    result
 }

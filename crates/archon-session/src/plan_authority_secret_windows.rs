@@ -12,15 +12,13 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SE_FILE_OBJECT,
 };
-#[cfg(test)]
-use windows_sys::Win32::Security::SetFileSecurityW;
 use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, AclSizeInformation, CreateWellKnownSid,
-    DACL_SECURITY_INFORMATION, EqualSid, GROUP_SECURITY_INFORMATION, GetAce, GetAclInformation,
-    GetLengthSid, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
-    GetSecurityDescriptorOwner, GetTokenInformation, INHERITED_ACE, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
-    TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+    CreateWellKnownSid, DACL_SECURITY_INFORMATION, EqualSid, GROUP_SECURITY_INFORMATION, GetAce,
+    GetAclInformation, GetLengthSid, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
+    GetSecurityDescriptorOwner, GetTokenInformation, INHERITED_ACE, IsValidSid,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED,
+    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
@@ -28,10 +26,12 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_READ, FILE_SHARE_WRITE, FlushFileBuffers, GetFileInformationByHandle, OPEN_EXISTING,
     READ_CONTROL, ReadFile, WriteFile,
 };
+use windows_sys::Win32::System::Memory::LocalSize;
 use windows_sys::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 const SDDL_REVISION_1: u32 = 1;
+const MAX_SID_SDDL_UNITS: usize = 184;
 
 pub(super) fn create_owner_only_file(path: &Path, bytes: &[u8; 32]) -> io::Result<[u8; 32]> {
     let user_sid = current_user_sid_sddl()?;
@@ -207,14 +207,14 @@ fn validate_protected_owner_system_dacl(
         if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
             return Err(last_error("read plan approval secret ACE"));
         }
-        let allow = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
-        if allow.Header.AceType as u32 != ACCESS_ALLOWED_ACE_TYPE
-            || allow.Header.AceFlags as u32 & INHERITED_ACE != 0
-            || allow.Mask != FILE_ALL_ACCESS
+        let allow = checked_access_allowed_ace(ace, dacl, info.AclBytesInUse as usize)?;
+        if allow.ace_type as u32 != ACCESS_ALLOWED_ACE_TYPE
+            || allow.ace_flags as u32 & INHERITED_ACE != 0
+            || allow.mask != FILE_ALL_ACCESS
         {
             return Err(reject_acl());
         }
-        let sid = &allow.SidStart as *const u32 as PSID;
+        let sid = allow.sid;
         if unsafe { EqualSid(sid, user_sid) } != 0 && !user_ace {
             user_ace = true;
         } else if unsafe { EqualSid(sid, system_sid.as_ptr() as PSID) } != 0 && !system_ace {
@@ -228,6 +228,73 @@ fn validate_protected_owner_system_dacl(
     } else {
         Err(reject_acl())
     }
+}
+
+struct CheckedAccessAllowedAce {
+    ace_type: u8,
+    ace_flags: u8,
+    mask: u32,
+    sid: PSID,
+}
+
+fn checked_access_allowed_ace(
+    ace: *mut c_void,
+    dacl: *const ACL,
+    acl_bytes_in_use: usize,
+) -> io::Result<CheckedAccessAllowedAce> {
+    if ace.is_null() || dacl.is_null() {
+        return Err(reject_acl());
+    }
+    let acl_start = dacl as usize;
+    let acl_end = acl_start
+        .checked_add(acl_bytes_in_use)
+        .ok_or_else(reject_acl)?;
+    let ace_start = ace as usize;
+    let header_end = ace_start
+        .checked_add(std::mem::size_of::<ACE_HEADER>())
+        .ok_or_else(reject_acl)?;
+    if ace_start < acl_start || header_end > acl_end {
+        return Err(reject_acl());
+    }
+    let header = unsafe { std::ptr::read_unaligned(ace as *const ACE_HEADER) };
+    let ace_size = usize::from(header.AceSize);
+    let ace_end = ace_start.checked_add(ace_size).ok_or_else(reject_acl)?;
+    if ace_size < std::mem::size_of::<ACCESS_ALLOWED_ACE>() || ace_end > acl_end {
+        return Err(reject_acl());
+    }
+    let mask_offset = std::mem::size_of::<ACE_HEADER>();
+    let sid_offset = std::mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+    let sid_prefix_len = 8_usize;
+    let sid_prefix_end = ace_start
+        .checked_add(sid_offset)
+        .and_then(|start| start.checked_add(sid_prefix_len))
+        .ok_or_else(reject_acl)?;
+    if sid_prefix_end > ace_end {
+        return Err(reject_acl());
+    }
+    let mask =
+        unsafe { std::ptr::read_unaligned((ace as *const u8).add(mask_offset) as *const u32) };
+    let sid = unsafe { (ace as *mut u8).add(sid_offset) as PSID };
+    let sub_authority_count = unsafe { (sid as *const u8).add(1).read() } as usize;
+    let sid_len = sid_prefix_len
+        .checked_add(sub_authority_count.checked_mul(4).ok_or_else(reject_acl)?)
+        .ok_or_else(reject_acl)?;
+    let sid_end = ace_start
+        .checked_add(sid_offset)
+        .and_then(|start| start.checked_add(sid_len))
+        .ok_or_else(reject_acl)?;
+    if sid_end > ace_end || unsafe { IsValidSid(sid) } == 0 {
+        return Err(reject_acl());
+    }
+    if unsafe { GetLengthSid(sid) } as usize != sid_len {
+        return Err(reject_acl());
+    }
+    Ok(CheckedAccessAllowedAce {
+        ace_type: header.AceType,
+        ace_flags: header.AceFlags,
+        mask,
+        sid,
+    })
 }
 
 fn local_system_sid() -> io::Result<Vec<u8>> {
@@ -295,9 +362,12 @@ fn current_user_sid_sddl() -> io::Result<String> {
     {
         return Err(last_error("convert current user SID"));
     }
-    let len = wide_len(text);
-    let result = String::from_utf16(unsafe { std::slice::from_raw_parts(text, len) })
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid current user SID"));
+    let result = (|| {
+        let allocated_bytes = unsafe { LocalSize(text) };
+        let len = allocated_wide_len(text, allocated_bytes, MAX_SID_SDDL_UNITS)?;
+        String::from_utf16(unsafe { std::slice::from_raw_parts(text, len) })
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid current user SID"))
+    })();
     unsafe { LocalFree(text as *mut c_void) };
     result
 }
@@ -359,14 +429,27 @@ fn wide(value: &str) -> Vec<u16> {
         .collect()
 }
 
-fn wide_len(value: *const u16) -> usize {
-    let mut current = value;
-    unsafe {
-        while *current != 0 {
-            current = current.add(1);
-        }
-        current.offset_from(value) as usize
+fn allocated_wide_len(
+    value: *const u16,
+    allocated_bytes: usize,
+    max_units: usize,
+) -> io::Result<usize> {
+    if value.is_null() || allocated_bytes == 0 || allocated_bytes % std::mem::size_of::<u16>() != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid current user SID string allocation",
+        ));
     }
+    let allocated_units = allocated_bytes / std::mem::size_of::<u16>();
+    let readable_units = allocated_units.min(max_units);
+    let units = unsafe { std::slice::from_raw_parts(value, readable_units) };
+    units.iter().position(|unit| *unit == 0).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "current user SID string exceeded its maximum length",
+        )
+    })
 }
 
 fn create_error() -> io::Error {
@@ -400,37 +483,5 @@ pub(super) fn validate_owner_only_acl(path: &Path) -> io::Result<()> {
         validate_owner_only_handle(handle)
     })();
     unsafe { CloseHandle(handle) };
-    result
-}
-
-#[cfg(test)]
-pub(super) fn replace_acl_for_test(path: &Path, sddl: &str) -> io::Result<()> {
-    let mut descriptor = null_mut();
-    if unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            wide(sddl).as_ptr(),
-            SDDL_REVISION_1,
-            &mut descriptor,
-            null_mut(),
-        )
-    } == 0
-    {
-        return Err(last_error("build permissive plan approval secret ACL"));
-    }
-    let result = (|| {
-        if unsafe {
-            SetFileSecurityW(
-                wide_path(path)?.as_ptr(),
-                DACL_SECURITY_INFORMATION,
-                descriptor,
-            )
-        } == 0
-        {
-            Err(last_error("replace plan approval secret ACL"))
-        } else {
-            Ok(())
-        }
-    })();
-    unsafe { LocalFree(descriptor as *mut c_void) };
     result
 }

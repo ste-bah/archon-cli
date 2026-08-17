@@ -10,6 +10,9 @@ use crate::workflow_resource_env::CargoResourceLimits;
 #[path = "bash_output.rs"]
 mod bash_output;
 
+#[path = "bash_containment.rs"]
+mod bash_containment;
+
 #[path = "bash_process.rs"]
 mod bash_process;
 use bash_process::{
@@ -299,6 +302,10 @@ fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64, floor_ms:
 fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
 }
+
+#[cfg(test)]
+#[path = "bash_containment_tests.rs"]
+mod containment_tests;
 
 #[cfg(test)]
 #[path = "bash_sandbox_evidence_tests.rs"]

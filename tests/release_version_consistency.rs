@@ -70,6 +70,16 @@ fn local_lock_versions(contents: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+fn first_line(contents: &str) -> Option<&str> {
+    contents.lines().next()
+}
+
+#[test]
+fn release_heading_accepts_platform_line_endings() {
+    assert_eq!(first_line("# v1.9.2\nbody"), Some("# v1.9.2"));
+    assert_eq!(first_line("# v1.9.2\r\nbody"), Some("# v1.9.2"));
+}
+
 #[test]
 fn v1_9_2_release_surfaces_are_synchronized() {
     assert_eq!(
@@ -105,7 +115,10 @@ fn v1_9_2_release_surfaces_are_synchronized() {
     assert!(read("README.md").contains("Current release: v1.9.2"));
     assert!(read("docs/getting-started/installation.md").contains("archon 1.9.2 (<short-sha>)"));
     assert!(read("docs/README.md").contains("[v1.9.2](release-notes/v1.9.2.md) — Patch:"));
-    assert!(read("docs/release-notes/v1.9.2.md").starts_with("# v1.9.2\n"));
+    assert_eq!(
+        first_line(&read("docs/release-notes/v1.9.2.md")),
+        Some("# v1.9.2")
+    );
 
     for snapshot in [
         "crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap",
