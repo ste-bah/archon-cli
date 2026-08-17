@@ -64,6 +64,7 @@ fn shell_quote(path: &std::path::Path) -> String {
 async fn normal_completion_kills_delayed_background_mutation() {
     let dir = tempfile::tempdir().unwrap();
     let delayed_file = dir.path().join("delayed-write");
+    let pid_file = dir.path().join("delayed-child.pid");
     let tool = BashTool {
         max_output_bytes: 1024,
         ..Default::default()
@@ -73,8 +74,9 @@ async fn normal_completion_kills_delayed_background_mutation() {
         .execute(
             json!({
                 "command": format!(
-                    "(sleep 0.2; printf delayed > {}) &",
-                    shell_quote(&delayed_file)
+                    "sh -c 'kill -STOP \"$$\"; printf delayed > {}' & child=$!; printf '%s' \"$child\" > {}",
+                    shell_quote(&delayed_file),
+                    shell_quote(&pid_file),
                 )
             }),
             &ToolContext {
@@ -85,7 +87,8 @@ async fn normal_completion_kills_delayed_background_mutation() {
         .await;
 
     assert!(!result.is_error, "{}", result.content);
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pid = std::fs::read_to_string(&pid_file).expect("fixture child pid");
+    wait_until_process_is_absent(&pid).await;
     assert!(
         !delayed_file.exists(),
         "a detached mutation escaped Bash completion"

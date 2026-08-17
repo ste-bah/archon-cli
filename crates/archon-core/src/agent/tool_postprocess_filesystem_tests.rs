@@ -202,7 +202,7 @@ async fn background_bash_command_is_observed_after_contained_completion() {
     let pending = PendingToolCall {
         id: "background-write".into(),
         name: "Bash".into(),
-        input_json: r#"{"command":"(kill -STOP \"$BASHPID\"; printf delayed > delayed) & child=$!; printf '%s' \"$child\" > child.pid"}"#.into(),
+        input_json: r#"{"command":"sh -c 'kill -STOP \"$$\"; printf delayed > delayed' & child=$!; printf '%s' \"$child\" > child.pid"}"#.into(),
     };
     let pre = agent
         .preflight_single_tool(&pending, AgentMode::Normal)

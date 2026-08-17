@@ -54,28 +54,16 @@ fn configure_windows_msvc_linker(fixture: &Path) {
         host.ends_with("-pc-windows-msvc"),
         "expected an MSVC Rust host, got {host}"
     );
-    let output = Command::new("where.exe")
-        .arg("link.exe")
-        .output()
-        .expect("where.exe must run to locate the MSVC linker");
-    assert!(
-        output.status.success(),
-        "where.exe link.exe failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let linker = String::from_utf8(output.stdout)
-        .expect("where.exe output must be UTF-8")
-        .lines()
-        .map(str::trim)
-        .find(|path| {
-            let path = path.replace('\\', "/").to_ascii_lowercase();
-            path.contains("/vc/tools/msvc/") && path.ends_with("/link.exe")
-        })
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| panic!("where.exe did not report a Visual Studio MSVC link.exe"));
+    let sysroot = rustc_sysroot();
+    let linker = Path::new(&sysroot)
+        .join("lib")
+        .join("rustlib")
+        .join(&host)
+        .join("bin")
+        .join("rust-lld.exe");
     assert!(
         linker.is_file(),
-        "MSVC linker must exist at {}",
+        "Rust toolchain linker must exist at {}",
         linker.display()
     );
     let cargo_dir = fixture.join(".cargo");
@@ -106,6 +94,23 @@ fn rustc_value(prefix: &str) -> String {
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| panic!("rustc -vV output must contain {prefix}"))
+}
+
+#[cfg(windows)]
+fn rustc_sysroot() -> String {
+    let output = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .expect("rustc must report its sysroot");
+    assert!(
+        output.status.success(),
+        "rustc --print sysroot failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("rustc sysroot must be UTF-8")
+        .trim()
+        .to_owned()
 }
 
 #[cfg(windows)]
@@ -185,8 +190,7 @@ fn fixture_manifest_path_is_shell_quoted() {
             config.contains("[target.\"x86_64-pc-windows-msvc\"]"),
             "{config}"
         );
-        assert!(config.contains("/VC/Tools/MSVC/"), "{config}");
-        assert!(config.contains("/link.exe"), "{config}");
+        assert!(config.contains("rust-lld.exe"), "{config}");
         assert!(config.contains("linker = \""), "{config}");
         assert!(!config.contains('\\'), "{config}");
     }
