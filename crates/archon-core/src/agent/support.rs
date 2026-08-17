@@ -24,7 +24,7 @@ pub enum AgentLoopError {
 /// Parse a plan from the assistant's text output.
 /// Simple line-by-line state machine: extracts title, steps, risks, questions.
 pub(super) fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocument {
-    use archon_session::plan::{PlanDocument, PlanStep, PlanStepStatus};
+    use archon_session::plan::{PlanDocument, PlanStatus, PlanStep, PlanStepStatus};
 
     enum Section {
         None,
@@ -101,6 +101,9 @@ pub(super) fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocu
                         description: desc.to_string(),
                         affected_files: Vec::new(),
                         status: PlanStepStatus::Pending,
+                        blocked_by: Vec::new(),
+                        required_evidence: Vec::new(),
+                        task_id: None,
                     });
                 }
             }
@@ -127,7 +130,7 @@ pub(super) fn parse_plan_from_text(text: &str) -> archon_session::plan::PlanDocu
     doc.steps = steps;
     doc.risks = risks;
     doc.questions = questions;
-    doc.status = "active".to_string();
+    doc.status = PlanStatus::Executing;
     doc
 }
 

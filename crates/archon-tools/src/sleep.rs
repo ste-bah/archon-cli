@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Maximum allowed sleep duration in seconds.
 const MAX_SLEEP_SECS: u64 = 300;
@@ -52,6 +52,10 @@ impl Tool for SleepTool {
 
         tokio::time::sleep(Duration::from_secs(seconds)).await;
         ToolResult::success(format!("Slept for {seconds} seconds"))
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

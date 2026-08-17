@@ -288,6 +288,7 @@ impl OpenShellSandboxBackend {
                     "OpenShell sandbox refused execution: {error}; no host shell fallback was used.\n"
                 ),
                 is_error: true,
+                exit_code: None,
             };
         }
         let args = match openshell_create_args(&self.config, &request) {
@@ -298,6 +299,7 @@ impl OpenShellSandboxBackend {
                         "OpenShell sandbox refused execution: {error}; no host shell fallback was used.\n"
                     ),
                     is_error: true,
+                    exit_code: None,
                 };
             }
         };
@@ -317,6 +319,7 @@ impl OpenShellSandboxBackend {
                 return SandboxCommandResult {
                     content: format!("Error: Failed to spawn openshell: {error}"),
                     is_error: true,
+                    exit_code: None,
                 };
             }
         };
@@ -331,6 +334,7 @@ impl OpenShellSandboxBackend {
             Ok(Err(error)) => SandboxCommandResult {
                 content: format!("Error: OpenShell command failed: {error}"),
                 is_error: true,
+                exit_code: None,
             },
             Err(_) => SandboxCommandResult {
                 content: format!(
@@ -338,6 +342,7 @@ impl OpenShellSandboxBackend {
                     request.timeout_ms
                 ),
                 is_error: true,
+                exit_code: None,
             },
         }
     }

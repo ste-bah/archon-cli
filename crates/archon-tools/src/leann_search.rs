@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use archon_leann::CodeIndex;
 
 pub struct LeannSearchTool {
@@ -84,6 +84,10 @@ impl Tool for LeannSearchTool {
             }
             Err(e) => ToolResult::error(format!("LEANN search failed: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

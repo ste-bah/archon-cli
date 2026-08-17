@@ -40,9 +40,17 @@ pub enum RequiredEvidenceStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RequiredEvidence {
+    /// Model-provided classification is never authoritative for plan-task completion.
     pub kind: RequiredEvidenceKind,
+    /// Model-provided status is never authoritative for plan-task completion.
     pub status: RequiredEvidenceStatus,
     pub sequence: u64,
+    /// Stable durable evidence identity. Required by plan-task completion.
+    #[serde(default)]
+    pub evidence_id: Option<String>,
+    /// Durable run that owns `evidence_id`. Required by plan-task completion.
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

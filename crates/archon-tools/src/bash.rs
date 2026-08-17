@@ -4,11 +4,14 @@ use serde_json::json;
 use std::sync::LazyLock;
 
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use crate::workflow_resource_env::CargoResourceLimits;
 
 #[path = "bash_output.rs"]
 mod bash_output;
+
+#[path = "bash_containment.rs"]
+mod bash_containment;
 
 #[path = "bash_process.rs"]
 mod bash_process;
@@ -217,10 +220,14 @@ impl Tool for BashTool {
             Ok(prepared) => prepared,
             Err(error) => return limit_tool_result(self.max_output_bytes, error),
         };
-        if let Some(result) = execute_in_sandbox(self, ctx, &prepared).await {
+        if let Some(result) = execute_in_sandbox(self, ctx, raw_command, &prepared).await {
             return result;
         }
         run_prepared_bash_command(self, ctx, raw_command, prepared).await
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {
@@ -295,6 +302,14 @@ fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64, floor_ms:
 fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
 }
+
+#[cfg(test)]
+#[path = "bash_containment_tests.rs"]
+mod containment_tests;
+
+#[cfg(test)]
+#[path = "bash_sandbox_evidence_tests.rs"]
+mod sandbox_evidence_tests;
 
 #[cfg(test)]
 #[path = "bash_tests.rs"]

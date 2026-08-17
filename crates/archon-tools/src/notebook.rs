@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool for editing Jupyter notebook (.ipynb) cells.
 ///
@@ -133,6 +133,10 @@ impl Tool for NotebookEditTool {
         }
 
         ToolResult::success(msg)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::DeclaredPaths
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

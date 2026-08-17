@@ -10,9 +10,11 @@ archon-tools = { path = "../archon-tools" }
 archon-permissions = { path = "../archon-permissions" }
 archon-context = { path = "../archon-context" }
 archon-session = { path = "../archon-session" }
+archon-completion = { path = "../archon-completion" }
 archon-consciousness = { path = "../archon-consciousness" }
 archon-cognitive = { path = "../archon-cognitive" }
 archon-memory = { path = "../archon-memory" }
+archon-world-model = { path = "../archon-world-model" }
 archon-leann = { path = "../archon-leann" }
 # TASK-AGS-OBS-901: `src/metrics.rs` now re-exports `ChannelMetricSink` from
 # archon-observability (trait was moved there in OBS-901 so the trait + type
@@ -83,6 +85,8 @@ rayon.workspace = true
 serde_yaml_ng.workspace = true
 
 [dev-dependencies]
+archon-session = { path = "../archon-session", features = ["test-support"] }
+archon-tools = { path = "../archon-tools", features = ["test-support"] }
 archon-permissions = { path = "../archon-permissions" }
 # TASK-AGS-506: test-util feature needed for tokio::time::pause/advance in
 # circuit_breaker tests. This only affects test builds.

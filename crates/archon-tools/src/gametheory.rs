@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub const GAMETHEORY_TOOL_NAMES: &[&str] = &[
     "GameTheoryRun",
@@ -121,6 +121,14 @@ macro_rules! define_gametheory_tool {
 
             async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
                 $exec_fn(input).await
+            }
+
+            fn working_tree_effect(&self) -> WorkingTreeEffect {
+                if $tool_name == "GameTheoryListAgents" {
+                    WorkingTreeEffect::None
+                } else {
+                    WorkingTreeEffect::Arbitrary
+                }
             }
 
             fn permission_level(&self, _input: &Value) -> PermissionLevel {

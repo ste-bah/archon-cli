@@ -18,8 +18,9 @@ use archon_observability::{
 };
 use archon_permissions::auto::AutoModeEvaluator;
 use archon_permissions::is_default_safe_tool;
+use archon_permissions::mode::PermissionMode;
 use archon_session::checkpoint::CheckpointStore;
-use archon_session::plan::PlanStore;
+use archon_session::plan::{PlanApprovalAuthority, PlanStore};
 use archon_tools::tool::{
     AgentMode, ToolContext, ToolResult, ToolRunAdmissionCallback, ToolRunOutcomeCallback,
 };
@@ -50,6 +51,9 @@ mod memory_integration_corrections;
 mod message_delivery;
 mod payloads;
 mod permission_gate;
+pub mod plan_approval;
+pub mod plan_mode_state;
+mod plan_reconciliation;
 mod process_message;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
 mod process_message_recovery;
@@ -66,6 +70,7 @@ mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
+mod tool_completion_evidence;
 mod tool_context;
 mod tool_dispatch;
 pub(crate) mod tool_input_json;
@@ -74,6 +79,7 @@ mod tool_postprocess_steps;
 #[cfg(test)]
 mod tool_postprocess_steps_tests;
 mod tool_preflight;
+mod tool_preflight_filesystem;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
 pub(crate) mod tool_result_context;
@@ -91,7 +97,9 @@ pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
-pub use types::{AgentConfig, AgentEvent, ConversationState, SessionStats, TimestampedEvent};
+pub use types::{
+    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, TimestampedEvent,
+};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 
@@ -128,6 +136,10 @@ pub struct Agent {
     event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
+    plan_approval_authority: Option<Arc<PlanApprovalAuthority>>,
+    plan_execution_evidence: plan_reconciliation::PlanExecutionEvidence,
+    /// Fail-closed backup when a post-mutation observation blocker cannot be persisted.
+    observation_failure_blocker: Option<String>,
     turn_number: u64,
     /// Corrections recalled for the current turn, and the turn they belong to.
     ///
@@ -197,8 +209,8 @@ pub struct Agent {
     /// Channel for receiving user answers when AskUserQuestion is invoked.
     /// The TUI sends the user's response through the paired sender.
     pub ask_user_response_rx: Option<Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<String>>>>,
-    /// Saved permission mode before entering plan mode, so ExitPlanMode can restore it.
-    previous_permission_mode: Option<String>,
+    /// State captured on plan-mode entry for safe restoration on exit.
+    plan_mode_state: Arc<tokio::sync::Mutex<plan_mode_state::PlanModeState>>,
     /// Append-only log of permission denials for audit / `/denials` display.
     pub denial_log: Arc<Mutex<archon_permissions::denial_log::DenialLog>>,
     /// Custom agent registry (built-in + project + user agents).

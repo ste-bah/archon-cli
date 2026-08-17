@@ -44,6 +44,12 @@ pub(super) enum ToolLoopAction {
     Break,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum StreamRoundDraftState {
+    Pending,
+    InsertedEarly,
+}
+
 impl Agent {
     pub(super) async fn begin_process_turn(&mut self, user_input: &str) {
         self.turn_number += 1;
@@ -84,8 +90,10 @@ impl Agent {
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
         self.inject_turn_requirements(&mut system);
+        let effective_mode = self.effective_agent_mode().await;
+        self.inject_plan_mode_reminder(&mut system, effective_mode);
 
-        let active_model = self.active_model().await;
+        let active_model = self.active_model_for_mode(effective_mode).await;
         let effort = self.turn_effort(user_input).await;
         // #123: `ultrathink` escalates BOTH knobs for this turn — effort to
         // `Max` (above, inside `turn_effort`) and the thinking budget here.
@@ -134,7 +142,14 @@ impl Agent {
                 agentic_iterations,
                 self.context_window_for(&active_model),
             ),
-            request_origin: Some("main_session".into()),
+            request_origin: Some(
+                if effective_mode == AgentMode::Plan {
+                    "plan_mode"
+                } else {
+                    "main_session"
+                }
+                .into(),
+            ),
             reasoning_encrypted: None,
         };
         request_cache::apply_stable_system_cache(
@@ -371,26 +386,10 @@ impl Agent {
         content.splice(0..0, drafts);
     }
 
-    pub(super) fn persist_guarded_plan_after_draft_admission(&self, round: &StreamRound) {
-        let exited_plan = round
-            .pending_tools
-            .iter()
-            .any(|tool| tool.name == "ExitPlanMode" && self.tool_result_passed(&tool.id));
-        if exited_plan {
-            self.persist_latest_plan_from_assistant();
-        }
-    }
-
-    fn tool_result_passed(&self, tool_id: &str) -> bool {
-        self.state.messages.iter().rev().any(|message| {
-            message["content"].as_array().is_some_and(|blocks| {
-                blocks.iter().any(|block| {
-                    block["type"] == "tool_result"
-                        && block["tool_use_id"] == tool_id
-                        && block["is_error"] == false
-                })
-            })
-        })
+    pub(super) fn persist_guarded_plan_after_draft_admission(&self, _round: &StreamRound) {
+        // ExitPlanMode persists the Draft before requesting approval. Keeping
+        // persistence there prevents an admitted tool result from bypassing the
+        // structured lifecycle ordering.
     }
 
     fn stream_round_drafts(

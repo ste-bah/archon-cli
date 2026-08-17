@@ -286,8 +286,10 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
 
     // 3. Build an AgentConfig. Use yolo permission mode so AgentTool
     //    (PermissionLevel::Risky) is auto-allowed without a prompt.
+    let workspace = tempfile::tempdir().expect("isolated test workspace");
+    let working_dir = workspace.path().to_path_buf();
     let config = AgentConfig {
-        working_dir: std::env::temp_dir(),
+        working_dir: working_dir.clone(),
         session_id: "preserve-104-seam-test".into(),
         max_turns: Some(5), // safety valve
         ..AgentConfig::default()
@@ -301,9 +303,7 @@ async fn agent_process_message_carries_real_subagent_text_across_seam() {
     );
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
 
-    let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(
-        &std::env::temp_dir(),
-    )));
+    let agent_registry = Arc::new(std::sync::RwLock::new(AgentRegistry::load(&working_dir)));
 
     let mut agent = Agent::new(
         Arc::new(MockLlmProvider::new()),

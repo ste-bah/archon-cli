@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::evidence_cli;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub const DOC_TOOL_NAMES: &[&str] = &[
     "DocIngest",
@@ -41,6 +41,10 @@ macro_rules! doc_tool {
                     Ok(args) => evidence_cli::run_archon(args, ctx).await,
                     Err(e) => ToolResult::error(e),
                 }
+            }
+
+            fn working_tree_effect(&self) -> WorkingTreeEffect {
+                WorkingTreeEffect::Arbitrary
             }
 
             fn permission_level(&self, _input: &Value) -> PermissionLevel {
@@ -81,6 +85,10 @@ impl Tool for DocList {
         }
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
+    }
+
     fn permission_level(&self, _input: &Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
@@ -107,6 +115,10 @@ impl Tool for DocGet {
             Ok(document_id) => crate::docs_runtime::run_get(document_id, ctx).await,
             Err(e) => ToolResult::error(e),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &Value) -> PermissionLevel {
@@ -144,6 +156,10 @@ impl Tool for DocSearch {
         }
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
+    }
+
     fn permission_level(&self, _input: &Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
@@ -170,6 +186,10 @@ impl Tool for DocAnswer {
             Ok(args) => crate::docs_runtime::run_answer(args, ctx).await,
             Err(e) => ToolResult::error(e),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &Value) -> PermissionLevel {

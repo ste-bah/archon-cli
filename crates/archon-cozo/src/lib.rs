@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
 mod guard_registry;
+mod in_memory_identity;
 mod locking;
 mod panic_guard;
 mod retry;
@@ -88,6 +89,13 @@ impl CozoGuardConfig {
         }
     }
 
+    pub fn database_path(&self) -> Option<PathBuf> {
+        let path = self.write_lock_path.as_deref()?;
+        let name = path.file_name()?.to_str()?;
+        let database_name = name.strip_suffix(".archon-cozo-write.lock")?;
+        canonical_resource_path(path.with_file_name(database_name)).ok()
+    }
+
     pub fn with_write_lock_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.write_lock_path = Some(path.into());
         self
@@ -147,6 +155,10 @@ impl std::ops::Deref for GuardedDbInstance {
 
 pub fn guarded_config_for(db: &DbInstance) -> Option<CozoGuardConfig> {
     guard_registry::guarded_config_for(db)
+}
+
+pub fn in_memory_database_identity(db: &DbInstance) -> Option<String> {
+    in_memory_identity::database_identity(db)
 }
 
 pub fn bound_guard_config(db: &DbInstance, context: &str) -> Result<CozoGuardConfig> {

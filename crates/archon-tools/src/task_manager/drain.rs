@@ -100,7 +100,7 @@ mod drain_tests {
     async fn a_task_without_a_board_item_is_not_pending() {
         let mgr = TaskManager::new();
         let id = mgr.create_task("no subagent, no mirror");
-        mgr.set_status(&id, TaskStatus::Running);
+        mgr.set_status(&id, TaskStatus::Running).unwrap();
         assert!(
             mgr.pending_board_items().is_empty(),
             "only mirrored tasks can strand a board item"
@@ -115,11 +115,11 @@ mod drain_tests {
         let mgr = TaskManager::new();
         let id = mgr.create_task("dispatched in the background");
         mgr.set_board_item_id(&id, "agent-uuid-1");
-        mgr.set_status(&id, TaskStatus::Running);
+        mgr.set_status(&id, TaskStatus::Running).unwrap();
         assert_eq!(mgr.pending_board_items().len(), 1);
 
         // What the detached completion task does when it finally gets scheduled.
-        mgr.set_status(&id, TaskStatus::Completed);
+        mgr.set_status(&id, TaskStatus::Completed).unwrap();
         assert!(
             mgr.pending_board_items().is_empty(),
             "a terminal task is no longer something the drain waits on"
@@ -134,7 +134,7 @@ mod drain_tests {
         // the task is left Running for the whole call on purpose.
         let id = TASK_MANAGER.create_task("an agent that never reports back");
         TASK_MANAGER.set_board_item_id(&id, "agent-uuid-stuck");
-        TASK_MANAGER.set_status(&id, TaskStatus::Running);
+        TASK_MANAGER.set_status(&id, TaskStatus::Running).unwrap();
 
         let started = Instant::now();
         drain_board_items_within(Duration::from_millis(200)).await;
@@ -150,6 +150,6 @@ mod drain_tests {
         );
 
         // Leave the global clean for any other test in this binary.
-        TASK_MANAGER.set_status(&id, TaskStatus::Stopped);
+        TASK_MANAGER.set_status(&id, TaskStatus::Stopped).unwrap();
     }
 }

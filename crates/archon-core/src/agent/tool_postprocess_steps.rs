@@ -1,6 +1,10 @@
+use std::path::{Component, Path};
+
 use super::tool_types::{PreflightResult, tool_transcript_summary};
 use super::*;
 
+#[path = "tool_postprocess_plan.rs"]
+mod plan;
 #[derive(Default)]
 pub(super) struct PostprocessFlow {
     pub(super) prevent_continuation_reason: Option<String>,
@@ -15,15 +19,18 @@ impl Agent {
         active_model: &str,
         flow: &mut PostprocessFlow,
     ) {
+        let mut raw_result = result.clone();
         let mut result = self.prepare_tool_result(pre, result, active_model).await;
-        self.run_post_tool_hooks(pre, &mut result, ctx, flow).await;
+        self.run_post_tool_hooks(pre, &mut raw_result, &mut result, ctx, active_model, flow)
+            .await;
+        self.record_executed_test_evidence(pre, &raw_result, &mut result);
+        self.record_plan_execution(pre, &mut result, ctx);
         self.fire_path_hooks(pre).await;
         self.fire_worktree_hooks(pre).await;
         self.record_tool_completion(pre, &result).await;
         self.update_plan_progress(pre, &result).await;
         self.add_context_tool_result(pre, &result);
     }
-
     async fn prepare_tool_result(
         &mut self,
         pre: &PreflightResult,
@@ -48,48 +55,21 @@ impl Agent {
         match pre.tool_name.as_str() {
             "EnterPlanMode" => {
                 let prev = self.config.permission_mode.lock().await.clone();
-                self.previous_permission_mode = Some(prev);
-                *self.config.permission_mode.lock().await = "plan".to_string();
+                let previous_mode = prev.parse::<PermissionMode>().unwrap_or_default();
+                self.plan_mode_state.lock().await.record_entry(
+                    previous_mode,
+                    plan_mode_state::PlanEntryPath::EnterPlanModeTool,
+                );
+                *self.config.permission_mode.lock().await = PermissionMode::Plan.to_string();
                 self.state.mode = AgentMode::Plan;
                 result
             }
-            "ExitPlanMode" => {
-                self.restore_mode_after_plan().await;
-                if !self.buffers_finalization_text() {
-                    self.persist_latest_plan_from_assistant();
-                }
-                result
-            }
+            "ExitPlanMode" => self.handle_exit_plan_mode_approval(result).await,
             _ => result,
         }
     }
 
-    async fn restore_mode_after_plan(&mut self) {
-        let restore = self
-            .previous_permission_mode
-            .take()
-            .unwrap_or_else(|| "auto".to_string());
-        *self.config.permission_mode.lock().await = restore;
-        self.state.mode = AgentMode::Normal;
-    }
-
-    pub(super) fn persist_latest_plan_from_assistant(&self) {
-        let Some(ref plan_store) = self.plan_store else {
-            return;
-        };
-        let plan_text = self.latest_assistant_text();
-        if plan_text.is_empty() {
-            return;
-        }
-        let plan = parse_plan_from_text(&plan_text);
-        let sid = self.config.session_id.clone();
-        match plan_store.save_plan(&sid, &plan) {
-            Ok(()) => tracing::info!("plan saved: {} ({} steps)", plan.title, plan.steps.len()),
-            Err(e) => tracing::warn!("failed to save plan: {e}"),
-        }
-    }
-
-    fn latest_assistant_text(&self) -> String {
+    pub(super) fn latest_assistant_text(&self) -> String {
         self.state
             .messages
             .iter()
@@ -159,9 +139,10 @@ impl Agent {
         ToolResult::success(auto_response)
     }
 
-    async fn ask_user(&mut self, question: String) -> ToolResult {
+    pub(super) async fn ask_user(&mut self, question: String) -> ToolResult {
         self.send_event(AgentEvent::AskUser {
             question: question.clone(),
+            kind: AskUserPromptKind::Ordinary,
         })
         .await;
         if let Some(rx) = &self.ask_user_response_rx {
@@ -189,8 +170,10 @@ impl Agent {
     pub(super) async fn run_post_tool_hooks(
         &mut self,
         pre: &PreflightResult,
+        raw_result: &mut ToolResult,
         result: &mut ToolResult,
         ctx: &ToolContext,
+        active_model: &str,
         flow: &mut PostprocessFlow,
     ) {
         let max_retries: u32 = 3;
@@ -211,13 +194,17 @@ impl Agent {
                     "PostToolUse hook requested retry, re-executing tool"
                 );
                 let retry_ctx = ctx.with_tool_run_attempt(pre.tool_id.clone(), retry_count);
-                *result = crate::tool_run_admission::execute_tool_attempt(
+                let retry_result = crate::tool_run_admission::execute_tool_attempt(
                     pre.tool_arc.as_ref(),
                     pre.input.clone(),
                     &retry_ctx,
                     pre.sandbox_prechecked,
                 )
                 .await;
+                *raw_result = retry_result.clone();
+                *result = self
+                    .prepare_tool_result(pre, retry_result, active_model)
+                    .await;
                 continue;
             }
             if post_agg.retry {
@@ -417,7 +404,11 @@ impl Agent {
         };
         let sid = self.config.session_id.clone();
         if let Ok(Some(plan)) = plan_store.load_latest_plan(&sid)
-            && (plan.status == "active" || plan.status == "draft")
+            && matches!(
+                plan.status,
+                archon_session::plan::PlanStatus::Executing
+                    | archon_session::plan::PlanStatus::Draft
+            )
         {
             for step in &plan.steps {
                 if plan_step_matches_file(step, fp)
@@ -434,6 +425,15 @@ impl Agent {
         }
     }
 
+    fn record_plan_execution(
+        &mut self,
+        pre: &PreflightResult,
+        result: &mut ToolResult,
+        ctx: &ToolContext,
+    ) {
+        plan::record_plan_execution(self, pre, result, ctx);
+    }
+
     fn add_context_tool_result(&mut self, pre: &PreflightResult, result: &ToolResult) {
         self.state
             .add_tool_result(&pre.tool_id, &result.content, result.is_error);
@@ -441,14 +441,34 @@ impl Agent {
 }
 
 fn command_changes_cwd(cmd: &str) -> bool {
-    let trimmed = cmd.trim_start();
-    trimmed.starts_with("cd ") || cmd.contains(" && cd ") || cmd.contains("; cd ")
+    cmd.trim_start().starts_with("cd ") || cmd.contains(" && cd ") || cmd.contains("; cd ")
 }
-
 fn plan_step_matches_file(step: &archon_session::plan::PlanStep, file_path: &str) -> bool {
     step.status == archon_session::plan::PlanStepStatus::Pending
         && step
             .affected_files
             .iter()
-            .any(|f| file_path.ends_with(f) || f.ends_with(file_path))
+            .any(|approved| same_normalized_relative_path(approved, file_path))
+}
+
+fn same_normalized_relative_path(approved: &str, actual: &str) -> bool {
+    normalized_relative_path(approved)
+        .zip(normalized_relative_path(actual))
+        .is_some_and(|(approved, actual)| approved == actual)
+}
+
+fn normalized_relative_path(path: &str) -> Option<std::path::PathBuf> {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return None;
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(component) => normalized.push(component),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    (!normalized.as_os_str().is_empty()).then_some(normalized)
 }

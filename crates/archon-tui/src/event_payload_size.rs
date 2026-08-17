@@ -32,7 +32,7 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
         TuiEvent::PermissionPrompt { tool, description } => {
             string_bytes(tool) + string_bytes(description)
         }
-        TuiEvent::AskUserPrompt { question } => string_bytes(question),
+        TuiEvent::AskUserPrompt { question, .. } => string_bytes(question),
         TuiEvent::ShowSessionPicker(entries) => {
             vec_bytes(entries) + entries.iter().map(session_entry_bytes).sum::<usize>()
         }

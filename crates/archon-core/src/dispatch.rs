@@ -5,7 +5,89 @@ use std::time::Duration;
 
 use archon_observability::{AgentActivityEvent, AgentActivityKind, AgentActivityStatus};
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
+#[cfg(test)]
+use archon_tools::tool::WorkingTreeEffect;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
+
+/// Reviewed effects for every built-in registered below. The exact-set test in
+/// `dispatch_registry_tests` fails until a newly registered tool is reviewed.
+#[cfg(test)]
+pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
+    ("Agent", WorkingTreeEffect::Arbitrary),
+    ("ApplyPatch", WorkingTreeEffect::DeclaredPaths),
+    ("AskUserQuestion", WorkingTreeEffect::ExternalOnly),
+    ("Bash", WorkingTreeEffect::Arbitrary),
+    ("BehaviourApprove", WorkingTreeEffect::Arbitrary),
+    ("BehaviourProposals", WorkingTreeEffect::Arbitrary),
+    ("BehaviourRollback", WorkingTreeEffect::Arbitrary),
+    ("BoardClaim", WorkingTreeEffect::ExternalOnly),
+    ("BoardList", WorkingTreeEffect::ExternalOnly),
+    ("BoardRaise", WorkingTreeEffect::ExternalOnly),
+    ("BoardResolve", WorkingTreeEffect::ExternalOnly),
+    ("CartographerScan", WorkingTreeEffect::ExternalOnly),
+    ("Config", WorkingTreeEffect::ExternalOnly),
+    ("CronCreate", WorkingTreeEffect::Arbitrary),
+    ("CronDelete", WorkingTreeEffect::Arbitrary),
+    ("CronList", WorkingTreeEffect::None),
+    ("DocAnswer", WorkingTreeEffect::Arbitrary),
+    ("DocGet", WorkingTreeEffect::Arbitrary),
+    ("DocIngest", WorkingTreeEffect::Arbitrary),
+    ("DocInspect", WorkingTreeEffect::Arbitrary),
+    ("DocList", WorkingTreeEffect::Arbitrary),
+    ("DocModelStatus", WorkingTreeEffect::Arbitrary),
+    ("DocProvenance", WorkingTreeEffect::Arbitrary),
+    ("DocSearch", WorkingTreeEffect::Arbitrary),
+    ("DocStatus", WorkingTreeEffect::Arbitrary),
+    ("Edit", WorkingTreeEffect::DeclaredPaths),
+    ("EnterPlanMode", WorkingTreeEffect::ExternalOnly),
+    ("EnterWorktree", WorkingTreeEffect::Arbitrary),
+    ("ExitPlanMode", WorkingTreeEffect::ExternalOnly),
+    ("ExitWorktree", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryCallSpecialist", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryClassify", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryInspect", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryListAgents", WorkingTreeEffect::None),
+    ("GameTheoryReplay", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryRun", WorkingTreeEffect::Arbitrary),
+    ("GameTheorySpecimens", WorkingTreeEffect::Arbitrary),
+    ("GameTheoryStatus", WorkingTreeEffect::Arbitrary),
+    ("Glob", WorkingTreeEffect::None),
+    ("Grep", WorkingTreeEffect::None),
+    ("JavaToolchain", WorkingTreeEffect::Arbitrary),
+    ("LargeEditAbort", WorkingTreeEffect::Arbitrary),
+    ("LargeEditBegin", WorkingTreeEffect::Arbitrary),
+    ("LargeEditCommit", WorkingTreeEffect::Arbitrary),
+    ("LargeEditDeleteSection", WorkingTreeEffect::Arbitrary),
+    ("LargeEditInsertAfter", WorkingTreeEffect::Arbitrary),
+    ("LargeEditReplaceSection", WorkingTreeEffect::Arbitrary),
+    ("LearningInspect", WorkingTreeEffect::Arbitrary),
+    ("LearningStatus", WorkingTreeEffect::Arbitrary),
+    ("ListMcpResources", WorkingTreeEffect::ExternalOnly),
+    ("Monitor", WorkingTreeEffect::Arbitrary),
+    ("NotebookEdit", WorkingTreeEffect::DeclaredPaths),
+    ("PowerShell", WorkingTreeEffect::Arbitrary),
+    ("PushNotification", WorkingTreeEffect::ExternalOnly),
+    ("Read", WorkingTreeEffect::None),
+    ("ReadMcpResource", WorkingTreeEffect::ExternalOnly),
+    ("RemoteTrigger", WorkingTreeEffect::ExternalOnly),
+    ("SendMessage", WorkingTreeEffect::ExternalOnly),
+    ("Skill", WorkingTreeEffect::Arbitrary),
+    ("Sleep", WorkingTreeEffect::None),
+    ("TaskCreate", WorkingTreeEffect::Arbitrary),
+    ("TaskGet", WorkingTreeEffect::None),
+    ("TaskList", WorkingTreeEffect::None),
+    ("TaskOutput", WorkingTreeEffect::None),
+    ("TaskStop", WorkingTreeEffect::ExternalOnly),
+    ("TaskUpdate", WorkingTreeEffect::ExternalOnly),
+    ("TeamCreate", WorkingTreeEffect::Arbitrary),
+    ("TeamDelete", WorkingTreeEffect::Arbitrary),
+    ("TodoWrite", WorkingTreeEffect::ExternalOnly),
+    ("ToolSearch", WorkingTreeEffect::None),
+    ("WebFetch", WorkingTreeEffect::ExternalOnly),
+    ("WebSearch", WorkingTreeEffect::ExternalOnly),
+    ("Write", WorkingTreeEffect::DeclaredPaths),
+    ("lsp", WorkingTreeEffect::Arbitrary),
+];
 
 /// Tools no allowlist removes: how an agent talks, and how it waits.
 ///
@@ -187,21 +269,30 @@ impl ToolRegistry {
     ) -> ToolResult {
         // Check if tool is allowed in current mode
         if !is_tool_allowed_in_mode(tool_name, ctx.mode) {
-            // TASK-P0-B.3 (#174): append the intercepted call to
-            // `.archon/plan.md` so the user can review it later via
-            // `/plan` or edit via `/plan open`. IO failures are logged
-            // but MUST NOT replace the block: the interception contract
-            // (return an error so the model sees the tool failed) is
-            // the primary behaviour; the plan-file append is an
-            // additive audit trail.
-            let plan_path = crate::plan_file::plan_path(&ctx.working_dir);
-            if let Err(e) = crate::plan_file::append_plan_entry(&plan_path, tool_name, &input) {
-                tracing::warn!(
-                    error = %e,
-                    plan_path = %plan_path.display(),
+            // Append the intercepted call to the session-scoped immutable audit
+            // log. The editable document remains separate and is only opened by
+            // `/plan open`. IO failures are logged but MUST NOT replace the
+            // block: returning an error so the model sees the tool failed is the
+            // primary behaviour; the audit append is additive.
+            match crate::plan_file::plan_audit_path(&ctx.working_dir, &ctx.session_id) {
+                Ok(audit_path) => {
+                    if let Err(error) =
+                        crate::plan_file::append_plan_entry(&audit_path, tool_name, &input)
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            audit_path = %audit_path.display(),
+                            tool = tool_name,
+                            "failed to append intercepted tool call to session audit log"
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    session_id = %ctx.session_id,
                     tool = tool_name,
-                    "failed to append intercepted tool call to plan file"
-                );
+                    "refused unsafe session ID for Plan Mode audit log"
+                ),
             }
             emit_tool_activity(
                 ctx,
@@ -210,8 +301,7 @@ impl ToolRegistry {
                 AgentActivityStatus::Failed,
             );
             return ToolResult::error(format!(
-                "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed. \
-                 The call has been queued in the plan file for review — use `/plan` to view or `/plan open` to edit."
+                "Tool '{tool_name}' is not available in Plan Mode. Plan Mode blocks working-tree mutations by default; only the canonical Plan-safe allowlist is available, including TaskCreate, TaskUpdate, and Agent. The call has been recorded in the session audit for review."
             ));
         }
 
@@ -453,6 +543,9 @@ pub fn create_default_registry(
     registry
 }
 
+#[cfg(test)]
+#[path = "dispatch_registry_tests.rs"]
+mod registry_tests;
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod tests;

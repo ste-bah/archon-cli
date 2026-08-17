@@ -23,6 +23,8 @@ pub struct ContextConfig {
     pub max_tool_result_bytes: usize,
     /// Optional explicit model used by background segment summarization.
     pub compaction_model: Option<String>,
+    /// Optional explicit model used while the agent is in Plan Mode.
+    pub plan_model: Option<String>,
     /// Whether to use prompt caching (cache_control breakpoints on static blocks).
     pub prompt_cache: bool,
     pub prompt_cache_mode: String,
@@ -78,6 +80,9 @@ pub struct ContextConfig {
     /// Maximum characters for hierarchical ARCHON.md content.
     #[serde(alias = "claudemd_max_tokens")]
     pub archonmd_max_tokens: u32,
+    /// Approval policy when the agent runs without an interactive AskUser channel.
+    /// `reject` fails closed; every other value defaults to approval.
+    pub noninteractive_plan_approval: String,
 }
 
 impl Default for ContextConfig {
@@ -95,6 +100,7 @@ impl Default for ContextConfig {
             large_request_retry_body_bytes: Some(320_000),
             max_tool_result_bytes: crate::agent::tool_result_context::DEFAULT_MAX_TOOL_RESULT_BYTES,
             compaction_model: None,
+            plan_model: None,
             prompt_cache: true,
             prompt_cache_mode: "explicit".into(),
             prompt_cache_ttl: "5m".into(),
@@ -104,6 +110,7 @@ impl Default for ContextConfig {
             prompt_cache_models: std::collections::BTreeMap::new(),
             model_pricing: std::collections::BTreeMap::new(),
             archonmd_max_tokens: 8192,
+            noninteractive_plan_approval: "approve".into(),
         }
     }
 }

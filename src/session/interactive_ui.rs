@@ -11,7 +11,6 @@ use archon_llm::effort::{EffortLevel, EffortState};
 use archon_llm::fast_mode::FastModeState;
 use archon_memory::MemoryTrait;
 use archon_tui::app::TuiEvent;
-use archon_tui::commands::CommandInfo;
 use archon_tui::event_channel::{TuiEventReceiver, TuiEventSender};
 use archon_tui::observability;
 
@@ -39,6 +38,7 @@ pub(super) async fn run(
     effort_state: EffortState,
     model_override_shared: Arc<tokio::sync::Mutex<String>>,
     permission_mode_shared: Arc<tokio::sync::Mutex<String>>,
+    plan_mode_state: Arc<tokio::sync::Mutex<archon_core::agent::plan_mode_state::PlanModeState>>,
     extra_dirs_shared: Arc<tokio::sync::Mutex<Vec<PathBuf>>>,
     show_thinking: Arc<AtomicBool>,
     session_stats_shared: Arc<tokio::sync::Mutex<SessionStats>>,
@@ -113,6 +113,7 @@ pub(super) async fn run(
             show_thinking,
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,
+            plan_mode_state,
             session_id: session_id.to_string(),
             session_store: Arc::clone(&session_store),
             cost_config: config.cost.clone(),
@@ -148,6 +149,11 @@ pub(super) async fn run(
             governed_learning_db,
             auto_trainer: auto_trainer.clone(),
         });
+
+    let command_catalog = super::command_catalog::build_command_catalog(
+        cmd_ctx.registry.primaries_with_descriptions(),
+        cmd_ctx.skill_registry.as_ref(),
+    );
 
     let slash_commands_disabled = resolved_flags.disable_slash_commands;
     let session_store_for_input = Arc::clone(&session_store);
@@ -239,15 +245,6 @@ pub(super) async fn run(
     if config.tui.vim_mode {
         tui_event_tx.send_async(TuiEvent::SetVimMode(true)).await?;
     }
-
-    let command_catalog: Vec<CommandInfo> = crate::command::registry::default_registry()
-        .primaries_with_descriptions()
-        .into_iter()
-        .map(|(name, desc)| CommandInfo {
-            name: format!("/{name}"),
-            description: desc.to_string(),
-        })
-        .collect();
 
     let tui_result = archon_tui::app::run(archon_tui::app::AppConfig {
         event_rx: tui_event_rx,

@@ -10,7 +10,7 @@ use crate::tool::ToolContext;
 
 #[tokio::test]
 #[cfg(unix)]
-async fn parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
+async fn parent_exit_with_descendant_held_pipes_is_cleaned_before_result() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("held-pipes.pid");
     let tool = BashTool {
@@ -34,11 +34,10 @@ async fn parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
     .expect("Bash invocation exceeded its strict outer deadline");
 
     assert!(
-        result.is_error,
-        "descendant-held pipes must time out: {}",
+        !result.is_error,
+        "completed shell with cleaned descendants should succeed: {}",
         result.content
     );
-    assert!(result.content.contains("timed out"), "{}", result.content);
     assert!(started.elapsed() < Duration::from_secs(3));
     wait_until_process_is_absent(&std::fs::read_to_string(&pid_file).expect("descendant pid file"))
         .await;
@@ -62,7 +61,61 @@ fn shell_quote(path: &std::path::Path) -> String {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn timeout_returns_after_descendant_cleanup() {
+async fn normal_completion_kills_delayed_background_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let delayed_file = dir.path().join("delayed-write");
+    let pid_file = dir.path().join("delayed-child.pid");
+    let tool = BashTool {
+        max_output_bytes: 1024,
+        ..Default::default()
+    };
+
+    let result = tool
+        .execute(
+            json!({
+                "command": format!(
+                    "sh -c 'kill -STOP \"$$\"; printf delayed > {}' & child=$!; printf '%s' \"$child\" > {}",
+                    shell_quote(&delayed_file),
+                    shell_quote(&pid_file),
+                )
+            }),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    let pid = std::fs::read_to_string(&pid_file).expect("fixture child pid");
+    wait_until_process_is_absent(&pid).await;
+    assert!(
+        !delayed_file.exists(),
+        "a detached mutation escaped Bash completion"
+    );
+}
+
+#[tokio::test]
+async fn stderr_redirection_and_heredoc_are_not_background_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool::default();
+    let result = tool
+        .execute(
+            json!({"command": "cat <<'EOF' >&2\nheredoc stderr\nEOF"}),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    assert!(result.content.contains("heredoc stderr"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn parent_completion_returns_after_descendant_cleanup() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("cleanup-before-return.pid");
     let tool = BashTool {
@@ -80,7 +133,7 @@ async fn timeout_returns_after_descendant_cleanup() {
         )
         .await;
 
-    assert!(result.is_error, "{}", result.content);
+    assert!(!result.is_error, "{}", result.content);
     let pid = std::fs::read_to_string(pid_file).unwrap();
     // Bounded poll rather than an immediate check.
     //
@@ -295,6 +348,8 @@ async fn execute_with_output_limit(command: &str, max_output_bytes: usize) -> To
     };
     bash_result_from_pipes(
         max_output_bytes,
+        &ToolContext::default(),
+        command,
         stdout,
         stderr,
         result.status.code().unwrap_or(-1),

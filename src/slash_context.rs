@@ -29,6 +29,9 @@ pub(crate) struct SlashCommandContext {
     pub(crate) show_thinking: Arc<AtomicBool>,
     pub(crate) session_stats: Arc<tokio::sync::Mutex<SessionStats>>,
     pub(crate) permission_mode: Arc<tokio::sync::Mutex<String>>,
+    /// Plan lifecycle state shared by slash entry and model-driven approval.
+    pub(crate) plan_mode_state:
+        Arc<tokio::sync::Mutex<archon_core::agent::plan_mode_state::PlanModeState>>,
     pub(crate) session_id: String,
     pub(crate) session_store: Arc<archon_session::storage::SessionStore>,
     pub(crate) cost_config: archon_core::config::CostConfig,

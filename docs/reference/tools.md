@@ -71,16 +71,58 @@ Agent result fails if those files are unchanged after completion. Explicit
 background subagents reject `expected_target_files` because Archon cannot
 verify the mutation before returning.
 
+## Plan Mode safe tools
+
+Plan Mode uses the canonical production **Plan-safe allowlist** in
+`archon_tools::plan_mode::PLAN_MODE_SAFE_TOOLS`. Every tool outside this exact
+set is denied while Plan Mode is active; future exceptions require an explicit
+production allowlist or configuration change. Plan Mode blocks working-tree mutations by default while retaining explicit process-state controls: `TaskCreate`, `TaskUpdate`, and `Agent`. Agent model/tool actions remain subject to Plan Mode and preflight boundaries. The retained tools are:
+
+| Tool | Plan Mode effect |
+|---|---|
+| `Read` | Read file, image, PDF, or notebook content without changing it. |
+| `Glob` | Find paths matching a pattern without changing the working tree. |
+| `Grep` | Search file content without changing it. |
+| `AskUserQuestion` | Request structured user input; it does not mutate project files. |
+| `EnterPlanMode` | Request Plan Mode entry; only the trusted runtime may execute it. |
+| `ExitPlanMode` | Submit the plan for approval; approval materializes plan-linked tasks, while rejection or revision keeps mutations blocked. |
+| `TaskCreate` | Create a tracked task. With a `prompt`, it may run or spawn a subagent; that subagent's tools remain subject to its own permission gates. |
+| `TaskUpdate` | Update tracked-task metadata or status; it does not edit project files. |
+| `TaskGet` | Read one tracked task. |
+| `TaskList` | List tracked tasks. |
+| `DocList` | List the compact document inventory. |
+| `DocGet` | Read compact document metadata. |
+| `DocStatus` | Read document processing or indexing status. |
+| `DocSearch` | Search indexed document chunks. |
+| `DocAnswer` | Answer from document evidence with citations. |
+| `DocProvenance` | Trace document or chunk provenance. |
+| `DocInspect` | Inspect document pages, chunks, OCR runs, and provenance. |
+| `DocModelStatus` | Read embedding backend and vector status. |
+| `GameTheoryStatus` | Read persisted game-theory run status. |
+| `GameTheoryListAgents` | List curated game-theory specialists. |
+| `GameTheoryInspect` | Inspect a game-theory run, fingerprint, routing, specialist, section, or report artifact. |
+| `LearningStatus` | Read governed-learning status and proposal counts. |
+| `LearningInspect` | Inspect a learning event, behaviour proposal, or manifest. |
+| `BehaviourProposals` | List pending behaviour proposals; it neither approves nor rolls them back. |
+| `Agent` | Spawn a subagent subject to its own permission gates; subagents cannot enter or exit Plan Mode. |
+
+The allowlist includes no mutation-capable tools: `Write`, `Edit`, `Bash`,
+`BehaviourApprove`, `BehaviourRollback`, and all other tools outside the
+canonical set are denied; mutating tools remain denied. Other task and agent controls remain denied unless explicitly allowlisted by a future production change. This includes `TaskStop`,
+`TaskOutput`, `AgentCatalog`, and `SendMessage`; they are not Plan-safe merely
+because they may be observational in some contexts.
+
 ## Planning & isolation
 
 | Tool | Permission | Purpose |
 |---|---|---|
-| `EnterPlanMode` | Safe | Enter Plan Mode (read-only tool whitelist) |
-| `ExitPlanMode` | Safe | Exit Plan Mode |
 | `EnterWorktree` | Risky | Create an isolated git worktree for the current session |
 | `ExitWorktree` | Risky | Exit worktree (`merge` / `keep` / `remove`) |
 
-## Task management
+## Plan Mode completion evidence
+
+Approved plan steps can carry required evidence kinds. A task cannot complete unless its recorded evidence passes `check_required_evidence`; evidence requirements block completion rather than treating a terminal task state as proof. Durable reconciliation classifies plan work as completed, omitted, or deviated and records changed unplanned paths as unplanned-extra.
+
 
 | Tool | Permission | Purpose |
 |---|---|---|

@@ -14,6 +14,8 @@ archon-leann = { path = "../archon-leann" }
 archon-observability = { path = "../archon-observability" }
 archon-docs = { path = "../archon-docs" }
 archon-policy = { path = "../archon-policy" }
+archon-completion = { path = "../archon-completion" }
+archon-session = { path = "../archon-session" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -63,12 +65,15 @@ libc = "0.2"
 sha2.workspace = true
 
 [dev-dependencies]
+archon-session = { path = "../archon-session", features = ["test-support"] }
 tempfile.workspace = true
 # TASK-AGS-105: serialize tests that rely on process-global
 # subagent executor state installed via OnceLock.
 serial_test.workspace = true
 
 [features]
+# Test-only support consumed by cross-crate fault-injection tests.
+test-support = ["archon-session/test-support"]
 # Declared so the feature-gated remote_trigger_tests target compiles under
 # clippy --all-targets; the tests only run with --features remote-trigger.
 remote-trigger = []

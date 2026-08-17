@@ -157,7 +157,7 @@ impl WebSessionHandle {
                      Change permissions in the TUI or config before retrying from web chat"
                 );
             }
-            TuiEvent::AskUserPrompt { question } => {
+            TuiEvent::AskUserPrompt { question, .. } => {
                 let _ = self.ask_user_tx.send(String::new()).await;
                 anyhow::bail!(
                     "AskUserQuestion requires an interactive TUI answer: {question}. \
@@ -182,6 +182,7 @@ pub(crate) async fn spawn_web_session(
     let super::interactive_bootstrap::Bootstrap {
         config_path,
         layer_filter,
+        session_database,
         session_store,
         memory,
         working_dir,
@@ -257,6 +258,7 @@ pub(crate) async fn spawn_web_session(
     } = super::interactive_agent::build(
         config,
         session_id,
+        session_database,
         cli,
         working_dir.clone(),
         Arc::clone(&hook_registry),
@@ -340,6 +342,7 @@ pub(crate) async fn spawn_web_session(
             show_thinking,
             session_stats: session_stats_shared,
             permission_mode: permission_mode_shared,
+            plan_mode_state: agent.plan_mode_state(),
             session_id: session_id.to_string(),
             session_store: Arc::clone(&session_store),
             cost_config: config.cost.clone(),

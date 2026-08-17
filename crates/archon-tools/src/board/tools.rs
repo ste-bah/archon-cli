@@ -10,7 +10,7 @@ use std::sync::Arc;
 use archon_memory::board::{BoardAccess, BoardItem, BoardItemKind, BoardStatus, NewBoardItem};
 
 use super::{BoardHandle, caller_id, leases, run_id_for_session};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -186,6 +186,10 @@ impl Tool for BoardRaiseTool {
         }
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
@@ -284,6 +288,10 @@ impl Tool for BoardListTool {
             }
             Err(error) => ToolResult::error(format!("failed to list board items: {error}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

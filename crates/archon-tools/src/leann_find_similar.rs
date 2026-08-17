@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use archon_leann::CodeIndex;
 
 pub struct LeannFindSimilarTool {
@@ -85,6 +85,10 @@ impl Tool for LeannFindSimilarTool {
             }
             Err(e) => ToolResult::error(format!("LEANN find-similar failed: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

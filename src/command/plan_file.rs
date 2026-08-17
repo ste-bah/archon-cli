@@ -21,17 +21,31 @@
 
 use std::path::{Path, PathBuf};
 
-/// Resolve the plan file path — see [`archon_core::plan_file::plan_path`].
+/// Resolve an editable document path for a plan.
 #[inline]
-pub fn plan_path(working_dir: &Path) -> PathBuf {
-    archon_core::plan_file::plan_path(working_dir)
+pub fn plan_document_path(working_dir: &Path, plan_id: &str) -> std::io::Result<PathBuf> {
+    archon_core::plan_file::plan_document_path(working_dir, plan_id)
 }
 
-/// Read the plan file contents — see
-/// [`archon_core::plan_file::read_plan_file`].
+/// Resolve a per-session interception audit path.
 #[inline]
-pub fn read_plan_file(path: &Path) -> std::io::Result<Option<String>> {
-    archon_core::plan_file::read_plan_file(path)
+pub fn plan_audit_path(working_dir: &Path, session_id: &str) -> std::io::Result<PathBuf> {
+    archon_core::plan_file::plan_audit_path(working_dir, session_id)
+}
+
+/// Write a structured plan as its editable Markdown document.
+#[inline]
+pub fn write_plan_document(
+    path: &Path,
+    plan: &archon_session::plan::PlanDocument,
+) -> std::io::Result<()> {
+    archon_core::plan_file::write_plan_document(path, plan)
+}
+
+/// Read editable plan-document text.
+#[inline]
+pub fn read_plan_document(path: &Path) -> std::io::Result<Option<String>> {
+    archon_core::plan_file::read_plan_document(path)
 }
 
 /// Append an intercepted-tool-call entry — see

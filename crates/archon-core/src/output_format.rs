@@ -142,7 +142,7 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
             Some(format_stream_event("compaction", &serde_json::json!({})))
         }
 
-        AgentEvent::AskUser { question } => Some(format_stream_event(
+        AgentEvent::AskUser { question, .. } => Some(format_stream_event(
             "ask_user",
             &serde_json::json!({"question": question}),
         )),

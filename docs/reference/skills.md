@@ -6,12 +6,18 @@ Skills are slash commands resolved through the Skill registry rather than the pr
 
 | Aspect | Primary commands | Skills |
 |---|---|---|
-| Registry | `default_registry()` in `src/command/registry.rs` | `crates/archon-core/src/skills/{builtin,expanded}.rs` + user/plugin paths |
+| Registry | `default_registry()` in `src/command/registry.rs` | `crates/archon-core/src/skills/{builtin,expanded}.rs` + installed project/user skill roots |
 | Dispatch precedence | Higher | Lower (only invoked if no primary matches) |
 | Implementation | Rust handler with `CommandHandler` trait | SKILL.md prompt workflow (or Rust for built-in) |
 | User extension | Compile-time only (built-in) | Drop a SKILL.md file in a project/global skill root |
 
 When you type `/foo`, archon first checks the primary registry. If no primary matches, it falls back to the skill registry.
+
+## Slash autocomplete
+
+At session startup, autocomplete builds one catalog from the initialized primary command registry and every canonical skill already registered for that session: built-ins plus project/user `SKILL.md` files, including plugin-bundle skills installed into those standard roots. Primary commands sort first, followed by skills; each group is alphabetical. Rows are labelled `[command]` or `[skill]`.
+
+A same-named primary shadows a skill: the skill is omitted from autocomplete and startup logs `skill '/{skill}' is shadowed by primary command '/{primary}'; primary dispatch wins`. Aliases are not autocomplete rows, so every canonical skill appears at most once. Adding or editing `SKILL.md` files requires restarting Archon.
 
 ## Built-in skills (68 total)
 
@@ -110,17 +116,7 @@ Arguments passed to a skill are appended to the injected prompt, for example
 
 ## Plugin-supplied skills
 
-Plugins can register skills in their `plugin.toml`:
-
-```toml
-[[skills]]
-name = "my-plugin-skill"
-description = "..."
-trigger = "/my-plugin"
-template_path = "templates/my-skill.md"
-```
-
-See [Plugins](../integrations/plugins.md) for the full plugin manifest schema.
+Markdown plugin bundles can supply `SKILL.md` directories. The bundle installer copies each `skills/<name>/` directory into a standard project or user skill root, such as `<workdir>/.archon/skills/`; the normal startup scan then registers it for dispatch, `/skills`, `/help`, and autocomplete. Bundle directories themselves are not scanned directly. See [Plugins](../integrations/plugins.md) for bundle layout and installation behavior.
 
 ## Discovery
 

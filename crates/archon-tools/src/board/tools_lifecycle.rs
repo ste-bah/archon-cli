@@ -12,7 +12,7 @@ use archon_memory::board::{BoardAccess, BoardStatus, BoardUpdate};
 
 use super::tools::{access, render, required_str, sweep};
 use super::{BoardHandle, caller_id, run_id_for_session};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 // ---------------------------------------------------------------------------
 // BoardClaim
@@ -105,6 +105,10 @@ impl Tool for BoardClaimTool {
             }
             Err(error) => ToolResult::error(format!("failed to claim board item: {error}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -248,6 +252,10 @@ impl Tool for BoardResolveTool {
             )),
             Err(error) => ToolResult::error(format!("failed to close board item: {error}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

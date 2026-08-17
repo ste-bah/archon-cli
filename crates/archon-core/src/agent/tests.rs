@@ -5,7 +5,7 @@ use archon_consciousness::rules::RuleSource;
 use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 use archon_memory::MemoryGraph;
 
-struct MockLlmProvider;
+pub(super) struct MockLlmProvider;
 
 #[async_trait::async_trait]
 impl LlmProvider for MockLlmProvider {
@@ -47,6 +47,8 @@ pub(super) fn test_agent() -> Agent {
         ))),
     )
 }
+
+include!("tests/plan_mode_preflight.rs");
 
 #[tokio::test]
 async fn auto_extraction_flush_waits_for_pending_tasks() {

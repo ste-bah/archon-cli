@@ -290,10 +290,12 @@ fn suggestion_list() -> Vec<archon_tui::commands::CommandInfo> {
         archon_tui::commands::CommandInfo {
             name: "/help".into(),
             description: "show help".into(),
+            kind: archon_tui::commands::CommandKind::Primary,
         },
         archon_tui::commands::CommandInfo {
             name: "/resume".into(),
             description: "会話を再開する".into(),
+            kind: archon_tui::commands::CommandKind::Primary,
         },
     ]
 }

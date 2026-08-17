@@ -83,6 +83,7 @@ async fn wrapper_records_redacted_check_and_bash_events() {
             bash_result: Some(SandboxCommandResult {
                 content: "ok".to_string(),
                 is_error: false,
+                exit_code: Some(0),
             }),
         }),
         config,

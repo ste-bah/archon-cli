@@ -24,6 +24,7 @@ use archon_tui::observability;
 pub(super) struct Bootstrap {
     pub config_path: PathBuf,
     pub layer_filter: Option<Vec<archon_core::config_layers::ConfigLayer>>,
+    pub session_database: PathBuf,
     pub session_store: Arc<archon_session::storage::SessionStore>,
     pub memory: Arc<dyn MemoryTrait>,
     pub working_dir: PathBuf,
@@ -373,6 +374,7 @@ pub(super) async fn prepare(
     Ok(Bootstrap {
         config_path,
         layer_filter,
+        session_database: session_db,
         session_store,
         memory,
         working_dir,

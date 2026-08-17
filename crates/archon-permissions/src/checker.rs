@@ -16,6 +16,10 @@ const PLAN_MODE_WHITELIST: &[&str] = &[
     "DocModelStatus",
     "AskUserQuestion",
     "EnterPlanMode",
+    // Exiting Plan mode is a lifecycle control. The agent dispatch layer still
+    // requires structured plan approval before it restores any write-capable
+    // permission mode.
+    "ExitPlanMode",
     "ToolSearch",
     "Agent",
 ];
@@ -262,6 +266,15 @@ mod tests {
         let checker = PermissionChecker::new(PermissionMode::Plan, RuleSet::empty());
         let decision = checker.check("Agent", "spawn subagent", "");
         assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn exit_plan_mode_is_admitted_as_a_plan_lifecycle_control() {
+        let checker = PermissionChecker::new(PermissionMode::Plan, RuleSet::empty());
+        assert_eq!(
+            checker.check("ExitPlanMode", "request structured plan approval", "{}"),
+            PermissionDecision::Allow
+        );
     }
 
     #[test]

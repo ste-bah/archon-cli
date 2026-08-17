@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::git::open_repo;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use crate::worktree_manager::{ExitAction, WorktreeManager};
 
 /// Tool to enter (create) a git worktree for isolated agent work.
@@ -54,6 +54,10 @@ impl Tool for EnterWorktreeTool {
             )),
             Err(e) => ToolResult::error(format!("Failed to create worktree: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -132,6 +136,10 @@ impl Tool for ExitWorktreeTool {
             Ok(msg) => ToolResult::success(msg),
             Err(e) => ToolResult::error(format!("Failed to exit worktree: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
