@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-#[cfg(windows)]
-use std::process::Command;
 use std::sync::Arc;
 
 use archon_completion::models::{CompletionEvidence, EvidenceStatus};
@@ -47,77 +45,6 @@ fn fixture_test_command(fixture: &Path) -> String {
     )
 }
 
-#[cfg(windows)]
-fn configure_windows_msvc_linker(fixture: &Path) {
-    let host = rustc_value("host:");
-    assert!(
-        host.ends_with("-pc-windows-msvc"),
-        "expected an MSVC Rust host, got {host}"
-    );
-    let sysroot = rustc_sysroot();
-    let linker = Path::new(&sysroot)
-        .join("lib")
-        .join("rustlib")
-        .join(&host)
-        .join("bin")
-        .join("rust-lld.exe");
-    assert!(
-        linker.is_file(),
-        "Rust toolchain linker must exist at {}",
-        linker.display()
-    );
-    let cargo_dir = fixture.join(".cargo");
-    std::fs::create_dir(&cargo_dir).unwrap();
-    std::fs::write(
-        cargo_dir.join("config.toml"),
-        format!("[target.\"{host}\"]\nlinker = {}\n", toml_string(&linker)),
-    )
-    .unwrap();
-}
-
-#[cfg(windows)]
-fn rustc_value(prefix: &str) -> String {
-    let output = Command::new("rustc")
-        .arg("-vV")
-        .output()
-        .expect("rustc must run to configure the fixture linker");
-    assert!(
-        output.status.success(),
-        "rustc -vV failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("rustc -vV output must be UTF-8")
-        .lines()
-        .find_map(|line| line.strip_prefix(prefix))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| panic!("rustc -vV output must contain {prefix}"))
-}
-
-#[cfg(windows)]
-fn rustc_sysroot() -> String {
-    let output = Command::new("rustc")
-        .args(["--print", "sysroot"])
-        .output()
-        .expect("rustc must report its sysroot");
-    assert!(
-        output.status.success(),
-        "rustc --print sysroot failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("rustc sysroot must be UTF-8")
-        .trim()
-        .to_owned()
-}
-
-#[cfg(windows)]
-fn toml_string(path: &Path) -> String {
-    format!("{:?}", bash_path(path))
-}
-
 fn bash_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -136,7 +63,20 @@ fn create_test_fixture() -> tempfile::TempDir {
     )
     .unwrap();
     #[cfg(windows)]
-    configure_windows_msvc_linker(fixture.path());
+    {
+        let manifest = fixture.path().join("Cargo.toml");
+        let target = fixture.path().join("target");
+        let native_build = std::process::Command::new("cargo")
+            .arg("test")
+            .arg("--manifest-path")
+            .arg(manifest)
+            .arg("--target-dir")
+            .arg(target)
+            .args(["--lib", "--no-run"])
+            .status()
+            .expect("native Cargo must prebuild the evidence fixture");
+        assert!(native_build.success(), "native fixture prebuild must pass");
+    }
     fixture
 }
 
@@ -183,17 +123,6 @@ fn fixture_manifest_path_is_shell_quoted() {
     assert!(command.contains("--manifest-path '"), "{command}");
     assert!(command.contains("--target-dir '"), "{command}");
     assert!(!command.contains([';', '|', '&', '\n', '#']), "{command}");
-    #[cfg(windows)]
-    {
-        let config = std::fs::read_to_string(fixture.path().join(".cargo/config.toml")).unwrap();
-        assert!(
-            config.contains("[target.\"x86_64-pc-windows-msvc\"]"),
-            "{config}"
-        );
-        assert!(config.contains("rust-lld.exe"), "{config}");
-        assert!(config.contains("linker = \""), "{config}");
-        assert!(!config.contains('\\'), "{config}");
-    }
 }
 
 #[test]
