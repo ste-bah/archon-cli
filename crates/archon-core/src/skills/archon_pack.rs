@@ -145,15 +145,23 @@ mod tests {
     /// invisible — the gate is Rust, the instruction is markdown, and nothing
     /// but this test connects them. Change either side and the gate silently
     /// never fires.
+    ///
+    /// The status is taken from `BoardStatus` rather than written as a literal
+    /// so the check survives a rename on the Rust side too. Asserting a
+    /// hardcoded `"gaps_remain"` would only catch the markdown drifting; if the
+    /// enum's string representation changed, the skill would keep telling the
+    /// model to raise a status the gate no longer queries, and this test would
+    /// still pass.
     #[test]
     fn verify_done_teaches_the_contract_the_gate_enforces() {
         let body = parse_skill_md(embedded_skill_md::VERIFY_DONE)
             .expect("verify-done must parse")
             .body;
 
+        let gate_status = archon_memory::board::BoardStatus::GapsRemain.to_string();
         assert!(
-            body.contains("gaps_remain"),
-            "must name the status the gate reads"
+            body.contains(&gate_status),
+            "must name the status the gate reads ({gate_status})"
         );
         assert!(body.contains("BoardRaise"), "must say how to record a gap");
         assert!(
