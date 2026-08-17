@@ -217,7 +217,7 @@ impl Tool for BashTool {
             Ok(prepared) => prepared,
             Err(error) => return limit_tool_result(self.max_output_bytes, error),
         };
-        if let Some(result) = execute_in_sandbox(self, ctx, &prepared).await {
+        if let Some(result) = execute_in_sandbox(self, ctx, raw_command, &prepared).await {
             return result;
         }
         run_prepared_bash_command(self, ctx, raw_command, prepared).await
@@ -299,6 +299,10 @@ fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64, floor_ms:
 fn command_with_compat_prelude(command: &str) -> String {
     format!("{BASH_COMPAT_PRELUDE}\n{SHELL_TIMEOUT_PRELUDE}\n{command}")
 }
+
+#[cfg(test)]
+#[path = "bash_sandbox_evidence_tests.rs"]
+mod sandbox_evidence_tests;
 
 #[cfg(test)]
 #[path = "bash_tests.rs"]

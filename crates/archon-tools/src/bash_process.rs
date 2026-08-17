@@ -113,6 +113,7 @@ pub(super) fn guarded_bash_command(
 pub(super) async fn execute_in_sandbox(
     tool: &BashTool,
     ctx: &ToolContext,
+    raw_command: &str,
     prepared: &PreparedBashCommand,
 ) -> Option<ToolResult> {
     let sandbox = ctx.sandbox.as_ref()?;
@@ -125,33 +126,43 @@ pub(super) async fn execute_in_sandbox(
             env: prepared.env_vars.clone(),
         })
         .await?;
-    Some(limit_tool_result(
-        tool.max_output_bytes,
-        ToolResult {
-            content: redact_provider_env_output(prepared.provider_env.as_ref(), result.content),
-            is_error: result.is_error,
-        },
-    ))
+    let content = redact_provider_env_output(prepared.provider_env.as_ref(), result.content);
+    let result = match result.exit_code {
+        Some(exit_code) => ToolResult::from_authoritative_bash_execution(
+            content,
+            ctx.session_id.clone(),
+            ctx.tool_run_tool_use_id.clone().unwrap_or_default(),
+            ctx.tool_run_attempt,
+            raw_command.to_string(),
+            exit_code,
+        ),
+        None => ToolResult::from_parts(content, result.is_error),
+    };
+    Some(limit_tool_result(tool.max_output_bytes, result))
 }
 
-pub(super) fn limit_tool_result(max_output_bytes: usize, result: ToolResult) -> ToolResult {
-    ToolResult {
-        content: bounded_text(result.content, max_output_bytes),
-        is_error: result.is_error,
-    }
+pub(super) fn limit_tool_result(max_output_bytes: usize, mut result: ToolResult) -> ToolResult {
+    result.content = bounded_text(result.content, max_output_bytes);
+    result
 }
 
 pub(super) fn bash_result_from_pipes(
     max_output_bytes: usize,
+    ctx: &ToolContext,
+    command: &str,
     stdout: CapturedOutput,
     stderr: CapturedOutput,
     exit_code: i32,
 ) -> ToolResult {
     let output = bounded_command_output(stdout, stderr, exit_code, max_output_bytes);
-    ToolResult {
-        content: output,
-        is_error: exit_code != 0,
-    }
+    ToolResult::from_authoritative_bash_execution(
+        output,
+        ctx.session_id.clone(),
+        ctx.tool_run_tool_use_id.clone().unwrap_or_default(),
+        ctx.tool_run_attempt,
+        command.to_string(),
+        exit_code,
+    )
 }
 
 pub(super) async fn run_prepared_bash_command(
@@ -173,6 +184,8 @@ pub(super) async fn run_prepared_bash_command(
     let result = await_bash_child(tool, ctx, raw_command, &prepared, &deadline, &mut child).await;
     let result = redact_and_limit_result(
         tool.max_output_bytes,
+        ctx,
+        raw_command,
         prepared.provider_env.as_ref(),
         result,
     );
@@ -182,16 +195,27 @@ pub(super) async fn run_prepared_bash_command(
 
 fn redact_and_limit_result(
     max_output_bytes: usize,
+    ctx: &ToolContext,
+    raw_command: &str,
     provider_env: Option<&ProviderEnvResolution>,
-    result: ToolResult,
+    mut result: ToolResult,
 ) -> ToolResult {
-    limit_tool_result(
-        max_output_bytes,
-        ToolResult {
-            content: redact_provider_env_output(provider_env, result.content),
-            is_error: result.is_error,
-        },
-    )
+    let content = redact_provider_env_output(provider_env, result.content);
+    result.content = bounded_text(content, max_output_bytes);
+    if let Some(exit_code) = result
+        .authoritative_bash_execution()
+        .map(|execution| execution.exit_code())
+    {
+        return ToolResult::from_authoritative_bash_execution(
+            result.content,
+            ctx.session_id.clone(),
+            ctx.tool_run_tool_use_id.clone().unwrap_or_default(),
+            ctx.tool_run_attempt,
+            raw_command.to_string(),
+            exit_code,
+        );
+    }
+    result
 }
 
 pub(super) fn spawn_bash_child(
@@ -255,7 +279,7 @@ pub(super) async fn await_bash_child(
         stdout_task: &mut stdout_task,
         stderr_task: &mut stderr_task,
     };
-    finish_bash_outcome(tool, prepared, &mut state, outcome).await
+    finish_bash_outcome(tool, ctx, raw_command, prepared, &mut state, outcome).await
 }
 
 pub(super) fn start_bash_observers(
@@ -333,13 +357,15 @@ impl BashChildState<'_> {
 
 pub(super) async fn finish_bash_outcome(
     tool: &BashTool,
+    ctx: &ToolContext,
+    raw_command: &str,
     prepared: &PreparedBashCommand,
     state: &mut BashChildState<'_>,
     outcome: BashOutcome,
 ) -> ToolResult {
     let failure = match outcome {
         BashOutcome::Done(status) => {
-            return completed_bash_result(tool, prepared, state, status).await;
+            return completed_bash_result(tool, ctx, raw_command, prepared, state, status).await;
         }
         BashOutcome::Timeout => (
             "timeout",
@@ -355,6 +381,8 @@ pub(super) async fn finish_bash_outcome(
 
 pub(super) async fn completed_bash_result(
     tool: &BashTool,
+    ctx: &ToolContext,
+    raw_command: &str,
     prepared: &PreparedBashCommand,
     state: &mut BashChildState<'_>,
     status: std::io::Result<std::process::ExitStatus>,
@@ -397,7 +425,14 @@ pub(super) async fn completed_bash_result(
             .await;
     }
     let exit_code = status.code().unwrap_or(-1);
-    bash_result_from_pipes(tool.max_output_bytes, stdout, stderr, exit_code)
+    bash_result_from_pipes(
+        tool.max_output_bytes,
+        ctx,
+        raw_command,
+        stdout,
+        stderr,
+        exit_code,
+    )
 }
 
 fn terminate_completed_process_group(process_group: Option<u32>) -> Option<String> {

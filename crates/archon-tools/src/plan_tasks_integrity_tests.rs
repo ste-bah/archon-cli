@@ -3,6 +3,39 @@ use super::*;
 use crate::plan_tasks::test_plan_approval_authority;
 
 #[test]
+fn atomic_materialization_failure_leaves_no_approved_plan_or_tasks() {
+    let store = test_store();
+    let manager = TaskManager::new();
+    let session_id = "atomic-materialization-failure";
+    let mut plan = five_step_plan();
+    store.fail_next_terminal_materialization_after_approval_write();
+
+    let error = materialize_plan_tasks(
+        &manager,
+        &store,
+        &test_plan_approval_authority(&store, session_id),
+        session_id,
+        &mut plan,
+    )
+    .expect_err("injected terminal materialization failure must abort");
+
+    assert!(error.contains("injected terminal materialization failure"));
+    assert!(store.load_plan(session_id, &plan.id).unwrap().is_none());
+    assert!(store.load_plan_tasks(session_id).unwrap().is_empty());
+    assert!(plan.steps.iter().all(|step| step.task_id.is_none()));
+
+    let recovered = materialize_plan_tasks(
+        &manager,
+        &store,
+        &test_plan_approval_authority(&store, session_id),
+        session_id,
+        &mut plan,
+    )
+    .expect("retry after rollback must recover");
+    assert_eq!(recovered.len(), plan.steps.len());
+}
+
+#[test]
 fn save_plan_task_rejects_existing_key_without_overwrite() {
     let store = test_store();
     let original = PersistedPlanTask {

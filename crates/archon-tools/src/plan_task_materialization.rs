@@ -2,6 +2,7 @@ use crate::task_manager::TaskManager;
 use archon_session::plan::{
     PlanApprovalAuthority, PlanApprovalRecord, PlanDocument, PlanStatus, PlanStore,
 };
+use std::sync::Arc;
 
 use super::{
     build_plan_task_infos, persisted_records, plan_has_materialized_steps,
@@ -12,7 +13,7 @@ use super::{
 pub fn materialize_plan_tasks(
     manager: &TaskManager,
     store: &PlanStore,
-    authority: &PlanApprovalAuthority,
+    authority: &Arc<PlanApprovalAuthority>,
     session_id: &str,
     plan: &mut PlanDocument,
 ) -> Result<Vec<String>, String> {
@@ -47,33 +48,25 @@ pub fn materialize_plan_tasks(
     };
     reject_plan_task_collisions(manager, store, session_id, &infos)?;
     wait_for_materialization_barrier_for_test(session_id);
-    let canonical = store
-        .load_plan(session_id, &candidate.id)
-        .map_err(|error| error.to_string())?;
-    if canonical
-        .as_ref()
-        .is_none_or(|stored| stored.to_json() != candidate.to_json())
-    {
-        store
-            .save_terminal_plan_with_approval(authority, session_id, &candidate, &record)
-            .or_else(|error| {
-                let canonical = store.load_plan(session_id, &candidate.id)?;
-                if canonical
-                    .as_ref()
-                    .is_some_and(|stored| stored.to_json() == candidate.to_json())
-                {
-                    Ok(())
-                } else {
-                    Err(error)
-                }
-            })
-            .map_err(|error| error.to_string())?;
-    }
     let prepared = manager
         .prepare_plan_task_installation(authority, session_id, store.clone(), infos)
         .map_err(|error| error.to_string())?;
     store
-        .claim_plan_materialization_with_tasks(authority, session_id, &candidate, &records)
+        .save_terminal_plan_with_approval_and_tasks(
+            authority, session_id, &candidate, &record, &records,
+        )
+        .or_else(|error| {
+            let canonical = store.load_plan(session_id, &candidate.id)?;
+            if canonical
+                .as_ref()
+                .is_some_and(|stored| stored.to_json() == candidate.to_json())
+                && canonical_materialization_ids(store, session_id, &candidate).is_ok()
+            {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })
         .map_err(|error| error.to_string())?;
     let ids = records.into_iter().map(|record| record.task_id).collect();
     *plan = candidate;

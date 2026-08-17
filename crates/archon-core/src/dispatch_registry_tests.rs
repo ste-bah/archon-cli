@@ -205,7 +205,7 @@ async fn dispatch_rejects_unsafe_session_id_without_writing_outside_audit_root()
         )
         .await;
     assert!(result.is_error);
-    assert!(result.content.contains("not available in plan mode"));
+    assert!(result.content.contains("not available in Plan Mode"));
     assert!(!tmp.path().join("escape.md").exists());
     assert!(!tmp.path().join(".archon/plan-audit").exists());
 }

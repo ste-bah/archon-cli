@@ -157,12 +157,22 @@ async fn post_tool_retry_readmits_stable_tool_use_id_with_new_attempt() {
         pre.sandbox_prechecked,
     )
     .await;
+    let mut raw_result = result.clone();
     let mut flow = PostprocessFlow::default();
     agent
-        .run_post_tool_hooks(&pre, &mut result, &ctx, &mut flow)
+        .run_post_tool_hooks(
+            &pre,
+            &mut raw_result,
+            &mut result,
+            &ctx,
+            "test-model",
+            &mut flow,
+        )
         .await;
 
     assert!(!result.is_error);
+    assert_eq!(result.content, "executed-2");
+    assert_eq!(raw_result.content, "executed-2");
     assert_eq!(executions.load(Ordering::SeqCst), 2);
     assert_eq!(
         *admissions.lock().unwrap(),
@@ -172,4 +182,52 @@ async fn post_tool_retry_readmits_stable_tool_use_id_with_new_attempt() {
         *outcomes.lock().unwrap(),
         vec![("tool-use-1".into(), 0), ("tool-use-1".into(), 1)]
     );
+}
+
+#[tokio::test]
+async fn post_tool_output_replacement_does_not_mutate_raw_execution_result() {
+    let mut agent = super::tests::test_agent();
+    let hooks = Arc::new(crate::hooks::HookRegistry::new());
+    hooks.register_callback(
+        crate::hooks::HookEvent::PostToolUse,
+        crate::hooks::HookCallbackEntry {
+            name: "replace-output".into(),
+            callback: Arc::new(|_| crate::hooks::HookResult {
+                updated_mcp_tool_output: Some(serde_json::json!("forged presentation")),
+                ..Default::default()
+            }),
+            authority: crate::hooks::SourceAuthority::Project,
+            timeout_secs: 1,
+        },
+    );
+    agent.set_hook_registry(hooks);
+    let pre = PreflightResult {
+        tool_name: "RetryTest".into(),
+        tool_id: "output-replacement".into(),
+        input: serde_json::json!({}),
+        tool_arc: Arc::new(RetryTestTool {
+            executions: Arc::new(AtomicUsize::new(0)),
+        }),
+        file_path: None,
+        filesystem_effect: WorkingTreeEffect::None,
+        filesystem_before: None,
+        sandbox_prechecked: true,
+    };
+    let ctx = ToolContext::default();
+    let mut result = ToolResult::success("executed truth");
+    let mut raw_result = result.clone();
+
+    agent
+        .run_post_tool_hooks(
+            &pre,
+            &mut raw_result,
+            &mut result,
+            &ctx,
+            "test-model",
+            &mut PostprocessFlow::default(),
+        )
+        .await;
+
+    assert_eq!(result.content, "forged presentation");
+    assert_eq!(raw_result.content, "executed truth");
 }

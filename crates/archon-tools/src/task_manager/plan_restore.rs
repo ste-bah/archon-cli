@@ -5,12 +5,35 @@ use tokio_util::sync::CancellationToken;
 use super::{TaskInfo, TaskManager, TaskTransitionError};
 
 impl TaskManager {
+    pub(super) fn attach_plan_store_for_test(
+        &self,
+        store: archon_session::plan::PlanStore,
+        session_id: impl Into<String>,
+    ) -> Result<(), TaskTransitionError> {
+        let mut persistence = self
+            .plan_persistence
+            .lock()
+            .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+        let session_id = session_id.into();
+        if persistence
+            .get(&session_id)
+            .is_some_and(|existing| !existing.is_same_store(&store))
+        {
+            return Err(TaskTransitionError::Persistence(format!(
+                "session {session_id} is already attached to a different plan store"
+            )));
+        }
+        persistence.entry(session_id).or_insert(store);
+        Ok(())
+    }
+
     /// Restore an already durably persisted plan-linked task.
     ///
     /// This compatibility entry point refuses to publish caller-supplied plan
     /// metadata unless the exact task row is present in the session's attached
     /// store. Transaction-backed materialization and batch rehydration use
     /// their dedicated prepared-installation paths instead.
+    #[allow(dead_code)]
     pub(crate) fn insert_plan_task(&self, info: TaskInfo) -> Result<(), TaskTransitionError> {
         let metadata = info.metadata.as_ref().ok_or_else(|| {
             TaskTransitionError::Persistence("insert_plan_task requires plan metadata".to_string())
@@ -52,6 +75,7 @@ impl TaskManager {
     ///
     /// Used only during session rehydration and transaction-backed plan
     /// materialization.
+    #[allow(dead_code)]
     pub(crate) fn restore_plan_task(&self, info: TaskInfo) -> Result<(), TaskTransitionError> {
         if info.metadata.is_none() {
             return Err(TaskTransitionError::Persistence(

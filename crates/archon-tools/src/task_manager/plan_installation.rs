@@ -13,8 +13,10 @@ pub struct PreparedPlanTaskInstallation<'a> {
     cancellation_tokens: MutexGuard<'a, HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
     execution_tokens: MutexGuard<'a, HashMap<String, CancellationToken>>,
     persistence: MutexGuard<'a, HashMap<String, PlanStore>>,
+    authorities: MutexGuard<'a, HashMap<String, Arc<PlanApprovalAuthority>>>,
     session_id: String,
     store: PlanStore,
+    authority: Arc<PlanApprovalAuthority>,
     infos: Vec<TaskInfo>,
 }
 
@@ -25,15 +27,17 @@ pub struct PreparedPlanTaskRehydration<'a> {
     cancellation_tokens: MutexGuard<'a, HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
     execution_tokens: MutexGuard<'a, HashMap<String, CancellationToken>>,
     persistence: MutexGuard<'a, HashMap<String, PlanStore>>,
+    authorities: MutexGuard<'a, HashMap<String, Arc<PlanApprovalAuthority>>>,
     session_id: String,
     store: PlanStore,
+    authority: Arc<PlanApprovalAuthority>,
     absent_infos: Vec<TaskInfo>,
 }
 
 impl TaskManager {
     pub fn prepare_plan_task_installation(
         &self,
-        authority: &PlanApprovalAuthority,
+        authority: &Arc<PlanApprovalAuthority>,
         session_id: &str,
         store: PlanStore,
         infos: Vec<TaskInfo>,
@@ -47,13 +51,16 @@ impl TaskManager {
         let execution_tokens = self.lock_execution_tokens()?;
         let persistence = self.lock_plan_persistence()?;
         validate_store_attachment(&persistence, session_id, &store)?;
+        let authorities = self.lock_plan_authorities()?;
         Ok(PreparedPlanTaskInstallation {
             tasks,
             cancellation_tokens,
             execution_tokens,
             persistence,
+            authorities,
             session_id: session_id.to_string(),
             store,
+            authority: Arc::clone(authority),
             infos,
         })
     }
@@ -62,7 +69,7 @@ impl TaskManager {
     /// manager lock until the complete restore batch and attachment are visible.
     pub fn prepare_plan_task_rehydration(
         &self,
-        authority: &PlanApprovalAuthority,
+        authority: &Arc<PlanApprovalAuthority>,
         session_id: &str,
         store: PlanStore,
         infos: Vec<TaskInfo>,
@@ -74,6 +81,7 @@ impl TaskManager {
         let execution_tokens = self.lock_execution_tokens()?;
         let persistence = self.lock_plan_persistence()?;
         validate_store_attachment(&persistence, session_id, &store)?;
+        let authorities = self.lock_plan_authorities()?;
         let absent_infos =
             validate_rehydration_batch(&tasks, &cancellation_tokens, &execution_tokens, &infos)?;
         self.fail_plan_installation_for_test(session_id)?;
@@ -82,8 +90,10 @@ impl TaskManager {
             cancellation_tokens,
             execution_tokens,
             persistence,
+            authorities,
             session_id: session_id.to_string(),
             store,
+            authority: Arc::clone(authority),
             absent_infos,
         })
     }
@@ -117,6 +127,15 @@ impl TaskManager {
         &self,
     ) -> Result<MutexGuard<'_, HashMap<String, PlanStore>>, TaskTransitionError> {
         self.plan_persistence
+            .lock()
+            .map_err(|error| TaskTransitionError::Lock(error.to_string()))
+    }
+
+    fn lock_plan_authorities(
+        &self,
+    ) -> Result<MutexGuard<'_, HashMap<String, Arc<PlanApprovalAuthority>>>, TaskTransitionError>
+    {
+        self.plan_authorities
             .lock()
             .map_err(|error| TaskTransitionError::Lock(error.to_string()))
     }
@@ -155,6 +174,59 @@ impl TaskManager {
 
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-support"))]
+    pub fn scoped_plan_task_cleanup_for_test<'a>(
+        &'a self,
+        session_id: impl Into<String>,
+        task_ids: impl IntoIterator<Item = String>,
+    ) -> super::ScopedPlanTaskCleanup<'a> {
+        super::ScopedPlanTaskCleanup {
+            manager: self,
+            session_id: session_id.into(),
+            task_ids: task_ids.into_iter().collect(),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn cleanup_plan_tasks_for_test(&self, session_id: &str, task_ids: &[String]) {
+        let mut tasks = self
+            .tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut cancellation_tokens = self
+            .cancellation_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut execution_tokens = self
+            .execution_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut persistence = self
+            .plan_persistence
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut authorities = self
+            .plan_authorities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for task_id in task_ids {
+            tasks.remove(task_id);
+            cancellation_tokens.remove(task_id);
+            execution_tokens.remove(task_id);
+        }
+        persistence.remove(session_id);
+        authorities.remove(session_id);
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn has_plan_store_attachment_for_test(&self, session_id: &str) -> bool {
+        self.plan_persistence
+            .lock()
+            .is_ok_and(|persistence| persistence.contains_key(session_id))
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn installed_plan_task_count_for_session_for_test(&self, session_id: &str) -> usize {
         self.tasks
             .lock()
@@ -175,8 +247,11 @@ impl TaskManager {
 impl PreparedPlanTaskInstallation<'_> {
     pub fn install(mut self) {
         self.persistence
-            .entry(self.session_id)
+            .entry(self.session_id.clone())
             .or_insert(self.store);
+        self.authorities
+            .entry(self.session_id)
+            .or_insert(self.authority);
         for info in self.infos.drain(..) {
             insert_task_with_tokens(
                 &mut self.tasks,
@@ -191,8 +266,11 @@ impl PreparedPlanTaskInstallation<'_> {
 impl PreparedPlanTaskRehydration<'_> {
     pub fn install(mut self) -> usize {
         self.persistence
-            .entry(self.session_id)
+            .entry(self.session_id.clone())
             .or_insert(self.store);
+        self.authorities
+            .entry(self.session_id)
+            .or_insert(self.authority);
         let inserted = self.absent_infos.len();
         for info in self.absent_infos.drain(..) {
             insert_task_with_tokens(

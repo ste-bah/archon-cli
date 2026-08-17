@@ -174,12 +174,16 @@ mod tests {
     use crate::plan_tasks::{materialize_plan_tasks, test_plan_approval_authority};
     use crate::task_manager::{TASK_MANAGER, TaskStatus};
     use crate::tool::Tool;
-    use archon_completion::models::{CompletionState, VerificationGateResult};
-    use archon_completion::{
-        CompletionEvidence, EvidenceKind, EvidenceStatus, RequiredEvidenceKind,
-    };
+    use archon_completion::RequiredEvidenceKind;
 
-    fn materialize_runtime_plan(session_id: &str) -> (Vec<String>, cozo::DbInstance) {
+    fn materialize_runtime_plan(
+        session_id: &str,
+    ) -> (
+        Vec<String>,
+        cozo::DbInstance,
+        archon_session::plan::PlanStore,
+        std::sync::Arc<archon_session::plan::PlanApprovalAuthority>,
+    ) {
         let db = cozo::DbInstance::new("mem", "", "").unwrap();
         let store = archon_session::plan::PlanStore::new(&db).unwrap();
         let plan_id = uuid::Uuid::new_v4().to_string();
@@ -211,15 +215,10 @@ mod tests {
                 task_id: None,
             },
         ];
-        let ids = materialize_plan_tasks(
-            &TASK_MANAGER,
-            &store,
-            &test_plan_approval_authority(&store, session_id),
-            session_id,
-            &mut plan,
-        )
-        .unwrap();
-        (ids, db)
+        let authority = test_plan_approval_authority(&store, session_id);
+        let ids = materialize_plan_tasks(&TASK_MANAGER, &store, &authority, session_id, &mut plan)
+            .unwrap();
+        (ids, db, store, authority)
     }
 
     #[tokio::test]
@@ -236,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_tool_reports_checked_transition_errors() {
-        let (ids, _) =
+        let (ids, _, _, _) =
             materialize_runtime_plan(&format!("runtime-update-{}", uuid::Uuid::new_v4()));
         let context = ToolContext::default();
 
@@ -290,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn plan_description_update_is_rejected_without_partial_status_change() {
-        let (ids, _) =
+        let (ids, _, _, _) =
             materialize_runtime_plan(&format!("runtime-description-{}", uuid::Uuid::new_v4()));
         let context = ToolContext::default();
         let result = TaskUpdateTool
@@ -332,9 +331,8 @@ mod tests {
 
     #[tokio::test]
     async fn trusted_durable_evidence_allows_plan_completion() {
-        let run_id = format!("trusted-run-{}", uuid::Uuid::new_v4());
-        let (ids, db) =
-            materialize_runtime_plan(&format!("runtime-trusted-{}", uuid::Uuid::new_v4()));
+        let session_id = format!("runtime-trusted-{}", uuid::Uuid::new_v4());
+        let (ids, _db, store, authority) = materialize_runtime_plan(&session_id);
         let context = ToolContext::default();
         TaskUpdateTool
             .execute(json!({"task_id": ids[0], "status": "Running"}), &context)
@@ -345,45 +343,31 @@ mod tests {
         TaskUpdateTool
             .execute(json!({"task_id": ids[1], "status": "Running"}), &context)
             .await;
-        let evidence = CompletionEvidence {
-            evidence_id: format!("evidence-{}", uuid::Uuid::new_v4()),
-            run_id: run_id.clone(),
-            evidence_kind: EvidenceKind::TestRun,
-            producer: "verified-test-runner".into(),
-            command_or_operation: Some("cargo test -p archon-tools".into()),
-            status: EvidenceStatus::Passed,
-            exit_code: Some(0),
-            input_hash: Some("input-hash".into()),
-            output_hash: Some("output-hash".into()),
-            stdout_summary: Some("tests passed".into()),
-            stderr_summary: None,
-            artifact_ids: vec![],
-            provenance_record_id: "verification-record-1".into(),
-            started_at: chrono::Utc::now().to_rfc3339(),
-            completed_at: Some(chrono::Utc::now().to_rfc3339()),
-        };
-        archon_completion::store::insert_gate_result(
-            &db,
-            &VerificationGateResult {
-                gate_id: format!("gate-{}", uuid::Uuid::new_v4()),
-                gate_name: "test-evidence".into(),
-                passed: true,
-                resulting_state: CompletionState::Verified,
-                blocked_claims: vec![],
-                required_missing_evidence: vec![],
-                explanation: "verified test result".into(),
-                provenance_record_id: evidence.provenance_record_id.clone(),
-            },
-            &run_id,
-        )
-        .unwrap();
-        archon_completion::store::insert_completion_evidence(&db, &evidence).unwrap();
+        let evidence = store
+            .record_authoritative_test_execution(
+                &authority,
+                &session_id,
+                "trusted-tool",
+                0,
+                "cargo test -p archon-tools",
+                "test result: ok. 1 passed; 0 failed",
+                0,
+            )
+            .unwrap();
+        store
+            .verify_test_command_evidence(
+                &authority,
+                &session_id,
+                &evidence.run_id,
+                &evidence.evidence_id,
+            )
+            .unwrap();
         let completed = TaskUpdateTool
             .execute(
                 json!({
                     "task_id": ids[1],
                     "status": "Completed",
-                    "evidence_run_id": run_id,
+                    "evidence_run_id": evidence.run_id,
                     "evidence_ids": [evidence.evidence_id]
                 }),
                 &context,

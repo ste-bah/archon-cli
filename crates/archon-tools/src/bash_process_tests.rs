@@ -382,6 +382,8 @@ async fn execute_with_output_limit(command: &str, max_output_bytes: usize) -> To
     };
     bash_result_from_pipes(
         max_output_bytes,
+        &ToolContext::default(),
+        command,
         stdout,
         stderr,
         result.status.code().unwrap_or(-1),

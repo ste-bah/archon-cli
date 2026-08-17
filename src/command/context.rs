@@ -12,7 +12,7 @@ mod effects;
 mod plan_lifecycle_tests;
 mod primary;
 #[cfg(test)]
-mod slash_ctx_test_fixture;
+pub(crate) mod slash_ctx_test_fixture;
 #[cfg(test)]
 mod tests;
 

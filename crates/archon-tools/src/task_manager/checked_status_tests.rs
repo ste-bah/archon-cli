@@ -34,6 +34,36 @@ fn evidence_plan() -> PlanDocument {
 }
 
 #[test]
+fn scoped_plan_task_cleanup_removes_only_tracked_tasks_and_attachment() {
+    let manager = TaskManager::new();
+    let (_db, store) = test_store();
+    let session_id = "scoped-plan-task-cleanup";
+    let durable_task_id = uuid::Uuid::new_v4().simple().to_string();
+    crate::plan_tasks::set_next_plan_task_ids_for_test([durable_task_id.clone()]);
+    let cleanup = manager.scoped_plan_task_cleanup_for_test(session_id, [durable_task_id.clone()]);
+    let manual_task_id = manager.create_task("manual task must survive scoped cleanup");
+    let mut plan = evidence_plan();
+
+    let installed = materialize_plan_tasks(
+        &manager,
+        &store,
+        &test_plan_approval_authority(&store, session_id),
+        session_id,
+        &mut plan,
+    )
+    .expect("materialize plan");
+    assert_eq!(installed, vec![durable_task_id.clone()]);
+    assert!(manager.has_plan_store_attachment_for_test(session_id));
+
+    drop(cleanup);
+
+    assert!(manager.get_task(&durable_task_id).is_none());
+    assert!(manager.cancellation_token(&durable_task_id).is_none());
+    assert!(manager.execution_token(&durable_task_id).is_none());
+    assert!(!manager.has_plan_store_attachment_for_test(session_id));
+    assert!(manager.get_task(&manual_task_id).is_some());
+}
+#[test]
 fn checked_status_rejects_forged_required_evidence_fields() {
     let manager = TaskManager::new();
     let (_db, store) = test_store();

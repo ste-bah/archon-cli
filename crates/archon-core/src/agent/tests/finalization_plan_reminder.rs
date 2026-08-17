@@ -92,7 +92,10 @@ async fn captured_plan_request_contains_plan_workflow_reminder() {
         .filter_map(|block| block["text"].as_str())
         .find(|text| text.contains("<system-reminder>"))
         .expect("plan request should contain a workflow reminder");
-    assert!(reminder.contains("read-only tools"));
+    assert!(reminder.contains("working-tree mutations"));
+    assert!(reminder.contains("TaskCreate"));
+    assert!(reminder.contains("TaskUpdate"));
+    assert!(reminder.contains("Agent"));
     assert!(reminder.contains("goal"));
     assert!(reminder.contains("files"));
     assert!(reminder.contains("ordered dependency steps"));

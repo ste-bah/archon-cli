@@ -104,9 +104,16 @@ impl Agent {
         let Some(task) = persisted_tasks.iter().find(|task| task.task_id == task_id) else {
             return;
         };
-        let Ok(resolved) =
-            store.resolve_required_evidence(run_id, &evidence_ids, &task.required_evidence)
-        else {
+        let Some(authority) = self.plan_approval_authority.as_ref() else {
+            return;
+        };
+        let Ok(resolved) = store.resolve_required_evidence(
+            authority,
+            &self.config.session_id,
+            run_id,
+            &evidence_ids,
+            &task.required_evidence,
+        ) else {
             return;
         };
         for item in resolved {

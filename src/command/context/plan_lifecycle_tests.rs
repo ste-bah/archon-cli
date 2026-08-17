@@ -59,6 +59,58 @@ async fn slash_entry_records_default_before_entering_plan() {
 }
 
 #[tokio::test]
+async fn slash_plan_exit_clears_model_entry_before_reentry_and_shared_restore() {
+    use archon_core::agent::plan_mode_state::{PlanEntryPath, safe_restore_mode};
+    use archon_permissions::mode::PermissionMode;
+
+    let fixture = super::slash_ctx_test_fixture::build_test_slash_context(
+        "model-plan-reentry",
+        "plan",
+        None,
+        None,
+    );
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    {
+        let mut state = fixture.ctx.plan_mode_state.lock().await;
+        state.record_entry(PermissionMode::Auto, PlanEntryPath::EnterPlanModeTool);
+        state.active_plan_id = Some("stale-model-plan".into());
+    }
+
+    super::apply_effect(
+        CommandEffect::SetPermissionMode("default".to_string()),
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+    {
+        let state = fixture.ctx.plan_mode_state.lock().await;
+        assert_eq!(state.previous_permission_mode, None);
+        assert_eq!(state.active_plan_id, None);
+        assert_eq!(state.entered_via, None);
+    }
+
+    super::apply_effect(
+        CommandEffect::EnterPlanMode {
+            previous_mode: PermissionMode::Default,
+        },
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+    let mut state = fixture.ctx.plan_mode_state.lock().await;
+    assert_eq!(
+        state.previous_permission_mode,
+        Some(PermissionMode::Default)
+    );
+    assert_eq!(state.entered_via, Some(PlanEntryPath::SlashCommand));
+    assert_eq!(
+        safe_restore_mode(state.previous_permission_mode.take(), false),
+        PermissionMode::Default,
+        "structured exit after re-entry must not restore stale Auto authority"
+    );
+}
+
+#[tokio::test]
 async fn slash_plan_exit_clears_entry_before_reentry_and_shared_restore() {
     use archon_core::agent::plan_mode_state::{PlanEntryPath, safe_restore_mode};
     use archon_permissions::mode::PermissionMode;

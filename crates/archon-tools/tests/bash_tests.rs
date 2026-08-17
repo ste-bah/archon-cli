@@ -6,6 +6,24 @@ use archon_tools::bash::BashTool;
 use archon_tools::provider_env::{ProviderEnvPolicy, resolve_provider_env};
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext};
 
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn bash_result_carries_private_authoritative_execution_metadata() {
+    let result = BashTool::default()
+        .execute(
+            json!({ "command": "printf 'authoritative'; exit 7" }),
+            &test_ctx(),
+        )
+        .await;
+    let execution = result
+        .authoritative_bash_execution()
+        .expect("real Bash execution metadata");
+
+    assert_eq!(execution.command(), "printf 'authoritative'; exit 7");
+    assert_eq!(execution.exit_code(), 7);
+    assert_eq!(execution.output(), result.content);
+}
+
 fn test_ctx() -> ToolContext {
     ToolContext {
         working_dir: std::env::temp_dir(),

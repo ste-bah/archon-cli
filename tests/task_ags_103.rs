@@ -67,10 +67,7 @@ fn priority_classifies_state_transitions_as_state() {
         priority(&AgentEvent::ToolCallComplete {
             name: "t".into(),
             id: "1".into(),
-            result: ToolResult {
-                content: "ok".into(),
-                is_error: false,
-            },
+            result: ToolResult::success("ok"),
             transcript_summary: None,
         }),
         Priority::State

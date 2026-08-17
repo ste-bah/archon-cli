@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use cozo::{DataValue, ScriptMutability};
 
 use super::{PersistedPlanTask, PlanStore, db_err};
+#[cfg(test)]
+use crate::plan_models::PlanStepStatus;
 
 impl PlanStore {
     #[cfg(any(test, feature = "test-support"))]
@@ -21,7 +23,7 @@ impl PlanStore {
         &self,
         _session_id: &str,
         _task: &PersistedPlanTask,
-        _status: super::PlanStepStatus,
+        _status: PlanStepStatus,
     ) -> Result<(), std::io::Error> {
         Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

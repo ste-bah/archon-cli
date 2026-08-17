@@ -115,10 +115,18 @@ async fn post_tool_result(
         sandbox_prechecked: true,
     };
     let mut result = ToolResult::success("The file has been updated.");
+    let mut raw_result = result.clone();
     let ctx = ToolContext::default();
     let mut flow = PostprocessFlow::default();
     agent
-        .run_post_tool_hooks(&pre, &mut result, &ctx, &mut flow)
+        .run_post_tool_hooks(
+            &pre,
+            &mut raw_result,
+            &mut result,
+            &ctx,
+            "test-model",
+            &mut flow,
+        )
         .await;
     result
 }

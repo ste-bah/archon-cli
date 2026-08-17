@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use cozo::{DataValue, MultiTransaction};
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
 use super::{PlanStore, PlanStoreIdentity, db_err};
@@ -246,6 +247,50 @@ impl PlanStore {
             ));
         }
         self.verify_authority_in(transaction, authority)
+    }
+
+    pub(super) fn evidence_signature_in(
+        &self,
+        transaction: &MultiTransaction,
+        authority: &PlanApprovalAuthority,
+        session_id: &str,
+        payload: &[u8],
+    ) -> Result<String, std::io::Error> {
+        self.require_authority_in(transaction, authority, session_id)?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(&authority.secret)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        mac.update(b"archon.authoritative-bash-evidence.v1\0");
+        mac.update(&(payload.len() as u64).to_be_bytes());
+        mac.update(payload);
+        Ok(hex::encode(mac.finalize().into_bytes()))
+    }
+
+    pub(super) fn verify_evidence_signature_in(
+        &self,
+        transaction: &MultiTransaction,
+        authority: &PlanApprovalAuthority,
+        session_id: &str,
+        payload: &[u8],
+        signature: &str,
+    ) -> Result<(), std::io::Error> {
+        self.require_authority_in(transaction, authority, session_id)?;
+        let signature = hex::decode(signature).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "authoritative Bash evidence signature is malformed",
+            )
+        })?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(&authority.secret)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        mac.update(b"archon.authoritative-bash-evidence.v1\0");
+        mac.update(&(payload.len() as u64).to_be_bytes());
+        mac.update(payload);
+        mac.verify_slice(&signature).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "authoritative Bash evidence signature verification failed",
+            )
+        })
     }
 
     /// Validate that an opaque authority is bound to this durable store and session.

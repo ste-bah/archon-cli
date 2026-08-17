@@ -210,6 +210,8 @@ async fn background_bash_command_is_observed_after_contained_completion() {
         .expect("Bash preflight must capture a filesystem baseline");
     let ctx = ToolContext {
         working_dir: temp.path().to_path_buf(),
+        session_id: session_id.into(),
+        tool_run_tool_use_id: Some(pending.id.clone()),
         ..ToolContext::default()
     };
     let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
@@ -224,7 +226,12 @@ async fn background_bash_command_is_observed_after_contained_completion() {
             AgentEvent::ToolCallComplete { name, result, .. } if name == "Bash" => Some(result),
             _ => None,
         });
-    assert!(!result.expect("Bash completion").is_error);
+    let result = result.expect("Bash completion");
+    assert!(
+        !result.is_error,
+        "unexpected Bash error: {}",
+        result.content
+    );
     let plan = store.load_latest_plan(session_id).unwrap().unwrap();
     assert!(plan.execution_evidence.observation_failure.is_none());
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;

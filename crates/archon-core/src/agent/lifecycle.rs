@@ -287,6 +287,7 @@ impl Agent {
         store: PlanStore,
         authority: PlanApprovalAuthority,
     ) -> Result<(), String> {
+        let authority = Arc::new(authority);
         store
             .validate_approval_authority(&authority, &self.config.session_id)
             .map_err(|error| error.to_string())?;

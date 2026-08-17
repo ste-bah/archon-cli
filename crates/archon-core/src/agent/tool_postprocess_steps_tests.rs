@@ -26,8 +26,8 @@ impl Tool for RetryTestTool {
     }
 
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        self.executions.fetch_add(1, Ordering::SeqCst);
-        ToolResult::success("executed")
+        let execution = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
+        ToolResult::success(format!("executed-{execution}"))
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

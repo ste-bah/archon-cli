@@ -101,13 +101,9 @@ pub(crate) fn apply_effect<'a>(
                 };
                 if resolved == archon_permissions::mode::PermissionMode::Default.as_str() {
                     let mut plan_mode_state = slash_ctx.plan_mode_state.lock().await;
-                    if plan_mode_state.entered_via
-                        == Some(archon_core::agent::plan_mode_state::PlanEntryPath::SlashCommand)
-                    {
-                        plan_mode_state.previous_permission_mode = None;
-                        plan_mode_state.active_plan_id = None;
-                        plan_mode_state.entered_via = None;
-                    }
+                    plan_mode_state.previous_permission_mode = None;
+                    plan_mode_state.active_plan_id = None;
+                    plan_mode_state.entered_via = None;
                 }
                 crate::runtime::permission_events::record_permission_mode_event(
                     slash_ctx.governed_learning_db.as_ref(),

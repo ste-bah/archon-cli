@@ -301,8 +301,7 @@ impl ToolRegistry {
                 AgentActivityStatus::Failed,
             );
             return ToolResult::error(format!(
-                "Tool '{tool_name}' is not available in plan mode. Only read-only tools are allowed. \
-                 The call has been recorded in the session audit for review."
+                "Tool '{tool_name}' is not available in Plan Mode. Plan Mode blocks working-tree mutations by default; only the canonical Plan-safe allowlist is available, including TaskCreate, TaskUpdate, and Agent. The call has been recorded in the session audit for review."
             ));
         }
 

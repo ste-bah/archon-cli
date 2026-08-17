@@ -107,10 +107,7 @@ impl Tool for PowerShellTool {
                 }
 
                 if exit_code != 0 {
-                    ToolResult {
-                        content: format!("Exit code {exit_code}\n{output}"),
-                        is_error: true,
-                    }
+                    ToolResult::from_parts(format!("Exit code {exit_code}\n{output}"), true)
                 } else {
                     ToolResult::success(output)
                 }

@@ -13,17 +13,20 @@ impl Agent {
     ) -> Option<(String, PermissionDecision, Arc<dyn Tool>, serde_json::Value)> {
         let perm_mode = self.config.permission_mode.lock().await.clone();
         let description = describe_tool_intent(&tool.name, &tool.input_json);
+        if let Some(PermissionDecision::Deny(reason)) = self
+            .config
+            .permission_rules
+            .evaluate(&tool.name, &tool.input_json)
+        {
+            self.deny_preflight_tool(tool, &perm_mode, &reason).await;
+            return None;
+        }
         let checker_decision = self.permission_checker_decision(
             &perm_mode,
             &tool.name,
             &tool.input_json,
             &description,
         );
-        if let PermissionDecision::Deny(reason) = &checker_decision {
-            self.deny_preflight_tool(tool, &perm_mode, reason).await;
-            return None;
-        }
-
         let tool_arc = match self.registry.lookup(&tool.name) {
             Some(t) => t,
             None => {
@@ -146,8 +149,7 @@ impl Agent {
             ),
         }
         let result = ToolResult::error(format!(
-            "Tool '{}' is not available in plan mode. Only read-only tools are allowed. \
-             The call has been recorded in the session audit for review.",
+            "Tool '{}' is not available in Plan Mode. Plan Mode blocks working-tree mutations by default; only the canonical Plan-safe allowlist is available, including TaskCreate, TaskUpdate, and Agent. The call has been recorded in the session audit for review.",
             tool.name
         ));
         self.send_event(AgentEvent::ToolCallComplete {

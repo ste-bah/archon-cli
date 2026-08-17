@@ -96,7 +96,8 @@ pub enum AgentMode {
     /// Normal mode -- all tools available.
     #[default]
     Normal,
-    /// Plan mode -- only read-only tools allowed.
+    /// Plan Mode blocks working-tree mutations by default while allowing its
+    /// canonical Plan-safe controls, including TaskCreate, TaskUpdate, and Agent.
     Plan,
 }
 
@@ -203,17 +204,94 @@ impl std::fmt::Debug for ToolContext {
 // Tool result
 // ---------------------------------------------------------------------------
 
+/// Opaque metadata minted only by the Bash execution implementation.
+///
+/// Private fields and crate-private construction prevent external tools or
+/// model-supplied prose from claiming that a command actually ran.
+#[derive(Debug, Clone)]
+pub struct AuthoritativeBashExecution {
+    session_id: String,
+    tool_use_id: String,
+    attempt: u32,
+    command: String,
+    output: String,
+    exit_code: i32,
+}
+
+impl AuthoritativeBashExecution {
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn tool_use_id(&self) -> &str {
+        &self.tool_use_id
+    }
+
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     pub content: String,
     pub is_error: bool,
+    #[serde(skip)]
+    authoritative_bash_execution: Option<Box<AuthoritativeBashExecution>>,
 }
 
 impl ToolResult {
+    pub fn from_parts(content: impl Into<String>, is_error: bool) -> Self {
+        Self {
+            content: content.into(),
+            is_error,
+            authoritative_bash_execution: None,
+        }
+    }
+
+    pub(crate) fn from_authoritative_bash_execution(
+        content: String,
+        session_id: String,
+        tool_use_id: String,
+        attempt: u32,
+        command: String,
+        exit_code: i32,
+    ) -> Self {
+        Self {
+            authoritative_bash_execution: Some(Box::new(AuthoritativeBashExecution {
+                session_id,
+                tool_use_id,
+                attempt,
+                command,
+                output: content.clone(),
+                exit_code,
+            })),
+            content,
+            is_error: exit_code != 0,
+        }
+    }
+
+    pub fn authoritative_bash_execution(&self) -> Option<&AuthoritativeBashExecution> {
+        self.authoritative_bash_execution.as_deref()
+    }
+
     pub fn success(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
             is_error: false,
+            authoritative_bash_execution: None,
         }
     }
 
@@ -227,6 +305,7 @@ impl ToolResult {
         Self {
             content,
             is_error: true,
+            authoritative_bash_execution: None,
         }
     }
 }

@@ -246,6 +246,7 @@ libc = "0.2"
 # access" test. Declared here rather than in `[dependencies]` so the check and
 # its atomic are compiled out of every non-test build: cargo applies dev
 # dependencies only to test targets.
+archon-tools = { path = "crates/archon-tools", features = ["test-support"] }
 archon-cozo = { path = "crates/archon-cozo", features = ["test-support"] }
 # Holds the workflow-live JSON fixture corpus (`archon_test_support::fixtures`).
 # The corpus lives there rather than beside the tests because `include_str!`

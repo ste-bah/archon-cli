@@ -56,8 +56,8 @@ impl archon_pipeline::runner::LlmClient for UnusedLlmClient {
 ///
 /// Held by the test for as long as the context is alive: dropping it removes
 /// the session database from disk.
-pub(super) struct SlashCtxFixture {
-    pub(super) ctx: SlashCommandContext,
+pub struct SlashCtxFixture {
+    pub ctx: SlashCommandContext,
     _tempdir: tempfile::TempDir,
 }
 
@@ -67,7 +67,7 @@ pub(super) struct SlashCtxFixture {
 /// caller-supplied because they are the inputs the permission-mode effect
 /// actually reads. The two database handles are separate parameters on
 /// purpose — pass distinct instances to prove which one is written.
-pub(super) fn build_test_slash_context(
+pub fn build_test_slash_context(
     session_id: &str,
     initial_permission_mode: &str,
     cozo_db: Option<Arc<cozo::DbInstance>>,

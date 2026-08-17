@@ -41,23 +41,40 @@ impl TaskManager {
                         Ok((Some(supplied_run_id.to_string()), evidence_ids))
                     },
                 )?;
-                let store = {
+                let (store, authority) = {
                     let persistence = self
                         .plan_persistence
                         .lock()
                         .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
-                    persistence
-                        .get(&metadata.session_id)
-                        .cloned()
-                        .ok_or_else(|| {
+                    let store =
+                        persistence
+                            .get(&metadata.session_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                TaskTransitionError::Persistence(format!(
+                                    "plan-linked task session {} has no attached plan store",
+                                    metadata.session_id
+                                ))
+                            })?;
+                    drop(persistence);
+                    let authorities = self
+                        .plan_authorities
+                        .lock()
+                        .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+                    let authority = authorities.get(&metadata.session_id).cloned().ok_or_else(
+                        || {
                             TaskTransitionError::Persistence(format!(
-                                "plan-linked task session {} has no attached plan store",
+                                "plan-linked task session {} has no attached approval authority",
                                 metadata.session_id
                             ))
-                        })?
+                        },
+                    )?;
+                    (store, authority)
                 };
                 store
                     .resolve_required_evidence(
+                        &authority,
+                        &metadata.session_id,
                         run_id.as_deref().unwrap_or_default(),
                         &evidence_ids,
                         &metadata.required_evidence,

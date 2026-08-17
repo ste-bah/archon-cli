@@ -4,13 +4,14 @@ use archon_session::plan::PlanStatus;
 use archon_session::plan::{PersistedPlanTask, PlanDocument, PlanStepStatus, PlanStore};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
+use std::sync::Arc;
 #[cfg(any(test, feature = "test-support"))]
 use {
     archon_session::plan::PlanApprovalAuthority,
     std::{
         cell::RefCell,
         collections::VecDeque,
-        sync::{Arc, Barrier, LazyLock, Mutex},
+        sync::{Barrier, LazyLock, Mutex},
     },
 };
 
@@ -21,10 +22,15 @@ mod materialization;
 pub use materialization::materialize_plan_tasks;
 
 #[cfg(any(test, feature = "test-support"))]
-pub fn test_plan_approval_authority(store: &PlanStore, session_id: &str) -> PlanApprovalAuthority {
-    store
-        .bootstrap_approval_authority_for_test(session_id)
-        .expect("test plan approval authority")
+pub fn test_plan_approval_authority(
+    store: &PlanStore,
+    session_id: &str,
+) -> Arc<PlanApprovalAuthority> {
+    Arc::new(
+        store
+            .bootstrap_approval_authority_for_test(session_id)
+            .expect("test plan approval authority"),
+    )
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -221,7 +227,7 @@ pub fn persisted_records(infos: &[TaskInfo]) -> Result<Vec<PersistedPlanTask>, S
 pub fn rehydrate_plan_tasks(
     manager: &TaskManager,
     store: &PlanStore,
-    authority: &archon_session::plan::PlanApprovalAuthority,
+    authority: &Arc<archon_session::plan::PlanApprovalAuthority>,
     session_id: &str,
 ) -> Result<usize, String> {
     let tasks = store

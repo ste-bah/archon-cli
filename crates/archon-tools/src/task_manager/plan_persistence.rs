@@ -67,6 +67,9 @@ pub enum TaskTransitionError {
 
 pub(super) fn persist_plan_task(
     plan_persistence: &Mutex<HashMap<String, PlanStore>>,
+    plan_authorities: &Mutex<
+        HashMap<String, std::sync::Arc<archon_session::plan::PlanApprovalAuthority>>,
+    >,
     previous: &TaskInfo,
     info: &TaskInfo,
     evidence: &[RequiredEvidence],
@@ -84,10 +87,21 @@ pub(super) fn persist_plan_task(
                 "plan-linked task session has no attached plan store".into(),
             )
         })?;
+    let authority = plan_authorities
+        .lock()
+        .map_err(|error| TaskTransitionError::Lock(error.to_string()))?
+        .get(&metadata.session_id)
+        .cloned()
+        .ok_or_else(|| {
+            TaskTransitionError::Persistence(
+                "plan-linked task session has no attached approval authority".into(),
+            )
+        })?;
     let record = persisted_plan_task(info)?;
     let (evidence_run_id, evidence_ids) = durable_evidence_identity(evidence)?;
     store
         .transition_plan_task_checked(
+            &authority,
             &metadata.session_id,
             &record.task_id,
             &previous.status.to_string(),
@@ -220,6 +234,7 @@ pub(super) fn set_status_checked(
     }
     persist_plan_task(
         &manager.plan_persistence,
+        &manager.plan_authorities,
         &current_info,
         &persisted_info,
         evidence,

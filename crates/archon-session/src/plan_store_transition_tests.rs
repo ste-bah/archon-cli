@@ -11,8 +11,17 @@ fn checked_terminal_transition_rolls_back_task_step_and_reconciliation_together(
     let running_task = store.load_plan_tasks(session_id).unwrap().remove(0);
     store.fail_next_task_transition_after_plan_write();
 
+    let authority = test_authority(&store, session_id);
     let error = store
-        .transition_plan_task_checked(session_id, &task.task_id, "Running", "Completed", "", &[])
+        .transition_plan_task_checked(
+            &authority,
+            session_id,
+            &task.task_id,
+            "Running",
+            "Completed",
+            "",
+            &[],
+        )
         .expect_err("injected post-plan-write failure must roll back");
 
     assert!(
@@ -50,16 +59,20 @@ fn running_materialized_task() -> (PlanStore, PlanDocument, PersistedPlanTask) {
         completion_evidence: vec![],
         updated_at: "2026-08-15T00:00:00Z".into(),
     };
+    let authority = test_authority(&store, session_id);
     store
-        .save_plan_with_tasks(
-            &test_authority(&store, session_id),
-            session_id,
-            &plan,
-            std::slice::from_ref(&task),
-        )
+        .save_plan_with_tasks(&authority, session_id, &plan, std::slice::from_ref(&task))
         .expect("seed");
     store
-        .transition_plan_task_checked(session_id, &task.task_id, "Pending", "Running", "", &[])
+        .transition_plan_task_checked(
+            &authority,
+            session_id,
+            &task.task_id,
+            "Pending",
+            "Running",
+            "",
+            &[],
+        )
         .expect("start canonical task");
     (store, plan, task)
 }

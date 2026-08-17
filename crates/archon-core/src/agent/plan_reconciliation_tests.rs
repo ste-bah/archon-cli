@@ -145,19 +145,15 @@ async fn cleared_materialized_reconciliation_agent() -> Agent {
     let session_id = format!("reconciliation-clear-{}", uuid::Uuid::new_v4());
     let mut plan = lifecycle_plan(&session_id);
     let manager = TaskManager::new();
-    let task_ids = materialize_plan_tasks(
-        &manager,
-        &plan_store,
-        &test_plan_approval_authority(&plan_store, &session_id),
-        &session_id,
-        &mut plan,
-    )
-    .unwrap();
-    set_materialized_task_outcomes(&db, &manager, &task_ids);
+    let authority = test_plan_approval_authority(&plan_store, &session_id);
+    let task_ids =
+        materialize_plan_tasks(&manager, &plan_store, &authority, &session_id, &mut plan).unwrap();
+    set_materialized_task_outcomes(&plan_store, &authority, &session_id, &manager, &task_ids);
 
     let mut agent = super::super::tests::test_agent();
     agent.config.session_id = session_id;
     agent.plan_store = Some(plan_store);
+    agent.plan_approval_authority = Some(authority);
     agent.record_plan_file_mutation("src/a.rs").unwrap();
     agent.record_plan_file_mutation("src/extra.rs").unwrap();
     agent.state.add_user_message("transient conversation state");
@@ -166,11 +162,23 @@ async fn cleared_materialized_reconciliation_agent() -> Agent {
 }
 
 fn set_materialized_task_outcomes(
-    db: &cozo::DbInstance,
+    store: &archon_session::plan::PlanStore,
+    authority: &archon_session::plan::PlanApprovalAuthority,
+    session_id: &str,
     manager: &archon_tools::task_manager::TaskManager,
     task_ids: &[String],
 ) {
-    let evidence = insert_passing_test_evidence(db);
+    let evidence = store
+        .record_authoritative_test_execution(
+            authority,
+            session_id,
+            "reconciliation-tool",
+            0,
+            "cargo test fixture",
+            "test result: ok. 1 passed; 0 failed",
+            0,
+        )
+        .unwrap();
     manager
         .set_status_checked_with_evidence_ids(&task_ids[0], TaskStatus::Running, "", &[])
         .unwrap();
@@ -185,47 +193,6 @@ fn set_materialized_task_outcomes(
     manager
         .set_status_checked_with_evidence_ids(&task_ids[2], TaskStatus::Failed, "", &[])
         .unwrap();
-}
-
-fn insert_passing_test_evidence(db: &cozo::DbInstance) -> archon_completion::CompletionEvidence {
-    use archon_completion::models::{CompletionState, VerificationGateResult};
-    use archon_completion::{CompletionEvidence, EvidenceKind, EvidenceStatus};
-
-    let run_id = format!("reconciliation-run-{}", uuid::Uuid::new_v4());
-    let evidence = CompletionEvidence {
-        evidence_id: format!("reconciliation-evidence-{}", uuid::Uuid::new_v4()),
-        run_id: run_id.clone(),
-        evidence_kind: EvidenceKind::TestRun,
-        producer: "fixture-test-runner".into(),
-        command_or_operation: Some("cargo test fixture".into()),
-        status: EvidenceStatus::Passed,
-        exit_code: Some(0),
-        input_hash: Some("input".into()),
-        output_hash: Some("output".into()),
-        stdout_summary: Some("passed".into()),
-        stderr_summary: None,
-        artifact_ids: Vec::new(),
-        provenance_record_id: "reconciliation-fixture-gate".into(),
-        started_at: chrono::Utc::now().to_rfc3339(),
-        completed_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
-    archon_completion::store::insert_gate_result(
-        db,
-        &VerificationGateResult {
-            gate_id: evidence.provenance_record_id.clone(),
-            gate_name: "fixture tests".into(),
-            passed: true,
-            resulting_state: CompletionState::Verified,
-            blocked_claims: Vec::new(),
-            required_missing_evidence: Vec::new(),
-            explanation: "fixture evidence verified".into(),
-            provenance_record_id: evidence.provenance_record_id.clone(),
-        },
-        &run_id,
-    )
-    .unwrap();
-    archon_completion::store::insert_completion_evidence(db, &evidence).unwrap();
-    evidence
 }
 
 #[tokio::test]

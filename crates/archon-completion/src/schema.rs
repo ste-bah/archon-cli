@@ -4,7 +4,7 @@
 //! and `archon-pipeline::gametheory::schema`.
 
 use anyhow::Result;
-use cozo::{DbInstance, ScriptMutability};
+use cozo::{DataValue, DbInstance, ScriptMutability};
 
 /// Reuse the same "already exists" markers as archon-docs.
 const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "already exists"];
@@ -13,6 +13,7 @@ const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "a
 pub fn ensure_completion_schema(db: &DbInstance) -> Result<()> {
     ensure_completion_claims(db)?;
     ensure_completion_evidence(db)?;
+    ensure_authoritative_bash_executions(db)?;
     ensure_completion_reports(db)?;
     ensure_verification_gate_results(db)?;
     ensure_false_completion_incidents(db)?;
@@ -79,6 +80,63 @@ fn ensure_completion_evidence(db: &DbInstance) -> Result<()> {
             completed_at: String default "",
         }"#,
     )
+}
+
+fn ensure_authoritative_bash_executions(db: &DbInstance) -> Result<()> {
+    run_create(
+        db,
+        r#":create authoritative_bash_executions {
+            provenance_record_id: String =>
+            run_id: String,
+            session_id: String,
+            tool_use_id: String,
+            attempt: Int,
+            command_hash: String,
+            output_hash: String,
+            exit_code: Int,
+            signature: String,
+            completed_at: String,
+        }"#,
+    )?;
+    migrate_unsigned_authoritative_bash_executions(db)
+}
+
+fn migrate_unsigned_authoritative_bash_executions(db: &DbInstance) -> Result<()> {
+    let columns = db
+        .run_script(
+            "::columns authoritative_bash_executions",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )
+        .map_err(|error| anyhow::anyhow!("inspect authoritative Bash schema failed: {error}"))?;
+    if columns
+        .rows
+        .iter()
+        .any(|row| row.first().and_then(DataValue::get_str) == Some("signature"))
+    {
+        return Ok(());
+    }
+    db.run_script(
+        r#"?[provenance_record_id, run_id, session_id, tool_use_id, attempt, command_hash, output_hash, exit_code, signature, completed_at] :=
+            *authoritative_bash_executions{provenance_record_id, run_id, session_id, tool_use_id, attempt, command_hash, output_hash, exit_code, completed_at},
+            signature = ""
+            :replace authoritative_bash_executions {
+                provenance_record_id =>
+                run_id,
+                session_id,
+                tool_use_id,
+                attempt,
+                command_hash,
+                output_hash,
+                exit_code,
+                signature,
+                completed_at,
+            }"#,
+        Default::default(),
+        ScriptMutability::Mutable,
+    )
+    .map_err(|error| anyhow::anyhow!("migrate authoritative Bash schema failed: {error}"))?;
+    Ok(())
 }
 
 fn ensure_completion_reports(db: &DbInstance) -> Result<()> {
@@ -181,5 +239,42 @@ mod tests {
         let db = test_db();
         ensure_completion_schema(&db).expect("first ensure must succeed");
         ensure_completion_schema(&db).expect("second ensure must succeed (idempotent)");
+    }
+
+    #[test]
+    fn migrates_unsigned_authoritative_bash_execution_relation() {
+        let db = test_db();
+        db.run_script(
+            r#":create authoritative_bash_executions {
+                provenance_record_id: String =>
+                run_id: String,
+                session_id: String,
+                tool_use_id: String,
+                attempt: Int,
+                command_hash: String,
+                output_hash: String,
+                exit_code: Int,
+                completed_at: String,
+            }"#,
+            Default::default(),
+            ScriptMutability::Mutable,
+        )
+        .unwrap();
+
+        ensure_completion_schema(&db).expect("legacy relation must migrate");
+
+        let columns = db
+            .run_script(
+                "::columns authoritative_bash_executions",
+                Default::default(),
+                ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert!(
+            columns
+                .rows
+                .iter()
+                .any(|row| { row.first().and_then(cozo::DataValue::get_str) == Some("signature") })
+        );
     }
 }

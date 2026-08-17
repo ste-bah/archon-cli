@@ -89,7 +89,7 @@ impl Agent {
 
         system.push(serde_json::json!({
             "type": "text",
-            "text": "<system-reminder>Plan mode is read-only: use only read-only tools while preparing the plan. State the goal, files to change, ordered dependency steps, and verification shape. Persist the complete plan, then submit it for approval with ExitPlanMode; do not implement changes until approval.</system-reminder>",
+            "text": "<system-reminder>Plan Mode blocks working-tree mutations by default while retaining canonical Plan-safe controls, including TaskCreate, TaskUpdate, and Agent. Agent model/tool actions remain subject to Plan Mode and preflight boundaries. State the goal, files to change, ordered dependency steps, and verification shape. Persist the complete plan, then submit it for approval with ExitPlanMode; do not implement working-tree changes until approval.</system-reminder>",
         }));
     }
 

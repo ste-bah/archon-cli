@@ -19,8 +19,11 @@ impl Agent {
         active_model: &str,
         flow: &mut PostprocessFlow,
     ) {
+        let mut raw_result = result.clone();
         let mut result = self.prepare_tool_result(pre, result, active_model).await;
-        self.run_post_tool_hooks(pre, &mut result, ctx, flow).await;
+        self.run_post_tool_hooks(pre, &mut raw_result, &mut result, ctx, active_model, flow)
+            .await;
+        self.record_executed_test_evidence(pre, &raw_result, &mut result);
         self.record_plan_execution(pre, &mut result, ctx);
         self.fire_path_hooks(pre).await;
         self.fire_worktree_hooks(pre).await;
@@ -167,8 +170,10 @@ impl Agent {
     pub(super) async fn run_post_tool_hooks(
         &mut self,
         pre: &PreflightResult,
+        raw_result: &mut ToolResult,
         result: &mut ToolResult,
         ctx: &ToolContext,
+        active_model: &str,
         flow: &mut PostprocessFlow,
     ) {
         let max_retries: u32 = 3;
@@ -189,13 +194,17 @@ impl Agent {
                     "PostToolUse hook requested retry, re-executing tool"
                 );
                 let retry_ctx = ctx.with_tool_run_attempt(pre.tool_id.clone(), retry_count);
-                *result = crate::tool_run_admission::execute_tool_attempt(
+                let retry_result = crate::tool_run_admission::execute_tool_attempt(
                     pre.tool_arc.as_ref(),
                     pre.input.clone(),
                     &retry_ctx,
                     pre.sandbox_prechecked,
                 )
                 .await;
+                *raw_result = retry_result.clone();
+                *result = self
+                    .prepare_tool_result(pre, retry_result, active_model)
+                    .await;
                 continue;
             }
             if post_agg.retry {

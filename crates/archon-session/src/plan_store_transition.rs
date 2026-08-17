@@ -7,11 +7,36 @@ use chrono::Utc;
 use cozo::DataValue;
 
 use super::{
-    PersistedPlanTask, PlanDocument, PlanStore, db_err,
+    PersistedPlanTask, PlanApprovalAuthority, PlanDocument, PlanStore, db_err,
     plan_store_materialization::validate_canonical_task_generation,
 };
 
 impl PlanStore {
+    /// Update a specific step's status without opening an unclaimed plan rewrite path.
+    pub fn update_step_status(
+        &self,
+        session_id: &str,
+        plan_id: &str,
+        step_number: u32,
+        status: PlanStepStatus,
+    ) -> Result<(), std::io::Error> {
+        let transaction = self.db.multi_transaction(true);
+        let result = (|| -> Result<(), std::io::Error> {
+            self.ensure_plan_unclaimed(&transaction, session_id, plan_id)?;
+            let mut plan = self.load_plan_in(&transaction, session_id, plan_id)?;
+            let step = plan
+                .steps
+                .iter_mut()
+                .find(|step| step.number == step_number)
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "plan step not found")
+                })?;
+            step.status = status;
+            self.write_plan_in(&transaction, session_id, &plan, &Utc::now().to_rfc3339())
+        })();
+        self.finish_transaction(transaction, result)
+    }
+
     /// Rebuild and persist reconciliation only from the immutable approved plan,
     /// canonical durable tasks, and durable execution evidence.
     pub fn reconcile_plan_execution(
@@ -89,8 +114,10 @@ impl PlanStore {
         self.finish_transaction(transaction, result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn transition_plan_task_checked(
         &self,
+        authority: &PlanApprovalAuthority,
         session_id: &str,
         task_id: &str,
         expected_status: &str,
@@ -107,6 +134,8 @@ impl PlanStore {
                     std::io::Error::new(std::io::ErrorKind::NotFound, "plan task not found")
                 })?;
             let evidence = self.resolve_required_evidence(
+                authority,
+                session_id,
                 evidence_run_id,
                 evidence_ids,
                 &task.required_evidence,

@@ -110,8 +110,29 @@ pub struct TaskManager {
     cancellation_tokens: Mutex<HashMap<String, Arc<AtomicBool>>>,
     execution_tokens: Mutex<HashMap<String, CancellationToken>>,
     plan_persistence: Mutex<HashMap<String, PlanStore>>,
+    plan_authorities: Mutex<HashMap<String, Arc<archon_session::plan::PlanApprovalAuthority>>>,
     #[cfg(any(test, feature = "test-support"))]
     fail_next_plan_installation: Mutex<Option<String>>,
+}
+
+/// Test-only cleanup guard for durable tasks installed into a shared manager.
+///
+/// It removes only the supplied task IDs and the supplied session's PlanStore
+/// attachment when dropped, including while an assertion unwinds.
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub struct ScopedPlanTaskCleanup<'a> {
+    pub(super) manager: &'a TaskManager,
+    pub(super) session_id: String,
+    pub(super) task_ids: Vec<String>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for ScopedPlanTaskCleanup<'_> {
+    fn drop(&mut self) {
+        self.manager
+            .cleanup_plan_tasks_for_test(&self.session_id, &self.task_ids);
+    }
 }
 
 impl TaskManager {
@@ -121,32 +142,20 @@ impl TaskManager {
             cancellation_tokens: Mutex::new(HashMap::new()),
             execution_tokens: Mutex::new(HashMap::new()),
             plan_persistence: Mutex::new(HashMap::new()),
+            plan_authorities: Mutex::new(HashMap::new()),
             #[cfg(any(test, feature = "test-support"))]
             fail_next_plan_installation: Mutex::new(None),
         }
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    #[allow(dead_code)]
     pub(crate) fn attach_plan_store(
         &self,
         store: PlanStore,
         session_id: impl Into<String>,
     ) -> Result<(), TaskTransitionError> {
-        let mut persistence = self
-            .plan_persistence
-            .lock()
-            .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
-        let session_id = session_id.into();
-        if persistence
-            .get(&session_id)
-            .is_some_and(|existing| !existing.is_same_store(&store))
-        {
-            return Err(TaskTransitionError::Persistence(format!(
-                "session {session_id} is already attached to a different plan store"
-            )));
-        }
-        persistence.entry(session_id).or_insert(store);
-        Ok(())
+        self.attach_plan_store_for_test(store, session_id)
     }
 
     /// Create a new task and return its collision-resistant UUID ID.
@@ -347,18 +356,40 @@ impl TaskManager {
             .ok_or_else(|| TaskTransitionError::NotFound(id.to_string()))?;
         let trusted = match &task.metadata {
             Some(metadata) if status == TaskStatus::Completed => {
-                let persistence = self
-                    .plan_persistence
-                    .lock()
-                    .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
-                let store = persistence.get(&metadata.session_id).ok_or_else(|| {
-                    TaskTransitionError::Persistence(format!(
-                        "plan-linked task session {} has no attached plan store",
-                        metadata.session_id
-                    ))
-                })?;
+                let (store, authority) = {
+                    let persistence = self
+                        .plan_persistence
+                        .lock()
+                        .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+                    let store =
+                        persistence
+                            .get(&metadata.session_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                TaskTransitionError::Persistence(format!(
+                                    "plan-linked task session {} has no attached plan store",
+                                    metadata.session_id
+                                ))
+                            })?;
+                    drop(persistence);
+                    let authorities = self
+                        .plan_authorities
+                        .lock()
+                        .map_err(|error| TaskTransitionError::Lock(error.to_string()))?;
+                    let authority = authorities.get(&metadata.session_id).cloned().ok_or_else(
+                        || {
+                            TaskTransitionError::Persistence(format!(
+                                "plan-linked task session {} has no attached approval authority",
+                                metadata.session_id
+                            ))
+                        },
+                    )?;
+                    (store, authority)
+                };
                 store
                     .resolve_required_evidence(
+                        &authority,
+                        &metadata.session_id,
                         evidence_run_id,
                         evidence_ids,
                         &metadata.required_evidence,

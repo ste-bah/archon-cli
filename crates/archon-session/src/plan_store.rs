@@ -2,6 +2,10 @@
 mod plan_store_authority;
 #[path = "plan_store_evidence.rs"]
 mod plan_store_evidence;
+#[path = "plan_store_evidence_resolution.rs"]
+mod plan_store_evidence_resolution;
+#[path = "plan_store_evidence_writes.rs"]
+mod plan_store_evidence_writes;
 #[path = "plan_store_materialization.rs"]
 mod plan_store_materialization;
 #[path = "plan_store_reconciliation.rs"]
@@ -23,7 +27,7 @@ use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 use plan_store_materialization::{ensure_approving_decision, validate_canonical_task_generation};
 use plan_store_writes::PlanWrite;
 
-use crate::plan_models::{PersistedPlanTask, PlanApprovalRecord, PlanDocument, PlanStepStatus};
+use crate::plan_models::{PersistedPlanTask, PlanApprovalRecord, PlanDocument};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum PlanStoreIdentity {
@@ -52,6 +56,10 @@ pub struct PlanStore {
     fail_next_mutation_persistence: Arc<AtomicBool>,
     #[cfg(any(test, feature = "test-support"))]
     fail_next_observation_failure_persistence: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_authoritative_evidence_after_execution_write: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "test-support"))]
+    fail_next_terminal_materialization_after_approval_write: Arc<AtomicBool>,
 }
 
 fn db_err(e: impl std::fmt::Display) -> std::io::Error {
@@ -91,6 +99,14 @@ impl PlanStore {
             fail_next_mutation_persistence: Arc::new(AtomicBool::new(false)),
             #[cfg(any(test, feature = "test-support"))]
             fail_next_observation_failure_persistence: Arc::new(AtomicBool::new(false)),
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_authoritative_evidence_after_execution_write: Arc::new(AtomicBool::new(
+                false,
+            )),
+            #[cfg(any(test, feature = "test-support"))]
+            fail_next_terminal_materialization_after_approval_write: Arc::new(AtomicBool::new(
+                false,
+            )),
         };
         store.init_schema()?;
         Ok(store)
@@ -127,6 +143,18 @@ impl PlanStore {
     #[cfg(any(test, feature = "test-support"))]
     pub fn fail_next_observation_failure_persistence(&self) {
         self.fail_next_observation_failure_persistence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_next_authoritative_evidence_after_execution_write(&self) {
+        self.fail_next_authoritative_evidence_after_execution_write
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_next_terminal_materialization_after_approval_write(&self) {
+        self.fail_next_terminal_materialization_after_approval_write
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -260,6 +288,15 @@ impl PlanStore {
             PlanWrite::materialization_claim(session_id, plan)?.run(&transaction)?;
             PlanWrite::plan(session_id, plan)?.run(&transaction)?;
             PlanWrite::approval(record)?.run(&transaction)?;
+            #[cfg(any(test, feature = "test-support"))]
+            if self
+                .fail_next_terminal_materialization_after_approval_write
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(std::io::Error::other(
+                    "injected terminal materialization failure",
+                ));
+            }
             tasks
                 .iter()
                 .try_for_each(|task| PlanWrite::task(session_id, task)?.run(&transaction))
@@ -410,71 +447,5 @@ impl PlanStore {
         PlanDocument::from_json(row[0].get_str().unwrap_or(""))
             .map(Some)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
-    }
-
-    /// Update a specific step's status without opening an unclaimed plan rewrite path.
-    pub fn update_step_status(
-        &self,
-        session_id: &str,
-        plan_id: &str,
-        step_number: u32,
-        status: PlanStepStatus,
-    ) -> Result<(), std::io::Error> {
-        let transaction = self.db.multi_transaction(true);
-        let result = (|| -> Result<(), std::io::Error> {
-            self.ensure_plan_unclaimed(&transaction, session_id, plan_id)?;
-            let mut lookup = BTreeMap::new();
-            lookup.insert("sid".to_string(), DataValue::from(session_id));
-            lookup.insert("pid".to_string(), DataValue::from(plan_id));
-            let rows = transaction
-                .run_script(
-                    "?[plan_json] := *plans{session_id, plan_id, plan_json}, session_id = $sid, plan_id = $pid",
-                    lookup,
-                )
-                .map_err(db_err)?;
-            let plan_json = rows
-                .rows
-                .first()
-                .and_then(|row| row.first())
-                .and_then(DataValue::get_str)
-                .ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::NotFound, "plan not found")
-                })?;
-            let mut plan = PlanDocument::from_json(plan_json)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-            let step = plan
-                .steps
-                .iter_mut()
-                .find(|step| step.number == step_number)
-                .ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::NotFound, "plan step not found")
-                })?;
-            step.status = status;
-
-            let plan_json = plan.to_json();
-            let updated_at = chrono::Utc::now().to_rfc3339();
-            let mut params = BTreeMap::new();
-            params.insert("session_id".to_string(), DataValue::from(session_id));
-            params.insert("plan_id".to_string(), DataValue::from(plan_id));
-            params.insert("plan_json".to_string(), DataValue::from(plan_json.as_str()));
-            params.insert(
-                "updated_at".to_string(),
-                DataValue::from(updated_at.as_str()),
-            );
-            transaction
-                .run_script(
-                    "?[session_id, plan_id, plan_json, updated_at] <- [[$session_id, $plan_id, $plan_json, $updated_at]]
-                     :put plans {session_id, plan_id => plan_json, updated_at}",
-                    params,
-                )
-                .map_err(db_err)?;
-            Ok(())
-        })();
-        if result.is_ok() {
-            transaction.commit().map_err(db_err)?;
-        } else {
-            let _ = transaction.abort();
-        }
-        result
     }
 }

@@ -3,13 +3,17 @@ use crate::plan_tasks::test_plan_approval_authority;
 use crate::task_list::TaskListTool;
 use crate::task_manager::TASK_MANAGER;
 use crate::tool::{Tool, ToolContext};
-use archon_completion::models::{CompletionState, VerificationGateResult};
-use archon_completion::{CompletionEvidence, EvidenceKind, EvidenceStatus};
 use serde_json::json;
 
 fn five_step_plan() -> PlanDocument {
     let mut plan = PlanDocument::new("plan-five", "Five-step approval plan");
     plan.status = PlanStatus::Approved;
+    plan.approval = Some(archon_session::plan::PlanApproval {
+        decision: archon_session::plan::PlanApprovalDecision::Approve,
+        source: archon_session::plan::PlanApprovalSource::NonInteractive,
+        decided_at: chrono::Utc::now().to_rfc3339(),
+        user_edited: false,
+    });
     plan.steps = (1..=5)
         .map(|number| archon_session::plan::PlanStep {
             number,
@@ -42,50 +46,22 @@ fn test_store() -> (cozo::DbInstance, PlanStore) {
 #[ignore = "Gate 5 live fixture; execute only in the dedicated smoke gate"]
 async fn live_five_step_fixture_advances_first_three_and_leaves_four_blocked() {
     let manager = &TASK_MANAGER;
-    let (db, store) = test_store();
+    let (_db, store) = test_store();
     let mut plan = five_step_plan();
-    let ids = materialize_plan_tasks(
-        manager,
-        &store,
-        &test_plan_approval_authority(&store, "live"),
-        "live",
-        &mut plan,
-    )
-    .unwrap();
-    let run_id = format!("live-fixture-{}", uuid::Uuid::new_v4());
-    let evidence = CompletionEvidence {
-        evidence_id: format!("live-evidence-{}", uuid::Uuid::new_v4()),
-        run_id: run_id.clone(),
-        evidence_kind: EvidenceKind::TestRun,
-        producer: "verified-test-runner".into(),
-        command_or_operation: Some("cargo test".into()),
-        status: EvidenceStatus::Passed,
-        exit_code: Some(0),
-        input_hash: Some("input".into()),
-        output_hash: Some("output".into()),
-        stdout_summary: Some("passed".into()),
-        stderr_summary: None,
-        artifact_ids: vec![],
-        provenance_record_id: "durable-live-fixture".into(),
-        started_at: chrono::Utc::now().to_rfc3339(),
-        completed_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
-    archon_completion::store::insert_gate_result(
-        &db,
-        &VerificationGateResult {
-            gate_id: "live-fixture-gate".into(),
-            gate_name: "test-evidence".into(),
-            passed: true,
-            resulting_state: CompletionState::Verified,
-            blocked_claims: vec![],
-            required_missing_evidence: vec![],
-            explanation: "live fixture test result verified".into(),
-            provenance_record_id: evidence.provenance_record_id.clone(),
-        },
-        &run_id,
-    )
-    .unwrap();
-    archon_completion::store::insert_completion_evidence(&db, &evidence).unwrap();
+    let authority = test_plan_approval_authority(&store, "live");
+    let ids = materialize_plan_tasks(manager, &store, &authority, "live", &mut plan).unwrap();
+    let evidence = store
+        .record_authoritative_test_execution(
+            &authority,
+            "live",
+            "live-fixture-tool",
+            0,
+            "cargo test live-fixture",
+            "test result: ok. 1 passed; 0 failed",
+            0,
+        )
+        .unwrap();
+    let run_id = evidence.run_id.clone();
     for (index, id) in ids[..3].iter().enumerate() {
         manager
             .set_status_checked_with_evidence_ids(id, TaskStatus::Running, "", &[])

@@ -12,6 +12,23 @@ pub use background_agents::{
     PollOutcome, cancel_background_agent, poll_background_agent, spawn_gc_task,
 };
 pub mod bash;
+pub mod bash_evidence;
+mod authoritative_bash_execution_compile_contract {
+    /// ```compile_fail
+    /// use archon_tools::tool::AuthoritativeBashExecution;
+    ///
+    /// let forged = AuthoritativeBashExecution {
+    ///     session_id: "session".into(),
+    ///     tool_use_id: "tool".into(),
+    ///     attempt: 0,
+    ///     command: "cargo test".into(),
+    ///     output: "test result: ok. 1 passed; 0 failed".into(),
+    ///     exit_code: 0,
+    /// };
+    /// ```
+    #[allow(dead_code)]
+    pub struct ExternalCallersCannotForgeBashExecutions;
+}
 pub(crate) mod bash_observability;
 pub(crate) mod cargo_target_env;
 pub use cargo_target_env::{current_timeout_exempt_cargo_wait, take_timeout_exempt_cargo_wait};

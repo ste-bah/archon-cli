@@ -70,6 +70,7 @@ mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
+mod tool_completion_evidence;
 mod tool_context;
 mod tool_dispatch;
 pub(crate) mod tool_input_json;
@@ -135,7 +136,7 @@ pub struct Agent {
     event_tx: tokio::sync::mpsc::Sender<TimestampedEvent>,
     checkpoint_store: Option<Arc<Mutex<CheckpointStore>>>,
     plan_store: Option<PlanStore>,
-    plan_approval_authority: Option<PlanApprovalAuthority>,
+    plan_approval_authority: Option<Arc<PlanApprovalAuthority>>,
     plan_execution_evidence: plan_reconciliation::PlanExecutionEvidence,
     /// Fail-closed backup when a post-mutation observation blocker cannot be persisted.
     observation_failure_blocker: Option<String>,

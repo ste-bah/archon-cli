@@ -73,7 +73,7 @@ serial_test.workspace = true
 
 [features]
 # Test-only support consumed by cross-crate fault-injection tests.
-test-support = []
+test-support = ["archon-session/test-support"]
 # Declared so the feature-gated remote_trigger_tests target compiles under
 # clippy --all-targets; the tests only run with --features remote-trigger.
 remote-trigger = []
