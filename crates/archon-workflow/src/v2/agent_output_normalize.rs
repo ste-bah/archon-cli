@@ -67,8 +67,23 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
             // echoed branch envelope in data.items, a coverage entry) could
             // impersonate the real reply. Never extract from a truncated
             // reply. (Prose braces fail with non-EOF errors and fall through.)
-            Some(Err(error)) if error.is_eof() || starts_like_json_container(&output[index..]) => {
+            //
+            // Which error is surfaced matters as much as the refusal. A
+            // container that fails to parse for a reason OTHER than running
+            // out of input is malformed, not truncated — a stray unescaped
+            // quote inside a shell command, a trailing comma — and the reply
+            // is otherwise complete. Returning `root_error` there tells the
+            // repair loop "expected value at line 1 column 1", which is true
+            // of the prose preamble and useless as a correction: observed
+            // live, an agent re-emitted the same 41k-char envelope with the
+            // same bad escape because nothing ever named the real fault.
+            // Serde's own error carries the line and column, so hand that
+            // back instead and let the repair prompt quote it.
+            Some(Err(error)) if error.is_eof() => {
                 return Err(root_error);
+            }
+            Some(Err(error)) if starts_like_json_container(&output[index..]) => {
+                return Err(error);
             }
             _ => {}
         }

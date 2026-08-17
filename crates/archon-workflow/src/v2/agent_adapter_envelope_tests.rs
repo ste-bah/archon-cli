@@ -232,3 +232,48 @@ fn malformed_envelope_error_carries_the_excerpt_too() {
     assert!(message.contains("output begins:"), "{message}");
     assert!(message.contains("\"evidence\""), "{message}");
 }
+
+/// The live 41k-char refusal: a complete, balanced, fenced envelope whose
+/// only fault was an unescaped quote inside a shell command. The old guard
+/// called it truncation and reported "expected value at line 1 column 1",
+/// which named nothing the agent could fix, so the repair re-emitted the same
+/// bad escape. The refusal is right; the error has to identify the fault.
+#[test]
+fn a_malformed_but_complete_envelope_reports_the_real_parse_fault() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    // Balanced braces; invalid because the inner quotes are not escaped.
+    let output = concat!(
+        "Now I have all the information. Let me construct the output.\n\n",
+        "```json\n",
+        r#"{"status": "accepted", "summary": "did the work", "#,
+        r#""commands_run": [{"command": "bash -lc 'grep -Fq "Checkout Identity" file'"}]}"#,
+        "\n```"
+    );
+    let error = adapter
+        .parse_agent_output(&read_only_request(), output)
+        .expect_err("a malformed envelope is still refused");
+    let message = error.to_string();
+    assert!(
+        !message.contains("expected value at line 1 column 1"),
+        "must not report the prose preamble as the fault: {message}"
+    );
+    assert!(
+        message.contains("line") && message.contains("column"),
+        "must carry the position of the real fault: {message}"
+    );
+}
+
+/// Truncation must still be refused with the root error — a reply that ran
+/// out of tokens has no recoverable fault to point at, and extracting from it
+/// is how a cut-off verdict gets recorded as a real one.
+#[test]
+fn a_truncated_envelope_is_still_refused_as_before() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = concat!(
+        "Now I have the picture.\n\n```json\n",
+        r#"{"status": "accepted", "summary": "did the work", "data": {"items": [{"id": "a"#
+    );
+    adapter
+        .parse_agent_output(&read_only_request(), output)
+        .expect_err("truncated replies stay refused");
+}
