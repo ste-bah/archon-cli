@@ -312,19 +312,29 @@ impl Agent {
 
     async fn restore_mode_after_approved_plan(&mut self, override_mode: Option<PermissionMode>) {
         let mut state = self.plan_mode_state.lock().await;
-        let restored = override_mode.unwrap_or_else(|| {
-            plan_mode_state::safe_restore_mode(
-                state.previous_permission_mode.take(),
-                self.config.allow_bypass_permissions,
-            )
-        });
+        let mut permission_mode = self.config.permission_mode.lock().await;
+        let current_mode = permission_mode
+            .parse::<PermissionMode>()
+            .unwrap_or(PermissionMode::Default);
+        let restored = if current_mode != PermissionMode::Plan {
+            state.previous_permission_mode.take();
+            current_mode
+        } else {
+            override_mode.unwrap_or_else(|| {
+                plan_mode_state::safe_restore_mode(
+                    state.previous_permission_mode.take(),
+                    self.config.allow_bypass_permissions,
+                )
+            })
+        };
         if override_mode.is_some() {
             state.previous_permission_mode.take();
         }
         state.active_plan_id = None;
         state.entered_via = None;
+        *permission_mode = restored.to_string();
+        drop(permission_mode);
         drop(state);
-        *self.config.permission_mode.lock().await = restored.to_string();
         self.state.mode = AgentMode::Normal;
     }
 }

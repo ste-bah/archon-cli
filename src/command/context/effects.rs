@@ -93,18 +93,20 @@ pub(crate) fn apply_effect<'a>(
             // no /permissions tracing, so this is new but invariant-
             // preserving.
             CommandEffect::SetPermissionMode(resolved) => {
-                let previous_mode = {
-                    let mut mode = slash_ctx.permission_mode.lock().await;
-                    let previous = mode.clone();
-                    *mode = resolved.clone();
-                    previous
-                };
-                if resolved == archon_permissions::mode::PermissionMode::Default.as_str() {
-                    let mut plan_mode_state = slash_ctx.plan_mode_state.lock().await;
+                let mut plan_mode_state = slash_ctx.plan_mode_state.lock().await;
+                let mut mode = slash_ctx.permission_mode.lock().await;
+                let previous_mode = mode.clone();
+                *mode = resolved.clone();
+                let left_plan_mode = previous_mode
+                    == archon_permissions::mode::PermissionMode::Plan.as_str()
+                    && resolved != archon_permissions::mode::PermissionMode::Plan.as_str();
+                if left_plan_mode {
                     plan_mode_state.previous_permission_mode = None;
                     plan_mode_state.active_plan_id = None;
                     plan_mode_state.entered_via = None;
                 }
+                drop(mode);
+                drop(plan_mode_state);
                 crate::runtime::permission_events::record_permission_mode_event(
                     slash_ctx.governed_learning_db.as_ref(),
                     Some(&slash_ctx.session_id),

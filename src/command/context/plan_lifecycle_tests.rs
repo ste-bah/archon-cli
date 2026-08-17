@@ -111,6 +111,56 @@ async fn slash_plan_exit_clears_model_entry_before_reentry_and_shared_restore() 
 }
 
 #[tokio::test]
+async fn leaving_plan_for_accept_edits_clears_stale_bypass_before_reentry() {
+    use archon_core::agent::plan_mode_state::{PlanEntryPath, safe_restore_mode};
+    use archon_permissions::mode::PermissionMode;
+
+    let fixture = super::slash_ctx_test_fixture::build_test_slash_context(
+        "bypass-plan-downgrade",
+        "plan",
+        None,
+        None,
+    );
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+    {
+        let mut state = fixture.ctx.plan_mode_state.lock().await;
+        state.record_entry(
+            PermissionMode::BypassPermissions,
+            PlanEntryPath::EnterPlanModeTool,
+        );
+        state.active_plan_id = Some("stale-bypass-plan".into());
+    }
+
+    super::apply_effect(
+        CommandEffect::SetPermissionMode(PermissionMode::AcceptEdits.to_string()),
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+    {
+        let state = fixture.ctx.plan_mode_state.lock().await;
+        assert_eq!(state.previous_permission_mode, None);
+        assert_eq!(state.active_plan_id, None);
+        assert_eq!(state.entered_via, None);
+    }
+
+    super::apply_effect(
+        CommandEffect::EnterPlanMode {
+            previous_mode: PermissionMode::AcceptEdits,
+        },
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+    let mut state = fixture.ctx.plan_mode_state.lock().await;
+    assert_eq!(
+        safe_restore_mode(state.previous_permission_mode.take(), true),
+        PermissionMode::AcceptEdits,
+        "later approval must not restore bypass after an explicit downgrade"
+    );
+}
+
+#[tokio::test]
 async fn slash_plan_exit_clears_entry_before_reentry_and_shared_restore() {
     use archon_core::agent::plan_mode_state::{PlanEntryPath, safe_restore_mode};
     use archon_permissions::mode::PermissionMode;
