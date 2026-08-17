@@ -340,3 +340,32 @@ fn an_explicit_command_status_survives_a_conflicting_exit_code() {
         crate::v2::result::WorkflowV2CommandStatus::Failed
     );
 }
+
+/// The live loss: an agent wrote a bracketed list in its prose, then the real
+/// envelope. The array arm aborted the parse before the envelope was reached.
+#[test]
+fn an_array_in_the_prose_does_not_kill_the_envelope_after_it() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = format!(
+        "Now I have the data. Routes checked: [\"retry\", \"supersede\"]\n\n{}",
+        envelope_json()
+    );
+
+    let result = adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect("an array before the envelope must not abort the parse");
+
+    assert_eq!(result.summary, "authored workflow script");
+}
+
+/// The rule the array arm exists for still holds: the array is consumed whole,
+/// so an envelope inside it is never promoted to top level.
+#[test]
+fn an_envelope_inside_an_array_is_still_not_the_reply() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = format!("Here is the result list:\n[{}]", envelope_json());
+
+    adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect_err("a nested envelope is not the reply envelope");
+}

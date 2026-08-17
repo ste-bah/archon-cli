@@ -48,11 +48,21 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
         match stream.next() {
             Some(Ok(value)) => {
                 skip_until = index + stream.byte_offset();
-                // A complete array is another JSON document, not prose. In
-                // particular, never extract a validating envelope nested in
-                // a one-element array and pretend it was top-level.
+                // A complete array is skipped, not fatal. `raw_decode`
+                // consumed the whole array and `skip_until` is now past it, so
+                // an envelope nested inside it is never seen as a top-level
+                // document — the "a one-element array must not impersonate the
+                // envelope" rule holds by construction, without aborting.
+                //
+                // This used to `return Err`, which was harmless while ANY
+                // second document also aborted the parse. Once the multi-object
+                // rule became "take the last envelope", the array arm was the
+                // only hard exit left in the loop, so a bracketed list written
+                // in an agent's prose preamble killed a reply whose envelope
+                // was complete and valid a few lines later. Observed live on a
+                // shape-repair call.
                 if value.is_array() {
-                    return Err(root_error);
+                    continue;
                 }
                 // Every envelope declares `status`; evidence items lack it,
                 // and task_coverage entries are told apart inside
