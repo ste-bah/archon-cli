@@ -238,7 +238,7 @@ async fn background_bash_command_is_observed_after_contained_completion() {
     assert!(!temp.path().join("delayed").exists());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn post_tool_non_utf8_path_is_persisted_as_a_completion_blocker() {
     let temp = tempfile::tempdir().unwrap();
