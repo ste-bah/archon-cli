@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+#[cfg(windows)]
+use std::process::Command;
 use std::sync::Arc;
 
 use archon_completion::models::{CompletionEvidence, EvidenceStatus};
@@ -10,9 +12,9 @@ use archon_tools::bash_evidence::record_authoritative_test_execution;
 use archon_tools::tool::{AgentMode, Tool, ToolContext, ToolResult};
 use cozo::{DataValue, ScriptMutability};
 
-fn context(tool_use_id: &str) -> ToolContext {
+fn context(tool_use_id: &str, working_dir: &Path) -> ToolContext {
     ToolContext {
-        working_dir: std::env::temp_dir(),
+        working_dir: working_dir.to_path_buf(),
         session_id: "test-evidence".into(),
         mode: AgentMode::Normal,
         tool_run_tool_use_id: Some(tool_use_id.into()),
@@ -45,6 +47,72 @@ fn fixture_test_command(fixture: &Path) -> String {
     )
 }
 
+#[cfg(windows)]
+fn configure_windows_msvc_linker(fixture: &Path) {
+    let host = rustc_value("host:");
+    assert!(
+        host.ends_with("-pc-windows-msvc"),
+        "expected an MSVC Rust host, got {host}"
+    );
+    let output = Command::new("where.exe")
+        .arg("link.exe")
+        .output()
+        .expect("where.exe must run to locate the MSVC linker");
+    assert!(
+        output.status.success(),
+        "where.exe link.exe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let linker = String::from_utf8(output.stdout)
+        .expect("where.exe output must be UTF-8")
+        .lines()
+        .map(str::trim)
+        .find(|path| {
+            let path = path.replace('\\', "/").to_ascii_lowercase();
+            path.contains("/vc/tools/msvc/") && path.ends_with("/link.exe")
+        })
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| panic!("where.exe did not report a Visual Studio MSVC link.exe"));
+    assert!(
+        linker.is_file(),
+        "MSVC linker must exist at {}",
+        linker.display()
+    );
+    let cargo_dir = fixture.join(".cargo");
+    std::fs::create_dir(&cargo_dir).unwrap();
+    std::fs::write(
+        cargo_dir.join("config.toml"),
+        format!("[target.\"{host}\"]\nlinker = {}\n", toml_string(&linker)),
+    )
+    .unwrap();
+}
+
+#[cfg(windows)]
+fn rustc_value(prefix: &str) -> String {
+    let output = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .expect("rustc must run to configure the fixture linker");
+    assert!(
+        output.status.success(),
+        "rustc -vV failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("rustc -vV output must be UTF-8")
+        .lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| panic!("rustc -vV output must contain {prefix}"))
+}
+
+#[cfg(windows)]
+fn toml_string(path: &Path) -> String {
+    format!("{:?}", bash_path(path))
+}
+
 fn bash_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -62,14 +130,16 @@ fn create_test_fixture() -> tempfile::TempDir {
         "#[cfg(test)]\nmod tests {\n    #[test]\n    fn passes() { assert_eq!(2 + 2, 4); }\n}\n",
     )
     .unwrap();
+    #[cfg(windows)]
+    configure_windows_msvc_linker(fixture.path());
     fixture
 }
 
-async fn execute(command: &str, tool_use_id: &str) -> ToolResult {
+async fn execute(command: &str, tool_use_id: &str, working_dir: &Path) -> ToolResult {
     BashTool::default()
         .execute(
             serde_json::json!({"command": command}),
-            &context(tool_use_id),
+            &context(tool_use_id, working_dir),
         )
         .await
 }
@@ -80,7 +150,12 @@ async fn record_real_test(
     tool_use_id: &str,
 ) -> CompletionEvidence {
     let fixture = create_test_fixture();
-    let result = execute(&fixture_test_command(fixture.path()), tool_use_id).await;
+    let result = execute(
+        &fixture_test_command(fixture.path()),
+        tool_use_id,
+        fixture.path(),
+    )
+    .await;
     assert!(
         !result.is_error,
         "fixture test must pass: {}",
@@ -101,9 +176,20 @@ fn fixture_manifest_path_is_shell_quoted() {
     let command = fixture_test_command(fixture.path());
 
     assert!(command.contains("--manifest-path '"), "{command}");
-    assert!(command.contains("Cargo.toml'"), "{command}");
     assert!(command.contains("--target-dir '"), "{command}");
-    assert!(!command.contains('\\'), "{command}");
+    assert!(!command.contains([';', '|', '&', '\n', '#']), "{command}");
+    #[cfg(windows)]
+    {
+        let config = std::fs::read_to_string(fixture.path().join(".cargo/config.toml")).unwrap();
+        assert!(
+            config.contains("[target.\"x86_64-pc-windows-msvc\"]"),
+            "{config}"
+        );
+        assert!(config.contains("/VC/Tools/MSVC/"), "{config}");
+        assert!(config.contains("/link.exe"), "{config}");
+        assert!(config.contains("linker = \""), "{config}");
+        assert!(!config.contains('\\'), "{config}");
+    }
 }
 
 #[test]
@@ -157,6 +243,7 @@ async fn preserves_real_nonzero_exit_code() {
     let result = execute(
         "cargo test --manifest-path /missing/Cargo.toml",
         "failed-tool",
+        &std::env::temp_dir(),
     )
     .await;
     let evidence = record_authoritative_test_execution(
@@ -198,7 +285,7 @@ async fn rejects_pseudo_test_and_non_test_commands() {
     .into_iter()
     .enumerate()
     {
-        let result = execute(command, &format!("pseudo-{index}")).await;
+        let result = execute(command, &format!("pseudo-{index}"), &std::env::temp_dir()).await;
         if let Some(execution) = result.authoritative_bash_execution() {
             assert!(
                 record_authoritative_test_execution(&store, &authority, execution)
@@ -348,7 +435,12 @@ async fn authority_and_evidence_rows_commit_atomically() {
     let (db, store, authority) = store_and_authority();
     store.fail_next_authoritative_evidence_after_execution_write();
     let fixture = create_test_fixture();
-    let result = execute(&fixture_test_command(fixture.path()), "atomic-tool").await;
+    let result = execute(
+        &fixture_test_command(fixture.path()),
+        "atomic-tool",
+        fixture.path(),
+    )
+    .await;
     let error = record_authoritative_test_execution(
         &store,
         &authority,

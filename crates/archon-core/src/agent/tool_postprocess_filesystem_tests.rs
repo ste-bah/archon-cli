@@ -202,7 +202,7 @@ async fn background_bash_command_is_observed_after_contained_completion() {
     let pending = PendingToolCall {
         id: "background-write".into(),
         name: "Bash".into(),
-        input_json: r#"{"command":"(sleep 0.2; printf delayed > delayed) &"}"#.into(),
+        input_json: r#"{"command":"(kill -STOP \"$BASHPID\"; printf delayed > delayed) & child=$!; printf '%s' \"$child\" > child.pid"}"#.into(),
     };
     let pre = agent
         .preflight_single_tool(&pending, AgentMode::Normal)
@@ -234,7 +234,20 @@ async fn background_bash_command_is_observed_after_contained_completion() {
     );
     let plan = store.load_latest_plan(session_id).unwrap().unwrap();
     assert!(plan.execution_evidence.observation_failure.is_none());
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let child_pid: libc::pid_t = std::fs::read_to_string(temp.path().join("child.pid"))
+        .expect("fixture must publish the stopped child before Bash returns")
+        .parse()
+        .expect("fixture child PID must be numeric");
+    assert_eq!(
+        unsafe { libc::kill(child_pid, libc::SIGCONT) },
+        -1,
+        "process-tree cleanup must remove the stopped child before it can mutate"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH),
+        "only the absent child proves SIGCONT cannot trigger a post-return write"
+    );
     assert!(!temp.path().join("delayed").exists());
 }
 
