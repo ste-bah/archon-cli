@@ -29,7 +29,11 @@ use crate::v2::WorkflowV2FanoutItem;
 /// branch call's options, which this retagging never touches.
 pub const CARGO_SERIAL_ROLE: &str = "cargo-serial";
 
-/// Does this item's declared verification/evidence run cargo?
+/// Rust build tools that take the shared target-directory lock. `rustc` and
+/// `rustdoc` contend exactly as `cargo` does — they are what cargo runs.
+const RUST_BUILD_TOOLS: [&str; 3] = ["cargo", "rustc", "rustdoc"];
+
+/// Does this item's declared verification/evidence run rust build tooling?
 pub fn item_has_cargo_commands(item: &Value) -> bool {
     raw_strings(
         item,
@@ -41,7 +45,32 @@ pub fn item_has_cargo_commands(item: &Value) -> bool {
         ],
     )
     .iter()
-    .any(|text| text.to_ascii_lowercase().contains("cargo "))
+    .any(|text| runs_rust_build_tool(text))
+}
+
+/// Match the tool as a command word rather than a substring.
+///
+/// The previous test was `contains("cargo ")`, which agents routinely walk
+/// straight past: told the host owns the shared target directory, they
+/// hand-roll the underlying compiler instead — `rustc --edition 2024 --extern
+/// ...` — which takes the same lock, matches nothing, and is scheduled at full
+/// wave width. Observed live: three such branches running concurrently for 21
+/// to 37 minutes, contending on the very directory the role limit exists to
+/// protect.
+///
+/// Word matching also tightens the old rule: prose naming the `cargo-serial`
+/// role, or a path like `cargo-audit`, no longer counts as running cargo,
+/// while `/usr/bin/rustc` and a bare trailing `cargo` now do.
+fn runs_rust_build_tool(text: &str) -> bool {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')'))
+        .filter_map(|token| {
+            let token = token.trim_matches(|ch: char| matches!(ch, '"' | '\'' | ',' | '`'));
+            token.rsplit('/').next()
+        })
+        .any(|name| {
+            let name = name.trim_end_matches(".exe").to_ascii_lowercase();
+            RUST_BUILD_TOOLS.contains(&name.as_str())
+        })
 }
 
 /// Retag cargo-running fanout items into [`CARGO_SERIAL_ROLE`].

@@ -66,14 +66,24 @@ fn batchable(item: &Value) -> bool {
         .is_none_or(|targets| targets.is_empty())
 }
 
+/// Batch by originating plan item only.
+///
+/// Keying on `canonical_task_ids` as well meant batching could only ever fire
+/// on a plan that emitted several cargo items for one task. The shape observed
+/// live is the opposite and at least as common: one cargo item per task, all
+/// from the same source item, every key unique, nothing merged, nine agents
+/// spun up to run nine commands strictly one after another.
+///
+/// Dropping the task from the key is sound for the same reason the module's
+/// same-task rule was: cargo items serialize against each other regardless of
+/// which task they belong to, so merging them across tasks costs no
+/// parallelism either. `merge_batch` unions the task ids so the merged branch
+/// still declares everything it answers for.
 fn batch_key(item: &Value) -> String {
-    let mut tasks = support::strings_of(item.get("canonical_task_ids"));
-    tasks.sort();
-    let source = item
-        .get("source_item_id")
+    item.get("source_item_id")
         .and_then(Value::as_str)
-        .unwrap_or("");
-    format!("{}::{}", tasks.join("+"), source)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn merge_batch(batch: Vec<Value>) -> Value {
@@ -101,6 +111,30 @@ fn merge_batch(batch: Vec<Value>) -> Value {
         "batched_from_item_ids".to_string(),
         serde_json::json!(ids),
     );
+    // A merged branch now spans tasks, so it must declare every task it
+    // answers for — inheriting only the first item's ids would silently drop
+    // the rest from coverage. Provenance is kept alongside it so a failure in
+    // one command can still be attributed to the task that asked for it,
+    // rather than condemning every task in the batch.
+    let mut tasks: Vec<Value> = Vec::new();
+    let mut provenance: Vec<Value> = Vec::new();
+    for item in &batch {
+        let item_tasks = support::array(item.get("canonical_task_ids"));
+        for task in &item_tasks {
+            if !tasks.contains(task) {
+                tasks.push(task.clone());
+            }
+        }
+        provenance.push(serde_json::json!({
+            "item_id": item.get("item_id").or_else(|| item.get("id")),
+            "canonical_task_ids": item_tasks,
+            "focused_verification": support::array(item.get("focused_verification")),
+        }));
+    }
+    if !tasks.is_empty() {
+        merged.insert("canonical_task_ids".to_string(), Value::Array(tasks));
+    }
+    merged.insert("batched_item_provenance".to_string(), Value::Array(provenance));
     for field in ["focused_verification", "expected_evidence"] {
         let values: Vec<Value> = batch
             .iter()

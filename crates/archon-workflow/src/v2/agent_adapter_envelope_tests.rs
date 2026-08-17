@@ -369,3 +369,54 @@ fn an_envelope_inside_an_array_is_still_not_the_reply() {
         .parse_agent_output(&read_only_request(), &output)
         .expect_err("a nested envelope is not the reply envelope");
 }
+
+/// The live loss, second form. The array above is VALID JSON, so it exercises
+/// only the branch that consumes a complete array. A bracket in prose that is
+/// NOT valid JSON fails to parse instead, and that arm went on aborting the
+/// whole reply: a verification branch wrote "7 `#[test]` annotations" in its
+/// preamble, `[test]` failed as an array at line 1 column 3, and the complete
+/// envelope 40 lines later was never reached.
+#[test]
+fn a_malformed_bracket_in_prose_does_not_kill_the_envelope_after_it() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = format!(
+        "File contains 7 `#[test]` annotations matching the claim.\n\n{}",
+        envelope_json()
+    );
+
+    let result = adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect("a prose bracket must not abort the parse");
+
+    assert_eq!(result.summary, "authored workflow script");
+}
+
+/// Rust prose is full of brackets. None of them may cost a finished result.
+#[test]
+fn rust_flavoured_prose_brackets_are_all_survivable() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    for prose in [
+        "ran the `[cfg(test)]` module",
+        "added a `[dependencies]` entry",
+        "matched [unresolved import] in the log",
+    ] {
+        let output = format!("{prose}\n\n{}", envelope_json());
+        adapter
+            .parse_agent_output(&read_only_request(), &output)
+            .unwrap_or_else(|error| panic!("prose {prose:?} aborted the parse: {error}"));
+    }
+}
+
+/// The shape the malformed-container arm actually guards. An array that opens
+/// with an object IS a JSON container, so when it fails to parse its contents
+/// stay unreachable — a complete envelope inside a broken wrapper must never
+/// be lifted out and returned as the reply.
+#[test]
+fn a_malformed_array_of_objects_still_refuses_to_promote_its_contents() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = format!("Results:\n[{}, not-json]", envelope_json());
+
+    adapter
+        .parse_agent_output(&read_only_request(), &output)
+        .expect_err("a broken array wrapper must not yield its nested envelope");
+}

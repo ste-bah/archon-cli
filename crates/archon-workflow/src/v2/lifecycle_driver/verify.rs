@@ -36,8 +36,19 @@ impl LifecycleDriver {
             )
             .await?;
         let mut verification_plan = contract.normalize_inventory(&raw_plan);
+        // A plan is only ready when it is well-shaped AND promises to check
+        // what the tasks were written for. Shape alone let a compile-only plan
+        // run a full wave and accept every branch while the declared outcome
+        // was never executed; the uncovered criteria are handed to the same
+        // bounded repair loop that already fixes shape.
+        let mut criteria_gaps = support::verification_plan_criteria_gaps(
+            &self.task_universe,
+            implementation_candidate_ids_unique,
+            &verification_plan,
+        );
         let mut plan_repair_attempt = 1usize;
-        while !support::verification_inventory_ready(&verification_plan)
+        while (!support::verification_inventory_ready(&verification_plan)
+            || !criteria_gaps.is_empty())
             && plan_repair_attempt <= self.max_repair_iterations
         {
             let call_id = format!("verification-plan-repair-{wave_index}-{plan_repair_attempt}");
@@ -49,7 +60,8 @@ impl LifecycleDriver {
                         ready_implementation_items,
                         implementation_candidate_ids_unique,
                         evidence.implementation,
-                        verification_plan
+                        verification_plan,
+                        { "uncoveredAcceptanceCriteria": criteria_gaps }
                     ]),
                     "reducer",
                     prompts::VERIFICATION_PLAN_REPAIR_TASK,
@@ -66,9 +78,16 @@ impl LifecycleDriver {
                 &repair,
             );
             verification_plan = contract.normalize_inventory(&repair);
+            criteria_gaps = support::verification_plan_criteria_gaps(
+                &self.task_universe,
+                implementation_candidate_ids_unique,
+                &verification_plan,
+            );
             plan_repair_attempt += 1;
         }
-        let plan_items = if support::verification_inventory_ready(&verification_plan) {
+        let plan_items = if support::verification_inventory_ready(&verification_plan)
+            && criteria_gaps.is_empty()
+        {
             support::verification_items(&contract, &verification_plan)
         } else {
             Vec::new()
@@ -86,6 +105,7 @@ impl LifecycleDriver {
                         "verificationPlan": verification_plan,
                         "implementationEvidence": evidence.implementation,
                         "repair_attempts": evidence.repair_attempts,
+                        "uncoveredAcceptanceCriteria": criteria_gaps,
                     }),
                     prompts::BLOCKED_EMPTY_VERIFICATION_TASK,
                 )

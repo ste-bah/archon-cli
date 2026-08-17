@@ -130,6 +130,13 @@ fn is_result_envelope(value: &Value) -> bool {
     ENVELOPE_ONLY.iter().any(|key| value.get(key).is_some())
 }
 
+/// Decide whether a bracket that FAILED to parse was a real JSON container or
+/// just punctuation in the agent's prose. A malformed container is fatal: no
+/// complete object inside it may be promoted to the reply envelope. Prose is
+/// skipped, and scanning continues to the envelope that follows.
+///
+/// The discriminator is the first non-whitespace character after the opener,
+/// because that is where JSON and prose diverge unambiguously.
 fn starts_like_json_container(candidate: &str) -> bool {
     let mut chars = candidate.chars();
     match chars.next() {
@@ -138,9 +145,25 @@ fn starts_like_json_container(candidate: &str) -> bool {
         // promoted to the reply envelope. Natural-language braces such as
         // "{ curly braces" remain eligible prose.
         Some('{') => matches!(chars.find(|ch| !ch.is_whitespace()), Some('"' | '}')),
-        // Arrays are never result envelopes. A malformed array can still
-        // contain one complete validating object, so it is always ambiguous.
-        Some('[') => true,
+        // A JSON array element opens with a quote, a nested container, a
+        // number, or the array closes immediately. Treating EVERY `[` as a
+        // container instead was the second array exit from this loop, and it
+        // outlived the reason for it: once multi-object output resolved to
+        // "take the last envelope", a bracket in prose that is not valid JSON
+        // became the only remaining way for a complete, valid envelope to be
+        // thrown away. Observed live and repeatedly on this workspace — a
+        // verification branch wrote "contains 7 `#[test]` annotations" in its
+        // preamble, `[test]` failed as an array at column 3, and 40 lines of
+        // finished, well-formed result went in the bin. `[dependencies]`,
+        // `[cfg(...)]` and every other Rust-flavoured bracket read the same.
+        //
+        // The shape this arm actually guards against is unaffected: a
+        // malformed `[{...}, garbage]` still opens with `{`, is still a
+        // container, and its contents are still never promoted.
+        Some('[') => matches!(
+            chars.find(|ch| !ch.is_whitespace()),
+            Some('"' | '{' | '[' | ']' | '-' | '0'..='9')
+        ),
         _ => false,
     }
 }

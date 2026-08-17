@@ -75,3 +75,48 @@ fn the_role_limit_serializes_exactly_the_cargo_role() {
     assert_eq!(limits.get(CARGO_SERIAL_ROLE), Some(&1));
     assert_eq!(limits.len(), 1);
 }
+
+/// The live bypass: told the host owns the shared target directory, agents
+/// hand-roll the compiler. `rustc` takes the same lock `cargo` does, matched
+/// nothing under the old `contains("cargo ")` test, and ran at full wave width.
+#[test]
+fn a_hand_rolled_rustc_invocation_is_serialized_like_cargo() {
+    for command in [
+        "rustc --edition 2024 --crate-type lib src/lib.rs",
+        "/usr/local/bin/rustc --extern serde=target/debug/libserde.rmeta x.rs",
+        "rustdoc --test README.md",
+    ] {
+        let item = serde_json::json!({ "focused_verification": [command] });
+        assert!(
+            super::item_has_cargo_commands(&item),
+            "{command} must take the serial role"
+        );
+    }
+}
+
+/// Word matching, not substring: naming the role in prose is not running it.
+#[test]
+fn prose_naming_the_role_does_not_claim_the_serial_slot() {
+    let item = serde_json::json!({
+        "expected_evidence": ["the cargo-serial role caps these at one branch"]
+    });
+
+    assert!(!super::item_has_cargo_commands(&item));
+}
+
+/// Cargo itself must keep matching in every shape it is written.
+#[test]
+fn cargo_still_matches_in_its_usual_shapes() {
+    for command in [
+        "cargo test -p archon-workflow",
+        "run cargo",
+        "cd repo && cargo check",
+        "(cargo build)",
+    ] {
+        let item = serde_json::json!({ "command": command });
+        assert!(
+            super::item_has_cargo_commands(&item),
+            "{command} must take the serial role"
+        );
+    }
+}

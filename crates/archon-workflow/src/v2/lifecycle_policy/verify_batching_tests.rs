@@ -137,3 +137,70 @@ fn union_fields_are_deduped() {
 
     assert_eq!(batched[0]["required_tools"], serde_json::json!(["cargo"]));
 }
+
+/// The shape observed live: one cargo item per task, one shared source item.
+/// Keying the batch on the task made every key unique and nothing ever merged.
+#[test]
+fn one_cargo_item_per_task_still_batches() {
+    let items = (0..3)
+        .map(|index| {
+            serde_json::json!({
+                "item_id": format!("verification-tdl-0{index}0-cargo-check"),
+                "canonical_task_ids": [format!("TASK-TDL-0{index}0")],
+                "source_item_id": "wire-tasks-universe",
+                "focused_verification": [format!("cargo check -p crate-{index}")],
+            })
+        })
+        .collect();
+
+    let batched = super::batch_cargo_verification_items(items);
+
+    assert_eq!(batched.len(), 1, "{batched:#?}");
+}
+
+/// A merged branch spans tasks, so it must declare every one it answers for.
+#[test]
+fn a_cross_task_batch_declares_every_task_it_covers() {
+    let items = vec![
+        serde_json::json!({
+            "item_id": "a",
+            "canonical_task_ids": ["TASK-A"],
+            "source_item_id": "shared",
+            "focused_verification": ["cargo check -p a"],
+        }),
+        serde_json::json!({
+            "item_id": "b",
+            "canonical_task_ids": ["TASK-B"],
+            "source_item_id": "shared",
+            "focused_verification": ["cargo check -p b"],
+        }),
+    ];
+
+    let batched = super::batch_cargo_verification_items(items);
+
+    let tasks = &batched[0]["canonical_task_ids"];
+    assert_eq!(tasks[0], "TASK-A");
+    assert_eq!(tasks[1], "TASK-B");
+    assert_eq!(batched[0]["batched_item_provenance"][1]["item_id"], "b");
+}
+
+/// Items from different source items stay apart.
+#[test]
+fn different_source_items_do_not_merge() {
+    let items = vec![
+        serde_json::json!({
+            "item_id": "a",
+            "canonical_task_ids": ["TASK-A"],
+            "source_item_id": "first",
+            "focused_verification": ["cargo check -p a"],
+        }),
+        serde_json::json!({
+            "item_id": "b",
+            "canonical_task_ids": ["TASK-B"],
+            "source_item_id": "second",
+            "focused_verification": ["cargo check -p b"],
+        }),
+    ];
+
+    assert_eq!(super::batch_cargo_verification_items(items).len(), 2);
+}
