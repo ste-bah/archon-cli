@@ -60,6 +60,7 @@ impl Agent {
             memory_briefing: None,
             permission_store,
             critical_system_reminder: None,
+            hook_session_context: Vec::new(),
             pending_resume_messages: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -159,6 +160,22 @@ impl Agent {
         } else {
             self.critical_system_reminder = Some(text);
         }
+    }
+
+    /// Record context contributed by a lifecycle hook (#187).
+    ///
+    /// Appends rather than replaces: several hooks may fire for one event, and
+    /// `PostCompact` adds to what `SessionStart` established rather than
+    /// superseding it. Blank contributions are dropped so an empty hook cannot
+    /// leave a stray block in the prompt.
+    pub fn add_hook_session_context(&mut self, contexts: Vec<String>) {
+        self.hook_session_context
+            .extend(contexts.into_iter().filter(|c| !c.trim().is_empty()));
+    }
+
+    /// Context contributed so far by lifecycle hooks.
+    pub fn hook_session_context(&self) -> &[String] {
+        &self.hook_session_context
     }
 
     pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {

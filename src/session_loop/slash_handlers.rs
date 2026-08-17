@@ -93,6 +93,14 @@ pub(super) async fn handle_clear_command(
             .await
             .add_watch_paths(clear_start_agg.watch_paths);
     }
+    // #187: `/clear` re-fires SessionStart, so hook-contributed context is
+    // re-established for the fresh conversation rather than lost with it.
+    if !clear_start_agg.additional_contexts.is_empty() {
+        agent
+            .lock()
+            .await
+            .add_hook_session_context(clear_start_agg.additional_contexts);
+    }
     if let Err(error) = input_tui_tx
         .send_async(TuiEvent::TextDelta(
             "\nConversation cleared. Session reset.\n".into(),

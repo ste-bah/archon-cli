@@ -58,6 +58,23 @@ impl Agent {
         }
     }
 
+    /// Inject context contributed by lifecycle hooks (#187).
+    ///
+    /// Appended after the cached blocks, like the critical reminder, so a hook
+    /// firing mid-session cannot invalidate the stable prefix.
+    pub(super) fn inject_hook_session_context(&self, system: &mut Vec<serde_json::Value>) {
+        if self.hook_session_context.is_empty() {
+            return;
+        }
+        system.push(serde_json::json!({
+            "type": "text",
+            "text": format!(
+                "<hook-context>\n{}\n</hook-context>",
+                self.hook_session_context.join("\n")
+            ),
+        }));
+    }
+
     pub(super) fn inject_turn_requirements(&self, system: &mut Vec<serde_json::Value>) {
         // Issues #80(b)/#81(a): the self-model briefing on the first turn, the
         // bounded unresolved-lesson block on later ones. Injected here rather

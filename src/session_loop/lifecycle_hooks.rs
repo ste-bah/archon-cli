@@ -53,6 +53,19 @@ pub(super) async fn fire_session_startup_hooks(agent: &Arc<tokio::sync::Mutex<Ag
             .await
             .add_watch_paths(session_start_agg.watch_paths);
     }
+    // #187: `additional_context` from SessionStart used to be aggregated and
+    // then discarded — only PostToolUse ever read it. A hook that publishes
+    // project context at session start now actually reaches the model.
+    if !session_start_agg.additional_contexts.is_empty() {
+        tracing::info!(
+            "SessionStart hook contributed {} context blocks",
+            session_start_agg.additional_contexts.len()
+        );
+        agent
+            .lock()
+            .await
+            .add_hook_session_context(session_start_agg.additional_contexts);
+    }
 
     // CRIT-06: Fire InstructionsLoaded hook after session starts and instructions are loaded
     {
