@@ -35,15 +35,34 @@ fn bash_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\\"'\\\"'"))
 }
 
-fn fixture_test_command() -> String {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../archon-completion/Cargo.toml")
-        .canonicalize()
-        .unwrap();
+fn fixture_test_command(fixture: &Path) -> String {
+    let manifest = fixture.join("Cargo.toml");
+    let target = fixture.join("target");
     format!(
-        "cargo test --manifest-path {} schema::tests::test_ensure_schema_idempotent --lib",
-        bash_quote(&manifest.to_string_lossy())
+        "cargo test --manifest-path {} --target-dir {} --lib",
+        bash_quote(&bash_path(&manifest)),
+        bash_quote(&bash_path(&target)),
     )
+}
+
+fn bash_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn create_test_fixture() -> tempfile::TempDir {
+    let fixture = tempfile::tempdir().unwrap();
+    std::fs::create_dir(fixture.path().join("src")).unwrap();
+    std::fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[package]\nname = \"archon-evidence-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        fixture.path().join("src/lib.rs"),
+        "#[cfg(test)]\nmod tests {\n    #[test]\n    fn passes() { assert_eq!(2 + 2, 4); }\n}\n",
+    )
+    .unwrap();
+    fixture
 }
 
 async fn execute(command: &str, tool_use_id: &str) -> ToolResult {
@@ -60,7 +79,8 @@ async fn record_real_test(
     authority: &PlanApprovalAuthority,
     tool_use_id: &str,
 ) -> CompletionEvidence {
-    let result = execute(&fixture_test_command(), tool_use_id).await;
+    let fixture = create_test_fixture();
+    let result = execute(&fixture_test_command(fixture.path()), tool_use_id).await;
     assert!(
         !result.is_error,
         "fixture test must pass: {}",
@@ -77,10 +97,21 @@ async fn record_real_test(
 
 #[test]
 fn fixture_manifest_path_is_shell_quoted() {
-    let command = fixture_test_command();
+    let fixture = create_test_fixture();
+    let command = fixture_test_command(fixture.path());
 
     assert!(command.contains("--manifest-path '"), "{command}");
     assert!(command.contains("Cargo.toml'"), "{command}");
+    assert!(command.contains("--target-dir '"), "{command}");
+    assert!(!command.contains('\\'), "{command}");
+}
+
+#[test]
+fn windows_manifest_path_is_normalized_for_bash() {
+    assert_eq!(
+        bash_path(Path::new(r"D:\a\archon-cli\crates\fixture\Cargo.toml")),
+        "D:/a/archon-cli/crates/fixture/Cargo.toml"
+    );
 }
 
 #[test]
@@ -316,7 +347,8 @@ async fn verifier_rejects_tampered_signature_and_execution_identity() {
 async fn authority_and_evidence_rows_commit_atomically() {
     let (db, store, authority) = store_and_authority();
     store.fail_next_authoritative_evidence_after_execution_write();
-    let result = execute(&fixture_test_command(), "atomic-tool").await;
+    let fixture = create_test_fixture();
+    let result = execute(&fixture_test_command(fixture.path()), "atomic-tool").await;
     let error = record_authoritative_test_execution(
         &store,
         &authority,

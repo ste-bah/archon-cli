@@ -251,21 +251,24 @@ async fn post_tool_non_utf8_path_is_persisted_as_a_completion_blocker() {
     let pending = PendingToolCall {
         id: "create-non-utf8-path".into(),
         name: "Bash".into(),
-        input_json: r#"{"command":"touch \"$(printf '\\377')\""}"#.into(),
+        input_json: r#"{"command":"true"}"#.into(),
     };
     let pre = agent
         .preflight_single_tool(&pending, AgentMode::Normal)
         .await
         .expect("Bash preflight must capture a filesystem baseline");
+    use std::os::unix::ffi::OsStringExt;
+    std::fs::write(
+        temp.path().join(std::ffi::OsString::from_vec(vec![0xff])),
+        b"",
+    )
+    .expect("fixture must create the non-UTF-8 path");
     let ctx = ToolContext {
         working_dir: temp.path().to_path_buf(),
         ..ToolContext::default()
     };
     let result = pre.tool_arc.execute(pre.input.clone(), &ctx).await;
-    assert!(
-        !result.is_error,
-        "fixture command must create the non-UTF-8 path"
-    );
+    assert!(!result.is_error, "fixture command must succeed");
 
     agent
         .postprocess_single_tool(&pre, result, &ctx, "test", &mut PostprocessFlow::default())
