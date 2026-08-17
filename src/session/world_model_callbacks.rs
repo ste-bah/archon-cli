@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use archon_core::agent::{Agent, FirstToolActionCallback, TurnFinalizationCallback};
+use archon_core::agent::{
+    Agent, FirstToolActionCallback, TurnFinalizationCallback, TurnFinalizationVerdict,
+};
 use archon_tools::tool::{ToolRunAdmissionCallback, ToolRunOutcomeCallback};
 
 trait CallbackTarget {
@@ -83,12 +85,27 @@ fn install_on(
         Arc::new(crate::command::world_model::tool_run_outcome_taps),
     );
 
+    // Composed finalization: the world-model guardrail first, then the #187
+    // completion gate. There is one callback slot, so this has to compose the
+    // way `admit_tool_run_composed` does above — installing the gate on its own
+    // would silently drop the guardrail, which is the exact class of bug #187
+    // was opened about.
+    //
+    // First blocker wins, and the guardrail goes first because it judges the
+    // action's own verification evidence; the gate judges what a review said
+    // about it. If both object, the more specific complaint is the useful one.
     let finalization_session_id = session_id.to_string();
+    let completion_gate = config.skills.completion_gate;
     target.set_turn_finalization_callback(Arc::new(move |action_id, _output| {
-        crate::command::world_model::turn_finalization_verdict_for_action(
+        match crate::command::world_model::turn_finalization_verdict_for_action(
             &finalization_session_id,
             action_id,
-        )
+        ) {
+            TurnFinalizationVerdict::Allowed => {
+                super::completion_gate::verdict(&finalization_session_id, completion_gate)
+            }
+            blocked => blocked,
+        }
     }));
 }
 
