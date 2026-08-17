@@ -103,15 +103,19 @@ mod tests {
         assert!(matches!(out, SkillOutput::Prompt(_)));
     }
 
+    /// What separates this from `/grill-me` is that it works against the
+    /// project's written record, so the description has to say so — otherwise
+    /// the model has no way to choose between the two.
     #[test]
     fn grill_with_docs_metadata() {
         assert_eq!(GrillWithDocsSkill.name(), "grill-with-docs");
         let desc = GrillWithDocsSkill.description();
         assert!(
-            desc.contains("context")
-                || desc.contains("glossary")
-                || desc.contains("CONTEXT")
+            desc.contains("docs")
                 || desc.contains("documentation")
+                || desc.contains("ADR")
+                || desc.contains("CONTEXT"),
+            "must name the written record it grills against: {desc}"
         );
     }
 

@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions "red-green-refactor", wants integration tests, or asks for test-first development.
+description: Use before writing implementation code for a feature or bug fix whose behaviour can be stated as a test — and any time you are about to fix something without a failing test that reproduces it. Also when asked for TDD, test-first, or red-green-refactor.
 license-source: https://github.com/mattpocock/skills/blob/main/skills/engineering/tdd/SKILL.md (MIT)
 ---
 > Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT licensed). Original: https://github.com/mattpocock/skills/blob/main/skills/engineering/tdd/SKILL.md
@@ -107,3 +107,19 @@ After all tests pass, look for refactor candidates:
 [ ] Code is minimal for this test
 [ ] No speculative features added
 ```
+
+## Watching it fail is the point
+
+A test you never saw fail is not a test, it is a hope. It may be asserting
+nothing, exercising the wrong path, or passing because the feature already
+worked. RED is not a formality before the real work — it is the only evidence
+that the test can detect the thing it claims to detect.
+
+If you wrote code before the test, delete the code and start again. Keeping it
+and writing the test afterwards produces a test shaped to the implementation
+you already have, which is precisely the coupled test this skill exists to
+avoid.
+
+## Next
+
+Green and refactored? `/verify-done` before you claim it works.
