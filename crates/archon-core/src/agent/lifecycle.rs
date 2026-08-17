@@ -180,22 +180,6 @@ impl Agent {
         }
     }
 
-    /// Record context contributed by a lifecycle hook (#187).
-    ///
-    /// Appends rather than replaces: several hooks may fire for one event, and
-    /// `PostCompact` adds to what `SessionStart` established rather than
-    /// superseding it. Blank contributions are dropped so an empty hook cannot
-    /// leave a stray block in the prompt.
-    pub fn add_hook_session_context(&mut self, contexts: Vec<String>) {
-        self.hook_session_context
-            .extend(contexts.into_iter().filter(|c| !c.trim().is_empty()));
-    }
-
-    /// Context contributed so far by lifecycle hooks.
-    pub fn hook_session_context(&self) -> &[String] {
-        &self.hook_session_context
-    }
-
     pub fn set_inner_voice(&mut self, iv: Arc<Mutex<InnerVoice>>) {
         self.inner_voice = Some(iv);
     }

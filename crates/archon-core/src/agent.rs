@@ -42,6 +42,7 @@ mod compaction_serde;
 mod correction_attribution;
 pub(crate) mod correction_intake;
 pub(crate) mod events;
+mod hook_context;
 mod lifecycle;
 #[cfg(test)]
 mod memory_attribution_tests;
