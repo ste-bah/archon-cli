@@ -13,6 +13,18 @@ Skills are slash commands resolved through the Skill registry rather than the pr
 
 When you type `/foo`, archon first checks the primary registry. If no primary matches, it falls back to the skill registry.
 
+## Model-invoked skills
+
+Skills are not only user-triggered. The agent-invocable ones are listed in the system prompt with their descriptions, and the model may load one with the `Skill` tool whenever a task matches — no slash command and no `Skill(list)` round-trip required.
+
+A skill is agent-invocable when it emits `Prompt` output, which is what reaches the model. Descriptor-only builtins like `/help` and `/cost` render in the TUI and never reach the agent, so they are excluded from the catalogue rather than wasting prompt tokens. Every embedded skill and every user-authored SKILL.md qualifies automatically.
+
+**Write the `description` as a trigger condition, not a summary.** It is the only thing the model sees when deciding whether a skill applies. "Use when a test is failing and the cause is not obvious" earns an invocation; "Debugging helper" does not.
+
+The catalogue is rendered into the turn-variable part of the prompt, after the cached prefix, so adding a `SKILL.md` to a project does not invalidate the prompt cache for that project's sessions.
+
+Agent definitions may also name specific skills via a **top-level** `skills:` key. Names are resolved against the registry at prompt-build time: unresolvable ones are dropped with a warning rather than presented to the model as callable, and any agent that declares skills is granted the `Skill` tool automatically. Note that `skills:` nested under `capabilities:` is not read — those entries are descriptive metadata only.
+
 ## Built-in skills (68 total)
 
 21 in `builtin.rs`, 35 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:

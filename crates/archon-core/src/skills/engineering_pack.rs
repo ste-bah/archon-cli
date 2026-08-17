@@ -54,6 +54,10 @@ macro_rules! engineering_skill {
                 &Self::parsed().description
             }
 
+            fn agent_invocable(&self) -> bool {
+                true
+            }
+
             fn execute(&self, args: &[String], ctx: &SkillContext) -> SkillOutput {
                 let body = templates::resolve_skill_body(&Self::parsed().name, &ctx.working_dir)
                     .unwrap_or_else(|| Self::parsed().body.clone());
