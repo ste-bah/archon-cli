@@ -3,7 +3,7 @@ use std::fs;
 use serde_json::json;
 
 use crate::path_guard::resolve_write_target_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct WriteTool;
 
@@ -101,6 +101,10 @@ impl Tool for WriteTool {
             Ok(()) => ToolResult::success(format!("File created successfully at: {file_path}")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::DeclaredPaths
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

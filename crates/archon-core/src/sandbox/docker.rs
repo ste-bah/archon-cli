@@ -263,6 +263,7 @@ impl DockerSandboxBackend {
             return SandboxCommandResult {
                 content: format!("Error: {error}"),
                 is_error: true,
+                exit_code: None,
             };
         }
         let args = docker_run_args(&self.config, &self.workspace_access, &request);
@@ -280,6 +281,7 @@ impl DockerSandboxBackend {
                 return SandboxCommandResult {
                     content: format!("Error: Failed to spawn docker: {error}"),
                     is_error: true,
+                    exit_code: None,
                 };
             }
         };
@@ -310,6 +312,7 @@ impl DockerSandboxBackend {
                         request.timeout_ms
                     ),
                     is_error: true,
+                    exit_code: None,
                 }
             }
         }

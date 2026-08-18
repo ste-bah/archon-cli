@@ -1,5 +1,5 @@
 use super::process_message_steps::{
-    StreamOpenOutcome, StreamRound, StreamRoundOutcome, ToolLoopAction,
+    StreamOpenOutcome, StreamRound, StreamRoundDraftState, StreamRoundOutcome, ToolLoopAction,
 };
 use super::*;
 
@@ -30,21 +30,36 @@ impl Agent {
         }
     }
 
-    async fn admit_tool_round_drafts(&mut self, message_index: usize, round: &StreamRound) {
-        self.prepend_stream_round_drafts(message_index, round);
+    async fn admit_tool_round_drafts(
+        &mut self,
+        message_index: usize,
+        round: &StreamRound,
+        draft_state: StreamRoundDraftState,
+    ) {
+        if draft_state == StreamRoundDraftState::Pending {
+            self.prepend_stream_round_drafts(message_index, round);
+        }
         self.persist_guarded_plan_after_draft_admission(round);
         self.emit_reasoning_turn(&round.text_content);
         self.commit_thinking_preview().await;
         self.emit_buffered_round_output(&round.text_content).await;
     }
 
-    fn finalization_verdict(&self, output: &str) -> TurnFinalizationVerdict {
-        let Some(callback) = &self.turn_finalization_callback else {
+    pub(super) fn finalization_verdict(&mut self, output: &str) -> TurnFinalizationVerdict {
+        if self.turn_finalization_callback.is_none() {
             return TurnFinalizationVerdict::Allowed;
-        };
-        callback(
-            self.guardrail_action_id.as_deref().unwrap_or_default(),
-            output,
+        }
+        if let Some(repair_prompt) = self.plan_completion_block() {
+            return TurnFinalizationVerdict::Blocked { repair_prompt };
+        }
+        self.turn_finalization_callback.as_ref().map_or(
+            TurnFinalizationVerdict::Allowed,
+            |callback| {
+                callback(
+                    self.guardrail_action_id.as_deref().unwrap_or_default(),
+                    output,
+                )
+            },
         )
     }
 
@@ -136,7 +151,20 @@ impl Agent {
 
             if !round.pending_tools.is_empty() {
                 let assistant_message_index = self.state.messages.len();
-                self.insert_assistant_stream_round(assistant_message_index, &round, false);
+                let includes_plan_exit = round
+                    .pending_tools
+                    .iter()
+                    .any(|tool| tool.name == "ExitPlanMode");
+                let draft_state = if includes_plan_exit {
+                    StreamRoundDraftState::InsertedEarly
+                } else {
+                    StreamRoundDraftState::Pending
+                };
+                self.insert_assistant_stream_round(
+                    assistant_message_index,
+                    &round,
+                    draft_state == StreamRoundDraftState::InsertedEarly,
+                );
                 match self
                     .handle_pending_tool_round(
                         &round.pending_tools,
@@ -146,13 +174,13 @@ impl Agent {
                     .await
                 {
                     ToolLoopAction::Continue => {
-                        self.admit_tool_round_drafts(assistant_message_index, &round)
+                        self.admit_tool_round_drafts(assistant_message_index, &round, draft_state)
                             .await;
                         continue 'agent_loop;
                     }
                     ToolLoopAction::Break => {
                         self.finalize_tool_loop_break(&round.text_content).await?;
-                        self.admit_tool_round_drafts(assistant_message_index, &round)
+                        self.admit_tool_round_drafts(assistant_message_index, &round, draft_state)
                             .await;
                         break;
                     }

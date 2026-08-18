@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 const DEFAULT_MAX_RESULTS: usize = 5;
 
@@ -130,6 +130,10 @@ impl Tool for ToolSearchTool {
             Ok(json_str) => ToolResult::success(json_str),
             Err(e) => ToolResult::error(format!("Failed to serialize results: {e}")),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

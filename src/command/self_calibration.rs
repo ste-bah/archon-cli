@@ -275,17 +275,9 @@ fn inspect_plans(session_id: &str, config: &ArchonConfig) -> Result<()> {
         return Ok(());
     };
 
-    let mut completed = 0usize;
-    let mut skipped = 0usize;
-    let mut blocked = 0usize;
+    let (completed, skipped, blocked) = plan_step_counts(plan.steps.iter().map(|step| step.status));
     let mut changed = 0usize;
     for step in &plan.steps {
-        match step.status {
-            archon_session::plan::PlanStepStatus::Complete => completed += 1,
-            archon_session::plan::PlanStepStatus::Skipped => skipped += 1,
-            archon_session::plan::PlanStepStatus::Pending
-            | archon_session::plan::PlanStepStatus::InProgress => blocked += 1,
-        }
         if step.description.to_lowercase().contains("changed") {
             changed += 1;
         }
@@ -328,6 +320,21 @@ fn inspect_plans(session_id: &str, config: &ArchonConfig) -> Result<()> {
     println!("Planning accuracy: {:.2}", planning_accuracy);
     println!("Report: {}", report_path.display());
     Ok(())
+}
+
+pub(super) fn plan_step_counts(
+    statuses: impl IntoIterator<Item = archon_session::plan::PlanStepStatus>,
+) -> (usize, usize, usize) {
+    statuses.into_iter().fold(
+        (0, 0, 0),
+        |(completed, skipped, blocked), status| match status {
+            archon_session::plan::PlanStepStatus::Complete => (completed + 1, skipped, blocked),
+            archon_session::plan::PlanStepStatus::Skipped => (completed, skipped + 1, blocked),
+            archon_session::plan::PlanStepStatus::Pending
+            | archon_session::plan::PlanStepStatus::InProgress
+            | archon_session::plan::PlanStepStatus::Failed => (completed, skipped, blocked + 1),
+        },
+    )
 }
 
 fn read_activity_tolerant(path: &Path) -> Result<TolerantActivityRead> {

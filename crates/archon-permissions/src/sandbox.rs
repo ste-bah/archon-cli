@@ -20,6 +20,9 @@ pub struct SandboxCommandRequest {
 pub struct SandboxCommandResult {
     pub content: String,
     pub is_error: bool,
+    /// Exact process status when the backend executed a command to completion.
+    /// `None` denotes preflight, transport, timeout, or cancellation failure.
+    pub exit_code: Option<i32>,
 }
 
 /// Backend for sandbox enforcement. The TUI layer implements this and injects

@@ -27,7 +27,7 @@ pub(crate) use guard::{
     record_guardrail_pipeline_steps, record_guardrail_provider_incident_for_session,
     record_guardrail_reasoning_quality_event, record_guardrail_tool_result_for_session,
     record_guardrail_turn_outcome, record_tool_run_attempt_outcome,
-    turn_finalization_verdict_for_action, turn_requirements_for_action,
+    turn_finalization_verdict_for_action_at_session_database, turn_requirements_for_action,
 };
 pub(crate) use runtime::{
     record_provider_runtime_advisory, record_runtime_advisory,

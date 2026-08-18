@@ -5,7 +5,7 @@ use futures_util::{Stream, StreamExt};
 use regex::Regex;
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 static RE_SCRIPT: OnceLock<Regex> = OnceLock::new();
 static RE_STYLE: OnceLock<Regex> = OnceLock::new();
@@ -176,6 +176,10 @@ impl Tool for WebFetchTool {
         }
 
         ToolResult::success(result)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

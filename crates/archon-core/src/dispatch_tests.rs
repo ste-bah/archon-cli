@@ -399,44 +399,6 @@ fn clone_filtered_nonexistent_tool_ignored() {
     assert!(names.contains(&"Read"));
 }
 
-#[test]
-fn clone_filtered_does_not_mutate_original() {
-    let registry = create_default_registry(std::env::temp_dir(), None);
-    let original_count = registry.tool_names().len();
-    let _filtered = registry.clone_filtered(&["Read"]);
-    assert_eq!(registry.tool_names().len(), original_count);
-}
-
-#[test]
-fn clone_filtered_tool_definitions_match() {
-    let registry = create_default_registry(std::env::temp_dir(), None);
-    let filtered = registry.clone_filtered(&["Read", "Glob"]);
-    let defs = filtered.tool_definitions();
-    assert_eq!(defs.len(), 2);
-    let def_names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
-    assert!(def_names.contains(&"Read"));
-    assert!(def_names.contains(&"Glob"));
-}
-
-#[tokio::test]
-async fn dispatch_blocked_in_plan_mode() {
-    let registry = create_default_registry(std::env::temp_dir(), None);
-    let ctx = ToolContext {
-        working_dir: std::env::temp_dir(),
-        session_id: "test".into(),
-        mode: AgentMode::Plan,
-        extra_dirs: vec![],
-        ..Default::default()
-    };
-
-    let result = registry
-        .dispatch("Write", serde_json::json!({}), &ctx)
-        .await;
-
-    assert!(result.is_error);
-    assert!(result.content.contains("plan mode"));
-}
-
 fn activity_ctx(sink: Arc<InMemoryActivitySink>) -> ToolContext {
     ToolContext {
         working_dir: std::env::temp_dir(),

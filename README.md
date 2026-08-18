@@ -205,22 +205,19 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.9.1** — [release notes](docs/release-notes/v1.9.1.md)
+**Current release: v1.9.2** — [release notes](docs/release-notes/v1.9.2.md)
 
-Prompt caching works on every provider archon talks to, rather than on the one
-endpoint whose URL it recognised. Against anything else it used to *strip* the
-directive, so a gateway that would have honoured caching was billed in full on
-every token of every turn. Every provider now declares how it caches and a guard
-test enforces it; the volatile part of each turn moves behind the message
-history, which is the only lever the implicitly-caching providers have; and
-cache reads and writes are priced at 0.1x and 1.25x base input instead of at
-zero and at par — so a checkpoint that never pays for itself now shows up as the
-loss it is.
+Plan Mode now has a durable approval lifecycle: explicit user exit controls,
+safe permission restoration, editable plan documents, plan-linked task
+materialization, authoritative completion evidence, reconciliation, and a
+Plan-Mode-specific model override. The trust boundary blocks subagents from entering
+or exiting Plan Mode and fails closed when evidence or approval authority cannot
+be verified.
 
-Four Bedrock models could not be called at all: SigV4 requires the request path
-encoded twice, and the colon in a dated model id was encoded once, which
-presented as a bad secret key. Verified live on five models, on Anthropic
-subscription OAuth, and on the OpenAI Codex subscription.
+Registered canonical skills now appear in slash autocomplete. Primary commands
+remain first and keep dispatch precedence; rows are labelled `[command]` or
+`[skill]`, aliases are not duplicated, and shadowed skills are omitted with an
+exact startup warning.
 
 Built on v1.9.0, where a knowledge base stopped being two disjoint things. `archon kb kbs` and the web
 Ingest tab list the same union, so a name created on either surface is visible
@@ -253,6 +250,13 @@ called.
 > refusal as success. Enter still submits; **Shift+Enter inserts a newline**, and
 > Ctrl+L forces a redraw. See the
 > [release notes](docs/release-notes/v1.9.0.md#upgrade-notes).
+>
+> From v1.9.2: **a structured `ExitPlanMode` submission now requires
+> approval**, while `/plan off`, `/plan exit`, and `/plan done` remain explicit
+> direct exits to `default`. Only plan-linked task rows persist and rehydrate;
+> unrelated manual tasks remain process-scoped. Skills are discovered when a
+> session starts, so restart Archon after adding or editing a `SKILL.md`. See the
+> [release notes](docs/release-notes/v1.9.2.md#upgrade-notes).
 >
 > From v1.9.1: **cost figures move in both directions** — cache reads were
 > priced at zero and writes at par, so caching could only ever look like a

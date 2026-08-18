@@ -136,8 +136,9 @@ pub struct App {
     pub btw_overlay: Option<String>,
     /// Pending permission prompt — tool name waiting for y/n.
     pub permission_prompt: Option<String>,
-    /// Pending AskUserQuestion prompt and draft answer.
+    /// Pending AskUserQuestion prompt, its semantic type, and draft answer.
     pub ask_user_prompt: Option<String>,
+    pub ask_user_prompt_kind: Option<archon_core::agent::AskUserPromptKind>,
     pub ask_user_draft: String,
     /// Session name (shown right-aligned on input line after /rename).
     pub session_name: Option<String>,
@@ -187,6 +188,7 @@ impl Default for App {
             btw_overlay: None,
             permission_prompt: None,
             ask_user_prompt: None,
+            ask_user_prompt_kind: None,
             ask_user_draft: String::new(),
             session_name: None,
             session_picker: None,

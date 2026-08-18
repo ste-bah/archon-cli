@@ -125,6 +125,31 @@ async fn await_usage_rows(
     .expect("logical-call row must be persisted")
 }
 
+#[tokio::test]
+async fn usage_record_preserves_plan_phase_model_and_origin() {
+    let db = test_db();
+    let observed = observed_stream(
+        &db,
+        vec![stream_start_usage(11, 0, 0, 0), StreamEvent::MessageStop],
+    )
+    .await;
+    let mut stream = observed
+        .stream(LlmRequest {
+            model: "planner".into(),
+            request_origin: Some("plan_mode".into()),
+            ..LlmRequest::default()
+        })
+        .await
+        .unwrap();
+    while stream.recv().await.is_some() {}
+
+    let rows = await_usage_rows(&db).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].model_id, "planner");
+    assert_eq!(rows[0].origin.as_deref(), Some("plan_mode"));
+    assert_known(&rows[0].input_tokens, 11);
+}
+
 #[test]
 fn observed_request_prefers_runtime_origin_over_transport_origin() {
     let request = LlmRequest {

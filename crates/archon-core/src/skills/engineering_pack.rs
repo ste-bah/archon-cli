@@ -54,6 +54,10 @@ macro_rules! engineering_skill {
                 &Self::parsed().description
             }
 
+            fn agent_invocable(&self) -> bool {
+                true
+            }
+
             fn execute(&self, args: &[String], ctx: &SkillContext) -> SkillOutput {
                 let body = templates::resolve_skill_body(&Self::parsed().name, &ctx.working_dir)
                     .unwrap_or_else(|| Self::parsed().body.clone());
@@ -99,15 +103,19 @@ mod tests {
         assert!(matches!(out, SkillOutput::Prompt(_)));
     }
 
+    /// What separates this from `/grill-me` is that it works against the
+    /// project's written record, so the description has to say so — otherwise
+    /// the model has no way to choose between the two.
     #[test]
     fn grill_with_docs_metadata() {
         assert_eq!(GrillWithDocsSkill.name(), "grill-with-docs");
         let desc = GrillWithDocsSkill.description();
         assert!(
-            desc.contains("context")
-                || desc.contains("glossary")
-                || desc.contains("CONTEXT")
+            desc.contains("docs")
                 || desc.contains("documentation")
+                || desc.contains("ADR")
+                || desc.contains("CONTEXT"),
+            "must name the written record it grills against: {desc}"
         );
     }
 

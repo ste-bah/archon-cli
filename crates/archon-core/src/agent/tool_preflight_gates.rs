@@ -13,17 +13,20 @@ impl Agent {
     ) -> Option<(String, PermissionDecision, Arc<dyn Tool>, serde_json::Value)> {
         let perm_mode = self.config.permission_mode.lock().await.clone();
         let description = describe_tool_intent(&tool.name, &tool.input_json);
+        if let Some(PermissionDecision::Deny(reason)) = self
+            .config
+            .permission_rules
+            .evaluate(&tool.name, &tool.input_json)
+        {
+            self.deny_preflight_tool(tool, &perm_mode, &reason).await;
+            return None;
+        }
         let checker_decision = self.permission_checker_decision(
             &perm_mode,
             &tool.name,
             &tool.input_json,
             &description,
         );
-        if let PermissionDecision::Deny(reason) = &checker_decision {
-            self.deny_preflight_tool(tool, &perm_mode, reason).await;
-            return None;
-        }
-
         let tool_arc = match self.registry.lookup(&tool.name) {
             Some(t) => t,
             None => {
@@ -119,13 +122,34 @@ impl Agent {
     pub(super) async fn plan_mode_allows_tool(
         &mut self,
         tool: &PendingToolCall,
+        input: &serde_json::Value,
         effective_mode: AgentMode,
     ) -> bool {
         if is_tool_allowed_in_mode(&tool.name, effective_mode) {
             return true;
         }
+        match crate::plan_file::plan_audit_path(&self.config.working_dir, &self.config.session_id) {
+            Ok(audit_path) => {
+                if let Err(error) =
+                    crate::plan_file::append_plan_entry(&audit_path, &tool.name, input)
+                {
+                    tracing::warn!(
+                        error = %error,
+                        audit_path = %audit_path.display(),
+                        tool = %tool.name,
+                        "failed to append preflight Plan Mode rejection to audit log"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(
+                error = %error,
+                session_id = %self.config.session_id,
+                tool = %tool.name,
+                "refused unsafe session ID for preflight Plan Mode audit log"
+            ),
+        }
         let result = ToolResult::error(format!(
-            "Tool '{}' is not available in plan mode. Only read-only tools are allowed.",
+            "Tool '{}' is not available in Plan Mode. Plan Mode blocks working-tree mutations by default; only the canonical Plan-safe allowlist is available, including TaskCreate, TaskUpdate, and Agent. The call has been recorded in the session audit for review.",
             tool.name
         ));
         self.send_event(AgentEvent::ToolCallComplete {
@@ -343,17 +367,9 @@ impl Agent {
     }
 }
 
-/// Longest argument excerpt carried into a permission prompt.
 pub(super) const INTENT_EXCERPT_LIMIT: usize = 160;
 
-/// Describe what a tool is about to do, for the human being asked to approve it.
-///
-/// This used to be `format!("use {}", tool.name)`, which produced prompts like
-/// "Tool 'Bash' wants to: use Bash" — approving a shell command without being
-/// shown the command. The argument that decides whether the call is safe is the
-/// one worth naming, so the primary argument is quoted here, bounded and on one
-/// line. Anything unrecognised falls back to the bare name rather than dumping
-/// a whole JSON blob into a dialog.
+/// Describe tool intent for a permission prompt.
 pub(super) fn describe_tool_intent(name: &str, input_json: &str) -> String {
     let Ok(input) = serde_json::from_str::<serde_json::Value>(input_json) else {
         return format!("use {name}");

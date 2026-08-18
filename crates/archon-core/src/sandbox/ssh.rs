@@ -283,6 +283,7 @@ impl SshSandboxBackend {
                     "SSH sandbox refused execution: {error}; no host shell fallback was used.\n"
                 ),
                 is_error: true,
+                exit_code: None,
             };
         }
         let args = match ssh_command_args(&self.config, &request) {
@@ -293,6 +294,7 @@ impl SshSandboxBackend {
                         "SSH sandbox refused execution: {error}; no host shell fallback was used.\n"
                     ),
                     is_error: true,
+                    exit_code: None,
                 };
             }
         };
@@ -311,6 +313,7 @@ impl SshSandboxBackend {
                 return SandboxCommandResult {
                     content: format!("Error: Failed to spawn ssh: {error}"),
                     is_error: true,
+                    exit_code: None,
                 };
             }
         };
@@ -325,6 +328,7 @@ impl SshSandboxBackend {
             Ok(Err(error)) => SandboxCommandResult {
                 content: format!("Error: SSH command failed: {error}"),
                 is_error: true,
+                exit_code: None,
             },
             Err(_) => SandboxCommandResult {
                 content: format!(
@@ -332,6 +336,7 @@ impl SshSandboxBackend {
                     request.timeout_ms
                 ),
                 is_error: true,
+                exit_code: None,
             },
         }
     }

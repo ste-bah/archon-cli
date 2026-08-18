@@ -3,7 +3,11 @@ mod session;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+
+fn large_edit_effect() -> WorkingTreeEffect {
+    WorkingTreeEffect::Arbitrary
+}
 
 pub struct LargeEditBeginTool;
 pub struct LargeEditInsertAfterTool;
@@ -54,6 +58,10 @@ impl Tool for LargeEditBeginTool {
         }
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
@@ -81,6 +89,10 @@ impl Tool for LargeEditInsertAfterTool {
             ops::insert_after(staged, &args.anchor, &args.content, args.occurrence)
         });
         tool_result(result)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -118,6 +130,10 @@ impl Tool for LargeEditReplaceSectionTool {
         tool_result(result)
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
@@ -150,6 +166,10 @@ impl Tool for LargeEditDeleteSectionTool {
             )
         });
         tool_result(result)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -191,6 +211,10 @@ impl Tool for LargeEditCommitTool {
         tool_result(session::commit(&edit_id, ctx, &required))
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
@@ -220,6 +244,10 @@ impl Tool for LargeEditAbortTool {
             None => return ToolResult::error("edit_id is required and must be a string"),
         };
         tool_result(session::abort(&edit_id, ctx))
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        large_edit_effect()
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

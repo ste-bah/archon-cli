@@ -1,6 +1,6 @@
 ---
 name: grill-with-docs
-description: Grilling session that challenges your plan against the existing domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) inline as decisions crystallise. Use when user wants to stress-test a plan against their project's language and documented decisions.
+description: Use when designing something that touches an established domain model, when the right vocabulary is contested, or when a decision will be hard to reverse and a future reader will ask why. Grills the plan against existing docs and writes ADRs as decisions settle.
 license-source: https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md (MIT)
 ---
 > Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT licensed). Original: https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md

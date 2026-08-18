@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 // ---------------------------------------------------------------------------
 // ResourceProvider trait — implemented by archon-core to bridge to MCP
@@ -138,6 +138,10 @@ impl Tool for ListMcpResourcesTool {
         }
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
@@ -231,6 +235,10 @@ impl Tool for ReadMcpResourceTool {
             }
             Err(e) => ToolResult::error(e),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

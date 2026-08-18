@@ -107,6 +107,7 @@ fn tab_accepts_suggestion() {
         .push(archon_tui::commands::CommandInfo {
             name: "test".into(),
             description: "test cmd".into(),
+            kind: archon_tui::commands::CommandKind::Primary,
         });
     let keymap = KeyMap::default();
     let key = make_key(KeyCode::Tab, KeyModifiers::NONE);

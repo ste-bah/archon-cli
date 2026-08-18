@@ -2,7 +2,7 @@ use serde_json::json;
 use std::fs;
 
 use crate::path_guard::resolve_existing_file_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct ReadTool;
 
@@ -91,6 +91,10 @@ impl Tool for ReadTool {
             .join("\n");
 
         ToolResult::success(numbered)
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

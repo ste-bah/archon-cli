@@ -1,6 +1,7 @@
 pub mod agent_skills;
 pub mod archon_pack;
 pub mod builtin;
+pub mod catalogue;
 pub mod discovery;
 pub mod embedded_skill_md;
 pub mod engineering_pack;
@@ -57,6 +58,19 @@ pub trait Skill: Send + Sync {
     /// Optional aliases that also resolve to this skill.
     fn aliases(&self) -> Vec<&str> {
         vec![]
+    }
+
+    /// Whether the model may invoke this skill on its own judgement.
+    ///
+    /// Only skills that return [`SkillOutput::Prompt`] are useful to an agent —
+    /// `Text` and `Markdown` render in the TUI and never reach the model, so
+    /// advertising them costs prompt tokens and buys nothing. Defaults to
+    /// `false` so a new descriptor-only builtin is excluded until it opts in.
+    ///
+    /// This is a predicate on the trait rather than a name list because the
+    /// distinction is structural: it follows from what `execute` returns.
+    fn agent_invocable(&self) -> bool {
+        false
     }
 
     /// Execute the skill with the given arguments and context.
@@ -136,6 +150,23 @@ impl SkillRegistry {
         let mut list: Vec<(&str, &str)> = self
             .skills
             .values()
+            .map(|s| (s.name(), s.description()))
+            .collect();
+        list.sort_by_key(|(name, _)| *name);
+        list
+    }
+
+    /// Return `(name, description)` for every skill the model may invoke on
+    /// its own judgement, sorted alphabetically by name.
+    ///
+    /// This is the catalogue advertised in the system prompt. It is a strict
+    /// subset of [`list_all`](Self::list_all) — descriptor-only builtins are
+    /// excluded because their output never reaches the model.
+    pub fn list_agent_invocable(&self) -> Vec<(&str, &str)> {
+        let mut list: Vec<(&str, &str)> = self
+            .skills
+            .values()
+            .filter(|s| s.agent_invocable())
             .map(|s| (s.name(), s.description()))
             .collect();
         list.sort_by_key(|(name, _)| *name);

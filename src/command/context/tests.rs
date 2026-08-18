@@ -154,6 +154,12 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
         CommandEffect::SetPermissionMode(_) => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
+        CommandEffect::EnterPlanMode { .. } => {
+            unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+        }
+        CommandEffect::SetActivePlanId(_) => {
+            unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+        }
         CommandEffect::StartPipelineWork(_) => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
@@ -174,8 +180,6 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
     );
 }
 
-// -----------------------------------------------------------------
-// TASK-AGS-809: /cost snapshot routing. Same rationale as AGS-807 +
 // AGS-808 — we pin the routing decision via
 // `resolve_primary_from_input` because standing up a full
 // `SlashCommandContext` fixture drags McpServerManager /
@@ -348,6 +352,36 @@ async fn apply_effect_set_permission_mode_records_event_in_governed_learning_db(
     assert!(
         saw_mode_change,
         "apply_effect must still emit PermissionModeChanged"
+    );
+}
+
+#[tokio::test]
+async fn apply_effect_set_active_plan_id_writes_shared_plan_mode_state() {
+    let fixture = super::slash_ctx_test_fixture::build_test_slash_context(
+        "session-plan-effect",
+        "default",
+        None,
+        None,
+    );
+    let (tui_tx, _tui_rx) = archon_tui::event_channel::bounded_tui_event_channel();
+
+    super::apply_effect(
+        CommandEffect::SetActivePlanId("safe-plan-id".to_string()),
+        &fixture.ctx,
+        &tui_tx,
+    )
+    .await;
+
+    assert_eq!(
+        fixture
+            .ctx
+            .plan_mode_state
+            .lock()
+            .await
+            .active_plan_id
+            .as_deref(),
+        Some("safe-plan-id"),
+        "apply_effect must persist the /plan open selection in shared state"
     );
 }
 

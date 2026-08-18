@@ -10,7 +10,7 @@ Source of truth: `crates/archon-permissions/src/mode.rs:8` enum + `:74-83` FromS
 |---|---|
 | `default` | Prompt user for risky/dangerous operations (legacy alias: `ask`) |
 | `acceptEdits` | Auto-allow file edits (Read/Write/Edit/Glob/Grep), prompt for Bash |
-| `plan` | Read-only: only whitelisted tools allowed |
+| `plan` | Blocks working-tree mutations by default; retained process-state controls are explicitly allowlisted |
 | `auto` | Heuristic-based: auto-approve safe, prompt risky, warn dangerous |
 | `dontAsk` | Auto-allow everything except `always_deny` rules |
 | `bubble` | Auto-approve within sandbox limits (stricter than `dontAsk`, looser than `bypassPermissions`) |
@@ -40,7 +40,18 @@ mode = "default"          # default | acceptEdits | plan | auto | dontAsk | bubb
 /sandbox                  # Toggle Bubble-mode sandbox
 ```
 
-## Rule lists
+### Plan Mode approval and restoration
+
+Plan Mode blocks working-tree mutations by default while retaining explicit process-state controls: `TaskCreate`, `TaskUpdate`, and `Agent`. Agent model/tool actions remain subject to Plan Mode and preflight boundaries.
+
+A structured `ExitPlanMode` submission requires approval before Plan Mode is exited. Interactive approval offers three outcomes: `approve`, `approve-edits`, or `edit`; `reject: <reason>` rejects the structured exit and retains Plan Mode, so Write and other working-tree mutations remain blocked.
+
+`/plan off`, `/plan exit`, and `/plan done` are explicit user commands that exit Plan Mode directly and restore `default` without structured plan approval.
+
+A normal approval restores the recorded pre-plan mode through the safe restoration path. If no mode was recorded, the fallback is `default`, not `auto`; an unapproved `bypassPermissions` mode is also downgraded to `default`. `approve-edits` restores `acceptEdits` explicitly. Plan-linked task rows and their completion evidence persist, while unrelated manual tasks are process-scoped.
+
+When no interactive AskUser channel is available, noninteractive Plan Mode approval defaults to approve. Set `[context].noninteractive_plan_approval = "reject"` to fail closed; any other value uses the approving default.
+
 
 Beyond the mode, fine-grained rules in `[permissions]`:
 
@@ -87,7 +98,7 @@ Subagents inherit the parent's permission mode by default. Override per-spawn:
 ```rust
 Agent {
     name: "code-reviewer",
-    permission_mode: Some(PermissionMode::Plan),  // Force read-only
+    permission_mode: Some(PermissionMode::Plan),  // Block working-tree mutation; retain Plan-safe controls
     ...
 }
 ```
@@ -134,7 +145,7 @@ sandbox = true
 always_deny = ["WebFetch:*", "RemoteTrigger:*"]
 ```
 
-Read-only, no network, no mutations. Useful for security reviews of unfamiliar code.
+Working-tree mutations and network access are blocked; Plan-safe process-state controls remain available. Useful for security reviews of unfamiliar code.
 
 ### Trusted automation
 

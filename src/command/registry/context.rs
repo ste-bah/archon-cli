@@ -267,6 +267,9 @@ pub struct CommandContext {
     /// `status_snapshot`, AGS-808 `model_snapshot`, B08 `denial_snapshot`,
     /// and B11 `effort_snapshot` snapshot gating rule.
     pub(crate) permissions_snapshot: Option<crate::command::permissions::PermissionsSnapshot>,
+    /// Typed permission mode captured before synchronous `/plan` execution.
+    /// This avoids awaiting the shared mutex inside `CommandHandler::execute`.
+    pub(crate) plan_snapshot: Option<crate::command::plan::PlanSnapshot>,
     /// TASK-AGS-POST-6-BODIES-B14-COPY SNAPSHOT-pattern field (READ-only
     /// /copy).
     ///

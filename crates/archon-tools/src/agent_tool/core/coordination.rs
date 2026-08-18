@@ -50,7 +50,7 @@ pub(super) fn claim_task_for_agent(task_id: &str, agent_id: &str) {
         return;
     };
     TASK_MANAGER.set_agent_id(&resolved.id, agent_id);
-    TASK_MANAGER.set_status(&resolved.id, TaskStatus::Running);
+    let _ = TASK_MANAGER.set_status(&resolved.id, TaskStatus::Running);
 }
 
 /// Settle a claimed task on the agent's terminal outcome.
@@ -61,9 +61,11 @@ pub(super) fn claim_task_for_agent(task_id: &str, agent_id: &str) {
 pub(super) fn settle_claimed_task(task_id: Option<&String>, outcome: &SubagentOutcome) {
     let Some(task_id) = task_id else { return };
     match outcome {
-        SubagentOutcome::Completed(_) => TASK_MANAGER.set_status(task_id, TaskStatus::Completed),
+        SubagentOutcome::Completed(_) => {
+            let _ = TASK_MANAGER.set_status(task_id, TaskStatus::Completed);
+        }
         SubagentOutcome::Failed(_) | SubagentOutcome::Cancelled => {
-            TASK_MANAGER.set_status(task_id, TaskStatus::Failed)
+            let _ = TASK_MANAGER.set_status(task_id, TaskStatus::Failed);
         }
         SubagentOutcome::AutoBackgrounded => {}
     }

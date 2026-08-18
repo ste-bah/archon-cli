@@ -36,6 +36,15 @@ impl Agent {
             override_model.clone()
         }
     }
+
+    pub(super) async fn active_model_for_mode(&self, mode: AgentMode) -> String {
+        if mode == AgentMode::Plan
+            && let Some(model) = self.config.context.plan_model.as_deref()
+        {
+            return model.to_string();
+        }
+        self.active_model().await
+    }
     /// The effort level for this turn, always as a concrete level (#123).
     ///
     /// This used to return `None` for `High`, and `None` for any turn
@@ -335,7 +344,7 @@ impl Agent {
         }
     }
 
-    async fn effective_agent_mode(&self) -> AgentMode {
+    pub(super) async fn effective_agent_mode(&self) -> AgentMode {
         let pm = self.config.permission_mode.lock().await;
         if pm.as_str() == "plan" {
             AgentMode::Plan

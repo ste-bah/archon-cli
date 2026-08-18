@@ -85,7 +85,8 @@ event. Most events discard it.
 | `PreToolUse` | `is_blocked` (tool call fails with the reason), `permission_behavior` (`deny` blocks; `allow` only from a `policy`-tagged hook; `ask` is logged and falls through to the normal flow), `updated_input` if it is a JSON object — the replacement is then re-validated against the tool's input schema. **`additional_context` is dropped.** |
 | `PostToolUse` | `updated_mcp_tool_output` replaces the tool result; **`additional_context` is appended to the tool result**; `retry` re-runs the tool, up to 3 attempts; `prevent_continuation` + `stop_reason` end the turn after this call. |
 | `FileChanged`, `CwdChanged` | `watch_paths` only. Everything else is discarded. |
-| `SessionStart` | `watch_paths` only. |
+| `SessionStart` | `watch_paths`, and **`additional_context` is injected into the system prompt** for the rest of the session, wrapped in `<hook-context>`. Re-fired by `/clear`. |
+| `PostCompact` | **`additional_context`**, appended to whatever `SessionStart` established. This is what lets injected context survive a long session. |
 | `PermissionRequest` | `updated_permissions` only. |
 | `Elicitation` | `elicitation_action` + `elicitation_content` — the question is auto-answered without reaching the user. |
 | `UserPromptSubmit` | Nothing. The call is made and the aggregate is dropped. |
@@ -93,7 +94,7 @@ event. Most events discard it.
 
 "Everything else" is most of the enum: `Setup`, `SessionEnd`, `Stop`,
 `StopFailure`, `PostToolUseFailure`, `Notification`, `PreCompact`,
-`PostCompact`, `ConfigChange`, `InstructionsLoaded`, `PermissionDenied`,
+`ConfigChange`, `InstructionsLoaded`, `PermissionDenied`,
 `SubagentStart`, `SubagentStop`, `TeammateIdle`, `TaskCreated`,
 `TaskCompleted`, `ElicitationResult`, `WorktreeCreate`, `WorktreeRemove`, and
 all twelve `Before*`/`After*` runtime lifecycle events. Those hooks are useful

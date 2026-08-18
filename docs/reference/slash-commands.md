@@ -28,10 +28,21 @@ Beyond the 87 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/effort` | — | Set reasoning effort (`high`/`medium`/`low`) |
 | `/fast` | — | Toggle fast mode |
 | `/thinking` | — | Toggle extended thinking display |
-| `/plan` | — | Toggle Plan Mode |
+| `/plan` | — | Plan Mode lifecycle: `/plan` or `/plan show` enters or shows the current Plan Mode state; `/plan open` creates or edits the active plan document; `/plan off`, `/plan exit`, and `/plan done` leave it. |
 | `/copy` | — | Copy last assistant response to clipboard |
 
-## Git integration
+## Plan Mode lifecycle
+
+`/plan` and `/plan show` enter Plan Mode or display its current state. `/plan open` creates or opens the active editable plan document. The exact exit form is `/plan off|exit|done`: `/plan off`, `/plan exit`, and `/plan done` leave Plan Mode.
+
+Plan Mode blocks working-tree mutations by default while retaining explicit process-state controls: `TaskCreate`, `TaskUpdate`, and `Agent`. Agent model/tool actions remain subject to Plan Mode and preflight boundaries. A structured `ExitPlanMode` submission requires approval before Plan Mode is exited. The approval prompt has three outcomes: approve, reject, or revise: `approve` accepts it, `approve-edits` accepts it with file-edit permission, and `edit` returns it for revision. A rejection requires a reason, rejects exit and keeps mutating tools blocked; working-tree mutations remain blocked. An approved plan uses safe restoration of the recorded pre-plan permission mode (or `default` when no safe mode was recorded); it does not infer `auto`.
+
+`/plan off`, `/plan exit`, and `/plan done` are explicit user commands that exit Plan Mode directly and restore `default` without structured plan approval.
+
+When approved, plan-linked task rows persist and rehydrate into `TaskList` after restart. This durability does not apply to unrelated manual tasks: unrelated manual tasks remain process-scoped. Each plan step can require durable evidence, and evidence requirements block completion until the corresponding passed evidence is recorded. Lifecycle reconciliation states are completed, omitted, deviated, and unplanned-extra: it records each step as completed, omitted, or deviated and records any changed file outside planned paths as an unplanned-extra. Reconciliation is durable and remains available after conversation context is cleared.
+
+Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interceptions are appended to `.archon/plan-audit/<session-id>.md`. Restarting requires reopening the same session and its durable plan store for plan-linked tasks and reconciliation to rehydrate.
+
 
 | Command | Aliases | Description |
 |---|---|---|

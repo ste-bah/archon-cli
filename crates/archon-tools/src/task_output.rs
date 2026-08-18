@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool that reads captured output from a task.
 pub struct TaskOutputTool;
@@ -22,7 +22,7 @@ impl Tool for TaskOutputTool {
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "The 8-character task ID"
+                    "description": "The full task ID"
                 },
                 "offset": {
                     "type": "integer",
@@ -55,6 +55,10 @@ impl Tool for TaskOutputTool {
             Ok(output) => ToolResult::success(output),
             Err(e) => ToolResult::error(e),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

@@ -32,6 +32,19 @@ const PASSTHROUGH_VARS: &[&str] = &[
     "COMSPEC",
     "PATHEXT",
     "PSMODULEPATH",
+    // Where Windows keeps installed toolchains. rustc locates the MSVC linker
+    // by running `vswhere.exe` out of `%ProgramFiles(x86)%`, so without these
+    // the lookup fails and it falls back to invoking a bare `link.exe` off
+    // PATH. On any machine with Git installed that resolves to Git's coreutils
+    // `link`, which answers with "link: extra operand" and a failed build —
+    // the symptom looked like a linker bug and was an environment hole.
+    //
+    // Same category as SYSTEMROOT and COMSPEC above: fixed OS paths, not
+    // credentials.
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMW6432",
+    "PROGRAMDATA",
     "CARGO_HOME",
     "RUSTUP_HOME",
 ];
@@ -111,6 +124,40 @@ mod tests {
         let mut env = vec![("Path".to_string(), r"C:\\Windows".to_string())];
         super::ensure_env_default(&mut env, "PATH", "unexpected");
         assert_eq!(env, vec![("Path".to_string(), r"C:\\Windows".to_string())]);
+    }
+
+    /// Toolchain discovery on Windows goes through `%ProgramFiles(x86)%`.
+    ///
+    /// Dropping these did not produce a missing-variable error — it produced a
+    /// linker error. rustc could not run `vswhere.exe`, gave up on locating
+    /// MSVC, and invoked a bare `link.exe`, which on any machine with Git
+    /// installed resolves to Git's coreutils `link` and fails with "extra
+    /// operand". Three `command_evidence` tests failed that way on every
+    /// Windows CI run, looking like a linker bug rather than an environment
+    /// hole, so this is pinned by name.
+    #[test]
+    fn strict_allowlist_preserves_windows_toolchain_discovery_paths() {
+        let env = sanitize_env([
+            ("ProgramFiles", r"C:\Program Files"),
+            ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            ("ProgramW6432", r"C:\Program Files"),
+            ("ProgramData", r"C:\ProgramData"),
+            ("UNRECOGNIZED_CREDENTIAL", "secret"),
+        ]);
+
+        let kept: Vec<&str> = env.iter().map(|(key, _)| key.as_str()).collect();
+        for required in [
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+            "ProgramData",
+        ] {
+            assert!(
+                kept.contains(&required),
+                "{required} must survive: {kept:?}"
+            );
+        }
+        assert!(!kept.contains(&"UNRECOGNIZED_CREDENTIAL"));
     }
 
     #[test]

@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::subagent_executor::get_subagent_executor;
 use crate::team_roster;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// How long members get to notice the shutdown request and finish their round.
 ///
@@ -122,6 +122,10 @@ impl Tool for TeamDeleteTool {
             }))
             .unwrap_or_default(),
         )
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

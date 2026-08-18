@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub struct GrepTool;
 
@@ -160,6 +160,10 @@ impl Tool for GrepTool {
             append_limits(&mut output, file_limit_hit, result_limit_hit, skipped_large);
             ToolResult::success(output)
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::None
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

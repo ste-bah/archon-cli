@@ -375,6 +375,7 @@ pub enum TuiEvent {
     },
     AskUserPrompt {
         question: String,
+        kind: archon_core::agent::AskUserPromptKind,
     },
     SessionRenamed(String),
     PermissionModeChanged(String),

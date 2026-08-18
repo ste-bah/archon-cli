@@ -5,10 +5,26 @@
 /// TUI event loop begins.
 use std::sync::RwLock;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandKind {
+    Primary,
+    Skill,
+}
+
+impl CommandKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Primary => "[command]",
+            Self::Skill => "[skill]",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CommandInfo {
     pub name: String,
     pub description: String,
+    pub kind: CommandKind,
 }
 
 /// Global command catalog. Set at startup from the registry.
@@ -56,108 +72,134 @@ mod tests {
             CommandInfo {
                 name: "/model".into(),
                 description: "Switch model".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data status".into(),
                 description: "Trading data status".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data list".into(),
                 description: "Trading data list".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data show".into(),
                 description: "Trading data show".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data ingest-ohlcv".into(),
                 description: "Trading data ingest OHLCV".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data validate".into(),
                 description: "Trading data validate".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data providers".into(),
                 description: "Trading data providers".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data capability".into(),
                 description: "Trading data capability".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data fetch-native".into(),
                 description: "Trading data fetch native".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data snapshot".into(),
                 description: "Trading data snapshot".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data coverage".into(),
                 description: "Trading data coverage".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data export".into(),
                 description: "Trading data export".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data list --target /tmp/project --json".into(),
                 description: "Trading data list target alias".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data export --target /tmp/project --dataset-id btc-1d --version v1 --out bars.json".into(),
                 description: "Trading data export target alias".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data export-ohlcv".into(),
                 description: "Trading data export OHLCV alias".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data providers --json".into(),
                 description: "Trading provider routing evidence".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name:
                     "/trading data capability --provider openbb --symbol SPY --timeframe 1D --json"
                         .into(),
                 description: "Trading provider capability probe".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data snapshot --provider tradingview --symbol ES".into(),
                 description: "Trading snapshot artifact route".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data fetch-native --provider polygon".into(),
                 description: "Trading data fetch native Polygon/OpenBB path".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data fetch-native --provider yfinance".into(),
                 description: "Trading data fetch native yfinance degraded fallback path".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/trading data fetch-native --provider stooq".into(),
                 description: "Trading data fetch native Stooq exact-native or fail-closed path".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/cost".into(),
                 description: "Show cost".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/compact".into(),
                 description: "Compact context".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/clear".into(),
                 description: "Clear history".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/config".into(),
                 description: "View config".into(),
+                kind: CommandKind::Primary,
             },
             CommandInfo {
                 name: "/help".into(),
                 description: "Show help".into(),
+                kind: CommandKind::Primary,
             },
         ]
     }

@@ -355,7 +355,11 @@ impl Agent {
         let outcome_json = serde_json::to_value(&outcome).unwrap_or(serde_json::Value::Null);
 
         // Fire PostCompact hook
-        if let Some(ref registry) = self.hook_registry {
+        //
+        // The registry handle is cloned out before firing so the aggregate can
+        // be applied to `self` afterwards — `if let Some(ref registry)` would
+        // hold an immutable borrow across the await and block the write.
+        if let Some(registry) = self.hook_registry.clone() {
             let payload = serde_json::json!({
                 "hook_event": "PostCompact",
                 "strategy": strategy_label,
@@ -363,7 +367,7 @@ impl Agent {
                 "tokens_remaining": after_tokens,
                 "outcome": outcome_json,
             });
-            registry
+            let post_compact_agg = registry
                 .execute_hooks(
                     crate::hooks::HookEvent::PostCompact,
                     payload,
@@ -371,6 +375,12 @@ impl Agent {
                     &self.config.session_id,
                 )
                 .await;
+            // #187: this is what makes hook-contributed context survive a long
+            // session. Compaction is exactly when a bootstrap injected at
+            // session start would otherwise be summarised away.
+            if !post_compact_agg.additional_contexts.is_empty() {
+                self.add_hook_session_context(post_compact_agg.additional_contexts);
+            }
         }
 
         // Return detailed summary

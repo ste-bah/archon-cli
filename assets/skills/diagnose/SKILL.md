@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: Disciplined diagnosis loop for hard bugs and performance regressions. Reproduce → minimise → hypothesise → instrument → fix → regression-test. Use when user says "diagnose this" / "debug this", reports a bug, says something is broken/throwing/failing, or describes a performance regression.
+description: Use when something is broken and the cause is not obvious, when a first fix attempt did not work, or when you are on your second guess at a bug — including flaky tests, crashes, and performance regressions. Also when asked to debug or diagnose.
 license-source: https://github.com/mattpocock/skills/blob/main/skills/engineering/diagnose/SKILL.md (MIT)
 ---
 > Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT licensed). Original: https://github.com/mattpocock/skills/blob/main/skills/engineering/diagnose/SKILL.md
@@ -73,6 +73,9 @@ Each hypothesis must be **falsifiable**: state the prediction it makes.
 > Format: "If <X> is the cause, then <changing Y> will make the bug disappear / <changing Z> will make it worse."
 
 If you cannot state the prediction, the hypothesis is a vibe — discard or sharpen it.
+
+Once the fix is in, `/verify-done`: the Phase 1 repro is the test, so re-run it
+rather than reporting "that should do it".
 
 **Show the ranked list to the user before testing.** They often have domain knowledge that re-ranks instantly ("we just deployed a change to #3"), or know hypotheses they've already ruled out. Cheap checkpoint, big time saver. Don't block on it — proceed with your ranking if the user is AFK.
 

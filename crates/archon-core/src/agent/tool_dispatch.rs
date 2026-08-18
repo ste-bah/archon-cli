@@ -132,6 +132,8 @@ mod tests {
                 executions: Arc::clone(executions),
             }),
             file_path: None,
+            filesystem_effect: archon_tools::tool::WorkingTreeEffect::None,
+            filesystem_before: None,
             sandbox_prechecked: true,
         }
     }

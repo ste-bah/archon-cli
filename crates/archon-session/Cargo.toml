@@ -3,8 +3,13 @@ name = "archon-session"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Narrow raw-row fixture support for dependent crate tests; never enabled by production consumers.
+test-support = []
+
 [dependencies]
 archon-cozo = { path = "../archon-cozo" }
+archon-completion = { path = "../archon-completion" }
 serde.workspace = true
 serde_json.workspace = true
 cozo.workspace = true
@@ -14,9 +19,16 @@ anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 dirs.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
+getrandom.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

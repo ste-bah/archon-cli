@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::cron_scheduler::validate_cron_expression;
 use crate::cron_task::{CronStore, CronTask};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 /// Tool that creates a new scheduled cron task.
 pub struct CronCreateTool {
@@ -139,6 +139,10 @@ impl Tool for CronCreateTool {
             })
             .to_string(),
         )
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {

@@ -146,6 +146,7 @@ pub(crate) fn build_command_context<'a>(
             // resolves to `/permissions`. Mirrors AGS-807 status /
             // AGS-808 model / B08 denials / B11 effort snapshot gating rule.
             permissions_snapshot: None,
+            plan_snapshot: None,
             // TASK-AGS-POST-6-BODIES-B14-COPY: SNAPSHOT-pattern field
             // (READ-only /copy). Initialised to `None` here; populated
             // BELOW in the `match primary.as_deref()` block only when the
@@ -298,6 +299,24 @@ pub(crate) fn build_command_context<'a>(
                 // handler consumes a pre-captured owned `EffortLevel`.
                 // Mirrors AGS-808 /model snapshot gating.
                 ctx.effort_snapshot = Some(effort::build_effort_snapshot(slash_ctx).await);
+            }
+            Some("plan") => {
+                let current_mode = slash_ctx
+                    .permission_mode
+                    .lock()
+                    .await
+                    .parse()
+                    .unwrap_or_default();
+                let active_plan_id = slash_ctx
+                    .plan_mode_state
+                    .lock()
+                    .await
+                    .active_plan_id
+                    .clone();
+                ctx.plan_snapshot = Some(crate::command::plan::PlanSnapshot {
+                    current_mode,
+                    active_plan_id,
+                });
             }
             Some("permissions") => {
                 // TASK-AGS-POST-6-BODIES-B12-PERMISSIONS snapshot population.

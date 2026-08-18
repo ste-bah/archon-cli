@@ -17,6 +17,8 @@ mlx-metal = ["dep:mlx-rs"]
 
 [dependencies]
 anyhow.workspace = true
+archon-completion = { path = "../archon-completion" }
+archon-permissions = { path = "../archon-permissions" }
 archon-llm = { path = "../archon-llm" }
 archon-memory = { path = "../archon-memory" }
 libc = "0.2"

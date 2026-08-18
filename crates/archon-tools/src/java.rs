@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 use finding::{Finding, select_issues, severity_counts};
 use project::{JavaProject, Stage};
 
@@ -135,6 +135,10 @@ impl Tool for JavaToolchain {
                 "Unknown operation '{other}'. Valid: detect, compile, analyze, test, report"
             )),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::Arbitrary
     }
 
     /// Running a project's own build executes whatever that build declares, so

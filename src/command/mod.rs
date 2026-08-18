@@ -190,6 +190,8 @@ pub(crate) mod review;
 // TASK-#208 SLASH-SEARCH: /search recursive basename substring search.
 pub(crate) mod search;
 pub(crate) mod self_calibration;
+#[cfg(test)]
+mod self_calibration_tests;
 // TASK-TUI-620: /rewind message-selector overlay launcher.
 pub(crate) mod rewind;
 pub(crate) mod rules;

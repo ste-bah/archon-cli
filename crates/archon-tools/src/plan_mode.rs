@@ -1,8 +1,10 @@
 use serde_json::json;
 
-use crate::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
-/// Tool to enter plan mode. In plan mode, only read-only tools are allowed.
+/// Tool to enter Plan Mode. Plan Mode blocks working-tree mutations by default
+/// while the canonical Plan-safe allowlist retains explicit process-state
+/// controls such as `TaskCreate`, `TaskUpdate`, and `Agent`.
 pub struct EnterPlanModeTool;
 
 #[async_trait::async_trait]
@@ -12,7 +14,7 @@ impl Tool for EnterPlanModeTool {
     }
 
     fn description(&self) -> &str {
-        "Enter plan mode. Only read-only tools (Read, Glob, Grep, AskUserQuestion) are allowed."
+        "Enter Plan Mode. Working-tree mutations are blocked by default; the canonical Plan-safe allowlist retains explicit process-state controls, including TaskCreate, TaskUpdate, and Agent."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -23,10 +25,19 @@ impl Tool for EnterPlanModeTool {
         })
     }
 
-    async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        if ctx.subagent_id.is_some() {
+            return ToolResult::error("subagents cannot enter plan mode");
+        }
         // The agent loop will intercept this and set AgentMode::Plan.
         // The tool itself just signals the intent.
-        ToolResult::success("Plan mode entered. Only read-only tools are available.")
+        ToolResult::success(
+            "Plan Mode entered. Working-tree mutations are blocked by default; use canonical Plan-safe controls, including TaskCreate, TaskUpdate, and Agent.",
+        )
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -56,6 +67,9 @@ impl Tool for ExitPlanModeTool {
     }
 
     async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
+        if ctx.subagent_id.is_some() {
+            return ToolResult::error("subagents cannot exit plan mode");
+        }
         if ctx.mode != AgentMode::Plan {
             return ToolResult::error("Not in plan mode. Use EnterPlanMode first.");
         }
@@ -63,45 +77,50 @@ impl Tool for ExitPlanModeTool {
         ToolResult::success("Plan mode exited. All tools are now available.")
     }
 
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
+    }
+
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
 }
 
+/// Canonical Plan Mode allowlist. Any tool not in this list is denied while
+/// `AgentMode::Plan` is active unless a future production change extends it.
+pub const PLAN_MODE_SAFE_TOOLS: &[&str] = &[
+    "Read",
+    "Glob",
+    "Grep",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskGet",
+    "TaskList",
+    "DocList",
+    "DocGet",
+    "DocStatus",
+    "DocSearch",
+    "DocAnswer",
+    "DocProvenance",
+    "DocInspect",
+    "DocModelStatus",
+    "GameTheoryStatus",
+    "GameTheoryListAgents",
+    "GameTheoryInspect",
+    "LearningStatus",
+    "LearningInspect",
+    "BehaviourProposals",
+    "Agent",
+];
+
 /// Check if a tool is allowed in the current agent mode.
 pub fn is_tool_allowed_in_mode(tool_name: &str, mode: AgentMode) -> bool {
     match mode {
         AgentMode::Normal => true,
-        AgentMode::Plan => {
-            matches!(
-                tool_name,
-                "Read"
-                    | "Glob"
-                    | "Grep"
-                    | "AskUserQuestion"
-                    | "EnterPlanMode"
-                    | "ExitPlanMode"
-                    | "TaskCreate"
-                    | "TaskUpdate"
-                    | "TaskGet"
-                    | "TaskList"
-                    | "DocList"
-                    | "DocGet"
-                    | "DocStatus"
-                    | "DocSearch"
-                    | "DocAnswer"
-                    | "DocProvenance"
-                    | "DocInspect"
-                    | "DocModelStatus"
-                    | "GameTheoryStatus"
-                    | "GameTheoryListAgents"
-                    | "GameTheoryInspect"
-                    | "LearningStatus"
-                    | "LearningInspect"
-                    | "BehaviourProposals"
-                    | "Agent"
-            )
-        }
+        AgentMode::Plan => PLAN_MODE_SAFE_TOOLS.contains(&tool_name),
     }
 }
 
@@ -139,6 +158,36 @@ impl From<&archon_permissions::mode::PermissionMode> for AgentMode {
 mod bridge_tests {
     use super::*;
     use archon_permissions::mode::PermissionMode;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn subagent_enter_plan_mode_errors_without_mode_change() {
+        let ctx = ToolContext {
+            subagent_id: Some("child-1".into()),
+            ..Default::default()
+        };
+
+        let result = EnterPlanModeTool.execute(json!({}), &ctx).await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("subagents cannot enter plan mode"));
+        assert_eq!(ctx.mode, AgentMode::Normal);
+    }
+
+    #[tokio::test]
+    async fn subagent_exit_plan_mode_errors_without_mode_change() {
+        let ctx = ToolContext {
+            subagent_id: Some("child-1".into()),
+            mode: AgentMode::Plan,
+            ..Default::default()
+        };
+
+        let result = ExitPlanModeTool.execute(json!({}), &ctx).await;
+
+        assert!(result.is_error);
+        assert!(result.content.contains("subagents cannot exit plan mode"));
+        assert_eq!(ctx.mode, AgentMode::Plan);
+    }
 
     #[test]
     fn plan_bridges_to_plan() {

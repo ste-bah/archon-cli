@@ -29,7 +29,7 @@ fn make_ctx() -> ToolContext {
 fn task_create_returns_id() {
     let mgr = TaskManager::new();
     let id = mgr.create_task("test task");
-    assert_eq!(id.len(), 8, "task ID should be 8 chars, got: {id}");
+    assert_eq!(id.len(), 32, "task ID should be a full UUID, got: {id}");
     // Should be valid hex
     assert!(
         id.chars().all(|c| c.is_ascii_hexdigit()),
@@ -74,7 +74,7 @@ fn task_list_all() {
 fn task_stop_sets_cancelled() {
     let mgr = TaskManager::new();
     let id = mgr.create_task("stoppable task");
-    mgr.set_status(&id, TaskStatus::Running);
+    mgr.set_status(&id, TaskStatus::Running).unwrap();
     mgr.stop_task(&id).expect("stop should work");
     assert!(mgr.is_cancelled(&id));
     let info = mgr.get_task(&id).expect("task should exist");
@@ -131,10 +131,10 @@ fn task_status_transitions() {
     let id = mgr.create_task("status task");
     assert_eq!(mgr.get_task(&id).unwrap().status, TaskStatus::Pending);
 
-    mgr.set_status(&id, TaskStatus::Running);
+    mgr.set_status(&id, TaskStatus::Running).unwrap();
     assert_eq!(mgr.get_task(&id).unwrap().status, TaskStatus::Running);
 
-    mgr.set_status(&id, TaskStatus::Completed);
+    mgr.set_status(&id, TaskStatus::Completed).unwrap();
     assert_eq!(mgr.get_task(&id).unwrap().status, TaskStatus::Completed);
     assert!(mgr.get_task(&id).unwrap().completed_at.is_some());
 }
@@ -143,11 +143,11 @@ fn task_status_transitions() {
 fn task_status_invalid_transition() {
     let mgr = TaskManager::new();
     let id = mgr.create_task("status task");
-    mgr.set_status(&id, TaskStatus::Running);
-    mgr.set_status(&id, TaskStatus::Completed);
+    mgr.set_status(&id, TaskStatus::Running).unwrap();
+    mgr.set_status(&id, TaskStatus::Completed).unwrap();
 
-    // Completed -> Running should be ignored (no panic, status stays Completed)
-    mgr.set_status(&id, TaskStatus::Running);
+    // Completed -> Running is rejected and status remains Completed.
+    assert!(mgr.set_status(&id, TaskStatus::Running).is_err());
     assert_eq!(mgr.get_task(&id).unwrap().status, TaskStatus::Completed);
 }
 
@@ -161,7 +161,7 @@ fn task_manager_concurrent_access() {
         handles.push(thread::spawn(move || {
             let id = mgr_clone.create_task(&format!("concurrent task {i}"));
             mgr_clone.append_output(&id, &format!("output from {i}"));
-            mgr_clone.set_status(&id, TaskStatus::Running);
+            mgr_clone.set_status(&id, TaskStatus::Running).unwrap();
             id
         }));
     }
@@ -213,7 +213,7 @@ async fn task_create_tool_returns_id_json() {
 
     let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
     let task_id = parsed["task_id"].as_str().unwrap();
-    assert_eq!(task_id.len(), 8);
+    assert_eq!(task_id.len(), 32);
 }
 
 // TASK-AGS-105: The old `task_create_returns_subagent_request` test asserted
@@ -238,7 +238,7 @@ async fn task_create_without_prompt_has_no_subagent_request() {
 
     let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
     let task_id = parsed["task_id"].as_str().unwrap();
-    assert_eq!(task_id.len(), 8);
+    assert_eq!(task_id.len(), 32);
     // Should NOT contain subagent_request when no prompt
     assert!(
         parsed.get("subagent_request").is_none(),
@@ -396,7 +396,9 @@ async fn task_stop_tool_works() {
     let task_id = parsed["task_id"].as_str().unwrap().to_string();
 
     // Set to Running first so stop is valid
-    TASK_MANAGER.set_status(&task_id, TaskStatus::Running);
+    TASK_MANAGER
+        .set_status(&task_id, TaskStatus::Running)
+        .unwrap();
 
     let stop_result = TaskStopTool
         .execute(serde_json::json!({ "task_id": task_id }), &ctx)

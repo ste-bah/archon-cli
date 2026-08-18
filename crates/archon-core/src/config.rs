@@ -12,6 +12,7 @@ mod memory_open;
 mod providers;
 mod runtime;
 mod sections;
+mod skills;
 mod tools;
 mod topology;
 mod validation;
@@ -26,6 +27,7 @@ pub use learning::*;
 pub use providers::*;
 pub use runtime::*;
 pub use sections::*;
+pub use skills::*;
 pub use tools::*;
 pub use topology::*;
 pub use validation::*;
@@ -108,6 +110,9 @@ pub struct ArchonConfig {
     /// Milestone 3 topology guardrail admission.
     #[serde(default)]
     pub topology: TopologyConfig,
+    /// Skill system, including the turn-completion gate (#187).
+    #[serde(default)]
+    pub skills: SkillsConfig,
 }
 
 #[cfg(test)]

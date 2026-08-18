@@ -77,6 +77,7 @@ pub struct CtxBuilder {
     denial_snapshot: Option<crate::command::denials::DenialSnapshot>,
     effort_snapshot: Option<crate::command::effort::EffortSnapshot>,
     permissions_snapshot: Option<crate::command::permissions::PermissionsSnapshot>,
+    plan_snapshot: Option<crate::command::plan::PlanSnapshot>,
     copy_snapshot: Option<crate::command::copy::CopySnapshot>,
     doctor_snapshot: Option<crate::command::doctor::DoctorSnapshot>,
     usage_snapshot: Option<crate::command::usage::UsageSnapshot>,
@@ -121,6 +122,7 @@ impl CtxBuilder {
             denial_snapshot: None,
             effort_snapshot: None,
             permissions_snapshot: None,
+            plan_snapshot: None,
             copy_snapshot: None,
             doctor_snapshot: None,
             usage_snapshot: None,
@@ -300,6 +302,16 @@ impl CtxBuilder {
         self
     }
 
+    pub fn with_plan_snapshot(mut self, s: crate::command::plan::PlanSnapshot) -> Self {
+        self.plan_snapshot = Some(s);
+        self
+    }
+
+    pub fn with_plan_snapshot_opt(mut self, s: Option<crate::command::plan::PlanSnapshot>) -> Self {
+        self.plan_snapshot = s;
+        self
+    }
+
     pub fn with_copy_snapshot(mut self, s: crate::command::copy::CopySnapshot) -> Self {
         self.copy_snapshot = Some(s);
         self
@@ -430,6 +442,7 @@ impl CtxBuilder {
                 denial_snapshot: self.denial_snapshot,
                 effort_snapshot: self.effort_snapshot,
                 permissions_snapshot: self.permissions_snapshot,
+                plan_snapshot: self.plan_snapshot,
                 copy_snapshot: self.copy_snapshot,
                 doctor_snapshot: self.doctor_snapshot,
                 usage_snapshot: self.usage_snapshot,

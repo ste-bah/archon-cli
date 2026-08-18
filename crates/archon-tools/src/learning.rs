@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::evidence_cli;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 pub const LEARNING_TOOL_NAMES: &[&str] = &[
     "LearningStatus",
@@ -37,6 +37,10 @@ macro_rules! learning_tool {
                     Ok(args) => evidence_cli::run_archon(args, ctx).await,
                     Err(e) => ToolResult::error(e),
                 }
+            }
+
+            fn working_tree_effect(&self) -> WorkingTreeEffect {
+                WorkingTreeEffect::Arbitrary
             }
 
             fn permission_level(&self, _input: &Value) -> PermissionLevel {

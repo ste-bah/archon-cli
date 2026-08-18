@@ -142,7 +142,7 @@ async fn enter_plan_mode_succeeds() {
     let tool = EnterPlanModeTool;
     let result = tool.execute(json!({}), &ctx(AgentMode::Normal)).await;
     assert!(!result.is_error);
-    assert!(result.content.contains("Plan mode entered"));
+    assert!(result.content.contains("Plan Mode entered"));
 }
 
 #[tokio::test]

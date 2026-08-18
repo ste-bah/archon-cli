@@ -170,7 +170,7 @@ pub(super) fn docker_output_result(
     status: std::io::Result<std::process::ExitStatus>,
     max_output_bytes: usize,
 ) -> SandboxCommandResult {
-    let exit_code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
+    let exit_code = status.as_ref().ok().and_then(|status| status.code());
     let combined = [stdout_buf, stderr_buf].concat();
     let truncated = combined.len() > max_output_bytes;
     let bytes = if truncated {
@@ -182,15 +182,21 @@ pub(super) fn docker_output_result(
     if truncated {
         output.push_str(&format!("\n\nOutput truncated at {max_output_bytes} bytes"));
     }
-    if exit_code == 0 {
-        SandboxCommandResult {
+    match exit_code {
+        Some(0) => SandboxCommandResult {
             content: output,
             is_error: false,
-        }
-    } else {
-        SandboxCommandResult {
+            exit_code,
+        },
+        Some(exit_code) => SandboxCommandResult {
             content: format!("Exit code {exit_code}\n{output}"),
             is_error: true,
-        }
+            exit_code: Some(exit_code),
+        },
+        None => SandboxCommandResult {
+            content: format!("Process terminated without an exit code\n{output}"),
+            is_error: true,
+            exit_code: None,
+        },
     }
 }

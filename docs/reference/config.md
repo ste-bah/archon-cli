@@ -376,6 +376,8 @@ explicitly when the machine has memory to spare.
 
 Tool gating policy. See [Permissions reference](permissions.md) for full details.
 
+Plan Mode blocks working-tree mutations by default while retaining explicit process-state controls: `TaskCreate`, `TaskUpdate`, and `Agent`. Agent model/tool actions remain subject to Plan Mode and preflight boundaries.
+
 ```toml
 [permissions]
 mode = "default"
@@ -397,7 +399,7 @@ pattern = "git push"
 
 | Field | What / Why |
 |---|---|
-| `mode` | One of 6 canonical modes: `default` (prompt for risky), `acceptEdits` (auto-allow file edits), `plan` (read-only), `auto` (heuristic), `dontAsk` (allow except deny rules), `bypassPermissions` (skip most prompts). Legacy aliases: `ask` -> `default`, `yolo` -> `bypassPermissions`. |
+| `mode` | One of 6 canonical modes: `default` (prompt for risky), `acceptEdits` (auto-allow file edits), `plan` (blocks working-tree mutations by default while retaining explicit process-state controls: `TaskCreate`, `TaskUpdate`, and `Agent`; Agent model/tool actions remain subject to Plan Mode and preflight boundaries), `auto` (heuristic), `dontAsk` (allow except deny rules), `bypassPermissions` (skip most prompts). Legacy aliases: `ask` -> `default`, `yolo` -> `bypassPermissions`. |
 | `always_allow` | Array of `{ tool, pattern }` tables auto-approved regardless of mode. Patterns are prefix/glob-style matchers. |
 | `always_deny` | Array of `{ tool, pattern }` tables always denied, even in permissive modes. Use for hard guards (`rm -rf`, secrets paths, etc.). |
 | `always_ask` | Array of `{ tool, pattern }` tables that force a prompt even in auto/dontAsk modes. Useful for operations you want eyes on. |
@@ -496,6 +498,10 @@ prompt_cache = true
 prompt_cache_mode = "explicit"
 prompt_cache_ttl = "5m"
 prompt_cache_conversation = false
+# Optional model override while the agent is in Plan Mode.
+# plan_model = "claude-sonnet-4-6"
+# Approval policy without an interactive AskUser channel: "approve" (default) or "reject".
+noninteractive_plan_approval = "approve"
 ```
 
 | Field | Default | What / Why |
@@ -513,6 +519,8 @@ prompt_cache_conversation = false
 | `prompt_cache_mode` | `"explicit"` | `"explicit"` uses cache breakpoints on stable prompt blocks; `"automatic"` strips explicit hints; `"hybrid"` keeps explicit hints and leaves room for provider-specific automatic caching where supported. |
 | `prompt_cache_ttl` | `"5m"` | Cache lifetime hint for providers that support TTLs. Set `"1h"` only when you accept the higher cache-write cost. |
 | `prompt_cache_conversation` | `false` | Reserved for provider-supported conversation caching. Unsupported providers ignore Anthropic cache hints. |
+| `plan_model` | unset | Optional model override used only while the agent is in Plan Mode. When unset, Plan Mode uses the active session model; normal execution returns to that session model after approval. |
+| `noninteractive_plan_approval` | `"approve"` | Approval policy when no interactive AskUser channel is available. `"reject"` fails closed; any other value, including the default, approves. |
 
 Model context-window limits live in a separate catalog, not in provider code.
 Archon ships a bundled `context.toml` for Claude, Codex auth, and common
@@ -1919,7 +1927,7 @@ open_browser = false
 max_body_bytes = 67108864
 
 [permissions]
-mode = "plan"               # remote sessions are read-only by default
+mode = "plan"               # blocks working-tree mutations by default; TaskCreate, TaskUpdate, and Agent remain explicitly allowed controls
 ```
 
 ---

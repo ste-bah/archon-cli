@@ -105,8 +105,9 @@ pub(super) async fn handle_tui_event(
         } => {
             app.permission_prompt = Some(tool);
         }
-        TuiEvent::AskUserPrompt { question } => {
+        TuiEvent::AskUserPrompt { question, kind } => {
             app.ask_user_prompt = Some(question.clone());
+            app.ask_user_prompt_kind = Some(kind);
             app.ask_user_draft.clear();
             app.output.append_line(&format!("[question] {question}"));
         }
@@ -450,6 +451,7 @@ mod tests {
             &mut app,
             TuiEvent::AskUserPrompt {
                 question: "Choose a path".into(),
+                kind: archon_core::agent::AskUserPromptKind::Ordinary,
             },
             &tx,
         )

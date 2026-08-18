@@ -3,7 +3,7 @@ use std::sync::{LazyLock, Mutex};
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
 
 #[cfg(test)]
 mod tests;
@@ -297,6 +297,10 @@ impl Tool for ConfigTool {
                 "Unknown action \"{other}\". Must be \"get\" or \"set\"."
             )),
         }
+    }
+
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
     }
 
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel {

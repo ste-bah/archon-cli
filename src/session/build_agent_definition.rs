@@ -64,7 +64,17 @@ pub(in crate::session) fn apply_agent_tool_filters(
 ) {
     if let Some(definition) = agent_def {
         if let Some(allowed) = &definition.allowed_tools {
-            let allowed_refs: Vec<&str> = allowed.iter().map(String::as_str).collect();
+            let mut allowed_refs: Vec<&str> = allowed.iter().map(String::as_str).collect();
+            // #187: an agent that declares skills is told to invoke them, so it
+            // needs the tool that does the invoking. Without this the prompt
+            // instructs it to call `Skill` and the whitelist has already
+            // deleted it — the instruction fails silently, which is how the
+            // whole path went unnoticed.
+            if definition.skills.as_ref().is_some_and(|s| !s.is_empty())
+                && !allowed_refs.contains(&"Skill")
+            {
+                allowed_refs.push("Skill");
+            }
             registry.filter_whitelist(&allowed_refs);
         }
         if let Some(denied) = &definition.disallowed_tools {

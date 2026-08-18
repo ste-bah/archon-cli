@@ -33,10 +33,9 @@ pub mod logging;
 pub mod message_router;
 pub mod orchestrator;
 pub mod output_format;
-// TASK-P0-B.3 (#174): Plan-file I/O helpers (`.archon/plan.md`).
-// Lives in the library so both `dispatch.rs` (interception append) AND
-// the bin-crate `PlanHandler` (read/open) import from a single source
-// without a cyclic dep.
+// Plan document and session-audit I/O helpers. Lives in the library so both
+// `dispatch.rs` (audit append) and the bin-crate `PlanHandler` (document
+// read/open) import from a single source without a cyclic dependency.
 pub mod output_style;
 pub mod output_style_loader;
 pub mod patterns;

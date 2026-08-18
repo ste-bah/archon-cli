@@ -307,6 +307,10 @@ async fn stream_child_to_tui(
 }
 
 #[cfg(test)]
+#[path = "slash_plan_mode_integrated_live_smoke.rs"]
+mod plan_mode_integrated_live_smoke;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
