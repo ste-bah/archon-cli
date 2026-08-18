@@ -7,23 +7,27 @@ pub(super) fn downgrade_read_only_accepted_task_coverage(
     if call.write_mode.is_some() || call.method == WorkflowV2HostMethod::Implementation {
         return;
     }
-    // A no-op proof is read-only, but accepting a task as an already-satisfied
-    // no-op is precisely its job: it credits on acceptance-criteria inspection,
-    // never on fresh implementation or test evidence, which a read-only call
-    // cannot produce by construction. Applying the implementation-evidence
-    // requirement here downgrades every legitimate no-op to needs_review, and
-    // because no repair can ever mint impl/test evidence for a read-only proof,
-    // the noop-proof -> repair -> reverify cycle spins to the repair cap and
-    // blocks the run (observed live: TDL-010/030 looped repair-2-1..2-3 on this
-    // exact gap while both task outcomes read accepted). The substantive check
-    // that a no-op's criteria are genuinely satisfied lives in
-    // `noop_acceptance_criteria_satisfied` (completion_credit.rs) and still
-    // runs; this guard is for the other read-only calls — verification, review
-    // — that must not claim implementation without concrete evidence.
-    if matches!(
-        crate::v2::completion_evidence::task_completion_evidence_kind(&call.id),
-        Some(crate::WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop)
-    ) {
+    // This guard exists for exactly one thing: a read-only FOCUSED-VERIFICATION
+    // call (verification-wave / review-verification-wave) that accepts a task as
+    // implemented without concrete evidence. That is the only read-only call
+    // whose accepted task coverage is an implementation-acceptance claim.
+    //
+    // Every other read-only call carries accepted coverage as structural
+    // bookkeeping, not an implementation claim: a no-op proof credits on
+    // acceptance-criteria inspection (its substantive check is
+    // `noop_acceptance_criteria_satisfied` in completion_credit.rs); inventory,
+    // shape/dependency repair, reconcile, planning and discovery build or mend
+    // the plan. Downgrading their coverage to needs_review sends the caller back
+    // into a repair loop that can never converge, because a read-only call can
+    // never mint the implementation/test evidence this guard then demands.
+    // Observed live twice from the same root cause: noop-proof looping
+    // repair-2-1..2-3 (an earlier, too-narrow fix exempted only that), then
+    // inventory-shape-repair <-> dependency-graph-repair cycling on this exact
+    // gap. Fire only for the calls that mint FocusedVerification evidence; the
+    // write/implementation calls are already returned above.
+    if crate::v2::completion_evidence::task_completion_evidence_kind(&call.id)
+        != Some(crate::WorkflowV2TaskCompletionEvidenceKind::FocusedVerification)
+    {
         return;
     }
     let has_implementation_evidence = !result.files_changed.is_empty()
@@ -241,20 +245,67 @@ mod downgrade_tests {
         );
     }
 
-    /// The guard still bites the calls it is for: a verification-wave call is
-    /// read-only and must not accept a task as implemented on inspection alone.
+    /// The guard still bites the calls it is for: both focused-verification
+    /// call types are read-only and must not accept a task as implemented on
+    /// inspection alone.
     #[test]
-    fn a_verification_wave_accepted_coverage_is_still_downgraded() {
-        let mut result = accepted_inspection_coverage();
-        downgrade_read_only_accepted_task_coverage(
-            &read_only_call("verification-wave-1"),
-            &mut result,
-        );
-        assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-        assert_eq!(
-            result.task_coverage[0].status,
-            WorkflowV2TaskCoverageStatus::Unknown
-        );
-        assert!(!result.residual_gaps.is_empty());
+    fn focused_verification_calls_are_still_downgraded() {
+        for id in ["verification-wave-1", "review-verification-wave-1"] {
+            let mut result = accepted_inspection_coverage();
+            downgrade_read_only_accepted_task_coverage(&read_only_call(id), &mut result);
+            assert_eq!(
+                result.status,
+                WorkflowV2Status::NeedsReview,
+                "{id} must be downgraded"
+            );
+            assert_eq!(
+                result.task_coverage[0].status,
+                WorkflowV2TaskCoverageStatus::Unknown,
+                "{id}"
+            );
+            assert!(!result.residual_gaps.is_empty(), "{id}");
+        }
+    }
+
+    /// The root fix: EVERY read-only structural call — inventory, shape and
+    /// dependency repair, reconcile, planning, remediation-inventory, evidence
+    /// repair, discovery, and no-op proofs — carries accepted coverage as
+    /// bookkeeping, not an implementation claim, and must never be downgraded.
+    /// Downgrading any of them loops the caller into non-converging repair.
+    /// This is the exhaustive check the two earlier too-narrow fixes lacked.
+    #[test]
+    fn no_structural_read_only_call_is_ever_downgraded() {
+        for id in [
+            "canonical-implementation-inventory",
+            "inventory-shape-repair-1",
+            "inventory-shape-repair-2",
+            "dependency-graph-repair-1",
+            "dependency-graph-repair-deadlock-1",
+            "task-universe-reconcile-1",
+            "evidence-repair-1",
+            "verification-plan-1",
+            "verification-plan-repair-1-1",
+            "remediation-inventory-1",
+            "initial-readonly-discovery",
+            "noop-proof-verification-2",
+            "noop-proof-reverification-2-3",
+        ] {
+            let mut result = accepted_inspection_coverage();
+            downgrade_read_only_accepted_task_coverage(&read_only_call(id), &mut result);
+            assert_eq!(
+                result.status,
+                WorkflowV2Status::Accepted,
+                "structural call {id} must not be downgraded"
+            );
+            assert_eq!(
+                result.task_coverage[0].status,
+                WorkflowV2TaskCoverageStatus::Accepted,
+                "structural call {id} coverage must stay accepted"
+            );
+            assert!(
+                result.residual_gaps.is_empty(),
+                "structural call {id} must not accrue a read-only-acceptance gap"
+            );
+        }
     }
 }
