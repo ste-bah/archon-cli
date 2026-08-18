@@ -52,6 +52,8 @@
 | `ARCHON_LEARNING_DB_PATH` | Override governed/pipeline-learning store path only; otherwise learning telemetry uses `<workspace>/.archon/learning-state.db` so idle TUI sessions do not pin the shared docs/video evidence DB |
 | `ARCHON_SESSION_DB_PATH` | Override session database path; otherwise `[session].db_path`, then platform data dir + `archon/sessions/sessions.db` |
 | `ARCHON_GAMETHEORY_DB_PATH` | Override game-theory evidence store path only; otherwise `ARCHON_EVIDENCE_DB_PATH` or the shared project evidence store is used |
+| `ARCHON_LLM_REPLAY` | `record` to write every LLM exchange to a cassette, `replay` to serve from cassettes and never reach the network. Unset means off. Any other value refuses to call a provider at all rather than guess |
+| `ARCHON_LLM_CASSETTES` | Where cassettes are read from and written to; default `.archon/cassettes` under the working directory |
 | `ARCHON_TRUST_USER_GRAMMARS` | Set to `1`, `true`, or `yes` to allow TUI syntax highlighting to load user-provided tree-sitter `.so` grammars |
 | `ARCHON_FFMPEG_BIN` | Override the `ffmpeg` binary used by video frame/audio extraction |
 | `ARCHON_FFPROBE_BIN` | Override the `ffprobe` binary used by video metadata extraction |
@@ -103,6 +105,39 @@ Set these only for local diagnostics and offline tests; they bypass live provide
 | `ARCHON_STOOQ_CSV_URL` | Override the Stooq CSV endpoint used by trading data ingest |
 | `ARCHON_TRADINGVIEW_OHLCV_FIXTURE` | Read TradingView OHLCV responses from a local fixture file instead of the live MCP call |
 | `ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE` | Read TradingView snapshot payloads from a local fixture file instead of the live MCP call |
+| `ARCHON_LLM_REPLAY` | `record` or `replay` — see below |
+| `ARCHON_LLM_CASSETTES` | Cassette directory, default `.archon/cassettes` |
+
+### Recording and replaying LLM exchanges
+
+Record once against a live provider, then run the same work offline:
+
+```bash
+ARCHON_LLM_REPLAY=record ARCHON_LLM_CASSETTES=./cassettes archon -p "your prompt"
+```
+
+```bash
+ARCHON_LLM_REPLAY=replay ARCHON_LLM_CASSETTES=./cassettes archon -p "your prompt"
+```
+
+One JSON file per request, named by a hash of the request. The file holds the
+model, every stream event with its original chunk boundaries, and the exact
+canonical form that was hashed — so when a replay misses, the two requests can
+be diffed rather than guessed at.
+
+The hash ignores what varies between runs without changing the question: tool
+call ids, cache breakpoints, the `archon_spill` locator, the encrypted
+reasoning blob, the tracing origin marker, and the `run_id`/`session_id` in the
+`archon_runtime` envelope. It keeps everything that changes the answer —
+the model, the system prompt, the messages, the tool schemas, thinking and
+effort settings, and the turn counters.
+
+Replay mode never reaches the network. A missing cassette is an error naming
+the digest, the directory and the command that would record it; it is not a
+fallthrough to a live call, because a test that quietly stopped exercising its
+recorded path would otherwise still pass. Recording keeps the real provider's
+own data-flow classification, so a recording run is gated exactly as the live
+call it is making would be.
 
 ## Inherited from the environment
 
