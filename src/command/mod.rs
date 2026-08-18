@@ -49,6 +49,8 @@ pub(crate) mod draft;
 pub(crate) mod commit;
 pub(crate) mod compact;
 pub(crate) mod config;
+/// #189 Phase 7: `config dump` — the effective configuration in one place.
+pub(crate) mod config_dump;
 // TASK-#214 SLASH-CONNECT: /connect dynamic MCP server connect.
 pub(crate) mod connect;
 pub(crate) mod context;

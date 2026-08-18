@@ -117,6 +117,18 @@ pub(crate) fn redact(value: &str) -> String {
     REDACTION_RE.replace_all(value, REDACTED).into_owned()
 }
 
+/// Apply the same redaction to arbitrary text destined for a human.
+///
+/// The layer above redacts tracing fields on their way to a log. This is the
+/// same regex for output that never becomes an event — `archon config dump`
+/// above all, whose whole purpose is to be pasted into an issue (#189 Phase 7).
+/// Sharing the pattern is the point: a second, weaker one would be a hole that
+/// looked like a feature.
+#[inline]
+pub fn redact_text(value: &str) -> String {
+    redact(value)
+}
+
 /// Writer abstraction for the redaction layer. We use a trait-object behind a
 /// `Mutex` so tests can substitute an in-memory `Vec<u8>` sink while prod
 /// code writes to stderr.

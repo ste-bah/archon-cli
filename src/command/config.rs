@@ -56,6 +56,18 @@ pub fn handle_config_command<'a>(
         let key = args.first().map(|s| s.trim()).unwrap_or("");
         let value = args.get(1).map(|s| s.trim()).unwrap_or("");
 
+        // #189 Phase 7: the effective configuration in one place. `sources`
+        // says where settings came from; this says what they resolved to and
+        // which ARCHON_* variables are actually set in this process.
+        if key == "dump" {
+            let output = match super::config_dump::dump() {
+                Ok(text) => format!("\n{text}"),
+                Err(error) => format!("\nCould not dump configuration: {error}\n"),
+            };
+            let _ = tui_tx.send_async(TuiEvent::TextDelta(output)).await;
+            return;
+        }
+
         if key == "sources" {
             let output = archon_core::config_source::format_sources(&ctx.config_sources);
             if output.is_empty() {
