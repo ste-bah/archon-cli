@@ -100,6 +100,8 @@ pub(crate) mod garden_metrics;
 pub(crate) mod garden_proposals;
 pub(crate) mod help;
 pub(crate) mod hooks;
+// #189 Phase 11: Agent Client Protocol over stdio.
+pub(crate) mod acp;
 pub(crate) mod ide_stdio;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;

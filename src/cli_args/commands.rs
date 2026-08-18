@@ -66,6 +66,14 @@ pub enum Commands {
         #[command(subcommand)]
         action: TeamAction,
     },
+    /// Speak the Agent Client Protocol over stdin/stdout, so an ACP-capable
+    /// editor can drive archon without a per-editor extension (#189 Phase 11)
+    Acp {
+        /// Project root the agent works in. Defaults to the directory the
+        /// editor spawned the process in.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+    },
     /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
     IdeStdio {
         /// Project root the agent works in. Defaults to the directory the

@@ -295,6 +295,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-acp"
+version = "1.9.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "archon-bench"
 version = "1.9.2"
 dependencies = [
@@ -321,6 +333,7 @@ version = "1.9.2"
 dependencies = [
  "anyhow",
  "archon-accel",
+ "archon-acp",
  "archon-cognitive",
  "archon-completion",
  "archon-consciousness",
