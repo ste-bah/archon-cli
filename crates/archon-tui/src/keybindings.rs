@@ -49,6 +49,8 @@ pub enum Action {
     OpenActivity,
     /// Ctrl+B = send the live activity stream back to the background.
     BackgroundActivity,
+    /// Ctrl+K = open the tasks overlay, where a running task can be cancelled.
+    OpenTasks,
     /// Shift+Tab = cycle permission mode.
     CyclePermissionMode,
     /// Tab = accept selected suggestion / autocomplete.
@@ -117,6 +119,16 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
             Action::BackgroundActivity,
+        );
+        // Ctrl+K opens the tasks overlay (#189 Phase 9).
+        //
+        // Ctrl+O's activity stream is keyed by actor role and carries no task
+        // id, so it can show that something is running but never stop it. This
+        // overlay holds the ids and routes cancellation back through
+        // `TaskStore`.
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            Action::OpenTasks,
         );
 
         // Navigation / scroll

@@ -1,19 +1,18 @@
-//! TASK-CI-PHASE4-REGRESSION-FIX Part 2: integration tests for the
-//! `/search` results overlay (screens::search_results).
+//! Render coverage for the `/search` results overlay.
 //!
-//! Drives `SearchResults::render` against a `TestBackend` and asserts
-//! against the rendered buffer. Pulled into an integration test file
-//! (vs. inline `#[cfg(test)] mod tests`) because keeping them inline
-//! pushed `crates/archon-tui/src/screens/search_results.rs` past the
-//! 500-line TUI ceiling. The `build_highlighted_spans` direct-call
-//! tests STAY inline (they test a `fn`-private helper that integration
-//! tests cannot reach).
+//! Kept in its own file rather than inline in `search_results.rs` because
+//! inlining pushed that module past the 500-line TUI ceiling. It ran as
+//! `tests/screens_search_results_render.rs` until #189 Phase 0 made the screen
+//! modules crate-private; the screen is genuinely wired — `app.rs` constructs
+//! it — so the tests moved in-crate rather than the module being re-opened for
+//! a test's benefit.
 //!
-//! Pattern mirrors `tests/render_coverage.rs::buffer_to_string`.
+//! The `build_highlighted_spans` direct-call tests STAY inline in the screen:
+//! they exercise a `fn`-private helper this module cannot reach either.
 
-use archon_tui::events::FileEntry;
-use archon_tui::screens::search_results::SearchResults;
-use archon_tui::theme::intj_theme;
+use super::search_results::SearchResults;
+use crate::events::FileEntry;
+use crate::theme::intj_theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::path::PathBuf;

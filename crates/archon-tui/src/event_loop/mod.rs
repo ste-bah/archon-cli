@@ -22,6 +22,7 @@ mod ask_user;
 mod driver;
 mod input;
 mod mouse;
+mod task_overlay_input;
 pub(crate) mod thinking_archive;
 mod tui_events;
 
@@ -83,11 +84,13 @@ where
         context_source,
         context_threshold,
         command_catalog,
+        task_store,
     } = config;
 
     crate::commands::set_catalog(command_catalog);
 
     let mut app = App::new();
+    app.task_store = task_store;
     app.status.model = model;
     app.status.context_window = context_window;
     app.status.context_name = Some("main".to_string());

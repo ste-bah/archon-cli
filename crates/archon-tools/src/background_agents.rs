@@ -211,7 +211,18 @@ pub trait BackgroundAgentRegistryApi: Send + Sync {
     /// counterpart to [`Self::iter_running`] for callers that want every live
     /// agent rather than only the UUID-shaped ones.
     fn iter_running_ids(&self) -> Vec<String>;
+
+    /// Every running handle, with enough detail to show it and act on it.
+    ///
+    /// [`Self::iter_running_ids`] answers "which ids are live", which is all a
+    /// poller needs; a surface listing agents for a human also needs how long
+    /// each has run (#189 Phase 9). See [`running`].
+    fn running_snapshot(&self) -> Vec<RunningAgent>;
 }
+
+#[path = "background_agents_running.rs"]
+mod running;
+pub use running::{RunningAgent, running_background_agents};
 
 /// DashMap-backed implementation of the registry contract.
 ///
@@ -372,6 +383,10 @@ impl BackgroundAgentRegistryApi for BackgroundAgentRegistry {
             .map(|entry| entry.key().clone())
             .collect()
     }
+
+    fn running_snapshot(&self) -> Vec<RunningAgent> {
+        running::snapshot(&self.inner)
+    }
 }
 
 /// Global singleton used by the spawn sites (TASK-AGS-104/105/106).
@@ -437,6 +452,7 @@ pub fn poll_subagent(subagent_id: &str) -> PollOutcome {
 pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
     BACKGROUND_AGENTS.cancel(id)
 }
+
 
 // ---------------------------------------------------------------------------
 // TASK-TUI-406: 60s janitor task for BACKGROUND_AGENTS registry

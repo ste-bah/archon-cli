@@ -45,6 +45,7 @@ pub(crate) mod plan_hint;
 mod reasoning_quality;
 mod slash_context_builder;
 mod splash;
+mod task_overlay_store;
 mod web_runtime;
 mod world_model_backend;
 mod world_model_callbacks;

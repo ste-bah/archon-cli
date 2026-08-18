@@ -1,13 +1,18 @@
-use archon_tui::screens::docs::{DocsRow, DocsScreen, DocsStore, DocsView};
-use archon_tui::screens::gametheory::{
-    GameTheoryRow, GameTheoryScreen, GameTheoryStore, GameTheoryView,
-};
-use archon_tui::screens::learning::{LearningRow, LearningScreen, LearningStore, LearningView};
-use archon_tui::screens::video::{
-    FrameGroupItem, TranscriptSegmentItem, VideoScreen, VideoSourceItem,
-};
-use archon_tui::screens::workflow::{WorkflowRow, WorkflowScreen, WorkflowStore, WorkflowView};
-use archon_tui::theme::intj_theme;
+//! Evidence-engine screen coverage.
+//!
+//! This ran as `tests/evidence_engine_screens.rs` until #189 Phase 0 made the
+//! screen modules crate-private. The screens it covers are genuinely wired —
+//! `app_views.rs` constructs all five — so the fix was to move the tests inside
+//! the crate rather than re-open the modules. Re-exporting a screen so an
+//! external test can reach it is precisely the visibility hole Phase 0 closed:
+//! it would make `dead_code` unable to fire on these again.
+
+use super::docs::{DocsRow, DocsScreen, DocsStore, DocsView};
+use super::gametheory::{GameTheoryRow, GameTheoryScreen, GameTheoryStore, GameTheoryView};
+use super::learning::{LearningRow, LearningScreen, LearningStore, LearningView};
+use super::video::{FrameGroupItem, TranscriptSegmentItem, VideoScreen, VideoSourceItem};
+use super::workflow::{WorkflowRow, WorkflowScreen, WorkflowStore, WorkflowView};
+use crate::theme::intj_theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 

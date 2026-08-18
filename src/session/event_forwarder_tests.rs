@@ -230,6 +230,7 @@ async fn agent_text_reconstructs_response_and_rendered_transcript() {
         context_source: None,
         context_threshold: 0.8,
         command_catalog: Vec::new(),
+        task_store: None,
     };
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("create terminal");
 
