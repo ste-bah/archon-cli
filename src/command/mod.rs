@@ -307,33 +307,3 @@ pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
-
-// TASK-AGS-800 (Stage 6, Q1=A): spec-name discoverability shim.
-//
-// The phase-8 spec (`TASK-AGS-800.md`) used the name `SlashCommand` for
-// the trait. Shipped code (TASK-AGS-622) calls it `CommandHandler`.
-// Stage 6 orchestrator decision Q1=A preserves the shipped trait
-// verbatim (sync, `anyhow::Result<()>`, no `CommandOutcome`/`CommandError`/
-// `ViewId` enums, no `inventory` registration). This re-export is a
-// zero-cost namespace alias so future readers grepping for
-// `SlashCommand` land on the real trait.
-//
-// Purely additive: no runtime behavior change, no new dependencies, no
-// new types. See the TASK-AGS-800 commit body for the full R-item list.
-#[allow(unused_imports)]
-pub(crate) use registry::CommandHandler as SlashCommand;
-
-// TASK-AGS-801 (Stage 6, Q1=A): parser drift-reconcile + gap-fill.
-//
-// Re-export the parser types so future readers grepping for
-// `CommandParser` / `ParseError` / `Arg` / `suggest` land on the real
-// definitions without having to dig through the `parser` submodule
-// directly. This matches the additive-shim pattern established by the
-// `SlashCommand` alias above and is the `mod.rs` re-export mandated by
-// TASK-AGS-801 (G9).
-//
-// Note: `ParsedCommand` is already reachable via `parser::ParsedCommand`
-// from dispatcher.rs; the re-export just widens the surface to match
-// the spec's "mod.rs re-exports the 5 parser types" wiring check.
-#[allow(unused_imports)]
-pub(crate) use parser::{Arg, CommandParser, ParseError, ParsedCommand, suggest};
