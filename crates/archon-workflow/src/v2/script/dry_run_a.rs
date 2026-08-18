@@ -11,6 +11,13 @@ pub struct WorkflowDryRunPlanDetails {
     pub review_map_claims: Vec<WorkflowReviewMapClaim>,
     /// Review reduce linkage and bounds captured from reviewContract metadata.
     pub review_reduce_edges: Vec<WorkflowReviewReduceEdge>,
+    /// Whether this script called a real tool (#189 Phase 4).
+    ///
+    /// A tool call reads the world, so its result is not a function of the
+    /// script and the plan derived from a dry run is only one of the paths the
+    /// script can take. Recorded so a caller can say that plainly instead of
+    /// treating a dry run of such a script as the whole story.
+    pub used_tool_calls: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +64,32 @@ pub async fn dry_run_workflow_plan_details(
 ) -> WorkflowResult<(Vec<WorkflowV2HostCall>, Vec<(String, String)>)> {
     let details = dry_run_workflow_plan_full_details(harness_source, script_args).await?;
     Ok((details.calls, details.write_task_claims))
+}
+
+/// Host method for a real tool call (#189 Phase 4). Kept in step with
+/// `crate::command::RUN_TOOL_METHOD` in the binary; a dry run has to recognise
+/// the same string the live host answers.
+pub(super) const RUN_TOOL_METHOD: &str = "runTool";
+
+/// What a tool call returns during a dry run.
+///
+/// Says what it is rather than returning nothing, so a script that logs the
+/// result shows why it is empty instead of implying the file was.
+pub(super) const DRY_RUN_TOOL_PLACEHOLDER: &str =
+    "[dry run: tools are not executed while validating a script]";
+
+/// Best-effort tool name from a `runTool` payload, for the stand-in reply.
+fn tool_name_from_payload(payload: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("options")
+                .and_then(|options| options.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 pub async fn dry_run_workflow_plan_full_details(
@@ -155,6 +188,28 @@ pub(super) fn record_dry_run_call(
     method: &str,
     payload: &str,
 ) -> WorkflowResult<String> {
+    // #189 Phase 4. A dry run validates a script's shape without doing
+    // anything, so a tool call is answered rather than executed — running it
+    // would make validating a script a way to run commands. It is also not
+    // recorded as a host call: the plan is the set of agent calls, and a
+    // `Read` is not one of them.
+    //
+    // The stand-in is marked, not empty. A script that branches on tool output
+    // will take an arbitrary branch here, which is a real limit of dry-running
+    // a script that reads the world, and the marker is what makes that visible
+    // rather than looking like a file that happened to be blank.
+    if method == RUN_TOOL_METHOD {
+        if let Ok(mut recorder) = recorder.lock() {
+            recorder.details.used_tool_calls = true;
+        }
+        return serde_json::to_string(&serde_json::json!({
+            "tool": tool_name_from_payload(payload),
+            "content": DRY_RUN_TOOL_PLACEHOLDER,
+            "is_error": false,
+            "dry_run": true,
+        }))
+        .map_err(|err| WorkflowError::SpecInvalid(format!("dry-run tool stand-in failed: {err}")));
+    }
     let call = match dry_run_call_from_payload(method, payload) {
         Ok(call) => call,
         Err(err) => {

@@ -287,6 +287,36 @@ whole payload is bounded; when rows are dropped to stay inside that bound the
 response says how many, because a silently shortened list reads as a complete
 one.
 
+## Tools from a workflow script
+
+A `workflow.js` script can call the tool registry directly, so an ordinary file
+operation inside an orchestration no longer costs a model round-trip:
+
+```js
+const readme = await w.runTool("Read", { file_path: "README.md" });
+const hits = await w.runTool("Grep", { pattern: "TODO", path: "src" });
+```
+
+Top-level Claude Code-style scripts also get `tool(name, input)` plus
+`readFile`, `grepFiles`, `globFiles` and `bash` as bare globals.
+
+This is separate from `w.tool(id, { tool: "checkpoint" })`, which reaches three
+workflow-internal pseudo-tools (`checkpoint`, `saveArtifact`,
+`requireArtifact`) and nothing else.
+
+Every call passes the same permission checker a model-issued call passes.
+Running in the host is not a licence to skip the gate. A script runs unattended,
+so a decision meaning "confirm with the user" is a refusal here — allow the tool
+under `[permissions] always_allow`, or do that work in an agent call. A refused
+or unknown tool comes back as a failed result the script can handle; exceeding
+the per-run caps (500 calls, 8 MB total) ends the run, because unlike a refusal
+there is no way to continue that returns less.
+
+During a dry run tools are **not** executed. Each call returns a marked stand-in
+and is left out of the plan — a `Read` is not an agent call. The dry-run details
+record whether a script used tool calls at all, because such a script reads the
+world and the plan derived from a dry run is only one of the paths it can take.
+
 ## Tool restrictions
 
 The CLI provides flags to restrict the model's tool surface:

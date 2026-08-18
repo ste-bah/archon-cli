@@ -77,6 +77,8 @@ impl WorkflowV2ScriptRunner {
             scaffold_hash: workflow_scaffold_hash(harness_source),
             runner: self,
             accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
+            tool_host: std::sync::OnceLock::new(),
+            tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
         });
         let driver = LifecycleDriver::new(
             host.clone(),
