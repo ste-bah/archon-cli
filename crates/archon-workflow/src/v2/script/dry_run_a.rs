@@ -66,32 +66,6 @@ pub async fn dry_run_workflow_plan_details(
     Ok((details.calls, details.write_task_claims))
 }
 
-/// Host method for a real tool call (#189 Phase 4). Kept in step with
-/// `crate::command::RUN_TOOL_METHOD` in the binary; a dry run has to recognise
-/// the same string the live host answers.
-pub(super) const RUN_TOOL_METHOD: &str = "runTool";
-
-/// What a tool call returns during a dry run.
-///
-/// Says what it is rather than returning nothing, so a script that logs the
-/// result shows why it is empty instead of implying the file was.
-pub(super) const DRY_RUN_TOOL_PLACEHOLDER: &str =
-    "[dry run: tools are not executed while validating a script]";
-
-/// Best-effort tool name from a `runTool` payload, for the stand-in reply.
-fn tool_name_from_payload(payload: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("options")
-                .and_then(|options| options.get("name"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 pub async fn dry_run_workflow_plan_full_details(
     harness_source: &str,
     script_args: Option<&serde_json::Value>,
