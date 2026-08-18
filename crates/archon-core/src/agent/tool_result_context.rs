@@ -138,6 +138,16 @@ mod projection;
 
 pub(crate) use projection::{project_messages_for_emergency_retry, project_messages_for_request};
 
+/// Would this result be trimmed when the request projection replays it?
+///
+/// The ingest ceiling (1 MB) and the per-tool replay budget (24-64 KB) are
+/// different numbers, and it is the replay budget that decides what the model
+/// actually loses. Spilling is keyed to this, not to the ingest ceiling, or a
+/// 30 KB shell result — trimmed on every request — would never get a file.
+pub(crate) fn exceeds_context_budget(tool_name: &str, content: &str) -> bool {
+    serialized_string_bytes(content) > context_limit_for_tool(tool_name)
+}
+
 fn context_limit_for_tool(tool_name: &str) -> usize {
     match tool_name {
         "Bash" | "Shell" => SHELL_TOOL_RESULT_CONTEXT_BYTES,

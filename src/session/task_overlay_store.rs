@@ -254,6 +254,10 @@ mod tests {
 
     #[test]
     fn an_unknown_id_is_refused_rather_than_silently_succeeding() {
-        assert!(TaskManagerStore.cancel_task(&"no-such-id".to_string()).is_err());
+        assert!(
+            TaskManagerStore
+                .cancel_task(&"no-such-id".to_string())
+                .is_err()
+        );
     }
 }

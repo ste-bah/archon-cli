@@ -17,18 +17,19 @@
 //! structurally: the token `stop_task` fires is the one `execution_token`
 //! hands out. Links 1 and 3 are exercised against real processes.
 
-use std::time::Duration;
-
 use archon_tools::task_manager::TaskManager;
 use tokio_util::sync::CancellationToken;
 
-// Only the process-level test uses the Bash machinery, and it is unix-only.
+// Only the process-level test uses the Bash machinery and the timing helpers,
+// and it is unix-only.
 #[cfg(unix)]
 use archon_tools::bash::BashTool;
 #[cfg(unix)]
 use archon_tools::tool::{Tool, ToolContext};
 #[cfg(unix)]
 use serde_json::json;
+#[cfg(unix)]
+use std::time::Duration;
 
 /// Link 1 + 2: the token `stop_task` fires is the one handed to the runner.
 #[test]
@@ -113,9 +114,12 @@ async fn cancelling_the_context_token_terminates_the_running_process() {
         cancel_for_task.cancel();
     });
 
-    let result = tokio::time::timeout(Duration::from_secs(10), tool.execute(json!({"command": command}), &ctx))
-        .await
-        .expect("cancellation must end the command well inside the 30s timeout");
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        tool.execute(json!({"command": command}), &ctx),
+    )
+    .await
+    .expect("cancellation must end the command well inside the 30s timeout");
 
     assert!(
         result.is_error,

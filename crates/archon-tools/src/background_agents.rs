@@ -453,7 +453,6 @@ pub fn cancel_background_agent(id: &AgentId) -> Result<(), RegistryError> {
     BACKGROUND_AGENTS.cancel(id)
 }
 
-
 // ---------------------------------------------------------------------------
 // TASK-TUI-406: 60s janitor task for BACKGROUND_AGENTS registry
 // (drift-reconcile from spec's gc_completed_agents + 1hr TTL)

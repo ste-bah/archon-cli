@@ -64,7 +64,10 @@ mod tests {
         app.task_overlay = Some(crate::screens::task_overlay::TaskOverlay::default());
 
         assert!(handle_task_overlay_key(&mut app, key(KeyCode::Char('q'))));
-        assert!(app.task_overlay.is_some(), "an unhandled key must not close it");
+        assert!(
+            app.task_overlay.is_some(),
+            "an unhandled key must not close it"
+        );
     }
 
     #[test]

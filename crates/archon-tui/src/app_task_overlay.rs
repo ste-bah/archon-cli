@@ -130,7 +130,10 @@ mod tests {
         }
 
         fn cancel_task(&self, id: &TaskId) -> Result<(), String> {
-            self.cancelled.lock().expect("cancelled lock").push(id.clone());
+            self.cancelled
+                .lock()
+                .expect("cancelled lock")
+                .push(id.clone());
             if let Some(reason) = &self.fail_with {
                 return Err(reason.clone());
             }

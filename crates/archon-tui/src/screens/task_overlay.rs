@@ -293,7 +293,10 @@ mod tests {
             }
         }
 
-        let store = FixedStore(vec![row("task-1", 10, "running"), row("task-2", 20, "done")]);
+        let store = FixedStore(vec![
+            row("task-1", 10, "running"),
+            row("task-2", 20, "done"),
+        ]);
         let overlay = TaskOverlay::new(store.list_tasks());
         assert_eq!(overlay.len(), 2);
     }

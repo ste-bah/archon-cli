@@ -314,6 +314,17 @@ pub struct ConversationState {
     /// the next API response repopulates it).
     pub last_known_context_tokens: u64,
     pub auto_compact: crate::agent::AutoCompactState,
+    /// Where oversized tool results are written so their omitted region stays
+    /// readable (#189 Phase 1). `None` disables spilling.
+    pub spill: Option<SpillContext>,
+}
+
+/// What `add_tool_result` needs to write a spill file.
+#[derive(Debug, Clone)]
+pub struct SpillContext {
+    pub working_dir: std::path::PathBuf,
+    pub session_id: String,
+    pub config: crate::config::SpillConfig,
 }
 
 impl Default for ConversationState {
@@ -326,6 +337,7 @@ impl Default for ConversationState {
             total_output_tokens: 0,
             last_known_context_tokens: 0,
             auto_compact: crate::agent::AutoCompactState::default(),
+            spill: None,
         }
     }
 }
@@ -364,12 +376,20 @@ impl ConversationState {
                 "tool result exceeded the ingest ceiling and was truncated"
             );
         }
-        let result = serde_json::json!({
+        let spilled = self.spill_locator_for(tool_use_id, content);
+        let mut result = serde_json::json!({
             "type": "tool_result",
             "tool_use_id": tool_use_id,
             "content": capped.content,
             "is_error": is_error,
         });
+        // Recorded on the block so it survives persistence and forking. The
+        // request projection strips it before anything reaches the provider —
+        // this key is archon's, not part of the tool_result wire format.
+        if let Some(locator) = spilled {
+            result[crate::agent::SPILL_PATH_KEY] =
+                serde_json::Value::String(locator.path.display().to_string());
+        }
         if let Some(last) = self.messages.last_mut()
             && last.get("role").and_then(|v| v.as_str()) == Some("user")
             && let Some(blocks) = last.get_mut("content").and_then(|v| v.as_array_mut())

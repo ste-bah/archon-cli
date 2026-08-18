@@ -22,6 +22,7 @@ impl Agent {
                 config.context.max_tool_result_bytes,
                 client.as_ref(),
             ),
+            spill: super::spill_ingest::open_spill(&config.working_dir, &config.session_id),
             ..ConversationState::default()
         };
         Self {

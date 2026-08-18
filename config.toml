@@ -1196,6 +1196,39 @@ isolation_max_tier = "worktree"
 completion_gate = "block"
 
 # ----------------------------------------------------------------------------
+# [spill] — Where oversized tool output is kept
+# ----------------------------------------------------------------------------
+# A large tool result is replayed to the model as a head/tail excerpt, because
+# the whole thing will not fit in the context window. Without somewhere to put
+# the rest, the note saying "omitted 180000 bytes" is a dead end: recovering
+# the middle of a big grep means running the grep again.
+#
+# The full output is written once, when the result is recorded, to
+# .archon/spill/<session-id>/<call-id>-<tool>.txt, and the truncation note
+# names the path so the model can Read it.
+#
+# Only results that will actually be trimmed are written -- the threshold is
+# the per-tool replay budget (24 KB shell, 32 KB subagent, 64 KB otherwise),
+# not the 1 MB ingest ceiling. Results that are already retrievable from where
+# they came from (Read, NotebookRead) are skipped: re-reading the original
+# beats reading a copy that may since have gone stale.
+
+[spill]
+
+# Write spill files at all.
+enabled = true
+
+# Days a session's spill directory survives. Expired directories are swept at
+# session start rather than by a timer -- a directory nobody has opened archon
+# to look at is not urgent, and a background sweeper is one more thing that can
+# delete the wrong path.
+#
+# 0 means "do not prune", not "delete immediately": someone typing 0 expecting
+# unlimited retention should get unlimited retention, not a feature that
+# silently discards every file the moment it is written.
+retention_days = 7
+
+# ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------
 # Generated decomposed-PRD workflows keep orchestration in workflow.js. These

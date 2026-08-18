@@ -13,6 +13,7 @@ mod providers;
 mod runtime;
 mod sections;
 mod skills;
+mod spill;
 mod tools;
 mod topology;
 mod validation;
@@ -28,6 +29,7 @@ pub use providers::*;
 pub use runtime::*;
 pub use sections::*;
 pub use skills::*;
+pub use spill::*;
 pub use tools::*;
 pub use topology::*;
 pub use validation::*;
@@ -113,6 +115,9 @@ pub struct ArchonConfig {
     /// Skill system, including the turn-completion gate (#187).
     #[serde(default)]
     pub skills: SkillsConfig,
+    /// Where oversized tool output is kept so it stays retrievable (#189).
+    #[serde(default)]
+    pub spill: SpillConfig,
 }
 
 #[cfg(test)]
