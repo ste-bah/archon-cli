@@ -54,6 +54,7 @@ pub mod powershell;
 pub mod provider_env;
 pub mod push_notification;
 pub mod registry;
+pub mod session_search;
 pub mod sleep;
 pub mod todo_write;
 pub mod tool;

@@ -247,7 +247,16 @@ running is refused.
 | Tool | Permission | Purpose |
 |---|---|---|
 | `RemoteTrigger` | Risky | HTTP POST to an allow-listed remote endpoint (`remote_triggers.allowed_hosts`) |
+| `SessionSearch` | Safe | Search past sessions by text, directory, branch or date; returns ids, names, timestamps and the matching excerpt |
 | `Sleep` | Safe | Async-safe delay (max 300s) |
+
+`SessionSearch` and `/sessions` read the same store and resolve its path the
+same way — `ARCHON_SESSION_DB_PATH`, then `session.db_path`, then the default
+location. They differ only in shape: the command renders a table for a person,
+the tool returns structured rows for the model. Results are capped at 50 and the
+whole payload is bounded; when rows are dropped to stay inside that bound the
+response says how many, because a silently shortened list reads as a complete
+one.
 
 ## Tool restrictions
 

@@ -71,6 +71,8 @@ pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
     ("ReadMcpResource", WorkingTreeEffect::ExternalOnly),
     ("RemoteTrigger", WorkingTreeEffect::ExternalOnly),
     ("SendMessage", WorkingTreeEffect::ExternalOnly),
+    // Reads the local session store and writes nothing (#189 Phase 2).
+    ("SessionSearch", WorkingTreeEffect::None),
     ("Skill", WorkingTreeEffect::Arbitrary),
     ("Sleep", WorkingTreeEffect::None),
     ("TaskCreate", WorkingTreeEffect::Arbitrary),
@@ -415,6 +417,17 @@ pub fn create_default_registry(
     ));
     registry.register(Box::new(archon_tools::powershell::PowerShellTool::default()));
     registry.register(Box::new(archon_tools::sleep::SleepTool));
+    // #189 Phase 2: session search was reachable only by typing /sessions.
+    // The configured path is resolved here because `archon-tools` cannot see
+    // `ArchonConfig`, and a tool guessing would mean searching a different
+    // database than `/sessions` reads.
+    registry.register(Box::new(
+        archon_tools::session_search::SessionSearchTool::new(
+            crate::config::load_config()
+                .ok()
+                .and_then(|loaded| loaded.session.db_path.map(PathBuf::from)),
+        ),
+    ));
     registry.register(Box::new(archon_tools::ask_user::AskUserTool));
     registry.register(Box::new(archon_tools::todo_write::TodoWriteTool));
     registry.register(Box::new(archon_tools::plan_mode::EnterPlanModeTool));
