@@ -145,6 +145,13 @@ type BoxedWriter = Box<dyn Write + Send + 'static>;
 pub struct RedactionLayer {
     writer: StdMutex<BoxedWriter>,
     json: bool,
+    /// OTLP destination, when one is configured (#189 Phase 10).
+    ///
+    /// Held *here* rather than installed as its own layer, and that placement
+    /// is the security property: a second layer would be a parallel sink
+    /// receiving the raw event, so the only copy that ever reaches the wire is
+    /// the one this layer has already redacted.
+    otlp: Option<std::sync::Arc<crate::otlp::OtlpExport>>,
 }
 
 impl RedactionLayer {
@@ -154,6 +161,7 @@ impl RedactionLayer {
         Self {
             writer: StdMutex::new(Box::new(std::io::stderr())),
             json: false,
+            otlp: None,
         }
     }
 
@@ -163,6 +171,7 @@ impl RedactionLayer {
         Self {
             writer: StdMutex::new(Box::new(writer)),
             json: false,
+            otlp: None,
         }
     }
 
@@ -174,6 +183,7 @@ impl RedactionLayer {
         Self {
             writer: StdMutex::new(Box::new(writer)),
             json,
+            otlp: None,
         }
     }
 
@@ -181,10 +191,22 @@ impl RedactionLayer {
     /// build the production layer wired to stderr with the caller's JSON
     /// preference. Keeps the raw `{ writer, json }` fields private so no one
     /// can bypass the constructor invariants.
+    /// Attach an OTLP destination to this layer (#189 Phase 10).
+    ///
+    /// Consuming `self` rather than taking `&mut`: there must be no moment at
+    /// which a layer is installed and its export destination is still being
+    /// decided.
+    #[must_use]
+    pub fn with_otlp(mut self, otlp: std::sync::Arc<crate::otlp::OtlpExport>) -> Self {
+        self.otlp = Some(otlp);
+        self
+    }
+
     pub(crate) fn stderr_with_format(json: bool) -> Self {
         Self {
             writer: StdMutex::new(Box::new(std::io::stderr())),
             json,
+            otlp: None,
         }
     }
 }
@@ -193,6 +215,16 @@ impl Default for RedactionLayer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A span's redacted attributes, waiting for it to close (#189 Phase 10).
+///
+/// Stored in the registry's per-span extensions rather than in a map on the
+/// layer, so it lives and dies with the span it belongs to — a span that is
+/// never closed cannot leak an entry, and nothing has to be reaped.
+struct PendingExport {
+    attributes: Vec<(String, String)>,
+    start: std::time::SystemTime,
 }
 
 /// Visitor that accumulates a redacted representation of each event field
@@ -274,6 +306,75 @@ impl<S> Layer<S> for RedactionLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
+    /// Record a span's attributes, redacted, for export on close.
+    ///
+    /// Redaction happens here rather than at export time so there is no window
+    /// in which an unscrubbed value is sitting in the registry's extensions —
+    /// and so the same [`RedactingVisitor`] that guards the log line guards the
+    /// exported attributes. One implementation, one contract.
+    fn on_new_span(
+        &self,
+        attrs: &::tracing::span::Attributes<'_>,
+        id: &::tracing::span::Id,
+        ctx: Context<'_, S>,
+    ) {
+        if self.otlp.is_none() {
+            // Configured off: no allocation, no extension, no cost.
+            return;
+        }
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        // `json: true` so the visitor keeps name/value pairs apart, which is
+        // the shape OTLP attributes need. The redaction applied is identical.
+        let mut visitor = RedactingVisitor::new(true);
+        attrs.record(&mut visitor);
+        span.extensions_mut().insert(PendingExport {
+            attributes: visitor.json_fields,
+            start: std::time::SystemTime::now(),
+        });
+    }
+
+    /// Fields recorded after a span opens are redacted the same way.
+    fn on_record(
+        &self,
+        id: &::tracing::span::Id,
+        values: &::tracing::span::Record<'_>,
+        ctx: Context<'_, S>,
+    ) {
+        if self.otlp.is_none() {
+            return;
+        }
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut visitor = RedactingVisitor::new(true);
+        values.record(&mut visitor);
+        let mut extensions = span.extensions_mut();
+        if let Some(pending) = extensions.get_mut::<PendingExport>() {
+            pending.attributes.extend(visitor.json_fields);
+        }
+    }
+
+    fn on_close(&self, id: ::tracing::span::Id, ctx: Context<'_, S>) {
+        let Some(otlp) = self.otlp.as_ref() else {
+            return;
+        };
+        let Some(span) = ctx.span(&id) else {
+            return;
+        };
+        let name = span.name().to_string();
+        let Some(pending) = span.extensions_mut().remove::<PendingExport>() else {
+            return;
+        };
+        otlp.export(crate::otlp::RedactedSpan {
+            name,
+            attributes: pending.attributes,
+            start: pending.start,
+            end: std::time::SystemTime::now(),
+        });
+    }
+
     fn on_event(&self, event: &::tracing::Event<'_>, ctx: Context<'_, S>) {
         let mut visitor = RedactingVisitor::new(self.json);
         event.record(&mut visitor);

@@ -1269,6 +1269,33 @@ repeated_reads = true
 retried_errors = true
 
 # ----------------------------------------------------------------------------
+# [observability] -- where telemetry goes (#189 Phase 10)
+# ----------------------------------------------------------------------------
+# Its own section rather than a field on [logging] because the two answer
+# different questions. [logging] is about a file on this machine; the endpoint
+# below sends session telemetry OFF it, which is a different decision with a
+# different blast radius, and burying it under a heading about log rotation
+# would hide that.
+#
+# Off unless set. With no endpoint no exporter is built and no per-span state is
+# allocated, so behaviour and cost are exactly what they were before.
+#
+# Set it to an OTLP/HTTP traces endpoint and agent turns, slash dispatches and
+# channel sends are exported as spans:
+#
+#   otlp_endpoint = "http://127.0.0.1:4318/v1/traces"
+#
+# Span attributes are redacted before they leave, by the same layer that scrubs
+# the session log -- and by the same code path, because the export is owned by
+# that layer rather than installed beside it. A second tracing layer would be a
+# parallel sink receiving the raw event, which would ship exactly the secrets
+# redaction exists to strip. The destination is still off this machine, so
+# point it somewhere you control.
+
+[observability]
+# otlp_endpoint = "http://127.0.0.1:4318/v1/traces"
+
+# ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------
 # Generated decomposed-PRD workflows keep orchestration in workflow.js. These

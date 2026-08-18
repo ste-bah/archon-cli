@@ -31,6 +31,21 @@ thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# OpenTelemetry export (#189 Phase 10). Off unless `[observability] otlp_endpoint`
+# is set. `tracing-opentelemetry` is deliberately absent: a `tracing` layer is a
+# parallel sink, so stacking one alongside the redaction layer would export the
+# unredacted copy of every event. The redaction layer drives these directly
+# instead, with values it has already scrubbed.
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+# HTTP/protobuf over the reqwest already in this workspace, rather than the
+# default gRPC stack — tonic and prost would be a large new dependency tree for
+# a transport this repo already has.
+opentelemetry-otlp = { version = "0.32", default-features = false, features = [
+    "trace",
+    "http-proto",
+    "reqwest-blocking-client",
+] }
 tracing-test = "0.2"
 clap = { version = "4", features = ["derive"] }
 ts-rs = "12.0.1"

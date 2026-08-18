@@ -9,6 +9,7 @@ mod learning;
 #[path = "config/context_section.rs"]
 mod context_section;
 mod memory_open;
+mod observability;
 mod providers;
 mod prune;
 mod runtime;
@@ -26,6 +27,7 @@ pub use generated_tuning::*;
 pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
+pub use observability::*;
 pub use providers::*;
 pub use prune::*;
 pub use runtime::*;
@@ -73,6 +75,9 @@ pub struct ArchonConfig {
     pub learning: LearningConfig,
     pub cost: CostConfig,
     pub logging: LoggingConfig,
+    /// Where telemetry goes (#189 Phase 10). Off unless otlp_endpoint is set.
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
     pub session: SessionConfig,
     pub checkpoint: CheckpointConfig,
     /// Repository code index (LEANN).

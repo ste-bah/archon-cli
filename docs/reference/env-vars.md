@@ -139,6 +139,31 @@ recorded path would otherwise still pass. Recording keeps the real provider's
 own data-flow classification, so a recording run is gated exactly as the live
 call it is making would be.
 
+### Exporting traces
+
+`[observability] otlp_endpoint` in `config.toml` sends agent turns, slash
+dispatches and channel sends to an OTLP/HTTP collector:
+
+```toml
+[observability]
+otlp_endpoint = "http://127.0.0.1:4318/v1/traces"
+```
+
+Off unless set — with no endpoint no exporter is built and no per-span state is
+allocated, so behaviour and cost are unchanged.
+
+Span attributes are redacted before they leave, by the same layer that scrubs
+the session log and through the same code path. That sharing is deliberate: the
+export is *owned* by the redaction layer rather than installed next to it,
+because `tracing` layers are parallel sinks, so a second layer would receive the
+raw event and ship exactly the secrets redaction exists to strip.
+
+This is a data-flow decision, not just a logging one. Session telemetry leaves
+the machine — span names, task ids and every attribute recorded on them. Point
+it at a collector you control, and note that it applies regardless of the
+provider's own `data_flow_classification`: a local-only model still produces
+spans, and those spans still go wherever this points.
+
 ## Inherited from the environment
 
 | Variable | Description |

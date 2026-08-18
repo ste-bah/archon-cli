@@ -42,10 +42,48 @@ use crate::redaction::RedactionLayer;
 /// first call installs, subsequent calls collapse the "already set" error
 /// into `Ok(())` to preserve caller idempotency expectations.
 pub fn init_tracing(json: bool, level: ::tracing::Level) -> anyhow::Result<()> {
+    init_tracing_with_otlp(json, level, None)
+}
+
+/// As [`init_tracing`], plus OTLP span export when `otlp_endpoint` is set
+/// (#189 Phase 10).
+///
+/// The endpoint is handed to the redaction layer rather than installed as its
+/// own layer. That is the whole security design: a second layer would be a
+/// parallel sink receiving the raw event, so the only copy that reaches the
+/// wire is the one redaction has already scrubbed. See `crate::otlp`.
+///
+/// With no endpoint the layer takes the same path it always did — no exporter
+/// is built, no span extension is allocated, and the span hooks return
+/// immediately.
+pub fn init_tracing_with_otlp(
+    json: bool,
+    level: ::tracing::Level,
+    otlp_endpoint: Option<&str>,
+) -> anyhow::Result<()> {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
 
-    let redaction = RedactionLayer::stderr_with_format(json);
+    let mut redaction = RedactionLayer::stderr_with_format(json);
+    if let Some(endpoint) = otlp_endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // A configured endpoint that cannot be built is reported and then left
+        // alone: telemetry going nowhere is a degraded run, not a reason to
+        // refuse to start the agent.
+        match crate::otlp::OtlpExport::new(endpoint, "archon") {
+            Ok(export) => {
+                let export = std::sync::Arc::new(export);
+                crate::otlp::set_global(&export);
+                redaction = redaction.with_otlp(export);
+                ::tracing::info!(endpoint, "otlp span export is on");
+            }
+            Err(error) => {
+                ::tracing::error!(%error, endpoint, "otlp span export could not start");
+            }
+        }
+    }
 
     // Idempotent: `try_init` returns Err on second install; we normalise that
     // case into Ok so repeated boots (tests, process-restart harnesses) do
