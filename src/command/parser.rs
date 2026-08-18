@@ -1,41 +1,36 @@
 //! Slash command parser.
 //!
-//! TASK #228: TASK-AGS-801 spec types (`Arg`, `CommandParser::parse`) are
-//! defined for the drift-reconcile gap-fill but not yet wired into
-//! production dispatch — file-level allow keeps the spec surface intact
-//! without warning noise.
-#![allow(dead_code)]
+//! Pure: takes raw user input (e.g. `"/effort high"`) and emits a
+//! [`ParsedCommand`] describing the command name, its positional arguments
+//! and its flags. No I/O, no async, no app state. Dispatch and registry live
+//! in separate modules (TASK-AGS-622 / TASK-AGS-623).
 //!
-//! Pure function: takes raw user input (e.g. `"/effort high"`) and emits
-//! a [`ParsedCommand`] describing the command name and its arguments.
-//! No I/O, no async, no app state. Dispatch and registry live in
-//! separate modules (TASK-AGS-622 / TASK-AGS-623).
+//! [`CommandParser::parse`] is the entry point, and the only one:
+//! `dispatcher.rs` calls it at both its call sites and maps each
+//! [`ParseError`] variant to a distinct TUI error.
 //!
-//! ## TASK-AGS-801 drift-reconcile + gap-fill
+//! # What used to be here
 //!
-//! The phase-8 spec (`TASK-AGS-801.md`) specifies a `CommandParser` struct
-//! returning `Result<ParsedCommand, ParseError>` with an `Arg` newtype in
-//! `args` and a flag map. The shipped code (from TASK-AGS-621 stub ->
-//! TASK-AGS-622 real-impl) exposes a free function `parse` returning
-//! `Option<ParsedCommand>` with `args: Vec<String>` and no flag map.
+//! TASK-AGS-801 reconciled this module against a spec, and did it by adding
+//! the spec's shape alongside the shipped shape rather than replacing it: an
+//! `Arg` newtype, three `ParsedCommand` accessors, and a free
+//! `parse() -> Option<ParsedCommand>` kept "for back-compat with the
+//! dispatcher's `parser::parse` call sites". The dispatcher had already moved
+//! to `CommandParser::parse` by then, so nothing called any of it, and the
+//! module carried a file-level `#![allow(dead_code)]` to keep the compiler
+//! quiet about a surface that existed only to match a document.
 //!
-//! Stage 6 orchestrator decision (Q1=A):
-//! - Keep `fn parse() -> Option<...>` AS-IS for back-compat (dispatcher
-//!   already reads `&parsed.args` as `&[String]`).
-//! - Add `CommandParser::parse() -> Result<...>` as a thin wrapper.
-//! - Extend `ParsedCommand` with `flags: HashMap<String, String>` and
-//!   teach the existing tokenizer to populate it.
-//! - Expose `Arg(pub String)` as a bonus type but do NOT change
-//!   `args: Vec<String>`.
-//! - Keep `pub(crate)` visibility (binary crate, no out-of-tree
-//!   consumers).
+//! It is gone. The behaviour it described was real and is still tested —
+//! those tests now run against `CommandParser::parse`, which is what
+//! production uses. Three of them asserted the free function's *stricter*
+//! contract (no leading `/` rejected, empty rejected, bare `/` rejected);
+//! the first is deliberately not how `CommandParser` behaves and the other
+//! two were already covered, so they went with it.
 //!
-//! See the TASK-AGS-801 commit body for the full R-item list (R1
-//! relocation, R2/R3/R4 type-drift, R5 behavior-rewrite scoped to the
-//! `CommandParser` wrapper).
+//! Without the `allow`, an unused item in here is now a build failure rather
+//! than a comment explaining itself.
 
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -46,11 +41,10 @@ use thiserror::Error;
 /// no case normalization applied — the dispatcher is responsible for
 /// case-folding when looking the command up in the registry.
 ///
-/// `args` retains the shipped `Vec<String>` type to keep the blast
-/// radius into `dispatcher.rs` (which already treats `&parsed.args` as
-/// `&[String]`) at zero. The `Arg` newtype in this module is exposed
-/// for callers that want typed coercion helpers; the parser itself does
-/// not return `Vec<Arg>`.
+/// `args` is `Vec<String>` because `dispatcher.rs` treats `&parsed.args` as
+/// `&[String]`. Every field is public and read directly; there are no
+/// accessor methods, which is why the ones that existed and were never
+/// called could be deleted without a caller noticing.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ParsedCommand {
     pub name: String,
@@ -62,53 +56,11 @@ pub(crate) struct ParsedCommand {
     pub flags: HashMap<String, String>,
 }
 
-impl ParsedCommand {
-    /// Return the positional argument at `idx`, if any.
-    pub fn arg(&self, idx: usize) -> Option<&str> {
-        self.args.get(idx).map(String::as_str)
-    }
-
-    /// Return the value of the `--key[=value]` flag, if present.
-    ///
-    /// Bare `--flag` tokens are recorded with value `"true"`.
-    pub fn flag(&self, key: &str) -> Option<&str> {
-        self.flags.get(key).map(String::as_str)
-    }
-
-    /// Return `true` if the `--key` flag is present (regardless of value).
-    pub fn has_flag(&self, key: &str) -> bool {
-        self.flags.contains_key(key)
-    }
-}
-
-/// Newtype wrapper for a positional argument.
-///
-/// Exposed as a bonus type per the TASK-AGS-801 spec so callers can
-/// perform typed coercion without the parser having to decide which
-/// `FromStr` implementation to use. The parser itself returns raw
-/// `String`s in `ParsedCommand::args`; callers wrap them in `Arg`
-/// on demand.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Arg(pub String);
-
-impl Arg {
-    /// Borrow the underlying string.
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    /// Attempt to parse the arg into any `FromStr` type.
-    pub fn parse<T: FromStr>(&self) -> Result<T, T::Err> {
-        self.0.parse::<T>()
-    }
-}
-
 /// Errors returned by [`CommandParser::parse`].
 ///
-/// The shipped free function `parse` returns `Option<ParsedCommand>`
-/// and collapses all of these into a single `None`. The `CommandParser`
-/// wrapper maps each failure mode to a specific variant so the TUI
-/// error layer (TASK-AGS-804) can distinguish them.
+/// Each failure mode is a distinct variant so the TUI error layer
+/// (TASK-AGS-804) can tell them apart — `dispatcher.rs` matches on all four
+/// and emits a different message for each.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(crate) enum ParseError {
     /// Input was empty or whitespace-only.
@@ -123,79 +75,6 @@ pub(crate) enum ParseError {
     /// Tokenizer reached end-of-input while still inside a `"..."` pair.
     #[error("unclosed quoted string")]
     UnclosedQuote,
-}
-
-/// Parse a raw user input line into a [`ParsedCommand`].
-///
-/// Returns `None` if the input is empty, does not start with `/`, or
-/// consists of only the `/` sigil with no command name.
-///
-/// Tokenization is quote-aware: pairs of `"` delimit a single token
-/// that may contain whitespace. The quote characters themselves are
-/// stripped from the emitted token. Extra whitespace between tokens is
-/// tolerated. The leading `/` is stripped before tokenization.
-///
-/// Tokens beginning with `--` are routed into `ParsedCommand::flags`:
-/// - `--key=value` sets `flags["key"] = "value"`
-/// - `--key` alone sets `flags["key"] = "true"`
-///
-/// Tokens beginning with a single `-` (e.g. `-v`) are treated as
-/// positional args, matching the shipped behaviour.
-///
-/// The first token becomes [`ParsedCommand::name`] with no case
-/// normalization — the dispatcher is responsible for case-folding
-/// when looking up commands in the registry.
-pub(crate) fn parse(input: &str) -> Option<ParsedCommand> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() || !trimmed.starts_with('/') {
-        return None;
-    }
-
-    let body = &trimmed[1..];
-    if body.is_empty() {
-        return None;
-    }
-
-    let tokens = tokenize(body).ok()?;
-    let mut iter = tokens.into_iter();
-    let name = iter.next()?;
-    if name.is_empty() {
-        return None;
-    }
-
-    let raw_args: Vec<String> = iter.collect();
-    let mut args: Vec<String> = Vec::new();
-    let mut flags: HashMap<String, String> = HashMap::new();
-    for tok in &raw_args {
-        if let Some(rest) = tok.strip_prefix("--") {
-            // Bare `--` or `--=x` is malformed for the Option-returning
-            // path; we swallow malformed flags by dropping them so the
-            // shipped behaviour (which never errored) is preserved. The
-            // `CommandParser::parse` wrapper surfaces the structured
-            // error instead.
-            if rest.is_empty() {
-                continue;
-            }
-            if let Some(eq_idx) = rest.find('=') {
-                let (k, v) = rest.split_at(eq_idx);
-                if k.is_empty() {
-                    continue;
-                }
-                flags.insert(k.to_string(), v[1..].to_string());
-            } else {
-                flags.insert(rest.to_string(), "true".to_string());
-            }
-        } else {
-            args.push(tok.clone());
-        }
-    }
-
-    Some(ParsedCommand {
-        name,
-        raw_args,
-        args,
-        flags,
-    })
 }
 
 /// Return up to `limit` suggestions from `known` whose Levenshtein
@@ -278,21 +157,21 @@ fn tokenize(body: &str) -> Result<Vec<String>, ParseError> {
     Ok(tokens)
 }
 
-/// Spec-mandated wrapper returning `Result<ParsedCommand, ParseError>`.
+/// The parser.
 ///
-/// Thin adapter over the free function [`parse`]:
-/// - Prepends `/` if missing (spec validation criterion 2: `"model"`
-///   parses the same as `"/model"`).
-/// - Maps `None` to the appropriate [`ParseError`] variant:
-///   - empty/whitespace-only input -> `Empty`
-///   - `"/"` with no name -> `MissingName`
-///   - otherwise -> `Empty` (defensive default, never reached by the
-///     tokenizer — the only paths that produce `None` today are
-///     empty-input or missing-name).
-/// - Surfaces structured flag errors (`--=value`, bare `--`) via
-///   [`ParseError::MalformedFlag`] that the free function silently
-///   drops.
-/// - Surfaces [`ParseError::UnclosedQuote`] from the tokenizer.
+/// - A leading `/` is optional: `"model"` parses the same as `"/model"`.
+/// - Tokenization is quote-aware: pairs of `"` delimit a single token that
+///   may contain whitespace, and the quotes are stripped from the token.
+///   Runs of whitespace between tokens collapse.
+/// - The first token becomes [`ParsedCommand::name`], with no case
+///   normalization — the dispatcher case-folds when looking up the registry.
+/// - Tokens beginning with `--` go into [`ParsedCommand::flags`]:
+///   `--key=value` sets `flags["key"] = "value"`, and a bare `--key` sets
+///   `flags["key"] = "true"`. A single leading `-` (e.g. `-v`) is a
+///   positional arg, not a flag.
+/// - Every token after the name, flags included, is preserved in order in
+///   [`ParsedCommand::raw_args`], so handlers that mirror CLI syntax receive
+///   the argv the user actually typed.
 pub(crate) struct CommandParser;
 
 impl CommandParser {
@@ -301,9 +180,6 @@ impl CommandParser {
         if trimmed.is_empty() {
             return Err(ParseError::Empty);
         }
-        // R5: the wrapper relaxes the leading-`/` requirement. The
-        // shipped `parse` fn stays strict for back-compat with the
-        // dispatcher's `parser::parse(input)` call sites.
         let owned;
         let normalized: &str = if trimmed.starts_with('/') {
             trimmed
@@ -317,9 +193,6 @@ impl CommandParser {
             return Err(ParseError::MissingName);
         }
 
-        // Run the tokenizer directly so we can surface structured
-        // errors (`UnclosedQuote`, `MalformedFlag`) instead of the
-        // shipped `parse` fn's `None`.
         let body = &normalized[1..];
         let tokens = tokenize(body)?;
         let mut iter = tokens.into_iter();
@@ -364,15 +237,24 @@ mod tests {
     use super::*;
 
     // ---------------------------------------------------------------
-    // Pre-existing 8 tests (TASK-AGS-622). Preserved verbatim modulo
-    // the new `flags` field defaulting to an empty map.
+    // Tokenizer behaviour. These were written against the free
+    // `parse() -> Option<ParsedCommand>`, which had no callers and has been
+    // deleted; the behaviour they describe is real and is what production
+    // runs, so they now exercise `CommandParser::parse` directly.
+    //
+    // Three of the originals asserted the free function's *stricter*
+    // contract and did not survive the move: `rejects_non_slash_input`
+    // (CommandParser deliberately accepts it — see
+    // `commandparser_accepts_no_leading_slash`), `rejects_empty_input` and
+    // `rejects_bare_slash` (both already covered below, with the specific
+    // `ParseError` instead of a bare `None`).
     // ---------------------------------------------------------------
 
     #[test]
     fn parses_bare_slash_command() {
         assert_eq!(
-            parse("/fast"),
-            Some(ParsedCommand {
+            CommandParser::parse("/fast"),
+            Ok(ParsedCommand {
                 name: "fast".to_string(),
                 raw_args: vec![],
                 args: vec![],
@@ -384,8 +266,8 @@ mod tests {
     #[test]
     fn parses_command_with_single_arg() {
         assert_eq!(
-            parse("/effort high"),
-            Some(ParsedCommand {
+            CommandParser::parse("/effort high"),
+            Ok(ParsedCommand {
                 name: "effort".to_string(),
                 raw_args: vec!["high".to_string()],
                 args: vec!["high".to_string()],
@@ -397,8 +279,8 @@ mod tests {
     #[test]
     fn parses_config_subcommand() {
         assert_eq!(
-            parse("/config sources"),
-            Some(ParsedCommand {
+            CommandParser::parse("/config sources"),
+            Ok(ParsedCommand {
                 name: "config".to_string(),
                 raw_args: vec!["sources".to_string()],
                 args: vec!["sources".to_string()],
@@ -410,8 +292,8 @@ mod tests {
     #[test]
     fn parses_quoted_argument_with_spaces() {
         assert_eq!(
-            parse("/rules edit r1 \"some text with spaces\""),
-            Some(ParsedCommand {
+            CommandParser::parse("/rules edit r1 \"some text with spaces\""),
+            Ok(ParsedCommand {
                 name: "rules".to_string(),
                 raw_args: vec![
                     "edit".to_string(),
@@ -429,25 +311,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_slash_input() {
-        assert_eq!(parse("not a slash command"), None);
-    }
-
-    #[test]
-    fn rejects_empty_input() {
-        assert_eq!(parse(""), None);
-    }
-
-    #[test]
-    fn rejects_bare_slash() {
-        assert_eq!(parse("/"), None);
-    }
-
-    #[test]
     fn tolerates_extra_whitespace() {
         assert_eq!(
-            parse("/effort   high  "),
-            Some(ParsedCommand {
+            CommandParser::parse("/effort   high  "),
+            Ok(ParsedCommand {
                 name: "effort".to_string(),
                 raw_args: vec!["high".to_string()],
                 args: vec!["high".to_string()],
@@ -457,16 +324,19 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // New tests for TASK-AGS-801 (G1-G7).
+    // Flags.
     // ---------------------------------------------------------------
 
     #[test]
     fn parses_flag_with_value() {
-        let parsed = parse("/model claude-4.5 --temperature=0.2").expect("parse should succeed");
+        let parsed =
+            CommandParser::parse("/model claude-4.5 --temperature=0.2").expect("should parse");
         assert_eq!(parsed.name, "model");
         assert_eq!(parsed.args, vec!["claude-4.5".to_string()]);
-        assert_eq!(parsed.flag("temperature"), Some("0.2"));
-        assert!(parsed.has_flag("temperature"));
+        assert_eq!(
+            parsed.flags.get("temperature").map(String::as_str),
+            Some("0.2")
+        );
     }
 
     #[test]
@@ -485,19 +355,19 @@ mod tests {
 
     #[test]
     fn parses_quoted_arg_with_flag() {
-        let parsed = parse("/export --format=json \"my session\"").expect("parse should succeed");
+        let parsed =
+            CommandParser::parse("/export --format=json \"my session\"").expect("should parse");
         assert_eq!(parsed.name, "export");
         assert_eq!(parsed.args, vec!["my session".to_string()]);
-        assert_eq!(parsed.flag("format"), Some("json"));
+        assert_eq!(parsed.flags.get("format").map(String::as_str), Some("json"));
     }
 
     #[test]
     fn parses_bare_flag_as_true() {
-        let parsed = parse("/fork --detach").expect("parse should succeed");
+        let parsed = CommandParser::parse("/fork --detach").expect("should parse");
         assert_eq!(parsed.name, "fork");
         assert!(parsed.args.is_empty());
-        assert_eq!(parsed.flag("detach"), Some("true"));
-        assert!(parsed.has_flag("detach"));
+        assert_eq!(parsed.flags.get("detach").map(String::as_str), Some("true"));
     }
 
     #[test]
@@ -542,19 +412,10 @@ mod tests {
     }
 
     #[test]
-    fn parsedcommand_arg_helper_returns_positional() {
-        let parsed = parse("/effort high --quiet").unwrap();
-        assert_eq!(parsed.arg(0), Some("high"));
-        assert_eq!(parsed.arg(1), None);
-        assert!(parsed.has_flag("quiet"));
-    }
-
-    #[test]
-    fn arg_newtype_parses_typed_value() {
-        let a = Arg("42".to_string());
-        assert_eq!(a.as_str(), "42");
-        let n: i32 = a.parse().expect("should parse as i32");
-        assert_eq!(n, 42);
+    fn a_flag_does_not_become_a_positional() {
+        let parsed = CommandParser::parse("/effort high --quiet").expect("should parse");
+        assert_eq!(parsed.args, vec!["high".to_string()]);
+        assert!(parsed.flags.contains_key("quiet"));
     }
 
     #[test]
@@ -570,7 +431,8 @@ mod tests {
 
     #[test]
     fn parses_multiple_flags_and_args() {
-        let parsed = parse("/run foo --verbose --retries=3 bar").expect("parse should succeed");
+        let parsed =
+            CommandParser::parse("/run foo --verbose --retries=3 bar").expect("should parse");
         assert_eq!(parsed.name, "run");
         assert_eq!(
             parsed.raw_args,
@@ -582,16 +444,19 @@ mod tests {
             ]
         );
         assert_eq!(parsed.args, vec!["foo".to_string(), "bar".to_string()]);
-        assert_eq!(parsed.flag("verbose"), Some("true"));
-        assert_eq!(parsed.flag("retries"), Some("3"));
+        assert_eq!(
+            parsed.flags.get("verbose").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(parsed.flags.get("retries").map(String::as_str), Some("3"));
     }
 
     #[test]
     fn preserves_cli_shaped_raw_args_for_slash_mirrors() {
-        let parsed = parse(
+        let parsed = CommandParser::parse(
             "/video ingest https://example.test/watch?v=1 --frames hybrid --asr whisper-cpp --yes",
         )
-        .expect("parse should succeed");
+        .expect("should parse");
 
         assert_eq!(
             parsed.raw_args,
@@ -614,8 +479,8 @@ mod tests {
                 "whisper-cpp".to_string()
             ]
         );
-        assert_eq!(parsed.flag("frames"), Some("true"));
-        assert_eq!(parsed.flag("asr"), Some("true"));
-        assert_eq!(parsed.flag("yes"), Some("true"));
+        assert_eq!(parsed.flags.get("frames").map(String::as_str), Some("true"));
+        assert_eq!(parsed.flags.get("asr").map(String::as_str), Some("true"));
+        assert_eq!(parsed.flags.get("yes").map(String::as_str), Some("true"));
     }
 }
