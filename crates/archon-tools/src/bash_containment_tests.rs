@@ -1,9 +1,17 @@
+// Everything below the platform table is used only by the four
+// `#[cfg(target_os = "linux")]` tests in this file, so off Linux these are all
+// dead and trip `-D warnings`. Gated rather than deleted: removing them builds
+// clean on Windows and breaks Linux outright.
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 use serde_json::json;
 
 use super::bash_containment::{BashContainment, containment_for_platform};
+#[cfg(target_os = "linux")]
 use super::*;
+#[cfg(target_os = "linux")]
 use crate::tool::ToolContext;
 
 #[test]
@@ -172,6 +180,7 @@ async fn timeout_kills_setsid_escaped_mutation() {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn shell_quote(path: &std::path::Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\"'\"'"))
 }
