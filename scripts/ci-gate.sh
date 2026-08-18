@@ -130,6 +130,40 @@ if should_run "r0-entry-gate"; then
 fi
 
 # ---------------------------------------------------------------------
+# Step 2c — deferral markers (replaces two dozen per-task grep gates)
+#
+# `scripts/tests/` used to hold 24 per-task verifiers, each grepping one
+# hardcoded path for one hardcoded `TODO(TASK-x)` string. They were deleted:
+# everything else they checked is compiler-enforced, and the hardcoded paths
+# meant they went red on file splits rather than on defects — all 8 that were
+# failing when they were removed were false alarms of exactly that kind.
+#
+# The one thing they checked that a compiler cannot is whether a wired slice
+# has regressed to a stub. That survives here, once, over the whole tree.
+# ---------------------------------------------------------------------
+if should_run "deferral-markers"; then
+    banner 2c "deferral markers (allowlisted stubs only)"
+    bash scripts/check-deferral-markers.sh --self-test
+    bash scripts/check-deferral-markers.sh
+fi
+
+# ---------------------------------------------------------------------
+# Step 2d — self-tests of the gates above
+#
+# A gate nobody has watched go red is indistinguishable from a gate that
+# cannot go red, and a silently-permissive gate is worse than no gate: it
+# reports GREEN for work it never checked. These prove the guards can fail.
+# See scripts/tests/README.md for what is allowed to live there.
+# ---------------------------------------------------------------------
+if should_run "gate-self-tests"; then
+    banner 2d "gate self-tests"
+    bash scripts/tests/test_check_file_sizes.sh
+    bash scripts/tests/test_ci_baseline_diff.sh
+    bash scripts/tests/archon-init-test.sh
+    bash scripts/tests/ci-preserve-invariants-wired.sh
+fi
+
+# ---------------------------------------------------------------------
 # Step 3 — cargo fmt --check
 # ---------------------------------------------------------------------
 if should_run "fmt"; then
