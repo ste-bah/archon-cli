@@ -101,6 +101,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [YouTube video evidence with local Whisper](cookbook/video-evidence-youtube-whisper.md) — governed `yt-dlp` download, caption-first ingest, `ffmpeg`, `whisper-cpp`, optional frame OCR fallbacks, TUI monitoring, and timecoded evidence consumption
 - [Multi-agent handoffs](cookbook/multi-agent-handoffs.md) — the task board, claims that expire with their holder, the drain gate that makes "leave no gaps" enforceable, and the third review verdict
 - [Agent teams, messaging, and isolation](cookbook/agent-teams-and-isolation.md) — `SendMessage` between agents, status envelopes, declaring writes, the isolation ladder, `/worktrees` review and merge, and `TeamCreate`/`TeamDelete` with a live roster; coding and non-coding recipes
+- [Skills and the method chain](cookbook/skills-and-the-method-chain.md) — skills the model invokes on its own judgement, adding one to a project, the `/grill-me` → `/execute-plan` → `/verify-done` → `/land-branch` chain, and the completion gate that refuses to end a turn on unresolved review gaps; coding and non-coding recipes
 - [Memory-driven coding](cookbook/memory-driven-coding.md) — using SONA + ReasoningBank to inform decisions
 - [Coding pipeline (`/archon-code`)](cookbook/god-code-pipeline.md) — 50-agent coding workflow end-to-end inside the TUI
 - [Research pipeline (`/archon-research`)](cookbook/archon-research-pipeline.md) — 47-agent PhD research workflow end-to-end inside the TUI

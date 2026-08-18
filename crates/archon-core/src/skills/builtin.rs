@@ -304,6 +304,11 @@ pub fn register_builtins() -> SkillRegistry {
     registry.register(Box::new(super::engineering_pack::TddSkill));
     registry.register(Box::new(super::engineering_pack::ZoomOutSkill));
 
+    // #187 method pack — plan -> execute -> verify -> land.
+    registry.register(Box::new(super::archon_pack::ExecutePlanSkill));
+    registry.register(Box::new(super::archon_pack::VerifyDoneSkill));
+    registry.register(Box::new(super::archon_pack::LandBranchSkill));
+
     // Phase 3 archon-specific skills
     registry.register(Box::new(super::archon_pack::SpecToTasksSkill));
     registry.register(Box::new(super::archon_pack::ComposePipelineSkill));

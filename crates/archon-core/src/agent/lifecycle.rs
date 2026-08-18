@@ -65,6 +65,7 @@ impl Agent {
             memory_briefing: None,
             permission_store,
             critical_system_reminder: None,
+            hook_session_context: Vec::new(),
             pending_resume_messages: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),

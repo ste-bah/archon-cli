@@ -89,6 +89,7 @@ impl Agent {
         let mut system = self.inject_memories().await;
         self.inject_inner_voice(&mut system).await;
         self.inject_critical_reminder(&mut system);
+        self.inject_hook_session_context(&mut system);
         self.inject_turn_requirements(&mut system);
         let effective_mode = self.effective_agent_mode().await;
         self.inject_plan_mode_reminder(&mut system, effective_mode);

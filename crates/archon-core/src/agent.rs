@@ -42,6 +42,7 @@ mod compaction_serde;
 mod correction_attribution;
 pub(crate) mod correction_intake;
 pub(crate) mod events;
+mod hook_context;
 mod lifecycle;
 #[cfg(test)]
 mod memory_attribution_tests;
@@ -223,6 +224,18 @@ pub struct Agent {
     permission_store: Arc<dyn crate::hooks::PermissionStore>,
     /// Critical system reminder re-injected into system prompt at every turn (AGT-022).
     critical_system_reminder: Option<String>,
+    /// Context contributed by lifecycle hooks, re-injected every turn (#187).
+    ///
+    /// `SessionStart` and `PostCompact` hooks could always return
+    /// `additional_context`, and the registry always aggregated it — but only
+    /// `PostToolUse` ever read the result, so every other event's contribution
+    /// was collected and dropped. A hook that published, say, a project's
+    /// working agreements at session start ran, produced correct output, and
+    /// changed nothing.
+    ///
+    /// Re-injected every turn rather than prepended once so it survives
+    /// compaction, which is the case that matters for long sessions.
+    hook_session_context: Vec<String>,
     /// Pending resume messages to inject into the next SubagentRunner (AGT-024).
     /// TASK-AGS-105: Arc<Mutex<...>> so the `AgentSubagentExecutor` can
     /// `take()` this slot from inside `run_to_completion` via its own

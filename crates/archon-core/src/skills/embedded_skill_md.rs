@@ -27,3 +27,10 @@ pub const CI_GATE_WALKER: &str = include_str!("../../../../assets/skills/ci-gate
 pub const SETUP_ARCHON_SKILLS: &str =
     include_str!("../../../../assets/skills/setup-archon-skills/SKILL.md");
 pub const WRITE_A_SKILL: &str = include_str!("../../../../assets/skills/write-a-skill/SKILL.md");
+
+// #187 method pack: the chain that turns an approved plan into landed work.
+// verify-done is the keystone — it is what raises the `gaps_remain` items the
+// completion gate refuses to finish a turn on.
+pub const VERIFY_DONE: &str = include_str!("../../../../assets/skills/verify-done/SKILL.md");
+pub const EXECUTE_PLAN: &str = include_str!("../../../../assets/skills/execute-plan/SKILL.md");
+pub const LAND_BRANCH: &str = include_str!("../../../../assets/skills/land-branch/SKILL.md");

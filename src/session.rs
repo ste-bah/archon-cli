@@ -22,6 +22,7 @@ mod build_prompt;
 mod cognitive_daemon_startup;
 mod cognitive_store;
 mod command_catalog;
+mod completion_gate;
 mod config_watcher;
 mod consolidation_reuse;
 mod event_forwarder;

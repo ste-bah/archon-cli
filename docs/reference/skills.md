@@ -19,9 +19,21 @@ At session startup, autocomplete builds one catalog from the initialized primary
 
 A same-named primary shadows a skill: the skill is omitted from autocomplete and startup logs `skill '/{skill}' is shadowed by primary command '/{primary}'; primary dispatch wins`. Aliases are not autocomplete rows, so every canonical skill appears at most once. Adding or editing `SKILL.md` files requires restarting Archon.
 
-## Built-in skills (68 total)
+## Model-invoked skills
 
-21 in `builtin.rs`, 35 in `expanded.rs`, 12 embedded prompt-template skills. Highlights:
+Skills are not only user-triggered. The agent-invocable ones are listed in the system prompt with their descriptions, and the model may load one with the `Skill` tool whenever a task matches — no slash command and no `Skill(list)` round-trip required.
+
+A skill is agent-invocable when it emits `Prompt` output, which is what reaches the model. Descriptor-only builtins like `/help` and `/cost` render in the TUI and never reach the agent, so they are excluded from the catalogue rather than wasting prompt tokens. Every embedded skill and every user-authored SKILL.md qualifies automatically.
+
+**Write the `description` as a trigger condition, not a summary.** It is the only thing the model sees when deciding whether a skill applies. "Use when a test is failing and the cause is not obvious" earns an invocation; "Debugging helper" does not.
+
+The catalogue is rendered into the turn-variable part of the prompt, after the cached prefix, so adding a `SKILL.md` to a project does not invalidate the prompt cache for that project's sessions.
+
+Agent definitions may also name specific skills via a **top-level** `skills:` key. Names are resolved against the registry at prompt-build time: unresolvable ones are dropped with a warning rather than presented to the model as callable, and any agent that declares skills is granted the `Skill` tool automatically. Note that `skills:` nested under `capabilities:` is not read — those entries are descriptive metadata only.
+
+## Built-in skills (71 total)
+
+21 in `builtin.rs`, 35 in `expanded.rs`, 15 embedded prompt-template skills. Highlights:
 
 | Skill | Description |
 |---|---|
@@ -56,12 +68,57 @@ A same-named primary shadows a skill: the skill is omitted from autocomplete and
 | `/ci-gate-walker` | Run CI gate script and surface findings |
 | `/setup-archon-skills` | Interactive 8-prompt first-run configuration wizard |
 | `/write-a-skill` | Meta-skill for authoring new SKILL.md skills |
+| `/execute-plan` | Run a plan task-by-task in fresh subagents, reviewed, with a board-backed ledger |
+| `/verify-done` | Turn a completion claim into evidence; records anything unclosed on the board |
+| `/land-branch` | Merge, PR, keep, or discard finished branch work |
 
 For the complete list, run `/skills` in the TUI.
 
+## The method chain
+
+Most skills stand alone. These form a sequence, and each names the next, so
+following one leads through the rest rather than dead-ending:
+
+```
+/grill-me  or  /grill-with-docs     settle the design
+        ↓
+/compose-pipeline  or  /spec-to-tasks    turn it into tasks
+        ↓
+/execute-plan                        build it, task by task, reviewed
+        ↓
+/verify-done                         prove it works
+        ↓
+/land-branch                         merge, PR, or discard
+```
+
+`/tdd` and `/diagnose` sit inside the build step and both hand off to
+`/verify-done`.
+
+### The completion gate
+
+`/verify-done` records anything it could not close as a board item in
+`gaps_remain`. That status is what the completion gate reads: while such an
+item exists for the run, **the turn does not end** — the findings go back to
+the model as a repair prompt, and it works them off with `BoardResolve` or
+declines them with a reason.
+
+This is the one part of the methodology that is not advice. A skill can
+describe a verification step but cannot stop a model from declaring victory;
+the rule most likely to be rationalised away is the one standing between the
+model and finishing.
+
+```toml
+[skills]
+completion_gate = "block"   # default; "warn" logs instead, "off" disables
+```
+
+`gaps_remain` is set by review flows only, so the gate cannot fire on ordinary
+task tracking. A session with no memory service has no board, and the gate
+allows the turn rather than wedging it.
+
 ## Embedded prompt-template skills (v0.1.33+)
 
-12 skills (5 engineering + 5 archon + 2 foundation) are embedded at compile time via `include_str!()`. Their SKILL.md bodies ship in the binary and emit `Prompt` output — the agent executes the instructions using its own tools.
+15 skills (5 engineering + 5 archon + 3 method + 2 foundation) are embedded at compile time via `include_str!()`. Their SKILL.md bodies ship in the binary and emit `Prompt` output — the agent executes the instructions using its own tools.
 
 ### Override system
 

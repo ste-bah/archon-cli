@@ -61,7 +61,7 @@ pub(super) fn build_system_prompt(
     let mut prompt = if let Some(def) = agent_def {
         vec![serde_json::json!({
             "type": "text",
-            "text": agent_prompt_text(def),
+            "text": agent_prompt_text(def, working_dir),
         })]
     } else {
         identity_blocks
@@ -69,6 +69,12 @@ pub(super) fn build_system_prompt(
 
     if inject_output_style && let Some(text) = output_style_prompt(cli, config) {
         prompt.push(serde_json::json!({ "type": "text", "text": text }));
+    }
+    // Appended after `apply_prompt_cache_policy` so the catalogue lands outside
+    // any `cache_control` block — it changes whenever a project gains a
+    // `SKILL.md` and would otherwise invalidate the cached prefix (#187).
+    if let Some(catalogue) = archon_core::skills::catalogue::render_for_prompt(working_dir) {
+        prompt.push(serde_json::json!({ "type": "text", "text": catalogue }));
     }
     prompt
 }
@@ -154,20 +160,9 @@ pub(super) fn build_interactive_system_prompt(
             Some(env_section.clone())
         },
         inner_voice: None,
-        personality_briefing: agent_def.map(agent_prompt_text),
+        personality_briefing: agent_def.map(|def| agent_prompt_text(def, working_dir)),
         memory_briefing: None,
-        dynamic: Some(format!(
-            "Date: {}\nSession: {}\n\n\
-            ## Memory System\n\
-            You have a persistent memory graph backed by CozoDB. Use it proactively:\n\
-            - `memory_store`: Save facts, decisions, preferences, and behavioral rules for future recall. \
-            Always store things the user asks you to remember.\n\
-            - `memory_recall`: Search past memories by keyword. Use this when the user asks what you \
-            remember, or when context from past sessions would be useful.\n\
-            Memories persist across sessions. Store important decisions and preferences immediately.",
-            chrono::Utc::now().format("%Y-%m-%d"),
-            session_id
-        )),
+        dynamic: Some(dynamic_section(working_dir, session_id)),
     };
 
     let sections = assembler.assemble(&input);
@@ -206,7 +201,38 @@ pub(super) fn build_interactive_system_prompt(
     blocks
 }
 
-fn agent_prompt_text(def: &archon_core::agents::definition::CustomAgentDefinition) -> String {
+/// Build the turn-variable prompt section: date, session, memory guidance, and
+/// the skill catalogue.
+///
+/// The catalogue belongs here specifically because this section carries no
+/// `cache_control` marker (assembler section 11, after the single ephemeral
+/// marker on `environment`). It changes whenever a project adds a `SKILL.md`,
+/// so putting it any earlier would invalidate the cached prefix for every
+/// session in that project — see #178 and #187.
+fn dynamic_section(working_dir: &std::path::Path, session_id: &str) -> String {
+    let mut text = format!(
+        "Date: {}\nSession: {}\n\n\
+        ## Memory System\n\
+        You have a persistent memory graph backed by CozoDB. Use it proactively:\n\
+        - `memory_store`: Save facts, decisions, preferences, and behavioral rules for future recall. \
+        Always store things the user asks you to remember.\n\
+        - `memory_recall`: Search past memories by keyword. Use this when the user asks what you \
+        remember, or when context from past sessions would be useful.\n\
+        Memories persist across sessions. Store important decisions and preferences immediately.",
+        chrono::Utc::now().format("%Y-%m-%d"),
+        session_id
+    );
+    if let Some(catalogue) = archon_core::skills::catalogue::render_for_prompt(working_dir) {
+        text.push_str("\n\n");
+        text.push_str(&catalogue);
+    }
+    text
+}
+
+fn agent_prompt_text(
+    def: &archon_core::agents::definition::CustomAgentDefinition,
+    working_dir: &std::path::Path,
+) -> String {
     let mut prompt = def.system_prompt.clone();
     let tool_contract = match def.allowed_tools.as_ref() {
         Some(tools) if !tools.is_empty() => format!(
@@ -227,10 +253,20 @@ fn agent_prompt_text(def: &archon_core::agents::definition::CustomAgentDefinitio
     if let Some(ref skills) = def.skills
         && !skills.is_empty()
     {
-        prompt = format!(
-            "{prompt}\n\n<available-skills>\nThe following skills are available to you: {}\nInvoke them by name when relevant to the task.\n</available-skills>",
-            skills.join(", ")
-        );
+        let (known, unknown) = archon_core::skills::catalogue::partition_known(skills, working_dir);
+        if !unknown.is_empty() {
+            tracing::warn!(
+                agent = %def.agent_type,
+                unknown = %unknown.join(", "),
+                "agent declares skills that resolve to nothing; omitted from the prompt"
+            );
+        }
+        if !known.is_empty() {
+            prompt = format!(
+                "{prompt}\n\n<available-skills>\nThe following skills are available to you: {}\nInvoke them by name with the `Skill` tool when relevant to the task.\n</available-skills>",
+                known.join(", ")
+            );
+        }
     }
     if !def.leann_queries.is_empty() {
         prompt = format!(
@@ -358,11 +394,50 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = agent_prompt_text(&def);
+        let prompt = agent_prompt_text(&def, &std::env::temp_dir());
 
         assert!(prompt.contains("<archon-tool-contract>"));
         assert!(prompt.contains("Read, LeannSearch"));
         assert!(prompt.contains("Do not run `claude-flow` or `npx ruv-swarm` through Bash"));
+    }
+
+    /// #187: a declared skill that resolves to nothing must not become an
+    /// instruction to invoke it. The 43 shipped definitions that declare
+    /// capability nouns under `capabilities.skills` are the motivating case.
+    #[test]
+    fn unresolvable_declared_skills_are_not_advertised() {
+        let def = archon_core::agents::definition::CustomAgentDefinition {
+            system_prompt: "You are a test agent.".to_string(),
+            skills: Some(vec![
+                "technical_documentation".to_string(),
+                "tdd".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let prompt = agent_prompt_text(&def, &std::env::temp_dir());
+
+        assert!(
+            !prompt.contains("technical_documentation"),
+            "unknown skill must be dropped: {prompt}"
+        );
+        assert!(prompt.contains("tdd"), "known skill must survive: {prompt}");
+        assert!(prompt.contains("<available-skills>"));
+    }
+
+    /// When nothing resolves the block is omitted entirely rather than
+    /// rendered empty.
+    #[test]
+    fn all_unresolvable_omits_the_block() {
+        let def = archon_core::agents::definition::CustomAgentDefinition {
+            system_prompt: "You are a test agent.".to_string(),
+            skills: Some(vec!["api_documentation".to_string()]),
+            ..Default::default()
+        };
+
+        let prompt = agent_prompt_text(&def, &std::env::temp_dir());
+
+        assert!(!prompt.contains("<available-skills>"), "{prompt}");
     }
 
     #[test]

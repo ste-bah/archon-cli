@@ -1165,6 +1165,37 @@ auto_isolation = "overlap"
 isolation_max_tier = "worktree"
 
 # ----------------------------------------------------------------------------
+# [skills] — Skill system
+# ----------------------------------------------------------------------------
+# Agent-invocable skills are listed in the system prompt with their
+# descriptions, so the model can load one with the Skill tool whenever a task
+# matches -- no slash command required. Anything with a SKILL.md under
+# .archon/skills/ is included automatically.
+
+[skills]
+
+# What happens at the end of a turn when a review has left gaps on the board.
+#
+#   "block"  refuse to end the turn; hand the findings back to fix (default)
+#   "warn"   let the turn end, but log what was still open
+#   "off"    do not check
+#
+# A skill can describe a verification step but cannot stop a model from
+# declaring victory -- prose is advice, and the rule most likely to be
+# rationalised away is the one standing between the model and finishing. This
+# is the part that is not advice.
+#
+# The signal is a board item in `gaps_remain`, which means exactly one thing:
+# something reviewed the work and found it wanting. No other flow sets that
+# status, so the gate cannot fire on ordinary task tracking. Items are cleared
+# with BoardResolve, or declined with a reason -- an unexplained open gap is
+# what keeps the turn from ending.
+#
+# A session with no memory service has no board, and the gate allows the turn
+# rather than wedging it.
+completion_gate = "block"
+
+# ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------
 # Generated decomposed-PRD workflows keep orchestration in workflow.js. These

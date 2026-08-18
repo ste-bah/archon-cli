@@ -18,6 +18,10 @@ impl Skill for UserSkill {
         &self.description
     }
 
+    fn agent_invocable(&self) -> bool {
+        true
+    }
+
     fn execute(&self, args: &[String], _ctx: &SkillContext) -> SkillOutput {
         let user_block = if args.is_empty() {
             "Continue with the skill's process using the current conversation context.".to_string()

@@ -70,11 +70,19 @@ async fn normal_completion_kills_delayed_background_mutation() {
         ..Default::default()
     };
 
+    // The parent waits until the child is genuinely stopped before finishing.
+    //
+    // Without that wait the parent could exit while the child was still on its
+    // way to `kill -STOP`, so cleanup met a running child on a fast machine and
+    // a stopped one on a slow machine — two different scenarios under one
+    // assertion, and the slow one failed. Synchronising on the state makes the
+    // case under test the same every run instead of a function of load.
     let result = tool
         .execute(
             json!({
                 "command": format!(
-                    "sh -c 'kill -STOP \"$$\"; printf delayed > {}' & child=$!; printf '%s' \"$child\" > {}",
+                    "sh -c 'kill -STOP \"$$\"; printf delayed > {}' & child=$!; printf '%s' \"$child\" > {}; \
+                     while kill -0 \"$child\" 2>/dev/null && ! ps -o stat= -p \"$child\" | grep -q '[Tt]'; do sleep 0.01; done",
                     shell_quote(&delayed_file),
                     shell_quote(&pid_file),
                 )
