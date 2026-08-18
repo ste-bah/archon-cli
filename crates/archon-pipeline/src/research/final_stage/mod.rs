@@ -1,11 +1,24 @@
 //! FinalStageOrchestrator (Phase 8) — assembles agent outputs into a final research paper.
 //!
-//! This module provides a state-machine-driven pipeline that:
+//! This is phase 8, "Final Assembly", of the 47-agent phdresearch pipeline
+//! (`.archon/agents/phdresearch/pipeline.toml`) — the phase whose single
+//! agent is `chapter-synthesizer`. It provides a state-machine-driven
+//! pipeline that:
+//!
 //! 1. Scans agent output files from the research directory.
 //! 2. Maps outputs to chapters using heuristic keyword matching.
-//! 3. Writes chapter content (LLM synthesis deferred).
+//! 3. Assembles each chapter's body via [`writer::synthesize_chapter`] — the
+//!    `chapter-synthesizer` seam, concatenation until `LlmClient` reaches
+//!    this stage (REQ-RESEARCH-007).
 //! 4. Combines chapters into a final paper with Table of Contents.
-//! 5. Optionally applies a style profile.
+//! 5. Applies a style profile via [`style_applier::apply_style`], or reports
+//!    in [`FinalStageResult::warnings`] that it could not.
+//!
+//! Steps 3 and 5 were described here while `run` called neither module: the
+//! concatenation was inlined in step 5's loop, and `style_applier` was not
+//! called at all, so [`FinalStageOptions::style_profile_id`] was read by
+//! nothing and a requested profile was dropped in silence. This is a library
+//! crate, so `pub` kept `dead_code` quiet about both seams.
 
 pub mod combiner;
 pub mod mapper;
@@ -200,18 +213,24 @@ impl FinalStageOrchestrator {
             return Err(FinalStageError::OutputExists);
         }
 
-        // 5. Build chapter content from mapping
+        // 5. Build chapter content from mapping, through the `writer` seam —
+        // the phase-8 `chapter-synthesizer` agent's entry point. It performs
+        // the concatenation that used to be inlined right here, which is what
+        // left the seam with no caller at all.
         let mut chapter_contents: Vec<combiner::ChapterContent> = Vec::new();
         for (num, title) in chapters {
-            let content = if let Some(mapped) = mapping.mappings.get(num) {
-                mapped
-                    .iter()
-                    .map(|m| m.content.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            } else {
+            let sources: Vec<&str> = mapping
+                .mappings
+                .get(num)
+                .map(|mapped| mapped.iter().map(|m| m.content.as_str()).collect())
+                .unwrap_or_default();
+
+            let content = if sources.is_empty() {
                 Self::generate_chapter_placeholder(title, "No source material mapped")
+            } else {
+                writer::synthesize_chapter(title, &sources)
             };
+
             chapter_contents.push(combiner::ChapterContent {
                 number: *num,
                 title: title.clone(),
@@ -221,9 +240,17 @@ impl FinalStageOrchestrator {
 
         // 6. Combine
         let paper = combiner::combine_chapters(&chapter_contents);
+
+        // 7. Style. No profiles are implemented yet, so naming one returns the
+        // paper unchanged plus a warning saying so — which is the point of the
+        // call: `style_profile_id` was previously read by nothing, so asking
+        // for a profile was ignored in silence.
+        let (paper, style_warning) =
+            style_applier::apply_style(&paper, options.style_profile_id.as_deref());
+        let warnings: Vec<String> = style_warning.into_iter().collect();
         let word_count = paper.split_whitespace().count();
 
-        // 7. Write output
+        // 8. Write output
         std::fs::create_dir_all(&final_dir)
             .map_err(|e| FinalStageError::WriteError(e.to_string()))?;
         let paper_path = final_dir.join("final-paper.md");
@@ -234,7 +261,7 @@ impl FinalStageOrchestrator {
             final_paper_path: paper_path.to_string_lossy().to_string(),
             chapter_count,
             word_count,
-            warnings: Vec::new(),
+            warnings,
         })
     }
 }
