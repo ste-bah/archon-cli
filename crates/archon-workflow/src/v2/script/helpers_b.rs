@@ -7,6 +7,25 @@ pub(super) fn downgrade_read_only_accepted_task_coverage(
     if call.write_mode.is_some() || call.method == WorkflowV2HostMethod::Implementation {
         return;
     }
+    // A no-op proof is read-only, but accepting a task as an already-satisfied
+    // no-op is precisely its job: it credits on acceptance-criteria inspection,
+    // never on fresh implementation or test evidence, which a read-only call
+    // cannot produce by construction. Applying the implementation-evidence
+    // requirement here downgrades every legitimate no-op to needs_review, and
+    // because no repair can ever mint impl/test evidence for a read-only proof,
+    // the noop-proof -> repair -> reverify cycle spins to the repair cap and
+    // blocks the run (observed live: TDL-010/030 looped repair-2-1..2-3 on this
+    // exact gap while both task outcomes read accepted). The substantive check
+    // that a no-op's criteria are genuinely satisfied lives in
+    // `noop_acceptance_criteria_satisfied` (completion_credit.rs) and still
+    // runs; this guard is for the other read-only calls — verification, review
+    // — that must not claim implementation without concrete evidence.
+    if matches!(
+        crate::v2::completion_evidence::task_completion_evidence_kind(&call.id),
+        Some(crate::WorkflowV2TaskCompletionEvidenceKind::VerifiedNoop)
+    ) {
+        return;
+    }
     let has_implementation_evidence = !result.files_changed.is_empty()
         || result
             .evidence
@@ -154,5 +173,88 @@ pub fn failed_v2_result(call_id: &str, err: impl std::fmt::Display) -> WorkflowV
         }],
         data: serde_json::json!({ "error": error }),
         ..WorkflowV2Result::default()
+    }
+}
+
+#[cfg(test)]
+mod downgrade_tests {
+    use super::*;
+    use crate::v2::result::WorkflowV2TaskCoverage;
+
+    fn read_only_call(id: &str) -> WorkflowV2HostCall {
+        WorkflowV2HostCall {
+            id: id.to_string(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        }
+    }
+
+    fn accepted_inspection_coverage() -> WorkflowV2Result {
+        let mut result = WorkflowV2Result::accepted("verified against acceptance criteria");
+        result.task_coverage.push(WorkflowV2TaskCoverage {
+            task_id: "TASK-TDL-010".to_string(),
+            status: WorkflowV2TaskCoverageStatus::Accepted,
+            summary: "registry schema already satisfies every criterion".to_string(),
+            evidence: vec![WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Inspection,
+                "registry_schema_v1 has 4 #[test] fns; structs defined",
+            )],
+        });
+        result
+    }
+
+    /// The live loop: a read-only no-op proof accepts a task on inspection
+    /// evidence and was downgraded to needs_review for lacking impl/test
+    /// evidence, which a read-only call can never mint — spinning the repair
+    /// cycle to the cap. A no-op proof call must keep its accepted coverage.
+    #[test]
+    fn a_noop_proof_keeps_its_accepted_coverage() {
+        let mut result = accepted_inspection_coverage();
+        downgrade_read_only_accepted_task_coverage(
+            &read_only_call("noop-proof-verification-2"),
+            &mut result,
+        );
+        assert_eq!(result.status, WorkflowV2Status::Accepted);
+        assert_eq!(
+            result.task_coverage[0].status,
+            WorkflowV2TaskCoverageStatus::Accepted
+        );
+        assert!(
+            result.residual_gaps.is_empty(),
+            "no read-only-acceptance gap for a no-op proof: {:?}",
+            result.residual_gaps
+        );
+    }
+
+    #[test]
+    fn a_noop_proof_reverification_keeps_its_accepted_coverage() {
+        let mut result = accepted_inspection_coverage();
+        downgrade_read_only_accepted_task_coverage(
+            &read_only_call("noop-proof-reverification-2-3"),
+            &mut result,
+        );
+        assert_eq!(result.status, WorkflowV2Status::Accepted);
+        assert_eq!(
+            result.task_coverage[0].status,
+            WorkflowV2TaskCoverageStatus::Accepted
+        );
+    }
+
+    /// The guard still bites the calls it is for: a verification-wave call is
+    /// read-only and must not accept a task as implemented on inspection alone.
+    #[test]
+    fn a_verification_wave_accepted_coverage_is_still_downgraded() {
+        let mut result = accepted_inspection_coverage();
+        downgrade_read_only_accepted_task_coverage(
+            &read_only_call("verification-wave-1"),
+            &mut result,
+        );
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(
+            result.task_coverage[0].status,
+            WorkflowV2TaskCoverageStatus::Unknown
+        );
+        assert!(!result.residual_gaps.is_empty());
     }
 }
