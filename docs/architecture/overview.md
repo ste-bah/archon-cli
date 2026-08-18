@@ -23,11 +23,13 @@ graph TB
         end
         subgraph bottom["Integration Layer"]
             MCP["archon-mcp<br/>(stdio / ws / http-stream)"]
+            ACP["archon-acp<br/>(editor-facing, stdio)"]
             PERMS["archon-permissions"]
-            TOOLS["archon-tools<br/>(43 tools)"]
+            TOOLS["archon-tools<br/>(built-in tools)"]
+            PTY["archon-pty<br/>(persistent shells)"]
         end
         subgraph pipeline["Pipeline & Intelligence Layer"]
-            PIPE["archon-pipeline<br/>(50 coding + 46 research + game-theory agents)"]
+            PIPE["archon-pipeline<br/>(50 coding + 47 research + game-theory agents)"]
             LEANN["archon-leann<br/>(semantic code search)"]
         end
         subgraph evidence["Evidence Engine Layer"]
@@ -48,6 +50,8 @@ graph TB
     end
 
     TUI --> CORE
+    ACP --> CORE
+    TOOLS --> PTY
     CORE --> CONSC
     CORE --> MEMORY
     CORE --> LLM
@@ -110,7 +114,9 @@ graph TB
 | `archon-plugin` | Plugin loading + manifest parsing |
 | `archon-sdk` | Embedding API + IDE bridge |
 | `archon-context` | Context compaction; shared markdown-fence parsing for model output |
-| `archon-observability` | Metrics, tracing, structured logs |
+| `archon-observability` | Metrics, tracing, structured logs, OTLP export owned by the redaction layer |
+| `archon-pty` | Pseudo-terminal sessions behind the persistent-shell tools. A leaf crate: `archon-tools` needs it and cannot depend on `archon-sdk`, so the code lives below both |
+| `archon-acp` | [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so an ACP-capable editor drives archon without a per-editor extension (`archon acp`) |
 
 The remaining crates are internal helpers and test/observability support.
 
