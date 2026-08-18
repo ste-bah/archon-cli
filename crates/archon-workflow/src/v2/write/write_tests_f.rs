@@ -242,3 +242,49 @@ pub(super) fn branch_for_item(
         }),
     )
 }
+
+/// Bisection for the live TDL-001 halt: a refuted-noop artifact-only item
+/// (target_files empty, artifact_requirements present as bare strings) must be
+/// classified artifact_only by the write-item builder. If this holds, the
+/// artifact_only=false seen at validation (MissingOwnership) is a loss
+/// downstream of construction, not in the classifier.
+#[test]
+fn refuted_noop_artifact_only_item_is_classified_artifact_only() {
+    let call = WorkflowV2HostCall {
+        id: "implementation-wave-1".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Worktree),
+        options: WorkflowV2HostOptions {
+            item_kind: Some("implementation".to_string()),
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let item = serde_json::json!({
+        "item_id": "implementation-refuted-impl-TASK-TDL-001",
+        "canonical_task_ids": ["TASK-TDL-001"],
+        "work_type": "implementation",
+        "target_files": [],
+        "artifact_requirements": ["docs/trading/data-lake-gap-audit.md"],
+    });
+    let branches = vec![WorkflowV2FanoutItem::read_only(
+        "implementation-wave-1-implementation-refuted-impl-TASK-TDL-001",
+        "coder",
+        call.clone(),
+        serde_json::json!({ "item": item }),
+    )];
+
+    let write_items = write_items_for_branches(None, &call, &branches).unwrap();
+
+    assert_eq!(write_items.len(), 1);
+    assert!(
+        write_items[0].artifact_only,
+        "refuted artifact-only item must be artifact_only; got {:?}",
+        write_items[0]
+    );
+    assert!(
+        !write_items[0].owned_scopes.is_empty(),
+        "artifact-only item must own its artifact directory; got {:?}",
+        write_items[0]
+    );
+}

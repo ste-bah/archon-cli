@@ -178,6 +178,15 @@ fn push_source_result(
     value: &serde_json::Value,
     results: &mut Vec<WorkflowV2Result>,
 ) -> crate::WorkflowResult<()> {
+    // Terminal reporting must never crash on agent-shaped input. A source that
+    // is null or not an object carries no result to collect; skip it rather
+    // than `?`-propagating a serde error and aborting the whole report. This is
+    // the boundary that failed live: a blocked-silent finalReport source held a
+    // null element and the report construction died with "invalid type: null,
+    // expected string or map", leaving only a host-fallback needs_review.
+    if !value.is_object() {
+        return Ok(());
+    }
     let result: WorkflowV2Result = serde_json::from_value(value.clone())?;
     results.push(result);
     Ok(())

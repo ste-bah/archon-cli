@@ -178,8 +178,25 @@ pub(crate) fn normalize_null_report_collections(value: &mut Value) {
     match value {
         Value::Object(object) => {
             for (key, child) in object {
-                if child.is_null() && COLLECTION_FIELDS.contains(&key.as_str()) {
-                    *child = Value::Array(Vec::new());
+                if COLLECTION_FIELDS.contains(&key.as_str()) {
+                    // A null collection becomes empty; a null ELEMENT inside a
+                    // present collection is dropped. The element carries no
+                    // evidence, so removing it loses nothing and cannot
+                    // fabricate a pass — but leaving it made a typed deserialize
+                    // (Vec<WorkflowV2FileRecord>, Vec<WorkflowV2Evidence>) fail
+                    // with "expected string or map" and crash terminal
+                    // reporting. Nested collections still recurse via the
+                    // retained elements below.
+                    if child.is_null() {
+                        *child = Value::Array(Vec::new());
+                    } else if let Some(elements) = child.as_array_mut() {
+                        elements.retain(|element| !element.is_null());
+                        for element in elements {
+                            normalize_null_report_collections(element);
+                        }
+                    } else {
+                        normalize_null_report_collections(child);
+                    }
                 } else {
                     normalize_null_report_collections(child);
                 }
