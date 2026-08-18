@@ -174,7 +174,7 @@ impl Agent {
         self.spawn_segment_summary(store, segment, source.to_vec(), active_model);
     }
 
-    fn staged_compaction_due(&self, active_model: &str) -> bool {
+    pub(in crate::agent) fn staged_compaction_due(&self, active_model: &str) -> bool {
         let window = self
             .context_window_for(active_model)
             .saturating_sub(self.config.context.output_reserve_tokens);

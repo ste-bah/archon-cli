@@ -10,6 +10,7 @@ mod learning;
 mod context_section;
 mod memory_open;
 mod providers;
+mod prune;
 mod runtime;
 mod sections;
 mod skills;
@@ -26,6 +27,7 @@ pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
 pub use providers::*;
+pub use prune::*;
 pub use runtime::*;
 pub use sections::*;
 pub use skills::*;
@@ -118,6 +120,9 @@ pub struct ArchonConfig {
     /// Where oversized tool output is kept so it stays retrievable (#189).
     #[serde(default)]
     pub spill: SpillConfig,
+    /// Mechanical context reclamation, tried before any model call (#189).
+    #[serde(default)]
+    pub prune: PruneConfig,
 }
 
 #[cfg(test)]

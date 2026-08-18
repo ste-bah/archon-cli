@@ -43,18 +43,14 @@ impl TaskStore for TaskManagerStore {
 
     fn cancel_task(&self, id: &TaskId) -> Result<(), String> {
         // Try the task manager first; its ids are the ones `TaskStop` uses.
-        match TaskManager::stop_task(&TASK_MANAGER, id) {
-            Ok(()) => return Ok(()),
-            Err(task_error) => {
-                if let Some(agent) = running_background_agents()
-                    .into_iter()
-                    .find(|agent| agent.subagent_id == *id)
-                {
-                    return cancel_agent(&agent);
-                }
-                Err(task_error)
-            }
-        }
+        // Only if it disowns the id is this a background agent.
+        let Err(task_error) = TaskManager::stop_task(&TASK_MANAGER, id) else {
+            return Ok(());
+        };
+        running_background_agents()
+            .into_iter()
+            .find(|agent| agent.subagent_id == *id)
+            .map_or(Err(task_error), |agent| cancel_agent(&agent))
     }
 }
 

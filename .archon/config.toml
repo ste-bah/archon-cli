@@ -1229,6 +1229,46 @@ enabled = true
 retention_days = 7
 
 # ----------------------------------------------------------------------------
+# [prune] — Reclaiming context without asking a model
+# ----------------------------------------------------------------------------
+# Compaction always calls a model. Much of what fills a context window is
+# removable by arithmetic instead: a file read three times with nothing writing
+# to it in between, an error retried successfully a moment later, a tool result
+# whose complete text is already spilled to disk. Summarising those spends a
+# request and a wait to reach a conclusion that costs nothing to reach.
+#
+# This pass runs BEFORE the summarisation path. If it reclaims enough to bring
+# the estimate back under the compaction threshold, the model call is skipped
+# entirely and that is recorded in the compaction log line.
+#
+# No rule ever removes a message or a block. An assistant tool_use whose
+# tool_result is missing is a provider-level error, not a degradation, so each
+# rule replaces the CONTENT of a tool result with a shorter line saying where
+# the original went. Orphaning is impossible by construction rather than by
+# remembering not to do it.
+
+[prune]
+
+# Run the pass at all.
+enabled = true
+
+# Replace a spilled tool result's body with its file path once an identical
+# result appears later. Only spilled results qualify -- without a locator there
+# would be nowhere to point.
+spilled_superseded = true
+
+# Collapse repeated reads of a path that no Edit, Write or NotebookEdit touched
+# in between. The intervening-write check is what keeps this sound: collapsing
+# across an edit would present stale text as current, which is worse than
+# spending the tokens.
+repeated_reads = true
+
+# Replace a failed tool result when the same call, with the same input,
+# succeeded later. A failure that was never retried is kept -- it is the record
+# of why the turn is in the state it is in.
+retried_errors = true
+
+# ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------
 # Generated decomposed-PRD workflows keep orchestration in workflow.js. These
