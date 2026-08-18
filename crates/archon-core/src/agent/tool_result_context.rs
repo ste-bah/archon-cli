@@ -150,7 +150,11 @@ pub(crate) fn exceeds_context_budget(tool_name: &str, content: &str) -> bool {
 
 fn context_limit_for_tool(tool_name: &str) -> usize {
     match tool_name {
-        "Bash" | "Shell" => SHELL_TOOL_RESULT_CONTEXT_BYTES,
+        // `TerminalRead` returns shell output and belongs on the shell budget,
+        // not the 64 KB default it would otherwise fall through to (#189
+        // Phase 6). Over the budget it spills like any other result, so the
+        // omitted region stays readable.
+        "Bash" | "Shell" | "TerminalRead" => SHELL_TOOL_RESULT_CONTEXT_BYTES,
         "Agent" | "SendMessage" | "TaskCreate" | "TaskOutput" => SUBAGENT_TOOL_RESULT_CONTEXT_BYTES,
         _ => DEFAULT_TOOL_RESULT_CONTEXT_BYTES,
     }

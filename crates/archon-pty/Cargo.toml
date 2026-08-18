@@ -1,0 +1,17 @@
+[package]
+name = "archon-pty"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "A pseudo-terminal and the child running inside it, for archon-cli. Deliberately a leaf — no archon-* dependencies — so both the web terminal pane in archon-sdk and the persistent shell tools in archon-tools run on one PTY lifecycle instead of two."
+
+# Dependency discipline: every dep MUST come from [workspace.dependencies].
+[dependencies]
+# ConPTY on Windows, openpty elsewhere, behind one API. Already a workspace
+# dependency for the browser terminal pane; this crate is where it now lives.
+portable-pty.workspace = true
+# Only for `sync::mpsc`, which is what bridges the blocking pump threads to
+# async callers. No runtime is started here.
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true

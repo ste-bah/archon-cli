@@ -46,6 +46,35 @@ staged copy remains available for review or `LargeEditAbort`.
 | `PowerShell` | Variable | Execute PowerShell command |
 | `Monitor` | Variable | Run a shell command and collect stdout as line-events within a bounded window |
 | `PushNotification` | Safe | Emit a user-visible notification |
+| `TerminalCreate` | Risky | Start a persistent shell (`bash`, `sh`, `powershell`, or `cmd`) and return its id |
+| `TerminalWrite` | Variable (floor Risky) | Send text to a live terminal; returns immediately |
+| `TerminalRead` | Safe | Read output produced since a byte offset |
+| `TerminalClose` | Safe | End a terminal and kill what is running in it |
+
+### Persistent terminals
+
+`Bash` is one-shot: each call is a new process, so a `cd`, an activated
+environment or a background process cannot survive it. The `Terminal*` tools are
+the other half — the shell stays alive between calls, and its output stays
+addressable after the call that produced it returned.
+
+The usual sequence is `TerminalCreate` → `TerminalWrite` → `TerminalRead`, then
+`TerminalClose`. `TerminalWrite` does not wait for the command; `TerminalRead`
+returns what has arrived since the offset you pass and reports a `next_offset`
+to resume from, so a long-running process can be started, left, and checked on
+later.
+
+Lifecycle, in three rules: at most 8 terminals are open at once, a terminal
+untouched for 30 minutes is closed the next time any terminal is created, and
+every terminal a session opened is closed when that session ends. Output is
+capped at 256 KB per terminal — passing it evicts the oldest bytes, and a read
+that lands in the evicted region says how much it lost rather than starting
+late. Escape sequences are stripped before the output reaches the model.
+
+Both PowerShell and a POSIX shell are reachable on Windows: `powershell` prefers
+`pwsh`, and `bash`/`sh` resolve through the Git-for-Windows tree. The underlying
+PTY (`crates/archon-pty`) is shared with the browser terminal pane, so ConPTY
+and `openpty` behave the same for both.
 
 ## Web
 
@@ -272,12 +301,17 @@ archon --disallowed-tools Bash,PowerShell          # Remove from model context e
 
 ## Permission classifier
 
-`Bash`, `PowerShell`, and `RemoteTrigger` use the per-command classifier in `crates/archon-permissions/src/classifier.rs`:
+`Bash`, `PowerShell`, `TerminalWrite`, and `RemoteTrigger` use the per-command classifier in `crates/archon-permissions/src/classifier.rs`:
 
 - Read-only commands (`ls`, `cat`, `grep`) → Safe
 - Mutating commands (`rm`, `mv`, `>`, `dd`) → Risky
 - Network commands (`curl`, `wget`, `ssh`) → Risky
 - Destructive patterns (`rm -rf /`, `git push --force`) → Always denied (configurable via `always_deny`)
+
+`TerminalWrite` runs the same classification and then floors the result at
+Risky: the same text is as dangerous typed into a live shell as it is passed to
+`Bash`, and a command the operator marked safe still carries whatever state that
+shell is already in, which the classifier cannot see.
 
 ## See also
 

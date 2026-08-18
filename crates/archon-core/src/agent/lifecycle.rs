@@ -102,6 +102,14 @@ impl Agent {
         }
     }
 
+    /// The session this agent belongs to.
+    ///
+    /// Added for #189 Phase 6: shutdown has to close the terminals this session
+    /// opened, and it holds the agent rather than the config it was built from.
+    pub fn session_id(&self) -> &str {
+        &self.config.session_id
+    }
+
     /// Share the plan lifecycle state with external session components.
     pub fn plan_mode_state(&self) -> Arc<tokio::sync::Mutex<plan_mode_state::PlanModeState>> {
         Arc::clone(&self.plan_mode_state)

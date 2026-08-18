@@ -124,6 +124,11 @@ async fn install_workflow_cli_subagent_executor(
 ) {
     let mut registry = create_default_registry(cwd.to_path_buf(), None);
     registry.replace(Box::new(config.tools.bash_tool(&config.permissions)));
+    // #189 Phase 6: the same command lists Bash uses, so typing a command into
+    // a persistent shell is gated exactly as hard as running it through Bash.
+    registry.replace(Box::new(
+        archon_core::config::ToolsConfig::terminal_write_tool(&config.permissions),
+    ));
     crate::command::workflow_mcp::install_project_tools(
         cwd,
         &mut registry,

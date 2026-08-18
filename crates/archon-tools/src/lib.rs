@@ -56,6 +56,13 @@ pub mod push_notification;
 pub mod registry;
 pub mod session_search;
 pub mod sleep;
+// Persistent shell sessions (#189 Phase 6). Only the tools are public; the
+// buffer, the registry and the shell table are `pub(crate)` so an unwired
+// helper still trips `dead_code` — a lesson from Phase 0 of the same issue.
+pub(crate) mod terminal_buffer;
+pub(crate) mod terminal_registry;
+pub(crate) mod terminal_shell;
+pub mod terminal_tools;
 pub mod todo_write;
 pub mod tool;
 

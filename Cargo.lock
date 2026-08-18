@@ -945,6 +945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "archon-pty"
+version = "1.9.2"
+dependencies = [
+ "anyhow",
+ "portable-pty",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "archon-reasoning-quality"
 version = "1.9.2"
 dependencies = [
@@ -975,6 +985,7 @@ dependencies = [
  "archon-llm",
  "archon-memory",
  "archon-permissions",
+ "archon-pty",
  "archon-tools",
  "archon-workflow",
  "async-trait",
@@ -983,7 +994,6 @@ dependencies = [
  "dirs",
  "futures-util",
  "open",
- "portable-pty",
  "rust-embed",
  "serde",
  "serde_json",
@@ -1057,6 +1067,7 @@ dependencies = [
  "archon-observability",
  "archon-permissions",
  "archon-policy",
+ "archon-pty",
  "archon-session",
  "archon-shell",
  "archon-write-plan",
