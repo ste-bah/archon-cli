@@ -32,9 +32,11 @@ async fn plan_mode_preflight_audits_before_cognitive_and_permission_gates() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(archon_tools::file_write::WriteTool));
-    let mut config = AgentConfig::default();
-    config.working_dir = temp.path().to_path_buf();
-    config.session_id = "preflight-gate-order".into();
+    let config = AgentConfig {
+        working_dir: temp.path().to_path_buf(),
+        session_id: "preflight-gate-order".into(),
+        ..AgentConfig::default()
+    };
     *config.permission_mode.lock().await = "default".into();
     let mut agent = Agent::new(
         Arc::new(MockLlmProvider),

@@ -48,7 +48,7 @@ pub(super) fn create_owner_only_file(path: &Path, bytes: &[u8; 32]) -> io::Resul
         return Err(last_error("build plan approval secret ACL"));
     }
     let result = (|| {
-        let mut attributes = SECURITY_ATTRIBUTES {
+        let attributes = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: descriptor,
             bInheritHandle: 0,
@@ -58,7 +58,7 @@ pub(super) fn create_owner_only_file(path: &Path, bytes: &[u8; 32]) -> io::Resul
                 wide_path(path)?.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                &mut attributes,
+                &attributes,
                 CREATE_NEW,
                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
                 null_mut(),
@@ -76,7 +76,7 @@ pub(super) fn create_owner_only_file(path: &Path, bytes: &[u8; 32]) -> io::Resul
         unsafe { CloseHandle(handle) };
         result
     })();
-    unsafe { LocalFree(descriptor as *mut c_void) };
+    unsafe { LocalFree(descriptor) };
     result
 }
 
@@ -146,7 +146,7 @@ fn validate_owner_only_handle(handle: HANDLE) -> io::Result<()> {
     }
     let user_sid = current_user_sid()?;
     let result = validate_protected_owner_system_dacl(descriptor, user_sid.as_ptr() as PSID);
-    unsafe { LocalFree(descriptor as *mut c_void) };
+    unsafe { LocalFree(descriptor) };
     result
 }
 
@@ -434,7 +434,9 @@ fn allocated_wide_len(
     allocated_bytes: usize,
     max_units: usize,
 ) -> io::Result<usize> {
-    if value.is_null() || allocated_bytes == 0 || allocated_bytes % std::mem::size_of::<u16>() != 0
+    if value.is_null()
+        || allocated_bytes == 0
+        || !allocated_bytes.is_multiple_of(std::mem::size_of::<u16>())
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

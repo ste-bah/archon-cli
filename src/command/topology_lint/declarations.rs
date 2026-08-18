@@ -118,11 +118,7 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
                     .insert(first.to_string());
             }
             for key in referenced_env_keys(&command) {
-                if !task
-                    .required_env_keys
-                    .iter()
-                    .any(|declared| *declared == key)
-                {
+                if !task.required_env_keys.contains(&key) {
                     undeclared_env.entry(name.clone()).or_default().insert(key);
                 }
             }

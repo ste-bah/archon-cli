@@ -78,6 +78,18 @@ pub struct UnresolvedDependency {
     pub suggestions: Vec<String>,
 }
 
+/// Two agents claiming the same name and version.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "duplicate agent: {name}@{version} already loaded from {existing_path:?}; rejected {rejected_path:?}"
+)]
+pub struct DuplicateAgent {
+    pub name: String,
+    pub version: semver::Version,
+    pub existing_path: PathBuf,
+    pub rejected_path: PathBuf,
+}
+
 /// Errors from the discovery subsystem.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
@@ -90,15 +102,13 @@ pub enum DiscoveryError {
     #[error("metadata too large: {path:?} ({size} bytes, max 10 MB)")]
     MetadataTooLarge { path: PathBuf, size: usize },
 
-    #[error(
-        "duplicate agent: {name}@{version} already loaded from {existing_path:?}; rejected {rejected_path:?}"
-    )]
-    DuplicateAgent {
-        name: String,
-        version: semver::Version,
-        existing_path: PathBuf,
-        rejected_path: PathBuf,
-    },
+    /// Boxed because it is far and away the fattest variant — a name, a
+    /// `semver::Version` and two paths — and an enum is as large as its
+    /// largest member. Unboxed it pushed `DiscoveryError` past 128 bytes,
+    /// which every `Result<_, DiscoveryError>` in this module then paid for on
+    /// the success path too.
+    #[error("{0}")]
+    DuplicateAgent(Box<DuplicateAgent>),
 
     #[error("circular dependency: {0:?}")]
     CircularDependency(Vec<String>),

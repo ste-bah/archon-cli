@@ -153,25 +153,24 @@ impl Agent {
             ),
             reasoning_encrypted: None,
         };
+        let cache_settings = request_cache::CacheSettings {
+            configured: &self.config.context.prompt_cache_strategy,
+            enabled: self.config.context.prompt_cache,
+            mode: &self.config.context.prompt_cache_mode,
+            ttl: &self.config.context.prompt_cache_ttl,
+            model_overrides: &self.config.context.prompt_cache_models,
+        };
         request_cache::apply_stable_system_cache(
             &mut request,
             self.client.as_ref(),
             stable_system_blocks,
-            &self.config.context.prompt_cache_strategy,
-            self.config.context.prompt_cache,
-            &self.config.context.prompt_cache_mode,
-            &self.config.context.prompt_cache_ttl,
-            &self.config.context.prompt_cache_models,
+            &cache_settings,
         );
         request_cache::apply_conversation_cache(
             &mut request,
             self.client.as_ref(),
-            &self.config.context.prompt_cache_strategy,
-            self.config.context.prompt_cache,
             self.config.context.prompt_cache_conversation,
-            &self.config.context.prompt_cache_mode,
-            &self.config.context.prompt_cache_ttl,
-            &self.config.context.prompt_cache_models,
+            &cache_settings,
         );
         self.fire_after_prompt_build_hook(&request, agentic_iterations)
             .await;

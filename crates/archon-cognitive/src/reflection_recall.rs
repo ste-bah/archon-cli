@@ -69,6 +69,19 @@ pub struct ReflectionReuseTally {
     pub metrics_emitted: usize,
 }
 
+/// Which turn is being scored.
+///
+/// Grouped because the four identify one turn and always travel together — and
+/// because `session_id` and `model_id` are both `&str`, so passing them
+/// positionally made a silent swap possible that nothing would catch.
+#[derive(Debug, Clone, Copy)]
+pub struct ScoredTurn<'a> {
+    pub session_id: &'a str,
+    pub turn_number: u64,
+    pub model_id: &'a str,
+    pub situation_kind: SituationKind,
+}
+
 pub struct ReflectionRecall<'a> {
     db: &'a DbInstance,
     ledger_dir: std::path::PathBuf,
@@ -216,14 +229,17 @@ impl<'a> ReflectionRecall<'a> {
     /// deterministic pass.
     pub fn record_outcome(
         &self,
-        session_id: &str,
-        turn_number: u64,
+        turn: &ScoredTurn<'_>,
         reflections: &[UnresolvedReflection],
         cited: &BTreeSet<String>,
         verification: TurnVerification,
-        model_id: &str,
-        situation_kind: SituationKind,
     ) -> Result<ReflectionReuseTally, CognitiveError> {
+        let ScoredTurn {
+            session_id,
+            turn_number,
+            model_id,
+            situation_kind,
+        } = *turn;
         let mut tally = ReflectionReuseTally {
             injected: reflections.len(),
             ..ReflectionReuseTally::default()

@@ -323,10 +323,10 @@ impl JepaEvalRunStore {
         #[cfg(target_os = "windows")]
         {
             let _ = (run_id, extra_args);
-            return Err(anyhow::anyhow!(
+            Err(anyhow::anyhow!(
                 "--background is not supported on Windows (ERR-JEVAL-04); \
                  run in the foreground or use eval-jepa-status from another shell."
-            ));
+            ))
         }
 
         #[cfg(not(target_os = "windows"))]

@@ -35,12 +35,8 @@ impl Agent {
         request_cache::apply_conversation_cache(
             &mut retry_request,
             self.client.as_ref(),
-            &self.config.context.prompt_cache_strategy,
-            self.config.context.prompt_cache,
             self.config.context.prompt_cache_conversation,
-            &self.config.context.prompt_cache_mode,
-            &self.config.context.prompt_cache_ttl,
-            &self.config.context.prompt_cache_models,
+            &crate::agent::request_cache::CacheSettings::from_context(&self.config.context),
         );
         retry_request
     }

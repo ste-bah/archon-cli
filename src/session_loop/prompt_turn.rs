@@ -245,11 +245,16 @@ mod tests {
         .await;
         tokio::task::yield_now().await;
 
-        let prompts = captured.lock().expect("prompt capture");
-        assert_eq!(prompts.len(), 1);
-        assert!(prompts[0].starts_with("This request spans multiple implementation concerns."));
-        assert!(prompts[0].ends_with("Update src/a.rs and src/b.rs"));
-        drop(prompts);
+        // Scoped rather than dropped explicitly: a `MutexGuard` is not `Send`,
+        // so one alive across an await point stops the enclosing future being
+        // spawned at all. A block makes that impossible to reintroduce by
+        // adding a line above the `drop`.
+        {
+            let prompts = captured.lock().expect("prompt capture");
+            assert_eq!(prompts.len(), 1);
+            assert!(prompts[0].starts_with("This request spans multiple implementation concerns."));
+            assert!(prompts[0].ends_with("Update src/a.rs and src/b.rs"));
+        }
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let runner = Arc::new(RecordingRunner(captured.clone()));
