@@ -72,6 +72,7 @@ mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
+pub mod token_surface;
 mod tool_completion_evidence;
 mod tool_context;
 mod tool_dispatch;

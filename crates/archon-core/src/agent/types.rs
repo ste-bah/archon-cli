@@ -63,6 +63,10 @@ pub enum AgentEvent {
         cache_read_tokens: u64,
         context_name: Option<String>,
         resolution_source: Option<String>,
+        /// Calibrated tokens attributed to the single largest message (#189
+        /// Phase 3), so the status line can say what is filling the window and
+        /// not only how full it is. Zero when nothing is attributed yet.
+        heaviest_message_tokens: u64,
     },
     TextDelta(String),
     ThinkingDelta(String),
@@ -317,6 +321,12 @@ pub struct ConversationState {
     /// Where oversized tool results are written so their omitted region stays
     /// readable (#189 Phase 1). `None` disables spilling.
     pub spill: Option<SpillContext>,
+    /// Correction applied to per-message token estimates (#189 Phase 3).
+    ///
+    /// Held here rather than on the surface itself because the surface is
+    /// rebuilt whenever the message list changes, and this must outlive both
+    /// that and the compaction that clears `last_known_context_tokens`.
+    pub token_calibration: crate::agent::token_surface::Calibration,
 }
 
 /// What `add_tool_result` needs to write a spill file.
@@ -338,6 +348,7 @@ impl Default for ConversationState {
             last_known_context_tokens: 0,
             auto_compact: crate::agent::AutoCompactState::default(),
             spill: None,
+            token_calibration: crate::agent::token_surface::Calibration::default(),
         }
     }
 }

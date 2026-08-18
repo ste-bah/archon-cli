@@ -185,8 +185,39 @@ impl Agent {
         let threshold = (self.config.context.compact_threshold
             - self.config.context.preflight_safety_margin)
             .max(0.0);
-        autocompact::evaluate_compaction(tokens, window, &self.state.auto_compact, threshold)
-            .is_some()
+        let due =
+            autocompact::evaluate_compaction(tokens, window, &self.state.auto_compact, threshold)
+                .is_some();
+        if due {
+            self.log_context_attribution(tokens, window);
+        }
+        due
+    }
+
+    /// Record which messages are filling the window, at the moment it matters.
+    ///
+    /// Compaction has always known *that* the window is 82% full and never
+    /// *which* messages account for it, so the only diagnosis available after
+    /// the fact was "it compacted". #189 Phase 3 makes the surface answerable;
+    /// this is where the answer is worth having.
+    fn log_context_attribution(&self, tokens: u64, window: u64) {
+        let surface = self.state.token_surface();
+        let top = surface.top_contributors(3);
+        if top.is_empty() {
+            return;
+        }
+        let heaviest: Vec<String> = top
+            .iter()
+            .map(|node| format!("#{}={}", node.message_index, node.estimated_tokens))
+            .collect();
+        tracing::info!(
+            compaction.trigger_tokens = tokens,
+            compaction.window = window,
+            compaction.attributed_total = surface.total(),
+            compaction.calibrated = surface.calibration().is_calibrated(),
+            compaction.heaviest_messages = heaviest.join(" "),
+            "context attribution at compaction"
+        );
     }
 
     fn assemble_stored_compaction_messages(

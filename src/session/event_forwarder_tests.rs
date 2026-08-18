@@ -310,6 +310,7 @@ async fn context_pressure_event_banks_last_request_body_tokens_for_slash_context
                 cache_read_tokens: 0,
                 context_name: Some("main".into()),
                 resolution_source: Some("bundled-catalog".into()),
+                heaviest_message_tokens: 0,
             }))
             .await
             .expect("send context pressure event");

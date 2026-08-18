@@ -199,6 +199,13 @@ impl Agent {
             cache_read_tokens: 0,
             context_name: Some("main".to_string()),
             resolution_source: Some(telemetry.context_source.to_string()),
+            heaviest_message_tokens: self
+                .state
+                .token_surface()
+                .top_contributors(1)
+                .first()
+                .map(|node| node.estimated_tokens)
+                .unwrap_or(0),
         })
         .await;
         self.send_event(AgentEvent::ApiCallStarted {
@@ -348,6 +355,13 @@ impl Agent {
         self.state.total_input_tokens += usage.context_input_tokens;
         self.state.last_known_context_tokens = usage.context_input_tokens;
         self.state.total_output_tokens += usage.output_tokens;
+        // Reconcile the per-message estimate against the one authoritative
+        // number (#189 Phase 3). `last_known_context_tokens` is cleared on
+        // compaction; the ratio is a property of the tokenizer, so keeping it
+        // separately is what stops attribution reverting to a raw `len / 4`
+        // guess at the moment the new size matters most.
+        self.state
+            .reconcile_token_surface(usage.context_input_tokens);
         TurnUsage {
             turn_input_tokens: usage.billable_input_tokens,
             turn_output_tokens: usage.output_tokens,
