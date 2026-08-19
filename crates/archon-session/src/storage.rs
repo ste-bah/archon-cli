@@ -203,13 +203,20 @@ impl SessionStore {
         // #193 Phase C. A sidecar, not a log event: a rating is editable and
         // the log is the record of what happened, and keeping it out of the log
         // keeps it out of model context, which is where it must not be.
-        self.create_relation(
-            ":create message_feedback {
+        //
+        // `message_digest` was added after the relation first shipped on this
+        // branch, so a database created by an earlier build has the old shape.
+        // `create_relation` treats "already exists" as success, so without this
+        // the schema in the code and the schema on disk diverge silently and
+        // every write fails at runtime instead — which is exactly what happened
+        // the first time this was run against a real session store.
+        const MESSAGE_FEEDBACK: &str = ":create message_feedback {
                 session_id: String, message_id: String =>
                 rating: String, note: String, message_digest: String,
                 version: String, created_at: String, updated_at: String
-            }",
-        )?;
+            }";
+        self.drop_relation_missing_field("message_feedback", "message_digest")?;
+        self.create_relation(MESSAGE_FEEDBACK)?;
         self.create_relation(":create session_names { session_id: String => name: String }")?;
         self.create_relation(
             ":create session_parents { session_id: String => parent_session_id: String }",
@@ -235,6 +242,53 @@ impl SessionStore {
                 created_at: String
             }",
         )
+    }
+
+    /// Drop `relation` when it exists but has no column called `field`.
+    ///
+    /// There is no migration machinery here, and [`Self::create_relation`]
+    /// treats "already exists" as success — so adding a column to a relation
+    /// changes the code and not the database, and every write against the new
+    /// shape then fails at runtime with "does not have field". This is the
+    /// narrow remedy for that: an unreleased relation whose shape has moved is
+    /// rebuilt rather than left to fail.
+    ///
+    /// It **discards the rows**, so it is only ever correct for a relation that
+    /// has not shipped. `message_feedback` is the one caller, and its rows only
+    /// ever existed on this branch. Anything released needs a real migration
+    /// that carries the data, not this.
+    fn drop_relation_missing_field(&self, relation: &str, field: &str) -> Result<(), SessionError> {
+        let Ok(columns) = self.db.run_script(
+            &format!("::columns {relation}"),
+            BTreeMap::new(),
+            cozo::ScriptMutability::Immutable,
+        ) else {
+            // No such relation: `create_relation` will make it, correctly.
+            return Ok(());
+        };
+        // `::columns` returns one row per column with the name first.
+        let has_field = columns
+            .rows
+            .iter()
+            .filter_map(|row| row.first())
+            .any(|name| extract_str(name) == field);
+        if has_field {
+            return Ok(());
+        }
+        tracing::warn!(
+            relation,
+            field,
+            "session store: rebuilding a relation whose shape changed; \
+             its rows are discarded"
+        );
+        self.db
+            .run_mutable(
+                &format!("::remove {relation}"),
+                BTreeMap::new(),
+                "session store schema: drop outdated relation",
+            )
+            .map_err(db_err)?;
+        Ok(())
     }
 
     fn create_relation(&self, script: &str) -> Result<(), SessionError> {

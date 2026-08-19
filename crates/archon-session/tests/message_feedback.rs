@@ -331,3 +331,61 @@ fn a_rating_about_a_different_message_can_be_overwritten_in_place() {
         "the row is the same row"
     );
 }
+
+/// The defect this was shipped with, and the reason live verification exists.
+///
+/// `create_relation` treats "already exists" as success, so adding
+/// `message_digest` changed the code and not any database that had already
+/// created the relation. Opening such a store used to succeed and then fail on
+/// every write with "stored relation 'message_feedback' does not have field
+/// 'message_digest'" — a schema divergence that only surfaced against a real
+/// session store.
+#[test]
+fn a_store_created_before_the_digest_field_is_rebuilt_rather_than_left_broken() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("sessions.db");
+
+    // A database carrying the pre-digest shape of the relation.
+    {
+        let store = SessionStore::open(&path).expect("store");
+        store
+            .db()
+            .run_mutable(
+                "::remove message_feedback",
+                std::collections::BTreeMap::new(),
+                "test: drop the current relation",
+            )
+            .expect("drop");
+        store
+            .db()
+            .run_mutable(
+                ":create message_feedback {
+                    session_id: String, message_id: String =>
+                    rating: String, note: String, version: String,
+                    created_at: String, updated_at: String
+                }",
+                std::collections::BTreeMap::new(),
+                "test: recreate the old shape",
+            )
+            .expect("create old shape");
+    }
+
+    // Reopening must notice and rebuild, not carry on and fail on first write.
+    let store = SessionStore::open(&path).expect("reopen");
+    let session = store
+        .create_session(&dir.path().to_string_lossy(), None, "claude-opus-5")
+        .expect("session")
+        .id;
+
+    store
+        .set_feedback(&session, "0", DIGEST, Rating::Positive, None, None)
+        .expect("a rating must be writable after the rebuild");
+    assert_eq!(
+        store
+            .feedback(&session, "0")
+            .expect("read")
+            .expect("present")
+            .message_digest,
+        DIGEST
+    );
+}
