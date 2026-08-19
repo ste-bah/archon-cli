@@ -32,6 +32,24 @@ impl<T> VirtualList<T> {
         self
     }
 
+    /// Move the cursor to `index`, scrolling it into view.
+    ///
+    /// The by-value [`Self::with_selected`] only helps at construction. An
+    /// overlay that opens onto a current value — the applied theme, the model
+    /// in use — has to position the cursor after the items are set, or it
+    /// opens on the first row and the user has to hunt for where they already
+    /// are.
+    ///
+    /// Out-of-range indices are ignored rather than clamped: a caller asking
+    /// for a row that does not exist has a bug, and silently landing on the
+    /// last row would hide it.
+    pub fn select_index(&mut self, index: usize) {
+        if index < self.items.len() {
+            self.selected = index;
+            self.scroll_to_selected();
+        }
+    }
+
     /// Every item, regardless of viewport.
     ///
     /// For renderers that do their own scrolling. `ratatui`'s stateful `Table`

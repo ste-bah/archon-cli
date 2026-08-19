@@ -148,63 +148,19 @@ pub(super) async fn handle_tui_event(
                 mgr.servers = servers;
             }
         }
+        // Overlay constructors live in `picker_events.rs`; keys for all of
+        // them are routed by `picker_input.rs`.
         TuiEvent::ShowMessageSelector(messages) => {
-            // TASK-TUI-620 + followup: /rewind opens this overlay; input
-            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
-            // and render dispatch (render/body.rs draw_message_selector)
-            // draws it.
-            app.message_selector = Some(crate::screens::message_selector::MessageSelector::new(
-                messages,
-            ));
+            super::picker_events::open_message_selector(app, messages);
         }
         TuiEvent::ShowSkillsMenu(skills) => {
-            // TASK-TUI-627 + followup: /skills opens this overlay; input
-            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
-            // and render dispatch (render/body.rs draw_skills_menu) draws
-            // it. Enter injects `/{skill-name} ` into the input buffer.
-            app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
+            super::picker_events::open_skills_menu(app, skills);
         }
         TuiEvent::ShowModelPicker(entries) => {
-            // #192: `/model` with no arguments opens this alongside its text
-            // summary. Keys are routed by the priority branch in
-            // event_loop/input.rs; Enter injects `/model <id>` so the change
-            // still goes through the one handler that validates it.
-            let mut picker = crate::screens::model_picker::ModelPicker::new();
-            picker.set_providers(
-                entries
-                    .into_iter()
-                    .map(
-                        |(provider_id, model_id, label)| {
-                            crate::screens::model_picker::ProviderEntry {
-                                provider_id,
-                                model_id,
-                                label,
-                            }
-                        },
-                    )
-                    .collect(),
-            );
-            app.model_picker = Some(picker);
+            super::picker_events::open_model_picker(app, entries);
         }
         TuiEvent::ShowThemePicker(entries) => {
-            // #192: `/theme` with no arguments. Enter injects `/theme <name>`,
-            // so the apply path stays the one handler that knows how to
-            // persist and validate a theme name.
-            let mut screen = crate::screens::theme_screen::ThemeScreen::new();
-            // The dispatch site cannot know which theme is applied — that
-            // lives here — so it sends every name and this marks the current
-            // one and parks the cursor on it.
-            screen.set_themes(
-                entries
-                    .into_iter()
-                    .map(|(name, _)| crate::screens::theme_screen::ThemeEntry {
-                        is_active: name == app.theme_name,
-                        name,
-                    })
-                    .collect(),
-            );
-            screen.select_theme(&app.theme_name);
-            app.theme_screen = Some(screen);
+            super::picker_events::open_theme_picker(app, entries);
         }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input

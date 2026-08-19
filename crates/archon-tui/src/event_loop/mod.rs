@@ -25,6 +25,12 @@ mod input;
 #[cfg(test)]
 mod input_routing_tests;
 mod mouse;
+/// `/model` and `/theme` picker construction, split from `tui_events.rs` for
+/// the 500-line ceiling (#192).
+mod picker_events;
+/// `/model` and `/theme` picker key routing, split from `input.rs` for the
+/// 500-line ceiling (#192).
+mod picker_input;
 mod task_overlay_input;
 pub(crate) mod thinking_archive;
 mod tui_events;

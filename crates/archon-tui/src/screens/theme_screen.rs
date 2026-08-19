@@ -52,12 +52,19 @@ impl ThemeScreen {
         self.list.set_items(self.themes.clone());
     }
 
-    /// Select theme (marks active, unmarks others).
+    /// Mark `name` as the active theme and put the cursor on it.
+    ///
+    /// It used to only set the flag. `set_items` resets the cursor to the top,
+    /// so opening the picker landed on the first theme rather than the one in
+    /// use — which is the row you most want to be standing on.
     pub fn select_theme(&mut self, name: &str) {
         for t in &mut self.themes {
             t.is_active = t.name == name;
         }
         self.list.set_items(self.themes.clone());
+        if let Some(index) = self.themes.iter().position(|t| t.name == name) {
+            self.list.select_index(index);
+        }
     }
 
     pub fn move_up(&mut self) {
