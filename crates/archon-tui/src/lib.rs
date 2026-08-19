@@ -17,6 +17,8 @@ pub mod context_status;
 pub mod input;
 pub mod markdown;
 pub mod output;
+/// Shared modal-overlay chrome. Crate-private: it is house style, not API.
+mod overlay;
 pub mod permissions;
 mod thinking_archive;
 #[cfg(test)]

@@ -3,8 +3,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Row, Table, TableState};
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -145,7 +144,6 @@ impl TaskOverlay {
         self.last_action = TaskAction::None;
     }
 
-    /// Render the tasks overlay into the given area.
     /// Draw the overlay into a centred rect inside `area`.
     ///
     /// `area` is the space available, not the space used — the overlay sizes
@@ -153,37 +151,18 @@ impl TaskOverlay {
     /// `render/body/pickers.rs`. It previously rendered into the whole frame,
     /// which is why it covered the status bar and the input line.
     pub fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
-        let width = area.width.saturating_sub(4).min(84);
-        // rows + header + two border lines, with room for the empty-state line.
-        let height = (self.rows.len() as u16 + 4)
-            .max(6)
-            .min(area.height.saturating_sub(2));
-        let overlay = Rect::new(
-            area.x + area.width.saturating_sub(width) / 2,
-            area.y + area.height.saturating_sub(height) / 2,
-            width,
-            height,
-        );
-
-        // Overlays own their cells rather than sharing them with whatever they
-        // happen to cover. Without this the welcome banner and the tips list
-        // show straight through the table.
-        f.render_widget(Clear, overlay);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Tasks — Up/Down select · x cancel · r refresh · Esc close ")
-            .border_style(Style::default().fg(theme.accent));
+        const TITLE: &str = " Tasks — Up/Down select · x cancel · r refresh · Esc close ";
 
         // An empty frame is indistinguishable from a broken one. The no-store
         // case already says so in words; so should this.
         if self.rows.is_empty() {
-            let empty = Paragraph::new("\n  Nothing is running.")
-                .style(Style::default().fg(theme.muted))
-                .block(block);
-            f.render_widget(empty, overlay);
+            crate::overlay::message(f, area, TITLE, "Nothing is running.", theme);
             return;
         }
+
+        // rows + header + two border lines.
+        let (overlay, block) =
+            crate::overlay::open(f, area, self.rows.len() as u16 + 3, TITLE, theme);
 
         let widths = [
             Constraint::Percentage(30),
@@ -201,25 +180,16 @@ impl TaskOverlay {
                     format_elapsed(r.elapsed_secs),
                     r.status.clone(),
                 ])
-                .style(Style::default().fg(theme.fg))
+                .style(crate::overlay::body_style(theme))
             })
             .collect();
 
         let table = Table::new(rows, &widths)
             .header(
-                Row::new(["ID", "Elapsed", "Status"]).style(
-                    Style::default()
-                        .fg(theme.header)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Row::new(["ID", "Elapsed", "Status"]).style(crate::overlay::header_style(theme)),
             )
             .block(block)
-            .row_highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .row_highlight_style(crate::overlay::selection_style(theme));
 
         // The selection has to reach the renderer or `move_up`/`move_down`
         // change an index nothing draws — which is what shipped: a list whose
