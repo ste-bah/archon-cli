@@ -158,7 +158,7 @@ fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow
 /// → 87 (Phase 6 traceability: /requirements).
 // → 89 (#184 M7 isolated-agent review and merge: /worktrees).
 /// -> 90 (#193 Phase C per-message human feedback: /feedback).
-/// -> 91 (#192 branch from an earlier message: /branch).
+/// -> 91 (#192 fork from an earlier message: /fork-at).
 const EXPECTED_PRIMARY_COUNT: usize = 91;
 
 /// Drain every currently-queued event from `rx` using `try_recv`

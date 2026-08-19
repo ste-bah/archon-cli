@@ -173,7 +173,7 @@ fn message_previews_for(ctx: &CommandContext) -> Vec<(usize, String, String)> {
         return Vec::new();
     };
     match store.load_messages(session_id) {
-        Ok(messages) => crate::command::branch::message_previews(&messages),
+        Ok(messages) => crate::command::fork_at::message_previews(&messages),
         Err(error) => {
             tracing::debug!("/context could not read the session log: {error}");
             Vec::new()

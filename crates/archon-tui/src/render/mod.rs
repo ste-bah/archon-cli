@@ -104,7 +104,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: memory files (#192, /memory files)
     body::draw_memory_browser(frame, app);
 
-    // Overlays: branch picker (#192, /branch with no arguments)
+    // Overlays: branch picker (#192, /fork-at with no arguments)
     body::draw_branch_picker(frame, app);
 
     // Overlays: voice capture (#192, /voice and the record hotkey)

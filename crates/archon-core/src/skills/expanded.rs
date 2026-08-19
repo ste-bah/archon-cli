@@ -666,22 +666,15 @@ expanded_skill!(
 // Utility (additional)
 // ---------------------------------------------------------------------------
 
-expanded_skill!(
-    FeedbackSkill,
-    "feedback",
-    "Submit feedback or report an issue",
-    |args, _ctx| {
-        if args.is_empty() {
-            return SkillOutput::Text(
-                "Usage: /feedback <message> — submit feedback\n\
-                 Or visit: https://github.com/archon-cli/archon/issues"
-                    .to_string(),
-            );
-        }
-        let message = args.join(" ");
-        SkillOutput::Text(format!("Feedback recorded: {message}"))
-    }
-);
+// FeedbackSkill lived here and answered `/feedback <message>` with
+// "Feedback recorded: {message}". It recorded nothing — no store, no file,
+// no request. A stub that reports success is worse than no command, because
+// the user stops looking for the place their feedback went.
+//
+// #193 Phase C gave feedback somewhere to go: `/feedback` is now a primary
+// handler that writes a rating and a note against a message id in the session
+// store, where the learning layer can read it. Primaries shadow skills at
+// dispatch, so leaving this one registered would only have hidden it.
 
 expanded_skill!(ReleaseNotesSkill, "release-notes", "Show version changelog");
 
@@ -793,7 +786,6 @@ pub fn register_expanded_skills(registry: &mut SkillRegistry) {
     registry.register(Box::new(SecurityReviewSkill));
 
     // Utility
-    registry.register(Box::new(FeedbackSkill));
     registry.register(Box::new(ReleaseNotesSkill));
     registry.register(Box::new(ScheduleSkill));
     registry.register(Box::new(RemoteControlSkill));

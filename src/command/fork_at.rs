@@ -1,4 +1,4 @@
-//! `/branch` — fork a session from an earlier message (#192).
+//! `/fork-at` — fork a session from an earlier message (#192).
 //!
 //! `/fork` copies the whole log: "carry on from here in a separate session".
 //! This is the other question — "go back to before that and try something
@@ -8,12 +8,25 @@
 //! With no argument it lists the branch points and opens the picker; with an
 //! index it forks through that message, inclusive. The original session is
 //! untouched: branching is not rewinding.
+//!
+//! # Why not `/branch`
+//!
+//! It was `/branch` first. `/branch` is already a built-in skill that lists,
+//! creates and switches *git* branches, and primaries shadow skills at
+//! dispatch — so the name silently replaced a working feature with an
+//! unrelated one. `expanded_skills_tests::git_branch_skill_not_overwritten`
+//! exists precisely to stop a conversation-fork feature taking that name; it
+//! tests the skill registry rather than the dispatcher, so it did not catch
+//! this, but its intent is unambiguous.
+//!
+//! Nor could this fold into `/fork`: `/fork <anything>` already means "fork
+//! and call it that", so `/fork 3` would be a session named "3".
 
 use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
-const USAGE: &str = "Usage: /branch <message-number> [name]";
+const USAGE: &str = "Usage: /fork-at <message-number> [name]";
 
 /// How much of a message to show in the list.
 ///
@@ -21,9 +34,9 @@ const USAGE: &str = "Usage: /branch <message-number> [name]";
 /// stays one row per message.
 const SUMMARY_CHARS: usize = 72;
 
-pub(crate) struct BranchHandler;
+pub(crate) struct ForkAtHandler;
 
-impl CommandHandler for BranchHandler {
+impl CommandHandler for ForkAtHandler {
     fn execute(&self, ctx: &mut CommandContext, args: &[String]) -> anyhow::Result<()> {
         let (Some(store), Some(session_id)) = (ctx.session_store.clone(), ctx.session_id.clone())
         else {
@@ -236,6 +249,6 @@ mod tests {
     fn the_listing_names_the_index_to_pass_back() {
         let text = list_text(&[(3, "user".into(), "do the thing".into())]);
         assert!(text.contains("[3] user: do the thing"), "{text}");
-        assert!(text.contains("Usage: /branch"), "{text}");
+        assert!(text.contains("Usage: /fork-at"), "{text}");
     }
 }

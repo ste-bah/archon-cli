@@ -4,7 +4,7 @@ use super::{Registry, RegistryBuilder};
 use crate::command::add_dir::AddDirHandler;
 use crate::command::archon_code::ArchonCodeHandler;
 use crate::command::archon_research::ArchonResearchHandler;
-use crate::command::branch::BranchHandler;
+use crate::command::fork_at::ForkAtHandler;
 use crate::command::bug::BugHandler;
 use crate::command::cancel::CancelHandler;
 use crate::command::checkpoint::CheckpointHandler;
@@ -79,7 +79,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("diff", Arc::new(DiffHandler));
     b.insert_primary("denials", Arc::new(DenialsHandler));
     b.insert_primary("feedback", Arc::new(FeedbackHandler));
-    b.insert_primary("branch", Arc::new(BranchHandler));
+    b.insert_primary("fork-at", Arc::new(ForkAtHandler));
     b.insert_primary("login", Arc::new(LoginHandler::new()));
     b.insert_primary("vim", Arc::new(VimHandler));
     b.insert_primary("usage", Arc::new(UsageHandler::new()));

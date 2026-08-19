@@ -1,4 +1,4 @@
-//! The `/branch` overlay (#192).
+//! The `/fork-at` overlay (#192).
 //!
 //! Layer 1 module — no imports from screens/ or app/.
 //!
@@ -10,7 +10,7 @@
 //! was added for it, because `fork_session` copies the whole log and there was
 //! no way to fork at an earlier point at all.
 //!
-//! Enter injects `/branch <index>`; the command does the forking.
+//! Enter injects `/fork-at <index>`; the command does the forking.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -22,7 +22,7 @@ use crate::virtual_list::VirtualList;
 /// One message that could be branched from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageRef {
-    /// Index in the session log — what `/branch` takes and what the fork keeps
+    /// Index in the session log — what `/fork-at` takes and what the fork keeps
     /// through, inclusive.
     pub index: usize,
     /// `user` or `assistant`.
@@ -34,7 +34,7 @@ pub struct MessageRef {
 impl MessageRef {
     /// The command Enter should put in the prompt.
     pub fn command(&self) -> String {
-        format!("/branch {}", self.index)
+        format!("/fork-at {}", self.index)
     }
 }
 
@@ -160,11 +160,11 @@ mod tests {
         assert!(BranchPicker::new().is_empty());
     }
 
-    /// The index is the whole payload: `/branch` takes it and the fork keeps
+    /// The index is the whole payload: `/fork-at` takes it and the fork keeps
     /// through it.
     #[test]
     fn enter_names_the_index_to_branch_at() {
-        assert_eq!(entry(7).command(), "/branch 7");
+        assert_eq!(entry(7).command(), "/fork-at 7");
     }
 
     #[test]

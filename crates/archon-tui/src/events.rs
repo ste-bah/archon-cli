@@ -422,9 +422,9 @@ pub enum TuiEvent {
     /// Each entry is `(scope, path, size_bytes)` in the order the files layer
     /// into the system prompt.
     ShowMemoryFiles(Vec<(String, String, u64)>),
-    /// Open the branch picker (#192, `/branch` with no arguments).
+    /// Open the branch picker (#192, `/fork-at` with no arguments).
     ///
-    /// Each entry is `(index, role, summary)`. The index is what `/branch`
+    /// Each entry is `(index, role, summary)`. The index is what `/fork-at`
     /// takes and what the fork keeps through, inclusive.
     ShowBranchPicker(Vec<(usize, String, String)>),
     /// Open the voice capture overlay (#192, `/voice` with no arguments).

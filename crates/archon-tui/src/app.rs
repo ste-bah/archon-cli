@@ -175,7 +175,7 @@ pub struct App {
     pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
     /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
     pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
-    /// `/branch` picker (#192): which message to fork the session from.
+    /// `/fork-at` picker (#192): which message to fork the session from.
     pub branch_picker: Option<crate::screens::session_branching::BranchPicker>,
     /// `/voice` capture overlay (#192): live microphone level and the last
     /// transcription. Opened by `/voice` and by the recording hotkey.

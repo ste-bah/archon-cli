@@ -288,7 +288,7 @@ pub(crate) fn handle_memory_files_key(app: &mut App, key: KeyEvent) -> bool {
 
 /// Route one key while the branch picker is open.
 ///
-/// Enter injects `/branch <index>`. The command owns the fork, so there is one
+/// Enter injects `/fork-at <index>`. The command owns the fork, so there is one
 /// path that decides what a branch means rather than two.
 pub(crate) fn handle_branch_picker_key(app: &mut App, key: KeyEvent) -> bool {
     if app.branch_picker.is_none() {

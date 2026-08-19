@@ -188,7 +188,7 @@ pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
     browser.render(frame, frame.area(), &app.theme);
 }
 
-/// Render the branch picker (#192, `/branch` with no arguments).
+/// Render the branch picker (#192, `/fork-at` with no arguments).
 pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
     let picker = match &app.branch_picker {
         Some(p) => p,

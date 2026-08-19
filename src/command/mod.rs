@@ -52,8 +52,8 @@ pub(crate) mod config;
 /// #189 Phase 7: `config dump` — the effective configuration in one place.
 pub(crate) mod config_dump;
 // TASK-#214 SLASH-CONNECT: /connect dynamic MCP server connect.
-/// `/branch` - fork a session from an earlier message (#192).
-pub(crate) mod branch;
+/// `/fork-at` - fork a session from an earlier message (#192).
+pub(crate) mod fork_at;
 pub(crate) mod connect;
 pub(crate) mod context;
 pub(crate) mod context_cmd;
