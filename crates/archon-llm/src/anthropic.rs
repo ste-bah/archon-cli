@@ -52,13 +52,23 @@ impl AnthropicClient {
         // way.
         //
         // `.read_timeout()` is the streaming-safe equivalent: it bounds the
-        // gap BETWEEN reads rather than the total duration, so a slow but
-        // live stream survives while a genuinely dead connection is still
-        // cut. Kept at 300s, which is the stall threshold this was always
-        // meant to enforce, and stays under the higher-level
-        // `stream_idle_timeout_secs` guard.
+        // gap BETWEEN reads rather than the total duration, so a slow but live
+        // stream survives while a genuinely dead connection is still cut.
+        //
+        // The value has to sit ABOVE the stall guard that owns this decision,
+        // `[subagent] stream_idle_timeout_secs` (default 600s, and the knob a
+        // user actually tunes). A reasoning model emits NOTHING on the wire
+        // while it thinks — with a large thinking budget that silence runs for
+        // many minutes — so a transport read gap is not evidence of a stall.
+        // Setting this at or below the guard makes the transport fire first and
+        // silently overrides it: a 300s value still killed live reducers
+        // mid-reasoning, reported as `error decoding response body`, exactly
+        // the failure the guard's own comment records it was widened to stop.
+        // Keep it a strict backstop for a truly dead socket and let the
+        // configurable guard make the real call.
+        const TRANSPORT_READ_BACKSTOP_SECS: u64 = 1800;
         let http = reqwest::Client::builder()
-            .read_timeout(Duration::from_secs(300))
+            .read_timeout(Duration::from_secs(TRANSPORT_READ_BACKSTOP_SECS))
             .no_proxy()
             .build()
             .expect("reqwest client should build");
