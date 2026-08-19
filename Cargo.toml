@@ -8,7 +8,7 @@ publish = false
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.9.2"
+version = "1.9.3"
 edition = "2024"
 # 1.88 is the floor because the tree uses let-chains (`if cond && let Some(x) =
 # ...`), which are unstable in edition 2024 before then: 1.86 and 1.87 both
