@@ -67,6 +67,21 @@ pub enum AgentEvent {
         /// Phase 3), so the status line can say what is filling the window and
         /// not only how full it is. Zero when nothing is attributed yet.
         heaviest_message_tokens: u64,
+        /// The heaviest messages, biggest first, as `(message_index, tokens)`
+        /// (#192 scope B).
+        ///
+        /// `heaviest_message_tokens` answers "how bad is the worst one"; this
+        /// answers "which ones, and by how much", which is the question
+        /// `top_contributors` was written for and had no caller for. Capped at
+        /// [`TOP_CONTRIBUTOR_LIMIT`] because this rides on every turn and the
+        /// tail of the ranking is not actionable.
+        top_contributors: Vec<(usize, u64)>,
+        /// Attributed tokens across *every* message, not only the ones listed.
+        ///
+        /// Without it a share cannot be computed from a truncated list, and
+        /// "42k" alone does not say whether that is most of the window or a
+        /// rounding error.
+        attributed_total: u64,
     },
     TextDelta(String),
     ThinkingDelta(String),

@@ -156,6 +156,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ShowBranchPicker(entries) => {
             super::picker_events::open_branch_picker(app, entries);
         }
+        TuiEvent::ShowTokenAttribution(previews) => {
+            super::picker_events::open_token_attribution(app, previews);
+        }
         TuiEvent::ShowVoiceCapture { vad_threshold } => {
             super::picker_events::open_voice_capture(app, vad_threshold);
         }
@@ -208,6 +211,8 @@ pub(super) async fn handle_tui_event(
             context_name,
             resolution_source,
             heaviest_message_tokens,
+            top_contributors,
+            attributed_total,
         } => {
             super::tui_events_accounting::apply_context_pressure(
                 app,
@@ -218,6 +223,10 @@ pub(super) async fn handle_tui_event(
                 context_name,
                 resolution_source,
                 heaviest_message_tokens,
+                crate::status::TokenAttribution {
+                    contributors: top_contributors,
+                    total: attributed_total,
+                },
             );
         }
         TuiEvent::SetVimMode(enabled) => {

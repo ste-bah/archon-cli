@@ -110,6 +110,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: voice capture (#192, /voice and the record hotkey)
     body::draw_voice_capture(frame, app);
 
+    // Overlays: token attribution (#192 scope B, /context)
+    body::draw_token_attribution(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

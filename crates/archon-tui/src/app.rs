@@ -180,6 +180,9 @@ pub struct App {
     /// `/voice` capture overlay (#192): live microphone level and the last
     /// transcription. Opened by `/voice` and by the recording hotkey.
     pub voice_capture: Option<crate::screens::voice_capture::VoiceCaptureOverlay>,
+    /// `/context` attribution overlay (#192 scope B): which messages are
+    /// filling the window, ranked.
+    pub token_attribution: Option<crate::screens::token_attribution::TokenAttributionOverlay>,
     /// `/config` settings overlay (#192).
     pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
@@ -243,6 +246,7 @@ impl Default for App {
             memory_browser: None,
             branch_picker: None,
             voice_capture: None,
+            token_attribution: None,
             settings_screen: None,
             file_picker: None,
             search_results: None,
@@ -284,6 +288,7 @@ impl App {
             && self.memory_browser.is_none()
             && self.branch_picker.is_none()
             && self.voice_capture.is_none()
+            && self.token_attribution.is_none()
             && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()

@@ -434,6 +434,15 @@ pub enum TuiEvent {
     ShowVoiceCapture {
         vad_threshold: f32,
     },
+    /// Open the token attribution overlay (#192 scope B, `/context`).
+    ///
+    /// Carries message previews and nothing else: the ranking is already on the
+    /// `App`, put there by `ContextPressureUpdated`, because only the agent has
+    /// the calibrated surface. `/context` supplies the text for those indices
+    /// because only the session log has it. Each side sends what it knows.
+    ///
+    /// Entries are `(message_index, role, summary)`.
+    ShowTokenAttribution(Vec<(usize, String, String)>),
     /// A recording started (`true`) or ended (`false`).
     ///
     /// Emitted by the voice pipeline, not by a key handler: the hotkey only
@@ -478,6 +487,13 @@ pub enum TuiEvent {
         resolution_source: Option<String>,
         /// Tokens attributed to the largest single message (#189 Phase 3).
         heaviest_message_tokens: u64,
+        /// The heaviest messages, biggest first, as `(message_index, tokens)`
+        /// (#192 scope B). What `/context` lists when it opens the attribution
+        /// overlay.
+        top_contributors: Vec<(usize, u64)>,
+        /// Attributed tokens across every message, so a share is computable
+        /// from a truncated ranking.
+        attributed_total: u64,
     },
     SetVimMode(bool),
     VimToggle,
@@ -533,6 +549,7 @@ impl TuiEvent {
             Self::ShowMemoryFiles(_) => "ShowMemoryFiles",
             Self::ShowBranchPicker(_) => "ShowBranchPicker",
             Self::ShowVoiceCapture { .. } => "ShowVoiceCapture",
+            Self::ShowTokenAttribution(_) => "ShowTokenAttribution",
             Self::VoiceRecording(_) => "VoiceRecording",
             Self::VoiceLevel(_) => "VoiceLevel",
             Self::ShowFilePicker { .. } => "ShowFilePicker",

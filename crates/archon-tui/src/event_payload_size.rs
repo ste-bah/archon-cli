@@ -105,7 +105,7 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     .map(|(scope, path, _)| string_bytes(scope) + string_bytes(path))
                     .sum::<usize>()
         }
-        TuiEvent::ShowBranchPicker(entries) => {
+        TuiEvent::ShowBranchPicker(entries) | TuiEvent::ShowTokenAttribution(entries) => {
             vec_bytes(entries)
                 + entries
                     .iter()
@@ -157,8 +157,13 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
         TuiEvent::ContextPressureUpdated {
             context_name,
             resolution_source,
+            top_contributors,
             ..
-        } => option_string_bytes(context_name) + option_string_bytes(resolution_source),
+        } => {
+            option_string_bytes(context_name)
+                + option_string_bytes(resolution_source)
+                + vec_bytes(top_contributors)
+        }
         TuiEvent::SetAgentInfo { name, color } => string_bytes(name) + option_string_bytes(color),
         _ => 0,
     }

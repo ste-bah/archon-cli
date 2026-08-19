@@ -89,6 +89,8 @@ async fn zero_usage_turn_preserves_preflight_context_pressure() {
             context_name: Some("main".into()),
             resolution_source: Some("bundled-catalog".into()),
             heaviest_message_tokens: 42_000,
+            top_contributors: vec![(12, 42_000), (3, 8_000)],
+            attributed_total: 121_000,
         },
         &tx,
     )

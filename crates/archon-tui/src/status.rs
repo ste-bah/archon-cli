@@ -50,6 +50,43 @@ pub struct StatusBar {
     /// full is it" — the difference between knowing to compact and knowing
     /// what to drop. Zero until attribution has something to report.
     pub heaviest_message_tokens: u64,
+    /// The whole ranking behind that one number (#192 scope B).
+    ///
+    /// The bar renders only `heaviest_message_tokens`; this is what `/context`
+    /// opens the attribution overlay on. Kept here because it arrives on the
+    /// same event and describes the same measurement — splitting them would
+    /// let the bar and the overlay disagree about the same turn.
+    pub token_attribution: TokenAttribution,
+}
+
+/// Per-message token attribution from the last context-pressure update.
+///
+/// `top_contributors` in `archon-core` has computed this since #189 Phase 3 and
+/// had no caller outside its own tests; this is where it lands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TokenAttribution {
+    /// Ranked biggest-first, as `(message_index, tokens)`. Truncated by the
+    /// emitter, so it is not the whole conversation.
+    pub contributors: Vec<(usize, u64)>,
+    /// Attributed tokens across *every* message, including those not listed.
+    ///
+    /// Without it a share cannot be computed from a truncated ranking, and a
+    /// bare token count does not say whether it is most of the window.
+    pub total: u64,
+}
+
+impl TokenAttribution {
+    /// This contributor's share of the whole surface, 0.0–100.0.
+    ///
+    /// Zero when nothing has been attributed yet, rather than a division by
+    /// zero dressed up as a percentage.
+    #[must_use]
+    pub fn share_percent(&self, tokens: u64) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (tokens as f64 / self.total as f64) * 100.0
+    }
 }
 
 impl Default for StatusBar {
@@ -65,6 +102,7 @@ impl Default for StatusBar {
             agent_color: None,
             context_tokens_used: 0,
             heaviest_message_tokens: 0,
+            token_attribution: TokenAttribution::default(),
             context_window: 0,
             context_name: None,
             resolution_source: None,
@@ -123,7 +161,15 @@ impl StatusBar {
         // Below that the answer is "nothing in particular", and saying so every
         // turn is noise.
         if self.heaviest_message_tokens >= 1000 {
-            parts.push(format!("top {}k", self.heaviest_message_tokens / 1000));
+            let top = self.heaviest_message_tokens / 1000;
+            // Name the command only when running it would show something. An
+            // affordance that opens an empty box teaches the user to ignore it
+            // (#192 scope B).
+            parts.push(if self.token_attribution.contributors.is_empty() {
+                format!("top {top}k")
+            } else {
+                format!("top {top}k /context")
+            });
         }
         if self.cache_creation_tokens > 0 || self.cache_read_tokens > 0 {
             parts.push(format!(

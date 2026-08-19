@@ -172,6 +172,41 @@ pub(crate) fn open_branch_picker(app: &mut App, entries: Vec<(usize, String, Str
     app.branch_picker = Some(picker);
 }
 
+/// Open the token attribution overlay (`/context` with no arguments).
+///
+/// Joins the two halves: the ranking the agent measured, already on the `App`
+/// from the last `ContextPressureUpdated`, and the message text `/context` read
+/// out of the session log. A ranked message the log has no line for keeps its
+/// index and its cost — the number is the actionable part, and dropping the row
+/// because its label is missing would hide the very thing being ranked.
+pub(crate) fn open_token_attribution(app: &mut App, previews: Vec<(usize, String, String)>) {
+    use crate::screens::token_attribution::{Contributor, TokenAttributionOverlay};
+
+    let attribution = app.status.token_attribution.clone();
+    let mut overlay = TokenAttributionOverlay::new(attribution.total);
+    overlay.set_contributors(
+        attribution
+            .contributors
+            .iter()
+            .map(|&(message_index, tokens)| {
+                let preview = previews
+                    .iter()
+                    .find(|(index, _, _)| *index == message_index);
+                Contributor {
+                    message_index,
+                    tokens,
+                    share_percent: attribution.share_percent(tokens),
+                    role: preview.map(|(_, role, _)| role.clone()).unwrap_or_default(),
+                    summary: preview
+                        .map(|(_, _, summary)| summary.clone())
+                        .unwrap_or_default(),
+                }
+            })
+            .collect(),
+    );
+    app.token_attribution = Some(overlay);
+}
+
 /// Open the voice capture overlay (`/voice` with no arguments).
 ///
 /// Opening it does not start a recording — `/voice` is how you look at the
@@ -318,5 +353,61 @@ mod tests {
         let mut app = App::default();
         open_voice_capture(&mut app, 0.02);
         assert!(!app.voice_capture.as_ref().expect("opened").is_recording());
+    }
+
+    fn app_with_ranking() -> App {
+        let mut app = App::default();
+        app.status.token_attribution = crate::status::TokenAttribution {
+            contributors: vec![(12, 42_000), (3, 8_000)],
+            total: 100_000,
+        };
+        app
+    }
+
+    /// The join this overlay exists to perform: the agent knows the cost, the
+    /// session log knows the text, and neither can produce the other half.
+    #[test]
+    fn the_ranking_and_the_message_text_are_joined_by_index() {
+        let mut app = app_with_ranking();
+        open_token_attribution(
+            &mut app,
+            vec![
+                (3, "user".into(), "pasted the config".into()),
+                (12, "assistant".into(), "the enormous build log".into()),
+            ],
+        );
+
+        let overlay = app.token_attribution.as_ref().expect("opened");
+        assert_eq!(overlay.len(), 2);
+        let first = overlay.selected().expect("a row is selected");
+        assert_eq!(first.message_index, 12, "the ranking order must survive");
+        assert_eq!(first.summary, "the enormous build log");
+        assert!((first.share_percent - 42.0).abs() < 1e-6);
+    }
+
+    /// A ranked message the log has no line for keeps its index and its cost:
+    /// the number is the actionable part.
+    #[test]
+    fn a_contributor_with_no_preview_still_appears() {
+        let mut app = app_with_ranking();
+        open_token_attribution(&mut app, Vec::new());
+
+        let overlay = app.token_attribution.as_ref().expect("opened");
+        assert_eq!(overlay.len(), 2);
+        let first = overlay.selected().expect("a row is selected");
+        assert_eq!(first.tokens, 42_000);
+        assert!(first.summary.is_empty());
+        assert!(first.role.is_empty());
+    }
+
+    /// Before the first request there is nothing measured, and the overlay has
+    /// to say so rather than draw an empty box.
+    #[test]
+    fn nothing_measured_yet_opens_an_empty_overlay_rather_than_none() {
+        let mut app = App::default();
+        open_token_attribution(&mut app, Vec::new());
+        let overlay = app.token_attribution.as_ref().expect("opened");
+        assert!(overlay.is_empty());
+        assert_eq!(overlay.total(), 0);
     }
 }

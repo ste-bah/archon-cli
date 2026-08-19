@@ -43,7 +43,7 @@ impl CommandHandler for BranchHandler {
             }
         };
 
-        let points = branch_points(&messages);
+        let points = message_previews(&messages);
         match args.first().map(String::as_str) {
             None | Some("") => {
                 ctx.emit(TuiEvent::TextDelta(list_text(&points)));
@@ -95,12 +95,17 @@ impl CommandHandler for BranchHandler {
     }
 }
 
-/// The messages worth offering as branch points, as `(index, role, summary)`.
+/// One line per recognisable message, as `(index, role, summary)`.
 ///
 /// A message that is not a JSON object with a role is skipped: it is not a turn
 /// anyone would recognise in a list, and branching at it would be branching at
-/// something the reader cannot see.
-fn branch_points(messages: &[String]) -> Vec<(usize, String, String)> {
+/// something the reader cannot see. The index stays the position in the log, so
+/// a caller can join against it.
+///
+/// Shared with `/context`, which needs the same "which message was that" line
+/// against the token ranking. One implementation, so the two surfaces cannot
+/// summarise the same message differently.
+pub(crate) fn message_previews(messages: &[String]) -> Vec<(usize, String, String)> {
     messages
         .iter()
         .enumerate()
@@ -175,7 +180,7 @@ mod tests {
             message("assistant", serde_json::json!("here it is")),
         ];
 
-        let points = branch_points(&messages);
+        let points = message_previews(&messages);
 
         assert_eq!(points.len(), 2);
         assert_eq!(points[0], (0, "user".to_string(), "add the parser".into()));
@@ -191,7 +196,7 @@ mod tests {
             message("user", serde_json::json!("real one")),
         ];
 
-        let points = branch_points(&messages);
+        let points = message_previews(&messages);
 
         assert_eq!(points.len(), 1);
         assert_eq!(

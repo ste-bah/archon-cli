@@ -68,8 +68,10 @@ pub(crate) fn apply_context_pressure(
     context_name: Option<String>,
     resolution_source: Option<String>,
     heaviest_message_tokens: u64,
+    token_attribution: crate::status::TokenAttribution,
 ) {
     app.status.heaviest_message_tokens = heaviest_message_tokens;
+    app.status.token_attribution = token_attribution;
     app.status.context_tokens_used = tokens_used;
     app.status.context_window = context_window;
     app.status.cache_creation_tokens = cache_creation_tokens;
@@ -123,11 +125,44 @@ mod tests {
             Some("main".into()),
             Some("config".into()),
             7,
+            crate::status::TokenAttribution {
+                contributors: vec![(2, 7)],
+                total: 12,
+            },
         );
 
         assert_eq!(app.status.context_tokens_used, 500);
         assert_eq!(app.status.cache_creation_tokens, 5, "assigned, not added");
         assert_eq!(app.status.heaviest_message_tokens, 7);
         assert_eq!(app.status.context_window, 1000);
+    }
+
+    /// The bar's `top Nk` and the overlay's ranking describe the same turn, so
+    /// they have to be assigned together or one can outlive the other.
+    #[test]
+    fn the_ranking_lands_with_the_number_the_status_bar_shows() {
+        let mut app = App::default();
+        apply_context_pressure(
+            &mut app,
+            500,
+            1000,
+            0,
+            0,
+            None,
+            None,
+            42,
+            crate::status::TokenAttribution {
+                contributors: vec![(9, 42), (1, 8)],
+                total: 100,
+            },
+        );
+
+        assert_eq!(app.status.heaviest_message_tokens, 42);
+        assert_eq!(
+            app.status.token_attribution.contributors,
+            vec![(9, 42), (1, 8)]
+        );
+        assert_eq!(app.status.token_attribution.total, 100);
+        assert!((app.status.token_attribution.share_percent(42) - 42.0).abs() < 1e-6);
     }
 }

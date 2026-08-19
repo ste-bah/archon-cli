@@ -311,6 +311,8 @@ async fn context_pressure_event_banks_last_request_body_tokens_for_slash_context
                 context_name: Some("main".into()),
                 resolution_source: Some("bundled-catalog".into()),
                 heaviest_message_tokens: 0,
+                top_contributors: Vec::new(),
+                attributed_total: 0,
             }))
             .await
             .expect("send context pressure event");

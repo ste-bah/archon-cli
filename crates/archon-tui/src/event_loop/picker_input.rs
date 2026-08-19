@@ -328,6 +328,42 @@ pub(crate) fn handle_branch_picker_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the attribution overlay is open.
+///
+/// Navigation and close only. It is a read-only ranking: nothing here can drop
+/// a message, and offering a key that looked like it might would be worse than
+/// offering none — `/compact` is the thing that acts on this.
+pub(crate) fn handle_token_attribution_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.token_attribution.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut overlay) = app.token_attribution {
+                overlay.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut overlay) = app.token_attribution {
+                overlay.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut overlay) = app.token_attribution {
+                overlay.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut overlay) = app.token_attribution {
+                overlay.page_down();
+            }
+        }
+        KeyCode::Esc | KeyCode::Enter => app.token_attribution = None,
+        _ => {}
+    }
+    true
+}
+
 /// Route one key while the voice capture overlay is open.
 ///
 /// Esc closes it, and cancels the recording if one is running — closing the

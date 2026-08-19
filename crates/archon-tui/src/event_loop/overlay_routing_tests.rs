@@ -380,3 +380,103 @@ async fn printable_characters_do_not_reach_the_prompt_behind_the_voice_overlay()
     assert!(app.input.text().is_empty(), "typed behind the overlay");
     assert!(app.voice_capture.is_some(), "an unhandled key closed it");
 }
+
+// ---------------------------------------------------------------------------
+// Token attribution overlay (#192 scope B)
+// ---------------------------------------------------------------------------
+
+fn attribution_with_two() -> crate::screens::token_attribution::TokenAttributionOverlay {
+    use crate::screens::token_attribution::{Contributor, TokenAttributionOverlay};
+
+    let mut overlay = TokenAttributionOverlay::new(100_000);
+    overlay.set_contributors(vec![
+        Contributor {
+            message_index: 12,
+            tokens: 42_000,
+            share_percent: 42.0,
+            role: "assistant".into(),
+            summary: "the enormous build log".into(),
+        },
+        Contributor {
+            message_index: 3,
+            tokens: 8_000,
+            share_percent: 8.0,
+            role: "user".into(),
+            summary: "pasted the config".into(),
+        },
+    ]);
+    overlay
+}
+
+#[tokio::test]
+async fn down_reaches_the_attribution_overlay() {
+    let mut app = App::default();
+    app.token_attribution = Some(attribution_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert_eq!(
+        app.token_attribution
+            .as_ref()
+            .expect("still open")
+            .selected_index(),
+        1,
+        "Down never reached the overlay"
+    );
+}
+
+#[tokio::test]
+async fn esc_closes_the_attribution_overlay() {
+    let mut app = App::default();
+    app.token_attribution = Some(attribution_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Esc),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.token_attribution.is_none());
+}
+
+/// It is a read-only ranking. Nothing here drops a message, so nothing here
+/// may look like it does.
+#[tokio::test]
+async fn printable_characters_do_not_reach_the_prompt_behind_the_attribution_overlay() {
+    let mut app = App::default();
+    app.token_attribution = Some(attribution_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Char('d')),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.input.text().is_empty(), "typed behind the overlay");
+    assert!(
+        app.token_attribution.is_some(),
+        "an unhandled key closed it"
+    );
+}

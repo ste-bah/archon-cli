@@ -197,6 +197,15 @@ pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
     picker.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the token attribution overlay (#192 scope B, `/context`).
+pub fn draw_token_attribution(frame: &mut Frame, app: &App) {
+    let overlay = match &app.token_attribution {
+        Some(o) => o,
+        None => return,
+    };
+    overlay.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the voice capture overlay (#192, `/voice` and the record hotkey).
 pub fn draw_voice_capture(frame: &mut Frame, app: &App) {
     let overlay = match &app.voice_capture {
