@@ -497,6 +497,9 @@ pub fn fixture_status_snapshot() -> crate::command::status::StatusSnapshot {
         input_tokens: 1234,
         output_tokens: 567,
         turn_count: 3,
+        // The fixture has no store to fold, so the counts are absent rather
+        // than zero — which is also what the status line must print.
+        stats: None,
     }
 }
 

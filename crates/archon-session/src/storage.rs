@@ -192,6 +192,14 @@ impl SessionStore {
             }",
         )?;
         self.create_relation(":create session_tags { session_id: String, tag: String }")?;
+        // #193 Phase B. Derived state, cached at the seq it was folded through,
+        // so resume does not refold the whole log.
+        self.create_relation(
+            ":create session_projections {
+                session_id: String, projection_key: String =>
+                event_seq: Int, state: String
+            }",
+        )?;
         // #193 Phase C. A sidecar, not a log event: a rating is editable and
         // the log is the record of what happened, and keeping it out of the log
         // keeps it out of model context, which is where it must not be.
