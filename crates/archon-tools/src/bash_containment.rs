@@ -53,6 +53,7 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
             // not a security sandbox. Linux adds subreaper tracking below for
             // session-detached descendants; other Unix platforms cannot
             // guarantee cleanup after a deliberate setsid(2) escape.
+            configure_own_process_group(&mut command);
             configure_linux_subreaper(&mut command);
             command
                 .arg("-c")
@@ -67,6 +68,39 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
     }
     command
 }
+
+/// Put the child in a process group of its own, with itself as leader.
+///
+/// This module is named for process-group containment and, until #192, never
+/// created one. The child inherited the caller's group, so `child.id()` — which
+/// `terminate_completed_process_group` passes to `kill(-pgid)` — was a plain
+/// pid that usually named no group at all.
+///
+/// Two consequences, and the second is the serious one:
+///
+/// 1. The kill was a no-op. `kill(-pid, SIGKILL)` returned `ESRCH`, which the
+///    cleanup path treats as "the group is already gone", so it reported
+///    success. Descendant cleanup rested entirely on the shell's `EXIT` trap.
+/// 2. A pid is only "usually" not a pgid. On a busy machine it can collide with
+///    a real process group belonging to something else, and then the kill lands
+///    on processes archon does not own. macOS reported that as `EPERM` and CI
+///    went red — the kernel refusing the signal is the bug reporting itself,
+///    not a platform quirk to be worked around.
+///
+/// With `process_group(0)` the child's pid *is* its pgid, so the kill can only
+/// ever reach descendants of this command, and `ESRCH` genuinely means the
+/// group has drained.
+///
+/// The child is not interactive — its stdin is `/dev/null` and cancellation
+/// arrives over the `CancellationToken`, not as a terminal `SIGINT` — so
+/// leaving the caller's group costs nothing.
+#[cfg(unix)]
+fn configure_own_process_group(command: &mut Command) {
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_own_process_group(_command: &mut Command) {}
 
 #[cfg(target_os = "linux")]
 fn configure_linux_subreaper(command: &mut Command) {
