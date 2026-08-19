@@ -2,6 +2,8 @@ pub mod attach;
 pub mod background;
 pub mod checkpoint;
 pub mod export;
+/// Per-message human feedback, stored beside the log rather than in it (#193).
+pub mod feedback;
 pub mod fork;
 pub mod history {}
 pub mod listing;

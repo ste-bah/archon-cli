@@ -167,7 +167,7 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
         // harness only constructs SetModelOverride above, so it is
         // unreachable here; the arm keeps the match exhaustive so a future
         // variant cannot be added without this test being updated in step.
-        CommandEffect::RunDraft { .. } => {
+        CommandEffect::RunDraft { .. } | CommandEffect::RateMessage { .. } => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
     }

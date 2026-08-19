@@ -74,6 +74,9 @@ pub enum SessionError {
     EmptyReplaceRefused,
     #[error("message index {index} would skip current logical count {message_count}")]
     MessageIndexGap { index: u64, message_count: u64 },
+    /// A per-message rating could not be written (#193 Phase C).
+    #[error("{0}")]
+    Feedback(#[from] crate::feedback::FeedbackError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -189,6 +192,16 @@ impl SessionStore {
             }",
         )?;
         self.create_relation(":create session_tags { session_id: String, tag: String }")?;
+        // #193 Phase C. A sidecar, not a log event: a rating is editable and
+        // the log is the record of what happened, and keeping it out of the log
+        // keeps it out of model context, which is where it must not be.
+        self.create_relation(
+            ":create message_feedback {
+                session_id: String, message_id: String =>
+                rating: String, note: String, version: String,
+                created_at: String, updated_at: String
+            }",
+        )?;
         self.create_relation(":create session_names { session_id: String => name: String }")?;
         self.create_relation(
             ":create session_parents { session_id: String => parent_session_id: String }",

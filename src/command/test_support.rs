@@ -442,6 +442,7 @@ impl CtxBuilder {
                 denial_snapshot: self.denial_snapshot,
                 effort_snapshot: self.effort_snapshot,
                 permissions_snapshot: self.permissions_snapshot,
+                feedback_snapshot: None,
                 plan_snapshot: self.plan_snapshot,
                 copy_snapshot: self.copy_snapshot,
                 doctor_snapshot: self.doctor_snapshot,

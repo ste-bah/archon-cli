@@ -78,6 +78,8 @@ pub(crate) mod effort;
 pub(crate) mod errors;
 pub(crate) mod evidence_index;
 pub(crate) mod evidence_view;
+/// `/feedback` — rate the last assistant message for the learning layer (#193).
+pub(crate) mod feedback;
 // TASK-#206 SLASH-EXIT: /exit handler + /q alias.
 pub(crate) mod exit;
 pub(crate) mod export;

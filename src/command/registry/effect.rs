@@ -140,4 +140,16 @@ pub(crate) enum CommandEffect {
         gate_config: Option<PathBuf>,
         cwd: PathBuf,
     },
+    /// Write a per-message rating to the sidecar relation (#193 Phase C).
+    ///
+    /// `rating` is `None` to withdraw one. `expected_version` is the token the
+    /// handler read, presented so a concurrent edit from the web workbench is
+    /// refused rather than silently overwritten — both can be open on one
+    /// session, and last-write-wins would discard whichever lost the race.
+    RateMessage {
+        message_id: String,
+        rating: Option<String>,
+        note: String,
+        expected_version: Option<String>,
+    },
 }
