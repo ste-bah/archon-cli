@@ -30,6 +30,10 @@ archon-memory = { path = "../archon-memory" }
 archon-permissions = { path = "../archon-permissions" }
 archon-tools = { path = "../archon-tools" }
 archon-workflow = { path = "../archon-workflow" }
+# The browser terminal pane's PTY plumbing, moved down so `archon-tools` can
+# share it — it cannot depend on this crate, so the code had to go below both
+# rather than sideways (#189 Phase 6).
+archon-pty = { path = "../archon-pty" }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -50,7 +54,6 @@ axum.workspace = true
 cozo.workspace = true
 tower-http.workspace = true
 open.workspace = true
-portable-pty.workspace = true
 rust-embed = "8"
 
 [dev-dependencies]

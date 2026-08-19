@@ -23,6 +23,8 @@ pub(crate) fn project_messages_for_emergency_retry(
                 ))
             })
         })
+        // Emergency retry caps everything, so every block already passes
+        // through `project_message` and is stripped there.
         .collect()
 }
 
@@ -40,7 +42,9 @@ pub(crate) fn project_messages_for_request(
         .enumerate()
         .map(|(index, message)| {
             if index >= preserve_from {
-                return message.clone();
+                // Untrimmed, but still stripped: archon's spill key must not
+                // reach a provider from the preserved turns either.
+                return strip_spill_keys(message);
             }
             project_message(message, |block, content| {
                 let tool_name = block
@@ -57,6 +61,47 @@ pub(crate) fn project_messages_for_request(
 
 fn trimmed(output: ContextToolOutput) -> Option<String> {
     output.truncated.then_some(output.content)
+}
+
+/// Append the spill locator to a note that has just said bytes were omitted.
+///
+/// Saying "omitted 180000 bytes" and stopping there tells the model it has lost
+/// something and gives it no way to get it back. The path turns the note into
+/// an instruction it can act on (#189 Phase 1).
+fn with_spill_note(block: &serde_json::Value, trimmed: Option<String>) -> Option<String> {
+    let trimmed = trimmed?;
+    let Some(path) = block
+        .get(crate::agent::SPILL_PATH_KEY)
+        .and_then(|value| value.as_str())
+    else {
+        return Some(trimmed);
+    };
+    Some(trimmed.replace(
+        " before replaying tool output to the model.]",
+        &format!(
+            " before replaying tool output to the model. Full output: {path} (read it if you need the omitted region).]"
+        ),
+    ))
+}
+
+/// Remove archon's spill key without otherwise touching the message.
+fn strip_spill_keys(message: &serde_json::Value) -> serde_json::Value {
+    project_message(message, |_, _| None)
+}
+
+/// Strip archon's own bookkeeping from a block before it goes to a provider.
+///
+/// The spill path is recorded in history so it survives persistence and
+/// forking, but it is not part of any provider's `tool_result` schema and has
+/// no business on the wire.
+fn without_spill_key(block: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = block.as_object()?;
+    if !object.contains_key(crate::agent::SPILL_PATH_KEY) {
+        return None;
+    }
+    let mut stripped = object.clone();
+    stripped.remove(crate::agent::SPILL_PATH_KEY);
+    Some(serde_json::Value::Object(stripped))
 }
 
 /// Copy one message, replacing the `content` of every `tool_result` block that
@@ -80,16 +125,25 @@ fn project_message(
     let Some(blocks) = message.get("content").and_then(|value| value.as_array()) else {
         return message.clone();
     };
-    let mut replacements: Vec<Option<String>> = Vec::new();
+    let mut replacements: Vec<Option<serde_json::Value>> = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
-        let Some(replacement) = trimmable_content(block).and_then(|content| trim(block, content))
-        else {
+        let trimmed = trimmable_content(block).and_then(|content| trim(block, content));
+        // A trimmed block gets the locator appended to its note; any block
+        // carrying the locator gets it removed on the way out, trimmed or not.
+        let rebuilt = match with_spill_note(block, trimmed) {
+            Some(content) => {
+                let base = without_spill_key(block).unwrap_or_else(|| block.clone());
+                Some(with_content(&base, serde_json::Value::String(content)))
+            }
+            None => without_spill_key(block),
+        };
+        let Some(rebuilt) = rebuilt else {
             continue;
         };
         if replacements.is_empty() {
             replacements.resize_with(blocks.len(), || None);
         }
-        replacements[index] = Some(replacement);
+        replacements[index] = Some(rebuilt);
     }
     if replacements.is_empty() {
         return message.clone();
@@ -97,10 +151,7 @@ fn project_message(
     let projected: Vec<serde_json::Value> = blocks
         .iter()
         .zip(replacements)
-        .map(|(block, replacement)| match replacement {
-            None => block.clone(),
-            Some(content) => with_content(block, serde_json::Value::String(content)),
-        })
+        .map(|(block, replacement)| replacement.unwrap_or_else(|| block.clone()))
         .collect();
     with_content(message, serde_json::Value::Array(projected))
 }
@@ -300,6 +351,99 @@ mod tests {
         assert_eq!(
             project_messages_for_emergency_retry(&messages, 4_096),
             messages
+        );
+    }
+
+    fn spilled_history(path: &str) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"role": "user", "content": "first turn"}),
+            serde_json::json!({"role": "assistant", "content": [{
+                "type": "tool_use", "id": "old-tool", "name": "Bash", "input": {}
+            }]}),
+            serde_json::json!({"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "old-tool",
+                "content": "x".repeat(100_000), "is_error": false,
+                crate::agent::SPILL_PATH_KEY: path
+            }]}),
+            serde_json::json!({"role": "user", "content": "second turn"}),
+        ]
+    }
+
+    /// The note has to name the file. "omitted 90000 bytes" alone tells the
+    /// model it lost something and gives it no way to get it back — which was
+    /// the whole gap (#189 Phase 1).
+    #[test]
+    fn a_trimmed_result_names_its_spill_file_in_the_note() {
+        let messages = spilled_history("/proj/.archon/spill/s/old-tool-Bash.txt");
+
+        let projected = project_messages_for_request(&messages, 1);
+
+        let note = projected[2]["content"][0]["content"]
+            .as_str()
+            .expect("projected content");
+        assert!(note.contains("omitted"), "{note}");
+        assert!(
+            note.contains("/proj/.archon/spill/s/old-tool-Bash.txt"),
+            "the note must name the file: {note}"
+        );
+        assert!(
+            note.contains("read it if you need the omitted region"),
+            "{note}"
+        );
+    }
+
+    /// The key is archon's bookkeeping, recorded so it survives persistence and
+    /// forking. It is not part of any provider's `tool_result` schema.
+    #[test]
+    fn the_spill_key_never_reaches_the_provider() {
+        let messages = spilled_history("/proj/.archon/spill/s/old-tool-Bash.txt");
+
+        let projected = project_messages_for_request(&messages, 1);
+
+        let serialized = serde_json::to_string(&projected).expect("serialize");
+        assert!(
+            !serialized.contains(crate::agent::SPILL_PATH_KEY),
+            "spill bookkeeping leaked onto the wire: {serialized}"
+        );
+    }
+
+    /// Preserved recent turns skip trimming entirely, so they need their own
+    /// stripping pass or the key rides out on them untouched.
+    #[test]
+    fn the_spill_key_is_stripped_from_preserved_recent_turns_too() {
+        let messages = vec![
+            serde_json::json!({"role": "user", "content": "only turn"}),
+            serde_json::json!({"role": "assistant", "content": [{
+                "type": "tool_use", "id": "recent", "name": "Bash", "input": {}
+            }]}),
+            serde_json::json!({"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "recent",
+                "content": "small", "is_error": false,
+                crate::agent::SPILL_PATH_KEY: "/proj/.archon/spill/s/recent-Bash.txt"
+            }]}),
+        ];
+
+        let projected = project_messages_for_request(&messages, 5);
+
+        let serialized = serde_json::to_string(&projected).expect("serialize");
+        assert!(
+            !serialized.contains(crate::agent::SPILL_PATH_KEY),
+            "{serialized}"
+        );
+        assert_eq!(projected[2]["content"][0]["content"], "small");
+        assert_eq!(projected[2]["content"][0]["tool_use_id"], "recent");
+    }
+
+    #[test]
+    fn emergency_projection_also_strips_the_spill_key() {
+        let messages = spilled_history("/proj/.archon/spill/s/old-tool-Bash.txt");
+
+        let projected = project_messages_for_emergency_retry(&messages, 4_096);
+
+        let serialized = serde_json::to_string(&projected).expect("serialize");
+        assert!(
+            !serialized.contains(crate::agent::SPILL_PATH_KEY),
+            "{serialized}"
         );
     }
 

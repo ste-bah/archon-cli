@@ -467,6 +467,99 @@ async fn test_dry_run_mode() {
     }
 }
 
+/// `style_profile_id` must reach the styling step. It used to be read by
+/// nothing at all — `run` never called `style_applier` — so a caller naming a
+/// profile got an unstyled paper and no indication why. No profiles are
+/// implemented yet (REQ-RESEARCH-007), so the observable contract is the
+/// warning; when one is implemented, this is what says the option is still
+/// plumbed through.
+#[tokio::test]
+async fn test_requested_style_profile_is_reported_not_silently_ignored() {
+    let files = standard_agent_files();
+    let dir = create_agent_output_dir(&files);
+
+    let mut options = default_options();
+    options.style_profile_id = Some("apa".to_string());
+
+    let orchestrator = FinalStageOrchestrator::new();
+    let res = orchestrator
+        .run(dir.path(), &sample_chapter_list(), &options)
+        .await
+        .expect("an unimplemented style profile must not fail the run");
+
+    assert!(
+        res.warnings.iter().any(|w| w.contains("apa")),
+        "requesting a style profile must warn that it was not applied; warnings: {:?}",
+        res.warnings,
+    );
+    assert!(
+        std::path::Path::new(&res.final_paper_path).exists(),
+        "the paper must still be written when a profile cannot be applied"
+    );
+}
+
+/// The control: without a profile there is nothing to warn about.
+#[tokio::test]
+async fn test_no_style_profile_produces_no_warnings() {
+    let files = standard_agent_files();
+    let dir = create_agent_output_dir(&files);
+
+    let orchestrator = FinalStageOrchestrator::new();
+    let res = orchestrator
+        .run(dir.path(), &sample_chapter_list(), &default_options())
+        .await
+        .expect("run should succeed");
+
+    assert!(
+        res.warnings.is_empty(),
+        "no profile was requested, so nothing should warn; got: {:?}",
+        res.warnings,
+    );
+}
+
+/// Chapter bodies go through `writer::synthesize_chapter` — the phase-8
+/// `chapter-synthesizer` seam — and that function emits no heading of its own.
+/// The combiner writes `## Chapter {n}: {title}`; the writer's earlier
+/// `## {title}` prefix is exactly what would double-head the paper, so this
+/// pins that each chapter title appears once.
+#[tokio::test]
+async fn test_chapter_bodies_are_not_double_headed_by_the_writer_seam() {
+    let files = standard_agent_files();
+    let dir = create_agent_output_dir(&files);
+
+    let orchestrator = FinalStageOrchestrator::new();
+    let res = orchestrator
+        .run(dir.path(), &sample_chapter_list(), &default_options())
+        .await
+        .expect("run should succeed");
+
+    let paper = fs::read_to_string(&res.final_paper_path).expect("should read the final paper");
+
+    for (num, title) in sample_chapter_list() {
+        let heading = format!("## Chapter {}: {}", num, title);
+        assert_eq!(
+            paper.matches(&heading).count(),
+            1,
+            "expected exactly one {heading:?} heading in the paper",
+        );
+    }
+
+    // Chapters that got sources carry a body straight from the writer seam,
+    // and it contributes no heading of its own. Unmapped chapters are NOT
+    // checked here: their body is `generate_chapter_placeholder`, which does
+    // open with `## {title}` — pre-existing, and pinned by
+    // `test_placeholder_format`.
+    let mapped_body = paper
+        .split("## Chapter 1: Introduction")
+        .nth(1)
+        .expect("chapter 1 must be present");
+    assert!(
+        !mapped_body.trim_start().starts_with("## Introduction"),
+        "the writer must not re-emit the chapter title as a heading: {:?}",
+        &mapped_body[..mapped_body.len().min(120)],
+    );
+}
+
 #[tokio::test]
 async fn test_force_overwrites() {
     let files = standard_agent_files();

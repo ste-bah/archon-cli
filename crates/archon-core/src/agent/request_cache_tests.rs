@@ -34,11 +34,13 @@ fn apply_system_cache(
     super::apply_system_cache(
         request,
         provider,
-        configured,
-        enabled,
-        mode,
-        ttl,
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured,
+            enabled,
+            mode,
+            ttl,
+            model_overrides: &BTreeMap::new(),
+        },
     );
 }
 
@@ -53,14 +55,16 @@ fn apply_conversation_cache(
     super::apply_conversation_cache(
         request,
         provider,
-        configured,
-        enabled,
         // These tests are about the marker itself; declining the conversation
         // checkpoint has its own test in `request_cache_config_tests`.
         true,
-        mode,
-        ttl,
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured,
+            enabled,
+            mode,
+            ttl,
+            model_overrides: &BTreeMap::new(),
+        },
     );
 }
 

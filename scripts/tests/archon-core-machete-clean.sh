@@ -11,14 +11,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CARGO_TOML="$REPO_ROOT/crates/archon-core/Cargo.toml"
-MACHETE="${CARGO_MACHETE_BIN:-/home/unixdude/.cargo/bin/cargo-machete}"
+# Resolve from PATH. This used to hardcode one developer's home directory,
+# which meant the check was RED-by-default for everyone else and green only
+# on the machine it was written on.
+MACHETE="${CARGO_MACHETE_BIN:-$(command -v cargo-machete || true)}"
 
 if [[ ! -f "$CARGO_TOML" ]]; then
     echo "RED: $CARGO_TOML not found"
     exit 1
 fi
-if [[ ! -x "$MACHETE" ]]; then
-    echo "RED: cargo-machete not found at $MACHETE (set CARGO_MACHETE_BIN)"
+if [[ -z "$MACHETE" || ! -x "$MACHETE" ]]; then
+    echo "RED: cargo-machete not on PATH (cargo install cargo-machete, or set CARGO_MACHETE_BIN)"
     exit 1
 fi
 

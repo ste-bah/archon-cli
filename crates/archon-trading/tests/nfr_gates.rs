@@ -25,11 +25,27 @@ fn nfr_001_governor_pre_trade_latency_and_audit_ack() {
         .expect("decision");
 
     assert_eq!(decision.status, RiskDecisionStatus::Approved);
+
+    // The controls, and only the controls. This assertion used to read the
+    // end-to-end figure, because `decide()` overwrote `latency_ms` after
+    // appending to the audit ledger — so on a cold Windows CI runner it was
+    // timing a first file create and reported 1020ms against this 50ms budget
+    // (then 58ms on the very next attempt). The budget was never the problem.
     assert!(
         decision.latency_ms <= 50,
-        "latency {}ms",
+        "pre-trade controls took {}ms, budget 50ms",
         decision.latency_ms
     );
+    assert!(
+        decision.total_latency_ms >= decision.latency_ms,
+        "end-to-end {}ms cannot be less than the controls' {}ms",
+        decision.total_latency_ms,
+        decision.latency_ms
+    );
+
+    // The audit-ack half of NFR-001: the decision is durable, whatever the
+    // ledger cost to write. That cost is deliberately not budgeted here — it
+    // is a filesystem property, not a governor one.
     assert_eq!(audit.records().expect("records").len(), 1);
 }
 

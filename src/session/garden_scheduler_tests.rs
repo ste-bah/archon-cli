@@ -128,7 +128,7 @@ async fn a_tick_files_proposals_and_deletes_nothing() {
     run_one_tick(
         &enabled_config(),
         &memory,
-        &dir.path().to_path_buf(),
+        dir.path(),
         dir.path(),
         Some(db.as_ref()),
     )
@@ -166,7 +166,7 @@ async fn a_proposal_is_never_filed_as_anything_but_pending() {
     run_one_tick(
         &enabled_config(),
         &memory,
-        &dir.path().to_path_buf(),
+        dir.path(),
         dir.path(),
         Some(db.as_ref()),
     )
@@ -231,7 +231,7 @@ async fn a_quiet_correction_derived_rule_reaches_the_review_pile_without_being_t
     run_one_tick(
         &enabled_config(),
         &memory,
-        &dir.path().to_path_buf(),
+        dir.path(),
         dir.path(),
         Some(db.as_ref()),
     )
@@ -267,14 +267,7 @@ async fn a_tick_with_no_governed_store_still_refuses_to_delete() {
     let (memory, ids) = doomed_store();
     let dir = tempfile::tempdir().expect("tempdir");
 
-    run_one_tick(
-        &enabled_config(),
-        &memory,
-        &dir.path().to_path_buf(),
-        dir.path(),
-        None,
-    )
-    .await;
+    run_one_tick(&enabled_config(), &memory, dir.path(), dir.path(), None).await;
 
     for id in &ids {
         assert!(
@@ -304,7 +297,7 @@ async fn a_tick_declined_by_the_run_lock_changes_nothing() {
     run_one_tick(
         &enabled_config(),
         &memory,
-        &dir.path().to_path_buf(),
+        dir.path(),
         dir.path(),
         Some(db.as_ref()),
     )

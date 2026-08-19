@@ -22,9 +22,20 @@ pub struct TaskRow {
     pub status: String,
 }
 
-/// Task store trait for injectable task data source.
+/// Injectable source of task rows, and the way back to cancel one.
+///
+/// The overlay lives in `archon-tui`, which depends on `archon-tools` only as a
+/// dev-dependency, so it cannot reach `TASK_MANAGER` directly. The binary owns
+/// both and supplies the implementation; this trait is the whole seam.
+///
+/// `cancel_task` is on the same trait rather than a separate controller because
+/// a list you cannot act on is what this overlay existed as for its whole life
+/// before #189 — the read and the write belong together.
 pub trait TaskStore: Send + Sync {
     fn list_tasks(&self) -> Vec<TaskRow>;
+
+    /// Stop the identified task. `Err` carries a message fit for the status bar.
+    fn cancel_task(&self, id: &TaskId) -> Result<(), String>;
 }
 
 /// Action emitted by the tasks overlay.
@@ -250,6 +261,44 @@ mod tests {
         overlay.cancel_selected();
         overlay.clear_action();
         assert_eq!(overlay.last_action(), TaskAction::None);
+    }
+
+    #[test]
+    fn refresh_emits_refresh_requested() {
+        let mut overlay = TaskOverlay::new(vec![row("task-1", 120, "running")]);
+        overlay.refresh();
+        assert_eq!(overlay.last_action(), TaskAction::RefreshRequested);
+    }
+
+    #[test]
+    fn open_resets_cursor() {
+        let mut overlay = TaskOverlay::new(vec![row("1", 10, "running"), row("2", 20, "running")]);
+        overlay.move_down();
+        overlay.open(vec![row("task-1", 10, "running")]);
+        assert_eq!(overlay.selected_index(), 0);
+    }
+
+    /// The overlay reads its rows through `TaskStore`, so the trait is exercised
+    /// here rather than only by the production implementation.
+    #[test]
+    fn rows_can_be_sourced_through_the_store_trait() {
+        struct FixedStore(Vec<TaskRow>);
+        impl TaskStore for FixedStore {
+            fn list_tasks(&self) -> Vec<TaskRow> {
+                self.0.clone()
+            }
+
+            fn cancel_task(&self, _id: &TaskId) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let store = FixedStore(vec![
+            row("task-1", 10, "running"),
+            row("task-2", 20, "done"),
+        ]);
+        let overlay = TaskOverlay::new(store.list_tasks());
+        assert_eq!(overlay.len(), 2);
     }
 
     #[test]

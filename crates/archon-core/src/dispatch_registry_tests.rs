@@ -91,6 +91,12 @@ fn approved_arbitrary_tools() -> &'static [&'static str] {
         "TaskCreate",
         "TeamCreate",
         "TeamDelete",
+        // #189 Phase 6. `TerminalCreate` runs the user's shell startup files
+        // and `TerminalWrite` runs whatever is typed into a live shell, so both
+        // reach as far as `Bash` does. `TerminalRead` and `TerminalClose` only
+        // touch the terminal registry and are not Arbitrary.
+        "TerminalCreate",
+        "TerminalWrite",
         "lsp",
     ]
 }

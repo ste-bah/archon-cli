@@ -46,6 +46,35 @@ staged copy remains available for review or `LargeEditAbort`.
 | `PowerShell` | Variable | Execute PowerShell command |
 | `Monitor` | Variable | Run a shell command and collect stdout as line-events within a bounded window |
 | `PushNotification` | Safe | Emit a user-visible notification |
+| `TerminalCreate` | Risky | Start a persistent shell (`bash`, `sh`, `powershell`, or `cmd`) and return its id |
+| `TerminalWrite` | Variable (floor Risky) | Send text to a live terminal; returns immediately |
+| `TerminalRead` | Safe | Read output produced since a byte offset |
+| `TerminalClose` | Safe | End a terminal and kill what is running in it |
+
+### Persistent terminals
+
+`Bash` is one-shot: each call is a new process, so a `cd`, an activated
+environment or a background process cannot survive it. The `Terminal*` tools are
+the other half — the shell stays alive between calls, and its output stays
+addressable after the call that produced it returned.
+
+The usual sequence is `TerminalCreate` → `TerminalWrite` → `TerminalRead`, then
+`TerminalClose`. `TerminalWrite` does not wait for the command; `TerminalRead`
+returns what has arrived since the offset you pass and reports a `next_offset`
+to resume from, so a long-running process can be started, left, and checked on
+later.
+
+Lifecycle, in three rules: at most 8 terminals are open at once, a terminal
+untouched for 30 minutes is closed the next time any terminal is created, and
+every terminal a session opened is closed when that session ends. Output is
+capped at 256 KB per terminal — passing it evicts the oldest bytes, and a read
+that lands in the evicted region says how much it lost rather than starting
+late. Escape sequences are stripped before the output reaches the model.
+
+Both PowerShell and a POSIX shell are reachable on Windows: `powershell` prefers
+`pwsh`, and `bash`/`sh` resolve through the Git-for-Windows tree. The underlying
+PTY (`crates/archon-pty`) is shared with the browser terminal pane, so ConPTY
+and `openpty` behave the same for both.
 
 ## Web
 
@@ -247,7 +276,46 @@ running is refused.
 | Tool | Permission | Purpose |
 |---|---|---|
 | `RemoteTrigger` | Risky | HTTP POST to an allow-listed remote endpoint (`remote_triggers.allowed_hosts`) |
+| `SessionSearch` | Safe | Search past sessions by text, directory, branch or date; returns ids, names, timestamps and the matching excerpt |
 | `Sleep` | Safe | Async-safe delay (max 300s) |
+
+`SessionSearch` and `/sessions` read the same store and resolve its path the
+same way — `ARCHON_SESSION_DB_PATH`, then `session.db_path`, then the default
+location. They differ only in shape: the command renders a table for a person,
+the tool returns structured rows for the model. Results are capped at 50 and the
+whole payload is bounded; when rows are dropped to stay inside that bound the
+response says how many, because a silently shortened list reads as a complete
+one.
+
+## Tools from a workflow script
+
+A `workflow.js` script can call the tool registry directly, so an ordinary file
+operation inside an orchestration no longer costs a model round-trip:
+
+```js
+const readme = await w.runTool("Read", { file_path: "README.md" });
+const hits = await w.runTool("Grep", { pattern: "TODO", path: "src" });
+```
+
+Top-level Claude Code-style scripts also get `tool(name, input)` plus
+`readFile`, `grepFiles`, `globFiles` and `bash` as bare globals.
+
+This is separate from `w.tool(id, { tool: "checkpoint" })`, which reaches three
+workflow-internal pseudo-tools (`checkpoint`, `saveArtifact`,
+`requireArtifact`) and nothing else.
+
+Every call passes the same permission checker a model-issued call passes.
+Running in the host is not a licence to skip the gate. A script runs unattended,
+so a decision meaning "confirm with the user" is a refusal here — allow the tool
+under `[permissions] always_allow`, or do that work in an agent call. A refused
+or unknown tool comes back as a failed result the script can handle; exceeding
+the per-run caps (500 calls, 8 MB total) ends the run, because unlike a refusal
+there is no way to continue that returns less.
+
+During a dry run tools are **not** executed. Each call returns a marked stand-in
+and is left out of the plan — a `Read` is not an agent call. The dry-run details
+record whether a script used tool calls at all, because such a script reads the
+world and the plan derived from a dry run is only one of the paths it can take.
 
 ## Tool restrictions
 
@@ -263,12 +331,17 @@ archon --disallowed-tools Bash,PowerShell          # Remove from model context e
 
 ## Permission classifier
 
-`Bash`, `PowerShell`, and `RemoteTrigger` use the per-command classifier in `crates/archon-permissions/src/classifier.rs`:
+`Bash`, `PowerShell`, `TerminalWrite`, and `RemoteTrigger` use the per-command classifier in `crates/archon-permissions/src/classifier.rs`:
 
 - Read-only commands (`ls`, `cat`, `grep`) → Safe
 - Mutating commands (`rm`, `mv`, `>`, `dd`) → Risky
 - Network commands (`curl`, `wget`, `ssh`) → Risky
 - Destructive patterns (`rm -rf /`, `git push --force`) → Always denied (configurable via `always_deny`)
+
+`TerminalWrite` runs the same classification and then floors the result at
+Risky: the same text is as dangerous typed into a live shell as it is passed to
+`Bash`, and a command the operator marked safe still carries whatever state that
+shell is already in, which the classifier cannot see.
 
 ## See also
 

@@ -324,6 +324,11 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Tasks overlay (#189 Phase 9): Up/Down move, `x`/Delete cancel
+            // through `TaskStore`, `r` refreshes, Esc closes.
+            if super::task_overlay_input::handle_task_overlay_key(app, key) {
+                return;
+            }
             // Handle search results overlay (TASK-#208 SLASH-SEARCH) —
             // Up/Down navigate; Enter injects `@<absolute-path> ` into
             // the input buffer and closes; Esc closes without injection.

@@ -48,6 +48,23 @@ impl Agent {
         })
         .await;
 
+        // Try arithmetic before any segment is closed for summarisation (#189
+        // Phase 8). A file read three times unchanged, an error retried
+        // successfully, a result already spilled to disk — all removable
+        // without judgement, and a summary of them costs a request and a wait
+        // to reach the same place. Runs here, at turn end, because this is the
+        // production compaction hook and the only one holding `&mut self`.
+        // Only under pressure: rewriting history every turn would change what
+        // the model sees whether or not anything needed reclaiming.
+        if self.staged_compaction_due(active_model) {
+            let telemetry = self.compaction_telemetry_for(active_model);
+            // The return value says whether the threshold was cleared, which
+            // the method logs itself. Nothing here branches on it: if pruning
+            // was enough, `staged_compaction_due` simply stops being true and
+            // no summary is ever assembled.
+            let _ = self.prune_context_mechanically(&telemetry, false);
+        }
+
         self.close_completed_compaction_segment(active_model);
 
         // CRIT-14 (ITEM 4): Decay rule scores every 50 turns.

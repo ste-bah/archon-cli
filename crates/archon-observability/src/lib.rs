@@ -82,6 +82,9 @@
 pub mod activity;
 pub mod file_init;
 pub mod metrics;
+// #189 Phase 10: OTLP span export, owned by the redaction layer rather than
+// installed as a second, unredacted sink.
+pub mod otlp;
 pub mod redaction;
 pub mod task_registry;
 pub mod tracing;
@@ -100,7 +103,9 @@ pub use task_registry::{
     TaskSnapshot, abort_alive_tasks, log_alive_tasks_after_cancel, register_abort_handle,
     reset_task_registry_for_tests, spawn_blocking_named, spawn_named, task_snapshots,
 };
-pub use tracing::{init_tracing, span_agent_turn, span_channel_send, span_slash_dispatch};
+pub use tracing::{
+    init_tracing, init_tracing_with_otlp, span_agent_turn, span_channel_send, span_slash_dispatch,
+};
 
 /// Workspace version string — pinned to `CARGO_PKG_VERSION` at build time so
 /// downstream crates can surface the active archon-observability version

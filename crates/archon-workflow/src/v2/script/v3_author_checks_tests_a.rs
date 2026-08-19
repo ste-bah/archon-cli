@@ -335,6 +335,7 @@ pub(super) fn review_details(
         write_task_claims: Vec::new(),
         review_map_claims,
         review_reduce_edges,
+        used_tool_calls: false,
     }
 }
 

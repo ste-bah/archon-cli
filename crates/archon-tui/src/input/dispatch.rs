@@ -97,6 +97,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             app.background_activity_stream();
             KeyResult::Nothing
         }
+        Action::OpenTasks => {
+            app.toggle_task_overlay();
+            KeyResult::Nothing
+        }
         Action::TabComplete => {
             app.input.accept_suggestion();
             KeyResult::Nothing

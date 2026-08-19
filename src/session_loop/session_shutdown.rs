@@ -14,6 +14,7 @@ pub(super) async fn finish_session(
     sandbox_audit_drain: crate::runtime::sandbox_audit_writer::SandboxAuditDrainHandle,
 ) -> anyhow::Result<()> {
     increment_agent_invocation(agent_def);
+    close_terminals(agent).await;
     let turn_result = drain_inflight_turns(dispatcher).await;
     if turn_result.is_ok() {
         flush_auto_extractions(agent).await;
@@ -34,6 +35,20 @@ fn finish_turn_and_audit(
         (Err(turn_error), Err(audit_error)) => Err(anyhow::anyhow!(
             "session turn shutdown failed: {turn_error:#}; sandbox audit drain failed: {audit_error:#}"
         )),
+    }
+}
+
+/// Kill the persistent shells this session opened (#189 Phase 6).
+///
+/// First, before anything that can fail or block: a terminal is a live process,
+/// and the one outcome that is not acceptable is leaving one running because
+/// shutdown took a different path out. The cap and the idle timeout both leave
+/// a recently-used terminal alone, which is exactly the state one is in here.
+async fn close_terminals(agent: &Arc<tokio::sync::Mutex<Agent>>) {
+    let session_id = agent.lock().await.session_id().to_string();
+    let closed = archon_tools::terminal_tools::close_session_terminals(&session_id);
+    if closed > 0 {
+        tracing::info!(closed, %session_id, "closed persistent terminals on session end");
     }
 }
 

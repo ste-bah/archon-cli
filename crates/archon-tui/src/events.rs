@@ -423,6 +423,8 @@ pub enum TuiEvent {
         cache_read_tokens: u64,
         context_name: Option<String>,
         resolution_source: Option<String>,
+        /// Tokens attributed to the largest single message (#189 Phase 3).
+        heaviest_message_tokens: u64,
     },
     SetVimMode(bool),
     VimToggle,

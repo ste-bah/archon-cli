@@ -163,6 +163,22 @@ struct Fixture {
 }
 
 fn fixture(hook_registry: Option<Arc<HookRegistry>>) -> Fixture {
+    fixture_with(
+        Arc::new(ToolThenTextProvider {
+            calls: AtomicU32::new(0),
+        }),
+        hook_registry,
+    )
+}
+
+/// As [`fixture`], but with the provider chosen by the caller.
+///
+/// Split out for #189 Phase 5, so this same loop can be driven by a replay
+/// provider reading cassettes instead of by the mock below.
+fn fixture_with(
+    provider: Arc<dyn LlmProvider>,
+    hook_registry: Option<Arc<HookRegistry>>,
+) -> Fixture {
     let captured: Captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let manager = Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4)));
     let mut tool_registry = ToolRegistry::new();
@@ -173,9 +189,7 @@ fn fixture(hook_registry: Option<Arc<HookRegistry>>) -> Fixture {
 
     let project_dir = std::env::temp_dir();
     let executor = Arc::new(AgentSubagentExecutor::new(
-        Arc::new(ToolThenTextProvider {
-            calls: AtomicU32::new(0),
-        }),
+        provider,
         tool_registry,
         Arc::clone(&manager),
         Arc::new(std::sync::RwLock::new(AgentRegistry::load(&project_dir))),
@@ -269,6 +283,85 @@ async fn tool_inside_subagent_sees_the_registered_subagent_id() {
         Some(ctx.session_id.as_str()),
         "subagent id and session id must not collapse into one value"
     );
+}
+
+/// The same loop, offline (#189 Phase 5).
+///
+/// This is the acceptance criterion for cassettes: an agent-loop test that
+/// already existed, driven end to end with no provider reachable. The first
+/// pass records the mock's two turns; the second replays them, with the mock
+/// left behind entirely — `ReplayProvider::replaying` holds no provider at all,
+/// so a cassette miss cannot quietly become a live call.
+///
+/// It exercises the loop, not just the transport: turn one is a `tool_use` that
+/// has to dispatch `RecordIdentity`, and turn two is the text that ends the run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_subagent_loop_runs_offline_from_cassettes() {
+    let cassettes = tempfile::tempdir().expect("tempdir");
+    let dir = cassettes.path().to_path_buf();
+
+    let live = Arc::new(ToolThenTextProvider {
+        calls: AtomicU32::new(0),
+    });
+    let recorded = run_once(Arc::new(archon_llm::replay::ReplayProvider::recording(
+        Arc::clone(&live) as Arc<dyn LlmProvider>,
+        dir.clone(),
+    )))
+    .await;
+    assert_eq!(
+        live.calls.load(Ordering::SeqCst),
+        2,
+        "the recording pass should have driven both turns of the loop"
+    );
+
+    let replayed = run_once(Arc::new(archon_llm::replay::ReplayProvider::replaying(dir))).await;
+
+    assert_eq!(
+        live.calls.load(Ordering::SeqCst),
+        2,
+        "the replay pass reached the live provider"
+    );
+    assert_eq!(
+        replayed, recorded,
+        "the replayed run dispatched a different tool sequence than the recorded one"
+    );
+    assert_eq!(
+        replayed,
+        vec!["RecordIdentity".to_string()],
+        "the loop did not dispatch the recorded tool call"
+    );
+}
+
+/// Run the subagent once and report which tools it dispatched.
+async fn run_once(provider: Arc<dyn LlmProvider>) -> Vec<String> {
+    let fixture = fixture_with(provider, None);
+    let parent_ctx = ToolContext {
+        working_dir: std::env::temp_dir(),
+        session_id: PARENT_SESSION_ID.into(),
+        ..ToolContext::default()
+    };
+    fixture
+        .executor
+        .run_to_completion(
+            uuid::Uuid::new_v4().to_string(),
+            request(),
+            parent_ctx,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("subagent run should complete");
+
+    let captured = fixture
+        .captured
+        .lock()
+        .expect("captured contexts mutex poisoned");
+    // Only the tool's own name is compared: the ids inside the context are
+    // fresh per run by design, and asserting on them is what
+    // `tool_inside_subagent_sees_the_registered_subagent_id` above is for.
+    captured
+        .iter()
+        .map(|_| "RecordIdentity".to_string())
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

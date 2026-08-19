@@ -9,10 +9,13 @@ mod learning;
 #[path = "config/context_section.rs"]
 mod context_section;
 mod memory_open;
+mod observability;
 mod providers;
+mod prune;
 mod runtime;
 mod sections;
 mod skills;
+mod spill;
 mod tools;
 mod topology;
 mod validation;
@@ -24,10 +27,13 @@ pub use generated_tuning::*;
 pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
+pub use observability::*;
 pub use providers::*;
+pub use prune::*;
 pub use runtime::*;
 pub use sections::*;
 pub use skills::*;
+pub use spill::*;
 pub use tools::*;
 pub use topology::*;
 pub use validation::*;
@@ -69,6 +75,9 @@ pub struct ArchonConfig {
     pub learning: LearningConfig,
     pub cost: CostConfig,
     pub logging: LoggingConfig,
+    /// Where telemetry goes (#189 Phase 10). Off unless otlp_endpoint is set.
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
     pub session: SessionConfig,
     pub checkpoint: CheckpointConfig,
     /// Repository code index (LEANN).
@@ -113,6 +122,12 @@ pub struct ArchonConfig {
     /// Skill system, including the turn-completion gate (#187).
     #[serde(default)]
     pub skills: SkillsConfig,
+    /// Where oversized tool output is kept so it stays retrievable (#189).
+    #[serde(default)]
+    pub spill: SpillConfig,
+    /// Mechanical context reclamation, tried before any model call (#189).
+    #[serde(default)]
+    pub prune: PruneConfig,
 }
 
 #[cfg(test)]

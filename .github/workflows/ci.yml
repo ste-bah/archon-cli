@@ -422,6 +422,27 @@ jobs:
         run: bash scripts/tui-banned-patterns-gate.sh
       - name: tui-banned-patterns-gate self-test
         run: bash scripts/tui-banned-patterns-gate.selftest.sh
+      # Replaces the 24 per-task grep verifiers deleted from scripts/tests/.
+      # Each of those checked one hardcoded path for one hardcoded marker;
+      # everything else they asserted was already compiler-enforced, and the
+      # hardcoded paths made them fail on file splits rather than on defects.
+      # This is the one check among them a compiler cannot make: whether a
+      # slice that was wired has quietly regressed to a stub.
+      - name: check-deferral-markers self-test (prove it can go red)
+        run: bash scripts/check-deferral-markers.sh --self-test
+      - name: check-deferral-markers
+        run: bash scripts/check-deferral-markers.sh
+      # See scripts/tests/README.md. These are self-tests of gates this
+      # workflow runs; a gate nobody has watched fail is indistinguishable
+      # from one that cannot fail.
+      - name: check-file-sizes self-test
+        run: bash scripts/tests/test_check_file_sizes.sh
+      - name: baseline-diff self-test
+        run: bash scripts/tests/test_ci_baseline_diff.sh
+      - name: archon-init.sh behavioural test
+        run: bash scripts/tests/archon-init-test.sh
+      - name: preserve-invariants is wired into CI
+        run: bash scripts/tests/ci-preserve-invariants-wired.sh
 
   config-sync:
     name: config-sync (template vs shipped .archon config)

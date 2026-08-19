@@ -1,5 +1,6 @@
 pub mod app;
 pub mod app_modals;
+mod app_task_overlay;
 mod app_views;
 pub use app::should_process_key_event;
 pub mod activity_stream;
@@ -85,6 +86,19 @@ pub mod overlays;
 pub mod prompt_input;
 pub mod render;
 pub mod screens;
+/// The one screen item constructed from outside this crate.
+///
+/// The `screens` sub-modules are crate-private so that an unwired screen trips
+/// `dead_code` instead of passing CI (see `screens/mod.rs`). Naming the single
+/// genuine export here keeps that property; widening the module back to `pub`
+/// would restore the hole.
+pub use screens::file_picker::walker::read_dir_entries;
+/// The tasks-overlay seam (#189 Phase 9).
+///
+/// The overlay itself stays crate-private — `App` constructs it. These three
+/// are re-exported because the binary implements `TaskStore` over
+/// `archon_tools::task_manager::TASK_MANAGER`, which this crate cannot reach.
+pub use screens::task_overlay::{TaskId, TaskRow, TaskStore};
 pub mod terminal;
 pub mod trading;
 pub mod virtual_list;

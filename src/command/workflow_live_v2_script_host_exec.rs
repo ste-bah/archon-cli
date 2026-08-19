@@ -167,6 +167,14 @@ impl WorkflowScriptHost {
         method: String,
         payload: String,
     ) -> archon_workflow::WorkflowResult<String> {
+        // #189 Phase 4. Intercepted before the call is turned into a
+        // `WorkflowV2CallExecution`: a tool call is not a workflow call. It
+        // produces no stored record, takes part in no reuse, and has nothing to
+        // verify — routing it through that machinery would make every one of
+        // those concepts mean something weaker.
+        if method == crate::command::workflow_live::workflow_script_tools::RUN_TOOL_METHOD {
+            return self.run_script_tool(&payload).await;
+        }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
         let execution = self.execution_from_request(&method, request)?;
         let mut source_metadata = dynamic_wave_source_metadata(

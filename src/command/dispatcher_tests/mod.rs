@@ -71,14 +71,15 @@ impl CommandHandler for FailingHandler {
 // Registry has no public "insert" API and TASK-AGS-623 is
 // out-of-scope for registry.rs changes, so these two tests
 // exercise the exact composition `Dispatcher::dispatch` performs
-// (parser::parse → handler.execute(raw_args)) against a fake handler
+// (CommandParser::parse → handler.execute(raw_args)) against a fake handler
 // directly, rather than round-tripping through a custom Registry.
 // This still guarantees that the parser output is faithfully
 // forwarded to handler.execute — which is the contract under test.
 // -----------------------------------------------------------------
 
 fn invoke_handler_via_parse(handler: &dyn CommandHandler, input: &str) -> anyhow::Result<()> {
-    let parsed = crate::command::parser::parse(input).expect("parser must accept input");
+    let parsed =
+        crate::command::parser::CommandParser::parse(input).expect("parser must accept input");
     let (mut ctx, _rx) = make_ctx();
     handler.execute(&mut ctx, &parsed.raw_args)
 }

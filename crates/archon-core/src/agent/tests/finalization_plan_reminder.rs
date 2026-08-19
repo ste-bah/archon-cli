@@ -56,12 +56,17 @@ async fn approved_execution_reverts_to_session_model() {
     *agent.config.permission_mode.lock().await = PermissionMode::Auto.to_string();
     agent.process_message("execute the approved plan").await.unwrap();
 
-    let requests = captured_requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].model, "planner");
-    assert_eq!(requests[0].request_origin.as_deref(), Some("plan_mode"));
-    assert_eq!(requests[1].model, "session");
-    assert_eq!(requests[1].request_origin.as_deref(), Some("main_session"));
+    // Scoped so the guard is released before the await below. A `MutexGuard`
+    // is not `Send`, so holding one across an await point stops the future
+    // being spawned at all — harmless here only because nothing spawns it.
+    {
+        let requests = captured_requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].model, "planner");
+        assert_eq!(requests[0].request_origin.as_deref(), Some("plan_mode"));
+        assert_eq!(requests[1].model, "session");
+        assert_eq!(requests[1].request_origin.as_deref(), Some("main_session"));
+    }
     assert!(override_model.lock().await.is_empty());
 }
 

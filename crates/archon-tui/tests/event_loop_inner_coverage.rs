@@ -69,6 +69,7 @@ async fn headless_backend_walks_wide_event_surface() {
         context_source: None,
         context_threshold: 0.80,
         command_catalog: Vec::new(),
+        task_store: None,
     };
 
     let backend = TestBackend::new(120, 32);

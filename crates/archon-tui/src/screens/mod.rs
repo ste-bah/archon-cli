@@ -1,28 +1,44 @@
 //! Screens module index.
+//!
+//! Every screen module here is `pub(crate)`. That is deliberate and it is load
+//! bearing.
+//!
+//! `archon-tui` is a library crate, so rustc treats any `pub` item as used by
+//! definition — `dead_code` cannot fire on a screen that nothing constructs.
+//! Twelve screens were built to spec, tested, and reachable from no code path
+//! at all; the lint that should have caught it was disarmed by the visibility,
+//! so CI stayed green over a set of features that only looked shipped (#189
+//! Phase 0).
+//!
+//! With the modules crate-private, an unwired screen is a compile-time failure
+//! instead. The single item the binary genuinely constructs is re-exported by
+//! name from `lib.rs`, and that re-export is a claim that a real caller exists
+//! — not that a test constructs it. Widening any of these back to `pub` would
+//! reopen the hole.
 
-pub mod cognitive;
-pub mod docs;
+pub(crate) mod cognitive;
+pub(crate) mod docs;
 pub(crate) mod evidence_browser;
 // TASK-#207 SLASH-FILES: file-picker overlay (3-file sub-module).
-pub mod file_picker;
-pub mod gametheory;
-// TASK-#208 SLASH-SEARCH: search-results overlay with highlighting.
-pub mod hooks_config_menu;
-pub mod learning;
-pub mod mcp_view;
-pub mod memory_file_selector;
-pub mod message_selector;
-pub mod model_picker;
-pub mod permissions_browser;
-pub mod search_results;
-pub mod session_branching;
-pub mod session_browser;
-pub mod session_stats;
-pub mod settings_screen;
-pub mod skills_menu;
-pub mod task_overlay;
-pub mod theme_screen;
-pub mod video;
-pub mod voice_capture;
-pub mod workflow;
-pub mod world;
+pub(crate) mod file_picker;
+pub(crate) mod gametheory;
+pub(crate) mod learning;
+pub(crate) mod message_selector;
+pub(crate) mod search_results;
+pub(crate) mod skills_menu;
+pub(crate) mod task_overlay;
+pub(crate) mod video;
+pub(crate) mod workflow;
+pub(crate) mod world;
+
+/// Cross-screen coverage that used to live in `tests/`, moved in-crate when the
+/// modules above became private (#189 Phase 0).
+#[cfg(test)]
+#[path = "evidence_engine_screens_tests.rs"]
+mod evidence_engine_screens_tests;
+
+/// `/search` overlay render coverage, kept out of `search_results.rs` so that
+/// module stays under the 500-line ceiling.
+#[cfg(test)]
+#[path = "search_results_render_tests.rs"]
+mod search_results_render_tests;

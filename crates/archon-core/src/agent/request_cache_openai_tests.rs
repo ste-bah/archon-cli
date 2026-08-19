@@ -75,12 +75,14 @@ fn apply(request: &mut LlmRequest, enabled: bool, mode: &str) {
     apply_conversation_cache(
         request,
         &ResponsesProvider,
-        "auto",
-        enabled,
         true,
-        mode,
-        "5m",
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured: "auto",
+            enabled,
+            mode,
+            ttl: "5m",
+            model_overrides: &BTreeMap::new(),
+        },
     );
 }
 

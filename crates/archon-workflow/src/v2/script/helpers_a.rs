@@ -128,6 +128,19 @@ const __archonW = Object.freeze({{
   fanout: (id, source, options = {{}}) => __archonCall("fanout", id, source, options),
   parallel: (id, source, options = {{}}) => __archonCall("parallel", id, source, options),
   tool: (id, options = {{}}) => __archonCall("tool", id, undefined, options),
+  // #189 Phase 4: the real tool registry, so a script can read or grep a file
+  // without spending a model round-trip on it. Separate from `tool` above,
+  // which reaches three workflow-internal pseudo-tools and nothing else.
+  runTool: (name, input = {{}}) => {{
+    if (typeof name !== "string" || name.trim() === "") {{
+      throw new Error("runTool requires a tool name, e.g. runTool('Read', {{ file_path: '...' }})");
+    }}
+    // Sequential rather than random: the determinism rule above bans
+    // Math.random, and two calls to the same tool still need distinct ids or
+    // the pending-call set collapses them into one.
+    __archonToolSeq += 1;
+    return __archonCall("runTool", `${{name}}#${{__archonToolSeq}}`, undefined, {{ name, input }});
+  }},
   checkpoint: (id, options = {{}}) => __archonCall("checkpoint", id, undefined, options),
   saveArtifact: (id, sourceOrOptions = {{}}, options) => __archonMaybeSourceCall("saveArtifact", id, sourceOrOptions, options),
   requireArtifact: (id, sourceOrOptions = {{}}, options) => __archonMaybeSourceCall("requireArtifact", id, sourceOrOptions, options),
@@ -148,6 +161,9 @@ function __archonMaybeSourceCall(method, id, sourceOrOptions, options) {{
 // workflow that returns while calls are pending dropped real work on the
 // floor (fire-and-forget async): fail closed, naming the dropped calls.
 const __archonPendingCalls = new Set();
+
+// Distinguishes repeat calls to the same tool (#189 Phase 4).
+let __archonToolSeq = 0;
 
 async function __archonCall(method, id, source, options) {{
   if (typeof id !== "string" || id.trim() === "") {{
@@ -187,6 +203,15 @@ async function __archonRun() {{
     globalThis.remediateFindings = api.remediateFindings;
     globalThis.remediationBudget = api.remediationBudget;
     globalThis.w = api.w;
+    // #189 Phase 4. Taken from `__archonW` rather than `api` because the
+    // primitives wrapper builds its own object and does not forward keys it
+    // does not know about — reading it from there would silently define
+    // `tool` as undefined.
+    globalThis.tool = __archonW.runTool;
+    globalThis.readFile = (file_path) => __archonW.runTool("Read", {{ file_path }});
+    globalThis.grepFiles = (pattern, options = {{}}) => __archonW.runTool("Grep", {{ pattern, ...options }});
+    globalThis.globFiles = (pattern, options = {{}}) => __archonW.runTool("Glob", {{ pattern, ...options }});
+    globalThis.bash = (command, options = {{}}) => __archonW.runTool("Bash", {{ command, ...options }});
   }}
   const result = await workflow(api);
   if (meta && globalThis.__archonMarkers) {{

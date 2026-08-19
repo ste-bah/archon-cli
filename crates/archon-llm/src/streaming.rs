@@ -6,7 +6,11 @@ use crate::types::{ContentBlockType, Usage};
 // Stream events -- typed enum for all SSE event types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+/// `Serialize`/`Deserialize` are for cassettes (#189 Phase 5), not for the
+/// wire: providers parse their own SSE into this by hand below, because no two
+/// of them agree on a shape. The derived form is serde's own, which round-trips
+/// with itself and is all a recording needs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StreamEvent {
     MessageStart {
         id: String,

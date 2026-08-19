@@ -61,16 +61,20 @@ mod process_message_recovery;
 mod process_message_steps;
 mod process_message_support;
 mod prompt_ordering;
+pub mod prune;
+mod prune_agent;
 pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;
 mod segment_compaction_runtime;
 #[cfg(test)]
 mod self_check_hook_tests;
+mod spill_ingest;
 mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
+pub mod token_surface;
 mod tool_completion_evidence;
 mod tool_context;
 mod tool_dispatch;
@@ -94,12 +98,14 @@ pub use payloads::{
     ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
 };
 pub use runtime_attribution::RuntimeAttribution;
+pub use spill_ingest::SPILL_PATH_KEY;
 pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
 pub use types::{
-    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, TimestampedEvent,
+    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, SpillContext,
+    TimestampedEvent,
 };
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;

@@ -32,6 +32,12 @@ pub mod provider;
 pub mod providers;
 // #123: declarative reasoning controls for OpenAI-compatible backends.
 pub mod reasoning;
+// #189 Phase 5: record an exchange with a real provider once, then replay it
+// offline. `LlmProvider` is the seam; these three are the decorator, the file
+// format and the request key.
+pub mod replay;
+pub mod replay_cassette;
+pub mod replay_digest;
 // TASK-AGS-708: RetryProvider<P> decorator with exponential backoff.
 pub mod retry;
 pub mod runtime;

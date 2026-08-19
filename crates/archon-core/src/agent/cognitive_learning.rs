@@ -166,13 +166,15 @@ pub(crate) fn resolve_turn_learning(
     }
     let cited = cited_reflection_ids(assistant_text, injected);
     let tally = ReflectionRecall::new(store.db(), ledger_dir, policy)?.record_outcome(
-        session_id,
-        turn_number,
+        &archon_cognitive::reflection_recall::ScoredTurn {
+            session_id,
+            turn_number,
+            model_id,
+            situation_kind,
+        },
         injected,
         &cited,
         evidence.verdict(),
-        model_id,
-        situation_kind,
     )?;
     tracing::debug!(
         injected = tally.injected,

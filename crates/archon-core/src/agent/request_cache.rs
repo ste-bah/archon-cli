@@ -85,14 +85,21 @@ fn should_emit(strategy: CacheStrategy, enabled: bool, mode: &str) -> bool {
 pub(crate) fn apply_system_cache(
     request: &mut LlmRequest,
     provider: &dyn LlmProvider,
-    configured: &str,
-    enabled: bool,
-    mode: &str,
-    ttl: &str,
-    model_overrides: &BTreeMap<String, ModelCacheParams>,
+    settings: &CacheSettings<'_>,
 ) {
-    let strategy = resolve_strategy(provider, &request.model, configured, model_overrides);
-    apply_system_cache_with(request, strategy, enabled, mode, ttl);
+    let strategy = resolve_strategy(
+        provider,
+        &request.model,
+        settings.configured,
+        settings.model_overrides,
+    );
+    apply_system_cache_with(
+        request,
+        strategy,
+        settings.enabled,
+        settings.mode,
+        settings.ttl,
+    );
 }
 
 pub(crate) fn apply_system_cache_with(
@@ -147,14 +154,55 @@ pub(crate) fn apply_stable_system_cache(
     request: &mut LlmRequest,
     provider: &dyn LlmProvider,
     stable_blocks: usize,
-    configured: &str,
-    enabled: bool,
-    mode: &str,
-    ttl: &str,
-    model_overrides: &BTreeMap<String, ModelCacheParams>,
+    settings: &CacheSettings<'_>,
 ) {
-    let strategy = resolve_strategy(provider, &request.model, configured, model_overrides);
-    apply_stable_system_cache_with(request, strategy, stable_blocks, enabled, mode, ttl);
+    let strategy = resolve_strategy(
+        provider,
+        &request.model,
+        settings.configured,
+        settings.model_overrides,
+    );
+    apply_stable_system_cache_with(
+        request,
+        strategy,
+        stable_blocks,
+        settings.enabled,
+        settings.mode,
+        settings.ttl,
+    );
+}
+
+/// The `[context]` prompt-cache settings, borrowed as one thing.
+///
+/// The five of them travelled together through every entry point below and
+/// always come from the same config section. Passing them individually made
+/// both entry points eight-argument functions whose signatures said nothing
+/// about which parameters belonged together — and made it possible to pass
+/// `mode` where `ttl` was meant, since both are `&str`.
+///
+/// Every call site builds it the same way, from `[context]`, so
+/// [`CacheSettings::from_context`] is the only constructor anyone needs.
+pub(crate) struct CacheSettings<'a> {
+    /// `prompt_cache_strategy` — the configured strategy name.
+    pub configured: &'a str,
+    /// `prompt_cache` — the master switch.
+    pub enabled: bool,
+    pub mode: &'a str,
+    pub ttl: &'a str,
+    pub model_overrides: &'a BTreeMap<String, ModelCacheParams>,
+}
+
+impl<'a> CacheSettings<'a> {
+    /// Borrow the five prompt-cache settings out of `[context]`.
+    pub(crate) fn from_context(context: &'a crate::config::ContextConfig) -> Self {
+        Self {
+            configured: &context.prompt_cache_strategy,
+            enabled: context.prompt_cache,
+            mode: &context.prompt_cache_mode,
+            ttl: &context.prompt_cache_ttl,
+            model_overrides: &context.prompt_cache_models,
+        }
+    }
 }
 
 pub(crate) fn apply_stable_system_cache_with(
@@ -210,15 +258,23 @@ pub(crate) fn apply_stable_system_cache_with(
 pub(crate) fn apply_conversation_cache(
     request: &mut LlmRequest,
     provider: &dyn LlmProvider,
-    configured: &str,
-    enabled: bool,
     conversation: bool,
-    mode: &str,
-    ttl: &str,
-    model_overrides: &BTreeMap<String, ModelCacheParams>,
+    settings: &CacheSettings<'_>,
 ) {
-    let strategy = resolve_strategy(provider, &request.model, configured, model_overrides);
-    apply_conversation_cache_with(request, strategy, enabled, conversation, mode, ttl);
+    let strategy = resolve_strategy(
+        provider,
+        &request.model,
+        settings.configured,
+        settings.model_overrides,
+    );
+    apply_conversation_cache_with(
+        request,
+        strategy,
+        settings.enabled,
+        conversation,
+        settings.mode,
+        settings.ttl,
+    );
 }
 
 pub(crate) fn apply_conversation_cache_with(

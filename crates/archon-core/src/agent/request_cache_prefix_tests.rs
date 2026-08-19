@@ -43,11 +43,13 @@ fn apply_stable(
         request,
         provider,
         stable_blocks,
-        "auto",
-        enabled,
-        "explicit",
-        "5m",
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured: "auto",
+            enabled,
+            mode: "explicit",
+            ttl: "5m",
+            model_overrides: &BTreeMap::new(),
+        },
     );
 }
 
@@ -119,12 +121,14 @@ fn the_stable_head_and_the_conversation_are_cached_independently() {
     super::apply_conversation_cache(
         &mut request,
         &direct,
-        "auto",
         true,
-        true,
-        "explicit",
-        "5m",
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured: "auto",
+            enabled: true,
+            mode: "explicit",
+            ttl: "5m",
+            model_overrides: &BTreeMap::new(),
+        },
     );
 
     assert_eq!(request.system[1]["cache_control"]["type"], "ephemeral");

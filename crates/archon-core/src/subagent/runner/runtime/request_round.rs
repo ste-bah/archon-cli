@@ -219,11 +219,7 @@ async fn build_llm_request(
     crate::agent::request_cache::apply_system_cache(
         &mut request,
         runner.provider.as_ref(),
-        &runner.agent_config.context.prompt_cache_strategy,
-        runner.agent_config.context.prompt_cache,
-        &runner.agent_config.context.prompt_cache_mode,
-        &runner.agent_config.context.prompt_cache_ttl,
-        &runner.agent_config.context.prompt_cache_models,
+        &crate::agent::request_cache::CacheSettings::from_context(&runner.agent_config.context),
     );
     // Runs against the empty message array on purpose: the conversation marker
     // itself is placed by the projection in `stream_round`, but on a provider
@@ -232,12 +228,8 @@ async fn build_llm_request(
     crate::agent::request_cache::apply_conversation_cache(
         &mut request,
         runner.provider.as_ref(),
-        &runner.agent_config.context.prompt_cache_strategy,
-        runner.agent_config.context.prompt_cache,
         runner.agent_config.context.prompt_cache_conversation,
-        &runner.agent_config.context.prompt_cache_mode,
-        &runner.agent_config.context.prompt_cache_ttl,
-        &runner.agent_config.context.prompt_cache_models,
+        &crate::agent::request_cache::CacheSettings::from_context(&runner.agent_config.context),
     );
     request
 }

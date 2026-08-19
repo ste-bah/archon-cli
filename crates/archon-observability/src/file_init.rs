@@ -167,6 +167,26 @@ pub fn init_tracing_file(
     log_level: &str,
     log_dir: &Path,
 ) -> Result<LogGuard, LoggingError> {
+    init_tracing_file_with_otlp(session_id, log_level, log_dir, None)
+}
+
+/// As [`init_tracing_file`], plus OTLP span export when an endpoint is
+/// configured (#189 Phase 10).
+///
+/// This is the function the binary actually reaches — `init_tracing` in the
+/// sibling module is the stderr path. The endpoint has to be plumbed through
+/// *here* or the setting would be inert in the one place it matters.
+///
+/// The export is attached to the `RedactionLayer` rather than stacked beside
+/// it, for the same reason the module header gives for refusing a `fmt` layer:
+/// tracing layers are parallel sinks, so a second one would ship the
+/// unredacted copy — and off the machine this time, not just to a local file.
+pub fn init_tracing_file_with_otlp(
+    session_id: &str,
+    log_level: &str,
+    log_dir: &Path,
+    otlp_endpoint: Option<&str>,
+) -> Result<LogGuard, LoggingError> {
     fs::create_dir_all(log_dir)?;
 
     let log_path = log_dir.join(format!("{session_id}.log"));
@@ -187,7 +207,25 @@ pub fn init_tracing_file(
 
     // RedactionLayer is the SOLE emitter. See module-level security
     // architecture comment for the parallel-sinks tombstone rationale.
-    let redaction = RedactionLayer::with_writer(file_writer);
+    let mut redaction = RedactionLayer::with_writer(file_writer);
+    if let Some(endpoint) = otlp_endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // A configured endpoint that will not build is logged and dropped:
+        // telemetry going nowhere is a degraded run, not a reason to refuse to
+        // start a session the user asked for.
+        match crate::otlp::OtlpExport::new(endpoint, "archon") {
+            Ok(export) => {
+                let export = std::sync::Arc::new(export);
+                crate::otlp::set_global(&export);
+                redaction = redaction.with_otlp(export);
+            }
+            Err(error) => {
+                eprintln!("warning: OTLP export to {endpoint} could not start: {error}");
+            }
+        }
+    }
 
     tracing_subscriber::registry()
         .with(filter)

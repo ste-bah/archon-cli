@@ -1,0 +1,25 @@
+# scripts/check-deferral-markers.allowlist
+#
+# Every tracked deferral marker in the tree, one per line, as `path:MARKER`.
+# `scripts/check-deferral-markers.sh` fails on any marker not listed here, AND
+# on any line here whose marker is no longer in the tree — so this file is a
+# cap on outstanding deferrals, not a suppression list.
+#
+# To add a line you need an issue. To delete one, do the work.
+
+# ---------------------------------------------------------------------------
+# Naming churn, not a stub. `app::TuiEvent` is fully implemented and wired; the
+# note records that it belongs in `archon_tui::events` rather than `app`.
+# ---------------------------------------------------------------------------
+src/main.rs:TODO(TUI-330)
+
+# ---------------------------------------------------------------------------
+# REQ-RESEARCH-007 — two genuine pass-throughs in the research final stage.
+# `apply_style` returns the paper unchanged and `synthesize_chapter` wraps the
+# source content in an H2 heading; both need `LlmClient` plumbing that the
+# final-stage pipeline does not yet carry. They are honest about it — neither
+# reports success for work it did not do — but they are stubs, and they are the
+# only two left in the tree.
+# ---------------------------------------------------------------------------
+crates/archon-pipeline/src/research/final_stage/style_applier.rs:TODO(REQ-RESEARCH-007)
+crates/archon-pipeline/src/research/final_stage/writer.rs:TODO(REQ-RESEARCH-007)

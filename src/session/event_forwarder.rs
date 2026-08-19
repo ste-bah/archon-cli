@@ -85,6 +85,7 @@ pub(super) fn spawn_agent_event_forwarder(
                     cache_read_tokens,
                     context_name,
                     resolution_source,
+                    heaviest_message_tokens,
                 } => {
                     // Bank the preflight size so `/context` can report it.
                     //
@@ -102,6 +103,7 @@ pub(super) fn spawn_agent_event_forwarder(
                         cache_read_tokens,
                         context_name,
                         resolution_source,
+                        heaviest_message_tokens,
                     }
                 }
                 AgentEvent::TurnComplete {

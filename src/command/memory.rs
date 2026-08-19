@@ -165,10 +165,7 @@ impl StoreOptions {
         let mut importance = 0.5;
         let mut rest = input.trim();
 
-        loop {
-            let Some(after_flag) = rest.strip_prefix("--") else {
-                break;
-            };
+        while let Some(after_flag) = rest.strip_prefix("--") {
             let (flag, tail) = split_word(after_flag);
             let value_tail = tail.trim_start();
             match flag {

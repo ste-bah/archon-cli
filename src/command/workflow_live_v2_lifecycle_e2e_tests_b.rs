@@ -321,6 +321,8 @@ async fn failed_final_report_emits_host_built_fallback() {
         scaffold_hash: workflow_scaffold_hash("# final report fallback fixture"),
         runner,
         accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
+        tool_host: std::sync::OnceLock::new(),
+        tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
     });
     let driver = LifecycleDriver::new(
         host,

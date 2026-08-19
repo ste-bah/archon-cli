@@ -114,7 +114,7 @@ archon task-status <task-id>
 
 ## TOML manifest for built-in pipeline agents
 
-Pipeline agents (50 coding + 46 research) use the dual format:
+Pipeline agents (50 coding + 47 research) use the dual format:
 
 `.archon/agents/coding-pipeline/code-quality-improver.md`:
 

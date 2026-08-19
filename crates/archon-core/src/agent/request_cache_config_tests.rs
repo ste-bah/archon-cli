@@ -106,12 +106,14 @@ fn an_enabled_bedrock_strategy_attaches_the_resolved_directive() {
     apply_conversation_cache(
         &mut request,
         &BedrockLikeProvider,
-        "auto",
         true,
-        true,
-        "explicit",
-        "5m",
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured: "auto",
+            enabled: true,
+            mode: "explicit",
+            ttl: "5m",
+            model_overrides: &BTreeMap::new(),
+        },
     );
 
     let directive = bedrock_directive(&request).expect("directive must be attached");
@@ -130,12 +132,14 @@ fn the_directive_requests_an_hour_only_when_config_and_model_agree() {
     apply_conversation_cache(
         &mut request,
         &BedrockLikeProvider,
-        "auto",
         true,
-        true,
-        "explicit",
-        "1h",
-        &BTreeMap::new(),
+        &super::CacheSettings {
+            configured: "auto",
+            enabled: true,
+            mode: "explicit",
+            ttl: "1h",
+            model_overrides: &BTreeMap::new(),
+        },
     );
 
     assert_eq!(
@@ -160,12 +164,14 @@ fn a_disabled_config_attaches_no_directive() {
         apply_conversation_cache(
             &mut request,
             &BedrockLikeProvider,
-            "auto",
-            enabled,
             true,
-            mode,
-            "5m",
-            &BTreeMap::new(),
+            &super::CacheSettings {
+                configured: "auto",
+                enabled,
+                mode,
+                ttl: "5m",
+                model_overrides: &BTreeMap::new(),
+            },
         );
 
         assert_eq!(
@@ -262,12 +268,14 @@ fn a_configured_entry_reaches_the_bedrock_directive() {
     apply_conversation_cache(
         &mut request,
         &BedrockLikeProvider,
-        "auto",
         true,
-        true,
-        "explicit",
-        "5m",
-        &overrides,
+        &super::CacheSettings {
+            configured: "auto",
+            enabled: true,
+            mode: "explicit",
+            ttl: "5m",
+            model_overrides: &overrides,
+        },
     );
 
     assert_eq!(

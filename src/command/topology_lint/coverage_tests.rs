@@ -16,6 +16,15 @@
 
 use super::*;
 
+/// Compiled once. Building it inside the per-file loop recompiled the same
+/// constant pattern for every fixture task, which is the whole cost of this
+/// helper twice over.
+fn requirement_id_pattern() -> &'static Regex {
+    static PATTERN: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"REQ-[A-Z0-9]+-[0-9]{3}").expect("id pattern"));
+    &PATTERN
+}
+
 fn fixture_tasks() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prd-trading-data-lake-ahdm-001")
 }
@@ -53,10 +62,7 @@ fn write_corpus_into(tasks: &Path, prd_path: &Path) -> PathBuf {
         }
         let raw = fs::read_to_string(&path).expect("read fixture task");
         fs::write(tasks.join(name), &raw).expect("copy fixture task");
-        for id in Regex::new(r"REQ-[A-Z0-9]+-[0-9]{3}")
-            .expect("id pattern")
-            .find_iter(implements_line(&raw))
-        {
+        for id in requirement_id_pattern().find_iter(implements_line(&raw)) {
             ids.insert(id.as_str().to_string());
         }
     }

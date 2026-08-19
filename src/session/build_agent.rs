@@ -46,6 +46,11 @@ pub(crate) async fn build_session_agent(
     let leann_index = super::init_leann_index(&working_dir);
     let mut registry = create_default_registry(working_dir.clone(), leann_index);
     registry.replace(Box::new(config.tools.bash_tool(&config.permissions)));
+    // #189 Phase 6: the same command lists Bash uses, so typing a command into
+    // a persistent shell is gated exactly as hard as running it through Bash.
+    registry.replace(Box::new(
+        archon_core::config::ToolsConfig::terminal_write_tool(&config.permissions),
+    ));
     apply_tool_filters(&mut registry, resolved_flags);
 
     let agent_registry_early = AgentRegistry::load(&working_dir);

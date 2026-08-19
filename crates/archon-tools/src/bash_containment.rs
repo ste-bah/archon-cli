@@ -1,3 +1,6 @@
+// Used only by the unix descendant-cleanup path below; on Windows the import
+// is dead and trips `-D warnings`.
+#[cfg(unix)]
 use std::collections::HashMap;
 
 use tokio::process::Command;

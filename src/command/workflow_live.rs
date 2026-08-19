@@ -57,6 +57,9 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
+// #189 Phase 4: real tool calls from inside a workflow script.
+#[path = "workflow_script_tools.rs"]
+pub(crate) mod workflow_script_tools;
 #[cfg(test)]
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;

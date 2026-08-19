@@ -147,7 +147,6 @@ pub(crate) async fn run_print_mode_session(
 }
 
 /// Run a headless-mode session over JSON-lines stdin/stdout.
-#[allow(dead_code)]
 pub(crate) async fn run_headless_session(
     config: &archon_core::config::ArchonConfig,
     session_id: &str,

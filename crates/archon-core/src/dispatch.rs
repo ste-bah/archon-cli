@@ -71,6 +71,8 @@ pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
     ("ReadMcpResource", WorkingTreeEffect::ExternalOnly),
     ("RemoteTrigger", WorkingTreeEffect::ExternalOnly),
     ("SendMessage", WorkingTreeEffect::ExternalOnly),
+    // Reads the local session store and writes nothing (#189 Phase 2).
+    ("SessionSearch", WorkingTreeEffect::None),
     ("Skill", WorkingTreeEffect::Arbitrary),
     ("Sleep", WorkingTreeEffect::None),
     ("TaskCreate", WorkingTreeEffect::Arbitrary),
@@ -81,6 +83,13 @@ pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
     ("TaskUpdate", WorkingTreeEffect::ExternalOnly),
     ("TeamCreate", WorkingTreeEffect::Arbitrary),
     ("TeamDelete", WorkingTreeEffect::Arbitrary),
+    // #189 Phase 6. Create runs the user's shell startup files and Write runs
+    // whatever is typed, so both are as unbounded as Bash. Read and Close only
+    // touch the terminal registry.
+    ("TerminalClose", WorkingTreeEffect::None),
+    ("TerminalCreate", WorkingTreeEffect::Arbitrary),
+    ("TerminalRead", WorkingTreeEffect::None),
+    ("TerminalWrite", WorkingTreeEffect::Arbitrary),
     ("TodoWrite", WorkingTreeEffect::ExternalOnly),
     ("ToolSearch", WorkingTreeEffect::None),
     ("WebFetch", WorkingTreeEffect::ExternalOnly),
@@ -414,7 +423,29 @@ pub fn create_default_registry(
         archon_tools::push_notification::PushNotificationTool,
     ));
     registry.register(Box::new(archon_tools::powershell::PowerShellTool::default()));
+    // #189 Phase 6: shells that outlive the call that made them. Registered
+    // next to Bash because they are the other half of it — Bash is one-shot, so
+    // a `cd`, an activated environment or a long-running process cannot survive
+    // it. `TerminalWrite` is replaced by the configured build at session setup,
+    // exactly as Bash is, so both classify a command by the same lists.
+    registry.register(Box::new(archon_tools::terminal_tools::TerminalCreateTool));
+    registry.register(Box::new(
+        archon_tools::terminal_tools::TerminalWriteTool::default(),
+    ));
+    registry.register(Box::new(archon_tools::terminal_tools::TerminalReadTool));
+    registry.register(Box::new(archon_tools::terminal_tools::TerminalCloseTool));
     registry.register(Box::new(archon_tools::sleep::SleepTool));
+    // #189 Phase 2: session search was reachable only by typing /sessions.
+    // The configured path is resolved here because `archon-tools` cannot see
+    // `ArchonConfig`, and a tool guessing would mean searching a different
+    // database than `/sessions` reads.
+    registry.register(Box::new(
+        archon_tools::session_search::SessionSearchTool::new(
+            crate::config::load_config()
+                .ok()
+                .and_then(|loaded| loaded.session.db_path.map(PathBuf::from)),
+        ),
+    ));
     registry.register(Box::new(archon_tools::ask_user::AskUserTool));
     registry.register(Box::new(archon_tools::todo_write::TodoWriteTool));
     registry.register(Box::new(archon_tools::plan_mode::EnterPlanModeTool));

@@ -1,0 +1,18 @@
+[package]
+name = "archon-acp"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Agent Client Protocol (ACP) over stdio for archon-cli. Deliberately a leaf — no archon-* dependencies — so the wire format can be tested without starting an agent, and so the protocol cannot quietly grow a dependency on one particular agent's internals."
+
+# Dependency discipline: every dep MUST come from [workspace.dependencies].
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

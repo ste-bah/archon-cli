@@ -44,6 +44,12 @@ pub struct StatusBar {
     pub cache_read_tokens: u64,
     pub warning_state: ContextWarning,
     pub compact_threshold: f32,
+    /// Tokens attributed to the largest single message (#189 Phase 3).
+    ///
+    /// Shown so the bar answers "what is filling the window", not only "how
+    /// full is it" — the difference between knowing to compact and knowing
+    /// what to drop. Zero until attribution has something to report.
+    pub heaviest_message_tokens: u64,
 }
 
 impl Default for StatusBar {
@@ -58,6 +64,7 @@ impl Default for StatusBar {
             agent_name: None,
             agent_color: None,
             context_tokens_used: 0,
+            heaviest_message_tokens: 0,
             context_window: 0,
             context_name: None,
             resolution_source: None,
@@ -111,6 +118,12 @@ impl StatusBar {
             ));
         } else if self.context_tokens_used > 0 {
             parts.push(format!("ctx {}k/?", self.context_tokens_used / 1000));
+        }
+        // Only worth the width when one message is a real share of the window.
+        // Below that the answer is "nothing in particular", and saying so every
+        // turn is noise.
+        if self.heaviest_message_tokens >= 1000 {
+            parts.push(format!("top {}k", self.heaviest_message_tokens / 1000));
         }
         if self.cache_creation_tokens > 0 || self.cache_read_tokens > 0 {
             parts.push(format!(
@@ -195,12 +208,43 @@ mod tests {
     fn format_shows_context_window_before_usage() {
         let bar = StatusBar {
             context_tokens_used: 0,
+            heaviest_message_tokens: 0,
             context_window: 1_000_000,
             context_name: Some("main".into()),
             resolution_source: Some("config".into()),
             ..Default::default()
         };
         assert!(bar.format().contains("ctx main 0k/1000k (0% config)"));
+    }
+
+    /// The bar has always said how full the window is. #189 Phase 3 makes it
+    /// say what is filling it, which is the part that tells you what to drop.
+    #[test]
+    fn the_heaviest_message_is_shown_beside_the_context_total() {
+        let bar = StatusBar {
+            context_tokens_used: 500_000,
+            heaviest_message_tokens: 92_000,
+            context_window: 1_000_000,
+            ..Default::default()
+        };
+
+        let rendered = bar.format();
+        assert!(rendered.contains("ctx "), "{rendered}");
+        assert!(rendered.contains("top 92k"), "{rendered}");
+    }
+
+    /// Below a thousand tokens the honest answer is "nothing in particular",
+    /// and spending status-bar width to say that every turn is noise.
+    #[test]
+    fn a_small_heaviest_message_is_not_worth_the_width() {
+        let bar = StatusBar {
+            context_tokens_used: 5_000,
+            heaviest_message_tokens: 400,
+            context_window: 1_000_000,
+            ..Default::default()
+        };
+
+        assert!(!bar.format().contains("top "), "{}", bar.format());
     }
 
     #[test]

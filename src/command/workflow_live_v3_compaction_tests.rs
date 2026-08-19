@@ -297,6 +297,8 @@ async fn run_fixture(scenario: FixtureScenario) {
         scaffold_hash: workflow_scaffold_hash("# v3 compaction fixture"),
         runner,
         accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
+        tool_host: std::sync::OnceLock::new(),
+        tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
     });
     let driver = LifecycleDriver::new(
         host,
