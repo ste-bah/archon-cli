@@ -9,6 +9,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, provider-aware `/model`, tool use, subagents, pipelines
 - [Project setup](getting-started/project-setup.md) — bootstrap a project with `archon-init.sh` (flags, scenarios, troubleshooting)
 - [First run](getting-started/first-run.md) — what to expect, where data lives, common gotchas
+- [Voice input](getting-started/voice.md) — microphone setup, speech-to-text backends, and why a recording gets discarded
 
 ## Architecture
 
@@ -38,9 +39,9 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 87 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 91 primary commands grouped by purpose, plus the overlays nine of them open
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
-- [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
+- [Skills](reference/skills.md) — 67 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [Prompt caching and cost](reference/prompt-caching.md) — per-provider wire formats, per-model minimums, breakpoint placement, and how cache reads and writes are priced
@@ -118,7 +119,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Operations
 
-- [Session management](operations/session-management.md) — resume, fork, checkpoint, rewind
+- [Session management](operations/session-management.md) — resume, fork, fork-at, rate, checkpoint, rewind
 - [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, provider-aware model selection, latency tuning

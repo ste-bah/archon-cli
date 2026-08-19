@@ -99,8 +99,60 @@ To temporarily allow: `/permissions auto` or add to `always_allow`:
 always_allow = ["Bash:rm /tmp/*"]
 ```
 
-## Pipelines
+### The agent refused an edit: "has not been read"
 
+Since v1.9.3 a write to a file the agent has not read in this session is
+refused, and so is a write to a file that changed on disk since it read it.
+The refusal names the file and the reason.
+
+Normally the fix is for the agent to read the file first, which it will do
+unprompted once told. If you have a workflow that legitimately writes files
+nobody read — a generator, a formatter driving `Write` over a tree — soften or
+disable the check:
+
+```toml
+[filesystem]
+read_before_edit = "warn"   # allow it, log the reason
+# read_before_edit = "off"  # no check at all
+```
+
+`Bash` is never checked, so a shell command that writes the file is unaffected.
+See [`[filesystem]`](../reference/config.md#filesystem).
+
+### The agent read the file and the write is still refused
+
+The file changed on disk between the read and the write — a formatter, a
+watcher, a rebuild, or you. Freshness is size plus modification time, so a
+rewrite with identical contents still counts as a change. Have the agent read
+it again.
+
+## Voice
+
+### Voice is enabled but nothing records
+
+Check `/voice`. If the pipeline could not start, archon says so on stderr at
+startup and names the reason: no input device, an unknown `device` name, or a
+build without the `audio-capture` feature. It does not start a pipeline that
+cannot hear anything.
+
+### Recording works, but nothing is transcribed
+
+Most likely the VAD discarded it. A recording whose loudest moment is below
+`vad_threshold` is dropped without being sent to the speech backend. Open
+`/voice` and look at the meter: if the peak is below the threshold, the overlay
+says so and says the recording will be discarded. Speak louder, move closer, or
+lower `vad_threshold`.
+
+If the transcription reads `[voice: no STT configured]`, `stt_provider` is
+unset or `"openai"` with no `stt_api_key`. See
+[voice input](../getting-started/voice.md).
+
+### `alsa-sys` fails to build
+
+Install `libasound2-dev` (Debian/Ubuntu) or `alsa-lib-devel` (Fedora/RHEL).
+`scripts/install-system-deps.sh` does it for you.
+
+## Pipelines
 ### Pipeline agent dispatch panics with `blocking_lock`-style error
 
 Pre-v0.1.13 bug. Upgrade to current release.

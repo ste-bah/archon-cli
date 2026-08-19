@@ -75,13 +75,13 @@ RapidOCR package is the preferred install path.
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev git curl libclang-dev perl cmake poppler-utils tesseract-ocr ffmpeg yt-dlp
+sudo apt install -y build-essential pkg-config libssl-dev git curl libclang-dev perl cmake libasound2-dev poppler-utils tesseract-ocr ffmpeg yt-dlp
 ```
 
 ### Fedora / RHEL / Rocky
 
 ```bash
-sudo dnf install -y gcc pkg-config openssl-devel git clang perl make cmake poppler-utils tesseract ffmpeg-free yt-dlp
+sudo dnf install -y gcc pkg-config openssl-devel git clang perl make cmake alsa-lib-devel poppler-utils tesseract ffmpeg-free yt-dlp
 ```
 
 ### Amazon Linux 2023
@@ -445,6 +445,7 @@ cargo nextest run --workspace -j1 -- --test-threads=2
 | `error[E0658]: 'let' expressions in this position are unstable` | toolchain below 1.88; the tree uses let-chains | same — let rustup install the pinned toolchain |
 | `Can't locate Locale/Maketext/Simple.pm in @INC` (Windows) | Git's msys Perl is being used to build vendored OpenSSL | install Strawberry Perl, then `setx PERL "C:\Strawberry\perl\bin\perl.exe"` |
 | `failed to resolve openssl` on Linux | missing `libssl-dev` | install OS build deps (above) |
+| `alsa-sys` fails on Linux | missing ALSA headers | install `libasound2-dev` (Debian/Ubuntu) or `alsa-lib-devel` (Fedora/RHEL). Or build without microphone support: `cargo build --no-default-features` on `archon-tui` — everything except voice input still works |
 | WSL2 build hangs then `Killed` / `signal: 9` | OOM during parallel rustc | rebuild with `cargo build --release -j1` |
 | `linker 'cc' not found` | missing C toolchain | install `build-essential` (Linux) or Xcode CLI tools (macOS) |
 | Long build (30+ min on first run) | full dependency graph fetch + compile | normal for first build; rebuilds use the incremental cache |

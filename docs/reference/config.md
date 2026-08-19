@@ -29,6 +29,7 @@ This page explains every section. Each table tells you **what** the field does, 
 - [`[consciousness]`](#consciousness) — inner voice and rule engine
 - [`[tools]`](#tools) — tool execution defaults
 - [Subagent turn limits](#subagent-turn-limits) — operator-only subagent turn caps
+- [`[filesystem]`](#filesystem) — read-before-write policy
 - [`[permissions]`](#permissions) — tool gating
 - [`[sandbox]`](#sandbox) — Bash isolation backends
 - [`[context]`](#context) — compaction and prompt cache
@@ -369,6 +370,60 @@ explicitly when the machine has memory to spare.
 ### Subagent Turn Limits
 
 `max_turns` is not exposed to the model via the `Agent` / `TaskCreate` tool schemas. Subagents default to `DEFAULT_MAX_TURNS = 100_000`, which is effectively unlimited for normal work. Operators can still set a cap explicitly per custom agent in `meta.json`, through built-in definitions such as the bounded `fork` agent, or with the CLI `--max-turns` flag in headless mode. The LLM cannot bound a subagent by adding `max_turns` to its own tool input.
+
+---
+
+## `[filesystem]`
+
+Whether a write has to be backed by a read.
+
+```toml
+[filesystem]
+read_before_edit = "block"
+```
+
+| Field | Default | What / Why |
+|---|---|---|
+| `read_before_edit` | `"block"` | `"block"` refuses the write and says why, naming the file. `"warn"` allows it and logs the reason. `"off"` does nothing, restoring the behaviour before this policy existed. |
+
+### What is checked
+
+`Read`, `Grep` and `NotebookRead` record what they showed the agent. `Edit`,
+`Write` and `NotebookEdit` are checked against that record. A write is refused
+when the agent has not read the file in this session, or when the file changed
+on disk since it did.
+
+`Bash` is deliberately not checked. A shell command can write anywhere and names
+no path, so demanding a prior read of something it never mentions would refuse
+work it cannot describe. Which means the policy is a guard against a specific
+mistake — an agent editing a file it is only guessing the contents of — and not
+a general write lock.
+
+`Grep` records only single-file paths. A directory-wide search shows matching
+lines, not a file, and treating it as a read would let a grep across the repo
+license writes to everything in it.
+
+### Why per agent, and why not persisted
+
+Observations are recorded per agent, not per session. A parent's read is not
+evidence for a subagent that never opened the file — the subagent has a
+different context and has not seen those bytes. They are discarded when the
+session ends rather than written to disk: a read from yesterday says nothing
+about what the file contains now.
+
+Freshness is tracked by size and modification time, not content hashing. That
+is cheap enough to run on every tool call and catches the case that matters — a
+file that changed between the read and the write.
+
+### When to turn it off
+
+`"off"` is a genuine no-op, not a check whose answer is ignored. Turn it down to
+`"warn"` if you have an agent that legitimately writes files it has never read
+(a generator, a formatter driving `Write` over a whole tree) and you want the
+reasons in the log without the refusals. Note that this is a behaviour change
+from before v1.9.3, where no such check existed: an agent that used to write
+blind will now be refused.
+
 
 ---
 
@@ -1589,20 +1644,26 @@ vad_threshold = 0.02
 stt_provider = "openai"
 # stt_api_key = "..."   # prefer config.local.toml for secrets
 stt_url = "https://api.openai.com"
-hotkey = "ctrl+shift+v"
+hotkey = "ctrl+v"
 toggle_mode = false
 ```
+
+Enabling this needs a binary built with the `audio-capture` feature, which is
+on by default. Built without it, archon says so at startup and runs with voice
+disabled rather than starting a pipeline that records silence — which is what
+it used to do. On Linux the feature needs `libasound2-dev` at build time;
+`scripts/install-system-deps.sh` installs it.
 
 | Field | Default | What / Why |
 |---|---|---|
 | `enabled` | `false` | Spawn voice capture → STT pipeline. OFF by default — typing is the primary input. |
-| `device` | `"default"` | Audio input device name. `"default"` = system default mic. |
-| `vad_threshold` | `0.02` | Voice activity detection RMS floor. Higher = stricter (suppresses ambient noise but may clip soft speech); lower = more permissive. |
+| `device` | `"default"` | Audio input device name. `"default"` = system default mic. An unknown name is an error naming the devices that do exist, not a silent fall back to the default — recording the wrong room is worse than not starting. |
+| `vad_threshold` | `0.02` | Voice activity detection RMS floor. A recording whose loudest moment is below this is discarded untranscribed. Higher = stricter (suppresses ambient noise but may clip soft speech); lower = more permissive. The `/voice` overlay draws the measured peak against this number, so a discarded recording says why it was discarded. |
 | `stt_provider` | `"openai"` | STT backend: `"openai"` (Whisper API), `"local"` (whisper.cpp server), `"mock"` (no-op for testing). |
 | `stt_api_key` | `""` | OpenAI API key for Whisper. Prefer setting `OPENAI_API_KEY` env var or putting it in `config.local.toml`. |
 | `stt_url` | `"https://api.openai.com"` | API endpoint. Override for local whisper.cpp HTTP server. |
-| `hotkey` | `"ctrl+shift+v"` | TUI push-to-record (or toggle, depending on `toggle_mode`) hotkey. |
-| `toggle_mode` | `false` | `false` = push-to-talk (hold hotkey while speaking, max 2s window). `true` = toggle (press once to start, again to stop). |
+| `hotkey` | `"ctrl+v"` | Reported by `/voice` and nothing else. The TUI binding is fixed at `Ctrl+V`, so setting this to something else changes what `/voice` prints and not what the keyboard does. It defaulted to `"ctrl+shift+v"` until v1.9.3 — a key that had never been bound. |
+| `toggle_mode` | `false` | `false` = push-to-talk: one press records for a 2s window and finalises itself (it does not detect the key being held). `true` = toggle: press once to start, again to stop. |
 
 ---
 

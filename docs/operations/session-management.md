@@ -70,7 +70,54 @@ archon --resume <id> --fork-session
 
 In the TUI: `/fork`. The new session shares history up to the fork point, then diverges.
 
+### Forking from an earlier message
+
+`/fork` copies the whole log — "carry on from here in a separate session".
+`/fork-at` answers the other question, "go back to before that and try
+something else":
+
+```
+/fork-at            # lists the branch points and opens a picker
+/fork-at 12         # forks through message 12, keeping 0..=12
+/fork-at 12 retry-with-tokio   # ...and names it
+```
+
+The index is inclusive, and the source session is untouched — branching is not
+rewinding, and the original is still there to resume. An index past the end of
+the log keeps everything, because asking to branch after the last message is
+asking for all of it.
+
+Messages that are not recognisable turns are skipped from the picker but keep
+their positions, so the index you pass is always the position in the log.
+
+`/fork-at` is not called `/branch`: `/branch` is the built-in skill that manages
+*git* branches.
+
+## Rating a message
+
+`/feedback` records what the learning subsystems cannot infer — whether the
+person reading an answer thought it was any good.
+
+```
+/feedback            # what is the last message rated?
+/feedback good       # ...or `+`, or `up`
+/feedback bad why it was wrong
+/feedback clear
+```
+
+`/rate` is an alias. A note is optional and free text.
+
+Ratings live in a sidecar relation keyed by message id, **never in the message
+log**, so they never reach model context. A model that could see its last
+answer was rated badly would start writing for the rating rather than for the
+task.
+
+Writes are compare-and-swap on an opaque version token, so two sessions rating
+the same message cannot silently overwrite each other — the loser is told the
+rating changed underneath it.
+
 ## Naming sessions
+
 
 ```bash
 archon --session-name "oauth-refactor"
@@ -128,6 +175,37 @@ The `checkpoint_diff` module computes line-level diffs between versions for insp
 | `~/.local/share/archon/logs/<id>.log` | Per-session log file |
 | `~/.archon/sessions/<id>/activity/events.jsonl` | Session activity JSONL used by retrospectives |
 | `~/.archon/self-calibration/` | Retrospectives, self-trust records, and plan-vs-outcome summaries |
+
+Inside `sessions.db`, two relations exist alongside the journal and are not
+part of the conversation:
+
+| Relation | Holds |
+|---|---|
+| `message_feedback` | Per-message ratings from `/feedback`. Never read into model context. |
+| `session_projections` | Cached folds over the event log (see below). |
+
+### Projections
+
+Anything derived from a session's history — message counts, which tools were
+used, cost by turn — is computed by folding the event log. Done naively that
+means rescanning the whole log every time anyone asks, which gets slower for
+exactly the sessions where the answer is most interesting.
+
+A projection folds the log once and caches the result with the sequence number
+it folded through. The next call resumes from there and applies only the events
+that arrived since. A session that has not moved costs one lookup.
+
+The cache is written only when the fold actually advanced, so a read-only query
+against an idle session does no writes. It is derived data throughout: deleting
+`session_projections` costs a rescan and nothing else, and
+`invalidate_projection` exists for when a projection's own logic changes and
+old cached state would be wrong rather than stale.
+
+`/status` reads one of these — message counts and the distinct set of tools
+used. It reports nothing at all rather than zeroes when a session has no
+projection yet, because "not measured" and "measured as zero" are different
+answers and a bar of zeroes looks like the latter.
+
 
 ## Recovery from crash
 

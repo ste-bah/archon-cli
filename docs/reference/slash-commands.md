@@ -2,13 +2,13 @@
 
 All slash commands work in the interactive TUI. Type `/help` to see them in-app.
 
-The registry contains **87 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 87` in `src/command/registry/tests/mod.rs` and `EXPECTED_PRIMARY_COUNT = 87` in `src/command/dispatcher_tests/mod.rs`). Aliases come from each handler's `aliases()` method.
+The registry contains **91 primary commands** (lockstep-tested at `EXPECTED_COMMAND_COUNT = 91` in `src/command/registry/tests/mod.rs` and `EXPECTED_PRIMARY_COUNT = 91` in `src/command/dispatcher_tests/mod.rs`). Aliases come from each handler's `aliases()` method.
 
 For shell/TUI parity, see the generated [command surface matrix](../generated/command-surface-matrix.md). It is backed by `src/command/surface_matrix.rs` and has tests that fail when registered slash primaries drift.
 
-Beyond the 87 primaries, archon-cli ships **68 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
+Beyond the 91 primaries, archon-cli ships **67 built-in skills** (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Skills behave like slash commands but are resolved through the Skill registry — primary handlers take precedence at dispatch time.
 
-> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`. v0.1.52 adds `/learning gnn status` to expose GNN auto-trainer diagnostics from the learning command family. v1.0.0 keeps the slash count at 78; `/archon-code`, `/archon-research`, and `/pipeline` now use the audited pipeline runtime. v1.0.1 keeps the slash count at 78 and adds shell-only hybrid retrospective analyzer modes. v1.1.0-beta.3 keeps the same slash primary count while adding provider runtime, sandbox, permissions, and governed agent-evolution shell surfaces. v1.2.0 adds `/reasoning` and `/briefing`, bringing the slash primary count to 80. v1.3.3 adds `/video`, bringing the slash primary count to 81. v1.3.8 adds `/cognitive`, bringing the slash primary count to 82. v1.3.9 keeps the same primary count and adds `/docs` vector subcommands. v1.3.10 adds `/workflow`, bringing the slash primary count to 83. v1.3.11 adds `/trading`, bringing the slash primary count to 84 and exposing Trading Lab setup, Pine/TradingView, governed OpenBB, spec validation, backtest, paper, promotion, live-gate, dispatch, routes, and kill-switch controls. v1.4.0 adds `/draft`, bringing the slash primary count to 85 and exposing the FCDP drafting protocol, which runs out-of-process against the same binary's `draft` subcommand and streams back into the TUI. That v1.4.0 figure was understated: `/world` (the world-model inspector and promotion approval gate) also shipped in v1.4.0 and was never counted here, so the true v1.4.0 total was 86. v1.5.0 adds one primary, `/requirements` (requirement-to-code traceability with a proof ladder), bringing the count to 87.
+> **Version history.** v0.1.38 added 11 primaries (Evidence Engine: `/kb`, `/prov`, `/meaning`, `/constellation`, plus gametheory inspection subcommands and the slash mirror). v0.1.40 added 2 more (`/auth` and `/chat` for the OpenAI-Codex provider surface). v0.1.45 keeps the same command count but upgrades Codex from chat/TUI-only to provider-neutral agentic surfaces where `[llm].provider = "openai-codex"`. v0.1.52 adds `/learning gnn status` to expose GNN auto-trainer diagnostics from the learning command family. v1.0.0 keeps the slash count at 78; `/archon-code`, `/archon-research`, and `/pipeline` now use the audited pipeline runtime. v1.0.1 keeps the slash count at 78 and adds shell-only hybrid retrospective analyzer modes. v1.1.0-beta.3 keeps the same slash primary count while adding provider runtime, sandbox, permissions, and governed agent-evolution shell surfaces. v1.2.0 adds `/reasoning` and `/briefing`, bringing the slash primary count to 80. v1.3.3 adds `/video`, bringing the slash primary count to 81. v1.3.8 adds `/cognitive`, bringing the slash primary count to 82. v1.3.9 keeps the same primary count and adds `/docs` vector subcommands. v1.3.10 adds `/workflow`, bringing the slash primary count to 83. v1.3.11 adds `/trading`, bringing the slash primary count to 84 and exposing Trading Lab setup, Pine/TradingView, governed OpenBB, spec validation, backtest, paper, promotion, live-gate, dispatch, routes, and kill-switch controls. v1.4.0 adds `/draft`, bringing the slash primary count to 85 and exposing the FCDP drafting protocol, which runs out-of-process against the same binary's `draft` subcommand and streams back into the TUI. That v1.4.0 figure was understated: `/world` (the world-model inspector and promotion approval gate) also shipped in v1.4.0 and was never counted here, so the true v1.4.0 total was 86. v1.5.0 adds one primary, `/requirements` (requirement-to-code traceability with a proof ladder), bringing the count to 87. v1.9.3 adds four, bringing the count to 91: `/feedback` and `/fork-at` (#193 Phase C and #192), plus `/memory files` and `/context` gaining overlays. See [Overlays](#overlays) — most of the additions in v1.9.3 are not new commands but new *surfaces* on commands that already existed.
 
 ## Core & meta
 
@@ -18,7 +18,7 @@ Beyond the 87 primaries, archon-cli ships **68 built-in skills** (33 in `crates/
 | `/archon` | — | Generic CLI mirror: run any `archon <subcommand>` from inside the TUI. Use this to reach shell-only surfaces such as `archon world ...`, `archon self ...`, and `archon team ...` that have no dedicated slash primary |
 | `/clear` | `cls` | Clear conversation history |
 | `/exit` | `q` | Exit Archon (graceful shutdown) |
-| `/context` | — | Show current context window usage |
+| `/context` | — | Show current context window usage. Bare `/context` also opens the attribution overlay: which messages are filling the window, ranked biggest-first with each one's share |
 | `/status` | `info` | Session status (model, effort, token use) |
 | `/doctor` | — | Run diagnostics |
 | `/cost` | — | Session token cost breakdown |
@@ -57,7 +57,9 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 | `/resume` | `continue`, `open-session` | Resume a previous session |
 | `/tag` | — | Toggle a searchable tag on the current session |
 | `/rename` | — | Rename current session |
-| `/fork` | — | Fork the session into a new branch |
+| `/fork` | — | Fork the whole session into a new one. `/fork <name>` names it |
+| `/fork-at` | — | Fork the session *through an earlier message*, leaving the original untouched. Bare `/fork-at` lists the branch points and opens the picker; `/fork-at <n> [name]` does the fork, keeping messages `0..=n`. Not named `/branch`: that is already the git-branch skill |
+| `/feedback` | `rate` | Rate the last assistant message so the learning layer can read it: `/feedback good [note]` (`+`, `up`), `/feedback bad [note]` (`-`, `down`), `/feedback clear`. Bare `/feedback` reports the current rating. The rating goes to a sidecar relation, never into the message log — a model that could see its last answer was rated badly would start writing for the rating |
 | `/rewind` | — | Open message-selector overlay to rewind |
 | `/checkpoint` | — | Create or restore a session checkpoint |
 | `/session` | — | Show remote-session QR code + URL |
@@ -71,7 +73,7 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 | `/add-dir` | — | Add working directory for file access |
 | `/recall` | — | Search memories by keyword |
 | `/garden` | — | Run memory consolidation now, print report |
-| `/memory` | — | Store / recall / manage memories |
+| `/memory` | — | Store / recall / manage memories. `/memory files` is separate: it lists the `ARCHON.md` instruction hierarchy in force (global, ancestor, project), which is a different subsystem from the memory graph |
 | `/tasks` | `todo`, `ps`, `jobs` | List background tasks |
 
 ## Agents & pipelines
@@ -93,12 +95,12 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 
 | Command | Aliases | Description |
 |---|---|---|
-| `/theme` | — | Change UI theme |
+| `/theme` | — | Change UI theme. Bare `/theme` opens the picker |
 | `/color` | — | Change prompt bar accent color |
-| `/model` | `m`, `switch-model` | Show or switch the active model |
-| `/permissions` | — | Show current permission mode |
+| `/model` | `m`, `switch-model` | Show or switch the active model. Bare `/model` opens the picker |
+| `/permissions` | — | Show the permission mode and every configured rule. Bare `/permissions` opens a read-only browser — nothing at runtime can change these rules |
 | `/sandbox` | `sandbox-toggle` | Toggle sandbox restrictions (gates tool dispatch via SandboxBackend) |
-| `/config` | `settings`, `prefs` | Show / modify settings |
+| `/config` | `settings`, `prefs` | Show / modify settings. Bare `/config` opens the settings overlay; Enter on a row types the `/config <key> <value>` that applies it |
 | `/reload` | — | Force configuration reload |
 | `/vim` | — | Toggle vim-style modal input |
 | `/skills` | — | Browse and invoke available skills |
@@ -112,8 +114,8 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 | `/connect` | — | List configured MCP servers (`/connect <name>` shows connection hint) |
 | `/plugin` | — | Manage WASM plugins (`list`, `info`, `enable`, `disable`, `install`, `reload`) |
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
-| `/hooks` | — | List or manage hook registrations (list, enable, disable, reload) |
-| `/voice` | — | Show or toggle voice input configuration (status, on, off) |
+| `/hooks` | — | List or manage hook registrations (list, enable, disable, reload). Bare `/hooks` opens the overlay; Enter on a row types the `/hooks enable <id>` or `/hooks disable <id>` that writes `.archon/hooks.local.toml` |
+| `/voice` | — | Show or toggle voice input configuration (status, on, off). Bare `/voice` also opens the capture overlay: live microphone level, the measured peak against the VAD threshold, and the last transcription. See [voice input](../getting-started/voice.md) |
 | `/web` | — | Start the web dashboard **inside this session**: `/web`, `/web <port>` (default 8421), `/web status`, `/web stop`. Unlike `archon web`, which is a separate process, this one can report the agents this session spawned — `BACKGROUND_AGENTS` holds live `JoinHandle`s that do not cross a process boundary. The dashboard's chat tab is hidden in this mode because the TUI is already serving the conversation. Binds loopback only, and stops with the session. See [web workbench](../operations/web-workbench.md) |
 
 ## Authentication & providers (v0.1.40+)
@@ -186,12 +188,14 @@ These skills compose the PRD → spec → tasks → code arc. Each emits a promp
 
 ## Built-in skills (selected)
 
-68 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 35 in `expanded.rs`). Highlights:
+67 skills total (33 in `crates/archon-core/src/skills/builtin.rs`, 34 in `expanded.rs`). Highlights:
+
+> The `feedback` skill was removed in v1.9.3. It answered `/feedback <message>` with "Feedback recorded: …" and recorded nothing — no store, no file, no request. `/feedback` is now a primary handler that writes a rating against a message id in the session store.
 
 | Skill | Description |
 |---|---|
 | `/git-status` (alias `/gs`) | Show repo status |
-| `/branch` | Manage branches (create / switch) |
+| `/branch` | Manage **git** branches (`--create NAME`, `--switch NAME`). Unrelated to `/fork-at`, which forks the conversation |
 | `/pr` | Create a pull request via `gh` |
 | `/restore` | List, diff, or restore file checkpoints |
 | `/undo` | Undo last file modification |
@@ -202,7 +206,6 @@ These skills compose the PRD → spec → tasks → code arc. Each emits a promp
 | `/insights` | Session patterns, tool usage, error rates |
 | `/stats` | Daily usage, session history, model preferences |
 | `/security-review` | Analyze pending changes for vulnerabilities |
-| `/feedback` | Submit feedback |
 | `/schedule` | Create a scheduled task (delegates to `CronCreate`) |
 | `/remote-control` | Show remote control mode info |
 | `/btw` | Aside marker (tangent, don't change focus) |
@@ -234,6 +237,56 @@ Run these steps with the current conversation context:
 
 See [Skills reference](skills.md) for discovery paths and the full SKILL.md
 format.
+
+## Overlays
+
+Nine commands open a browsable overlay as well as printing their text. That is
+the whole of what v1.9.3 added to the slash surface: mostly not new commands
+but new *ways in* to commands that already worked.
+
+| Command | Overlay | Enter does |
+|---|---|---|
+| `/model` | Provider/model picker, filterable by typing | types `/model <id>` |
+| `/theme` | Theme list, cursor parked on the applied one | types `/theme <name>` |
+| `/config` | Every setting, with read-only ones marked | types `/config <key> <value>` |
+| `/hooks` | Registered hooks: event, command, source, enabled | types `/hooks enable\|disable <id>` |
+| `/permissions` | Mode and every rule, grouped by effect | nothing — read-only |
+| `/memory files` | The `ARCHON.md` hierarchy in force | nothing — read-only |
+| `/fork-at` | Branch points, one row per message | types `/fork-at <n>` |
+| `/context` | Ranked token attribution per message | nothing — read-only |
+| `/voice` | Live microphone level and last transcription | closes |
+
+Three rules hold across all of them, and they are worth knowing because they
+are what make the overlays safe to add to commands that scripts depend on.
+
+**The bare form opens the overlay; every argument form is unchanged.** `/model`
+opens the picker, `/model sonnet` behaves exactly as it always did. Nothing
+that worked before behaves differently now, and `archon -p` output is
+byte-identical because a headless run has no TUI to deliver the event to.
+
+**Enter types a command, it does not apply a change.** The overlay puts
+`/config tools.cargo.incremental true` in the prompt and closes; you press
+Enter again to run it. That is deliberate: the slash command is the one place
+that validates the value, refuses a read-only key, and persists — an overlay
+that wrote the value itself would be a second path with its own bugs, and the
+first version of these screens was exactly that. Several of them shipped with
+a `toggle_selected` method that mutated a copy nothing downstream read, so the
+screen appeared to change state while nothing happened.
+
+**Read-only means read-only.** `/permissions`, `/memory files` and `/context`
+offer no action key at all, because no runtime setter exists behind them.
+Permission rules are read from `[permissions]` at session start and nothing can
+change them mid-session; offering an Enter that did nothing would be worse than
+offering none.
+
+Keys are the same everywhere: `Up`/`Down` and `PageUp`/`PageDown` to move,
+`Enter` to act, `Esc` to close. Every overlay names its own keys in its title
+bar. Unhandled keys are swallowed rather than falling through to the prompt
+behind the overlay.
+
+`Ctrl+K` opens the background-tasks overlay, where `x` cancels a running task.
+It is the one overlay with no slash command.
+
 
 ## See also
 
