@@ -42,8 +42,23 @@ impl AnthropicClient {
     ///   2. `api.base_url` in config.toml
     ///   3. `None` → hardcoded default
     pub fn new(auth: AuthProvider, identity: IdentityProvider, api_url: Option<String>) -> Self {
+        // `.timeout()` bounds the WHOLE request, streaming response body
+        // included, so a 300s cap silently killed every generation that ran
+        // longer than five minutes: reqwest drops the body stream and reports
+        // `error decoding response body`, which reads as a network fault even
+        // though the provider is healthy and still sending. Observed live —
+        // litellm logged 200 OK with zero errors while archon failed stage
+        // after stage on hour-long reasoning turns, each retry dying the same
+        // way.
+        //
+        // `.read_timeout()` is the streaming-safe equivalent: it bounds the
+        // gap BETWEEN reads rather than the total duration, so a slow but
+        // live stream survives while a genuinely dead connection is still
+        // cut. Kept at 300s, which is the stall threshold this was always
+        // meant to enforce, and stays under the higher-level
+        // `stream_idle_timeout_secs` guard.
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(300))
+            .read_timeout(Duration::from_secs(300))
             .no_proxy()
             .build()
             .expect("reqwest client should build");

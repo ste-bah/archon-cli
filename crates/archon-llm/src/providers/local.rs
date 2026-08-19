@@ -44,8 +44,12 @@ pub struct LocalProvider {
 impl LocalProvider {
     /// Create a new LocalProvider.
     pub fn new(base_url: String, model: String, timeout_secs: u64, pull_if_missing: bool) -> Self {
+        // Streaming-safe: `.timeout()` would bound the whole request including
+        // the response body, killing any generation longer than the cap with a
+        // misleading `error decoding response body` (see anthropic.rs). Bound
+        // the gap between reads instead, so a slow-but-live stream survives.
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
+            .read_timeout(Duration::from_secs(timeout_secs))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
