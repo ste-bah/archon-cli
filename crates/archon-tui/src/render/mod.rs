@@ -95,6 +95,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: settings (#192, /config with no arguments)
     body::draw_settings_screen(frame, app);
 
+    // Overlays: hooks (#192, /hooks with no subcommand)
+    body::draw_hooks_menu(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

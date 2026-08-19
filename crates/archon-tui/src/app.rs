@@ -168,6 +168,8 @@ pub struct App {
     pub model_picker: Option<crate::screens::model_picker::ModelPicker>,
     /// `/theme` picker overlay (#192).
     pub theme_screen: Option<crate::screens::theme_screen::ThemeScreen>,
+    /// `/hooks` overlay (#192).
+    pub hooks_menu: Option<crate::screens::hooks_config_menu::HooksMenu>,
     /// `/config` settings overlay (#192).
     pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
@@ -226,6 +228,7 @@ impl Default for App {
             skills_menu: None,
             model_picker: None,
             theme_screen: None,
+            hooks_menu: None,
             settings_screen: None,
             file_picker: None,
             search_results: None,
@@ -262,6 +265,7 @@ impl App {
             && self.skills_menu.is_none()
             && self.model_picker.is_none()
             && self.theme_screen.is_none()
+            && self.hooks_menu.is_none()
             && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()

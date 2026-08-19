@@ -403,6 +403,11 @@ pub enum TuiEvent {
     /// dispatch site: the key registry lives in `archon-tools`, which the TUI
     /// depends on only as a dev-dependency.
     ShowSettings(Vec<(String, String, bool, bool)>),
+    /// Open the hooks overlay (#192, `/hooks` with no subcommand).
+    ///
+    /// Each entry is `(id, event, command, source, enabled)`, taken from the
+    /// registry summaries the text listing already renders.
+    ShowHooks(Vec<(String, String, String, String, bool)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -490,6 +495,7 @@ impl TuiEvent {
             Self::ShowModelPicker(_) => "ShowModelPicker",
             Self::ShowThemePicker(_) => "ShowThemePicker",
             Self::ShowSettings(_) => "ShowSettings",
+            Self::ShowHooks(_) => "ShowHooks",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

@@ -165,6 +165,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ShowSettings(entries) => {
             super::picker_events::open_settings(app, entries);
         }
+        TuiEvent::ShowHooks(entries) => {
+            super::picker_events::open_hooks(app, entries);
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input
             // priority branch (event_loop/input.rs) routes Up/Down,

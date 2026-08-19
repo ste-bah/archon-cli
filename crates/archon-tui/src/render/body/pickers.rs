@@ -161,6 +161,15 @@ pub fn draw_settings_screen(frame: &mut Frame, app: &App) {
     screen.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the hooks overlay (#192, `/hooks` with no subcommand).
+pub fn draw_hooks_menu(frame: &mut Frame, app: &App) {
+    let menu = match &app.hooks_menu {
+        Some(m) => m,
+        None => return,
+    };
+    menu.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

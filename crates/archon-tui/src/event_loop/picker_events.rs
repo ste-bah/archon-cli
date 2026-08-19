@@ -86,6 +86,26 @@ pub(crate) fn open_settings(app: &mut App, entries: Vec<(String, String, bool, b
     app.settings_screen = Some(screen);
 }
 
+/// Populate and open the hooks overlay (`/hooks` with no subcommand).
+pub(crate) fn open_hooks(app: &mut App, entries: Vec<(String, String, String, String, bool)>) {
+    let mut menu = crate::screens::hooks_config_menu::HooksMenu::new();
+    menu.set_hooks(
+        entries
+            .into_iter()
+            .map(|(id, event, command, source, enabled)| {
+                crate::screens::hooks_config_menu::HookRow {
+                    id,
+                    event,
+                    command,
+                    source,
+                    enabled,
+                }
+            })
+            .collect(),
+    );
+    app.hooks_menu = Some(menu);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

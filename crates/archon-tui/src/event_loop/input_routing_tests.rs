@@ -268,6 +268,99 @@ async fn down_reaches_the_tasks_overlay() {
     );
 }
 
+fn hooks_with_two() -> crate::screens::hooks_config_menu::HooksMenu {
+    let mut menu = crate::screens::hooks_config_menu::HooksMenu::new();
+    menu.set_hooks(vec![
+        crate::screens::hooks_config_menu::HookRow {
+            id: "abc123".into(),
+            event: "PreToolUse".into(),
+            command: "bash scripts/self-check-file.sh Edit".into(),
+            source: "project".into(),
+            enabled: true,
+        },
+        crate::screens::hooks_config_menu::HookRow {
+            id: "def456".into(),
+            event: "PostToolUse".into(),
+            command: "bash scripts/self-check-file.sh Write".into(),
+            source: "user".into(),
+            enabled: false,
+        },
+    ]);
+    menu
+}
+
+#[tokio::test]
+async fn down_reaches_the_hooks_overlay() {
+    let mut app = App::default();
+    app.hooks_menu = Some(hooks_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert_eq!(
+        app.hooks_menu
+            .as_ref()
+            .expect("still open")
+            .selected_index(),
+        1,
+        "Down did not reach the hooks overlay"
+    );
+}
+
+/// A disabled hook offers `enable`, an enabled one offers `disable`, and
+/// either way it goes through the command that writes the override file.
+#[tokio::test]
+async fn enter_injects_the_opposite_hooks_command() {
+    let mut app = App::default();
+    app.hooks_menu = Some(hooks_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Enter),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+    assert_eq!(app.input.text(), "/hooks disable abc123");
+
+    app.input.set_text("");
+    app.hooks_menu = Some(hooks_with_two());
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Enter),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+    assert_eq!(app.input.text(), "/hooks enable def456");
+}
+
 fn settings_with_two() -> crate::screens::settings_screen::SettingsScreen {
     let mut screen = crate::screens::settings_screen::SettingsScreen::new();
     screen.set_fields(vec![

@@ -167,6 +167,49 @@ pub(crate) fn handle_settings_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the hooks overlay is open.
+///
+/// Enter injects `/hooks enable <id>` or `/hooks disable <id>`. That is the
+/// command that writes `.archon/hooks.local.toml`; setting the flag here
+/// would change the list and nothing else.
+pub(crate) fn handle_hooks_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.hooks_menu.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut menu) = app.hooks_menu {
+                menu.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut menu) = app.hooks_menu {
+                menu.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut menu) = app.hooks_menu {
+                menu.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut menu) = app.hooks_menu {
+                menu.page_down();
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(menu) = app.hooks_menu.take()
+                && let Some(hook) = menu.selected()
+            {
+                app.input.set_text(&hook.command());
+            }
+        }
+        KeyCode::Esc => app.hooks_menu = None,
+        _ => {}
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

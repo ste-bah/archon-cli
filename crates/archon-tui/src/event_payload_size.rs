@@ -76,6 +76,18 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     .map(|(key, value, _, _)| string_bytes(key) + string_bytes(value))
                     .sum::<usize>()
         }
+        TuiEvent::ShowHooks(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(id, event, command, source, _)| {
+                        string_bytes(id)
+                            + string_bytes(event)
+                            + string_bytes(command)
+                            + string_bytes(source)
+                    })
+                    .sum::<usize>()
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             path_bytes(root) + file_entries_bytes(entries)
         }
