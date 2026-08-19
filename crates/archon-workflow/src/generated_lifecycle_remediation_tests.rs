@@ -69,3 +69,79 @@ fn followup_remediation_preserves_failure_context_from_source() {
         serde_json::to_string_pretty(&normalized).expect("json")
     );
 }
+
+/// The live loop: a verification-triage inventory carries the ROUTED shape
+/// (`implementation_failures` / `retry_items`) and never mints `items`. Keying
+/// readiness on `items` alone read it as "not ready", so the router regenerated
+/// the inventory, triage returned the same shape, and the run cycled until the
+/// repair cap — re-deriving the same actionable failure every pass and running
+/// no write wave. Observed on wf-b40de9ee: five cycles, three hours, one
+/// TASK-TDL-030 failure that already had target files and a required fix.
+#[test]
+fn a_routed_triage_inventory_is_ready_without_an_items_array() {
+    let routed = serde_json::json!({
+        "implementation_failures": [{
+            "item_id": "remediation-tdl030-ac08-allowlist-removal",
+            "canonical_task_ids": ["TASK-TDL-030"],
+            "target_files": ["crates/archon-trading/src/data_lake/contracts.rs"],
+            "required_fix": "Remove legacy free function; wire ProviderDispatcher."
+        }],
+        "retry_items": [],
+        "terminal_blockers": []
+    });
+
+    assert!(
+        super::remediation_inventory_ready(&routed),
+        "a routed inventory with actionable failures must be ready"
+    );
+}
+
+#[test]
+fn retry_items_alone_are_also_work() {
+    let routed = serde_json::json!({
+        "implementation_failures": [],
+        "retry_items": [{"item_id": "retry-1", "canonical_task_ids": ["TASK-A"]}]
+    });
+
+    assert!(super::remediation_inventory_ready(&routed));
+}
+
+/// The classic wave-shaped inventory keeps working exactly as before.
+#[test]
+fn an_items_shaped_inventory_is_still_ready() {
+    let wave = serde_json::json!({ "items": [{"item_id": "r1"}] });
+
+    assert!(super::remediation_inventory_ready(&wave));
+}
+
+/// Nothing to do is still not ready — this must not become "always ready".
+#[test]
+fn an_empty_inventory_is_not_ready() {
+    for empty in [
+        serde_json::json!({}),
+        serde_json::json!({"items": []}),
+        serde_json::json!({"implementation_failures": [], "retry_items": []}),
+    ] {
+        assert!(
+            !super::remediation_inventory_ready(&empty),
+            "empty inventory must not be ready: {empty}"
+        );
+    }
+}
+
+/// Unresolved issues still gate BOTH shapes.
+#[test]
+fn unresolved_issues_block_either_shape() {
+    for blocked in [
+        serde_json::json!({"items": [{"item_id": "r1"}], "unresolved_issues": ["x"]}),
+        serde_json::json!({
+            "implementation_failures": [{"item_id": "r1"}],
+            "unresolved_issues": ["x"]
+        }),
+    ] {
+        assert!(
+            !super::remediation_inventory_ready(&blocked),
+            "unresolved issues must block: {blocked}"
+        );
+    }
+}

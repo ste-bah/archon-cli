@@ -215,9 +215,34 @@ fn remediation_item_with_source_ownership(
 }
 
 /// JS `remediationInventoryReady`.
+///
+/// Readiness means "there is remediation work to run", and that work arrives in
+/// two shapes. A remediation inventory built for a wave carries `items`. A
+/// verification-triage inventory carries the ROUTED shape the triage prompt asks
+/// for — `implementation_failures` / `retry_items` — and never mints an `items`
+/// array at all.
+///
+/// Keying readiness on `items` alone therefore reads a fully-populated routed
+/// inventory as "not ready", and `remediation_inventory_route` answers that with
+/// `RegenerateInventory`. Regeneration re-runs the same triage, which returns the
+/// same routed shape, which is again not ready: the run cycles
+/// remediation-inventory -> triage -> remediation-inventory until the repair cap
+/// blocks it, re-deriving identical actionable failures every pass and executing
+/// none of them.
+///
+/// Observed live on wf-b40de9ee: five cycles over three hours on a single
+/// TASK-TDL-030 failure that already carried its target files and required fix,
+/// with no write wave ever scheduled. The comment in `verify_remediation_a`
+/// predicted this loop but its guard only covers the case where triage
+/// classified NOTHING; a triage that classified real failures fell straight
+/// through into it.
+///
+/// Accept either shape as work. `unresolved_issues` still gates both.
 pub fn remediation_inventory_ready(inventory: &Value) -> bool {
-    !array(inventory.get("items")).is_empty()
-        && array(inventory.get("unresolved_issues")).is_empty()
+    let has_work = !array(inventory.get("items")).is_empty()
+        || !array(inventory.get("implementation_failures")).is_empty()
+        || !array(inventory.get("retry_items")).is_empty();
+    has_work && array(inventory.get("unresolved_issues")).is_empty()
 }
 
 /// JS `remediationTaskIdSet`.
