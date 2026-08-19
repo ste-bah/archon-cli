@@ -324,6 +324,55 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
+            // Model picker (#192): Up/Down move, printable characters filter,
+            // Backspace edits the filter, Enter injects `/model <id>` so the
+            // change still runs through the handler that validates it rather
+            // than being applied from the overlay, Esc closes.
+            if app.model_picker.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut picker) = app.model_picker {
+                            picker.move_up();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut picker) = app.model_picker {
+                            picker.move_down();
+                        }
+                        return;
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(ref mut picker) = app.model_picker {
+                            let mut query = picker.query().to_string();
+                            query.push(c);
+                            picker.set_query(&query);
+                        }
+                        return;
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(ref mut picker) = app.model_picker {
+                            let mut query = picker.query().to_string();
+                            query.pop();
+                            picker.set_query(&query);
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(picker) = app.model_picker.take()
+                            && let Some(entry) = picker.selected()
+                        {
+                            app.input.set_text(&format!("/model {}", entry.model_id));
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.model_picker = None;
+                        return;
+                    }
+                    _ => return, // swallow the rest, or it types behind the overlay
+                }
+            }
             // Tasks overlay (#189 Phase 9): Up/Down move, `x`/Delete cancel
             // through `TaskStore`, `r` refreshes, Esc closes.
             if super::task_overlay_input::handle_task_overlay_key(app, key) {

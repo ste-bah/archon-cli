@@ -157,6 +157,9 @@ pub struct App {
     pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
     /// TASK-TUI-627: active skills-menu modal (shown by /skills).
     pub skills_menu: Option<crate::screens::skills_menu::SkillsMenu>,
+    /// `/model` picker overlay (#192). Opened alongside the text summary, so
+    /// print mode and scrollback keep the reading they always had.
+    pub model_picker: Option<crate::screens::model_picker::ModelPicker>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
@@ -210,6 +213,7 @@ impl Default for App {
             mcp_manager: None,
             message_selector: None,
             skills_menu: None,
+            model_picker: None,
             file_picker: None,
             search_results: None,
             task_overlay: None,
@@ -243,6 +247,7 @@ impl App {
             && self.message_selector.is_none()
             && self.thinking_archive.is_none()
             && self.skills_menu.is_none()
+            && self.model_picker.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()
             && self.task_overlay.is_none()

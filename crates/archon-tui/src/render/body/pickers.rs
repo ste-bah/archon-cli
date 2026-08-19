@@ -134,6 +134,15 @@ pub fn draw_skills_menu(frame: &mut Frame, app: &App) {
     menu.render(frame, area, &app.theme);
 }
 
+/// Render the model-picker overlay (#192, `/model` with no arguments).
+pub fn draw_model_picker(frame: &mut Frame, app: &App) {
+    let picker = match &app.model_picker {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

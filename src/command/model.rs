@@ -91,6 +91,44 @@ fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
     }
 }
 
+/// Rows for the `/model` picker overlay (#192).
+///
+/// Built from the same shortcut tables `snapshot_shortcuts` prints, so the
+/// overlay and the text summary cannot disagree about what is selectable. The
+/// provider is chosen the same way `resolve_model_for_snapshot` chooses it —
+/// by what the current model looks like — because that is what the subsequent
+/// `/model <id>` will be resolved against.
+fn snapshot_picker_entries(snap: &ModelSnapshot) -> Vec<(String, String, String)> {
+    if looks_like_codex_model(&snap.current_model) {
+        CODEX_SHORTCUTS
+            .iter()
+            .map(|shortcut| {
+                (
+                    "openai-codex".to_string(),
+                    (*shortcut).to_string(),
+                    (*shortcut).to_string(),
+                )
+            })
+            .collect()
+    } else if looks_like_anthropic_model(&snap.current_model) {
+        archon_tools::validation::KNOWN_SHORTCUTS
+            .iter()
+            .map(|(shortcut, model)| {
+                (
+                    "anthropic".to_string(),
+                    (*model).to_string(),
+                    (*shortcut).to_string(),
+                )
+            })
+            .collect()
+    } else {
+        // A provider-model current selection has no enumerable shortcut table,
+        // and inventing one would list models the resolver would then reject.
+        // The empty picker says so rather than showing a wrong menu.
+        Vec::new()
+    }
+}
+
 fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<String, String> {
     if looks_like_codex_model(&snap.current_model) {
         resolve_codex_model_name(input, &snap.codex_models)
@@ -275,6 +313,13 @@ impl CommandHandler for ModelHandler {
                 shortcuts = snapshot_shortcuts(snap),
             );
             ctx.emit(TuiEvent::TextDelta(msg));
+
+            // #192: also open the picker. Emitted *after* the text, and as a
+            // separate event, so nothing regresses for `archon -p` or for
+            // scrollback — a print-mode run drops the event and keeps exactly
+            // the output it had before. The overlay is additive, not a
+            // replacement, which is why `/model <name>` below is untouched.
+            ctx.emit(TuiEvent::ShowModelPicker(snapshot_picker_entries(snap)));
             return Ok(());
         }
 

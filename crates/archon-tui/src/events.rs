@@ -388,6 +388,13 @@ pub enum TuiEvent {
     ShowMessageSelector(Vec<MessageSummary>),
     /// Open the skills-menu overlay with pre-computed rows.
     ShowSkillsMenu(Vec<SkillEntry>),
+    /// Open the model-picker overlay (#192).
+    ///
+    /// Each entry is `(provider_id, model_id, label)`. Resolved at the dispatch
+    /// site rather than in the TUI: the handler is sync and the model config
+    /// lives behind an async lock, which is the same reason `ModelSnapshot`
+    /// exists.
+    ShowModelPicker(Vec<(String, String, String)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -472,6 +479,7 @@ impl TuiEvent {
             Self::UpdateMcpManager(_) => "UpdateMcpManager",
             Self::ShowMessageSelector(_) => "ShowMessageSelector",
             Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
+            Self::ShowModelPicker(_) => "ShowModelPicker",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

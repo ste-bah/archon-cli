@@ -161,6 +161,28 @@ pub(super) async fn handle_tui_event(
             // it. Enter injects `/{skill-name} ` into the input buffer.
             app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
         }
+        TuiEvent::ShowModelPicker(entries) => {
+            // #192: `/model` with no arguments opens this alongside its text
+            // summary. Keys are routed by the priority branch in
+            // event_loop/input.rs; Enter injects `/model <id>` so the change
+            // still goes through the one handler that validates it.
+            let mut picker = crate::screens::model_picker::ModelPicker::new();
+            picker.set_providers(
+                entries
+                    .into_iter()
+                    .map(
+                        |(provider_id, model_id, label)| {
+                            crate::screens::model_picker::ProviderEntry {
+                                provider_id,
+                                model_id,
+                                label,
+                            }
+                        },
+                    )
+                    .collect(),
+            );
+            app.model_picker = Some(picker);
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input
             // priority branch (event_loop/input.rs) routes Up/Down,

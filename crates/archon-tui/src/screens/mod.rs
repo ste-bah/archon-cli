@@ -24,6 +24,7 @@ pub(crate) mod file_picker;
 pub(crate) mod gametheory;
 pub(crate) mod learning;
 pub(crate) mod message_selector;
+pub(crate) mod model_picker;
 pub(crate) mod search_results;
 pub(crate) mod skills_menu;
 pub(crate) mod task_overlay;

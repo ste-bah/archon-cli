@@ -86,6 +86,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: skills menu (TASK-TUI-627 /skills)
     body::draw_skills_menu(frame, app);
 
+    // Overlays: model picker (#192, /model with no arguments)
+    body::draw_model_picker(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 
