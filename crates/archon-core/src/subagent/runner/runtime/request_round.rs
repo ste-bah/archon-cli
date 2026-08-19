@@ -19,8 +19,9 @@ pub(super) struct PreparedRequest {
 /// Cross-round pressure bookkeeping owned by the run loop.
 #[derive(Default)]
 pub(super) struct PressureState {
-    /// One proactive request-pressure compaction attempt per run.
-    pub proactive_attempted: bool,
+    /// Guards retry of a FAILED proactive compaction — see
+    /// `request_round_pressure::proactive_rearmed`. `None` means armed.
+    pub proactive_retry_watermark: Option<u64>,
     /// Serialized size of the request's fixed parts, measured on the first
     /// round and reused (#171 part 7).
     ///
@@ -175,7 +176,7 @@ async fn maybe_compact_for_context_window(
         consecutive_failures = auto_compact.consecutive_failures,
         "subagent auto-compaction attempt started"
     );
-    compact_proactively(
+    let _ = super::request_round_pressure::compact_proactively(
         runner,
         messages,
         auto_compact,
@@ -311,13 +312,41 @@ async fn maybe_compact_for_request_pressure(
         .context
         .rate_limit_pressure_body_bytes
         .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
-    if pressure.proactive_attempted
-        || !(token_pressure || body_pressure)
-        || !auto_compact.should_attempt()
+    if !(token_pressure || body_pressure) {
+        return;
+    }
+    // Arithmetic before inference. `[prune]` may reclaim enough on its own,
+    // and unlike the summariser it has no context window of its own to blow.
+    if super::request_round_pressure::prune_history_mechanically(messages) > 0 {
+        *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
+            envelope_bytes,
+            messages.estimated_tokens(),
+        );
+        let after = current_trigger_tokens(messages, *last_known_context_tokens);
+        let still_over = runner
+            .agent_config
+            .context
+            .rate_limit_pressure_tokens
+            .is_some_and(|threshold| after >= threshold)
+            || runner
+                .agent_config
+                .context
+                .rate_limit_pressure_body_bytes
+                .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
+        if !still_over {
+            // Under threshold again without spending a request. The watermark
+            // is deliberately untouched: nothing was attempted, so nothing
+            // should be held back later.
+            return;
+        }
+    }
+    if !super::request_round_pressure::proactive_rearmed(
+        pressure.proactive_retry_watermark,
+        trigger_tokens,
+    ) || !auto_compact.should_attempt()
     {
         return;
     }
-    pressure.proactive_attempted = true;
     let reason = pressure_reason(token_pressure, body_pressure);
     tracing::info!(
         compaction.reason = reason,
@@ -335,7 +364,7 @@ async fn maybe_compact_for_request_pressure(
         consecutive_failures = auto_compact.consecutive_failures,
         "subagent request pressure threshold reached; attempting proactive compaction"
     );
-    compact_proactively(
+    let compacted = super::request_round_pressure::compact_proactively(
         runner,
         messages,
         auto_compact,
@@ -345,6 +374,16 @@ async fn maybe_compact_for_request_pressure(
         "subagent request-pressure compaction failed; continuing turn",
     )
     .await;
+    // Success re-arms unconditionally: the compacted history is the new
+    // baseline and the pressure threshold alone decides when to act again.
+    // Failure holds the guard at the size that failed, so the next attempt
+    // waits for genuinely new material rather than re-summarising the same
+    // bytes every turn.
+    pressure.proactive_retry_watermark = if compacted {
+        None
+    } else {
+        Some(current_trigger_tokens(messages, *last_known_context_tokens))
+    };
     // The compacted history is projected once, when the request is opened.
     // Rebuilding the message array here as well was the second of the two
     // full-history passes #171 part 2 set out to remove.
@@ -367,80 +406,6 @@ fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {
         (true, false) => "request_pressure_tokens",
         (false, true) => "request_pressure_bytes",
         (false, false) => unreachable!(),
-    }
-}
-
-async fn compact_proactively(
-    runner: &SubagentRunner,
-    messages: &mut MessageHistory,
-    auto_compact: &mut crate::agent::AutoCompactState,
-    last_known_context_tokens: &mut u64,
-    telemetry: &crate::agent::autocompact::CompactionTelemetry,
-    action: crate::agent::CompactAction,
-    failure_message: &str,
-) {
-    auto_compact.compact_in_flight = true;
-    match crate::agent::autocompact::compact_json_messages_with_provider(
-        runner.provider.as_ref(),
-        &runner.model,
-        messages.as_slice(),
-        action,
-        false,
-        runner.agent_config.runtime_attribution_extra(
-            "compaction",
-            "subagent_auto_compaction",
-            None,
-            None,
-            None,
-        ),
-    )
-    .await
-    {
-        Ok((
-            crate::agent::autocompact::CompactionOutcome::Compacted {
-                after_estimated_tokens,
-                ..
-            },
-            compacted,
-        )) => {
-            messages.replace(compacted);
-            *last_known_context_tokens = 0;
-            auto_compact.on_success(after_estimated_tokens);
-        }
-        Ok((crate::agent::autocompact::CompactionOutcome::Skipped { .. }, _)) => {
-            auto_compact.on_cancel();
-        }
-        Err(crate::agent::autocompact::CompactionError::Cancelled) => {
-            auto_compact.on_cancel();
-            tracing::debug!(
-                compaction.outcome = "cancelled",
-                provider_family = telemetry.provider_family,
-                wire_shape = telemetry.wire_shape,
-                native_context_window = telemetry.native_context_window,
-                runtime_context_budget = telemetry.runtime_context_budget,
-                context_source = telemetry.context_source,
-                compaction_backend = telemetry.compaction_backend,
-                actor = %runner.activity_actor_id.as_deref().unwrap_or("subagent"),
-                "proactive subagent compaction cancelled"
-            );
-        }
-        Err(error) => {
-            auto_compact.on_failure(&error);
-            tracing::warn!(
-                compaction.outcome = "auto_failed",
-                provider_family = telemetry.provider_family,
-                wire_shape = telemetry.wire_shape,
-                native_context_window = telemetry.native_context_window,
-                runtime_context_budget = telemetry.runtime_context_budget,
-                context_source = telemetry.context_source,
-                compaction_backend = telemetry.compaction_backend,
-                actor = %runner.activity_actor_id.as_deref().unwrap_or("subagent"),
-                consecutive_failures = auto_compact.consecutive_failures,
-                breaker_tripped = auto_compact.disabled,
-                error = %error,
-                "{failure_message}",
-            );
-        }
     }
 }
 
