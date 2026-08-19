@@ -62,6 +62,7 @@ mod process_message_steps;
 mod process_message_support;
 mod prompt_ordering;
 pub mod prune;
+pub(crate) mod tool_block_repair;
 mod prune_agent;
 pub(crate) mod request_cache;
 mod runtime_attribution;

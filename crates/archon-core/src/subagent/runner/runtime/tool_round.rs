@@ -156,12 +156,56 @@ fn replay_tool_input(tool: &PreparedTool) -> serde_json::Value {
     }
 }
 
+/// Reattach the halves of a `tool_use` block a proxy split in two.
+///
+/// See `crate::agent::tool_block_repair` for the malformation, the three gates
+/// that keep it from touching a healthy call, and why an unnamed `tool_use`
+/// block is not something a conforming producer emits.
+fn repair_split_tool_blocks(
+    _runner: &SubagentRunner,
+    pending_tools: &[PendingTool],
+) -> Vec<PendingTool> {
+    // Read at use time rather than held on `AgentConfig`, which is constructed
+    // in too many places to thread a new field through for a decision taken
+    // once per turn. Same approach as prune and spill.
+    let enabled = crate::config::load_config()
+        .map(|loaded| loaded.api.repair_split_tool_blocks)
+        .unwrap_or(true);
+    if !enabled {
+        return pending_tools.to_vec();
+    }
+    let names: Vec<&str> = pending_tools.iter().map(|tool| tool.name.as_str()).collect();
+    let jsons: Vec<&str> = pending_tools
+        .iter()
+        .map(|tool| tool.input_json.as_str())
+        .collect();
+    let plan = crate::agent::tool_block_repair::plan_split_tool_repairs(&names, &jsons);
+    if plan.is_empty() {
+        return pending_tools.to_vec();
+    }
+    let mut repaired = pending_tools.to_vec();
+    let mut jsons: Vec<String> = repaired
+        .iter()
+        .map(|tool| tool.input_json.clone())
+        .collect();
+    let drop_positions =
+        crate::agent::tool_block_repair::apply_split_tool_repairs(&mut jsons, &plan, &names);
+    for (tool, json) in repaired.iter_mut().zip(jsons) {
+        tool.input_json = json;
+    }
+    for position in drop_positions {
+        repaired.remove(position);
+    }
+    repaired
+}
+
 fn prepare_tools_for_execution(
     runner: &SubagentRunner,
     pending_tools: &[PendingTool],
 ) -> Vec<PreparedTool> {
+    let pending_tools = repair_split_tool_blocks(runner, pending_tools);
     let mut prepared = Vec::with_capacity(pending_tools.len());
-    for tool in pending_tools {
+    for tool in &pending_tools {
         let input = crate::agent::tool_input_json::parse_pending_tool_input(
             &tool.name,
             &tool.id,

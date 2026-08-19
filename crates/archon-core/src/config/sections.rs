@@ -16,6 +16,15 @@ pub struct ApiConfig {
     ///   2. This field in config.toml
     ///   3. Hardcoded default: `https://api.anthropic.com/v1/messages`
     pub base_url: Option<String>,
+    /// Repair `tool_use` content blocks that a proxy split across a named block
+    /// and an unnamed continuation.
+    ///
+    /// Defaults ON. When it is not needed the pass never runs — a conforming
+    /// stream has no unnamed `tool_use` block — so leaving it on costs nothing,
+    /// while leaving it off on a proxy that splits blocks kills every agent turn
+    /// that issues parallel tool calls. Switch it off to get strict Anthropic
+    /// spec behaviour. See `agent::tool_block_repair`.
+    pub repair_split_tool_blocks: bool,
 }
 
 impl Default for ApiConfig {
@@ -26,6 +35,7 @@ impl Default for ApiConfig {
             default_effort: "medium".into(),
             max_retries: 3,
             base_url: None,
+            repair_split_tool_blocks: true,
         }
     }
 }

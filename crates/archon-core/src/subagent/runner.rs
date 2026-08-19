@@ -69,7 +69,7 @@ pub struct SubagentRunner {
 }
 
 /// A single pending tool call collected from the stream.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PendingTool {
     id: String,
     name: String,
