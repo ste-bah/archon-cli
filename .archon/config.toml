@@ -1470,3 +1470,35 @@ proposal_stale_days = 30
 #   allow_corpus_open_paths = false       # filesystem-open actions require this plus allow_mutating_actions
 #   allow_web_terminal = false            # browser terminal pane; loopback-only and NOT implied by any other gate
 #   allow_document_deletion = false       # delete button on documents; NOT implied by allow_file_uploads
+
+# ---------------------------------------------------------------------------
+# Filesystem write policy (#193)
+# ---------------------------------------------------------------------------
+#
+# Edit re-reads a file immediately before writing it, so the bytes it replaces
+# are current. The risk is upstream of that: old_string was chosen from a view
+# of the file that may be arbitrarily old, and if anything changed the file
+# since -- another agent in a parallel session, a git checkout, a formatter,
+# you in your editor -- the match can land somewhere that no longer means what
+# the model believed, and the edit succeeds silently.
+#
+# Archon makes that likelier than most: execute-plan runs a fresh subagent per
+# task, and several sessions routinely share one tree.
+
+[filesystem]
+
+# What to do when a write is not backed by a read of the same bytes.
+#
+#   block  refuse it and say why, naming the file (default)
+#   warn   allow it, and log the reason
+#   off    do nothing -- restores the behaviour before this policy existed
+#
+# Read, Grep and NotebookRead record what they showed; Edit, Write and
+# NotebookEdit are checked against it. Bash is not checked: a shell command can
+# write anywhere and names no path, so demanding a prior read of something it
+# never mentions would refuse work it cannot describe.
+#
+# Observations are per agent, not per session -- a parent's read is not
+# evidence for a subagent that never opened the file -- and are discarded when
+# the session ends rather than persisted.
+read_before_edit = "block"

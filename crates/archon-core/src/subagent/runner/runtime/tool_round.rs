@@ -211,12 +211,30 @@ async fn execute_prepared_tools(
             let registry = Arc::clone(&registry);
             let mut ctx = runner.tool_context.with_tool_run_attempt(tool_use_id, 0);
             ctx.cancel_parent = Some(round_cancel.child_token());
+            // #193 Phase A. The parent agent's loop is not the only one that
+            // runs tools; a policy only it consulted would leave a hole exactly
+            // where Archon runs the most agents in parallel.
+            let filesystem = runner.agent_config.filesystem;
             async move {
                 let input = match input {
                     Ok(input) => input,
                     Err(err) => return ToolResult::error(err),
                 };
-                registry.dispatch(&name, input, &ctx).await
+                let observer = crate::agent::tool_preflight_freshness::observer_for(&ctx);
+                if let Some(reason) = crate::agent::tool_preflight_freshness::refusal_for(
+                    filesystem, &observer, &name, &input,
+                ) {
+                    return ToolResult::error(reason);
+                }
+                let result = registry.dispatch(&name, input.clone(), &ctx).await;
+                crate::agent::tool_preflight_freshness::record(
+                    filesystem,
+                    &observer,
+                    &name,
+                    &input,
+                    !result.is_error,
+                );
+                result
             }
         })
         .collect();

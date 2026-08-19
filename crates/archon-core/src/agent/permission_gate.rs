@@ -211,6 +211,12 @@ mod tests {
         let config = AgentConfig {
             permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
             sandbox: Some(sandbox),
+            // The sandbox check is the subject here. These fixtures write to
+            // paths nothing has read, which read_before_edit refuses by design
+            // (#193 Phase A).
+            filesystem: crate::config::FilesystemConfig {
+                read_before_edit: crate::config::ReadBeforeEdit::Off,
+            },
             ..AgentConfig::default()
         };
         Agent::new(

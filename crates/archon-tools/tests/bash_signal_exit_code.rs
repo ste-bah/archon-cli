@@ -26,10 +26,7 @@ async fn a_process_killed_by_a_signal_reports_128_plus_the_signal() {
     // SIGKILL is 9, so the shell convention is 137. The subshell kills itself
     // rather than relying on an outside signaller, which would race.
     let result = tool
-        .execute(
-            serde_json::json!({ "command": "kill -9 $$" }),
-            &ctx,
-        )
+        .execute(serde_json::json!({ "command": "kill -9 $$" }), &ctx)
         .await;
 
     assert!(
