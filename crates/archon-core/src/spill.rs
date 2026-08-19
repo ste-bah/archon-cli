@@ -72,14 +72,114 @@ pub fn save(
     call_id: &str,
     content: &str,
 ) -> std::io::Result<SpillLocator> {
-    let dir = spill_root(working_dir).join(sanitize(session_id));
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}-{}.txt", sanitize(call_id), sanitize(tool_name)));
-    std::fs::write(&path, content)?;
+    let root = spill_root(working_dir);
+    let dir = root.join(sanitize(session_id));
+    create_private_dir(&root)?;
+    create_private_dir(&dir)?;
+
+    // The random component is what stops the path being derivable. Call id and
+    // tool name stay for readability when someone is looking through the
+    // directory by hand; they no longer decide where the write lands.
+    let path = dir.join(format!(
+        "{}-{}-{}.txt",
+        sanitize(call_id),
+        sanitize(tool_name),
+        uuid::Uuid::new_v4().simple()
+    ));
+    write_private_file(&path, content)?;
+
     Ok(SpillLocator {
         path: std::fs::canonicalize(&path).unwrap_or(path),
         bytes: content.len(),
     })
+}
+
+/// Create `dir` readable only by its owner, if it does not already exist.
+///
+/// Spill files hold complete, untruncated tool output — command output that
+/// passed a credential, an API response, an environment dump. On a shared host
+/// or a synced checkout the default mode publishes all of it.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    if dir.is_dir() {
+        return Ok(());
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        // Mode is applied by mkdir itself, so there is no window in which the
+        // directory exists at the default mode.
+        std::fs::DirBuilder::new().mode(0o700).create(dir)?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir(dir)?;
+        restrict_to_current_user(dir)?;
+    }
+    Ok(())
+}
+
+/// Write `content` to a path that must not already exist, owner-only.
+///
+/// `create_new` is what actually closes the symlink follow: `std::fs::write`
+/// opens with truncate and follows a symlink already sitting at the target,
+/// sending tool output wherever it points. The random name makes the path hard
+/// to guess; this makes guessing it useless.
+fn write_private_file(path: &Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()
+}
+
+/// Restrict `dir` to the current user on Windows.
+///
+/// `PermissionsExt::from_mode` is a silent no-op here, so a mode-only
+/// implementation would leave the primary development platform unprotected.
+/// `icacls` is the supported way to do this without a page of DACL-building
+/// unsafe code, and it runs once per directory rather than once per file.
+///
+/// Inheritance is broken first: without `/inheritance:r` the grant is added
+/// alongside whatever the parent already published, which is the thing being
+/// removed.
+#[cfg(not(unix))]
+fn restrict_to_current_user(dir: &Path) -> std::io::Result<()> {
+    let Ok(user) = std::env::var("USERNAME") else {
+        return Err(std::io::Error::other(
+            "cannot restrict the spill directory: USERNAME is not set",
+        ));
+    };
+    let principal = match std::env::var("USERDOMAIN") {
+        Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
+        _ => user,
+    };
+
+    let output = std::process::Command::new("icacls")
+        .arg(dir)
+        .arg("/inheritance:r")
+        .arg("/grant:r")
+        .arg(format!("{principal}:(OI)(CI)F"))
+        .output()?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(std::io::Error::other(format!(
+        "icacls could not restrict {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
 }
 
 /// Reduce an identifier to something safe to use as a path component.
@@ -204,6 +304,96 @@ mod tests {
             "{} escaped {}",
             locator.path.display(),
             root.display()
+        );
+    }
+
+    /// Spill files hold complete tool output — anything a command printed,
+    /// including whatever it printed a credential into. The default mode
+    /// publishes that to every account on the host.
+    #[cfg(unix)]
+    #[test]
+    fn the_directories_and_the_file_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let locator = save(dir.path(), "s", "Bash", "c", "secret").expect("spill");
+
+        let mode_of = |path: &Path| {
+            std::fs::metadata(path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777
+        };
+
+        assert_eq!(mode_of(&spill_root(dir.path())), 0o700, "spill root");
+        assert_eq!(
+            mode_of(&spill_root(dir.path()).join("s")),
+            0o700,
+            "session directory"
+        );
+        assert_eq!(mode_of(&locator.path), 0o600, "spill file");
+    }
+
+    /// Windows has no mode, and `from_mode` is a silent no-op there. The
+    /// directory must still carry an explicit grant rather than whatever it
+    /// inherited from the checkout.
+    #[cfg(windows)]
+    #[test]
+    fn the_session_directory_is_restricted_to_the_current_user() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        save(dir.path(), "s", "Bash", "c", "secret").expect("spill");
+
+        let session_dir = spill_root(dir.path()).join("s");
+        let output = std::process::Command::new("icacls")
+            .arg(&session_dir)
+            .output()
+            .expect("icacls runs");
+        let acl = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            !acl.contains("(I)"),
+            "inherited entries survived, so the checkout's ACL still applies:\n{acl}"
+        );
+        let user = std::env::var("USERNAME").expect("USERNAME");
+        assert!(acl.contains(&user), "no grant for the current user:\n{acl}");
+    }
+
+    /// The name must not be derivable from the call id and tool name alone,
+    /// or a pre-placed symlink at the predictable path receives the output.
+    #[test]
+    fn the_file_name_is_not_derivable_from_the_call() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let first = save(dir.path(), "s", "Bash", "call-1", "one").expect("first");
+        std::fs::remove_file(&first.path).expect("clear the way");
+        let again = save(dir.path(), "s", "Bash", "call-1", "one").expect("second");
+
+        assert_ne!(
+            first.path, again.path,
+            "the same call produced the same path twice, so the path is guessable"
+        );
+        for locator in [&first, &again] {
+            let name = locator.path.file_name().expect("name").to_string_lossy();
+            assert!(name.starts_with("call-1-Bash-"), "{name} lost its label");
+        }
+    }
+
+    /// What the random name makes unlikely, the exclusive create makes
+    /// impossible: an existing entry is an error, not a target to write
+    /// through.
+    #[test]
+    fn an_existing_path_is_refused_rather_than_written_through() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let locator = save(dir.path(), "s", "Bash", "c", "original").expect("spill");
+
+        let error = write_private_file(&locator.path, "overwrite").expect_err("must refuse");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read_to_string(&locator.path).expect("read back"),
+            "original",
+            "the existing file was written through"
         );
     }
 
