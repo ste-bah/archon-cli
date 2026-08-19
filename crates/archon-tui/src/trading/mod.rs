@@ -205,6 +205,9 @@ mod tests {
                     terminal: false,
                     recoverable: false,
                     latency_ms: 3,
+                    // End-to-end is the controls plus the audit write, so it is
+                    // never below `latency_ms`.
+                    total_latency_ms: 4,
                 },
             }],
         };

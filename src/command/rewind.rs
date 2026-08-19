@@ -40,11 +40,18 @@
 //! - 3 tests exercising the three branches (no session_id, no messages,
 //!   happy path emits `ShowMessageSelector`).
 //!
-//! # Deferred (TUI-620-followup)
+//! # Follow-up work — landed
 //!
-//! - Full ratatui render of `MessageSelector`.
-//! - Input priority-branch routing in `event_loop/input.rs`.
-//! - Truncate-on-confirm: apply the selection to the session history.
+//! This module used to list three items as deferred under a
+//! `TUI-620-followup` marker. All three are in the tree:
+//!
+//! - Full ratatui render of `MessageSelector` — `draw_message_selector` in
+//!   `crates/archon-tui/src/render/body/pickers.rs`.
+//! - Input priority-branch routing — the `app.message_selector.is_some()`
+//!   branch in `crates/archon-tui/src/event_loop/input.rs`.
+//! - Truncate-on-confirm — the `__truncate_session__` control input in
+//!   `src/session_loop/control_input.rs`, handled by
+//!   `session_loop::session_history::handle_truncate_session`.
 
 use archon_tui::app::{MessageSummary, TuiEvent};
 
@@ -235,15 +242,22 @@ mod tests {
         }
     }
 
+    /// Dispatch reaches the registered handler, proven on the two `Err` paths
+    /// that need no real (Cozo-backed) `SessionStore`.
+    ///
+    /// This was `#[ignore]`d as a "live smoke" test, and had been wrong for as
+    /// long as it was ignored: it asserted the second path produced "no
+    /// messages to rewind to". That stopped being true when `RealMessageLoader`
+    /// was replaced by `load_message_summaries` reading `ctx.session_store`
+    /// directly. Through `default_registry()` the handler carries no fallback
+    /// loader and `make_bug_ctx()` carries no store, so the reachable second
+    /// error is "session store is unavailable". Nothing ran it, so nothing said
+    /// so. It now asserts what the code does, and is no longer ignored.
+    ///
+    /// The empty-message branch it *meant* to cover is covered by
+    /// `no_messages_returns_err`, which injects an empty `MockMessageLoader`.
     #[test]
-    #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
     fn rewind_dispatches_via_registry() {
-        // Gate 5 smoke: Registry::get("rewind") must return Some(handler).
-        // Exercise two Err paths that don't require a real SessionStore:
-        //   (1) session_id=None → "no active session"
-        //   (2) session_id=Some + RealMessageLoader stub returns empty Vec →
-        //       "no messages to rewind to"
-        // Both prove the dispatch wiring runs the handler end-to-end.
         use crate::command::registry::default_registry;
 
         let registry = default_registry();
@@ -268,22 +282,23 @@ mod tests {
             events
         );
 
-        // Path 2: session_id set, but RealMessageLoader stub returns empty Vec
-        // (per TODO(TUI-620-followup) — production wiring deferred).
+        // Path 2: session_id set, but no store and no injected loader — which
+        // is exactly the shape a registry-dispatched handler has outside a
+        // live session.
         let (mut ctx2, mut rx2) = make_bug_ctx();
         ctx2.session_id = Some("smoke-session".to_string());
         let result2 = handler.execute(&mut ctx2, &[]);
-        assert!(result2.is_err(), "empty-messages path must Err");
+        assert!(result2.is_err(), "no-store path must Err");
         let msg2 = format!("{:#}", result2.unwrap_err()).to_lowercase();
         assert!(
-            msg2.contains("no messages") || msg2.contains("empty"),
-            "empty-messages Err must mention 'no messages' or 'empty'; got: {}",
+            msg2.contains("session store"),
+            "no-store Err must name the missing store; got: {}",
             msg2
         );
         let events2 = drain_tui_events(&mut rx2);
         assert!(
             events2.is_empty(),
-            "empty-messages path must emit no events; got: {:?}",
+            "no-store path must emit no events; got: {:?}",
             events2
         );
     }

@@ -173,6 +173,8 @@ impl WorkflowV2ScriptRunner {
             scaffold_hash: workflow_scaffold_hash(harness_source),
             runner: self,
             accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
+            tool_host: std::sync::OnceLock::new(),
+            tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
         });
         let runtime = AsyncRuntime::new()
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;

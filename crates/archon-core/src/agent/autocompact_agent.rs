@@ -96,6 +96,15 @@ impl Agent {
             consecutive_failures = self.state.auto_compact.consecutive_failures,
             "auto-compaction attempt started"
         );
+        // Try arithmetic before asking a model (#189 Phase 8). Much of what
+        // fills a window — a file read three times unchanged, an error retried
+        // successfully, a result whose full text is already spilled to disk —
+        // is removable without judgement, and summarising it spends a request
+        // and a wait to reach the same place.
+        if self.prune_context_mechanically(&telemetry, force) {
+            self.state.auto_compact.compact_in_flight = false;
+            return Ok(());
+        }
         let attribution = self.config.runtime_attribution_extra(
             "compaction",
             "auto_compaction",

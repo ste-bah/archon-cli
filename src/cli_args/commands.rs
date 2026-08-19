@@ -8,6 +8,13 @@ use super::{
     StyleAction, TeamAction, TradingCliAction, VideoAction, WorkflowAction, WorldAction,
 };
 
+/// `Trading` carries by far the largest payload, so `clippy::large_enum_variant`
+/// fires at 440 bytes. Allowed rather than boxed: this enum is built once by
+/// `clap` at process start, moved once into the dispatcher, and dropped. There
+/// is no hot path and no collection of them, so the 440 bytes are paid once —
+/// while boxing costs an indirection at every construction and match site,
+/// including 38 in the tests that assert on parsed commands.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Authenticate with Anthropic via OAuth PKCE flow (deprecated alias for `auth login`)
@@ -65,6 +72,14 @@ pub enum Commands {
     Team {
         #[command(subcommand)]
         action: TeamAction,
+    },
+    /// Speak the Agent Client Protocol over stdin/stdout, so an ACP-capable
+    /// editor can drive archon without a per-editor extension (#189 Phase 11)
+    Acp {
+        /// Project root the agent works in. Defaults to the directory the
+        /// editor spawned the process in.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
     },
     /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
     IdeStdio {

@@ -9,6 +9,10 @@ archon-permissions = { path = "../archon-permissions" }
 # already depends on it — so this adds no cycle, and it means the tool and the
 # hooks resolve the same shell by the same rules (#118).
 archon-shell = { path = "../archon-shell" }
+# Persistent shell sessions (#189 Phase 6). A leaf, and the same PTY the web
+# terminal pane runs on — the code moved down there so these tools and that
+# pane could not drift into two lifecycles for one kind of process.
+archon-pty = { path = "../archon-pty" }
 archon-memory = { path = "../archon-memory" }
 archon-leann = { path = "../archon-leann" }
 archon-observability = { path = "../archon-observability" }

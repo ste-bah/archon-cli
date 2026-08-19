@@ -67,6 +67,24 @@ impl ToolsConfig {
             isolation_tier: archon_tools::isolation::IsolationTier::Shared,
         }
     }
+
+    /// Build the `TerminalWrite` tool this config describes (#189 Phase 6).
+    ///
+    /// Alongside `bash_tool` and taking the same argument, because the two must
+    /// classify a command identically: text typed into a persistent shell runs
+    /// exactly as text passed to `Bash` does, and a tool that read a different
+    /// list would be a way around the gate rather than a way to keep a shell
+    /// open. Nothing from `[tools]` applies — the Bash timeout and output cap
+    /// describe a call that waits for a command, which this one never does.
+    pub fn terminal_write_tool(
+        permissions: &PermissionsConfig,
+    ) -> archon_tools::terminal_tools::TerminalWriteTool {
+        archon_tools::terminal_tools::TerminalWriteTool {
+            safe_commands: permissions.safe_commands.clone(),
+            risky_commands: permissions.risky_commands.clone(),
+            dangerous_commands: permissions.dangerous_commands.clone(),
+        }
+    }
 }
 
 /// Resource limits applied to agent-run `cargo` commands.

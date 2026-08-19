@@ -134,6 +134,16 @@ pub fn draw_skills_menu(frame: &mut Frame, app: &App) {
     menu.render(frame, area, &app.theme);
 }
 
+/// Render the tasks overlay (#189 Phase 9, Ctrl+K).
+pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
+    let overlay = match &app.task_overlay {
+        Some(o) => o,
+        None => return,
+    };
+    let area = frame.area();
+    overlay.render(frame, area, &app.theme);
+}
+
 /// Render the file-picker overlay (TASK-#207 SLASH-FILES).
 pub fn draw_file_picker(frame: &mut Frame, app: &App) {
     let picker = match &app.file_picker {

@@ -26,10 +26,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{CommandBuilder, PtySize};
+// The PTY plumbing this pane used to own now lives in `archon-pty`, so the
+// persistent shell tools run on the same session lifecycle rather than a second
+// copy of it (#189 Phase 6).
+use archon_pty::{CommandBuilder, PtySession, PtySize};
 use serde::Deserialize;
 
-use super::terminal_pty::PtySession;
 use super::{AppState, WebConfig, api::EffectivePolicySummary};
 
 /// Sub-protocol carrying the bearer token when one is configured.

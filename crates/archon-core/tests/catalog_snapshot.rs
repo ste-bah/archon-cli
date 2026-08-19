@@ -372,9 +372,9 @@ fn bulk_insert_rejects_same_key_contender_with_its_metadata_and_error() {
     assert_eq!(result.rejected[0].metadata.source_path, contender_path);
     assert!(matches!(
         result.rejected[0].error,
-        DiscoveryError::DuplicateAgent { ref existing_path, ref rejected_path, .. }
-            if existing_path == &PathBuf::from("/agents/winner")
-                && rejected_path == &contender_path
+        DiscoveryError::DuplicateAgent(ref duplicate)
+            if duplicate.existing_path == std::path::Path::new("/agents/winner")
+                && duplicate.rejected_path == contender_path
     ));
     assert_eq!(
         catalog

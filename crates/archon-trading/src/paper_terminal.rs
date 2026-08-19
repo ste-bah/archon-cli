@@ -346,7 +346,11 @@ mod tests {
                     quantity: 1.0,
                     price: 10.0,
                     slippage_bps: 0.0,
-                    latency_ms: gated.decision.latency_ms,
+                    // End-to-end, which is what this field meant before
+                    // `latency_ms` was narrowed to the controls alone. Recording
+                    // the wall-clock cost of asking for a decision is the right
+                    // thing here; NFR-001 is the one that wants the controls.
+                    latency_ms: gated.decision.total_latency_ms,
                     realized_pnl: 0.0,
                     position_after: 1.0,
                 },

@@ -306,12 +306,14 @@ fn completed_plan_remains_available_after_cozo_reopen() {
 fn two_sessions_get_separate_audits_and_one_editable_plan_document() {
     let tmp = tempfile::tempdir().unwrap();
     let document = plan_file::plan_document_path(tmp.path(), "plan-one").unwrap();
-    let first_audit = plan_file::plan_audit_path(tmp.path(), "session-one").unwrap();
-    let second_audit = plan_file::plan_audit_path(tmp.path(), "session-two").unwrap();
+    let first_audit = archon_core::plan_file::plan_audit_path(tmp.path(), "session-one").unwrap();
+    let second_audit = archon_core::plan_file::plan_audit_path(tmp.path(), "session-two").unwrap();
     let plan = PlanDocument::new("plan-one", "Shared editable plan");
     plan_file::write_plan_document(&document, &plan).unwrap();
-    plan_file::append_plan_entry(&first_audit, "Write", &serde_json::json!({})).unwrap();
-    plan_file::append_plan_entry(&second_audit, "Bash", &serde_json::json!({})).unwrap();
+    archon_core::plan_file::append_plan_entry(&first_audit, "Write", &serde_json::json!({}))
+        .unwrap();
+    archon_core::plan_file::append_plan_entry(&second_audit, "Bash", &serde_json::json!({}))
+        .unwrap();
     assert!(document.exists() && first_audit.exists() && second_audit.exists());
 }
 

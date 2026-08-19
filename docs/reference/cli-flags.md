@@ -109,6 +109,32 @@ subagents, coding/research pipelines, and gametheory through Codex.
 | `archon agent-info <NAME> [--version REQ] [--json]` | Show detailed agent information |
 | `archon update [--check] [--force]` | Check for / apply updates |
 
+### `archon acp`
+
+Speaks the [Agent Client Protocol](https://agentclientprotocol.com) over
+stdin/stdout, so an ACP-capable editor can drive archon without a per-editor
+extension. The editor spawns the process and owns it:
+
+```bash
+archon acp --workspace /path/to/project
+```
+
+`--workspace` is optional; without it the agent works in the directory the
+editor spawned it in. One process is one session — `session/new` returns the
+session this process already is, and a client wanting a different root spawns a
+different process.
+
+What an editor sees: streamed text as `agent_message_chunk`, reasoning as
+`agent_thought_chunk` so it can be folded away, and each tool call as a
+`tool_call` followed by a `tool_call_update` carrying its result and whether it
+failed. Tool permission requests go to the client as
+`session/request_permission` and its answer is honoured — anything that is not
+an explicit allow, including a dismissed prompt or a disconnected client, is a
+refusal. `session/cancel` stops the turn in flight.
+
+Not offered, and declared so in `initialize` rather than accepted and ignored:
+`session/load` (resuming a stored session), and image or audio prompt content.
+
 ## Top-level flags
 
 ### Mode and I/O

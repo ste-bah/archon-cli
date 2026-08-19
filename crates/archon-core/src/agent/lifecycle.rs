@@ -22,6 +22,7 @@ impl Agent {
                 config.context.max_tool_result_bytes,
                 client.as_ref(),
             ),
+            spill: super::spill_ingest::open_spill(&config.working_dir, &config.session_id),
             ..ConversationState::default()
         };
         Self {
@@ -99,6 +100,14 @@ impl Agent {
             // tests and non-interactive paths no-op.
             inner_voice_change_callback: None,
         }
+    }
+
+    /// The session this agent belongs to.
+    ///
+    /// Added for #189 Phase 6: shutdown has to close the terminals this session
+    /// opened, and it holds the agent rather than the config it was built from.
+    pub fn session_id(&self) -> &str {
+        &self.config.session_id
     }
 
     /// Share the plan lifecycle state with external session components.

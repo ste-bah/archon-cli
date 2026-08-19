@@ -256,6 +256,13 @@ fn ctrl_b_backgrounds_activity_stream() {
 }
 
 #[test]
+fn ctrl_k_opens_the_tasks_overlay() {
+    let km = KeyMap::default();
+    let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+    assert_eq!(km.resolve(key), Some(&Action::OpenTasks));
+}
+
+#[test]
 fn unknown_key_returns_none() {
     let km = KeyMap::default();
     let f1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);

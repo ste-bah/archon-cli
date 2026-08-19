@@ -433,13 +433,11 @@ archon-cli-workspace::bin::archon::command::model::tests::model_handler_execute_
 archon-cli-workspace::bin::archon::command::model::tests::model_handler_execute_with_codex_literal_sets_effect_and_emits_events
 archon-cli-workspace::bin::archon::command::model::tests::model_handler_execute_with_invalid_arg_emits_error_no_effect
 archon-cli-workspace::bin::archon::command::model::tests::model_handler_execute_with_valid_arg_sets_effect_and_emits_events
-archon-cli-workspace::bin::archon::command::parser::tests::arg_newtype_parses_typed_value
 archon-cli-workspace::bin::archon::command::parser::tests::commandparser_accepts_no_leading_slash
 archon-cli-workspace::bin::archon::command::parser::tests::commandparser_bare_slash_returns_missing_name
 archon-cli-workspace::bin::archon::command::parser::tests::commandparser_empty_returns_error
 archon-cli-workspace::bin::archon::command::parser::tests::commandparser_malformed_flag_returns_error
 archon-cli-workspace::bin::archon::command::parser::tests::commandparser_unclosed_quote_returns_error
-archon-cli-workspace::bin::archon::command::parser::tests::parsedcommand_arg_helper_returns_positional
 archon-cli-workspace::bin::archon::command::parser::tests::parses_bare_flag_as_true
 archon-cli-workspace::bin::archon::command::parser::tests::parses_bare_slash_command
 archon-cli-workspace::bin::archon::command::parser::tests::parses_command_with_single_arg
@@ -449,9 +447,6 @@ archon-cli-workspace::bin::archon::command::parser::tests::parses_multiple_flags
 archon-cli-workspace::bin::archon::command::parser::tests::parses_quoted_arg_with_flag
 archon-cli-workspace::bin::archon::command::parser::tests::parses_quoted_argument_with_spaces
 archon-cli-workspace::bin::archon::command::parser::tests::preserves_cli_shaped_raw_args_for_slash_mirrors
-archon-cli-workspace::bin::archon::command::parser::tests::rejects_bare_slash
-archon-cli-workspace::bin::archon::command::parser::tests::rejects_empty_input
-archon-cli-workspace::bin::archon::command::parser::tests::rejects_non_slash_input
 archon-cli-workspace::bin::archon::command::parser::tests::suggest_respects_limit_and_order
 archon-cli-workspace::bin::archon::command::parser::tests::suggest_returns_close_match
 archon-cli-workspace::bin::archon::command::parser::tests::suggest_returns_empty_when_too_far

@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use archon_cognitive::reflection_recall::{
-    MAX_INJECTED_REFLECTIONS, MAX_INJECTIONS_PER_REFLECTION, ReflectionRecall,
+    MAX_INJECTED_REFLECTIONS, MAX_INJECTIONS_PER_REFLECTION, ReflectionRecall, ScoredTurn,
     cited_reflection_ids, render_block,
 };
 use archon_cognitive::self_model::prediction::TurnVerification;
@@ -55,13 +55,15 @@ fn passed_turn(
 ) -> archon_cognitive::ReflectionReuseTally {
     recall
         .record_outcome(
-            SESSION,
-            turn,
+            &ScoredTurn {
+                session_id: SESSION,
+                turn_number: turn,
+                model_id: "test-model",
+                situation_kind: SituationKind::CodeChange,
+            },
             reflections,
             &cited,
             TurnVerification::Passed,
-            "test-model",
-            SituationKind::CodeChange,
         )
         .unwrap()
 }
@@ -192,13 +194,15 @@ fn a_citation_without_a_verified_pass_is_not_reuse() {
 
     let tally = recall
         .record_outcome(
-            SESSION,
-            2,
+            &ScoredTurn {
+                session_id: SESSION,
+                turn_number: 2,
+                model_id: "test-model",
+                situation_kind: SituationKind::CodeChange,
+            },
             &offered,
             &BTreeSet::from(["r1".to_string()]),
             TurnVerification::Failed,
-            "test-model",
-            SituationKind::CodeChange,
         )
         .unwrap();
 
@@ -282,16 +286,18 @@ fn citation_and_verified_reuse_derive_as_separate_metrics() {
     // All three cited; the turn failed, so none of them counts as reuse.
     recall
         .record_outcome(
-            SESSION,
-            5,
+            &ScoredTurn {
+                session_id: SESSION,
+                turn_number: 5,
+                model_id: "test-model",
+                situation_kind: SituationKind::CodeChange,
+            },
             &offered,
             &offered
                 .iter()
                 .map(|reflection| reflection.reflection_id.clone())
                 .collect(),
             TurnVerification::Failed,
-            "test-model",
-            SituationKind::CodeChange,
         )
         .unwrap();
 

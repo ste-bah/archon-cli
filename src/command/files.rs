@@ -23,7 +23,8 @@
 //!   - Event-loop arm sets `app.file_picker = Some(FilePicker::new(...))`.
 //!   - Input priority branch routes Up/Down/Enter/Backspace/Esc.
 //!   - `DirWalker` trait seam — `RealDirWalker` calls
-//!     `archon_tui::screens::file_picker::walker::read_dir_entries`;
+//!     `archon_tui::read_dir_entries` (re-exported from the crate-private
+//!     `screens::file_picker::walker`);
 //!     tests inject `MockDirWalker` that returns canned entries.
 //!
 //! # Why not snapshot-pattern
@@ -59,7 +60,7 @@ impl DirWalker for RealDirWalker {
         // The screen module's `FileEntry` re-exports the layer-0
         // `events::FileEntry`, so the walker's return type is
         // already `Vec<FileEntry>` — no conversion needed.
-        archon_tui::screens::file_picker::walker::read_dir_entries(path)
+        archon_tui::read_dir_entries(path)
     }
 }
 

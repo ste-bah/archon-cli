@@ -1,5 +1,4 @@
 use super::{fs, load_or_create_approval_secret, owner_only_sddl, windows_secret};
-use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::ptr::null_mut;
@@ -113,6 +112,6 @@ fn replace_acl_for_test(path: &std::path::Path, sddl: &str) -> std::io::Result<(
         } else {
             Ok(())
         };
-    unsafe { LocalFree(descriptor as *mut c_void) };
+    unsafe { LocalFree(descriptor) };
     result
 }

@@ -146,12 +146,14 @@ impl DiscoveryCatalog {
         if let Some(existing) = staging.get(&metadata_key(&meta)).cloned() {
             if existing.source_path != meta.source_path {
                 return Err(Box::new(BulkInsertRejection {
-                    error: DiscoveryError::DuplicateAgent {
-                        name: meta.name.clone(),
-                        version: meta.version.clone(),
-                        existing_path: existing.source_path,
-                        rejected_path: meta.source_path.clone(),
-                    },
+                    error: DiscoveryError::DuplicateAgent(Box::new(
+                        super::catalog_types::DuplicateAgent {
+                            name: meta.name.clone(),
+                            version: meta.version.clone(),
+                            existing_path: existing.source_path,
+                            rejected_path: meta.source_path.clone(),
+                        },
+                    )),
                     metadata: meta,
                 }));
             }

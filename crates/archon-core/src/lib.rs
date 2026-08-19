@@ -46,6 +46,7 @@ pub mod remote;
 pub mod sandbox;
 pub mod schema_validation;
 pub mod skills;
+pub mod spill;
 pub mod subagent;
 pub mod subagent_executor;
 pub mod tasks;

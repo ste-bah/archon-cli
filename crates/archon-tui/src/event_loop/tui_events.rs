@@ -203,7 +203,9 @@ pub(super) async fn handle_tui_event(
             cache_read_tokens,
             context_name,
             resolution_source,
+            heaviest_message_tokens,
         } => {
+            app.status.heaviest_message_tokens = heaviest_message_tokens;
             app.status.context_tokens_used = tokens_used;
             app.status.context_window = context_window;
             app.status.cache_creation_tokens = cache_creation_tokens;
@@ -379,6 +381,7 @@ mod tests {
                 cache_read_tokens: 0,
                 context_name: Some("main".into()),
                 resolution_source: Some("bundled-catalog".into()),
+                heaviest_message_tokens: 42_000,
             },
             &tx,
         )

@@ -1,9 +1,11 @@
 //! Helper utilities for session resume/search and shared CLI plumbing.
 //!
-//! TASK #228: several helpers below are not currently invoked but are
-//! kept as ready-to-use utilities for the in-progress slash-command +
-//! resume-list refactors. File-level allow(dead_code) silences noise.
-#![allow(dead_code)]
+//! Everything here is called. Three helpers used to be kept "ready to use" for
+//! a refactor behind a file-level `allow(dead_code)`: two no-argument wrappers
+//! over the `_with_config` variants that callers actually use, and a
+//! `truncate_str` nothing reached. Kept-for-later is how a module stops being
+//! able to tell you when something goes unused, so they are gone and so is the
+//! allow. Reinstate one from history the day it has a caller.
 
 // ---------------------------------------------------------------------------
 // Date/time helpers
@@ -27,12 +29,6 @@ pub fn parse_datetime(s: &str) -> anyhow::Result<chrono::DateTime<chrono::Utc>> 
     ))
 }
 
-/// List recent sessions for `--resume` with no ID.
-pub async fn handle_resume_list() -> anyhow::Result<()> {
-    let config = archon_core::config::ArchonConfig::default();
-    handle_resume_list_with_config(&config).await
-}
-
 /// List recent sessions from the configured session database.
 pub async fn handle_resume_list_with_config(
     config: &archon_core::config::ArchonConfig,
@@ -54,12 +50,6 @@ pub async fn handle_resume_list_with_config(
         eprintln!("\nUse: archon --resume <session-id>");
     }
     Ok(())
-}
-
-/// Load resume messages for `--resume <id>`.
-pub fn load_resume_messages(session_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
-    let config = archon_core::config::ArchonConfig::default();
-    load_resume_messages_with_config(session_id, &config)
 }
 
 /// Load resume messages from the configured session database.
@@ -104,25 +94,6 @@ pub fn apply_tool_filters(
         let names: Vec<&str> = blacklist.iter().map(|s| s.as_str()).collect();
         registry.filter_blacklist(&names);
         tracing::info!("tool blacklist applied: removed {} patterns", names.len());
-    }
-}
-
-// ---------------------------------------------------------------------------
-// String utilities
-// ---------------------------------------------------------------------------
-
-/// Truncate a string to at most `max` bytes, appending "..." if truncated.
-/// Safe for multi-byte UTF-8: always splits on a char boundary.
-pub fn truncate_str(s: &str, max: usize) -> String {
-    let trimmed = s.replace('\n', " ");
-    if trimmed.len() <= max {
-        trimmed
-    } else {
-        let mut end = max.saturating_sub(3);
-        while end > 0 && !trimmed.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &trimmed[..end])
     }
 }
 

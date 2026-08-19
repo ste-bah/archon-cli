@@ -48,6 +48,13 @@ pub(crate) async fn observe_llm_provider_with_profile(
     runtime_mode: impl Into<String>,
     profile_id: Option<String>,
 ) -> Arc<dyn LlmProvider> {
+    // #189 Phase 5: record/replay goes innermost, closest to the real provider,
+    // so observation records the same events either way — telemetry from a
+    // replayed run looks like telemetry from the run it was recorded from. Does
+    // nothing unless `ARCHON_LLM_REPLAY` is set. Placed here because this is
+    // the one function every provider in the binary passes through; wrapping at
+    // any single call site would record part of a run.
+    let provider = archon_llm::replay::wrap_if_enabled(provider);
     Arc::new(
         ObservedLlmProvider::new(
             provider,

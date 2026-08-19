@@ -72,6 +72,7 @@ fn overlay_mask(app: &App) -> u32 {
         app.skills_menu.is_some(),
         app.file_picker.is_some(),
         app.search_results.is_some(),
+        app.task_overlay.is_some(),
         app.evidence_view.is_some(),
         app.thinking_archive.is_some(),
         app.vim_state.is_some(),

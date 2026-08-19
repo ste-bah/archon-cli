@@ -3,7 +3,7 @@ use archon_core::cli_flags::{ResolvedFlags, resolve_flags};
 use archon_core::config::default_config_path;
 use archon_core::config_layers::ConfigLayer;
 use archon_core::env_vars::{self, ArchonEnvVars};
-use archon_core::logging::{LogGuard, init_logging, resolve_log_dir, rotate_logs};
+use archon_core::logging::{LogGuard, resolve_log_dir, rotate_logs};
 
 use crate::cli_args::Cli;
 
@@ -116,11 +116,19 @@ fn apply_cli_logging_and_model_overrides(
 
 fn init_session_logging(session_id: &str, config: &archon_core::config::ArchonConfig) -> LogGuard {
     let log_dir = resolve_log_dir();
-    let log_guard =
-        init_logging(session_id, &config.logging.level, &log_dir).unwrap_or_else(|error| {
-            eprintln!("fatal: logging init failed: {error}");
-            std::process::exit(1);
-        });
+    // #189 Phase 10: the OTLP endpoint is threaded in here rather than at
+    // `init_tracing`, because this is the function the binary actually reaches.
+    // Wiring it to the other one would leave the setting inert in production.
+    let log_guard = archon_observability::file_init::init_tracing_file_with_otlp(
+        session_id,
+        &config.logging.level,
+        &log_dir,
+        config.observability.endpoint(),
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("fatal: logging init failed: {error}");
+        std::process::exit(1);
+    });
     if let Err(error) = rotate_logs(&log_dir, config.logging.max_files) {
         tracing::warn!("failed to rotate logs: {error}");
     }

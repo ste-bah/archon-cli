@@ -59,6 +59,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+# #189 Phase 10: OTLP span export, off unless an endpoint is configured.
+# `tracing-opentelemetry` is deliberately absent — a tracing layer is a parallel
+# sink, and stacking one alongside the redaction layer would export the
+# unredacted copy of every event. `RedactionLayer` drives these itself, with
+# values it has already scrubbed.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
 
 [dev-dependencies]
 # tests/tracing_smoke.rs installs a local subscriber via

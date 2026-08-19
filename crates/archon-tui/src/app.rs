@@ -49,6 +49,13 @@ pub struct AppConfig {
     /// Command catalog injected from the bin crate's registry so autocomplete
     /// stays locked to `Registry::primaries_with_descriptions()`.
     pub command_catalog: Vec<crate::commands::CommandInfo>,
+    /// Source of rows for the Ctrl+K tasks overlay, and the route back to
+    /// cancel one (#189 Phase 9).
+    ///
+    /// Injected from the bin crate because this crate cannot reach
+    /// `archon_tools::task_manager::TASK_MANAGER`. `None` leaves the overlay
+    /// unavailable and it says so.
+    pub task_store: Option<std::sync::Arc<dyn crate::screens::task_overlay::TaskStore>>,
 }
 
 /// Thin entry point that sets up terminal infrastructure and delegates to
@@ -154,6 +161,14 @@ pub struct App {
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
     pub search_results: Option<crate::screens::search_results::SearchResults>,
+    /// #189 Phase 9: tasks overlay (Ctrl+K), listing cancellable background work.
+    pub task_overlay: Option<crate::screens::task_overlay::TaskOverlay>,
+    /// Source of task rows and the route back to cancel one.
+    ///
+    /// `None` when nothing injected a store — the overlay then reports that
+    /// rather than silently showing an empty list, because "no tasks running"
+    /// and "no way to see tasks" are different answers.
+    pub task_store: Option<std::sync::Arc<dyn crate::screens::task_overlay::TaskStore>>,
     /// Evidence Engine inspection overlay opened by TuiEvent::OpenView.
     pub evidence_view: Option<EvidenceViewState>,
     /// Vim keybinding state — Some when vim mode is active, None otherwise.
@@ -197,6 +212,8 @@ impl Default for App {
             skills_menu: None,
             file_picker: None,
             search_results: None,
+            task_overlay: None,
+            task_store: None,
             evidence_view: None,
             vim_state: None,
             panes: SplitPaneManager::new(),
@@ -228,6 +245,7 @@ impl App {
             && self.skills_menu.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()
+            && self.task_overlay.is_none()
             && self.evidence_view.is_none()
             && self.vim_state.is_none()
             && !self.activity_stream.is_foreground()

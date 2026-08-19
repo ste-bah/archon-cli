@@ -258,6 +258,7 @@ pub(super) async fn run(
         context_source: Some(context_resolution.source.label().to_string()),
         context_threshold: config.context.compact_threshold,
         command_catalog,
+        task_store: Some(crate::session::task_overlay_store::TaskManagerStore::shared()),
     })
     .await;
 

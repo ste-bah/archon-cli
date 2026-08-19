@@ -14,6 +14,12 @@ use std::sync::Mutex;
 /// — so we define a local double that returns configurable
 /// pre-canned values. Defined here rather than extending the shared
 /// mock so the AGS-817 blast radius stays scoped to this file.
+/// What `store_memory` was called with: content, title, type, importance, tags.
+///
+/// Named rather than left as a five-element tuple so the field below reads as
+/// one thing, and so a sixth argument has somewhere obvious to go.
+type StoredMemory = (String, String, MemoryType, f64, Vec<String>);
+
 struct TestMemory {
     list_recent_result: Mutex<Result<Vec<Memory>, MemoryError>>,
     recall_result: Mutex<Result<Vec<Memory>, MemoryError>>,
@@ -21,7 +27,7 @@ struct TestMemory {
     recall_captured_query: Mutex<Option<String>>,
     /// (content, title, memory_type, importance, tags) of the last
     /// `store_memory`.
-    store_captured: Mutex<Option<(String, String, MemoryType, f64, Vec<String>)>>,
+    store_captured: Mutex<Option<StoredMemory>>,
     store_result: Mutex<Result<String, MemoryError>>,
 }
 

@@ -268,7 +268,7 @@ pub(crate) fn review_diamond_graph(plan_calls: &[WorkflowV2HostCall]) -> Option<
     let fold_method = method(FOLD_FAMILY)?;
 
     let mut nodes = vec![TaskNode {
-        fanout: (fanout_method == WorkflowV2HostMethod::Fanout).then(|| FanoutSpec {
+        fanout: (fanout_method == WorkflowV2HostMethod::Fanout).then_some(FanoutSpec {
             source: None,
             // The declared shape, not this run's width: the lint scores whether
             // the diamond exists, and a per-run number would make the same plan
