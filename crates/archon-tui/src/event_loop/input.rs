@@ -373,6 +373,38 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow the rest, or it types behind the overlay
                 }
             }
+            // Theme picker (#192): Up/Down move, Enter injects `/theme <name>`
+            // so applying still runs through the handler that persists it,
+            // Esc closes.
+            if app.theme_screen.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(ref mut screen) = app.theme_screen {
+                            screen.move_up();
+                        }
+                        return;
+                    }
+                    KeyCode::Down => {
+                        if let Some(ref mut screen) = app.theme_screen {
+                            screen.move_down();
+                        }
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(screen) = app.theme_screen.take()
+                            && let Some(entry) = screen.selected()
+                        {
+                            app.input.set_text(&format!("/theme {}", entry.name));
+                        }
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        app.theme_screen = None;
+                        return;
+                    }
+                    _ => return, // swallow the rest, or it types behind the overlay
+                }
+            }
             // Tasks overlay (#189 Phase 9): Up/Down move, `x`/Delete cancel
             // through `TaskStore`, `r` refreshes, Esc closes.
             if super::task_overlay_input::handle_task_overlay_key(app, key) {

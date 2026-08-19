@@ -125,6 +125,20 @@ impl CommandHandler for ThemeHandler {
             ctx.emit(TuiEvent::TextDelta(format!(
                 "\nAvailable themes: {names}\nUsage: /theme <name>\n"
             )));
+
+            // #192: open the picker as well. Additive — the text above is
+            // unchanged, so `archon -p` and scrollback keep exactly what they
+            // had, and a print-mode run simply drops this event.
+            //
+            // `is_active` is not knowable here: the handler is sync and the
+            // applied theme lives on the `App`. The TUI marks the active row
+            // itself when it builds the screen.
+            ctx.emit(TuiEvent::ShowThemePicker(
+                archon_tui::theme::available_themes()
+                    .iter()
+                    .map(|name| ((*name).to_string(), false))
+                    .collect(),
+            ));
         } else if archon_tui::theme::theme_by_name(theme_arg).is_some() {
             // Valid theme — emit SetTheme first (the actual mutation
             // signal), then the confirmation TextDelta. Order matches

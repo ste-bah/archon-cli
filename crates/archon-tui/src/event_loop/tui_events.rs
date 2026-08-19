@@ -132,6 +132,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::SetTheme(name) => {
             if let Some(t) = crate::theme::theme_by_name(&name) {
                 app.theme = t;
+                // Kept so the `/theme` picker can mark the current entry;
+                // `Theme` is a colour struct and cannot be reversed to a name.
+                app.theme_name = name;
             }
         }
         TuiEvent::ShowMcpManager(servers) => {
@@ -182,6 +185,26 @@ pub(super) async fn handle_tui_event(
                     .collect(),
             );
             app.model_picker = Some(picker);
+        }
+        TuiEvent::ShowThemePicker(entries) => {
+            // #192: `/theme` with no arguments. Enter injects `/theme <name>`,
+            // so the apply path stays the one handler that knows how to
+            // persist and validate a theme name.
+            let mut screen = crate::screens::theme_screen::ThemeScreen::new();
+            // The dispatch site cannot know which theme is applied — that
+            // lives here — so it sends every name and this marks the current
+            // one and parks the cursor on it.
+            screen.set_themes(
+                entries
+                    .into_iter()
+                    .map(|(name, _)| crate::screens::theme_screen::ThemeEntry {
+                        is_active: name == app.theme_name,
+                        name,
+                    })
+                    .collect(),
+            );
+            screen.select_theme(&app.theme_name);
+            app.theme_screen = Some(screen);
         }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input

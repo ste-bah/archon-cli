@@ -143,6 +143,15 @@ pub fn draw_model_picker(frame: &mut Frame, app: &App) {
     picker.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the theme picker overlay (#192, `/theme` with no arguments).
+pub fn draw_theme_screen(frame: &mut Frame, app: &App) {
+    let screen = match &app.theme_screen {
+        Some(s) => s,
+        None => return,
+    };
+    screen.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

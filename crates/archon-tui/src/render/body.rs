@@ -20,7 +20,7 @@ use super::layout::{input_scroll_for_cursor, wrapped_cursor_position};
 mod pickers;
 pub use pickers::{
     draw_file_picker, draw_mcp_manager, draw_message_selector, draw_model_picker,
-    draw_search_results, draw_session_picker, draw_skills_menu, draw_task_overlay,
+    draw_search_results, draw_session_picker, draw_skills_menu, draw_task_overlay, draw_theme_screen,
     draw_thinking_archive,
 };
 

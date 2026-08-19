@@ -395,6 +395,8 @@ pub enum TuiEvent {
     /// lives behind an async lock, which is the same reason `ModelSnapshot`
     /// exists.
     ShowModelPicker(Vec<(String, String, String)>),
+    /// Open the theme picker (#192). Each entry is `(name, is_active)`.
+    ShowThemePicker(Vec<(String, bool)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -480,6 +482,7 @@ impl TuiEvent {
             Self::ShowMessageSelector(_) => "ShowMessageSelector",
             Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
             Self::ShowModelPicker(_) => "ShowModelPicker",
+            Self::ShowThemePicker(_) => "ShowThemePicker",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

@@ -121,6 +121,12 @@ pub struct App {
     pub thinking_blocks: Vec<ThinkingBlock>,
     pub thinking_archive: Option<usize>,
     pub theme: Theme,
+    /// Name of the applied theme (#192).
+    ///
+    /// Theme is a colour struct and cannot be reversed to the name that
+    /// produced it, so the /theme picker had no way to show which entry is
+    /// current — the one question you open it to answer.
+    pub theme_name: String,
     pub should_quit: bool,
     pub is_generating: bool,
     pub active_tool: Option<String>,
@@ -160,6 +166,8 @@ pub struct App {
     /// `/model` picker overlay (#192). Opened alongside the text summary, so
     /// print mode and scrollback keep the reading they always had.
     pub model_picker: Option<crate::screens::model_picker::ModelPicker>,
+    /// `/theme` picker overlay (#192).
+    pub theme_screen: Option<crate::screens::theme_screen::ThemeScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
@@ -190,6 +198,7 @@ impl Default for App {
             thinking_blocks: Vec::new(),
             thinking_archive: None,
             theme: intj_theme(),
+            theme_name: "intj".to_string(),
             should_quit: false,
             is_generating: false,
             active_tool: None,
@@ -214,6 +223,7 @@ impl Default for App {
             message_selector: None,
             skills_menu: None,
             model_picker: None,
+            theme_screen: None,
             file_picker: None,
             search_results: None,
             task_overlay: None,
@@ -248,6 +258,7 @@ impl App {
             && self.thinking_archive.is_none()
             && self.skills_menu.is_none()
             && self.model_picker.is_none()
+            && self.theme_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()
             && self.task_overlay.is_none()

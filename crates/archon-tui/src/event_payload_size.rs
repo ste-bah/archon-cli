@@ -62,6 +62,13 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     })
                     .sum::<usize>()
         }
+        TuiEvent::ShowThemePicker(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(name, _)| string_bytes(name))
+                    .sum::<usize>()
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             path_bytes(root) + file_entries_bytes(entries)
         }
