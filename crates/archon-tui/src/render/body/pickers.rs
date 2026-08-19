@@ -197,6 +197,15 @@ pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
     picker.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the voice capture overlay (#192, `/voice` and the record hotkey).
+pub fn draw_voice_capture(frame: &mut Frame, app: &App) {
+    let overlay = match &app.voice_capture {
+        Some(o) => o,
+        None => return,
+    };
+    overlay.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

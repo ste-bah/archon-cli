@@ -1310,15 +1310,24 @@ max_investigation_iterations = 3
 # [voice] — Speech-to-text input
 # ----------------------------------------------------------------------------
 [voice]
+# Enabling this needs a binary built with `--features audio-capture`; without
+# it archon says so at startup and runs without voice, rather than starting a
+# pipeline that records silence.
 enabled = false
+# "default", or the exact name of an input device. An unknown name is an error
+# listing the devices that do exist, not a silent fall back to the default.
 device = "default"
-# Voice activity detection threshold (0.0..=1.0)
+# Voice activity detection threshold (0.0..=1.0). A recording whose loudest
+# moment is below this is discarded untranscribed; the /voice overlay draws the
+# measured peak next to it so a discarded recording says why.
 vad_threshold = 0.02
 # STT provider: "openai" | ... (extensible)
 stt_provider = "openai"
 # stt_api_key = "..."   # prefer config.local.toml for secrets
 stt_url = "https://api.openai.com"
-hotkey = "ctrl+shift+v"
+# Reported by /voice. The TUI binding is fixed at Ctrl+V, so changing this
+# changes what /voice prints and not what the keyboard does.
+hotkey = "ctrl+v"
 toggle_mode = false
 
 

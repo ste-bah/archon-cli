@@ -25,7 +25,17 @@ impl CommandHandler for VoiceHandler {
 
         match sub {
             "status" | "list" | "" => {
-                self.emit_status(ctx);
+                let voice = self.emit_status(ctx);
+                // Additive, like the other restored screens (#192): the text
+                // above is what a `-p` run keeps, and the overlay is dropped
+                // there. Only the bare form opens it — `/voice status` is an
+                // instruction to print, and an argument form that grew a
+                // window would be a change to an existing surface.
+                if args.is_empty()
+                    && let Some(vad_threshold) = voice
+                {
+                    ctx.emit(TuiEvent::ShowVoiceCapture { vad_threshold });
+                }
             }
             "on" => match archon_core::config::save_voice_enabled(true) {
                 Ok(()) => {
@@ -70,18 +80,24 @@ impl CommandHandler for VoiceHandler {
 }
 
 impl VoiceHandler {
-    fn emit_status(&self, ctx: &mut CommandContext) {
+    /// Print the configuration, returning the VAD threshold it reported.
+    ///
+    /// The threshold is handed back rather than re-read because the overlay
+    /// has to mark the level the pipeline actually enforces; a second
+    /// `load_config` could disagree with the text just printed.
+    fn emit_status(&self, ctx: &mut CommandContext) -> Option<f32> {
         let config = match archon_core::config::load_config() {
             Ok(c) => c,
             Err(e) => {
                 ctx.emit(TuiEvent::Error(format!(
                     "Failed to load config for /voice: {e}"
                 )));
-                return;
+                return None;
             }
         };
         let text = render_status(&config.voice);
         ctx.emit(TuiEvent::TextDelta(text));
+        Some(config.voice.vad_threshold)
     }
 }
 
@@ -178,6 +194,44 @@ mod tests {
         assert!(saw_status, "bare /voice must emit status");
     }
 
+    /// Additive, like every other restored screen (#192): the text form is
+    /// what `-p` keeps, and the overlay rides alongside it.
+    #[test]
+    fn bare_voice_opens_the_capture_overlay_as_well_as_printing_status() {
+        let (mut ctx, mut rx) = make_ctx();
+        VoiceHandler.execute(&mut ctx, &[]).expect("execute");
+
+        let mut saw_text = false;
+        let mut saw_overlay = false;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                TuiEvent::TextDelta(_) | TuiEvent::Error(_) => saw_text = true,
+                TuiEvent::ShowVoiceCapture { .. } => saw_overlay = true,
+                _ => {}
+            }
+        }
+        assert!(saw_text, "the text form must survive for print mode");
+        assert!(saw_overlay, "bare /voice must open the overlay");
+    }
+
+    /// A subcommand is an instruction, not a request to browse, so it must not
+    /// pop a window — same rule the other restored screens follow.
+    #[test]
+    fn a_voice_subcommand_opens_no_overlay() {
+        for sub in ["status", "list", "on", "off", "bogus"] {
+            let (mut ctx, mut rx) = make_ctx();
+            VoiceHandler
+                .execute(&mut ctx, &[sub.to_string()])
+                .expect("execute");
+            while let Ok(event) = rx.try_recv() {
+                assert!(
+                    !matches!(event, TuiEvent::ShowVoiceCapture { .. }),
+                    "/voice {sub} opened the overlay"
+                );
+            }
+        }
+    }
+
     #[test]
     fn voice_handler_unknown_subcommand_emits_hint() {
         let (mut ctx, mut rx) = make_ctx();
@@ -207,7 +261,8 @@ mod tests {
         assert!(out.contains("enabled:       false"));
         assert!(out.contains("device:        default"));
         assert!(out.contains("stt_provider:  openai"));
-        assert!(out.contains("hotkey:        ctrl+shift+v"));
+        // The TUI binding is Ctrl+V; the default has to say so (#192).
+        assert!(out.contains("hotkey:        ctrl+v"));
         assert!(out.contains("toggle_mode:   false"));
         assert!(out.contains("vad_threshold: 0.02"));
     }

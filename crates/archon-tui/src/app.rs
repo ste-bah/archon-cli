@@ -177,6 +177,9 @@ pub struct App {
     pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
     /// `/branch` picker (#192): which message to fork the session from.
     pub branch_picker: Option<crate::screens::session_branching::BranchPicker>,
+    /// `/voice` capture overlay (#192): live microphone level and the last
+    /// transcription. Opened by `/voice` and by the recording hotkey.
+    pub voice_capture: Option<crate::screens::voice_capture::VoiceCaptureOverlay>,
     /// `/config` settings overlay (#192).
     pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
@@ -239,6 +242,7 @@ impl Default for App {
             permissions_browser: None,
             memory_browser: None,
             branch_picker: None,
+            voice_capture: None,
             settings_screen: None,
             file_picker: None,
             search_results: None,
@@ -279,6 +283,7 @@ impl App {
             && self.permissions_browser.is_none()
             && self.memory_browser.is_none()
             && self.branch_picker.is_none()
+            && self.voice_capture.is_none()
             && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()

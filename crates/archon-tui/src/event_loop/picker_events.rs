@@ -172,6 +172,44 @@ pub(crate) fn open_branch_picker(app: &mut App, entries: Vec<(usize, String, Str
     app.branch_picker = Some(picker);
 }
 
+/// Open the voice capture overlay (`/voice` with no arguments).
+///
+/// Opening it does not start a recording — `/voice` is how you look at the
+/// meter and the last transcription; the hotkey is how you record.
+pub(crate) fn open_voice_capture(app: &mut App, vad_threshold: f32) {
+    app.voice_capture =
+        Some(crate::screens::voice_capture::VoiceCaptureOverlay::with_threshold(vad_threshold));
+}
+
+/// A recording started or ended.
+///
+/// A start opens the overlay if it is not already open: the user pressed the
+/// record hotkey, and a recording with no visible indicator is how you end up
+/// talking to a microphone that is not listening.
+pub(crate) fn set_voice_recording(app: &mut App, recording: bool) {
+    match app.voice_capture.as_mut() {
+        Some(overlay) if recording => overlay.start(),
+        Some(overlay) => overlay.stop(),
+        None if recording => {
+            let mut overlay = crate::screens::voice_capture::VoiceCaptureOverlay::new();
+            overlay.start();
+            app.voice_capture = Some(overlay);
+        }
+        // Nothing open and nothing recording: nothing to show.
+        None => {}
+    }
+}
+
+/// One level reading from the capture thread.
+///
+/// Dropped when the overlay is closed rather than buffered — the meter is a
+/// live view, and levels from a recording nobody is watching have no reader.
+pub(crate) fn push_voice_level(app: &mut App, level: f32) {
+    if let Some(overlay) = app.voice_capture.as_mut() {
+        overlay.push_sample(level);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +256,67 @@ mod tests {
             selected.is_active,
             "the applied theme must be marked, whatever the dispatch site sent"
         );
+    }
+
+    /// The overlay has to appear on its own: the user pressed a hotkey, and a
+    /// recording with no visible indicator is how you end up talking to a
+    /// microphone that is not listening.
+    #[test]
+    fn a_recording_opens_the_overlay_when_none_is_open() {
+        let mut app = App::default();
+        set_voice_recording(&mut app, true);
+        assert!(
+            app.voice_capture
+                .as_ref()
+                .expect("the recording opened no overlay")
+                .is_recording()
+        );
+    }
+
+    #[test]
+    fn ending_a_recording_leaves_the_overlay_open_but_stopped() {
+        let mut app = App::default();
+        set_voice_recording(&mut app, true);
+        set_voice_recording(&mut app, false);
+        let overlay = app.voice_capture.as_ref().expect("the overlay closed");
+        assert!(!overlay.is_recording());
+    }
+
+    /// Otherwise every recording that ends would pop a window open.
+    #[test]
+    fn the_end_of_a_recording_opens_nothing() {
+        let mut app = App::default();
+        set_voice_recording(&mut app, false);
+        assert!(app.voice_capture.is_none());
+    }
+
+    #[test]
+    fn levels_reach_the_meter_while_the_overlay_is_open() {
+        let mut app = App::default();
+        open_voice_capture(&mut app, 0.05);
+        push_voice_level(&mut app, 0.3);
+        push_voice_level(&mut app, 0.1);
+        let overlay = app.voice_capture.as_ref().expect("opened");
+        assert_eq!(overlay.waveform_slice(), vec![0.3, 0.1]);
+        assert!((overlay.vad_threshold() - 0.05).abs() < 1e-6);
+    }
+
+    /// A closed overlay has no reader; buffering levels for it would only grow
+    /// a queue nobody drains.
+    #[test]
+    fn levels_are_dropped_when_the_overlay_is_closed() {
+        let mut app = App::default();
+        push_voice_level(&mut app, 0.3);
+        assert!(app.voice_capture.is_none());
+    }
+
+    /// `/voice` is for looking at the meter, not for recording — the hotkey
+    /// does that, and conflating them would start a recording every time
+    /// someone read the configuration.
+    #[test]
+    fn opening_the_overlay_does_not_start_a_recording() {
+        let mut app = App::default();
+        open_voice_capture(&mut app, 0.02);
+        assert!(!app.voice_capture.as_ref().expect("opened").is_recording());
     }
 }

@@ -307,3 +307,76 @@ async fn printable_characters_do_not_reach_the_prompt_behind_the_settings_overla
     assert!(app.input.text().is_empty(), "typed behind the overlay");
     assert!(app.settings_screen.is_some(), "an unhandled key closed it");
 }
+
+// ---------------------------------------------------------------------------
+// Voice capture overlay (#192)
+// ---------------------------------------------------------------------------
+
+/// Esc must reach the overlay, or a live microphone keeps recording behind a
+/// window the user thinks they closed.
+#[tokio::test]
+async fn esc_reaches_the_voice_overlay_and_closes_it() {
+    let mut app = App::default();
+    app.voice_capture = Some(crate::screens::voice_capture::VoiceCaptureOverlay::new());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Esc),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.voice_capture.is_none(), "Esc did not reach the overlay");
+}
+
+#[tokio::test]
+async fn enter_closes_the_voice_overlay() {
+    let mut app = App::default();
+    app.voice_capture = Some(crate::screens::voice_capture::VoiceCaptureOverlay::new());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Enter),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.voice_capture.is_none());
+    assert!(
+        app.input.text().is_empty(),
+        "Enter must not submit the prompt behind the overlay"
+    );
+}
+
+/// Same rule as every other overlay: unhandled keys are swallowed rather than
+/// typed into the prompt behind it.
+#[tokio::test]
+async fn printable_characters_do_not_reach_the_prompt_behind_the_voice_overlay() {
+    let mut app = App::default();
+    app.voice_capture = Some(crate::screens::voice_capture::VoiceCaptureOverlay::new());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Char('q')),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.input.text().is_empty(), "typed behind the overlay");
+    assert!(app.voice_capture.is_some(), "an unhandled key closed it");
+}

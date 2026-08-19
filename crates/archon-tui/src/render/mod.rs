@@ -107,6 +107,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: branch picker (#192, /branch with no arguments)
     body::draw_branch_picker(frame, app);
 
+    // Overlays: voice capture (#192, /voice and the record hotkey)
+    body::draw_voice_capture(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

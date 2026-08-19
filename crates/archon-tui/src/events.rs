@@ -427,6 +427,20 @@ pub enum TuiEvent {
     /// Each entry is `(index, role, summary)`. The index is what `/branch`
     /// takes and what the fork keeps through, inclusive.
     ShowBranchPicker(Vec<(usize, String, String)>),
+    /// Open the voice capture overlay (#192, `/voice` with no arguments).
+    ///
+    /// Carries the configured VAD threshold so the overlay marks the level a
+    /// recording actually has to beat, rather than a hard-coded guess.
+    ShowVoiceCapture {
+        vad_threshold: f32,
+    },
+    /// A recording started (`true`) or ended (`false`).
+    ///
+    /// Emitted by the voice pipeline, not by a key handler: the hotkey only
+    /// asks for a recording, and whether one begins depends on the microphone.
+    VoiceRecording(bool),
+    /// One RMS level reading from the capture thread, for the overlay meter.
+    VoiceLevel(f32),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -518,6 +532,9 @@ impl TuiEvent {
             Self::ShowPermissions { .. } => "ShowPermissions",
             Self::ShowMemoryFiles(_) => "ShowMemoryFiles",
             Self::ShowBranchPicker(_) => "ShowBranchPicker",
+            Self::ShowVoiceCapture { .. } => "ShowVoiceCapture",
+            Self::VoiceRecording(_) => "VoiceRecording",
+            Self::VoiceLevel(_) => "VoiceLevel",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

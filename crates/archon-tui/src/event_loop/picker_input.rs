@@ -328,6 +328,33 @@ pub(crate) fn handle_branch_picker_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the voice capture overlay is open.
+///
+/// Esc closes it, and cancels the recording if one is running — closing the
+/// window on a live microphone and leaving it recording is the behaviour
+/// nobody wants. Enter closes without cancelling, so a finished recording can
+/// be dismissed while its transcription is already in the input line.
+pub(crate) fn handle_voice_capture_key(app: &mut App, key: KeyEvent) -> bool {
+    let Some(overlay) = app.voice_capture.as_ref() else {
+        return false;
+    };
+    match key.code {
+        KeyCode::Esc => {
+            if overlay.is_recording() {
+                // Best effort: with no voice pipeline running this is a no-op,
+                // and the overlay still closes.
+                let _ = crate::voice::pipeline::fire_trigger(
+                    crate::voice::pipeline::VoiceTrigger::Cancel,
+                );
+            }
+            app.voice_capture = None;
+        }
+        KeyCode::Enter => app.voice_capture = None,
+        _ => {}
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -35,6 +35,7 @@ pub(crate) mod skills_menu;
 pub(crate) mod task_overlay;
 pub(crate) mod theme_screen;
 pub(crate) mod video;
+pub(crate) mod voice_capture;
 pub(crate) mod workflow;
 pub(crate) mod world;
 

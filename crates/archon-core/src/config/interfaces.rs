@@ -9,6 +9,13 @@ pub struct VoiceConfig {
     pub stt_provider: String,
     pub stt_api_key: String,
     pub stt_url: String,
+    /// The key that starts a recording.
+    ///
+    /// Reported by `/voice` and nothing else: the TUI binding is fixed at
+    /// `Ctrl+V` (`Action::VoiceHotkey`), so setting this to anything else
+    /// changes what `/voice` prints and not what the keyboard does. The
+    /// default matches the real binding rather than describing one that has
+    /// never existed — it read `ctrl+shift+v` until #192.
     pub hotkey: String,
     pub toggle_mode: bool,
 }
@@ -22,7 +29,7 @@ impl Default for VoiceConfig {
             stt_provider: "openai".into(),
             stt_api_key: String::new(),
             stt_url: "https://api.openai.com".into(),
-            hotkey: "ctrl+shift+v".into(),
+            hotkey: "ctrl+v".into(),
             toggle_mode: false,
         }
     }
