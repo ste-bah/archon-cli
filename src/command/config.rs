@@ -92,6 +92,23 @@ pub fn handle_config_command<'a>(
                 lines.push_str(&format!("  {k} = {val}\n"));
             }
             let _ = tui_tx.send_async(TuiEvent::TextDelta(lines)).await;
+
+            // #192: and offer the same rows as a list you can act on. The text
+            // above is unchanged, so `archon -p` and anything scraping this
+            // output keep exactly what they had — the overlay is additive, and
+            // a print-mode run simply drops the event.
+            let entries = archon_tools::config_tool::config_entries()
+                .into_iter()
+                .map(|entry| {
+                    (
+                        entry.key.to_string(),
+                        entry.value,
+                        entry.is_bool,
+                        entry.read_only,
+                    )
+                })
+                .collect();
+            let _ = tui_tx.send_async(TuiEvent::ShowSettings(entries)).await;
         } else if value.is_empty() {
             // Get a single key
             match archon_tools::config_tool::get_config_value(key) {

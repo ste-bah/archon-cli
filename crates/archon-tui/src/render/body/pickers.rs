@@ -152,6 +152,15 @@ pub fn draw_theme_screen(frame: &mut Frame, app: &App) {
     screen.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the settings overlay (#192, `/config` with no arguments).
+pub fn draw_settings_screen(frame: &mut Frame, app: &App) {
+    let screen = match &app.settings_screen {
+        Some(s) => s,
+        None => return,
+    };
+    screen.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

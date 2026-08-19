@@ -111,7 +111,10 @@ impl ModelPicker {
         let title = if self.query.is_empty() {
             " Models — type to filter · Up/Down select · Enter choose · Esc close ".to_string()
         } else {
-            format!(" Models — filter: {} · Enter choose · Esc close ", self.query)
+            format!(
+                " Models — filter: {} · Enter choose · Esc close ",
+                self.query
+            )
         };
 
         if self.list.is_empty() {

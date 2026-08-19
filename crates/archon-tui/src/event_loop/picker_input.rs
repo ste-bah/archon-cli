@@ -123,6 +123,50 @@ pub(crate) fn handle_theme_picker_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the settings overlay is open.
+///
+/// Enter injects `/config <key> <value>` rather than writing the value here:
+/// that command validates the type and refuses a read-only key, and a second
+/// path that skipped it would be a second set of bugs. A read-only row still
+/// injects, so the refusal comes from the one place that knows why.
+pub(crate) fn handle_settings_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.settings_screen.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut screen) = app.settings_screen {
+                screen.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut screen) = app.settings_screen {
+                screen.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut screen) = app.settings_screen {
+                screen.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut screen) = app.settings_screen {
+                screen.page_down();
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(screen) = app.settings_screen.take()
+                && let Some(field) = screen.selected()
+            {
+                app.input.set_text(&field.command());
+            }
+        }
+        KeyCode::Esc => app.settings_screen = None,
+        _ => {}
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

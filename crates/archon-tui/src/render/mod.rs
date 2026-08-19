@@ -92,6 +92,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: theme picker (#192, /theme with no arguments)
     body::draw_theme_screen(frame, app);
 
+    // Overlays: settings (#192, /config with no arguments)
+    body::draw_settings_screen(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

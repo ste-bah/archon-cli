@@ -34,9 +34,7 @@ impl Agent {
     ) -> Result<Option<FileSystemObservation>, String> {
         effect
             .requires_filesystem_observation()
-            .then(|| {
-                filesystem_observation(&self.config.working_dir, true, MAX_OBSERVED_ENTRIES)
-            })
+            .then(|| filesystem_observation(&self.config.working_dir, true, MAX_OBSERVED_ENTRIES))
             .transpose()
     }
 

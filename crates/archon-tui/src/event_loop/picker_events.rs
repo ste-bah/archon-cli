@@ -67,6 +67,25 @@ pub(crate) fn open_theme_picker(app: &mut App, entries: Vec<(String, bool)>) {
     app.theme_screen = Some(screen);
 }
 
+/// Populate and open the settings overlay (`/config` with no arguments).
+pub(crate) fn open_settings(app: &mut App, entries: Vec<(String, String, bool, bool)>) {
+    let mut screen = crate::screens::settings_screen::SettingsScreen::new();
+    screen.set_fields(
+        entries
+            .into_iter()
+            .map(
+                |(key, value, is_bool, read_only)| crate::screens::settings_screen::SettingField {
+                    key,
+                    value,
+                    is_bool,
+                    read_only,
+                },
+            )
+            .collect(),
+    );
+    app.settings_screen = Some(screen);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

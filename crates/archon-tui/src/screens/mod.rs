@@ -26,6 +26,7 @@ pub(crate) mod learning;
 pub(crate) mod message_selector;
 pub(crate) mod model_picker;
 pub(crate) mod search_results;
+pub(crate) mod settings_screen;
 pub(crate) mod skills_menu;
 pub(crate) mod task_overlay;
 pub(crate) mod theme_screen;

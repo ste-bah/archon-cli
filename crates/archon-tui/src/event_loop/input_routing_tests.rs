@@ -21,7 +21,10 @@ fn press(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
-fn channels() -> (tokio::sync::mpsc::Sender<String>, crate::keybindings::KeyMap) {
+fn channels() -> (
+    tokio::sync::mpsc::Sender<String>,
+    crate::keybindings::KeyMap,
+) {
     let (tx, rx) = tokio::sync::mpsc::channel(8);
     // Held open so `send` in a routed branch does not fail the test for the
     // wrong reason.
@@ -63,10 +66,22 @@ async fn down_reaches_the_model_picker() {
         "precondition"
     );
 
-    handle_key_event(&mut app, press(KeyCode::Down), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
 
     assert_eq!(
-        app.model_picker.as_ref().expect("still open").selected_index(),
+        app.model_picker
+            .as_ref()
+            .expect("still open")
+            .selected_index(),
         1,
         "Down did not reach the model picker — some earlier branch consumed it"
     );
@@ -78,11 +93,23 @@ async fn up_reaches_the_model_picker() {
     app.model_picker = Some(model_picker_with_three());
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Down), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
     handle_key_event(&mut app, press(KeyCode::Up), &tx, None, None, None, &keymap).await;
 
     assert_eq!(
-        app.model_picker.as_ref().expect("still open").selected_index(),
+        app.model_picker
+            .as_ref()
+            .expect("still open")
+            .selected_index(),
         0,
         "Up did not reach the model picker"
     );
@@ -94,8 +121,26 @@ async fn enter_injects_the_slash_command_and_closes_the_picker() {
     app.model_picker = Some(model_picker_with_three());
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Down), &tx, None, None, None, &keymap).await;
-    handle_key_event(&mut app, press(KeyCode::Enter), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Enter),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
 
     assert!(app.model_picker.is_none(), "Enter left the picker open");
     assert_eq!(
@@ -111,7 +156,16 @@ async fn escape_closes_the_model_picker() {
     app.model_picker = Some(model_picker_with_three());
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Esc), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Esc),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
     assert!(app.model_picker.is_none());
 }
 
@@ -122,7 +176,16 @@ async fn printable_characters_filter_instead_of_typing_behind_the_overlay() {
     app.model_picker = Some(model_picker_with_three());
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Char('s')), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Char('s')),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
 
     assert_eq!(app.model_picker.as_ref().expect("open").query(), "s");
     assert!(
@@ -148,7 +211,16 @@ async fn down_reaches_the_theme_picker() {
     app.theme_screen = Some(screen);
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Down), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
 
     assert_eq!(
         app.theme_screen.as_ref().expect("open").selected_index(),
@@ -178,11 +250,127 @@ async fn down_reaches_the_tasks_overlay() {
     ]));
     let (tx, keymap) = channels();
 
-    handle_key_event(&mut app, press(KeyCode::Down), &tx, None, None, None, &keymap).await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
 
     assert_eq!(
         app.task_overlay.as_ref().expect("open").selected_index(),
         1,
         "Down did not reach the tasks overlay"
     );
+}
+
+fn settings_with_two() -> crate::screens::settings_screen::SettingsScreen {
+    let mut screen = crate::screens::settings_screen::SettingsScreen::new();
+    screen.set_fields(vec![
+        crate::screens::settings_screen::SettingField {
+            key: "api.default_effort".into(),
+            value: "high".into(),
+            is_bool: false,
+            read_only: false,
+        },
+        crate::screens::settings_screen::SettingField {
+            key: "tools.cargo.incremental".into(),
+            value: "false".into(),
+            is_bool: true,
+            read_only: false,
+        },
+    ]);
+    screen
+}
+
+#[tokio::test]
+async fn down_reaches_the_settings_overlay() {
+    let mut app = App::default();
+    app.settings_screen = Some(settings_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert_eq!(
+        app.settings_screen
+            .as_ref()
+            .expect("still open")
+            .selected_index(),
+        1,
+        "Down did not reach the settings overlay"
+    );
+}
+
+/// The whole reason `toggle_selected` was removed: pressing Enter has to put
+/// the change through `/config`, which is what actually validates and applies
+/// it. A boolean arrives flipped so the user is not made to type the only
+/// other value it could have.
+#[tokio::test]
+async fn enter_injects_the_config_command_for_the_selected_key() {
+    let mut app = App::default();
+    app.settings_screen = Some(settings_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Down),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Enter),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert_eq!(app.input.text(), "/config tools.cargo.incremental true");
+    assert!(
+        app.settings_screen.is_none(),
+        "the overlay must close once it has handed over the command"
+    );
+}
+
+/// Anything not acted on must be swallowed, or it types into the prompt
+/// hidden behind the overlay.
+#[tokio::test]
+async fn printable_characters_do_not_reach_the_prompt_behind_the_settings_overlay() {
+    let mut app = App::default();
+    app.settings_screen = Some(settings_with_two());
+    let (tx, keymap) = channels();
+
+    handle_key_event(
+        &mut app,
+        press(KeyCode::Char('q')),
+        &tx,
+        None,
+        None,
+        None,
+        &keymap,
+    )
+    .await;
+
+    assert!(app.input.text().is_empty(), "typed behind the overlay");
+    assert!(app.settings_screen.is_some(), "an unhandled key closed it");
 }

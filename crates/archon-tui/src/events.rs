@@ -397,6 +397,12 @@ pub enum TuiEvent {
     ShowModelPicker(Vec<(String, String, String)>),
     /// Open the theme picker (#192). Each entry is `(name, is_active)`.
     ShowThemePicker(Vec<(String, bool)>),
+    /// Open the settings overlay (#192, `/config` with no arguments).
+    ///
+    /// Each entry is `(key, value, is_bool, read_only)`, resolved at the
+    /// dispatch site: the key registry lives in `archon-tools`, which the TUI
+    /// depends on only as a dev-dependency.
+    ShowSettings(Vec<(String, String, bool, bool)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -483,6 +489,7 @@ impl TuiEvent {
             Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
             Self::ShowModelPicker(_) => "ShowModelPicker",
             Self::ShowThemePicker(_) => "ShowThemePicker",
+            Self::ShowSettings(_) => "ShowSettings",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",
