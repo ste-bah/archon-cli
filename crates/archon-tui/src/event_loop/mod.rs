@@ -21,6 +21,9 @@ use driver::{
 mod ask_user;
 mod driver;
 mod input;
+/// Key-routing coverage for `input.rs`, which had none (#192).
+#[cfg(test)]
+mod input_routing_tests;
 mod mouse;
 mod task_overlay_input;
 pub(crate) mod thinking_archive;

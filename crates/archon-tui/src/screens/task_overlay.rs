@@ -189,6 +189,7 @@ impl TaskOverlay {
                 Row::new(["ID", "Elapsed", "Status"]).style(crate::overlay::header_style(theme)),
             )
             .block(block)
+            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
             .row_highlight_style(crate::overlay::selection_style(theme));
 
         // The selection has to reach the renderer or `move_up`/`move_down`

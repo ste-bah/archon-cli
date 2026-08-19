@@ -102,13 +102,14 @@ impl ThemeScreen {
                 // The active theme is marked, because "which one am I on" is
                 // the question you open this to answer.
                 let marker = if t.is_active { "●" } else { " " };
-                ListItem::new(format!(" {marker} {}", t.name))
+                ListItem::new(format!("{marker} {}", t.name))
                     .style(crate::overlay::body_style(theme))
             })
             .collect();
 
         let list = List::new(items)
             .block(block)
+            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
             .highlight_style(crate::overlay::selection_style(theme));
 
         let mut state = ListState::default().with_selected(Some(self.list.selected_index()));

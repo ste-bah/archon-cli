@@ -136,9 +136,9 @@ impl ModelPicker {
                 // config takes. Showing both means the picker can be used to
                 // find a name and to confirm one.
                 let line = if p.label.is_empty() {
-                    format!(" {} / {}", p.provider_id, p.model_id)
+                    format!("{}/{}", p.provider_id, p.model_id)
                 } else {
-                    format!(" {}  ({}/{})", p.label, p.provider_id, p.model_id)
+                    format!("{}  ({}/{})", p.label, p.provider_id, p.model_id)
                 };
                 ListItem::new(line).style(crate::overlay::body_style(theme))
             })
@@ -146,6 +146,7 @@ impl ModelPicker {
 
         let list = List::new(items)
             .block(block)
+            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
             .highlight_style(crate::overlay::selection_style(theme));
 
         let mut state = ListState::default().with_selected(Some(self.list.selected_index()));
@@ -248,6 +249,41 @@ mod render_tests {
             opus,
             style_of(&after, "opus").expect("still drawn"),
             "moving the selection changed nothing on screen"
+        );
+    }
+
+    /// Colour alone was not perceptible on a real terminal, so the arrow keys
+    /// looked dead even though the selection was moving. The marker is the
+    /// part that cannot fail to render, so it is the part worth asserting.
+    #[test]
+    fn the_selection_marker_is_drawn_and_moves_with_the_keys() {
+        let mut picker = picker();
+
+        let line_with_marker = |terminal: &Terminal<TestBackend>| -> String {
+            let buffer = terminal.backend().buffer();
+            let area = buffer.area;
+            for y in 0..area.height {
+                let line: String = (0..area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect();
+                if line.contains(crate::overlay::HIGHLIGHT_SYMBOL.trim()) {
+                    return line;
+                }
+            }
+            String::new()
+        };
+
+        let first = line_with_marker(&draw(&picker));
+        assert!(
+            first.contains("opus"),
+            "the marker is not on the first row: {first:?}"
+        );
+
+        picker.move_down();
+        let second = line_with_marker(&draw(&picker));
+        assert!(
+            second.contains("sonnet"),
+            "the marker did not move to the second row: {second:?}"
         );
     }
 

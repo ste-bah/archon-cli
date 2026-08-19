@@ -78,10 +78,21 @@ pub(crate) fn open<'a>(
     (region, block)
 }
 
+/// Marker drawn against the selected row.
+///
+/// Colour alone is not enough. The first cut of these overlays marked the
+/// selection with `highlight_style` only, and on a real terminal it was not
+/// perceptible — which made the arrow keys look dead, because the only
+/// evidence they had worked was a colour nobody could see. A glyph cannot fail
+/// to render, does not depend on the theme, and survives a terminal that
+/// mangles background colours.
+pub(crate) const HIGHLIGHT_SYMBOL: &str = "▸ ";
+
 /// Style for the selected row of a list or table.
 ///
 /// Inverted rather than merely coloured, so it reads as a cursor at a glance
-/// and survives themes whose accent is close to the foreground.
+/// and survives themes whose accent is close to the foreground. Paired with
+/// [`HIGHLIGHT_SYMBOL`] — the colour is the emphasis, the glyph is the proof.
 pub(crate) fn selection_style(theme: &Theme) -> Style {
     Style::default()
         .fg(Color::Black)
