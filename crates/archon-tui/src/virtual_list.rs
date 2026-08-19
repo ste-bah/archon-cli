@@ -32,6 +32,18 @@ impl<T> VirtualList<T> {
         self
     }
 
+    /// Every item, regardless of viewport.
+    ///
+    /// For renderers that do their own scrolling. `ratatui`'s stateful `Table`
+    /// and `List` scroll from a `TableState`/`ListState` selection, and feeding
+    /// them a pre-windowed slice makes the two scroll against each other: the
+    /// widget offsets within a window this list has already offset. Give those
+    /// renderers everything and the absolute `selected_index`, and let them
+    /// window it.
+    pub fn items(&self) -> &[T] {
+        &self.items
+    }
+
     /// Items visible in the current viewport.
     pub fn visible_items(&self) -> &[T] {
         let end = (self.viewport_offset + self.viewport_height).min(self.items.len());
