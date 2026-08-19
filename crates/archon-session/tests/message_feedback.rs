@@ -1,7 +1,10 @@
 //! Acceptance coverage for per-message feedback (#193 Phase C).
 
-use archon_session::feedback::{FeedbackError, Rating};
+use archon_session::feedback::{FeedbackError, Rating, message_digest};
 use archon_session::storage::{SessionError, SessionStore};
+
+/// Stand-in digest for the tests that are not about digest handling.
+const DIGEST: &str = "0011223344556677";
 
 fn store() -> (tempfile::TempDir, SessionStore, String) {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -18,7 +21,14 @@ fn a_rating_can_be_set_changed_and_cleared() {
     let (_dir, store, session) = store();
 
     let set = store
-        .set_feedback(&session, "msg-1", Rating::Positive, Some("useful"), None)
+        .set_feedback(
+            &session,
+            "msg-1",
+            DIGEST,
+            Rating::Positive,
+            Some("useful"),
+            None,
+        )
         .expect("first rating");
     assert_eq!(set.rating, Rating::Positive);
     assert_eq!(set.note.as_deref(), Some("useful"));
@@ -27,6 +37,7 @@ fn a_rating_can_be_set_changed_and_cleared() {
         .set_feedback(
             &session,
             "msg-1",
+            DIGEST,
             Rating::Negative,
             None,
             Some(&set.version),
@@ -57,7 +68,7 @@ fn a_concurrent_edit_is_refused_rather_than_overwritten() {
     let (_dir, store, session) = store();
 
     let first = store
-        .set_feedback(&session, "msg-1", Rating::Positive, None, None)
+        .set_feedback(&session, "msg-1", DIGEST, Rating::Positive, None, None)
         .expect("first");
 
     // A second window wrote while the first was still holding its version.
@@ -65,6 +76,7 @@ fn a_concurrent_edit_is_refused_rather_than_overwritten() {
         .set_feedback(
             &session,
             "msg-1",
+            DIGEST,
             Rating::Negative,
             Some("changed my mind"),
             Some(&first.version),
@@ -75,6 +87,7 @@ fn a_concurrent_edit_is_refused_rather_than_overwritten() {
         .set_feedback(
             &session,
             "msg-1",
+            DIGEST,
             Rating::Positive,
             None,
             Some(&first.version),
@@ -101,11 +114,11 @@ fn a_concurrent_edit_is_refused_rather_than_overwritten() {
 fn writing_without_a_token_over_an_existing_rating_is_refused() {
     let (_dir, store, session) = store();
     store
-        .set_feedback(&session, "msg-1", Rating::Positive, None, None)
+        .set_feedback(&session, "msg-1", DIGEST, Rating::Positive, None, None)
         .expect("first");
 
     let error = store
-        .set_feedback(&session, "msg-1", Rating::Negative, None, None)
+        .set_feedback(&session, "msg-1", DIGEST, Rating::Negative, None, None)
         .expect_err("must refuse");
 
     assert!(matches!(
@@ -118,7 +131,7 @@ fn writing_without_a_token_over_an_existing_rating_is_refused() {
 fn updating_a_rating_that_no_longer_exists_says_so() {
     let (_dir, store, session) = store();
     let set = store
-        .set_feedback(&session, "msg-1", Rating::Positive, None, None)
+        .set_feedback(&session, "msg-1", DIGEST, Rating::Positive, None, None)
         .expect("first");
     store
         .clear_feedback(&session, "msg-1", Some(&set.version))
@@ -128,6 +141,7 @@ fn updating_a_rating_that_no_longer_exists_says_so() {
         .set_feedback(
             &session,
             "msg-1",
+            DIGEST,
             Rating::Negative,
             None,
             Some(&set.version),
@@ -156,7 +170,7 @@ fn every_rating_in_a_session_can_be_read_back_in_a_stable_order() {
     let (_dir, store, session) = store();
     for id in ["msg-3", "msg-1", "msg-2"] {
         store
-            .set_feedback(&session, id, Rating::Positive, None, None)
+            .set_feedback(&session, id, DIGEST, Rating::Positive, None, None)
             .expect("rating");
     }
 
@@ -185,6 +199,7 @@ fn feedback_never_appears_in_the_message_log() {
         .set_feedback(
             &session,
             "msg-1",
+            DIGEST,
             Rating::Negative,
             Some("this was wrong"),
             None,
@@ -220,9 +235,99 @@ fn ratings_are_scoped_to_their_session() {
         .id;
 
     store
-        .set_feedback(&one, "msg-1", Rating::Positive, None, None)
+        .set_feedback(&one, "msg-1", DIGEST, Rating::Positive, None, None)
         .expect("rating");
 
     assert!(store.feedback(&two, "msg-1").expect("read").is_none());
     assert_eq!(store.all_feedback(&two).expect("read all").len(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Index drift (#193 Phase C, corrected)
+// ---------------------------------------------------------------------------
+
+/// A message has no id of its own, so a rating is keyed by its position — and
+/// positions move. Compaction replaces the whole message list with a shorter
+/// one, so index 7 afterwards is a different message from index 7 before, and
+/// a rating left keyed to 7 would be reported as describing text nobody rated.
+///
+/// The digest is what makes that detectable. This is the property the reader
+/// relies on; `build_feedback_snapshot` is where it is acted on.
+#[test]
+fn a_rating_records_which_message_it_was_about() {
+    let (_dir, store, session) = store();
+    let rated = r#"{"role":"assistant","content":"the original answer"}"#;
+    let after_compaction = r#"{"role":"assistant","content":"something else entirely"}"#;
+
+    store
+        .set_feedback(
+            &session,
+            "7",
+            &message_digest(rated),
+            Rating::Positive,
+            None,
+            None,
+        )
+        .expect("rating");
+
+    let found = store
+        .feedback(&session, "7")
+        .expect("read")
+        .expect("still there");
+
+    assert_eq!(
+        found.message_digest,
+        message_digest(rated),
+        "the rating must say which message it was about"
+    );
+    assert_ne!(
+        found.message_digest,
+        message_digest(after_compaction),
+        "a different message at the same index must not match"
+    );
+}
+
+/// Identical text hashes identically, so re-rating the same message after a
+/// harmless rewrite is not treated as a different message.
+#[test]
+fn the_digest_is_of_the_content_not_the_position() {
+    let content = r#"{"role":"assistant","content":"same bytes"}"#;
+    assert_eq!(message_digest(content), message_digest(content));
+    assert_ne!(message_digest(content), message_digest("same byte"));
+}
+
+/// The stale row must stay overwritable. A reader that ignores a mismatched
+/// rating still holds its version, and re-rating has to succeed rather than
+/// dead-end on a conflict nobody can resolve.
+#[test]
+fn a_rating_about_a_different_message_can_be_overwritten_in_place() {
+    let (_dir, store, session) = store();
+    let old = store
+        .set_feedback(
+            &session,
+            "7",
+            &message_digest("old message"),
+            Rating::Positive,
+            None,
+            None,
+        )
+        .expect("first rating");
+
+    let replaced = store
+        .set_feedback(
+            &session,
+            "7",
+            &message_digest("what is there now"),
+            Rating::Negative,
+            Some("rating the message that is actually here"),
+            Some(&old.version),
+        )
+        .expect("re-rating a shifted index must succeed");
+
+    assert_eq!(replaced.rating, Rating::Negative);
+    assert_eq!(replaced.message_digest, message_digest("what is there now"));
+    assert_eq!(
+        replaced.created_at, old.created_at,
+        "the row is the same row"
+    );
 }

@@ -59,7 +59,7 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 | `/rename` | — | Rename current session |
 | `/fork` | — | Fork the whole session into a new one. `/fork <name>` names it |
 | `/fork-at` | — | Fork the session *through an earlier message*, leaving the original untouched. Bare `/fork-at` lists the branch points and opens the picker; `/fork-at <n> [name]` does the fork, keeping messages `0..=n`. Not named `/branch`: that is already the git-branch skill |
-| `/feedback` | `rate` | Rate the last assistant message so the learning layer can read it: `/feedback good [note]` (`+`, `up`), `/feedback bad [note]` (`-`, `down`), `/feedback clear`. Bare `/feedback` reports the current rating. The rating goes to a sidecar relation, never into the message log — a model that could see its last answer was rated badly would start writing for the rating |
+| `/feedback` | `rate` | Rate the last assistant message so the learning layer can read it: `/feedback good [note]` (`+`, `up`), `/feedback bad [note]` (`-`, `down`), `/feedback clear`. Bare `/feedback` reports the current rating and `/feedback list` shows every rating in the session, marking any the log has moved out from under. The rating goes to a sidecar relation, never into the message log — a model that could see its last answer was rated badly would start writing for the rating |
 | `/rewind` | — | Open message-selector overlay to rewind |
 | `/checkpoint` | — | Create or restore a session checkpoint |
 | `/session` | — | Show remote-session QR code + URL |

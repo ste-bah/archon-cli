@@ -342,7 +342,8 @@ pub(crate) fn build_command_context<'a>(
                     Some(permissions::build_permissions_snapshot(slash_ctx).await);
             }
             Some("feedback" | "rate") => {
-                ctx.feedback_snapshot = Some(build_feedback_snapshot(slash_ctx));
+                ctx.feedback_snapshot =
+                    Some(super::feedback_snapshot::build_feedback_snapshot(slash_ctx));
             }
             Some("copy") => {
                 // TASK-AGS-POST-6-BODIES-B14-COPY snapshot population.
@@ -401,50 +402,4 @@ pub(crate) fn build_command_context<'a>(
 
         ctx
     })
-}
-
-/// The last assistant message and any rating on it (#193 Phase C).
-///
-/// The message id is its index in the log, which is already the storage key —
-/// inventing a second identifier would mean two ways to name one message and a
-/// mapping to keep honest between them.
-///
-/// The scan runs backwards because the message being rated is nearly always the
-/// last one, and a session log can be long. A message whose content is not JSON,
-/// or carries no role, is skipped rather than guessed at.
-fn build_feedback_snapshot(
-    slash_ctx: &SlashCommandContext,
-) -> crate::command::feedback::FeedbackSnapshot {
-    use crate::command::feedback::FeedbackSnapshot;
-
-    let Ok(messages) = slash_ctx.session_store.load_messages(&slash_ctx.session_id) else {
-        return FeedbackSnapshot::default();
-    };
-    let Some(index) = messages.iter().rposition(|content| {
-        serde_json::from_str::<serde_json::Value>(content)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("role")
-                    .and_then(serde_json::Value::as_str)
-                    .map(|role| role == "assistant")
-            })
-            .unwrap_or(false)
-    }) else {
-        return FeedbackSnapshot::default();
-    };
-
-    let message_id = index.to_string();
-    let existing = slash_ctx
-        .session_store
-        .feedback(&slash_ctx.session_id, &message_id)
-        .ok()
-        .flatten();
-
-    FeedbackSnapshot {
-        message_id: Some(message_id),
-        rating: existing.as_ref().map(|f| f.rating.as_str().to_string()),
-        note: existing.as_ref().and_then(|f| f.note.clone()),
-        version: existing.map(|f| f.version),
-    }
 }

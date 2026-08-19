@@ -206,8 +206,8 @@ impl SessionStore {
         self.create_relation(
             ":create message_feedback {
                 session_id: String, message_id: String =>
-                rating: String, note: String, version: String,
-                created_at: String, updated_at: String
+                rating: String, note: String, message_digest: String,
+                version: String, created_at: String, updated_at: String
             }",
         )?;
         self.create_relation(":create session_names { session_id: String => name: String }")?;

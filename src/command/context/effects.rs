@@ -173,6 +173,7 @@ pub(crate) fn apply_effect<'a>(
             }
             CommandEffect::RateMessage {
                 message_id,
+                message_digest,
                 rating,
                 note,
                 expected_version,
@@ -181,6 +182,7 @@ pub(crate) fn apply_effect<'a>(
                     slash_ctx,
                     tui_tx,
                     &message_id,
+                    &message_digest,
                     rating.as_deref(),
                     &note,
                     expected_version.as_deref(),
@@ -199,6 +201,7 @@ async fn apply_message_rating(
     slash_ctx: &SlashCommandContext,
     tui_tx: &archon_tui::event_channel::TuiEventSender,
     message_id: &str,
+    message_digest: &str,
     rating: Option<&str>,
     note: &str,
     expected_version: Option<&str>,
@@ -224,6 +227,7 @@ async fn apply_message_rating(
                 .set_feedback(
                     &slash_ctx.session_id,
                     message_id,
+                    message_digest,
                     parsed,
                     (!note.is_empty()).then_some(note),
                     expected_version,

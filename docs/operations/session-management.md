@@ -103,6 +103,7 @@ person reading an answer thought it was any good.
 /feedback good       # ...or `+`, or `up`
 /feedback bad why it was wrong
 /feedback clear
+/feedback list       # everything rated in this session
 ```
 
 `/rate` is an alias. A note is optional and free text.
@@ -116,8 +117,15 @@ Writes are compare-and-swap on an opaque version token, so two sessions rating
 the same message cannot silently overwrite each other — the loser is told the
 rating changed underneath it.
 
-## Naming sessions
+A message has no id of its own, so a rating is keyed by its position in the
+log — and positions move: compaction replaces the whole message list with a
+shorter one. Each rating therefore records a fingerprint of the message it was
+made about, and a rating whose fingerprint no longer matches what sits at that
+index is reported as absent rather than as describing the message now there.
+Losing a rating to a compaction is recoverable; feeding the learning layer a
+rating of the wrong answer is not.
 
+## Naming sessions
 
 ```bash
 archon --session-name "oauth-refactor"

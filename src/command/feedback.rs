@@ -13,7 +13,7 @@ use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandEffect, CommandHandler};
 
-const USAGE: &str = "Usage: /feedback good|bad|clear [note]";
+const USAGE: &str = "Usage: /feedback good|bad|clear [note], or /feedback list";
 
 pub(crate) struct FeedbackHandler;
 
@@ -35,6 +35,11 @@ impl CommandHandler for FeedbackHandler {
             return Ok(());
         }
 
+        if verb == "list" || verb == "all" {
+            ctx.emit(TuiEvent::TextDelta(list(&snapshot)));
+            return Ok(());
+        }
+
         let Some(message_id) = snapshot.message_id.clone() else {
             ctx.emit(TuiEvent::Error(
                 "There is no assistant message to rate yet.".to_string(),
@@ -46,6 +51,7 @@ impl CommandHandler for FeedbackHandler {
             "good" | "+" | "up" => {
                 ctx.pending_effect = Some(CommandEffect::RateMessage {
                     message_id,
+                    message_digest: snapshot.message_digest.clone(),
                     rating: Some(Rating::Positive.as_str().to_string()),
                     note: note.clone(),
                     expected_version: snapshot.version.clone(),
@@ -54,6 +60,7 @@ impl CommandHandler for FeedbackHandler {
             "bad" | "-" | "down" => {
                 ctx.pending_effect = Some(CommandEffect::RateMessage {
                     message_id,
+                    message_digest: snapshot.message_digest.clone(),
                     rating: Some(Rating::Negative.as_str().to_string()),
                     note: note.clone(),
                     expected_version: snapshot.version.clone(),
@@ -62,6 +69,7 @@ impl CommandHandler for FeedbackHandler {
             "clear" | "none" => {
                 ctx.pending_effect = Some(CommandEffect::RateMessage {
                     message_id,
+                    message_digest: snapshot.message_digest.clone(),
                     rating: None,
                     note: String::new(),
                     expected_version: snapshot.version.clone(),
@@ -85,6 +93,31 @@ impl CommandHandler for FeedbackHandler {
     }
 }
 
+/// Everything rated in this session.
+///
+/// The reason to read this back is to see what the learning layer will see, so
+/// a rating the log has moved out from under is listed and marked rather than
+/// quietly omitted.
+fn list(snapshot: &FeedbackSnapshot) -> String {
+    if snapshot.all.is_empty() {
+        return "\nNothing rated in this session yet.\n".to_string();
+    }
+    let mut out = format!("\nRatings in this session ({}):\n", snapshot.all.len());
+    for (message_id, rating, note, current) in &snapshot.all {
+        let note = note
+            .as_deref()
+            .map(|note| format!(" — {note}"))
+            .unwrap_or_default();
+        let stale = if *current {
+            ""
+        } else {
+            "  (stale: the message at this position has changed)"
+        };
+        out.push_str(&format!("  [{message_id}] {rating}{note}{stale}\n"));
+    }
+    out
+}
+
 /// What the handler needs, resolved at the dispatch site.
 ///
 /// The store is sync but the message list is read behind the same lock the
@@ -94,11 +127,22 @@ impl CommandHandler for FeedbackHandler {
 pub(crate) struct FeedbackSnapshot {
     /// The most recent assistant message, or `None` in a session with none yet.
     pub(crate) message_id: Option<String>,
+    /// Fingerprint of that message, so a rating survives a compaction without
+    /// being reattributed to whatever ends up at the same index.
+    pub(crate) message_digest: String,
     /// The rating already on it, if any.
     pub(crate) rating: Option<String>,
     pub(crate) note: Option<String>,
     /// The compare-and-set token to present when changing it.
     pub(crate) version: Option<String>,
+    /// Every rating in the session, oldest message id first, as
+    /// `(message_id, rating, note, still_describes_that_message)`.
+    ///
+    /// Read back by `/feedback list`. A rating whose digest no longer matches
+    /// the message at its index is listed as stale rather than hidden: it is
+    /// still a thing the reader wrote, and silently dropping it from the list
+    /// would make a compaction look like it lost work.
+    pub(crate) all: Vec<(String, String, Option<String>, bool)>,
 }
 
 /// The reply to a bare `/feedback`.
@@ -139,6 +183,43 @@ mod tests {
         assert!(text.contains("good|bad|clear"), "{text}");
     }
 
+    #[test]
+    fn an_empty_session_lists_nothing_and_says_so() {
+        assert!(list(&FeedbackSnapshot::default()).contains("Nothing rated"));
+    }
+
+    /// `/feedback list` is how you see what the learning layer will see, so a
+    /// rating the log has moved out from under is shown and marked rather than
+    /// quietly omitted — otherwise a compaction looks like it lost work.
+    #[test]
+    fn a_stale_rating_is_listed_and_marked_rather_than_hidden() {
+        let snapshot = FeedbackSnapshot {
+            all: vec![
+                (
+                    "3".into(),
+                    "positive".into(),
+                    Some("nailed it".into()),
+                    true,
+                ),
+                ("7".into(), "negative".into(), None, false),
+            ],
+            ..FeedbackSnapshot::default()
+        };
+        let text = list(&snapshot);
+
+        assert!(text.contains("[3] positive — nailed it"), "{text}");
+        assert!(text.contains("[7] negative"), "{text}");
+        assert!(
+            text.contains("stale"),
+            "the moved rating is not marked: {text}"
+        );
+        assert_eq!(
+            text.matches("stale").count(),
+            1,
+            "only the moved rating is stale: {text}"
+        );
+    }
+
     /// The note is worth more than the thumb, so it has to be shown back.
     #[test]
     fn an_existing_rating_is_reported_with_its_note() {
@@ -147,6 +228,7 @@ mod tests {
             rating: Some("negative".into()),
             note: Some("missed the point".into()),
             version: Some("v1".into()),
+            ..FeedbackSnapshot::default()
         };
         let text = describe(&snapshot);
         assert!(text.contains("negative"), "{text}");

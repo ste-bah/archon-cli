@@ -52,12 +52,41 @@ impl Rating {
     }
 }
 
+/// A stable fingerprint of the message a rating is about.
+///
+/// A message has no id of its own, so a rating is keyed by its position in the
+/// log — and positions move. Compaction replaces the whole message list with a
+/// shorter one (`autocompact_agent.rs`, `compaction.rs`, written back by the
+/// post-turn `replace_messages`), so index 7 after a compaction is a different
+/// message from index 7 before it, and a rating left keyed to 7 would be
+/// silently reattributed to text nobody rated.
+///
+/// Storing the digest makes that self-correcting: a rating whose digest no
+/// longer matches the message at its index is not about that message, and the
+/// reader drops it rather than reporting it. Losing a rating is recoverable;
+/// feeding the learning layer a rating of the wrong answer is not.
+#[must_use]
+pub fn message_digest(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    // Sixteen hex characters. This distinguishes messages within one session's
+    // log, which is tens to thousands of entries — it is not a security
+    // boundary and nothing is authenticated by it.
+    hex::encode(&hasher.finalize()[..8])
+}
+
 /// One rating, as stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageFeedback {
     pub message_id: String,
     pub rating: Rating,
     pub note: Option<String>,
+    /// [`message_digest`] of the message this rating was made against.
+    ///
+    /// Compare it to the digest of whatever now sits at `message_id` before
+    /// believing the rating describes it.
+    pub message_digest: String,
     /// Opaque compare-and-set token, replaced on every material update.
     ///
     /// The TUI and the web workbench can both be open on one session, so
@@ -102,10 +131,13 @@ impl SessionStore {
     /// `expected_version` is `None` for the first rating on a message and the
     /// version last read for any change. A mismatch is refused rather than
     /// applied: the alternative is one of two open windows silently winning.
+    /// `message_digest` is [`message_digest`] of the message being rated, so a
+    /// later reader can tell whether the index still names the same text.
     pub fn set_feedback(
         &self,
         session_id: &str,
         message_id: &str,
+        message_digest: &str,
         rating: Rating,
         note: Option<&str>,
         expected_version: Option<&str>,
@@ -118,7 +150,12 @@ impl SessionStore {
             message_id: message_id.to_string(),
             rating,
             note: note.map(str::to_string).filter(|note| !note.is_empty()),
+            message_digest: message_digest.to_string(),
             version: uuid::Uuid::new_v4().simple().to_string(),
+            // `created_at` follows the row, not the message. A rating that
+            // replaces one about different text is a new rating, but the row is
+            // the same row, and dating it from the first rating is the honest
+            // reading of "when did this session start having an opinion here".
             created_at: existing.map_or_else(|| now.clone(), |prior| prior.created_at),
             updated_at: now,
         };
@@ -130,6 +167,10 @@ impl SessionStore {
         params.insert(
             "note".to_string(),
             DataValue::from(record.note.clone().unwrap_or_default()),
+        );
+        params.insert(
+            "message_digest".to_string(),
+            DataValue::from(record.message_digest.clone()),
         );
         params.insert(
             "version".to_string(),
@@ -146,9 +187,9 @@ impl SessionStore {
 
         self.db()
             .run_mutable(
-                "?[session_id, message_id, rating, note, version, created_at, updated_at] <- \
-                 [[$session_id, $message_id, $rating, $note, $version, $created_at, $updated_at]] \
-                 :put message_feedback {session_id, message_id => rating, note, version, created_at, updated_at}",
+                "?[session_id, message_id, rating, note, message_digest, version, created_at, updated_at] <- \
+                 [[$session_id, $message_id, $rating, $note, $message_digest, $version, $created_at, $updated_at]] \
+                 :put message_feedback {session_id, message_id => rating, note, message_digest, version, created_at, updated_at}",
                 params,
                 "session store: set message feedback",
             )
@@ -199,8 +240,8 @@ impl SessionStore {
         let result = self
             .db()
             .run_script(
-                "?[rating, note, version, created_at, updated_at] := \
-                 *message_feedback{session_id, message_id, rating, note, version, created_at, updated_at}, \
+                "?[rating, note, message_digest, version, created_at, updated_at] := \
+                 *message_feedback{session_id, message_id, rating, note, message_digest, version, created_at, updated_at}, \
                  session_id = $sid, message_id = $mid",
                 params,
                 ScriptMutability::Immutable,
@@ -211,9 +252,10 @@ impl SessionStore {
                 message_id: message_id.to_string(),
                 rating: Rating::parse(&extract_str(&row[0]))?,
                 note: Some(extract_str(&row[1])).filter(|note| !note.is_empty()),
-                version: extract_str(&row[2]),
-                created_at: extract_str(&row[3]),
-                updated_at: extract_str(&row[4]),
+                message_digest: extract_str(&row[2]),
+                version: extract_str(&row[3]),
+                created_at: extract_str(&row[4]),
+                updated_at: extract_str(&row[5]),
             })
         }))
     }
@@ -225,8 +267,8 @@ impl SessionStore {
         let result = self
             .db()
             .run_script(
-                "?[message_id, rating, note, version, created_at, updated_at] := \
-                 *message_feedback{session_id, message_id, rating, note, version, created_at, updated_at}, \
+                "?[message_id, rating, note, message_digest, version, created_at, updated_at] := \
+                 *message_feedback{session_id, message_id, rating, note, message_digest, version, created_at, updated_at}, \
                  session_id = $sid",
                 params,
                 ScriptMutability::Immutable,
@@ -240,9 +282,10 @@ impl SessionStore {
                     message_id: extract_str(&row[0]),
                     rating: Rating::parse(&extract_str(&row[1]))?,
                     note: Some(extract_str(&row[2])).filter(|note| !note.is_empty()),
-                    version: extract_str(&row[3]),
-                    created_at: extract_str(&row[4]),
-                    updated_at: extract_str(&row[5]),
+                    message_digest: extract_str(&row[3]),
+                    version: extract_str(&row[4]),
+                    created_at: extract_str(&row[5]),
+                    updated_at: extract_str(&row[6]),
                 })
             })
             .collect();
