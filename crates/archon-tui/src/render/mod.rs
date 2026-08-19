@@ -98,6 +98,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: hooks (#192, /hooks with no subcommand)
     body::draw_hooks_menu(frame, app);
 
+    // Overlays: permission rules (#192, /permissions)
+    body::draw_permissions_browser(frame, app);
+
+    // Overlays: memory files (#192, /memory files)
+    body::draw_memory_browser(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

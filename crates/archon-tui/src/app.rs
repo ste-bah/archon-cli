@@ -170,6 +170,11 @@ pub struct App {
     pub theme_screen: Option<crate::screens::theme_screen::ThemeScreen>,
     /// `/hooks` overlay (#192).
     pub hooks_menu: Option<crate::screens::hooks_config_menu::HooksMenu>,
+    /// `/permissions` rules overlay (#192). Read-only: nothing at runtime can
+    /// change these rules.
+    pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
+    /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
+    pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
     /// `/config` settings overlay (#192).
     pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
@@ -229,6 +234,8 @@ impl Default for App {
             model_picker: None,
             theme_screen: None,
             hooks_menu: None,
+            permissions_browser: None,
+            memory_browser: None,
             settings_screen: None,
             file_picker: None,
             search_results: None,
@@ -266,6 +273,8 @@ impl App {
             && self.model_picker.is_none()
             && self.theme_screen.is_none()
             && self.hooks_menu.is_none()
+            && self.permissions_browser.is_none()
+            && self.memory_browser.is_none()
             && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()

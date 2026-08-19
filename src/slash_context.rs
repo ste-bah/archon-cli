@@ -41,6 +41,14 @@ pub(crate) struct SlashCommandContext {
     /// whole `ArchonConfig`.
     pub(crate) codex_models: archon_core::config::OpenAiCodexModelsConfig,
     pub(crate) anthropic_models: archon_core::config::AnthropicModelsConfig,
+    /// `[permissions]` — the always-allow/deny/ask rules in force (#192).
+    ///
+    /// Carried for the same reason as `cost_config`: `/permissions` reports the
+    /// mode, and the mode is only half the answer. These rules are evaluated
+    /// before it and can override it, and until now nothing in the TUI could
+    /// show them. Loaded at session start and not mutable at runtime, so a
+    /// value rather than a lock.
+    pub(crate) permission_rules: archon_permissions::rules::RuleSet,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,
     pub(crate) mcp_manager: McpServerManager,

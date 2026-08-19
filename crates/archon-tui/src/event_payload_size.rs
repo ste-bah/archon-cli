@@ -88,6 +88,23 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     })
                     .sum::<usize>()
         }
+        TuiEvent::ShowPermissions { mode, rules } => {
+            string_bytes(mode)
+                + vec_bytes(rules)
+                + rules
+                    .iter()
+                    .map(|(effect, tool, pattern)| {
+                        string_bytes(effect) + string_bytes(tool) + string_bytes(pattern)
+                    })
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowMemoryFiles(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(scope, path, _)| string_bytes(scope) + string_bytes(path))
+                    .sum::<usize>()
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             path_bytes(root) + file_entries_bytes(entries)
         }

@@ -50,34 +50,13 @@ pub(super) async fn handle_tui_event(
             cache_creation_tokens,
             cache_read_tokens,
         } => {
-            app.on_turn_complete();
-            app.status.cost += archon_core::cost::estimate_turn_cost_usd(
-                &app.status.model,
+            super::tui_events_accounting::apply_turn_usage(
+                app,
                 input_tokens,
                 output_tokens,
                 cache_creation_tokens,
                 cache_read_tokens,
             );
-            // Absolute assignment: show current-turn context pressure, not
-            // cumulative session total. Full context = billable input +
-            // cache_creation + cache_read — matches context_input_tokens from
-            // the Anthropic usage response (same value used by the compaction
-            // trigger via last_known_context_tokens in ConversationState).
-            let context_tokens = input_tokens
-                .saturating_add(cache_creation_tokens)
-                .saturating_add(cache_read_tokens);
-            if context_tokens > 0 {
-                app.status.context_tokens_used = context_tokens;
-            }
-            app.status.cache_creation_tokens = app
-                .status
-                .cache_creation_tokens
-                .saturating_add(cache_creation_tokens);
-            app.status.cache_read_tokens = app
-                .status
-                .cache_read_tokens
-                .saturating_add(cache_read_tokens);
-            app.status.update_context_warning();
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
@@ -168,6 +147,12 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ShowHooks(entries) => {
             super::picker_events::open_hooks(app, entries);
         }
+        TuiEvent::ShowPermissions { mode, rules } => {
+            super::picker_events::open_permissions(app, mode, rules);
+        }
+        TuiEvent::ShowMemoryFiles(entries) => {
+            super::picker_events::open_memory_files(app, entries);
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input
             // priority branch (event_loop/input.rs) routes Up/Down,
@@ -212,14 +197,16 @@ pub(super) async fn handle_tui_event(
             resolution_source,
             heaviest_message_tokens,
         } => {
-            app.status.heaviest_message_tokens = heaviest_message_tokens;
-            app.status.context_tokens_used = tokens_used;
-            app.status.context_window = context_window;
-            app.status.cache_creation_tokens = cache_creation_tokens;
-            app.status.cache_read_tokens = cache_read_tokens;
-            app.status.context_name = context_name;
-            app.status.resolution_source = resolution_source;
-            app.status.update_context_warning();
+            super::tui_events_accounting::apply_context_pressure(
+                app,
+                tokens_used,
+                context_window,
+                cache_creation_tokens,
+                cache_read_tokens,
+                context_name,
+                resolution_source,
+                heaviest_message_tokens,
+            );
         }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {

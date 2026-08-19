@@ -272,7 +272,7 @@ fn memory_handler_execute_unknown_subcommand_emits_error() {
         if let TuiEvent::Error(text) = ev
             && text
                 == "Unknown memory subcommand: nope. Use list, \
-                    store, search, prune, or clear."
+                    store, search, files, prune, or clear."
         {
             saw_unknown = true;
         }

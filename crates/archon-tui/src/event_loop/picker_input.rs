@@ -210,6 +210,82 @@ pub(crate) fn handle_hooks_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the permission-rules overlay is open.
+///
+/// There is no Enter action. These rules are read once from `[permissions]` at
+/// session start and nothing at runtime can change them, so the overlay reads
+/// and closes. Offering an Enter that did nothing would be worse than not
+/// offering one.
+pub(crate) fn handle_permissions_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.permissions_browser.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut browser) = app.permissions_browser {
+                browser.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut browser) = app.permissions_browser {
+                browser.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut browser) = app.permissions_browser {
+                browser.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut browser) = app.permissions_browser {
+                browser.page_down();
+            }
+        }
+        KeyCode::Esc | KeyCode::Enter => app.permissions_browser = None,
+        _ => {}
+    }
+    true
+}
+
+/// Route one key while the memory-files overlay is open.
+///
+/// Typing filters by path. There is no Enter action — the files are read into
+/// the system prompt at startup and the TUI has no editor to hand one to.
+pub(crate) fn handle_memory_files_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.memory_browser.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut browser) = app.memory_browser {
+                browser.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut browser) = app.memory_browser {
+                browser.move_down();
+            }
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut browser) = app.memory_browser {
+                let mut query = browser.query().to_string();
+                query.push(c);
+                browser.set_query(&query);
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(ref mut browser) = app.memory_browser {
+                let mut query = browser.query().to_string();
+                query.pop();
+                browser.set_query(&query);
+            }
+        }
+        KeyCode::Esc | KeyCode::Enter => app.memory_browser = None,
+        _ => {}
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

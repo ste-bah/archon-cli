@@ -408,6 +408,20 @@ pub enum TuiEvent {
     /// Each entry is `(id, event, command, source, enabled)`, taken from the
     /// registry summaries the text listing already renders.
     ShowHooks(Vec<(String, String, String, String, bool)>),
+    /// Open the permission-rules overlay (#192, `/permissions` with no mode).
+    ///
+    /// `mode` is what the mode line already says; `rules` are the
+    /// `[permissions]` entries evaluated ahead of it, as
+    /// `(effect, tool, pattern)` where effect is `deny`, `allow` or `ask`.
+    ShowPermissions {
+        mode: String,
+        rules: Vec<(String, String, String)>,
+    },
+    /// Open the memory-files overlay (#192, `/memory files`).
+    ///
+    /// Each entry is `(scope, path, size_bytes)` in the order the files layer
+    /// into the system prompt.
+    ShowMemoryFiles(Vec<(String, String, u64)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -496,6 +510,8 @@ impl TuiEvent {
             Self::ShowThemePicker(_) => "ShowThemePicker",
             Self::ShowSettings(_) => "ShowSettings",
             Self::ShowHooks(_) => "ShowHooks",
+            Self::ShowPermissions { .. } => "ShowPermissions",
+            Self::ShowMemoryFiles(_) => "ShowMemoryFiles",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

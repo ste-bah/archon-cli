@@ -170,6 +170,24 @@ pub fn draw_hooks_menu(frame: &mut Frame, app: &App) {
     menu.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the permission-rules overlay (#192, `/permissions`).
+pub fn draw_permissions_browser(frame: &mut Frame, app: &App) {
+    let browser = match &app.permissions_browser {
+        Some(b) => b,
+        None => return,
+    };
+    browser.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the memory-files overlay (#192, `/memory files`).
+pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
+    let browser = match &app.memory_browser {
+        Some(b) => b,
+        None => return,
+    };
+    browser.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

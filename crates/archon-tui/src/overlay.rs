@@ -118,11 +118,96 @@ pub(crate) fn body_style(theme: &Theme) -> Style {
 /// handle: an empty bordered box is indistinguishable from a broken widget, so
 /// the reason there is nothing to show has to be said in words.
 pub(crate) fn message(frame: &mut Frame, area: Rect, title: &str, body: &str, theme: &Theme) {
-    let (region, block) = open(frame, area, 5, title, theme);
+    // Sized from the wrapped height, not a fixed 5. The permissions overlay's
+    // empty state ran past the right border and was clipped mid-word on a real
+    // terminal — "Add them under [permissions] in co". A message worth writing
+    // is worth reading to the end of.
+    let usable = centred(area, 5).width.saturating_sub(4).max(1);
+    let lines = wrapped_line_count(body, usable);
+    let (region, block) = open(frame, area, lines.saturating_add(4), title, theme);
     let paragraph = Paragraph::new(format!("\n  {body}"))
         .style(Style::default().fg(theme.muted))
+        .wrap(ratatui::widgets::Wrap { trim: false })
         .block(block);
     frame.render_widget(paragraph, region);
+}
+
+/// Rows `body` needs at `width`, counting whole words.
+///
+/// Deliberately approximate: it only has to be right enough to reserve height,
+/// and `Paragraph`'s own wrapping does the drawing.
+fn wrapped_line_count(body: &str, width: u16) -> u16 {
+    let width = width.max(1) as usize;
+    let mut rows: u16 = 1;
+    let mut used = 2; // the two-space indent the body is drawn with
+    for word in body.split_whitespace() {
+        let needed = word.chars().count() + usize::from(used > 2);
+        if used + needed > width {
+            rows = rows.saturating_add(1);
+            used = word.chars().count();
+        } else {
+            used += needed;
+        }
+    }
+    rows
+}
+
+#[cfg(test)]
+mod message_wrap_tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn rendered(body: &str) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(96, 24)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                message(
+                    frame,
+                    frame.area(),
+                    " Title ",
+                    body,
+                    &crate::theme::dark_theme(),
+                )
+            })
+            .expect("draw message");
+        let buffer = terminal.backend().buffer();
+        let area = buffer.area;
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buffer[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Caught on a real terminal: the permissions empty state was clipped at
+    /// "in co". Every word of a message has to survive to the screen.
+    #[test]
+    fn a_message_longer_than_the_overlay_still_ends_where_it_should() {
+        const BODY: &str = "No rules configured — the mode alone decides. \
+                            Add them under [permissions] in config.toml.";
+        let out = rendered(BODY);
+
+        for word in BODY.split_whitespace() {
+            assert!(out.contains(word), "{word:?} was clipped away:\n{out}");
+        }
+    }
+
+    #[test]
+    fn a_short_message_does_not_grow_the_box() {
+        let out = rendered("Nothing is running.");
+        let borders = out.lines().filter(|line| line.contains('└')).count();
+        assert_eq!(borders, 1, "more than one box was drawn:\n{out}");
+    }
+
+    #[test]
+    fn the_wrap_estimate_counts_whole_words() {
+        assert_eq!(super::wrapped_line_count("one two", 40), 1);
+        assert_eq!(super::wrapped_line_count("aaaa bbbb cccc", 10), 2);
+    }
 }
 
 #[cfg(test)]

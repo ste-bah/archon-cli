@@ -308,6 +308,12 @@ pub(super) async fn handle_key_event(
             if super::picker_input::handle_hooks_key(app, key) {
                 return;
             }
+            if super::picker_input::handle_permissions_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_memory_files_key(app, key) {
+                return;
+            }
             // Tasks overlay (#189 Phase 9): Up/Down move, `x`/Delete cancel
             // through `TaskStore`, `r` refreshes, Esc closes.
             if super::task_overlay_input::handle_task_overlay_key(app, key) {

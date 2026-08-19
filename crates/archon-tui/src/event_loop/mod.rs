@@ -25,6 +25,10 @@ mod input;
 #[cfg(test)]
 mod input_routing_tests;
 mod mouse;
+/// Overlay key-routing coverage, split from `input_routing_tests.rs` for the
+/// 500-line ceiling (#192).
+#[cfg(test)]
+mod overlay_routing_tests;
 /// `/model` and `/theme` picker construction, split from `tui_events.rs` for
 /// the 500-line ceiling (#192).
 mod picker_events;
@@ -34,6 +38,9 @@ mod picker_input;
 mod task_overlay_input;
 pub(crate) mod thinking_archive;
 mod tui_events;
+/// Token and cost arithmetic, split from `tui_events.rs` for the 500-line
+/// ceiling (#192).
+mod tui_events_accounting;
 
 /// Backend-generic event loop body (TUI-310 extraction from `app.rs`).
 ///

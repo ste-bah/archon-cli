@@ -194,6 +194,12 @@ pub(crate) struct PermissionsSnapshot {
     /// The current permission mode captured at dispatch time by
     /// awaiting `SlashCommandContext::permission_mode`.
     pub(crate) current_mode: String,
+    /// The `[permissions]` rules in force, as `(effect, tool, pattern)`
+    /// with effect one of `deny`, `allow`, `ask` (#192).
+    ///
+    /// Deny first, then allow, then ask — the order the checker evaluates
+    /// them, so the list reads the way the decision is made.
+    pub(crate) rules: Vec<(String, String, String)>,
     /// Whether `--allow-dangerously-skip-permissions` was passed on the
     /// CLI; unlocks the `bypassPermissions` mode.
     pub(crate) allow_bypass_permissions: bool,
@@ -213,8 +219,21 @@ pub(crate) async fn build_permissions_snapshot(
     let guard = slash_ctx.permission_mode.lock().await;
     let current_mode = guard.clone();
     drop(guard); // Guard dropped before return (explicit for clarity).
+
+    let rules = &slash_ctx.permission_rules;
+    let flatten = |effect: &'static str, entries: &[archon_permissions::rules::ToolRule]| {
+        entries
+            .iter()
+            .map(|rule| (effect.to_string(), rule.tool.clone(), rule.pattern.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut flattened = flatten("deny", &rules.always_deny);
+    flattened.extend(flatten("allow", &rules.always_allow));
+    flattened.extend(flatten("ask", &rules.always_ask));
+
     PermissionsSnapshot {
         current_mode,
+        rules: flattened,
         allow_bypass_permissions: slash_ctx.allow_bypass_permissions,
     }
 }
@@ -278,6 +297,15 @@ impl CommandHandler for PermissionsHandler {
                 "\nCurrent permission mode: {mode}\nUsage: /permissions <mode>\nModes: default, acceptEdits, plan, auto, dontAsk, bypassPermissions\nLegacy aliases: ask -> default, yolo -> bypassPermissions\n"
             );
             ctx.emit(TuiEvent::TextDelta(msg));
+
+            // #192: and the rules the mode is qualified by. The mode line has
+            // never said whether an always-deny entry overrides it, and there
+            // was nowhere else to look. Additive — the text above is
+            // unchanged and print mode drops this event.
+            ctx.emit(TuiEvent::ShowPermissions {
+                mode: mode.clone(),
+                rules: snap.rules.clone(),
+            });
             return Ok(());
         }
 

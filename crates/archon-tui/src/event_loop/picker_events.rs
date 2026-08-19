@@ -106,6 +106,54 @@ pub(crate) fn open_hooks(app: &mut App, entries: Vec<(String, String, String, St
     app.hooks_menu = Some(menu);
 }
 
+/// Populate and open the permission-rules overlay (`/permissions`).
+///
+/// An unrecognised effect string is dropped rather than guessed at: showing a
+/// rule under the wrong effect is worse than not showing it, because the three
+/// effects are exactly what the reader is there to check.
+pub(crate) fn open_permissions(app: &mut App, mode: String, rules: Vec<(String, String, String)>) {
+    use crate::screens::permissions_browser::{PermissionsBrowser, RuleEffect, ToolPermission};
+
+    let mut browser = PermissionsBrowser::new(mode);
+    browser.set_permissions(
+        rules
+            .into_iter()
+            .filter_map(|(effect, tool, pattern)| {
+                let effect = match effect.as_str() {
+                    "deny" => RuleEffect::Deny,
+                    "allow" => RuleEffect::Allow,
+                    "ask" => RuleEffect::Ask,
+                    _ => return None,
+                };
+                Some(ToolPermission {
+                    effect,
+                    tool,
+                    pattern,
+                })
+            })
+            .collect(),
+    );
+    app.permissions_browser = Some(browser);
+}
+
+/// Populate and open the memory-files overlay (`/memory files`).
+pub(crate) fn open_memory_files(app: &mut App, entries: Vec<(String, String, u64)>) {
+    let mut browser = crate::screens::memory_file_selector::MemoryBrowser::new();
+    browser.set_entries(
+        entries
+            .into_iter()
+            .map(
+                |(scope, path, size_bytes)| crate::screens::memory_file_selector::MemoryEntry {
+                    path,
+                    size_bytes,
+                    scope,
+                },
+            )
+            .collect(),
+    );
+    app.memory_browser = Some(browser);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
