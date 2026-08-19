@@ -175,6 +175,8 @@ pub struct App {
     pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
     /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
     pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
+    /// `/branch` picker (#192): which message to fork the session from.
+    pub branch_picker: Option<crate::screens::session_branching::BranchPicker>,
     /// `/config` settings overlay (#192).
     pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
@@ -236,6 +238,7 @@ impl Default for App {
             hooks_menu: None,
             permissions_browser: None,
             memory_browser: None,
+            branch_picker: None,
             settings_screen: None,
             file_picker: None,
             search_results: None,
@@ -275,6 +278,7 @@ impl App {
             && self.hooks_menu.is_none()
             && self.permissions_browser.is_none()
             && self.memory_browser.is_none()
+            && self.branch_picker.is_none()
             && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()

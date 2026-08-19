@@ -105,6 +105,13 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     .map(|(scope, path, _)| string_bytes(scope) + string_bytes(path))
                     .sum::<usize>()
         }
+        TuiEvent::ShowBranchPicker(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(_, role, summary)| string_bytes(role) + string_bytes(summary))
+                    .sum::<usize>()
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             path_bytes(root) + file_entries_bytes(entries)
         }

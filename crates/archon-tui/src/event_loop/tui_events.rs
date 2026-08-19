@@ -153,6 +153,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ShowMemoryFiles(entries) => {
             super::picker_events::open_memory_files(app, entries);
         }
+        TuiEvent::ShowBranchPicker(entries) => {
+            super::picker_events::open_branch_picker(app, entries);
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input
             // priority branch (event_loop/input.rs) routes Up/Down,

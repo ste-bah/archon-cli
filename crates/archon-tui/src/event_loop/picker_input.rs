@@ -286,6 +286,48 @@ pub(crate) fn handle_memory_files_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the branch picker is open.
+///
+/// Enter injects `/branch <index>`. The command owns the fork, so there is one
+/// path that decides what a branch means rather than two.
+pub(crate) fn handle_branch_picker_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.branch_picker.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut picker) = app.branch_picker {
+                picker.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut picker) = app.branch_picker {
+                picker.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut picker) = app.branch_picker {
+                picker.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut picker) = app.branch_picker {
+                picker.page_down();
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(picker) = app.branch_picker.take()
+                && let Some(entry) = picker.selected()
+            {
+                app.input.set_text(&entry.command());
+            }
+        }
+        KeyCode::Esc => app.branch_picker = None,
+        _ => {}
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

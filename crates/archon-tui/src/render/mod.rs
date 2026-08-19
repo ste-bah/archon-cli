@@ -104,6 +104,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: memory files (#192, /memory files)
     body::draw_memory_browser(frame, app);
 
+    // Overlays: branch picker (#192, /branch with no arguments)
+    body::draw_branch_picker(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

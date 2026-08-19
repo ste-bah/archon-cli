@@ -154,6 +154,24 @@ pub(crate) fn open_memory_files(app: &mut App, entries: Vec<(String, String, u64
     app.memory_browser = Some(browser);
 }
 
+/// Populate and open the branch picker (`/branch` with no arguments).
+pub(crate) fn open_branch_picker(app: &mut App, entries: Vec<(usize, String, String)>) {
+    let mut picker = crate::screens::session_branching::BranchPicker::new();
+    picker.set_candidates(
+        entries
+            .into_iter()
+            .map(
+                |(index, role, summary)| crate::screens::session_branching::MessageRef {
+                    index,
+                    role,
+                    summary,
+                },
+            )
+            .collect(),
+    );
+    app.branch_picker = Some(picker);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

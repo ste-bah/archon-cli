@@ -422,6 +422,11 @@ pub enum TuiEvent {
     /// Each entry is `(scope, path, size_bytes)` in the order the files layer
     /// into the system prompt.
     ShowMemoryFiles(Vec<(String, String, u64)>),
+    /// Open the branch picker (#192, `/branch` with no arguments).
+    ///
+    /// Each entry is `(index, role, summary)`. The index is what `/branch`
+    /// takes and what the fork keeps through, inclusive.
+    ShowBranchPicker(Vec<(usize, String, String)>),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -512,6 +517,7 @@ impl TuiEvent {
             Self::ShowHooks(_) => "ShowHooks",
             Self::ShowPermissions { .. } => "ShowPermissions",
             Self::ShowMemoryFiles(_) => "ShowMemoryFiles",
+            Self::ShowBranchPicker(_) => "ShowBranchPicker",
             Self::ShowFilePicker { .. } => "ShowFilePicker",
             Self::ShowSearchResults { .. } => "ShowSearchResults",
             Self::OpenView(_) => "OpenView",

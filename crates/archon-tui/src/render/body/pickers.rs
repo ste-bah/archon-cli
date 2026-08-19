@@ -188,6 +188,15 @@ pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
     browser.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the branch picker (#192, `/branch` with no arguments).
+pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
+    let picker = match &app.branch_picker {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

@@ -6,7 +6,8 @@ use std::sync::Arc;
 /// 87 = 86 + `/requirements` (Phase 6 traceability report surface).
 /// 89 = 88 + `/worktrees` (#184 M7 isolated-agent review and merge).
 /// 90 = 89 + `/feedback` (#193 Phase C per-message human feedback).
-const EXPECTED_COMMAND_COUNT: usize = 90;
+/// 91 = 90 + `/branch` (#192 fork from an earlier message).
+const EXPECTED_COMMAND_COUNT: usize = 91;
 
 mod aliases_core;
 mod aliases_more;
