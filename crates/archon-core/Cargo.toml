@@ -78,6 +78,7 @@ which.workspace = true
 # Phase 3: Agent discovery system (TASK-AGS-300..307)
 arc-swap.workspace = true
 walkdir.workspace = true
+ignore.workspace = true
 moka.workspace = true
 strsim.workspace = true
 globset.workspace = true
