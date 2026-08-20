@@ -16,8 +16,20 @@ impl Tool for WriteTool {
         "Write"
     }
 
+    /// Names the alternatives, because the model chooses from this sentence.
+    ///
+    /// The old text — "Writes content to a file... Overwrites existing files."
+    /// — described the mechanism and said nothing about when NOT to reach for
+    /// it, so a whole-file rewrite read as the obvious way to change a file.
+    /// It is the most expensive one available: every unchanged line is
+    /// regenerated, the model pays output tokens to retype code it is not
+    /// changing, and the resulting diff is unreviewable.
+    ///
+    /// Until now the only steer lived in `tool_input_json`'s recovery hint,
+    /// which fires AFTER a large Write has already truncated mid-file. That is
+    /// the right advice one wasted turn too late.
     fn description(&self) -> &str {
-        "Writes content to a file. Creates parent directories if needed. Overwrites existing files."
+        "Creates a NEW file, or replaces an existing one in full. Creates parent          directories if needed. For a file that already exists, prefer Edit for a          localised change, ApplyPatch for several changes at once, or          LargeEditBegin for a file above a few hundred lines — a whole-file          rewrite regenerates every unchanged line and can be truncated mid-file.          Use Write on an existing file only when the change touches nearly all of          it."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -190,4 +202,38 @@ fn string_value(value: &serde_json::Value) -> Option<String> {
             .find_map(|key| value.get(*key).and_then(|v| v.as_str()))
             .map(ToOwned::to_owned)
     })
+}
+
+#[cfg(test)]
+mod description_tests {
+    use super::*;
+    use crate::tool::Tool;
+
+    /// The description is the only thing the model reads before choosing a
+    /// tool, so the steer has to survive edits to it. Without this, a tidy-up
+    /// that shortens the sentence silently restores whole-file Write as the
+    /// obvious default and the failure returns as a truncated file.
+    #[test]
+    fn write_names_the_cheaper_alternatives() {
+        let description = WriteTool.description();
+        for alternative in ["Edit", "ApplyPatch", "LargeEditBegin"] {
+            assert!(
+                description.contains(alternative),
+                "Write's description must name {alternative} so the model has \
+                 somewhere to go: {description}"
+            );
+        }
+    }
+
+    /// Naming the alternatives is not enough on its own — the description also
+    /// has to say that a whole-file rewrite is the expensive path, or a model
+    /// reads the list as three equal options.
+    #[test]
+    fn write_says_why_a_full_rewrite_costs_more() {
+        let description = WriteTool.description();
+        assert!(
+            description.contains("regenerates every unchanged line"),
+            "Write's description must say what a full rewrite costs: {description}"
+        );
+    }
 }
