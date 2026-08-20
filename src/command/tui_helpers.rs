@@ -165,6 +165,17 @@ pub(crate) async fn setup_voice_pipeline(
     use archon_tui::voice::stt::{LocalStt, MockStt, OpenAiStt, SttProvider};
     use std::sync::Arc as StdArc;
 
+    // Config resolution is reported before the device is opened, because it
+    // describes the configuration rather than the hardware: a machine with no
+    // microphone has still resolved a toggle mode, and reporting it only on the
+    // success path would make the log depend on what is plugged in.
+    install_toggle_mode(config.voice.toggle_mode);
+    tracing::info!(
+        "voice: toggle_mode={} (hotkey action={:?})",
+        config.voice.toggle_mode,
+        hotkey_action_for_mode(config.voice.toggle_mode)
+    );
+
     let (voice_evt_tx, voice_evt_rx) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
     let (level_tx, mut level_rx) = tokio::sync::mpsc::channel::<f32>(LEVEL_QUEUE);
 
@@ -172,8 +183,11 @@ pub(crate) async fn setup_voice_pipeline(
         Ok(audio) => audio,
         Err(error) => {
             // Loud, and on stderr as well as in the log: the user turned voice
-            // on and is entitled to know it did not come up.
-            tracing::error!("voice: {error:#}");
+            // on and is entitled to know it did not come up. `voice:
+            // unavailable` is a stable prefix the wiring gate matches on — a
+            // machine with no microphone is a normal outcome, not a failure to
+            // hide.
+            tracing::error!("voice: unavailable: {error:#}");
             eprintln!("warning: voice is enabled but unavailable: {error:#}");
             return None;
         }
@@ -181,12 +195,6 @@ pub(crate) async fn setup_voice_pipeline(
 
     let (trig_tx, trig_rx) = tokio::sync::mpsc::channel::<VoiceTrigger>(16);
     install_trigger_sender(trig_tx);
-    install_toggle_mode(config.voice.toggle_mode);
-    tracing::info!(
-        "voice: toggle_mode={} (hotkey action={:?})",
-        config.voice.toggle_mode,
-        hotkey_action_for_mode(config.voice.toggle_mode)
-    );
 
     let stt: StdArc<dyn SttProvider> = match config.voice.stt_provider.as_str() {
         "openai" if !config.voice.stt_api_key.is_empty() => StdArc::new(OpenAiStt {
