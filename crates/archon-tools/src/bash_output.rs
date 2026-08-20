@@ -25,8 +25,33 @@ pub(super) fn spawn_wrapped_child(
 
     let mut wrapper = CommandWrap::from(command);
     wrapper.wrap(KillOnDrop);
+    // A session, not a process group (#197).
+    //
+    // A process group still inherits the controlling terminal, so a command
+    // that wants an answer opens `/dev/tty` directly and gets one regardless of
+    // where stdin points. Doing that from a background group raises SIGTTIN and
+    // the child is *stopped* — state `T`, pipes still held, nothing there to
+    // answer it. An agent ran `git diff HEAD | patch -p1`, patch could not place
+    // a hunk and asked `File to patch:`, and that wedged an eleven-item parallel
+    // wave for thirty minutes. No timeout caught it, and no timeout should have:
+    // the command was not slow, so a deadline strict enough to catch this would
+    // kill honest long builds instead.
+    //
+    // `setsid` leaves the child with no controlling terminal at all, so the
+    // `/dev/tty` open fails with ENXIO and the program errors out promptly. The
+    // agent reads a real error and picks a different command, which is what it
+    // wanted to do in the first place.
+    //
+    // This is also strictly stronger than the process group it replaces: setsid
+    // creates a new session *and* a new group with the child as leader, so
+    // `child.id()` genuinely names a group and `kill(-pgid)` reaches exactly
+    // this command's descendants. ProcessSession reuses ProcessGroup's child
+    // wrapper, so group-kill and kill-on-drop are unchanged.
+    //
+    // Nothing may also call `setpgid` on this child — see the note in
+    // `bash_containment::contained_bash_command`.
     #[cfg(unix)]
-    wrapper.wrap(process_wrap::tokio::ProcessGroup::leader());
+    wrapper.wrap(process_wrap::tokio::ProcessSession);
     #[cfg(windows)]
     wrapper.wrap(process_wrap::tokio::JobObject);
     wrapper.spawn()

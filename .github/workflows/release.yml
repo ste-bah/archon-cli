@@ -147,7 +147,24 @@ jobs:
           # the default sources only carry amd64 and would 404 on every arm64
           # fetch, so the existing entries are pinned to amd64 before the ports
           # list is added.
+          #
+          # Two source formats to pin, not one. Noble runners describe their
+          # repos in deb822 (/etc/apt/sources.list.d/*.sources), which the
+          # one-line sed cannot see. Pinning only the .list files left those
+          # stanzas unrestricted, so apt asked security.ubuntu.com — which
+          # carries amd64 and i386 only — for arm64 and the step died on
+          # `binary-arm64/Packages 404 Not Found`.
           sudo sed -i 's/^deb \(http\|mirror+file\)/deb [arch=amd64] \1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          # Rewrite rather than skip-if-present: the guard has to hold per
+          # stanza, and a file whose first stanza is already pinned would
+          # otherwise leave its later ones open. Dropping any existing line
+          # first also makes this idempotent. Forcing amd64 on every .sources is
+          # the intent -- the one arm64 source we want is the ports .list added
+          # below.
+          for sources in /etc/apt/sources.list.d/*.sources; do
+            [ -e "$sources" ] || continue
+            sudo sed -i -e '/^Architectures:/d' -e '/^Types:/a Architectures: amd64' "$sources"
+          done
           sudo dpkg --add-architecture arm64
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           timeout 180 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
