@@ -100,6 +100,7 @@ mod tool_preflight_steps;
 pub(crate) mod tool_result_context;
 mod tool_types;
 mod turn_completion;
+mod conversation_state;
 mod types;
 
 pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};
@@ -113,10 +114,8 @@ pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
-pub use types::{
-    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, SpillContext,
-    TimestampedEvent,
-};
+pub use conversation_state::{ConversationState, SpillContext};
+pub use types::{AgentConfig, AgentEvent, AskUserPromptKind, SessionStats, TimestampedEvent};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 
