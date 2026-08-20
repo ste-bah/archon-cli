@@ -53,7 +53,6 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
             // not a security sandbox. Linux adds subreaper tracking below for
             // session-detached descendants; other Unix platforms cannot
             // guarantee cleanup after a deliberate setsid(2) escape.
-            configure_own_process_group(&mut command);
             configure_linux_subreaper(&mut command);
             command
                 .arg("-c")
@@ -69,38 +68,32 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
     command
 }
 
-/// Put the child in a process group of its own, with itself as leader.
-///
-/// This module is named for process-group containment and, until #192, never
-/// created one. The child inherited the caller's group, so `child.id()` — which
-/// `terminate_completed_process_group` passes to `kill(-pgid)` — was a plain
-/// pid that usually named no group at all.
-///
-/// Two consequences, and the second is the serious one:
-///
-/// 1. The kill was a no-op. `kill(-pid, SIGKILL)` returned `ESRCH`, which the
-///    cleanup path treats as "the group is already gone", so it reported
-///    success. Descendant cleanup rested entirely on the shell's `EXIT` trap.
-/// 2. A pid is only "usually" not a pgid. On a busy machine it can collide with
-///    a real process group belonging to something else, and then the kill lands
-///    on processes archon does not own. macOS reported that as `EPERM` and CI
-///    went red — the kernel refusing the signal is the bug reporting itself,
-///    not a platform quirk to be worked around.
-///
-/// With `process_group(0)` the child's pid *is* its pgid, so the kill can only
-/// ever reach descendants of this command, and `ESRCH` genuinely means the
-/// group has drained.
-///
-/// The child is not interactive — its stdin is `/dev/null` and cancellation
-/// arrives over the `CancellationToken`, not as a terminal `SIGINT` — so
-/// leaving the caller's group costs nothing.
-#[cfg(unix)]
-fn configure_own_process_group(command: &mut Command) {
-    command.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_own_process_group(_command: &mut Command) {}
+// NO `process_group(0)` HERE. It cannot work, and it stops bash starting at all.
+//
+// #192 added `command.process_group(0)` to fix a real bug: `child.id()` was
+// being passed to `kill(-pgid)` while naming no process group, so descendant
+// cleanup rested on the shell's EXIT trap and could, on a pid collision, signal
+// processes archon does not own.
+//
+// The premise was wrong. Archon does not spawn this command directly — every
+// bash child is wrapped in `process_wrap::ProcessSession`, which calls
+// `setsid()` (see `bash_output::spawn_wrapped_child`, and the `patch` incident
+// its comment records). `setsid()` makes the child a SESSION LEADER, and a
+// session leader may not change its process group: `setpgid` returns EPERM and
+// the spawn fails with "Operation not permitted" before bash ever runs.
+//
+// Measured on macOS: 11 of 42 archon-tools bash tests fail this way, including
+// #192's own `bash_runs_in_a_process_group_of_its_own`, and 7 archon-core tests
+// fail downstream because no shell means no file mutation to reconcile. In
+// isolation the call is fine — plain Rust `Command::process_group(0)`, raw
+// `posix_spawn(setpgroup=0)` and `fork`+`setpgid` all succeed on the same
+// machine against the same bash binary. Only the combination fails.
+//
+// The bug #192 set out to fix is already fixed by the session, and better:
+// `setsid()` gives the child a new session AND a new process group with the
+// child as leader, so `child.id()` IS a valid pgid and `kill(-pgid)` reaches
+// exactly this command's descendants. Adding `setpgid` on top bought nothing
+// and cost the shell.
 
 #[cfg(target_os = "linux")]
 fn configure_linux_subreaper(command: &mut Command) {
