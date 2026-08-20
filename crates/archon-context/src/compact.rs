@@ -41,8 +41,14 @@ pub fn compact_messages(
 
     let mut compacted = Vec::new();
 
-    // Add structured summary as first user message
-    let header = build_structured_summary_header(summary_text);
+    // Add structured summary as first user message. The originating task is
+    // restated ahead of it: the split above discards `messages[0]`, and for an
+    // agent that is told its job exactly once, that message is not history —
+    // it is the assignment.
+    let header = match preserved_task(messages, split_point) {
+        Some(task) => build_structured_summary_header_with_task(&task, summary_text),
+        None => build_structured_summary_header(summary_text),
+    };
     compacted.push(ContextMessage::user(&header));
 
     // Add preserved recent messages (including any tool results)
@@ -213,6 +219,90 @@ pub fn select_strategy(usage_ratio: f32) -> Option<CompactionStrategy> {
     } else {
         None
     }
+}
+
+/// Maximum characters of the originating task carried across a compaction.
+///
+/// Long enough for any realistic agent brief, short enough that a pasted file
+/// in the first message cannot eat the window the compaction just reclaimed.
+pub const MAX_PRESERVED_TASK_CHARS: usize = 4_000;
+
+/// Build a summary header that restates the originating task above the summary.
+///
+/// WHY: `compact_messages` keeps only the tail plus a summary. A subagent is
+/// given its task exactly once, as `messages[0]` (`SubagentRunner::run`), so a
+/// successful compaction deleted the only statement of what it was doing and
+/// left the summariser's own scaffolding — "## Current State", "use bullet
+/// points" — as the sole instruction in context. Branches then answered the
+/// scaffolding: an acceptance-evidence audit returned a bullet-point context
+/// summary, and the gate accepted it because the envelope was well-formed.
+///
+/// The defect was latent for as long as subagent compaction always failed on
+/// an empty summary from the reasoning model; routing it to a summarising
+/// model made it fire. Restating the task costs a few hundred tokens and
+/// removes the failure mode for every agent that shares this path.
+pub fn build_structured_summary_header_with_task(task: &str, summary_text: &str) -> String {
+    prepend_task_block(task, &build_structured_summary_header(summary_text))
+}
+
+/// Put the restated task above `body`, whatever shape `body` has.
+///
+/// Kept separate so the micro path kernel can reuse it without inheriting the
+/// structured `## Key Decisions` header, which downstream consumers parse.
+pub(crate) fn prepend_task_block(task: &str, body: &str) -> String {
+    let mut header = String::with_capacity(task.len() + body.len() + 96);
+    header.push_str("[Original Task — still in force, restated verbatim after compaction]\n");
+    header.push_str(task);
+    header.push_str("\n\n");
+    header.push_str(body);
+    header
+}
+
+/// The originating task, when the split would otherwise discard it.
+///
+/// `None` when the head is already inside the retained tail, when the first
+/// message is not a user message, or when it carries no text to restate.
+pub(crate) fn preserved_task(messages: &[ContextMessage], split_point: usize) -> Option<String> {
+    if split_point == 0 {
+        return None;
+    }
+    let first = messages.first()?;
+    if first.role != "user" {
+        return None;
+    }
+    let text = message_text(first);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(truncate_on_char_boundary(trimmed, MAX_PRESERVED_TASK_CHARS))
+}
+
+/// Readable text of a message, whether its content is a string or blocks.
+///
+/// Tool-use and tool-result blocks are skipped: a seed prompt carries neither,
+/// and replaying one into the header would reintroduce an unpaired block.
+fn message_text(message: &ContextMessage) -> String {
+    match &message.content {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(|v| v.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// Truncate on a char boundary, saying so where it happened.
+fn truncate_on_char_boundary(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push_str("\n[task text truncated]");
+    out
 }
 
 /// Compaction statistics returned after a compaction operation.

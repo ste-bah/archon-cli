@@ -1,5 +1,5 @@
 use archon_context::boundary::{CompactBoundary, CompactionStrategy};
-use archon_context::compact::{CompactionStats, select_strategy};
+use archon_context::compact::{CompactionStats, compact_messages, select_strategy};
 use archon_context::messages::ContextMessage;
 use archon_context::microcompact::microcompact_messages;
 use archon_context::snip::{count_turns, snip_messages};
@@ -362,4 +362,95 @@ fn compaction_stats_ratio() {
         ratio: 500.0 / 1000.0,
     };
     assert!((stats.ratio - 0.5).abs() < f64::EPSILON);
+}
+
+// ---------------------------------------------------------------------------
+// The originating task must survive compaction.
+//
+// A subagent is told its job exactly once, as messages[0]. Both compaction
+// paths kept only a tail, so a successful compaction deleted the assignment
+// and left the summariser's own scaffolding as the sole instruction — an
+// acceptance-evidence audit branch answered that scaffolding with a
+// bullet-point context summary, and the gate accepted it.
+// ---------------------------------------------------------------------------
+
+fn seeded(task: &str, turns: usize) -> Vec<ContextMessage> {
+    let mut messages = vec![ContextMessage::user(task)];
+    for i in 0..turns {
+        messages.push(ContextMessage::assistant(&format!("reply {i}")));
+        messages.push(ContextMessage::user(&format!("turn {i}")));
+    }
+    messages
+}
+
+#[test]
+fn full_compaction_restates_the_originating_task() {
+    let messages = seeded("AUDIT the acceptance evidence and report gaps", 8);
+    let compacted = compact_messages(&messages, "summary body", 3);
+
+    let head = compacted[0].content.as_str().expect("string content");
+    assert!(
+        head.contains("AUDIT the acceptance evidence and report gaps"),
+        "the assignment must survive compaction, got: {head}"
+    );
+    assert!(head.contains("[Original Task"));
+    assert!(head.contains("[Context Summary]"), "summary still present");
+}
+
+#[test]
+fn micro_compaction_restates_the_originating_task() {
+    let messages = seeded("AUDIT the acceptance evidence and report gaps", 8);
+    let (compacted, _) = microcompact_messages(&messages, "summary body", 3);
+
+    let head = compacted[0].content.as_str().expect("string content");
+    assert!(head.contains("AUDIT the acceptance evidence and report gaps"));
+    assert!(
+        head.contains("summary body"),
+        "micro keeps its bare summary shape"
+    );
+    assert!(
+        !head.contains("## Key Decisions"),
+        "micro must not inherit the structured header downstream parses"
+    );
+}
+
+#[test]
+fn a_task_in_content_blocks_is_restated_too() {
+    let mut messages = seeded("ignored", 8);
+    messages[0] = ContextMessage {
+        role: "user".into(),
+        content: serde_json::json!([{"type": "text", "text": "BLOCK-FORM ASSIGNMENT"}]),
+        estimated_tokens: 1,
+    };
+    let compacted = compact_messages(&messages, "summary", 3);
+    let head = compacted[0].content.as_str().expect("string content");
+    assert!(head.contains("BLOCK-FORM ASSIGNMENT"));
+}
+
+#[test]
+fn an_oversized_task_is_truncated_not_dropped() {
+    let long = "x".repeat(archon_context::compact::MAX_PRESERVED_TASK_CHARS + 500);
+    let messages = seeded(&long, 8);
+    let compacted = compact_messages(&messages, "summary", 3);
+    let head = compacted[0].content.as_str().expect("string content");
+
+    assert!(head.contains("[task text truncated]"));
+    assert!(
+        head.len() < long.len() + 1_000,
+        "a pasted file must not eat the window compaction just reclaimed"
+    );
+}
+
+#[test]
+fn nothing_is_restated_when_the_head_is_already_kept() {
+    // Too few messages to compact: the list comes back untouched, so there is
+    // no synthetic header to carry a restated task.
+    let messages = seeded("ASSIGNMENT", 2);
+    let compacted = compact_messages(&messages, "summary", 3);
+    assert_eq!(compacted.len(), messages.len());
+    assert_eq!(
+        compacted[0].content.as_str().expect("string"),
+        "ASSIGNMENT",
+        "the real first message is still the real first message"
+    );
 }
