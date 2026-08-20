@@ -161,6 +161,40 @@ pub fn all_keys() -> Vec<&'static str> {
     key_registry().keys().copied().collect()
 }
 
+/// One row of the runtime configuration, as the settings overlay shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigEntry {
+    pub key: &'static str,
+    /// The value in force: the session overlay if set, otherwise the default.
+    pub value: String,
+    /// True for a `Bool` key, so a caller can offer the opposite value.
+    pub is_bool: bool,
+    /// True when `set` will refuse the key, so a caller can say so first.
+    pub read_only: bool,
+}
+
+/// Every key with its current value, sorted by name.
+///
+/// `/config` with no arguments already prints key and value. The settings
+/// overlay needs the type as well: without it a boolean cannot offer the
+/// opposite value, and a read-only key would be offered for editing only to be
+/// refused after the fact. Sorted because the registry is a `HashMap`, and a
+/// list that reshuffles between openings is one you cannot learn.
+pub fn config_entries() -> Vec<ConfigEntry> {
+    let registry = key_registry();
+    let mut entries: Vec<ConfigEntry> = registry
+        .iter()
+        .map(|(key, meta)| ConfigEntry {
+            key,
+            value: get_config_value(key).unwrap_or_else(|| meta.default.to_string()),
+            is_bool: meta.ty == KeyType::Bool,
+            read_only: meta.read_only,
+        })
+        .collect();
+    entries.sort_by(|a, b| a.key.cmp(b.key));
+    entries
+}
+
 /// Find the closest matching keys using segment-aware substring matching.
 fn suggest_keys(unknown: &str) -> Vec<&'static str> {
     let parts: Vec<&str> = unknown.split('.').collect();

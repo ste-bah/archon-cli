@@ -205,7 +205,15 @@ fn activity_events_and_tui_rows_carry_provider_metadata() {
         "crates/archon-core/src/agent/events.rs",
         "crates/archon-core/src/agent/tool_context.rs",
     ]);
-    let events = read("crates/archon-tui/src/events.rs");
+    // Both halves: the agent-activity payload types moved to
+    // `events_activity.rs` when `events.rs` crossed the 500-line gate, and
+    // reading only the enum's file made this guard assert on a file the types
+    // no longer live in. What it is checking is that the metadata survives
+    // somewhere in the event layer, not which file holds it.
+    let events = read_all(&[
+        "crates/archon-tui/src/events.rs",
+        "crates/archon-tui/src/events_activity.rs",
+    ]);
     let rail = read("crates/archon-tui/src/agent_activity.rs");
 
     // v1.3.0: ProviderModelActivitySink::emit now fills provider/model only

@@ -193,6 +193,30 @@ pub(super) async fn run_prepared_bash_command(
     result
 }
 
+/// The exit code to report for a finished process.
+///
+/// `ExitStatus::code()` is `None` on Unix when the process was killed by a
+/// signal, and collapsing that to `-1` loses which signal — an OOM kill and a
+/// `SIGSEGV` came back identical, and `BashOutcome` is otherwise a clean
+/// `Done`/`Timeout`/`Cancelled` split with no other place two outcomes report
+/// as one (#193).
+///
+/// `128 + signal` is the convention every shell uses for `$?`, so the number
+/// matches what the same command would have shown at a prompt.
+fn reported_exit_code(status: &std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    -1
+}
+
 fn redact_and_limit_result(
     max_output_bytes: usize,
     ctx: &ToolContext,
@@ -398,7 +422,7 @@ pub(super) async fn completed_bash_result(
             )
             .await;
     }
-    let exit_code = status.code().unwrap_or(-1);
+    let exit_code = reported_exit_code(&status);
     bash_result_from_pipes(
         tool.max_output_bytes,
         ctx,

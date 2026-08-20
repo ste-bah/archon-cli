@@ -100,6 +100,102 @@
 #[allow(unused_imports)]
 use archon_tui::app::TuiEvent;
 
+#[cfg(test)]
+mod memory_files_tests {
+    use super::*;
+
+    /// The defect the live run exposed: on Windows the discovered paths are
+    /// verbatim and the working directory is not, so the project's own file was
+    /// labelled `ancestor` and an ancestor was labelled `global`.
+    #[test]
+    fn the_working_directorys_own_file_is_scoped_to_the_project() {
+        let root = tempfile::tempdir().expect("temp dir");
+        std::fs::write(root.path().join("ARCHON.md"), "# project").expect("write");
+
+        let entries = memory_file_entries(Some(root.path()));
+        let project: Vec<&(String, String, u64)> = entries
+            .iter()
+            .filter(|(scope, _, _)| scope == "project")
+            .collect();
+
+        assert_eq!(
+            project.len(),
+            1,
+            "the file in the working directory must be scoped to the project; got {entries:?}"
+        );
+        assert!(project[0].2 > 0, "size must be the real byte count");
+    }
+
+    /// A verbatim prefix is the correct path and the wrong thing to show.
+    #[test]
+    fn windows_verbatim_prefixes_are_not_shown() {
+        let root = tempfile::tempdir().expect("temp dir");
+        std::fs::write(root.path().join("ARCHON.md"), "# project").expect("write");
+
+        for (_, path, _) in memory_file_entries(Some(root.path())) {
+            assert!(!path.starts_with(r"\\?\"), "verbatim prefix leaked: {path}");
+        }
+    }
+
+    #[test]
+    fn no_working_directory_yields_no_entries() {
+        assert!(memory_file_entries(None).is_empty());
+    }
+}
+
+/// The ARCHON.md hierarchy in force, as `(scope, path, size_bytes)`.
+///
+/// Discovery order is load order — global, then each ancestor, then the working
+/// directory — and a later file overrides an earlier one, so the list must not
+/// be sorted.
+///
+/// A file that vanished between discovery and stat is dropped rather than
+/// listed with a zero size, because a zero-byte instruction file and a missing
+/// one mean different things.
+fn memory_file_entries(working_dir: Option<&std::path::Path>) -> Vec<(String, String, u64)> {
+    let Some(working_dir) = working_dir else {
+        return Vec::new();
+    };
+    // Discovery canonicalises, and on Windows that yields verbatim
+    // (`\\?\C:\...`) paths. Comparing one of those against an uncanonicalised
+    // working directory never matches, which labelled the project's own file
+    // "ancestor" and an ancestor "global" — caught by looking at the list on a
+    // real terminal. Canonicalise both sides, or neither comparison is sound.
+    let root = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
+    let home = dirs::home_dir().and_then(|home| home.canonicalize().ok());
+
+    archon_core::archonmd::discover_archon_md_paths(working_dir)
+        .iter()
+        .filter_map(|path| {
+            let size = std::fs::metadata(path).ok()?.len();
+            // Project beats global: a repository checked out inside the home
+            // directory is still the project's own file.
+            let scope = if path.starts_with(&root) {
+                "project"
+            } else if home.as_ref().is_some_and(|home| path.starts_with(home)) {
+                "global"
+            } else {
+                "ancestor"
+            };
+            Some((scope.to_string(), display_path(path), size))
+        })
+        .collect()
+}
+
+/// Strip the Windows verbatim prefix for display.
+///
+/// `canonicalize` returns `\\?\C:\...` on Windows. That is the correct path and
+/// the wrong thing to show someone: it is not what they typed, not what they
+/// would type, and it makes every row eight characters wider for no gain.
+fn display_path(path: &std::path::Path) -> String {
+    let shown = path.display().to_string();
+    shown
+        .strip_prefix(r"\\?\")
+        .map_or(shown.clone(), str::to_string)
+}
+
 use archon_memory::MemoryTrait;
 use archon_memory::types::MemoryType;
 
@@ -424,10 +520,29 @@ impl CommandHandler for MemoryHandler {
                     }
                 }
             }
+            // #192. Deliberately its own subcommand rather than part of
+            // `list`: these are instruction files on disk, not memories in the
+            // graph, and folding two subsystems under one word makes both
+            // harder to reason about.
+            "files" => {
+                let entries = memory_file_entries(ctx.working_dir.as_deref());
+                if entries.is_empty() {
+                    ctx.emit(TuiEvent::TextDelta(
+                        "\nNo ARCHON.md or CLAUDE.md is being loaded.\n".into(),
+                    ));
+                } else {
+                    let mut text = format!("\nMemory files ({}):\n", entries.len());
+                    for (scope, path, size) in &entries {
+                        text.push_str(&format!("  [{scope}] {path} ({size} bytes)\n"));
+                    }
+                    ctx.emit(TuiEvent::TextDelta(text));
+                }
+                ctx.emit(TuiEvent::ShowMemoryFiles(entries));
+            }
             other => {
                 ctx.emit(TuiEvent::Error(format!(
                     "Unknown memory subcommand: {other}. Use list, \
-                     store, search, prune, or clear."
+                     store, search, files, prune, or clear."
                 )));
             }
         }

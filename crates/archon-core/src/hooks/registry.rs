@@ -343,6 +343,12 @@ impl HookRegistry {
         // Auto-clear session hooks on SessionEnd.
         if event == HookEvent::SessionEnd {
             self.clear_session_hooks(session_id);
+            // And the read-before-write observations, including every
+            // subagent's (#193 Phase A). They are deliberately not persisted:
+            // a token from last week is not evidence about now, and a stale one
+            // would answer "yes, fresh" for a file nobody in this process has
+            // opened — worse than having no record at all.
+            archon_tools::file_observation::FILE_OBSERVATIONS.forget_session(session_id);
         }
 
         // Execute registered in-process callbacks for this event.

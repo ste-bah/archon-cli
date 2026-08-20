@@ -8,6 +8,9 @@
 
 mod builder;
 mod effects;
+/// `/feedback` dispatch-site snapshot, split from `builder.rs` for the
+/// 500-line ceiling (#193 Phase C).
+mod feedback_snapshot;
 #[cfg(test)]
 mod plan_lifecycle_tests;
 mod primary;

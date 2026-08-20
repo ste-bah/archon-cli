@@ -57,6 +57,7 @@ fn permissions_handler_aliases_are_empty() {
 #[test]
 fn permissions_handler_execute_with_no_args_emits_snapshot_text() {
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };
@@ -75,10 +76,13 @@ fn permissions_handler_execute_with_no_args_emits_snapshot_text() {
     );
 
     let events = drain(&mut rx);
+    // Two since #192: the shipped text, unchanged, and the overlay that shows
+    // the rules the mode is qualified by. The overlay is additive — the count
+    // moved, the text did not, and that is what the next assertion pins.
     assert_eq!(
         events.len(),
-        1,
-        "empty-arg branch must emit exactly one event; got: {events:?}"
+        2,
+        "empty-arg branch must emit the text and the overlay; got: {events:?}"
     );
     let expected =
         "\nCurrent permission mode: default\nUsage: /permissions <mode>\nModes: default, acceptEdits, plan, auto, dontAsk, bypassPermissions\nLegacy aliases: ask -> default, yolo -> bypassPermissions\n"
@@ -93,6 +97,13 @@ fn permissions_handler_execute_with_no_args_emits_snapshot_text() {
         }
         other => panic!("empty-arg branch must emit TuiEvent::TextDelta, got: {other:?}"),
     }
+    match &events[1] {
+        TuiEvent::ShowPermissions { mode, rules } => {
+            assert_eq!(mode, "default");
+            assert!(rules.is_empty(), "no rules were configured; got: {rules:?}");
+        }
+        other => panic!("empty-arg branch must open the rules overlay, got: {other:?}"),
+    }
 }
 
 /// A valid non-bypass mode (`"plan"`) must:
@@ -106,6 +117,7 @@ fn permissions_handler_execute_with_no_args_emits_snapshot_text() {
 #[test]
 fn permissions_handler_execute_with_valid_plan_stashes_effect_and_emits_set_text() {
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };
@@ -162,6 +174,7 @@ fn permissions_handler_execute_with_valid_plan_stashes_effect_and_emits_set_text
 #[test]
 fn permissions_handler_execute_bypass_without_allow_emits_error_no_effect() {
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };
@@ -211,6 +224,7 @@ fn permissions_bypass_denial_records_to_governed_learning_db() {
     archon_learning::schema::ensure_learning_schema(&db).expect("schema");
     let db = std::sync::Arc::new(db);
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };
@@ -240,6 +254,7 @@ fn permissions_bypass_denial_records_to_governed_learning_db() {
 #[test]
 fn permissions_handler_execute_bypass_with_allow_stashes_effect() {
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: true,
     };
@@ -285,6 +300,7 @@ fn permissions_handler_execute_bypass_with_allow_stashes_effect() {
 #[test]
 fn permissions_handler_execute_with_invalid_arg_emits_validation_error() {
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };

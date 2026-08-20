@@ -53,6 +53,65 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     .map(|entry| string_bytes(&entry.name) + string_bytes(&entry.description))
                     .sum::<usize>()
         }
+        TuiEvent::ShowModelPicker(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(provider, model, label)| {
+                        string_bytes(provider) + string_bytes(model) + string_bytes(label)
+                    })
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowThemePicker(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(name, _)| string_bytes(name))
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowSettings(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(key, value, _, _)| string_bytes(key) + string_bytes(value))
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowHooks(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(id, event, command, source, _)| {
+                        string_bytes(id)
+                            + string_bytes(event)
+                            + string_bytes(command)
+                            + string_bytes(source)
+                    })
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowPermissions { mode, rules } => {
+            string_bytes(mode)
+                + vec_bytes(rules)
+                + rules
+                    .iter()
+                    .map(|(effect, tool, pattern)| {
+                        string_bytes(effect) + string_bytes(tool) + string_bytes(pattern)
+                    })
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowMemoryFiles(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(scope, path, _)| string_bytes(scope) + string_bytes(path))
+                    .sum::<usize>()
+        }
+        TuiEvent::ShowBranchPicker(entries) | TuiEvent::ShowTokenAttribution(entries) => {
+            vec_bytes(entries)
+                + entries
+                    .iter()
+                    .map(|(_, role, summary)| string_bytes(role) + string_bytes(summary))
+                    .sum::<usize>()
+        }
         TuiEvent::ShowFilePicker { root, entries } => {
             path_bytes(root) + file_entries_bytes(entries)
         }
@@ -98,8 +157,13 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
         TuiEvent::ContextPressureUpdated {
             context_name,
             resolution_source,
+            top_contributors,
             ..
-        } => option_string_bytes(context_name) + option_string_bytes(resolution_source),
+        } => {
+            option_string_bytes(context_name)
+                + option_string_bytes(resolution_source)
+                + vec_bytes(top_contributors)
+        }
         TuiEvent::SetAgentInfo { name, color } => string_bytes(name) + option_string_bytes(color),
         _ => 0,
     }

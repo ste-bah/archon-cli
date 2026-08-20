@@ -49,7 +49,10 @@ mod task_overlay_store;
 mod web_runtime;
 mod world_model_backend;
 mod world_model_callbacks;
-use activity::{session_activity_sink, session_activity_sink_with_tui};
+/// Re-exported for `command::context::effects`, which records the
+/// `MessageRated` event from outside this module (#193 Phase C).
+pub(crate) use activity::session_activity_sink;
+use activity::session_activity_sink_with_tui;
 pub(super) use model_selection::active_session_model;
 pub(crate) use modes::{run_headless_session, run_print_mode_session};
 pub(crate) use web_runtime::{WebSessionHandle, spawn_web_session};

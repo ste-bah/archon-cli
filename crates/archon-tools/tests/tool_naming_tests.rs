@@ -69,25 +69,61 @@ fn builtin_tool_names_match_claude_code_conventions() {
 // Constants integrity
 // ---------------------------------------------------------------------------
 
+/// The shortcuts must resolve to the CURRENT generation.
+///
+/// This test previously asserted only that the three names existed, and that
+/// is why the table sat on `claude-opus-4-8` after `[models.anthropic]` in
+/// config.toml had moved to `claude-opus-5`: nothing checked what a shortcut
+/// pointed AT. `/model opus` silently downgraded, and `/model claude-opus-5`
+/// was rejected as unknown while the session was running on it (#192).
 #[test]
-fn known_shortcuts_are_complete() {
-    assert_eq!(KNOWN_SHORTCUTS.len(), 3);
-    assert!(KNOWN_SHORTCUTS.iter().any(|(s, _)| *s == "opus"));
-    assert!(KNOWN_SHORTCUTS.iter().any(|(s, _)| *s == "sonnet"));
-    assert!(KNOWN_SHORTCUTS.iter().any(|(s, _)| *s == "haiku"));
+fn known_shortcuts_resolve_to_the_current_generation() {
+    let resolved = |name: &str| {
+        KNOWN_SHORTCUTS
+            .iter()
+            .find(|(s, _)| *s == name)
+            .map(|(_, id)| *id)
+    };
+
+    assert_eq!(resolved("opus"), Some("claude-opus-5"));
+    assert_eq!(resolved("sonnet"), Some("claude-sonnet-5"));
+    assert_eq!(resolved("fable"), Some("claude-fable-5"));
+    assert_eq!(resolved("haiku"), Some("claude-haiku-4-5-20251001"));
+
+    // Every shortcut must point at an id the validator also accepts, or the
+    // shortcut resolves to a model that is then refused by literal id.
+    for (shortcut, id) in KNOWN_SHORTCUTS {
+        assert!(
+            KNOWN_MODEL_IDS.contains(id),
+            "shortcut {shortcut} resolves to {id}, which is not in KNOWN_MODEL_IDS"
+        );
+    }
 }
 
 #[test]
-fn known_model_ids_are_complete() {
-    // Older Opus generations are retained alongside 4.8 for backward-compat
-    // with TUI sessions, memory references, and snapshot fixtures that pinned
-    // a previous Opus generation. See validation.rs:KNOWN_MODEL_IDS comment.
-    assert_eq!(KNOWN_MODEL_IDS.len(), 5);
-    assert!(KNOWN_MODEL_IDS.contains(&"claude-opus-4-8"));
-    assert!(KNOWN_MODEL_IDS.contains(&"claude-opus-4-7"));
-    assert!(KNOWN_MODEL_IDS.contains(&"claude-opus-4-6"));
-    assert!(KNOWN_MODEL_IDS.contains(&"claude-sonnet-4-6"));
-    assert!(KNOWN_MODEL_IDS.contains(&"claude-haiku-4-5-20251001"));
+fn known_model_ids_cover_current_and_pinned_generations() {
+    // Current generation. Absent before #192, which is the defect above.
+    for id in [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+    ] {
+        assert!(KNOWN_MODEL_IDS.contains(&id), "missing current id: {id}");
+    }
+
+    // Earlier generations are retained for backward-compat with TUI sessions,
+    // memory references and snapshot fixtures that pinned them. See the
+    // KNOWN_MODEL_IDS comment in validation.rs.
+    for id in [
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+    ] {
+        assert!(KNOWN_MODEL_IDS.contains(&id), "dropped pinned id: {id}");
+    }
 }
 
 #[test]
@@ -125,14 +161,25 @@ fn legacy_permission_aliases_are_complete() {
 
 #[test]
 fn model_shortcut_opus() {
-    assert_eq!(validate_model_name("opus"), Ok("claude-opus-4-8".into()));
+    assert_eq!(validate_model_name("opus"), Ok("claude-opus-5".into()));
 }
 
 #[test]
 fn model_shortcut_sonnet() {
+    assert_eq!(validate_model_name("sonnet"), Ok("claude-sonnet-5".into()));
+}
+
+#[test]
+fn model_shortcut_fable() {
+    assert_eq!(validate_model_name("fable"), Ok("claude-fable-5".into()));
+}
+
+/// The id the session actually runs on must validate. It did not before #192.
+#[test]
+fn model_full_id_current_opus_validates() {
     assert_eq!(
-        validate_model_name("sonnet"),
-        Ok("claude-sonnet-4-6".into())
+        validate_model_name("claude-opus-5"),
+        Ok("claude-opus-5".into())
     );
 }
 
@@ -170,11 +217,8 @@ fn model_full_id_sonnet() {
 
 #[test]
 fn model_shortcut_case_insensitive() {
-    assert_eq!(validate_model_name("OPUS"), Ok("claude-opus-4-8".into()));
-    assert_eq!(
-        validate_model_name("Sonnet"),
-        Ok("claude-sonnet-4-6".into())
-    );
+    assert_eq!(validate_model_name("OPUS"), Ok("claude-opus-5".into()));
+    assert_eq!(validate_model_name("Sonnet"), Ok("claude-sonnet-5".into()));
 }
 
 #[test]

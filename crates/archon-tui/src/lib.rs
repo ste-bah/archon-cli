@@ -17,6 +17,8 @@ pub mod context_status;
 pub mod input;
 pub mod markdown;
 pub mod output;
+/// Shared modal-overlay chrome. Crate-private: it is house style, not API.
+mod overlay;
 pub mod permissions;
 mod thinking_archive;
 #[cfg(test)]
@@ -68,11 +70,19 @@ pub mod event_loop;
 pub mod cancel;
 pub use cancel::YieldGate;
 
+/// TUI entry points, split out of `app.rs` for the 500-line gate.
+mod app_run;
 pub mod event_channel;
 mod event_framing;
 mod event_payload_size;
 mod event_queue_metrics;
 pub mod events;
+/// Agent-activity payload types, split out of `events.rs` for the 500-line
+/// gate. Re-exported from `events`, so no caller changes.
+pub mod events_activity;
+/// `TuiEvent::variant_name`, split out of `events.rs` for the same reason: one
+/// arm per variant, growing with every event and describing none of them.
+pub mod events_variant_name;
 pub mod evidence_view_state;
 pub use events::TuiEvent;
 pub mod state;

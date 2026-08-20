@@ -28,7 +28,9 @@ impl archon_observability::AgentActivitySink for SessionActivitySink {
     }
 }
 
-pub(super) fn session_activity_sink(
+/// `pub(crate)` since #193 Phase C: `/feedback` records a `MessageRated` event
+/// from `command::context::effects`, which is outside this module.
+pub(crate) fn session_activity_sink(
     session_id: &str,
 ) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
     session_activity_sink_inner(session_id, None)

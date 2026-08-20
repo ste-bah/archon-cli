@@ -59,6 +59,45 @@ fn shell_quote(path: &std::path::Path) -> String {
     )
 }
 
+/// The containment this module is named for.
+///
+/// Until #192 the child inherited the caller's process group, so the pgid the
+/// cleanup path signals was a plain pid that usually named no group — the kill
+/// hit nothing and returned ESRCH, which reads as "already gone". When the pid
+/// did collide with a real group it named someone else's processes; macOS
+/// refused that with EPERM and CI went red.
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_runs_in_a_process_group_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool::default();
+    let result = tool
+        .execute(
+            json!({"command": "ps -o pgid= -p $$"}),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    let child_group: i32 = result
+        .content
+        .lines()
+        .filter_map(|line| line.trim().parse::<i32>().ok())
+        .next_back()
+        .unwrap_or_else(|| panic!("no process group in output: {}", result.content));
+    let own_group = unsafe { libc::getpgrp() };
+
+    assert_ne!(
+        child_group, own_group,
+        "the child shares this process's group, so killing its 'group' would \
+         either do nothing or signal processes archon does not own"
+    );
+    assert!(child_group > 0, "implausible pgid {child_group}");
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn normal_completion_kills_delayed_background_mutation() {

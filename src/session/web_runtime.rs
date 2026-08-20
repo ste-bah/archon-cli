@@ -348,6 +348,11 @@ pub(crate) async fn spawn_web_session(
             cost_config: config.cost.clone(),
             codex_models: config.models.openai_codex.clone(),
             anthropic_models: config.models.anthropic.clone(),
+            permission_rules: archon_permissions::rules::RuleSet {
+                always_allow: config.permissions.always_allow.clone(),
+                always_deny: config.permissions.always_deny.clone(),
+                always_ask: config.permissions.always_ask.clone(),
+            },
             memory: Arc::clone(&memory),
             garden_config: config.memory.garden.clone(),
             mcp_manager: mcp_manager.clone(),

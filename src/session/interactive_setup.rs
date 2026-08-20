@@ -203,6 +203,9 @@ pub(super) async fn prepare(
         subagent_stream_idle_timeout_secs: config.subagent.stream_idle_timeout_secs,
         subagent_auto_isolation: config.subagent.auto_isolation,
         subagent_isolation_max_tier: config.subagent.isolation_max_tier,
+        filesystem: config.filesystem,
+        // The top-level agent. The executor stamps a real id on a child.
+        subagent_id: None,
     };
     super::build_agent::apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli)
         .await;

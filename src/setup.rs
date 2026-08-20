@@ -120,75 +120,12 @@ pub fn resolve_cli_flags(
     resolved_flags
 }
 
-/// Set up voice pipeline if enabled in config.
-/// Returns the voice event receiver if voice is enabled.
-pub fn setup_voice_pipeline(
-    config: &archon_core::config::ArchonConfig,
-) -> Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>> {
-    if !config.voice.enabled {
-        tracing::info!("voice: disabled (config.voice.enabled=false)");
-        return None;
-    }
-
-    use archon_tui::app::TuiEvent as VTuiEvent;
-    use archon_tui::voice::pipeline::{
-        AudioSource, MockAudioSource, VoicePipeline, VoiceTrigger, hotkey_action_for_mode,
-        install_toggle_mode, install_trigger_sender, voice_loop,
-    };
-    use archon_tui::voice::stt::{LocalStt, MockStt, OpenAiStt, SttProvider};
-    use std::sync::Arc as StdArc;
-
-    let (trig_tx, trig_rx) = tokio::sync::mpsc::channel::<VoiceTrigger>(16);
-    install_trigger_sender(trig_tx);
-    install_toggle_mode(config.voice.toggle_mode);
-    tracing::info!(
-        "voice: toggle_mode={} (hotkey action={:?})",
-        config.voice.toggle_mode,
-        hotkey_action_for_mode(config.voice.toggle_mode)
-    );
-    let (voice_evt_tx, voice_evt_rx_inner) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
-    let voice_event_rx = Some(voice_evt_rx_inner);
-    let audio_capture = archon_tui::voice::capture::AudioCapture::new();
-    let audio: StdArc<dyn AudioSource> = if audio_capture.is_supported() {
-        tracing::info!(
-            "voice: real audio device detected (sample_rate={}, channels={})",
-            audio_capture.sample_rate,
-            audio_capture.channels
-        );
-        StdArc::new(MockAudioSource::with_samples(vec![
-            0.0_f32;
-            audio_capture.sample_rate
-                as usize
-        ]))
-    } else {
-        tracing::warn!("voice: no audio device available, using mock audio source");
-        StdArc::new(MockAudioSource::with_samples(vec![0.0_f32; 16000]))
-    };
-    let stt: StdArc<dyn SttProvider> = match config.voice.stt_provider.as_str() {
-        "openai" if !config.voice.stt_api_key.is_empty() => StdArc::new(OpenAiStt {
-            api_key: config.voice.stt_api_key.clone(),
-            url: config.voice.stt_url.clone(),
-        }),
-        "local" => StdArc::new(LocalStt {
-            url: config.voice.stt_url.clone(),
-        }),
-        _ => StdArc::new(MockStt {
-            response: "[voice: no STT configured]".to_string(),
-        }),
-    };
-    let pipeline = VoicePipeline::new(audio, stt, config.voice.vad_threshold);
-    archon_observability::spawn_named("voice-pipeline", async move {
-        voice_loop(trig_rx, voice_evt_tx, pipeline).await;
-    });
-    tracing::info!(
-        "voice: pipeline wired (provider={}, device={}, hotkey={})",
-        config.voice.stt_provider,
-        config.voice.device,
-        config.voice.hotkey,
-    );
-
-    voice_event_rx
-}
+// A second `setup_voice_pipeline` lived here, byte-for-byte the same wiring as
+// the one in `command/tui_helpers.rs` except for the `yield_now`, and nothing
+// called it: `main.rs` calls the other one. Two copies of a subsystem's
+// startup path is one copy that can be fixed while the running one stays
+// broken, which is exactly what had happened — both built a mock audio source
+// (#192).
 
 /// Load environment variables and warn about unrecognized ARCHON_* vars.
 pub fn load_env_vars() -> ArchonEnvVars {

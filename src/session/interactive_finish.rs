@@ -468,6 +468,7 @@ pub(super) async fn finish(
                 provider_name,
             ),
             selected_model: agent_model_for_ledger,
+            speech_tx: crate::command::tui_helpers::setup_speech(config),
         },
     );
 

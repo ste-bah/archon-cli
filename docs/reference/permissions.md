@@ -127,6 +127,16 @@ In the TUI:
 /denials                  # Show denied permissions in current session
 ```
 
+Bare `/permissions` also opens a browsable overlay listing the mode and every
+configured rule grouped by effect. It is **read-only** and has no action key:
+rules are read from `[permissions]` when the session starts and nothing at
+runtime can change them, so an Enter that appeared to toggle one would be
+lying. Change them in `config.toml` and restart, or use `--permission-mode` for
+the session-wide mode.
+
+An overlay showing no rules says so in words — the mode alone decides, which is
+a different situation from a browser that failed to load.
+
 CLI:
 ```bash
 archon --permission-mode default --print "list files in /etc"

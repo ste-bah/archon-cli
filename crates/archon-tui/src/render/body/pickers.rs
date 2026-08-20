@@ -134,6 +134,87 @@ pub fn draw_skills_menu(frame: &mut Frame, app: &App) {
     menu.render(frame, area, &app.theme);
 }
 
+/// Render the model-picker overlay (#192, `/model` with no arguments).
+pub fn draw_model_picker(frame: &mut Frame, app: &App) {
+    let picker = match &app.model_picker {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the theme picker overlay (#192, `/theme` with no arguments).
+pub fn draw_theme_screen(frame: &mut Frame, app: &App) {
+    let screen = match &app.theme_screen {
+        Some(s) => s,
+        None => return,
+    };
+    screen.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the settings overlay (#192, `/config` with no arguments).
+pub fn draw_settings_screen(frame: &mut Frame, app: &App) {
+    let screen = match &app.settings_screen {
+        Some(s) => s,
+        None => return,
+    };
+    screen.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the hooks overlay (#192, `/hooks` with no subcommand).
+pub fn draw_hooks_menu(frame: &mut Frame, app: &App) {
+    let menu = match &app.hooks_menu {
+        Some(m) => m,
+        None => return,
+    };
+    menu.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the permission-rules overlay (#192, `/permissions`).
+pub fn draw_permissions_browser(frame: &mut Frame, app: &App) {
+    let browser = match &app.permissions_browser {
+        Some(b) => b,
+        None => return,
+    };
+    browser.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the memory-files overlay (#192, `/memory files`).
+pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
+    let browser = match &app.memory_browser {
+        Some(b) => b,
+        None => return,
+    };
+    browser.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the branch picker (#192, `/fork-at` with no arguments).
+pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
+    let picker = match &app.branch_picker {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the token attribution overlay (#192 scope B, `/context`).
+pub fn draw_token_attribution(frame: &mut Frame, app: &App) {
+    let overlay = match &app.token_attribution {
+        Some(o) => o,
+        None => return,
+    };
+    overlay.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the voice capture overlay (#192, `/voice` and the record hotkey).
+pub fn draw_voice_capture(frame: &mut Frame, app: &App) {
+    let overlay = match &app.voice_capture {
+        Some(o) => o,
+        None => return,
+    };
+    overlay.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the tasks overlay (#189 Phase 9, Ctrl+K).
 pub fn draw_task_overlay(frame: &mut Frame, app: &App) {
     let overlay = match &app.task_overlay {

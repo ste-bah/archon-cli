@@ -29,6 +29,7 @@ fn dispatcher_routes_slash_permissions_to_handler_end_to_end() {
     // here inline — in production the builder fills it before
     // dispatch). Use "default" as the harness default.
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };
@@ -48,14 +49,15 @@ fn dispatcher_routes_slash_permissions_to_handler_end_to_end() {
         ctx.pending_effect
     );
 
-    // 2. Exactly one TextDelta whose payload is byte-identical to
-    //    the shipped format!() output for the snapshot mode.
+    // 2. A TextDelta whose payload is byte-identical to the shipped
+    //    format!() output for the snapshot mode, followed since #192 by the
+    //    rules overlay. Additive: the count moved, the text did not.
     let events = drain(&mut rx);
     assert_eq!(
         events.len(),
-        1,
-        "end-to-end bare `/permissions` must emit exactly one \
-         event; got: {events:?}"
+        2,
+        "end-to-end bare `/permissions` must emit the text and the \
+         overlay; got: {events:?}"
     );
     let expected = format!(
         "\nCurrent permission mode: {}\n\
@@ -103,6 +105,7 @@ fn dispatcher_routes_slash_permissions_with_plan_arg_end_to_end() {
     // Production builder always populates when primary resolves
     // to /permissions, so match that contract here.
     let snap = PermissionsSnapshot {
+        rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
     };

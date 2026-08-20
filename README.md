@@ -205,7 +205,7 @@ archon-cli/
 
 ## Status
 
-**Current release: v1.9.2** — [release notes](docs/release-notes/v1.9.2.md)
+**Current release: v1.9.3** — [release notes](docs/release-notes/v1.9.3.md)
 
 Plan Mode now has a durable approval lifecycle: explicit user exit controls,
 safe permission restoration, editable plan documents, plan-linked task
@@ -250,6 +250,16 @@ called.
 > refusal as success. Enter still submits; **Shift+Enter inserts a newline**, and
 > Ctrl+L forces a redraw. See the
 > [release notes](docs/release-notes/v1.9.0.md#upgrade-notes).
+>
+> From v1.9.3: **a write to a file the agent has not read is now refused.**
+> `Edit`, `Write` and `NotebookEdit` are checked against what `Read`, `Grep` and
+> `NotebookRead` recorded; `Bash` is not checked. Set
+> `[filesystem].read_before_edit` to `"warn"` or `"off"` to soften or disable it.
+> **`voice.hotkey` defaults to `"ctrl+v"`**, which is the key that has always
+> been bound. **Building on Linux needs `libasound2-dev`** now that microphone
+> capture is a default feature. `/feedback` rates a message rather than
+> submitting a report, replacing a skill that recorded nothing. See the
+> [release notes](docs/release-notes/v1.9.3.md#upgrade-notes).
 >
 > From v1.9.2: **a structured `ExitPlanMode` submission now requires
 > approval**, while `/plan off`, `/plan exit`, and `/plan done` remain explicit

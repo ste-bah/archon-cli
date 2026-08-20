@@ -39,6 +39,38 @@ pub(crate) struct StatusSnapshot {
     pub(crate) input_tokens: u64,
     pub(crate) output_tokens: u64,
     pub(crate) turn_count: u64,
+    /// Message and tool counts, served by the session-stats projection
+    /// (#193 Phase B).
+    ///
+    /// `None` when the fold could not run, which is reported as absent rather
+    /// than as zeros — "no messages" and "could not count" are different
+    /// answers and the status line should not conflate them.
+    pub(crate) stats: Option<archon_session::projection_stats::SessionStatsState>,
+}
+
+/// The message and tool lines, or nothing when the fold could not run.
+///
+/// Absent rather than zeroed: "no messages" and "could not count" are different
+/// answers, and a status line that reported the second as the first would be
+/// lying quietly.
+fn stats_lines(stats: Option<&archon_session::projection_stats::SessionStatsState>) -> String {
+    let Some(stats) = stats else {
+        return String::new();
+    };
+    let tools = if stats.tools_used.is_empty() {
+        "none".to_string()
+    } else {
+        stats
+            .tools_used
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "Messages: {} ({} you / {} assistant)\nTools used: {tools}\n",
+        stats.message_count, stats.user_messages, stats.assistant_messages
+    )
 }
 
 /// Build a [`StatusSnapshot`] by awaiting the four async locks in the
@@ -78,6 +110,16 @@ pub(crate) async fn build_status_snapshot(slash_ctx: &SlashCommandContext) -> St
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
         turn_count: stats.turn_count,
+        // #193 Phase B: the derived counts come from the projection rather
+        // than from a rescan here, and resume folds only what is new.
+        stats: slash_ctx
+            .session_store
+            .project(
+                &slash_ctx.session_id,
+                &archon_session::projection_stats::SessionStatsProjection,
+            )
+            .ok()
+            .map(|projected| (*projected.state).clone()),
     }
     // Guards drop here — locks released before return.
 }
@@ -122,12 +164,13 @@ impl CommandHandler for StatusHandler {
              Thinking: {thinking_str}\n\
              Session: {sid}\n\
              Tokens: {in_k:.1}k in / {out_k:.1}k out\n\
-             Turns: {turns}\n",
+             Turns: {turns}\n{stats}",
             current_model = snap.current_model,
             perm_mode = snap.perm_mode,
             effort = snap.effort,
             sid = snap.session_id_short,
             turns = snap.turn_count,
+            stats = stats_lines(snap.stats.as_ref()),
         );
 
         // Sync try_send analogous to /tasks precedent (AGS-806). Channel
@@ -251,5 +294,47 @@ mod tests {
         assert_eq!(snap.turn_count, cloned.turn_count);
         // Debug impl must not panic.
         let _ = format!("{snap:?}");
+    }
+}
+
+#[cfg(test)]
+mod projection_stats_line_tests {
+    use super::stats_lines;
+    use archon_session::projection_stats::SessionStatsState;
+
+    /// "no messages" and "could not count" are different answers. A status
+    /// line that printed the second as the first would be lying quietly.
+    #[test]
+    fn an_unavailable_fold_prints_nothing_rather_than_zeros() {
+        assert_eq!(stats_lines(None), "");
+    }
+
+    #[test]
+    fn the_counts_and_the_tools_are_named() {
+        let mut state = SessionStatsState {
+            message_count: 5,
+            user_messages: 3,
+            assistant_messages: 2,
+            ..SessionStatsState::default()
+        };
+        state.tools_used.insert("Bash".to_string());
+        state.tools_used.insert("Read".to_string());
+
+        let text = stats_lines(Some(&state));
+
+        assert!(text.contains("Messages: 5 (3 you / 2 assistant)"), "{text}");
+        assert!(text.contains("Tools used: Bash, Read"), "{text}");
+    }
+
+    /// A session that called no tools says so, rather than showing an empty
+    /// label that reads like a rendering fault.
+    #[test]
+    fn a_session_with_no_tool_calls_says_none() {
+        let state = SessionStatsState {
+            message_count: 1,
+            user_messages: 1,
+            ..SessionStatsState::default()
+        };
+        assert!(stats_lines(Some(&state)).contains("Tools used: none"));
     }
 }

@@ -23,6 +23,16 @@ struct CancellationExecutor {
     inner_completion_count: AtomicUsize,
     visible_completed: AtomicBool,
     cancel_before_return: Mutex<Option<CancellationToken>>,
+    /// Park the executor until the test releases it, instead of sleeping.
+    ///
+    /// A test that wants to prove "the call returned while the executor was
+    /// still running" cannot prove it with a stopwatch: on a loaded runner the
+    /// stopwatch measures scheduling latency, not the behaviour under test.
+    /// Holding the executor open makes the claim structural — while `hold` is
+    /// set the executor *cannot* have completed, so a return is necessarily an
+    /// early one.
+    hold: AtomicBool,
+    release: tokio::sync::Notify,
 }
 
 #[async_trait]
@@ -42,10 +52,14 @@ impl SubagentExecutor for CancellationExecutor {
                 .await;
             return Err(ExecutorError::Internal("cancelled".into()));
         }
-        tokio::time::sleep(std::time::Duration::from_millis(
-            self.delay_ms.load(Ordering::SeqCst),
-        ))
-        .await;
+        if self.hold.load(Ordering::SeqCst) {
+            self.release.notified().await;
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                self.delay_ms.load(Ordering::SeqCst),
+            ))
+            .await;
+        }
         self.on_inner_complete(subagent_id, Ok("recorded".into()))
             .await;
         if let Some(parent) = self
@@ -101,6 +115,8 @@ fn executor() -> Arc<CancellationExecutor> {
                 inner_completion_count: AtomicUsize::new(0),
                 visible_completed: AtomicBool::new(false),
                 cancel_before_return: Mutex::new(None),
+                hold: AtomicBool::new(false),
+                release: tokio::sync::Notify::new(),
             })
         })
         .clone();
@@ -291,20 +307,38 @@ async fn task_completion_wins_before_late_stop() {
 async fn auto_background_returns_without_visible_completion() {
     let executor = executor();
     executor.auto_bg_ms.store(1, Ordering::SeqCst);
-    executor.delay_ms.store(200, Ordering::SeqCst);
+    executor.delay_ms.store(0, Ordering::SeqCst);
+    executor.hold.store(true, Ordering::SeqCst);
     executor.inner_completed.store(false, Ordering::SeqCst);
     executor.visible_completed.store(false, Ordering::SeqCst);
+
+    // A hang backstop, not the assertion. This used to be a 100ms budget
+    // against a 200ms executor, which made the whole test a bet that a
+    // 12,000-test CI runner would schedule two tasks inside 100ms. It lost that
+    // bet on ubuntu.
     let result = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
+        std::time::Duration::from_secs(30),
         TaskCreateTool.execute(prompted_task("preserve D5", false), &context(None)),
     )
     .await
-    .expect("timer must return before executor completion");
+    .expect("auto-background must return rather than await the executor");
+
+    // The real claim: the executor is parked on `release` and cannot have
+    // finished, so this return can only have come from the auto-background
+    // timer. No clock is involved, so no amount of runner load can fake it.
+    assert!(
+        !executor.inner_completed.load(Ordering::SeqCst),
+        "execute returned only after the executor completed"
+    );
+
     let task_id = task_id(&result);
+    executor.hold.store(false, Ordering::SeqCst);
+    // notify_one, not notify_waiters: it leaves a permit if the executor task
+    // has not parked yet, so the release cannot be missed.
+    executor.release.notify_one();
 
     wait_for_status(&task_id, TaskStatus::Completed).await;
     assert!(executor.inner_completed.load(Ordering::SeqCst));
     assert!(!executor.visible_completed.load(Ordering::SeqCst));
     executor.auto_bg_ms.store(0, Ordering::SeqCst);
-    executor.delay_ms.store(0, Ordering::SeqCst);
 }

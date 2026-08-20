@@ -146,6 +146,10 @@ pub(crate) fn build_command_context<'a>(
             // resolves to `/permissions`. Mirrors AGS-807 status /
             // AGS-808 model / B08 denials / B11 effort snapshot gating rule.
             permissions_snapshot: None,
+            // #193 Phase C. Populated below only for `/feedback`: it reads the
+            // message log and the sidecar relation, and no other command uses
+            // either.
+            feedback_snapshot: None,
             plan_snapshot: None,
             // TASK-AGS-POST-6-BODIES-B14-COPY: SNAPSHOT-pattern field
             // (READ-only /copy). Initialised to `None` here; populated
@@ -336,6 +340,10 @@ pub(crate) fn build_command_context<'a>(
                 // gating.
                 ctx.permissions_snapshot =
                     Some(permissions::build_permissions_snapshot(slash_ctx).await);
+            }
+            Some("feedback" | "rate") => {
+                ctx.feedback_snapshot =
+                    Some(super::feedback_snapshot::build_feedback_snapshot(slash_ctx));
             }
             Some("copy") => {
                 // TASK-AGS-POST-6-BODIES-B14-COPY snapshot population.

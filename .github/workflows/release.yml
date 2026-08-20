@@ -134,13 +134,26 @@ jobs:
         if: runner.os == 'Linux' && !matrix.cross
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y pkg-config perl make
+          sudo apt-get install -y pkg-config perl make libasound2-dev
 
       - name: Install cross-compilation deps (aarch64-linux)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config perl make
+          # Microphone and speaker support links ALSA, so a cross build needs
+          # the arm64 headers, not the host's. dpkg needs the architecture
+          # enabled first, and the arm64 packages come from ports.ubuntu.com —
+          # the default sources only carry amd64 and would 404 on every arm64
+          # fetch, so the existing entries are pinned to amd64 before the ports
+          # list is added.
+          sudo sed -i 's/^deb \(http\|mirror+file\)/deb [arch=amd64] \1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          sudo dpkg --add-architecture arm64
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          timeout 180 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y libasound2-dev:arm64
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV

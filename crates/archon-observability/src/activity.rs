@@ -57,6 +57,13 @@ pub enum AgentActivityKind {
     AgentCompleted,
     /// Execution was cancelled.
     Cancelled,
+    /// A person rated an assistant message (#193 Phase C).
+    ///
+    /// The one signal the learning subsystems cannot synthesise: they can see
+    /// what happened and infer whether it worked, but not whether the reader
+    /// thought the answer was any good. Emitted so they can consume it without
+    /// polling the sidecar relation.
+    MessageRated,
 }
 
 /// Normalized lifecycle state for activity rows and persistence.

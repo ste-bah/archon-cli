@@ -110,7 +110,13 @@ path = "benches/eventchannel_latency.rs"
 harness = false
 
 [features]
-default = []
+# audio-capture is on by default because voice input is a shipped feature and
+# an off-by-default flag meant every release binary refused to record. It costs
+# nothing on Windows (WASAPI) or macOS (CoreAudio); on Linux it needs
+# libasound2-dev at build time, which scripts/install-system-deps.sh installs.
+# Building without it still compiles: archon_tui::voice::real_audio_source then
+# returns an error naming the missing feature, and the TUI runs without voice.
+default = ["audio-capture"]
 terminal-panel = []
 audio-capture = ["cpal"]
 # TASK-TUI-810: gates the 100-agents x 1000-events load test so default

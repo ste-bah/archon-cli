@@ -333,7 +333,7 @@ fn command_effect_debug_and_clone() {
         // only constructs SetModelOverride, so it is unreachable here; the arm
         // exists to satisfy exhaustiveness and to fail loudly if a future
         // variant is added without updating this pin.
-        CommandEffect::RunDraft { .. } => {
+        CommandEffect::RunDraft { .. } | CommandEffect::RateMessage { .. } => {
             unreachable!("this test only constructs SetModelOverride")
         }
     }

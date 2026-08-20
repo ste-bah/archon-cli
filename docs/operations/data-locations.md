@@ -59,9 +59,36 @@ archon-cli specific overrides:
 | `plugin-artifacts/`, `artifacts/`, `runs/` | Optional plugin and run artifacts discoverable by world-model backfill |
 | `settings.json` | Hooks definitions (alternative to TOML) |
 | `lsp.toml` | LSP server overrides |
+| `hooks.local.toml` | Per-project hook enable/disable state, written by `/hooks enable\|disable` |
+| `spill/<session-id>/` | Full output of tool results too large to replay in full. See [Spill files](#spill-files) |
 
 Also (backward compat):
 - `<workdir>/.claude/settings.json` — read for hooks, deprecated
+
+### Spill files
+
+A tool result too large to replay is sent to the model as a head/tail excerpt
+with a note saying how much was omitted. The omitted region is not lost: the
+whole result is written once to `.archon/spill/<session-id>/` and the note
+names the path, so the model can `Read` the part it was not shown.
+
+These files hold whatever the tool produced — a grep across the repository, the
+body of an HTTP response, the contents of a config. Treat them as being as
+sensitive as the commands that made them.
+
+They are created with restrictive permissions and never inherited ones:
+
+- **Unix** — the directory is created `0700` and each file `0600`, at creation
+  time rather than with a `chmod` afterwards. A `chmod` leaves a window in which
+  the file exists and is readable.
+- **Windows** — inheritance is broken on the directory and a single full-control
+  entry is granted to the creating principal, so a spill directory under a
+  world-readable project root does not inherit that.
+
+Each file is written with `create_new`, so a spill never overwrites an existing
+file, and the name carries a random suffix, so two calls that would otherwise
+collide cannot. Nothing prunes them; they live as long as the project directory
+does.
 
 ## Project root markers
 

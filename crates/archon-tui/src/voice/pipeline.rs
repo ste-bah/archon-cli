@@ -240,10 +240,27 @@ pub async fn voice_loop(
                 }
                 recording = true;
                 tracing::info!("voice: recording");
+                // The capture overlay opens from this, not from the key
+                // handler: the hotkey only asks for a recording, and whether
+                // one begins depends on the microphone.
+                if tui_event_tx
+                    .send(TuiEvent::VoiceRecording(true))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
             }
             VoiceTrigger::Toggle => {
                 // recording = true → stop, transcribe, emit
                 recording = false;
+                if tui_event_tx
+                    .send(TuiEvent::VoiceRecording(false))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
                 let samples = match pipeline.audio.stop().await {
                     Ok(s) => s,
                     Err(e) => {
@@ -289,6 +306,13 @@ pub async fn voice_loop(
             VoiceTrigger::Cancel => {
                 if recording {
                     recording = false;
+                    if tui_event_tx
+                        .send(TuiEvent::VoiceRecording(false))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
                     if let Err(e) = pipeline.audio.cancel().await {
                         tracing::warn!("voice: cancel failed: {e}");
                         if tui_event_tx

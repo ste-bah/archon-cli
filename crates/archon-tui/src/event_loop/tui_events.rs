@@ -50,34 +50,13 @@ pub(super) async fn handle_tui_event(
             cache_creation_tokens,
             cache_read_tokens,
         } => {
-            app.on_turn_complete();
-            app.status.cost += archon_core::cost::estimate_turn_cost_usd(
-                &app.status.model,
+            super::tui_events_accounting::apply_turn_usage(
+                app,
                 input_tokens,
                 output_tokens,
                 cache_creation_tokens,
                 cache_read_tokens,
             );
-            // Absolute assignment: show current-turn context pressure, not
-            // cumulative session total. Full context = billable input +
-            // cache_creation + cache_read — matches context_input_tokens from
-            // the Anthropic usage response (same value used by the compaction
-            // trigger via last_known_context_tokens in ConversationState).
-            let context_tokens = input_tokens
-                .saturating_add(cache_creation_tokens)
-                .saturating_add(cache_read_tokens);
-            if context_tokens > 0 {
-                app.status.context_tokens_used = context_tokens;
-            }
-            app.status.cache_creation_tokens = app
-                .status
-                .cache_creation_tokens
-                .saturating_add(cache_creation_tokens);
-            app.status.cache_read_tokens = app
-                .status
-                .cache_read_tokens
-                .saturating_add(cache_read_tokens);
-            app.status.update_context_warning();
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
@@ -132,6 +111,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::SetTheme(name) => {
             if let Some(t) = crate::theme::theme_by_name(&name) {
                 app.theme = t;
+                // Kept so the `/theme` picker can mark the current entry;
+                // `Theme` is a colour struct and cannot be reversed to a name.
+                app.theme_name = name;
             }
         }
         TuiEvent::ShowMcpManager(servers) => {
@@ -145,21 +127,46 @@ pub(super) async fn handle_tui_event(
                 mgr.servers = servers;
             }
         }
+        // Overlay constructors live in `picker_events.rs`; keys for all of
+        // them are routed by `picker_input.rs`.
         TuiEvent::ShowMessageSelector(messages) => {
-            // TASK-TUI-620 + followup: /rewind opens this overlay; input
-            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
-            // and render dispatch (render/body.rs draw_message_selector)
-            // draws it.
-            app.message_selector = Some(crate::screens::message_selector::MessageSelector::new(
-                messages,
-            ));
+            super::picker_events::open_message_selector(app, messages);
         }
         TuiEvent::ShowSkillsMenu(skills) => {
-            // TASK-TUI-627 + followup: /skills opens this overlay; input
-            // priority branch (event_loop/input.rs) routes Up/Down/Enter/Esc
-            // and render dispatch (render/body.rs draw_skills_menu) draws
-            // it. Enter injects `/{skill-name} ` into the input buffer.
-            app.skills_menu = Some(crate::screens::skills_menu::SkillsMenu::new(skills));
+            super::picker_events::open_skills_menu(app, skills);
+        }
+        TuiEvent::ShowModelPicker(entries) => {
+            super::picker_events::open_model_picker(app, entries);
+        }
+        TuiEvent::ShowThemePicker(entries) => {
+            super::picker_events::open_theme_picker(app, entries);
+        }
+        TuiEvent::ShowSettings(entries) => {
+            super::picker_events::open_settings(app, entries);
+        }
+        TuiEvent::ShowHooks(entries) => {
+            super::picker_events::open_hooks(app, entries);
+        }
+        TuiEvent::ShowPermissions { mode, rules } => {
+            super::picker_events::open_permissions(app, mode, rules);
+        }
+        TuiEvent::ShowMemoryFiles(entries) => {
+            super::picker_events::open_memory_files(app, entries);
+        }
+        TuiEvent::ShowBranchPicker(entries) => {
+            super::picker_events::open_branch_picker(app, entries);
+        }
+        TuiEvent::ShowTokenAttribution(previews) => {
+            super::picker_events::open_token_attribution(app, previews);
+        }
+        TuiEvent::ShowVoiceCapture { vad_threshold } => {
+            super::picker_events::open_voice_capture(app, vad_threshold);
+        }
+        TuiEvent::VoiceRecording(recording) => {
+            super::picker_events::set_voice_recording(app, recording);
+        }
+        TuiEvent::VoiceLevel(level) => {
+            super::picker_events::push_voice_level(app, level);
         }
         TuiEvent::ShowFilePicker { root, entries } => {
             // TASK-#207 SLASH-FILES: /files opens this overlay; input
@@ -204,15 +211,23 @@ pub(super) async fn handle_tui_event(
             context_name,
             resolution_source,
             heaviest_message_tokens,
+            top_contributors,
+            attributed_total,
         } => {
-            app.status.heaviest_message_tokens = heaviest_message_tokens;
-            app.status.context_tokens_used = tokens_used;
-            app.status.context_window = context_window;
-            app.status.cache_creation_tokens = cache_creation_tokens;
-            app.status.cache_read_tokens = cache_read_tokens;
-            app.status.context_name = context_name;
-            app.status.resolution_source = resolution_source;
-            app.status.update_context_warning();
+            super::tui_events_accounting::apply_context_pressure(
+                app,
+                tokens_used,
+                context_window,
+                cache_creation_tokens,
+                cache_read_tokens,
+                context_name,
+                resolution_source,
+                heaviest_message_tokens,
+                crate::status::TokenAttribution {
+                    contributors: top_contributors,
+                    total: attributed_total,
+                },
+            );
         }
         TuiEvent::SetVimMode(enabled) => {
             if enabled {
@@ -230,6 +245,14 @@ pub(super) async fn handle_tui_event(
         }
         TuiEvent::VoiceText(text) => {
             app.input.inject_text(&text);
+            // Also show it in the overlay, if one is open. The overlay is
+            // centred and the input line is near the bottom, so both are
+            // readable at once — and seeing the recognised text next to the
+            // levels that produced it is how a bad transcription gets
+            // attributed to a quiet microphone rather than to the model.
+            if let Some(overlay) = app.voice_capture.as_mut() {
+                overlay.set_transcription(&text);
+            }
         }
         TuiEvent::SetAgentInfo { name, color } => {
             app.status.agent_name = Some(name);
@@ -294,200 +317,5 @@ fn flush_pending_input_after_turn(app: &mut App, input_tx: &tokio::sync::mpsc::S
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use std::time::Duration;
-
-    // Both tests below clear and read the process-global task registry
-    // (archon_observability::reset_task_registry_for_tests + task_snapshots).
-    // task_registry.rs documents this race: parallel tests wipe each other's
-    // entries mid-flight. Marking them #[serial(task_registry)] matches the
-    // pattern the registry's own tests use (task_registry.rs:163,178,189).
-    // Surfaced by CI run 25541207525 on commit bee8d8b under cargo llvm-cov,
-    // where instrumentation widens the race window enough to flip pass→fail.
-    #[tokio::test]
-    #[serial(task_registry)]
-    async fn turn_complete_flushes_pending_input_without_blocking_when_channel_has_room() {
-        archon_observability::reset_task_registry_for_tests();
-        let mut app = App::new();
-        app.pending_input.push("first".to_string());
-        app.pending_input.push("second".to_string());
-        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
-
-        handle_tui_event(
-            &mut app,
-            TuiEvent::TurnComplete {
-                input_tokens: 1,
-                output_tokens: 1,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-            },
-            &tx,
-        )
-        .await;
-
-        assert!(app.pending_input.is_empty());
-        assert_eq!(rx.try_recv().unwrap(), "first");
-        assert_eq!(rx.try_recv().unwrap(), "second");
-    }
-
-    #[tokio::test]
-    #[serial(task_registry)]
-    async fn turn_complete_does_not_block_when_input_channel_is_full() {
-        archon_observability::reset_task_registry_for_tests();
-        let mut app = App::new();
-        app.pending_input.push("queued".to_string());
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        tx.try_send("occupied".to_string()).unwrap();
-
-        tokio::time::timeout(
-            Duration::from_millis(50),
-            handle_tui_event(
-                &mut app,
-                TuiEvent::TurnComplete {
-                    input_tokens: 1,
-                    output_tokens: 1,
-                    cache_creation_tokens: 0,
-                    cache_read_tokens: 0,
-                },
-                &tx,
-            ),
-        )
-        .await
-        .expect("TurnComplete handler must not await on a full input channel");
-
-        assert!(app.pending_input.is_empty());
-        assert_eq!(rx.try_recv().unwrap(), "occupied");
-        assert!(
-            archon_observability::task_snapshots()
-                .iter()
-                .any(|task| task.name == "tui-pending-input-flush")
-        );
-        archon_observability::abort_alive_tasks();
-    }
-
-    #[tokio::test]
-    async fn zero_usage_turn_preserves_preflight_context_pressure() {
-        let mut app = App::new();
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        handle_tui_event(
-            &mut app,
-            TuiEvent::ContextPressureUpdated {
-                tokens_used: 121_000,
-                context_window: 1_050_000,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                context_name: Some("main".into()),
-                resolution_source: Some("bundled-catalog".into()),
-                heaviest_message_tokens: 42_000,
-            },
-            &tx,
-        )
-        .await;
-        handle_tui_event(
-            &mut app,
-            TuiEvent::TurnComplete {
-                input_tokens: 0,
-                output_tokens: 10,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-            },
-            &tx,
-        )
-        .await;
-
-        assert_eq!(app.status.context_tokens_used, 121_000);
-        assert_eq!(app.status.context_name.as_deref(), Some("main"));
-    }
-
-    #[tokio::test]
-    async fn thinking_toggle_message_does_not_finish_active_thinking() {
-        let mut app = App::new();
-        app.on_thinking_delta("retained before toggle");
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        handle_tui_event(&mut app, TuiEvent::ThinkingToggle(true), &tx).await;
-
-        assert!(app.show_thinking);
-        assert!(app.thinking.active);
-        assert_eq!(app.thinking.accumulated, "retained before toggle");
-        assert!(app.thinking_blocks.is_empty());
-        assert!(
-            app.output
-                .all_lines()
-                .iter()
-                .any(|line| line.contains("Thinking display enabled."))
-        );
-
-        app.on_thinking_delta(" and after toggle");
-        app.on_turn_complete();
-        assert_eq!(app.thinking_blocks.len(), 1);
-        assert_eq!(
-            app.thinking_blocks[0].text,
-            "retained before toggle and after toggle"
-        );
-    }
-
-    #[tokio::test]
-    async fn open_thinking_archive_event_selects_the_latest_block() {
-        let mut app = App::new();
-        app.on_thinking_delta("first thought");
-        app.on_turn_complete();
-        app.on_thinking_delta("second thought");
-        app.on_turn_complete();
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        handle_tui_event(&mut app, TuiEvent::OpenThinkingArchive, &tx).await;
-
-        assert_eq!(app.thinking_archive_selection(), Some(1));
-    }
-
-    #[tokio::test]
-    async fn ask_user_prompt_sets_modal_state_and_logs_question() {
-        let mut app = App::new();
-        app.ask_user_draft = "stale answer".into();
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        handle_tui_event(
-            &mut app,
-            TuiEvent::AskUserPrompt {
-                question: "Choose a path".into(),
-                kind: archon_core::agent::AskUserPromptKind::Ordinary,
-            },
-            &tx,
-        )
-        .await;
-
-        assert_eq!(app.ask_user_prompt.as_deref(), Some("Choose a path"));
-        assert!(app.ask_user_draft.is_empty());
-        assert!(
-            app.output
-                .all_lines()
-                .iter()
-                .any(|line| line.contains("[question] Choose a path"))
-        );
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn resize_and_done_update_canonical_loop_state() {
-        let mut app = App::new();
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        handle_tui_event(
-            &mut app,
-            TuiEvent::Resize {
-                cols: 200,
-                rows: 60,
-            },
-            &tx,
-        )
-        .await;
-        handle_tui_event(&mut app, TuiEvent::Done, &tx).await;
-
-        assert_eq!(crate::layout::last_known_size(), (200, 60));
-        assert!(app.should_quit);
-    }
-}
+#[path = "tui_events_tests.rs"]
+mod tests;

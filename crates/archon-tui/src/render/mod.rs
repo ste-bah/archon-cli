@@ -86,6 +86,33 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: skills menu (TASK-TUI-627 /skills)
     body::draw_skills_menu(frame, app);
 
+    // Overlays: model picker (#192, /model with no arguments)
+    body::draw_model_picker(frame, app);
+
+    // Overlays: theme picker (#192, /theme with no arguments)
+    body::draw_theme_screen(frame, app);
+
+    // Overlays: settings (#192, /config with no arguments)
+    body::draw_settings_screen(frame, app);
+
+    // Overlays: hooks (#192, /hooks with no subcommand)
+    body::draw_hooks_menu(frame, app);
+
+    // Overlays: permission rules (#192, /permissions)
+    body::draw_permissions_browser(frame, app);
+
+    // Overlays: memory files (#192, /memory files)
+    body::draw_memory_browser(frame, app);
+
+    // Overlays: branch picker (#192, /fork-at with no arguments)
+    body::draw_branch_picker(frame, app);
+
+    // Overlays: voice capture (#192, /voice and the record hotkey)
+    body::draw_voice_capture(frame, app);
+
+    // Overlays: token attribution (#192 scope B, /context)
+    body::draw_token_attribution(frame, app);
+
     // Overlays: tasks (#189 Phase 9, Ctrl+K)
     body::draw_task_overlay(frame, app);
 

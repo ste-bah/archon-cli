@@ -78,6 +78,10 @@ pub(crate) mod effort;
 pub(crate) mod errors;
 pub(crate) mod evidence_index;
 pub(crate) mod evidence_view;
+/// `/feedback` — rate the last assistant message for the learning layer (#193).
+pub(crate) mod feedback;
+/// `/fork-at` - fork a session from an earlier message (#192).
+pub(crate) mod fork_at;
 // TASK-#206 SLASH-EXIT: /exit handler + /q alias.
 pub(crate) mod exit;
 pub(crate) mod export;

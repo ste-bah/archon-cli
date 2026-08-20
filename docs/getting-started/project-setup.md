@@ -103,8 +103,27 @@ sh ~/code/archon-cli/scripts/archon-init.sh \
 └── .gitignore         (appends `.archon/` if not present, or creates a new one)
 ```
 
-## What it does NOT create
+## Instruction files, and which ones are in force
 
+`ARCHON.md` (or `CLAUDE.md`, kept for compatibility) holds project instructions
+that are layered into the system prompt. Three scopes load, in this order:
+
+| Scope | Where |
+|---|---|
+| `global` | your home directory |
+| `ancestor` | every directory between home and the working directory |
+| `project` | the working directory itself |
+
+Later files layer over earlier ones, so the project's own file has the last
+word. A repository checked out inside your home directory is still `project`,
+not `global`.
+
+Run `/memory files` in the TUI to see exactly which files are in force, with
+their scopes and sizes. This is a different subsystem from `/memory` proper —
+one is the instruction files on disk, the other is the memory graph — which is
+why it is a subcommand rather than the same list.
+
+## What it does NOT create
 The current installer does NOT seed these — they are populated later
 by other steps:
 

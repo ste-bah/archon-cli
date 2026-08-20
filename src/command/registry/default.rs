@@ -23,7 +23,9 @@ use crate::command::effort::EffortHandler;
 use crate::command::evidence_view::{DocsViewHandler, LearningViewHandler};
 use crate::command::export::ExportHandler;
 use crate::command::fast::FastHandler;
+use crate::command::feedback::FeedbackHandler;
 use crate::command::fork::ForkHandler;
+use crate::command::fork_at::ForkAtHandler;
 use crate::command::garden::GardenHandler;
 use crate::command::help::HelpHandler;
 use crate::command::hooks::HooksHandler;
@@ -76,6 +78,8 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("bug", Arc::new(BugHandler));
     b.insert_primary("diff", Arc::new(DiffHandler));
     b.insert_primary("denials", Arc::new(DenialsHandler));
+    b.insert_primary("feedback", Arc::new(FeedbackHandler));
+    b.insert_primary("fork-at", Arc::new(ForkAtHandler));
     b.insert_primary("login", Arc::new(LoginHandler::new()));
     b.insert_primary("vim", Arc::new(VimHandler));
     b.insert_primary("usage", Arc::new(UsageHandler::new()));

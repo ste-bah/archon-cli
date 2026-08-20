@@ -23,6 +23,11 @@ pub(super) struct AgentEventForwarderConfig {
     pub agent_ledger_db: Option<Arc<cozo::DbInstance>>,
     pub ledger_context: crate::runtime::agent_ledger_events::AgentLedgerContext,
     pub selected_model: String,
+    /// Where a finished reply goes to be read aloud, when speech is on.
+    ///
+    /// None when speech is off or unavailable, which is the difference
+    /// between not speaking and queueing into a channel nothing drains.
+    pub speech_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 pub(super) fn spawn_agent_event_forwarder(
@@ -44,8 +49,13 @@ pub(super) fn spawn_agent_event_forwarder(
         agent_ledger_db,
         ledger_context,
         selected_model,
+        speech_tx,
     } = config;
     observability::spawn_named("agent-event-forwarder", async move {
+        // This turn's reply, accumulated so it can be spoken whole at the end.
+        // Speaking each delta would read the answer out a fragment at a time,
+        // in the order the model happened to emit it.
+        let mut reply_so_far = String::new();
         while let Some(timestamped) = event_rx.recv().await {
             // Re-read per event rather than binding once outside the loop: a
             // resume moves the target row mid-session, and this task outlives
@@ -59,6 +69,9 @@ pub(super) fn spawn_agent_event_forwarder(
             let tui_event = match timestamped.inner {
                 AgentEvent::TextDelta(text) => {
                     last_response_for_fwd.lock().await.push_str(&text);
+                    if speech_tx.is_some() {
+                        reply_so_far.push_str(&text);
+                    }
                     TuiEvent::TextDelta(text)
                 }
                 AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
@@ -86,6 +99,8 @@ pub(super) fn spawn_agent_event_forwarder(
                     context_name,
                     resolution_source,
                     heaviest_message_tokens,
+                    top_contributors,
+                    attributed_total,
                 } => {
                     // Bank the preflight size so `/context` can report it.
                     //
@@ -104,6 +119,8 @@ pub(super) fn spawn_agent_event_forwarder(
                         context_name,
                         resolution_source,
                         heaviest_message_tokens,
+                        top_contributors,
+                        attributed_total,
                     }
                 }
                 AgentEvent::TurnComplete {
@@ -112,6 +129,7 @@ pub(super) fn spawn_agent_event_forwarder(
                     cache_creation_tokens,
                     cache_read_tokens,
                 } => {
+                    speak_reply(speech_tx.as_ref(), &mut reply_so_far);
                     let events = handle_turn_complete(
                         input_tokens,
                         output_tokens,
@@ -284,3 +302,30 @@ async fn record_permission(
 #[cfg(test)]
 #[path = "event_forwarder_tests.rs"]
 mod tests;
+
+/// Hand this turn's reply to the speech loop, and reset for the next one.
+///
+/// `try_send`, never `send`: the speech channel is small on purpose, and a
+/// reply that cannot be queued now is one the conversation has already moved
+/// past. Blocking the event forwarder — which every TUI update flows through —
+/// to wait for a sentence to finish being read aloud would freeze the screen.
+///
+/// The buffer is cleared whether or not it was sent, so a dropped reply is
+/// dropped rather than prepended to the next one.
+fn speak_reply(speech_tx: Option<&tokio::sync::mpsc::Sender<String>>, reply: &mut String) {
+    let Some(tx) = speech_tx else {
+        return;
+    };
+    let text = std::mem::take(reply);
+    if text.trim().is_empty() {
+        return;
+    }
+    // Checked here rather than in the loop so Ctrl+P takes effect on the very
+    // next reply, without the pipeline being torn down and rebuilt.
+    if !archon_tui::voice::speech::speech_enabled() {
+        return;
+    }
+    if tx.try_send(text).is_err() {
+        tracing::debug!("voice: speech queue full; this reply is not read aloud");
+    }
+}

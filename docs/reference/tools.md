@@ -39,6 +39,27 @@ LargeEditBegin -> LargeEditReplaceSection/InsertAfter/DeleteSection -> LargeEdit
 by `LargeEditBegin`. If another process changed the file, commit fails and the
 staged copy remains available for review or `LargeEditAbort`.
 
+### Read before write
+
+Since v1.9.3, `Edit`, `Write` and `NotebookEdit` are refused when the agent has
+not read the file in this session, or when the file changed on disk since it
+did. `Read`, `Grep` (on a single file) and `NotebookRead` are what record the
+read.
+
+The point is a specific failure: an agent editing a file whose contents it is
+inferring rather than looking at. An exact-string replacement against a guess
+either fails loudly or, worse, matches something the agent did not intend.
+
+`Bash` is not checked. A shell command can write anywhere and names no path, so
+demanding a prior read of something it never mentions would refuse work it
+cannot describe.
+
+Observations are per agent — a parent's read is not evidence for a subagent that
+never opened the file — and are discarded at session end.
+
+Set `read_before_edit` under [`[filesystem]`](config.md#filesystem) to `"warn"`
+to log the reason and allow the write, or `"off"` to disable the check.
+
 ## Shell & observability
 
 | Tool | Permission | Purpose |

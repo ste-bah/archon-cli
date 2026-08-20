@@ -19,6 +19,13 @@
 //! of the tokenizer and the text, not of the message set, so the factor
 //! survives a compaction that clears the anchor.
 
+/// How many contributors travel on a context-pressure update.
+///
+/// The ranking is emitted every turn, so it is capped: past the first handful
+/// the entries are neither large enough to be worth dropping nor few enough to
+/// read at a glance, and the tail would be paid for on every request.
+pub const TOP_CONTRIBUTOR_LIMIT: usize = 10;
+
 /// One message's share of the context window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenSurfaceNode {

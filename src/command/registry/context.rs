@@ -203,6 +203,12 @@ pub struct CommandContext {
     /// event emission path since /diff must stay Ok(()) to keep the
     /// dispatcher contract uniform).
     pub(crate) working_dir: Option<PathBuf>,
+    /// The last assistant message and any rating on it (#193 Phase C).
+    ///
+    /// Populated only when the primary resolves to `/feedback`: it reads the
+    /// message log and the sidecar relation, and every other command would pay
+    /// for that without using it.
+    pub(crate) feedback_snapshot: Option<crate::command::feedback::FeedbackSnapshot>,
     /// TASK-AGS-POST-6-BODIES-B06-HELP DIRECT-pattern field (/help).
     ///
     /// Clone of `SlashCommandContext::skill_registry` populated

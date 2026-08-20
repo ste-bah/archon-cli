@@ -171,6 +171,97 @@ pub(crate) fn apply_effect<'a>(
                     cwd,
                 );
             }
+            CommandEffect::RateMessage {
+                message_id,
+                message_digest,
+                rating,
+                note,
+                expected_version,
+            } => {
+                apply_message_rating(
+                    slash_ctx,
+                    tui_tx,
+                    &message_id,
+                    &message_digest,
+                    rating.as_deref(),
+                    &note,
+                    expected_version.as_deref(),
+                )
+                .await;
+            }
         }
     })
+}
+
+/// Write a per-message rating and report what happened (#193 Phase C).
+///
+/// A conflict is reported rather than swallowed: the whole point of the
+/// compare-and-set token is that the person who lost the race finds out.
+async fn apply_message_rating(
+    slash_ctx: &SlashCommandContext,
+    tui_tx: &archon_tui::event_channel::TuiEventSender,
+    message_id: &str,
+    message_digest: &str,
+    rating: Option<&str>,
+    note: &str,
+    expected_version: Option<&str>,
+) {
+    use archon_session::feedback::Rating;
+
+    let outcome = match rating {
+        None => slash_ctx
+            .session_store
+            .clear_feedback(&slash_ctx.session_id, message_id, expected_version)
+            .map(|()| format!("\nRating cleared on message {message_id}.\n")),
+        Some(raw) => {
+            let Some(parsed) = Rating::parse(raw) else {
+                let _ = tui_tx
+                    .send_async(archon_tui::app::TuiEvent::Error(format!(
+                        "Unknown rating: {raw}"
+                    )))
+                    .await;
+                return;
+            };
+            slash_ctx
+                .session_store
+                .set_feedback(
+                    &slash_ctx.session_id,
+                    message_id,
+                    message_digest,
+                    parsed,
+                    (!note.is_empty()).then_some(note),
+                    expected_version,
+                )
+                .map(|_| format!("\nMessage {message_id} rated {raw}.\n"))
+        }
+    };
+
+    match outcome {
+        Ok(text) => {
+            // The learning layer consumes this rather than polling the
+            // relation. Emitted only on success, because a refused write is
+            // not a signal about the answer.
+            if let Some(sink) = crate::session::session_activity_sink(&slash_ctx.session_id) {
+                sink.emit(archon_observability::AgentActivityEvent::new(
+                    slash_ctx.session_id.clone(),
+                    archon_observability::AgentActivityKind::MessageRated,
+                    archon_observability::AgentActivityStatus::Completed,
+                    rating.map_or_else(
+                        || format!("rating cleared on message {message_id}"),
+                        |value| format!("message {message_id} rated {value}"),
+                    ),
+                ));
+            }
+            let _ = tui_tx
+                .send_async(archon_tui::app::TuiEvent::TextDelta(text))
+                .await;
+        }
+        Err(error) => {
+            let _ = tui_tx
+                .send_async(archon_tui::app::TuiEvent::Error(format!(
+                    "Could not record feedback: {error}"
+                )))
+                .await;
+        }
+    }
 }

@@ -10,8 +10,9 @@
 /// production code should call `resolve_anthropic_model(alias, &cfg)` instead
 /// of reading this constant directly.
 pub const KNOWN_SHORTCUTS: &[(&str, &str)] = &[
-    ("opus", "claude-opus-4-8"),
-    ("sonnet", "claude-sonnet-4-6"),
+    ("opus", "claude-opus-5"),
+    ("sonnet", "claude-sonnet-5"),
+    ("fable", "claude-fable-5"),
     ("haiku", "claude-haiku-4-5-20251001"),
 ];
 
@@ -22,11 +23,21 @@ pub const KNOWN_SHORTCUTS: &[(&str, &str)] = &[
 /// and memory references that pinned older models still validate rather than
 /// erroring on input.
 pub const KNOWN_MODEL_IDS: &[&str] = &[
+    // Current generation. These were absent until #192, which meant
+    // `/model claude-opus-5` was rejected as an unknown model *while the
+    // session was running on it* — the table had been left behind when
+    // `[models.anthropic]` in config.toml moved to the 5 series.
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+    // Earlier generations, kept per the note above so pinned sessions,
+    // snapshots and memory references still validate.
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
 ];
 
 // Resolver functions for these aliases live in `archon_core::config` next to

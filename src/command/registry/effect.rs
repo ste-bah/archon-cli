@@ -140,4 +140,22 @@ pub(crate) enum CommandEffect {
         gate_config: Option<PathBuf>,
         cwd: PathBuf,
     },
+    /// Write a per-message rating to the sidecar relation (#193 Phase C).
+    ///
+    /// `rating` is `None` to withdraw one. `expected_version` is the token the
+    /// handler read, presented so a concurrent edit from the web workbench is
+    /// refused rather than silently overwritten — both can be open on one
+    /// session, and last-write-wins would discard whichever lost the race.
+    ///
+    /// `message_digest` fingerprints the message being rated. A rating is keyed
+    /// by position and positions move — compaction rewrites the message list —
+    /// so the digest is what lets a later reader tell whether the rating is
+    /// still about the message at that index.
+    RateMessage {
+        message_id: String,
+        message_digest: String,
+        rating: Option<String>,
+        note: String,
+        expected_version: Option<String>,
+    },
 }

@@ -74,6 +74,29 @@ impl HooksHandler {
 
         let text = render_list(&summaries);
         ctx.emit(TuiEvent::TextDelta(text));
+
+        // #192: the same hooks as a list you can act on. The text above is
+        // unchanged, so `archon -p` and anything reading it keep what they
+        // had — a print-mode run simply drops this event.
+        let entries = summaries
+            .iter()
+            .map(|summary| {
+                (
+                    summary.id.clone(),
+                    format!("{:?}", summary.event),
+                    // The command, not the matcher: every project hook here
+                    // matches `*` on the same event and differs only in what
+                    // it runs, so a matcher column shows identical rows.
+                    summary.command.clone(),
+                    summary
+                        .source
+                        .clone()
+                        .unwrap_or_else(|| "(none)".to_string()),
+                    summary.enabled,
+                )
+            })
+            .collect();
+        ctx.emit(TuiEvent::ShowHooks(entries));
     }
 
     fn set_enabled(&self, ctx: &mut CommandContext, id: &str, enabled: bool) {

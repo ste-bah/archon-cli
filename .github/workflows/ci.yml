@@ -52,12 +52,19 @@ jobs:
       - name: Install system dependencies
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y pkg-config perl make
+          sudo apt-get install -y pkg-config perl make libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - name: Check every Rust target without warnings
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --all-targets --locked
+      # audio-capture is a default feature, so the branch that reports "this
+      # build has no microphone support" is otherwise never compiled — which is
+      # how a fallback path rots into one that does not build (#192).
+      - name: Check archon-tui builds without audio capture
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check -p archon-tui --no-default-features --locked
 
   clippy:
     name: clippy (advisory)
@@ -71,7 +78,7 @@ jobs:
       - name: Install system dependencies
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y pkg-config perl make
+          sudo apt-get install -y pkg-config perl make libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets
 
@@ -206,7 +213,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y pkg-config perl make
+          sudo apt-get install -y pkg-config perl make libasound2-dev
 
       - name: Install mold linker (faster + lower memory than lld for large workspaces)
         if: runner.os == 'Linux'
@@ -527,6 +534,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make libasound2-dev
       - name: check-tui-complexity
         run: bash scripts/check-tui-complexity.sh
 
@@ -538,6 +549,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make libasound2-dev
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
       - name: check-tui-coverage
@@ -576,7 +591,7 @@ jobs:
       - name: Install system dependencies
         run: |
           timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y pkg-config perl make
+          sudo apt-get install -y pkg-config perl make libasound2-dev
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-smoke

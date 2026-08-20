@@ -41,6 +41,11 @@ pub enum Action {
     ToggleToolOutput,
     /// Ctrl+V = voice hotkey trigger.
     VoiceHotkey,
+    /// Ctrl+P = toggle reading replies aloud.
+    ///
+    /// Not Ctrl+S: that is XOFF on a terminal and would freeze output on the
+    /// machines where flow control is still enabled.
+    ToggleSpeech,
     /// Ctrl+\ = toggle split pane layout.
     ToggleSplit,
     /// Ctrl+W = switch focus between panes.
@@ -103,6 +108,10 @@ impl Default for KeyMap {
         bindings.insert(
             KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
             Action::VoiceHotkey,
+        );
+        bindings.insert(
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            Action::ToggleSpeech,
         );
         bindings.insert(
             KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL),
