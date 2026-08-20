@@ -62,6 +62,11 @@ pub(super) struct ContractTaskUniverse {
     aliases: BTreeMap<String, String>,
     dependencies: BTreeMap<String, Vec<String>>,
     tasks_with_deliverable_contracts: BTreeSet<String>,
+    /// Tasks a no-op can never satisfy, because a deliverable contract names a
+    /// command that has to RUN. Derived from the contract, not from any task's
+    /// wording, so it holds for every PRD. See the rule in
+    /// `generated_contract_validation`.
+    tasks_requiring_execution: BTreeSet<String>,
 }
 
 impl ContractTaskUniverse {
@@ -84,6 +89,14 @@ impl ContractTaskUniverse {
                 out.tasks_with_deliverable_contracts
                     .insert(task.canonical_task_id.clone());
             }
+            if task
+                .deliverable_contracts
+                .iter()
+                .any(|contract| contract.typed_verifier_command.is_some())
+            {
+                out.tasks_requiring_execution
+                    .insert(task.canonical_task_id.clone());
+            }
         }
         out
     }
@@ -92,6 +105,13 @@ impl ContractTaskUniverse {
         task_ids
             .iter()
             .any(|id| self.tasks_with_deliverable_contracts.contains(id))
+    }
+
+    /// Whether any of these tasks declares a command that must be executed.
+    pub(super) fn requires_execution(&self, task_ids: &[String]) -> bool {
+        task_ids
+            .iter()
+            .any(|id| self.tasks_requiring_execution.contains(id))
     }
 
     fn add_canonical(&mut self, task_id: &str) {

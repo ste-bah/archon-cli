@@ -117,6 +117,32 @@ pub(super) fn generated_item_issues(
             }
         }
         "verified_noop" => {
+            // A task whose deliverable contract names a command to RUN cannot be
+            // finished by inspection. The harness invites every implementation
+            // agent to answer `idempotent_noop` when "the implementation is
+            // already complete and no repository change is required", and for an
+            // execution task that invitation is a trap: the artifacts exist
+            // because someone wrote the source, and pointing at them satisfies
+            // the no-op proof rule while the command never runs.
+            //
+            // Observed across four runs of one PRD: ingest tasks accepted with
+            // changed=0 and a registry that stayed empty, then refuted by
+            // verification, then re-run and accepted as no-ops again.
+            //
+            // Executed evidence means `commands_run` — the record of something
+            // actually happening. Artifacts and proof references describe what is
+            // on disk, which is exactly the claim in doubt.
+            if universe.requires_execution(&canonical_task_ids)
+                && !value_present(value.get("commands_run"))
+            {
+                issues.push(make_issue(
+                    GeneratedContractIssueKind::EvidenceRepair,
+                    "commands_run",
+                    "verified_noop is not available for a task whose deliverable \
+                     contract declares a command to execute: record the command in \
+                     commands_run, or classify this as implementation work",
+                ));
+            }
             if !value_present(value.get("acceptance_criteria")) {
                 issues.push(make_issue(
                     GeneratedContractIssueKind::VerificationRequirementsDiscovery,

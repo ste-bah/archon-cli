@@ -43,3 +43,6 @@ use generated_contract_invariants::*;
 #[cfg(test)]
 #[path = "generated_contract_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "generated_contract_execution_tests.rs"]
+mod execution_tests;
