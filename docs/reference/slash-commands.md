@@ -115,7 +115,7 @@ Plan documents are stored at `.archon/plans/<plan-id>.md`; Plan Mode tool interc
 | `/plugin` | — | Manage WASM plugins (`list`, `info`, `enable`, `disable`, `install`, `reload`) |
 | `/reload-plugins` | — | Re-scan plugin directories from disk |
 | `/hooks` | — | List or manage hook registrations (list, enable, disable, reload). Bare `/hooks` opens the overlay; Enter on a row types the `/hooks enable <id>` or `/hooks disable <id>` that writes `.archon/hooks.local.toml` |
-| `/voice` | — | Show or toggle voice input configuration (status, on, off). Bare `/voice` also opens the capture overlay: live microphone level, the measured peak against the VAD threshold, and the last transcription. See [voice input](../getting-started/voice.md) |
+| `/voice` | — | Show or toggle voice input configuration (status, on, off). `/voice speak on\|off` toggles reading replies aloud (`Ctrl+P` does the same). Bare `/voice` also opens the capture overlay: live microphone level, the measured peak against the VAD threshold, the speech state, and the last transcription. See [voice](../getting-started/voice.md) |
 | `/web` | — | Start the web dashboard **inside this session**: `/web`, `/web <port>` (default 8421), `/web status`, `/web stop`. Unlike `archon web`, which is a separate process, this one can report the agents this session spawned — `BACKGROUND_AGENTS` holds live `JoinHandle`s that do not cross a process boundary. The dashboard's chat tab is hidden in this mode because the TUI is already serving the conversation. Binds loopback only, and stops with the session. See [web workbench](../operations/web-workbench.md) |
 
 ## Authentication & providers (v0.1.40+)
@@ -286,6 +286,11 @@ behind the overlay.
 
 `Ctrl+K` opens the background-tasks overlay, where `x` cancels a running task.
 It is the one overlay with no slash command.
+
+`Ctrl+V` starts a voice recording and `Ctrl+P` toggles reading replies aloud;
+both open the voice overlay so the key has visible feedback. Not `Ctrl+S` for
+speech: that is XOFF on a terminal and would freeze output where flow control
+is still enabled.
 
 
 ## See also

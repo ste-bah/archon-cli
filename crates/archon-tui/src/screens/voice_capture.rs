@@ -52,6 +52,11 @@ pub struct VoiceCaptureOverlay {
     is_recording: bool,
     /// The VAD threshold a recording has to beat to be transcribed at all.
     vad_threshold: f32,
+    /// Whether replies are being read aloud (`Ctrl+P`).
+    ///
+    /// The overlay is the menu for it: a toggle whose only evidence is whether
+    /// the *next* reply speaks is a toggle you find out about too late.
+    speech_enabled: bool,
 }
 
 impl VoiceCaptureOverlay {
@@ -61,7 +66,18 @@ impl VoiceCaptureOverlay {
             transcription: String::new(),
             is_recording: false,
             vad_threshold: 0.02,
+            speech_enabled: false,
         }
+    }
+
+    /// Whether replies are being read aloud.
+    pub fn speech_enabled(&self) -> bool {
+        self.speech_enabled
+    }
+
+    /// Record the speech toggle's new state, for display.
+    pub fn set_speech_enabled(&mut self, enabled: bool) {
+        self.speech_enabled = enabled;
     }
 
     /// Build with the VAD threshold that is actually configured.
@@ -137,10 +153,11 @@ impl VoiceCaptureOverlay {
 
     /// Render the overlay.
     pub fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
-        const TITLE: &str = " Voice — Ctrl+V record/stop · Esc cancel · Enter close ";
+        const TITLE: &str = " Voice — Ctrl+V record · Ctrl+P speak · Esc cancel · Enter close ";
 
-        // status + blank + meter + scale + blank + transcription + 2 borders.
-        let (region, block) = crate::overlay::open(f, area, 9, TITLE, theme);
+        // status + speech + blank + meter + scale + blank + transcription
+        // + 2 borders.
+        let (region, block) = crate::overlay::open(f, area, 10, TITLE, theme);
         let usable = region.width.saturating_sub(4).max(1) as usize;
 
         let status = if self.is_recording {
@@ -185,11 +202,24 @@ impl VoiceCaptureOverlay {
             )
         };
 
+        let speaking = if self.speech_enabled {
+            Span::styled(
+                "speaking replies aloud (Ctrl+P to stop)",
+                Style::default().fg(theme.accent),
+            )
+        } else {
+            Span::styled(
+                "not speaking replies (Ctrl+P to start)",
+                Style::default().fg(theme.muted),
+            )
+        };
+
         let lines = vec![
             Line::from(vec![
                 status,
                 Span::styled(verdict, Style::default().fg(theme.muted)),
             ]),
+            Line::from(speaking),
             Line::from(""),
             Line::from(Span::styled(
                 meter(&self.waveform, usable),

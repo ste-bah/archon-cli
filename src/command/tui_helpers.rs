@@ -86,6 +86,62 @@ pub(crate) fn handle_list_themes(
 /// dropped one, and the capture thread must never wait on a redraw.
 const LEVEL_QUEUE: usize = 8;
 
+/// Start the speech loop, returning the channel replies go into.
+///
+/// Independent of [`setup_voice_pipeline`]: listening and speaking are separate
+/// devices and separate wants, and a machine with no microphone can still read
+/// answers aloud.
+///
+/// Returns `None` — loudly — when speech cannot work, rather than accepting
+/// replies into a channel nothing drains.
+pub(crate) fn setup_speech(
+    config: &archon_core::config::ArchonConfig,
+) -> Option<tokio::sync::mpsc::Sender<String>> {
+    use archon_tui::voice::speech::{SpeechPipeline, set_speech_enabled, speech_loop};
+    use archon_tui::voice::tts::{OpenAiCompatibleTts, TtsProvider};
+    use std::sync::Arc as StdArc;
+
+    if !config.voice.speak {
+        // Still record the setting: Ctrl+P reads and flips the same flag, so
+        // the key works from a known state rather than whatever it defaulted to.
+        set_speech_enabled(false);
+        return None;
+    }
+
+    let sink = match archon_tui::voice::real_speech_player() {
+        Ok(sink) => sink,
+        Err(error) => {
+            tracing::error!("voice: {error:#}");
+            eprintln!("warning: speech is enabled but unavailable: {error:#}");
+            set_speech_enabled(false);
+            return None;
+        }
+    };
+
+    let tts: StdArc<dyn TtsProvider> = StdArc::new(OpenAiCompatibleTts {
+        url: config.voice.tts_url.clone(),
+        api_key: config.voice.tts_api_key.clone(),
+        model: config.voice.tts_model.clone(),
+        voice: config.voice.tts_voice.clone(),
+    });
+
+    // Bounded and small. Replies are spoken one at a time and a backlog of
+    // them is worse than dropping one: by the time a queued sentence is read
+    // out, the conversation has moved on.
+    let (text_tx, text_rx) = tokio::sync::mpsc::channel::<String>(4);
+    archon_observability::spawn_named("voice-speech", async move {
+        speech_loop(text_rx, SpeechPipeline::new(tts, sink)).await;
+    });
+    set_speech_enabled(true);
+    tracing::info!(
+        "voice: speech wired (provider={}, voice={}, url={})",
+        config.voice.tts_provider,
+        config.voice.tts_voice,
+        config.voice.tts_url,
+    );
+    Some(text_tx)
+}
+
 /// Start the voice pipeline, or explain why there isn't one.
 ///
 /// Returns `None` — with the reason logged and printed — whenever voice cannot

@@ -466,6 +466,17 @@ impl App {
         self.thinking.dot_offset = 0;
     }
 
+    /// Show the speech toggle's new state, opening the voice overlay if needed.
+    ///
+    /// `Ctrl+P` flips a process-wide flag that the reply producer reads. Without
+    /// this the only evidence the key landed is whether the *next* reply speaks,
+    /// which is far too late to notice you missed it.
+    pub fn show_speech_state(&mut self, enabled: bool) {
+        self.voice_capture
+            .get_or_insert_with(crate::screens::voice_capture::VoiceCaptureOverlay::new)
+            .set_speech_enabled(enabled);
+    }
+
     pub fn toggle_thinking(&mut self) {
         if self.thinking.active {
             self.thinking.toggle_expand();

@@ -18,6 +18,19 @@ pub struct VoiceConfig {
     /// never existed — it read `ctrl+shift+v` until #192.
     pub hotkey: String,
     pub toggle_mode: bool,
+    /// Read replies aloud. Independent of `enabled`: speaking and listening are
+    /// separate devices and separate wants.
+    pub speak: bool,
+    /// `"kokoro"` (default) or `"openai"`. Both talk `/v1/audio/speech`.
+    pub tts_provider: String,
+    /// Where the speech endpoint lives. The default is a local `kokoro-fastapi`.
+    pub tts_url: String,
+    /// Model name the endpoint expects.
+    pub tts_model: String,
+    /// Voice name. Kokoro ships `af_heart`, `af_bella`, `am_michael` and more.
+    pub tts_voice: String,
+    /// Only needed by a hosted endpoint; a local Kokoro wants none.
+    pub tts_api_key: String,
 }
 
 impl Default for VoiceConfig {
@@ -31,6 +44,15 @@ impl Default for VoiceConfig {
             stt_url: "https://api.openai.com".into(),
             hotkey: "ctrl+v".into(),
             toggle_mode: false,
+            speak: false,
+            // Kokoro-82M by default: it is a neural model and the voices sound
+            // like people. The formant and concatenative synthesisers are
+            // cheaper and are not worth listening to.
+            tts_provider: "kokoro".into(),
+            tts_url: "http://127.0.0.1:8880".into(),
+            tts_model: "kokoro".into(),
+            tts_voice: "af_heart".into(),
+            tts_api_key: String::new(),
         }
     }
 }

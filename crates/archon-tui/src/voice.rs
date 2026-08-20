@@ -2,7 +2,11 @@ pub mod capture;
 #[cfg(feature = "audio-capture")]
 pub mod cpal_source;
 pub mod pipeline;
+#[cfg(feature = "audio-capture")]
+pub mod playback;
+pub mod speech;
 pub mod stt;
+pub mod tts;
 
 use std::sync::Arc;
 
@@ -33,6 +37,27 @@ pub fn real_audio_source(
     {
         Err(anyhow::anyhow!(
             "this archon build has no microphone support: rebuild with \
+             `--features audio-capture` (Linux also needs libasound2-dev)"
+        ))
+    }
+}
+
+/// Open the default output device to speak through.
+///
+/// Same contract as [`real_audio_source`] and for the same reason: callers
+/// need no `cfg`, and a build that cannot speak says so rather than silently
+/// discarding every sentence.
+pub fn real_speech_player() -> anyhow::Result<Arc<speech::SpeechSink>> {
+    #[cfg(feature = "audio-capture")]
+    {
+        Ok(Arc::new(speech::SpeechSink::Device(
+            playback::SpeechPlayer::new()?,
+        )))
+    }
+    #[cfg(not(feature = "audio-capture"))]
+    {
+        Err(anyhow::anyhow!(
+            "this archon build has no audio output support: rebuild with \
              `--features audio-capture` (Linux also needs libasound2-dev)"
         ))
     }

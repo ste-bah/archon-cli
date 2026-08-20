@@ -61,9 +61,42 @@ impl CommandHandler for VoiceHandler {
                     )));
                 }
             },
+            // Speaking is separate from listening: a machine with no microphone
+            // can still read answers aloud, so this toggles independently of
+            // `enabled`. Ctrl+P flips the same flag.
+            "speak" => {
+                let want = args.get(1).map(|s| s.as_str().trim());
+                let enabled = match want {
+                    Some("on" | "true" | "yes") => {
+                        archon_tui::voice::speech::set_speech_enabled(true);
+                        true
+                    }
+                    Some("off" | "false" | "no") => {
+                        archon_tui::voice::speech::set_speech_enabled(false);
+                        false
+                    }
+                    None | Some("") => archon_tui::voice::speech::toggle_speech_enabled(),
+                    Some(other) => {
+                        ctx.emit(TuiEvent::Error(format!(
+                            "Unknown /voice speak argument: {other}. Valid: on, off"
+                        )));
+                        return Ok(());
+                    }
+                };
+                ctx.emit(TuiEvent::TextDelta(format!(
+                    "\nSpeaking replies aloud: {}.\n{}\n",
+                    if enabled { "on" } else { "off" },
+                    if enabled {
+                        "Needs a speech backend at voice.tts_url and a build with audio support."
+                    } else {
+                        "Ctrl+P toggles this without typing."
+                    }
+                )));
+            }
             other => {
-                let msg =
-                    format!("Unknown /voice subcommand: {other}. Valid: status, list, on, off");
+                let msg = format!(
+                    "Unknown /voice subcommand: {other}. Valid: status, list, on, off, speak"
+                );
                 ctx.emit(TuiEvent::TextDelta(msg));
             }
         }
@@ -117,6 +150,25 @@ fn render_status(voice: &archon_core::config::VoiceConfig) -> String {
     lines.push(format!("  vad_threshold: {}", voice.vad_threshold));
     lines.push(format!("  hotkey:        {}", voice.hotkey));
     lines.push(format!("  toggle_mode:   {}", voice.toggle_mode));
+    lines.push(String::new());
+    lines.push("Speech (replies read aloud, Ctrl+P):".to_string());
+    lines.push(format!(
+        "  speaking now:  {}",
+        archon_tui::voice::speech::speech_enabled()
+    ));
+    lines.push(format!("  speak:         {}", voice.speak));
+    lines.push(format!("  tts_provider:  {}", voice.tts_provider));
+    lines.push(format!("  tts_url:       {}", voice.tts_url));
+    lines.push(format!("  tts_model:     {}", voice.tts_model));
+    lines.push(format!("  tts_voice:     {}", voice.tts_voice));
+    lines.push(format!(
+        "  tts_api_key:   {}",
+        if voice.tts_api_key.is_empty() {
+            "(empty)"
+        } else {
+            "(set)"
+        }
+    ));
     lines.join("\n")
 }
 

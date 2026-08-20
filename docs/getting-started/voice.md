@@ -1,6 +1,6 @@
-# Voice input
+# Voice
 
-Speak instead of typing. Press the record key, talk, press it again; the
+Speak instead of typing, and have archon speak back. Press the record key, talk, press it again; the
 transcription lands in the prompt where you can edit it before sending.
 
 Off by default — typing is the primary input.
@@ -141,6 +141,96 @@ WSL2 has no audio device by default. Either run archon from Windows, or set up
 PulseAudio/PipeWire forwarding into the WSL instance — `/voice` will report the
 device once ALSA can see one.
 
+## Speaking replies aloud
+
+Archon can read its answers out. Off by default; `Ctrl+P` toggles it live, and
+`/voice speak on|off` does the same by typing. The `/voice` overlay shows which
+state you are in, so the key has visible feedback rather than a change you only
+notice on the next reply.
+
+```toml
+# config.toml
+[voice]
+speak = true
+tts_provider = "kokoro"
+tts_url = "http://127.0.0.1:8880"
+tts_model = "kokoro"
+tts_voice = "af_heart"
+```
+
+Speaking is **independent of `enabled`**. Listening and speaking are separate
+devices and separate wants: a machine with no microphone can still read answers
+aloud, and one with no speakers can still be dictated to.
+
+### The voice
+
+The default is **Kokoro-82M**, run locally. It is a neural model trained on real
+speech — not a formant or concatenative synthesiser — and it does not sound like
+one. That is the whole reason it is the default.
+
+Run it with `kokoro-fastapi`, which speaks the OpenAI `/v1/audio/speech`
+protocol deliberately:
+
+```bash
+docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu
+# or, with an NVIDIA GPU:
+docker run --gpus all -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-gpu
+```
+
+Then set `tts_voice`. Kokoro ships several; `af_heart`, `af_bella`, `af_nicole`,
+`am_michael` and `bf_emma` are the common ones. Nothing validates the name
+locally — a voice the server does not have comes back as an error naming it.
+
+| `tts_provider` | What it talks to |
+|---|---|
+| `"kokoro"` | A local `kokoro-fastapi` at `tts_url`. No key. |
+| `"openai"` | OpenAI. Set `tts_url = "https://api.openai.com"`, `tts_model = "tts-1"` or `"gpt-4o-mini-tts"`, a `tts_voice` such as `alloy`, and `tts_api_key`. |
+
+Both go through the same client, because the protocol is the same. The provider
+name is documentation for the reader; the URL, model and voice are what differ.
+
+Audio comes back as raw 24 kHz PCM (`response_format: "pcm"`) rather than a
+container, so nothing here has to decode mp3 or WAV.
+
+### What gets spoken
+
+The assistant's reply, once the turn finishes — not each delta as it streams,
+which would read the answer out a fragment at a time.
+
+Replies longer than about a thousand characters are trimmed at a sentence end
+before being spoken. A spoken wall of text cannot be skimmed the way the screen
+can, and the screen still has all of it.
+
+Replies are spoken one at a time, in order. If one is still being read when the
+next arrives, the new one is dropped rather than queued — by the time a backed-up
+sentence got read out, the conversation would have moved on. Tool output,
+thinking, and errors are never spoken.
+
+### Platforms
+
+The same code on all three, through cpal: WASAPI on Windows, CoreAudio on macOS,
+ALSA on Linux. Linux needs `libasound2-dev` at build time, which
+`scripts/install-system-deps.sh` installs; the other two need nothing.
+
+Playback is resampled to whatever rate the output device runs at, because a
+device does not negotiate — 24 kHz audio pushed at a 48 kHz card plays at the
+wrong pitch.
+
+### When it does not speak
+
+Check `/voice`, which reports `speaking now` (the live toggle) separately from
+`speak` (the configured default). If the two disagree, `Ctrl+P` or
+`/voice speak` changed it since startup.
+
+If speech was enabled but could not start — no output device, or a build without
+audio support — archon says so on stderr at startup and runs without it rather
+than accepting replies into a channel nothing drains.
+
+A synthesis failure costs one reply, not the session: it is logged and skipped,
+and the next reply is attempted normally. So a speech server that is down means
+silence, not a stall.
+
+
 ## Known limits
 
 - **The hotkey is not configurable.** `voice.hotkey` is reported by `/voice` and
@@ -148,7 +238,6 @@ device once ALSA can see one.
   `"ctrl+shift+v"` until v1.9.3, which described a key that had never been
   bound.
 - **A recording is capped at five minutes** and says so if it hits the ceiling.
-- **There is no text-to-speech.** Voice is input only.
 
 ## See also
 

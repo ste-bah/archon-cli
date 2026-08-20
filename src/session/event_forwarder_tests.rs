@@ -54,6 +54,7 @@ async fn large_tool_output_reaches_tui_as_bounded_ordered_frames() {
             "test-provider",
         ),
         selected_model: "test-model".into(),
+        speech_tx: None,
     });
     let output = format!("{}世界", "0123456789abcdef\n".repeat(5_000));
     agent_tx
@@ -115,6 +116,7 @@ async fn full_tui_queue_backpressures_agent_source_without_reordering() {
             "test-provider",
         ),
         selected_model: "test-model".into(),
+        speech_tx: None,
     });
 
     agent_tx
@@ -195,6 +197,7 @@ async fn agent_text_reconstructs_response_and_rendered_transcript() {
             "test-provider",
         ),
         selected_model: "test-model".into(),
+        speech_tx: None,
     });
     let expected = "hello 世界\nfinal";
     for chunk in ["hello ", "世界", "\nfinal"] {
@@ -293,6 +296,7 @@ async fn context_pressure_event_banks_last_request_body_tokens_for_slash_context
             "test-provider",
         ),
         selected_model: "test-model".into(),
+        speech_tx: None,
     });
 
     assert_eq!(

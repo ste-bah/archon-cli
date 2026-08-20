@@ -81,6 +81,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
             crate::voice::pipeline::fire_trigger_for_hotkey();
             KeyResult::Nothing
         }
+        Action::ToggleSpeech => {
+            // The overlay is the visible half of this: without it the only
+            // evidence the key did anything is the next reply either speaking
+            // or not, which is a long way to find out you missed the key.
+            let enabled = crate::voice::speech::toggle_speech_enabled();
+            app.show_speech_state(enabled);
+            KeyResult::Nothing
+        }
         Action::ToggleSplit => {
             app.panes.toggle_split();
             KeyResult::Nothing

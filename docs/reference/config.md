@@ -1648,8 +1648,12 @@ hotkey = "ctrl+v"
 toggle_mode = false
 ```
 
-Enabling this needs a binary built with the `audio-capture` feature, which is
-on by default. Built without it, archon says so at startup and runs with voice
+Kokoro-82M is the default voice because it is a neural model trained on real
+speech, not a formant or concatenative synthesiser. Run it locally with
+`kokoro-fastapi`; see [voice](../getting-started/voice.md#speaking-replies-aloud).
+
+Enabling either half needs a binary built with the `audio-capture` feature,
+which is on by default and covers both the microphone and the speaker. Built without it, archon says so at startup and runs with voice
 disabled rather than starting a pipeline that records silence — which is what
 it used to do. On Linux the feature needs `libasound2-dev` at build time;
 `scripts/install-system-deps.sh` installs it.
@@ -1664,6 +1668,12 @@ it used to do. On Linux the feature needs `libasound2-dev` at build time;
 | `stt_url` | `"https://api.openai.com"` | API endpoint. Override for local whisper.cpp HTTP server. |
 | `hotkey` | `"ctrl+v"` | Reported by `/voice` and nothing else. The TUI binding is fixed at `Ctrl+V`, so setting this to something else changes what `/voice` prints and not what the keyboard does. It defaulted to `"ctrl+shift+v"` until v1.9.3 — a key that had never been bound. |
 | `toggle_mode` | `false` | `false` = push-to-talk: one press records for a 2s window and finalises itself (it does not detect the key being held). `true` = toggle: press once to start, again to stop. |
+| `speak` | `false` | Read replies aloud. Independent of `enabled` — listening and speaking are separate devices. `Ctrl+P` toggles it live; `/voice speak on\|off` does the same by typing. |
+| `tts_provider` | `"kokoro"` | `"kokoro"` or `"openai"`. Both talk `/v1/audio/speech`, so this names the intent; `tts_url`, `tts_model` and `tts_voice` are what actually differ. |
+| `tts_url` | `"http://127.0.0.1:8880"` | Speech endpoint. The default is a local `kokoro-fastapi`. |
+| `tts_model` | `"kokoro"` | Model the endpoint expects. `tts-1` or `gpt-4o-mini-tts` at OpenAI. |
+| `tts_voice` | `"af_heart"` | Kokoro ships `af_heart`, `af_bella`, `af_nicole`, `am_michael`, `bf_emma`; OpenAI has `alloy` and friends. Not validated locally — an unknown name comes back as an error naming it. |
+| `tts_api_key` | `""` | Only a hosted endpoint needs one. Prefer `config.local.toml`. |
 
 ---
 

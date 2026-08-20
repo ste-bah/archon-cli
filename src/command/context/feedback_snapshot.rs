@@ -22,7 +22,10 @@ pub(super) fn build_feedback_snapshot(slash_ctx: &SlashCommandContext) -> Feedba
     let Ok(messages) = slash_ctx.session_store.load_messages(&slash_ctx.session_id) else {
         return FeedbackSnapshot::default();
     };
-    let Some(index) = messages.iter().rposition(is_assistant_message) else {
+    let Some(index) = messages
+        .iter()
+        .rposition(|content| is_assistant_message(content))
+    else {
         // Nothing to rate, but ratings from before a `/clear` or a rewind may
         // still be there, and `/feedback list` is how you find that out.
         return FeedbackSnapshot {
@@ -66,7 +69,7 @@ pub(super) fn build_feedback_snapshot(slash_ctx: &SlashCommandContext) -> Feedba
 }
 
 /// Whether one stored message is an assistant turn.
-fn is_assistant_message(content: &String) -> bool {
+fn is_assistant_message(content: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(content)
         .ok()
         .and_then(|value| {
