@@ -98,6 +98,59 @@ async fn bash_runs_in_a_process_group_of_its_own() {
     assert!(child_group > 0, "implausible pgid {child_group}");
 }
 
+/// The session that keeps a prompting command from wedging the wave (#197).
+///
+/// A process group still inherits the controlling terminal, so a command that
+/// wants an answer opens `/dev/tty` directly and gets one no matter where stdin
+/// points. Doing that from a background group raises SIGTTIN, and SIGTTIN
+/// *stops* the child rather than failing it: state `T`, pipes still held,
+/// nothing there to answer. One `git diff HEAD | patch -p1` that could not place
+/// a hunk asked `File to patch:` and held that state for thirty minutes, with an
+/// eleven-item parallel wave behind it. `setsid` leaves the child no controlling
+/// terminal at all, so the open fails with ENXIO and the command errors out
+/// promptly -- which lets the agent read a real error and try something else.
+///
+/// Asserted as "a session of its own" rather than "opening /dev/tty fails",
+/// because a CI runner has no controlling terminal to begin with: the open would
+/// fail there whatever this code did, and the test would pass without testing
+/// anything. A session id cannot go vacuous the same way -- the parent has one
+/// either way, so a child that skipped `setsid` would share it and fail here.
+///
+/// Linux-only because `ps -o sid=` is. BSD `ps` on macOS reports a session
+/// pointer under `sess`, which is not comparable with `getsid`.
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn bash_runs_in_a_session_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool::default();
+    let result = tool
+        .execute(
+            json!({"command": "ps -o sid= -p $$"}),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(!result.is_error, "{}", result.content);
+    let child_session: i32 = result
+        .content
+        .lines()
+        .filter_map(|line| line.trim().parse::<i32>().ok())
+        .next_back()
+        .unwrap_or_else(|| panic!("no session id in output: {}", result.content));
+    let own_session = unsafe { libc::getsid(0) };
+
+    assert_ne!(
+        child_session, own_session,
+        "the child shares this process's session, so it still has our \
+         controlling terminal and a command that prompts on /dev/tty will be \
+         stopped by SIGTTIN instead of failing"
+    );
+    assert!(child_session > 0, "implausible sid {child_session}");
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn normal_completion_kills_delayed_background_mutation() {

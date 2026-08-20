@@ -25,27 +25,31 @@ pub(super) fn spawn_wrapped_child(
 
     let mut wrapper = CommandWrap::from(command);
     wrapper.wrap(KillOnDrop);
-    // A new SESSION, not just a new process group.
+    // A session, not a process group (#197).
     //
-    // A process group still inherits the controlling terminal, and a program
-    // that wants to ask the operator something opens `/dev/tty` directly rather
-    // than reading stdin — so redirecting stdin to null does not stop it. Doing
-    // that from a background process group raises SIGTTIN and the child is
-    // *stopped*, not failed: it sits in state `T` forever, holding the pipes
-    // open, with nothing to answer it.
+    // A process group still inherits the controlling terminal, so a command
+    // that wants an answer opens `/dev/tty` directly and gets one regardless of
+    // where stdin points. Doing that from a background group raises SIGTTIN and
+    // the child is *stopped* — state `T`, pipes still held, nothing there to
+    // answer it. An agent ran `git diff HEAD | patch -p1`, patch could not place
+    // a hunk and asked `File to patch:`, and that wedged an eleven-item parallel
+    // wave for thirty minutes. No timeout caught it, and no timeout should have:
+    // the command was not slow, so a deadline strict enough to catch this would
+    // kill honest long builds instead.
     //
-    // Live: an agent ran `git diff HEAD | patch -p1`, patch could not place a
-    // hunk, prompted "File to patch:", and stopped. It held that state for
-    // 30 minutes and froze an eleven-item wave behind it — one item ever got a
-    // worktree. No timeout caught it, correctly: the model was not waiting and
-    // the command was not slow, so a deadline would only have punished honest
-    // long-running work like a build.
+    // `setsid` leaves the child with no controlling terminal at all, so the
+    // `/dev/tty` open fails with ENXIO and the program errors out promptly. The
+    // agent reads a real error and picks a different command, which is what it
+    // wanted to do in the first place.
     //
-    // `setsid` leaves the child with no controlling terminal at all, so opening
-    // `/dev/tty` fails with ENXIO and the program errors out promptly. The agent
-    // then reads a real error and can choose a better command, which is what it
-    // was already trying to do. ProcessSession reuses ProcessGroup's child
-    // wrapper, so group-kill and kill-on-drop behave exactly as before.
+    // This is also strictly stronger than the process group it replaces: setsid
+    // creates a new session *and* a new group with the child as leader, so
+    // `child.id()` genuinely names a group and `kill(-pgid)` reaches exactly
+    // this command's descendants. ProcessSession reuses ProcessGroup's child
+    // wrapper, so group-kill and kill-on-drop are unchanged.
+    //
+    // Nothing may also call `setpgid` on this child — see the note in
+    // `bash_containment::contained_bash_command`.
     #[cfg(unix)]
     wrapper.wrap(process_wrap::tokio::ProcessSession);
     #[cfg(windows)]

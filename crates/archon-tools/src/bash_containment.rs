@@ -53,6 +53,17 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
             // not a security sandbox. Linux adds subreaper tracking below for
             // session-detached descendants; other Unix platforms cannot
             // guarantee cleanup after a deliberate setsid(2) escape.
+            //
+            // The group itself is established in
+            // `bash_output::spawn_wrapped_child`, by `setsid` rather than the
+            // `setpgid` this function used to add (#197). Deliberately not both:
+            // a process-group leader may not create a session, and a session
+            // leader may not change its process group, so whichever call runs
+            // second fails with EPERM and bash never starts at all --
+            // `Failed to spawn bash: Operation not permitted (os error 1)`.
+            // Measured on macOS with both applied: 11 of 42 archon-tools bash
+            // tests fail, plus 7 in archon-core behind them, because no shell
+            // means no file mutation for plan reconciliation to observe.
             configure_linux_subreaper(&mut command);
             command
                 .arg("-c")
@@ -67,33 +78,6 @@ pub(super) fn contained_bash_command(command_text: &str) -> Command {
     }
     command
 }
-
-// NO `process_group(0)` HERE. It cannot work, and it stops bash starting at all.
-//
-// #192 added `command.process_group(0)` to fix a real bug: `child.id()` was
-// being passed to `kill(-pgid)` while naming no process group, so descendant
-// cleanup rested on the shell's EXIT trap and could, on a pid collision, signal
-// processes archon does not own.
-//
-// The premise was wrong. Archon does not spawn this command directly — every
-// bash child is wrapped in `process_wrap::ProcessSession`, which calls
-// `setsid()` (see `bash_output::spawn_wrapped_child`, and the `patch` incident
-// its comment records). `setsid()` makes the child a SESSION LEADER, and a
-// session leader may not change its process group: `setpgid` returns EPERM and
-// the spawn fails with "Operation not permitted" before bash ever runs.
-//
-// Measured on macOS: 11 of 42 archon-tools bash tests fail this way, including
-// #192's own `bash_runs_in_a_process_group_of_its_own`, and 7 archon-core tests
-// fail downstream because no shell means no file mutation to reconcile. In
-// isolation the call is fine — plain Rust `Command::process_group(0)`, raw
-// `posix_spawn(setpgroup=0)` and `fork`+`setpgid` all succeed on the same
-// machine against the same bash binary. Only the combination fails.
-//
-// The bug #192 set out to fix is already fixed by the session, and better:
-// `setsid()` gives the child a new session AND a new process group with the
-// child as leader, so `child.id()` IS a valid pgid and `kill(-pgid)` reaches
-// exactly this command's descendants. Adding `setpgid` on top bought nothing
-// and cost the shell.
 
 #[cfg(target_os = "linux")]
 fn configure_linux_subreaper(command: &mut Command) {
