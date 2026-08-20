@@ -5,6 +5,12 @@ async fn preflight_observer_receives_first_allowed_tool_with_final_input() {
     let (tx, _rx) = tokio::sync::mpsc::channel(AGENT_EVENT_CHANNEL_CAPACITY);
     let config = AgentConfig {
         permission_mode: Arc::new(Mutex::new("bypassPermissions".to_string())),
+        // This is about the permission gate, not the freshness gate. The
+        // fixture writes to paths nothing has read, which read_before_edit
+        // refuses by design (#193 Phase A).
+        filesystem: crate::config::FilesystemConfig {
+            read_before_edit: crate::config::ReadBeforeEdit::Off,
+        },
         ..AgentConfig::default()
     };
     let mut agent = Agent::new(

@@ -8,6 +8,8 @@ mod learning;
 // Inherent impl on `MemoryConfig` only — nothing to re-export.
 #[path = "config/context_section.rs"]
 mod context_section;
+/// Freshness policy for writes to the working tree (#193 Phase A).
+mod filesystem;
 mod memory_open;
 mod observability;
 mod providers;
@@ -22,6 +24,7 @@ mod validation;
 mod world_model;
 
 pub use context_section::ContextConfig;
+pub use filesystem::{FilesystemConfig, ReadBeforeEdit};
 pub use generated_shape::*;
 pub use generated_tuning::*;
 pub use interfaces::*;
@@ -128,6 +131,9 @@ pub struct ArchonConfig {
     /// Mechanical context reclamation, tried before any model call (#189).
     #[serde(default)]
     pub prune: PruneConfig,
+    /// Whether a write has to be backed by a read of the same bytes (#193).
+    #[serde(default)]
+    pub filesystem: FilesystemConfig,
 }
 
 #[cfg(test)]

@@ -67,6 +67,21 @@ pub enum AgentEvent {
         /// Phase 3), so the status line can say what is filling the window and
         /// not only how full it is. Zero when nothing is attributed yet.
         heaviest_message_tokens: u64,
+        /// The heaviest messages, biggest first, as `(message_index, tokens)`
+        /// (#192 scope B).
+        ///
+        /// `heaviest_message_tokens` answers "how bad is the worst one"; this
+        /// answers "which ones, and by how much", which is the question
+        /// `top_contributors` was written for and had no caller for. Capped at
+        /// [`TOP_CONTRIBUTOR_LIMIT`] because this rides on every turn and the
+        /// tail of the ranking is not actionable.
+        top_contributors: Vec<(usize, u64)>,
+        /// Attributed tokens across *every* message, not only the ones listed.
+        ///
+        /// Without it a share cannot be computed from a truncated list, and
+        /// "42k" alone does not say whether that is most of the window or a
+        /// rounding error.
+        attributed_total: u64,
     },
     TextDelta(String),
     ThinkingDelta(String),
@@ -214,6 +229,17 @@ pub struct AgentConfig {
     /// `config.subagent.isolation_max_tier` — the most isolation any agent may
     /// have, however it was requested.
     pub subagent_isolation_max_tier: archon_tools::isolation::IsolationTier,
+    /// `[filesystem]` — whether a write must be backed by a read of the same
+    /// bytes (#193 Phase A).
+    pub filesystem: crate::config::FilesystemConfig,
+    /// Which subagent this agent is, if it is one (#193 Phase A).
+    ///
+    /// `session_id` is copied verbatim from parent to child, so on its own it
+    /// cannot tell one agent from another inside a session — which matters for
+    /// the read-before-write registry, where a parent's reading must not count
+    /// as evidence for a child that never opened the file. `None` means the
+    /// top-level agent, which is an answer rather than missing data.
+    pub subagent_id: Option<String>,
 }
 
 impl AgentConfig {
@@ -292,6 +318,8 @@ impl Default for AgentConfig {
             max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
             subagent_auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
             subagent_isolation_max_tier: archon_tools::isolation::IsolationTier::Worktree,
+            filesystem: crate::config::FilesystemConfig::default(),
+            subagent_id: None,
         }
     }
 }

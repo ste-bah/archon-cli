@@ -39,6 +39,8 @@ pub(crate) mod docs_runtime;
 pub mod evidence_cli;
 pub mod execution_deadline;
 pub mod file_edit;
+/// What each agent has actually looked at on disk (#193 Phase A).
+pub mod file_observation;
 pub mod file_read;
 pub mod file_write;
 pub mod gametheory;

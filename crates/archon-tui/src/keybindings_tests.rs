@@ -303,3 +303,21 @@ fn shifted_symbols_resolve_on_non_us_layouts() {
         );
     }
 }
+
+/// Ctrl+P toggles reading replies aloud (#192 follow-up).
+///
+/// Not Ctrl+S: that is XOFF on a terminal, and binding speech to it would
+/// freeze output on any machine where flow control is still enabled.
+#[test]
+fn ctrl_p_toggles_speech() {
+    let km = KeyMap::default();
+    assert_eq!(
+        km.resolve(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
+        Some(&Action::ToggleSpeech)
+    );
+    assert_ne!(
+        km.resolve(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+        Some(&Action::ToggleSpeech),
+        "Ctrl+S is XOFF and must not be the speech key"
+    );
+}

@@ -63,6 +63,9 @@ mod process_message_support;
 mod prompt_ordering;
 pub mod prune;
 mod prune_agent;
+/// Acceptance coverage for the read-before-write policy (#193 Phase A).
+#[cfg(test)]
+mod read_before_edit_policy_tests;
 pub(crate) mod request_cache;
 mod runtime_attribution;
 mod runtime_hooks;
@@ -85,6 +88,12 @@ mod tool_postprocess_steps;
 mod tool_postprocess_steps_tests;
 mod tool_preflight;
 mod tool_preflight_filesystem;
+/// Read-before-write freshness, consulted before a mutating tool runs (#193).
+///
+/// `pub(crate)` rather than private because the subagent runner has its own
+/// tool loop and must consult the same policy; a guarantee only the parent
+/// honoured would have a hole in it exactly where Archon runs the most agents.
+pub(crate) mod tool_preflight_freshness;
 mod tool_preflight_gates;
 mod tool_preflight_steps;
 pub(crate) mod tool_result_context;

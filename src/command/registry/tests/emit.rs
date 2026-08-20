@@ -22,6 +22,7 @@ fn make_emit_test_ctx(tui_tx: archon_tui::event_channel::TuiEventSender) -> Comm
         denial_snapshot: None,
         effort_snapshot: None,
         permissions_snapshot: None,
+        feedback_snapshot: None,
         plan_snapshot: None,
         copy_snapshot: None,
         doctor_snapshot: None,

@@ -291,38 +291,37 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
-            // Handle skills menu overlay — Up/Down/Enter/Esc
-            // (TASK-TUI-627-followup). Enter injects `/{skill-name} `
-            // into the input buffer via InputHandler::set_text, then
-            // closes the overlay so the user can finish typing args.
-            if app.skills_menu.is_some() {
-                match key.code {
-                    KeyCode::Up => {
-                        if let Some(ref mut menu) = app.skills_menu {
-                            menu.select_prev();
-                        }
-                        return;
-                    }
-                    KeyCode::Down => {
-                        if let Some(ref mut menu) = app.skills_menu {
-                            menu.select_next();
-                        }
-                        return;
-                    }
-                    KeyCode::Enter => {
-                        if let Some(menu) = app.skills_menu.take()
-                            && let Some(skill) = menu.selected()
-                        {
-                            app.input.set_text(&format!("/{} ", skill.name));
-                        }
-                        return;
-                    }
-                    KeyCode::Esc => {
-                        app.skills_menu = None;
-                        return;
-                    }
-                    _ => return, // swallow other keys while overlay is up
-                }
+            // Skills menu (TASK-TUI-627-followup) — routed in `picker_input.rs`.
+            if super::picker_input::handle_skills_menu_key(app, key) {
+                return;
+            }
+            // Model and theme pickers (#192) — routed in `picker_input.rs`.
+            if super::picker_input::handle_model_picker_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_theme_picker_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_settings_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_hooks_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_permissions_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_memory_files_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_branch_picker_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_voice_capture_key(app, key) {
+                return;
+            }
+            if super::picker_input::handle_token_attribution_key(app, key) {
+                return;
             }
             // Tasks overlay (#189 Phase 9): Up/Down move, `x`/Delete cancel
             // through `TaskStore`, `r` refreshes, Esc closes.

@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 const WIRED_LOG: &str = "voice: pipeline wired";
 const DISABLED_LOG: &str = "voice: disabled";
 const STARTED_LOG: &str = "voice: pipeline started";
+/// Emitted when voice is enabled but there is no device to record from.
+const UNAVAILABLE_LOG: &str = "voice: unavailable";
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn archon_bin() -> Option<PathBuf> {
@@ -164,9 +166,24 @@ fn voice_enabled_logs_pipeline_wired_and_started() {
         return;
     }
     let logs = run_and_scrape(true);
+
+    // Two acceptable outcomes, because voice now depends on hardware: the
+    // pipeline comes up, or it says plainly that it cannot. What is not
+    // acceptable is silence — that was the old behaviour, where a missing
+    // microphone was replaced with a mock and the log claimed success.
+    //
+    // CI runners have no audio device, so the second branch is the one that
+    // runs there; a developer machine with a microphone takes the first.
+    if logs.contains(UNAVAILABLE_LOG) {
+        assert!(
+            !logs.contains(WIRED_LOG),
+            "voice reported unavailable and wired a pipeline anyway\n--- logs ---\n{logs}\n---"
+        );
+        return;
+    }
     assert!(
         logs.contains(WIRED_LOG),
-        "expected log {WIRED_LOG:?} when voice enabled\n--- logs ---\n{logs}\n---"
+        "expected either {WIRED_LOG:?} or {UNAVAILABLE_LOG:?} when voice enabled\n--- logs ---\n{logs}\n---"
     );
     assert!(
         logs.contains(STARTED_LOG),

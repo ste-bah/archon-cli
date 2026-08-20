@@ -70,8 +70,18 @@ fn model_handler_execute_no_args_emits_current_model_text() {
                 msg.contains("Usage: /model <name>"),
                 "TextDelta must contain the usage line, got: {msg}"
             );
+            // `fable` joined the table in #192, alongside correcting `opus`
+            // and `sonnet` to the 5 series. Asserted as a set rather than a
+            // fixed string so adding a model does not fail a test about the
+            // usage line.
+            for shortcut in ["opus", "sonnet", "fable", "haiku"] {
+                assert!(
+                    msg.contains(shortcut),
+                    "shortcuts line is missing {shortcut}, got: {msg}"
+                );
+            }
             assert!(
-                msg.contains("Shortcuts: opus, sonnet, haiku"),
+                msg.contains("Shortcuts: "),
                 "TextDelta must contain shortcuts line, got: {msg}"
             );
         }

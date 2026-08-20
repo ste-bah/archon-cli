@@ -52,7 +52,10 @@ fn join_sections(sections: Vec<String>, max_chars: Option<usize>) -> String {
 /// to revalidate a cached render without re-reading the files (issue #171
 /// Part 5) — and because discovery reruns, a file *added to* or *removed from*
 /// the hierarchy changes the returned list, not merely its mtimes.
-pub(crate) fn discover_archon_md_paths(working_dir: &Path) -> Vec<PathBuf> {
+/// Public since #192 so `/memory files` can list the instruction files this
+/// session is actually carrying. That was invisible before: the rendered text
+/// goes into the system prompt and nothing reported where it came from.
+pub fn discover_archon_md_paths(working_dir: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 

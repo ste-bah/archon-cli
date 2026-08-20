@@ -75,7 +75,21 @@ pub(crate) async fn build_model_snapshot(slash_ctx: &SlashCommandContext) -> Mod
 }
 
 const CODEX_SHORTCUTS: &[&str] = &["default", "codex", "mini", "opus", "sonnet", "haiku"];
-const CODEX_MODEL_IDS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
+/// Concrete Codex model ids accepted as literal `/model` overrides.
+///
+/// The 5.6 series was missing until #192, while `config.toml` already shipped
+/// `default = "gpt-5.6-sol"`, `mini = "gpt-5.6-luna"` and an
+/// `app_server_model_catalog` listing `gpt-5.6-terra` — so the aliases
+/// resolved to models this table then refused by literal id.
+const CODEX_MODEL_IDS: &[&str] = &[
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+];
 
 fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
     if looks_like_codex_model(&snap.current_model) {
@@ -91,7 +105,113 @@ fn snapshot_shortcuts(snap: &ModelSnapshot) -> String {
     }
 }
 
+/// Drop repeats, keeping the first occurrence of each model id.
+///
+/// Aliases are listed before literal ids so `opus  (anthropic/claude-opus-5)`
+/// wins over the bare `claude-opus-5` row — the labelled one is the more
+/// useful of the two, and showing both would look like two different models.
+fn dedupe_by_model_id(entries: Vec<(String, String, String)>) -> Vec<(String, String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    entries
+        .into_iter()
+        .filter(|(_, model_id, _)| seen.insert(model_id.clone()))
+        .collect()
+}
+
+/// Rows for the `/model` picker overlay (#192).
+///
+/// Every model `/model <id>` will accept, from both families, with the
+/// current family first. Aliases resolve through the same functions the
+/// command uses, so the overlay cannot disagree with what applying the row
+/// would actually do.
+fn snapshot_picker_entries(snap: &ModelSnapshot) -> Vec<(String, String, String)> {
+    // Both families, always. Listing only the current one meant a Codex
+    // session could not see a Claude model and vice versa -- and worse, a
+    // Codex session whose `default_model` is still a Claude id (a state
+    // config.toml explicitly supports) was shown the Claude list. Which
+    // family you can reach is not a decision this picker should be making.
+    //
+    // Aliases are resolved through the same functions `/model <name>` uses, so
+    // a row shows the id it will actually apply, and they come first so the
+    // labelled row wins the dedupe against its own literal id.
+    let anthropic_aliased =
+        archon_tools::validation::KNOWN_SHORTCUTS
+            .iter()
+            .filter_map(|(shortcut, _)| {
+                resolve_anthropic_model_name(shortcut, &snap.anthropic_models)
+                    .ok()
+                    .map(|id| ("anthropic".to_string(), id, (*shortcut).to_string()))
+            });
+    // Every literal id the validator accepts, not just the aliased ones.
+    // Listing aliases alone hid every pinned generation -- `claude-opus-4-8`
+    // and `claude-sonnet-4-6` are still selectable and simply could not be
+    // seen, which reads as "they were removed".
+    let anthropic_literal = archon_tools::validation::KNOWN_MODEL_IDS
+        .iter()
+        .map(|id| ("anthropic".to_string(), (*id).to_string(), String::new()));
+
+    let codex_aliased = CODEX_SHORTCUTS.iter().filter_map(|shortcut| {
+        resolve_codex_model_name(shortcut, &snap.codex_models)
+            .ok()
+            .map(|id| ("openai-codex".to_string(), id, (*shortcut).to_string()))
+    });
+    let codex_literal = CODEX_MODEL_IDS
+        .iter()
+        .map(|id| ("openai-codex".to_string(), (*id).to_string(), String::new()));
+
+    // Current family first, so what you can use right now is at the top and
+    // the cursor starts on it.
+    if looks_like_codex_model(&snap.current_model) {
+        dedupe_by_model_id(
+            codex_aliased
+                .chain(codex_literal)
+                .chain(anthropic_aliased)
+                .chain(anthropic_literal)
+                .collect(),
+        )
+    } else {
+        dedupe_by_model_id(
+            anthropic_aliased
+                .chain(anthropic_literal)
+                .chain(codex_aliased)
+                .chain(codex_literal)
+                .collect(),
+        )
+    }
+}
+
+/// Resolve `/model <input>` against whichever family the INPUT belongs to.
+///
+/// This used to branch on `snap.current_model`, which made the model you were
+/// already on decide which models you were allowed to name. Two consequences,
+/// both real:
+///
+/// - You could never cross families. On Claude, `/model gpt-5.6-sol` went to
+///   the Anthropic resolver and came back "unknown model".
+/// - It was wrong even within a session. `config.toml` documents a supported
+///   state where `[llm].provider = "openai-codex"` while `[api].default_model`
+///   is still a Claude id — Archon maps the tiers internally. There
+///   `current_model` looks Anthropic, so a Codex session was offered and
+///   validated against the Claude table.
+///
+/// Branching on the input is both simpler and correct: the name you typed is
+/// the only evidence of which family you meant. The ambiguous aliases
+/// (`opus`, `sonnet`, `haiku`) exist in both tables, so they keep resolving
+/// against the current family — those are the only cases where the session
+/// state is the better guide.
 fn resolve_model_for_snapshot(input: &str, snap: &ModelSnapshot) -> Result<String, String> {
+    let ambiguous = matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "opus" | "sonnet" | "haiku" | "default" | "codex" | "mini"
+    );
+
+    if !ambiguous && looks_like_codex_model(input) {
+        return resolve_codex_model_name(input, &snap.codex_models);
+    }
+    if !ambiguous && looks_like_anthropic_model(input) {
+        return resolve_anthropic_model_name(input, &snap.anthropic_models);
+    }
+
     if looks_like_codex_model(&snap.current_model) {
         resolve_codex_model_name(input, &snap.codex_models)
     } else if looks_like_anthropic_model(&snap.current_model) {
@@ -275,6 +395,13 @@ impl CommandHandler for ModelHandler {
                 shortcuts = snapshot_shortcuts(snap),
             );
             ctx.emit(TuiEvent::TextDelta(msg));
+
+            // #192: also open the picker. Emitted *after* the text, and as a
+            // separate event, so nothing regresses for `archon -p` or for
+            // scrollback — a print-mode run drops the event and keeps exactly
+            // the output it had before. The overlay is additive, not a
+            // replacement, which is why `/model <name>` below is untouched.
+            ctx.emit(TuiEvent::ShowModelPicker(snapshot_picker_entries(snap)));
             return Ok(());
         }
 

@@ -442,6 +442,7 @@ impl CtxBuilder {
                 denial_snapshot: self.denial_snapshot,
                 effort_snapshot: self.effort_snapshot,
                 permissions_snapshot: self.permissions_snapshot,
+                feedback_snapshot: None,
                 plan_snapshot: self.plan_snapshot,
                 copy_snapshot: self.copy_snapshot,
                 doctor_snapshot: self.doctor_snapshot,
@@ -496,6 +497,9 @@ pub fn fixture_status_snapshot() -> crate::command::status::StatusSnapshot {
         input_tokens: 1234,
         output_tokens: 567,
         turn_count: 3,
+        // The fixture has no store to fold, so the counts are absent rather
+        // than zero — which is also what the status line must print.
+        stats: None,
     }
 }
 

@@ -22,12 +22,21 @@ pub(crate) mod evidence_browser;
 // TASK-#207 SLASH-FILES: file-picker overlay (3-file sub-module).
 pub(crate) mod file_picker;
 pub(crate) mod gametheory;
+pub(crate) mod hooks_config_menu;
 pub(crate) mod learning;
+pub(crate) mod memory_file_selector;
 pub(crate) mod message_selector;
+pub(crate) mod model_picker;
+pub(crate) mod permissions_browser;
 pub(crate) mod search_results;
+pub(crate) mod session_branching;
+pub(crate) mod settings_screen;
 pub(crate) mod skills_menu;
 pub(crate) mod task_overlay;
+pub(crate) mod theme_screen;
+pub(crate) mod token_attribution;
 pub(crate) mod video;
+pub(crate) mod voice_capture;
 pub(crate) mod workflow;
 pub(crate) mod world;
 

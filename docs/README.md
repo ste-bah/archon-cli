@@ -9,6 +9,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Codex authentication](getting-started/codex-auth.md) — ChatGPT/Codex OAuth, TUI provider mode, provider-aware `/model`, tool use, subagents, pipelines
 - [Project setup](getting-started/project-setup.md) — bootstrap a project with `archon-init.sh` (flags, scenarios, troubleshooting)
 - [First run](getting-started/first-run.md) — what to expect, where data lives, common gotchas
+- [Voice input](getting-started/voice.md) — microphone setup, speech-to-text backends, and why a recording gets discarded
 
 ## Architecture
 
@@ -38,9 +39,9 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Reference
 
-- [Slash commands](reference/slash-commands.md) — 87 primary commands grouped by purpose
+- [Slash commands](reference/slash-commands.md) — 91 primary commands grouped by purpose, plus the overlays nine of them open
 - [Tools](reference/tools.md) — 43 built-in tools available to agents
-- [Skills](reference/skills.md) — 68 built-in skills (composable command sequences)
+- [Skills](reference/skills.md) — 67 built-in skills (composable command sequences)
 - [Permissions](reference/permissions.md) — 7 permission modes, rule lists, sandboxing
 - [Configuration](reference/config.md) — `config.toml` schema, precedence, every section
 - [Prompt caching and cost](reference/prompt-caching.md) — per-provider wire formats, per-model minimums, breakpoint placement, and how cache reads and writes are priced
@@ -118,7 +119,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Operations
 
-- [Session management](operations/session-management.md) — resume, fork, checkpoint, rewind
+- [Session management](operations/session-management.md) — resume, fork, fork-at, rate, checkpoint, rewind
 - [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, provider-aware model selection, latency tuning
@@ -145,6 +146,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Release notes
 
+- [v1.9.3](release-notes/v1.9.3.md) — Patch: eleven deleted TUI screens adjudicated one at a time, with eight restored and wired to overlays on `/model`, `/theme`, `/config`, `/hooks`, `/permissions`, `/memory files`, `/fork-at`, `/voice` and `/context`, and three deleted for their own stated reasons (#192); a mutation preflight that walked and hashed every file under the working directory, gitignored or not, twice per mutating tool call, which made a real checkout hang indefinitely; a microphone that records rather than a mock feeding silence in both branches of a check that logged "real audio device detected"; per-message token attribution surfaced, so `/context` answers which message is filling the window and not only how full it is; `Edit`/`Write`/`NotebookEdit` refused when the agent has not read the file (#193 Phase A); session projections that fold the event log once and cache through a sequence number (#193 Phase B); `/feedback` ratings in a sidecar relation that never reaches model context (#193 Phase C); spilled tool output created 0700/0600 rather than inheriting the directory's permissions (#193 Phase D); Bash finally putting its child in a process group of its own, which the containment was named for and never did; and signalled commands reported as 128+signal instead of -1
 - [v1.9.2](release-notes/v1.9.2.md) — Patch: structured Plan Mode approval with safe permission restoration; editable plan documents; durable plan-linked tasks, signed test-run evidence, reconciliation, and a Plan-Mode-specific model override; direct `/plan` exit aliases; subagent and filesystem-mutation trust boundaries; and registered canonical skills in slash autocomplete with typed labels, primary-first ordering, alias deduplication, shadow omission, and exact startup warnings
 - [v1.9.1](release-notes/v1.9.1.md) — Patch: prompt caching emitted on every provider rather than only the one endpoint whose URL archon recognised, with `prompt_cache_strategy` to declare a gateway and a guard test that fails the build if a new provider omits its declaration (#178); the stable-head breakpoint placed ahead of the per-turn content on Bedrock and Vertex instead of behind it, where a cache write bills above plain input and is never read back; Vertex system markers no longer flattened away into a string; GPT-5.6 `prompt_cache_breakpoint` with a prefix-derived `prompt_cache_key`; this turn's volatile system blocks moved onto the last user message, the only lever the implicitly-caching providers have (`prompt_cache_reorder`); cache reads and writes priced at 0.1x and 1.25x base input instead of zero and par, per model, with the 10% regional Bedrock and Vertex premium read from the model id and `[context.model_pricing]` to correct any of it without a release; SigV4 canonical paths encoded twice, without which every dated Bedrock model id failed as a bad secret key; `prompt_cache_conversation = false` no longer discarding the tools and system checkpoints along with the message one; OpenAI cached tokens no longer counted twice into context pressure and cost; an EC2 instance profile no longer reported as missing credentials; and `RUST_LOG` and `ARCHON_DEBUG_LOG_DIR` reaching the session log at all. Verified live on five Bedrock models, Anthropic subscription OAuth, and the OpenAI Codex subscription
 - [v1.9.0](release-notes/v1.9.0.md) — Minor: knowledge bases unified into one namespace, so a name created on any surface is listed and usable from all of them, and a name nobody wrote down is recoverable at all (#170); corrections reinforcing a rule only once something has been shown to have caused them, with causal attribution running in shadow and failing closed (#77); scheduled Memory Garden consolidation under a single-run lock and a work budget, with irreversible pruning routed to governed proposals instead of deleting (#79); replay weighted by the latent surprise that was being recorded and never read, bounded three ways and held out by session (#85); the subagent runtime's per-round copies cut from five to two, transcripts opened once instead of once per message, and a ten-way fan-out querying the memory store three times rather than thirty, with request bytes verified byte-identical (#171); multi-line TUI input via Shift+Enter with the enhancement flags popped on every exit path, and the leftover cells that put stray glyphs in the input area (#174); a policy refusal in the web workbench answering 403 rather than 200 (#170); RocksDB's periodic stats dump disabled, which was causing a null dereference at exit on Linux and a deadlock on Windows; and `reports/` untracked

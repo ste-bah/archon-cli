@@ -30,6 +30,12 @@ impl Agent {
         {
             return None;
         }
+        // Read-before-write (#193 Phase A). After permission, because "you may
+        // not do this at all" is a better answer than "you have not read the
+        // file you are not allowed to edit".
+        if !self.freshness_allows_tool(tool, &input).await {
+            return None;
+        }
         if !self.run_pre_tool_hooks(tool, &perm_mode, &mut input).await {
             return None;
         }

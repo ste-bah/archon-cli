@@ -37,240 +37,11 @@ pub struct EvidenceRowPayload {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentActivityRole {
-    Parent,
-    Subagent,
-    Background,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentActivityStatus {
-    Queued,
-    Running,
-    Waiting,
-    WaitingForTool,
-    Backgrounded,
-    Complete,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentActivityUpdate {
-    pub id: String,
-    pub name: String,
-    pub role: AgentActivityRole,
-    pub status: AgentActivityStatus,
-    pub current_tool: Option<String>,
-    pub detail: Option<String>,
-    pub run_id: Option<String>,
-    pub parent_id: Option<String>,
-    pub artifact_id: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub cost_usd: Option<f64>,
-}
-
-pub const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivityStreamLineKind {
-    Status,
-    Thinking,
-    Text,
-    ToolCall,
-    ToolResult,
-    FinalOutput,
-    Error,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActivityStreamUpdate {
-    pub id: String,
-    pub name: String,
-    pub role: AgentActivityRole,
-    pub status: AgentActivityStatus,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub kind: ActivityStreamLineKind,
-    pub text: String,
-    pub tool: Option<String>,
-    pub is_error: bool,
-}
-
-impl ActivityStreamUpdate {
-    pub fn from_activity_event(event: archon_observability::AgentActivityEvent) -> Self {
-        let base = AgentActivityUpdate::from(event.clone());
-        if let Some(payload) = activity_stream_payload(&event.message) {
-            return Self {
-                id: base.id,
-                name: base.name,
-                role: base.role,
-                status: base.status,
-                provider: base.provider,
-                model: base.model,
-                kind: payload.kind,
-                text: payload.text,
-                tool: payload.tool,
-                is_error: payload.is_error,
-            };
-        }
-        Self {
-            id: base.id,
-            name: base.name,
-            role: base.role,
-            status: base.status,
-            provider: base.provider,
-            model: base.model,
-            kind: ActivityStreamLineKind::Status,
-            text: base
-                .detail
-                .unwrap_or_else(|| format!("{:?}", base.status).to_lowercase()),
-            tool: base.current_tool,
-            is_error: matches!(
-                base.status,
-                AgentActivityStatus::Failed | AgentActivityStatus::Cancelled
-            ),
-        }
-    }
-}
-
-pub fn is_activity_stream_payload(message: &str) -> bool {
-    message.starts_with(ACTIVITY_STREAM_PREFIX)
-}
-
-struct ActivityPayload {
-    kind: ActivityStreamLineKind,
-    text: String,
-    tool: Option<String>,
-    is_error: bool,
-}
-
-fn activity_stream_payload(message: &str) -> Option<ActivityPayload> {
-    let raw = message.strip_prefix(ACTIVITY_STREAM_PREFIX)?;
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    let kind = match value.get("kind")?.as_str()? {
-        "thinking" => ActivityStreamLineKind::Thinking,
-        "text" => ActivityStreamLineKind::Text,
-        "tool_call" => ActivityStreamLineKind::ToolCall,
-        "tool_result" => ActivityStreamLineKind::ToolResult,
-        "final" => ActivityStreamLineKind::FinalOutput,
-        "error" => ActivityStreamLineKind::Error,
-        _ => ActivityStreamLineKind::Status,
-    };
-    Some(ActivityPayload {
-        kind,
-        text: value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        tool: value
-            .get("tool")
-            .and_then(|v| v.as_str())
-            .map(ToString::to_string),
-        is_error: value
-            .get("is_error")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-    })
-}
-
-impl From<archon_observability::AgentActivityEvent> for AgentActivityUpdate {
-    fn from(event: archon_observability::AgentActivityEvent) -> Self {
-        let role = activity_role(&event);
-        let status = activity_status(&event);
-        let id = activity_id(&event);
-        let name = activity_name(&event, role);
-        let current_tool = match event.kind {
-            archon_observability::AgentActivityKind::ToolStarted
-            | archon_observability::AgentActivityKind::ToolCompleted
-            | archon_observability::AgentActivityKind::ToolFailed => Some(event.message.clone()),
-            _ => None,
-        };
-
-        Self {
-            id,
-            name,
-            role,
-            status,
-            current_tool,
-            detail: Some(event.message),
-            run_id: event.run_id,
-            parent_id: event.parent_id,
-            artifact_id: event.artifact_id,
-            provider: event.provider,
-            model: event.model,
-            cost_usd: event.cost_usd,
-        }
-    }
-}
-
-fn activity_role(event: &archon_observability::AgentActivityEvent) -> AgentActivityRole {
-    match event.kind {
-        archon_observability::AgentActivityKind::ParentTurnStarted
-        | archon_observability::AgentActivityKind::ParentTurnCompleted
-        | archon_observability::AgentActivityKind::ToolStarted
-        | archon_observability::AgentActivityKind::ToolCompleted
-        | archon_observability::AgentActivityKind::ToolFailed => AgentActivityRole::Parent,
-        archon_observability::AgentActivityKind::AgentBackgrounded
-        | archon_observability::AgentActivityKind::AgentResumed => AgentActivityRole::Background,
-        _ => AgentActivityRole::Subagent,
-    }
-}
-
-fn activity_status(event: &archon_observability::AgentActivityEvent) -> AgentActivityStatus {
-    match event.kind {
-        archon_observability::AgentActivityKind::ToolStarted => {
-            return AgentActivityStatus::WaitingForTool;
-        }
-        archon_observability::AgentActivityKind::ToolCompleted => {
-            return AgentActivityStatus::Complete;
-        }
-        archon_observability::AgentActivityKind::ToolFailed => {
-            return AgentActivityStatus::Failed;
-        }
-        _ => {}
-    }
-
-    match event.status {
-        archon_observability::AgentActivityStatus::Queued => AgentActivityStatus::Queued,
-        archon_observability::AgentActivityStatus::Running => AgentActivityStatus::Running,
-        archon_observability::AgentActivityStatus::Waiting => AgentActivityStatus::Waiting,
-        archon_observability::AgentActivityStatus::Backgrounded => {
-            AgentActivityStatus::Backgrounded
-        }
-        archon_observability::AgentActivityStatus::Completed => AgentActivityStatus::Complete,
-        archon_observability::AgentActivityStatus::Failed => AgentActivityStatus::Failed,
-        archon_observability::AgentActivityStatus::Cancelled => AgentActivityStatus::Cancelled,
-    }
-}
-
-fn activity_id(event: &archon_observability::AgentActivityEvent) -> String {
-    event
-        .subagent_id
-        .clone()
-        .or_else(|| event.agent_id.clone())
-        .or_else(|| event.run_id.clone())
-        .unwrap_or_else(|| "parent".to_string())
-}
-
-fn activity_name(
-    event: &archon_observability::AgentActivityEvent,
-    role: AgentActivityRole,
-) -> String {
-    event
-        .agent_key
-        .clone()
-        .or_else(|| event.subagent_type.clone())
-        .or_else(|| event.model.clone())
-        .unwrap_or_else(|| match role {
-            AgentActivityRole::Parent => "Parent".to_string(),
-            AgentActivityRole::Subagent => "Subagent".to_string(),
-            AgentActivityRole::Background => "Background".to_string(),
-        })
-}
+/// Agent-activity payload types live in `events_activity.rs` (500-line gate).
+pub use crate::events_activity::{
+    ACTIVITY_STREAM_PREFIX, ActivityStreamLineKind, ActivityStreamUpdate, AgentActivityRole,
+    AgentActivityStatus, AgentActivityUpdate, is_activity_stream_payload,
+};
 
 /// Summary of a conversation message for the /rewind overlay list (TASK-TUI-620).
 ///
@@ -388,6 +159,68 @@ pub enum TuiEvent {
     ShowMessageSelector(Vec<MessageSummary>),
     /// Open the skills-menu overlay with pre-computed rows.
     ShowSkillsMenu(Vec<SkillEntry>),
+    /// Open the model-picker overlay (#192).
+    ///
+    /// Each entry is `(provider_id, model_id, label)`. Resolved at the dispatch
+    /// site rather than in the TUI: the handler is sync and the model config
+    /// lives behind an async lock, which is the same reason `ModelSnapshot`
+    /// exists.
+    ShowModelPicker(Vec<(String, String, String)>),
+    /// Open the theme picker (#192). Each entry is `(name, is_active)`.
+    ShowThemePicker(Vec<(String, bool)>),
+    /// Open the settings overlay (#192, `/config` with no arguments).
+    ///
+    /// Each entry is `(key, value, is_bool, read_only)`, resolved at the
+    /// dispatch site: the key registry lives in `archon-tools`, which the TUI
+    /// depends on only as a dev-dependency.
+    ShowSettings(Vec<(String, String, bool, bool)>),
+    /// Open the hooks overlay (#192, `/hooks` with no subcommand).
+    ///
+    /// Each entry is `(id, event, command, source, enabled)`, taken from the
+    /// registry summaries the text listing already renders.
+    ShowHooks(Vec<(String, String, String, String, bool)>),
+    /// Open the permission-rules overlay (#192, `/permissions` with no mode).
+    ///
+    /// `mode` is what the mode line already says; `rules` are the
+    /// `[permissions]` entries evaluated ahead of it, as
+    /// `(effect, tool, pattern)` where effect is `deny`, `allow` or `ask`.
+    ShowPermissions {
+        mode: String,
+        rules: Vec<(String, String, String)>,
+    },
+    /// Open the memory-files overlay (#192, `/memory files`).
+    ///
+    /// Each entry is `(scope, path, size_bytes)` in the order the files layer
+    /// into the system prompt.
+    ShowMemoryFiles(Vec<(String, String, u64)>),
+    /// Open the branch picker (#192, `/fork-at` with no arguments).
+    ///
+    /// Each entry is `(index, role, summary)`. The index is what `/fork-at`
+    /// takes and what the fork keeps through, inclusive.
+    ShowBranchPicker(Vec<(usize, String, String)>),
+    /// Open the voice capture overlay (#192, `/voice` with no arguments).
+    ///
+    /// Carries the configured VAD threshold so the overlay marks the level a
+    /// recording actually has to beat, rather than a hard-coded guess.
+    ShowVoiceCapture {
+        vad_threshold: f32,
+    },
+    /// Open the token attribution overlay (#192 scope B, `/context`).
+    ///
+    /// Carries message previews and nothing else: the ranking is already on the
+    /// `App`, put there by `ContextPressureUpdated`, because only the agent has
+    /// the calibrated surface. `/context` supplies the text for those indices
+    /// because only the session log has it. Each side sends what it knows.
+    ///
+    /// Entries are `(message_index, role, summary)`.
+    ShowTokenAttribution(Vec<(usize, String, String)>),
+    /// A recording started (`true`) or ended (`false`).
+    ///
+    /// Emitted by the voice pipeline, not by a key handler: the hotkey only
+    /// asks for a recording, and whether one begins depends on the microphone.
+    VoiceRecording(bool),
+    /// One RMS level reading from the capture thread, for the overlay meter.
+    VoiceLevel(f32),
     /// Open the file-picker overlay with a pre-walked listing.
     ShowFilePicker {
         /// Original working directory (the picker's ascent-clamp root).
@@ -425,6 +258,13 @@ pub enum TuiEvent {
         resolution_source: Option<String>,
         /// Tokens attributed to the largest single message (#189 Phase 3).
         heaviest_message_tokens: u64,
+        /// The heaviest messages, biggest first, as `(message_index, tokens)`
+        /// (#192 scope B). What `/context` lists when it opens the attribution
+        /// overlay.
+        top_contributors: Vec<(usize, u64)>,
+        /// Attributed tokens across every message, so a share is computable
+        /// from a truncated ranking.
+        attributed_total: u64,
     },
     SetVimMode(bool),
     VimToggle,
@@ -440,55 +280,6 @@ pub enum TuiEvent {
     Done,
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
-}
-
-impl TuiEvent {
-    pub fn variant_name(&self) -> &'static str {
-        match self {
-            Self::TextDelta(_) => "TextDelta",
-            Self::ThinkingDelta(_) => "ThinkingDelta",
-            Self::TransientThinkingDelta(_) => "TransientThinkingDelta",
-            Self::CommitThinkingPreview => "CommitThinkingPreview",
-            Self::DiscardThinkingPreview => "DiscardThinkingPreview",
-            Self::ToolStart { .. } => "ToolStart",
-            Self::ToolOutputChunk { .. } => "ToolOutputChunk",
-            Self::ToolComplete { .. } => "ToolComplete",
-            Self::TurnComplete { .. } => "TurnComplete",
-            Self::Error(_) => "Error",
-            Self::GenerationStarted => "GenerationStarted",
-            Self::SlashCommandComplete => "SlashCommandComplete",
-            Self::ThinkingToggle(_) => "ThinkingToggle",
-            Self::OpenThinkingArchive => "OpenThinkingArchive",
-            Self::ModelChanged(_) => "ModelChanged",
-            Self::BtwResponse(_) => "BtwResponse",
-            Self::PermissionPrompt { .. } => "PermissionPrompt",
-            Self::AskUserPrompt { .. } => "AskUserPrompt",
-            Self::SessionRenamed(_) => "SessionRenamed",
-            Self::PermissionModeChanged(_) => "PermissionModeChanged",
-            Self::ShowSessionPicker(_) => "ShowSessionPicker",
-            Self::SetAccentColor(_) => "SetAccentColor",
-            Self::SetTheme(_) => "SetTheme",
-            Self::ShowMcpManager(_) => "ShowMcpManager",
-            Self::UpdateMcpManager(_) => "UpdateMcpManager",
-            Self::ShowMessageSelector(_) => "ShowMessageSelector",
-            Self::ShowSkillsMenu(_) => "ShowSkillsMenu",
-            Self::ShowFilePicker { .. } => "ShowFilePicker",
-            Self::ShowSearchResults { .. } => "ShowSearchResults",
-            Self::OpenView(_) => "OpenView",
-            Self::OpenViewRows { .. } => "OpenViewRows",
-            Self::VideoIngestProgress(_) => "VideoIngestProgress",
-            Self::AgentActivity(_) => "AgentActivity",
-            Self::ActivityStream(_) => "ActivityStream",
-            Self::ContextPressureUpdated { .. } => "ContextPressureUpdated",
-            Self::SetVimMode(_) => "SetVimMode",
-            Self::VimToggle => "VimToggle",
-            Self::VoiceText(_) => "VoiceText",
-            Self::SetAgentInfo { .. } => "SetAgentInfo",
-            Self::Resize { .. } => "Resize",
-            Self::Done => "Done",
-            Self::NotificationTimeout(_) => "NotificationTimeout",
-        }
-    }
 }
 
 #[cfg(test)]

@@ -139,6 +139,9 @@ pub(crate) async fn build_session_agent(
         max_subagent_concurrency: config.subagent.max_concurrent,
         subagent_auto_isolation: config.subagent.auto_isolation,
         subagent_isolation_max_tier: config.subagent.isolation_max_tier,
+        filesystem: config.filesystem,
+        // The top-level agent. The executor stamps a real id on a child.
+        subagent_id: None,
     };
     apply_agent_execution_overrides(&mut agent_config, agent_def.as_ref(), cli).await;
 

@@ -180,7 +180,7 @@ case "$DISTRO_ID" in
         PKG_MGR="apt"
         PKG_UPDATE_CMD="apt-get update"
         PKG_INSTALL_CMD="apt-get install -y"
-        PKG_BUILD="build-essential pkg-config libssl-dev git curl libclang-dev perl cmake"
+        PKG_BUILD="build-essential pkg-config libssl-dev git curl libclang-dev perl cmake libasound2-dev"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
@@ -197,7 +197,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkg-config openssl-devel git clang perl make cmake"
+        PKG_BUILD="gcc pkg-config openssl-devel git clang perl make cmake alsa-lib-devel"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg-free yt-dlp"
@@ -224,7 +224,7 @@ case "$DISTRO_ID" in
         PKG_MGR="dnf"
         PKG_UPDATE_CMD=""   # dnf install handles refresh on demand
         PKG_INSTALL_CMD="dnf install -y"
-        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz clang perl make cmake"
+        PKG_BUILD="gcc pkgconf-pkg-config openssl-devel git tar xz clang perl make cmake alsa-lib-devel"
         PKG_PDF="poppler-utils"
         PKG_OCR=""          # not packaged on AL2023 — see TESSERACT_UNPACKAGED
         PKG_VIDEO=""        # ffmpeg/yt-dlp via install_amzn_extras
@@ -241,7 +241,7 @@ case "$DISTRO_ID" in
         PKG_MGR="pacman"
         PKG_UPDATE_CMD="pacman -Sy"
         PKG_INSTALL_CMD="pacman -S --needed --noconfirm"
-        PKG_BUILD="base-devel openssl pkg-config git curl clang perl cmake"
+        PKG_BUILD="base-devel openssl pkg-config git curl clang perl cmake alsa-lib"
         PKG_PDF="poppler"
         PKG_OCR="tesseract"
         PKG_VIDEO="ffmpeg yt-dlp whisper.cpp"
@@ -263,7 +263,7 @@ case "$DISTRO_ID" in
         PKG_MGR="zypper"
         PKG_UPDATE_CMD="zypper refresh"
         PKG_INSTALL_CMD="zypper install -y"
-        PKG_BUILD="gcc pkg-config libopenssl-devel git curl clang-devel perl make cmake"
+        PKG_BUILD="gcc pkg-config libopenssl-devel git curl clang-devel perl make cmake alsa-devel"
         PKG_PDF="poppler-tools"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"
@@ -280,7 +280,7 @@ case "$DISTRO_ID" in
         PKG_MGR="apk"
         PKG_UPDATE_CMD=""   # apk add --no-cache pulls fresh index per call
         PKG_INSTALL_CMD="apk add --no-cache"
-        PKG_BUILD="build-base openssl-dev pkgconfig git curl clang perl make cmake"
+        PKG_BUILD="build-base openssl-dev pkgconfig git curl clang perl make cmake alsa-lib-dev"
         PKG_PDF="poppler-utils"
         PKG_OCR="tesseract-ocr"
         PKG_VIDEO="ffmpeg yt-dlp"

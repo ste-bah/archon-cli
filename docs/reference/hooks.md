@@ -74,6 +74,17 @@ An override is keyed by id, so it survives edits elsewhere in the file but not a
 change to the hook's command — a new command is a new id, and the override no
 longer applies to it.
 
+Bare `/hooks` opens a browsable overlay of the same list: id, event, command,
+source, and whether it is enabled. Enter on a row types the matching
+`/hooks enable <id>` or `/hooks disable <id>` into the prompt and closes; you
+press Enter again to run it. The overlay never writes `hooks.local.toml`
+itself — the command does, and that is the one place that knows how.
+
+The command column is there because the matcher usually is not distinguishing.
+The first version of the overlay showed the matcher, and on a real project all
+three hooks read `PostToolUse *` — three identical rows over three different
+commands.
+
 ## What the runtime does with a hook's result
 
 Every hook for an event runs and its result is merged into one

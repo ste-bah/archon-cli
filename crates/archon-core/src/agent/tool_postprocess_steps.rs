@@ -29,6 +29,10 @@ impl Agent {
         self.fire_worktree_hooks(pre).await;
         self.record_tool_completion(pre, &result).await;
         self.update_plan_progress(pre, &result).await;
+        // Read-before-write bookkeeping (#193 Phase A). A successful read is
+        // what a later edit is checked against, and an agent's own write
+        // refreshes the token so its second edit is not refused by its first.
+        self.record_observation(&pre.tool_name, &pre.input, !result.is_error);
         self.add_context_tool_result(pre, &result);
     }
     async fn prepare_tool_result(

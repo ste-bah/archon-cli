@@ -191,6 +191,11 @@ impl Agent {
 
     pub(super) async fn emit_turn_request_started(&mut self, prepared: &PreparedTurnRequest) {
         let telemetry = self.compaction_telemetry_for(&prepared.active_model);
+        // Built once and read twice: the heaviest message for the status line
+        // and the ranking for the attribution overlay are the same surface, and
+        // building it twice would let them disagree.
+        let surface = self.state.token_surface();
+        let top = surface.top_contributors(super::token_surface::TOP_CONTRIBUTOR_LIMIT);
         self.send_event(AgentEvent::ContextPressureUpdated {
             tokens_used: autocompact::approx_tokens_from_bytes(prepared.request_body_bytes),
             context_window: prepared.context_window,
@@ -198,13 +203,12 @@ impl Agent {
             cache_read_tokens: 0,
             context_name: Some("main".to_string()),
             resolution_source: Some(telemetry.context_source.to_string()),
-            heaviest_message_tokens: self
-                .state
-                .token_surface()
-                .top_contributors(1)
-                .first()
-                .map(|node| node.estimated_tokens)
-                .unwrap_or(0),
+            heaviest_message_tokens: top.first().map_or(0, |node| node.estimated_tokens),
+            top_contributors: top
+                .iter()
+                .map(|node| (node.message_index, node.estimated_tokens))
+                .collect(),
+            attributed_total: surface.total(),
         })
         .await;
         self.send_event(AgentEvent::ApiCallStarted {

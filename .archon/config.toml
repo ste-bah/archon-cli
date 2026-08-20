@@ -1310,16 +1310,46 @@ max_investigation_iterations = 3
 # [voice] — Speech-to-text input
 # ----------------------------------------------------------------------------
 [voice]
+# Enabling this needs a binary built with `--features audio-capture`; without
+# it archon says so at startup and runs without voice, rather than starting a
+# pipeline that records silence.
 enabled = false
+# "default", or the exact name of an input device. An unknown name is an error
+# listing the devices that do exist, not a silent fall back to the default.
 device = "default"
-# Voice activity detection threshold (0.0..=1.0)
+# Voice activity detection threshold (0.0..=1.0). A recording whose loudest
+# moment is below this is discarded untranscribed; the /voice overlay draws the
+# measured peak next to it so a discarded recording says why.
 vad_threshold = 0.02
 # STT provider: "openai" | ... (extensible)
 stt_provider = "openai"
 # stt_api_key = "..."   # prefer config.local.toml for secrets
 stt_url = "https://api.openai.com"
-hotkey = "ctrl+shift+v"
+# Reported by /voice. The TUI binding is fixed at Ctrl+V, so changing this
+# changes what /voice prints and not what the keyboard does.
+hotkey = "ctrl+v"
 toggle_mode = false
+
+# -- Speaking (the other half: replies read aloud) ---------------------------
+#
+# Independent of `enabled` above. Listening and speaking are separate devices
+# and separate wants: a machine with no microphone can still read answers out.
+# Ctrl+P toggles this live, and `/voice speak on|off` does the same by typing.
+speak = false
+# "kokoro" (default) or "openai". Both speak the /v1/audio/speech protocol, so
+# the difference is a URL, a model and a voice rather than any code.
+#
+# Kokoro-82M is the default because the voices have to be worth listening to.
+# It is a neural model trained on real speech, not a formant or concatenative
+# synthesiser, and it does not sound like one. Run it with kokoro-fastapi:
+#   docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu
+tts_provider = "kokoro"
+tts_url = "http://127.0.0.1:8880"
+tts_model = "kokoro"
+# Kokoro ships af_heart, af_bella, af_nicole, am_michael, bf_emma and more.
+tts_voice = "af_heart"
+# Only a hosted endpoint needs this; a local Kokoro wants none.
+# tts_api_key = "..."   # prefer config.local.toml for secrets
 
 
 # ----------------------------------------------------------------------------
@@ -1470,3 +1500,35 @@ proposal_stale_days = 30
 #   allow_corpus_open_paths = false       # filesystem-open actions require this plus allow_mutating_actions
 #   allow_web_terminal = false            # browser terminal pane; loopback-only and NOT implied by any other gate
 #   allow_document_deletion = false       # delete button on documents; NOT implied by allow_file_uploads
+
+# ---------------------------------------------------------------------------
+# Filesystem write policy (#193)
+# ---------------------------------------------------------------------------
+#
+# Edit re-reads a file immediately before writing it, so the bytes it replaces
+# are current. The risk is upstream of that: old_string was chosen from a view
+# of the file that may be arbitrarily old, and if anything changed the file
+# since -- another agent in a parallel session, a git checkout, a formatter,
+# you in your editor -- the match can land somewhere that no longer means what
+# the model believed, and the edit succeeds silently.
+#
+# Archon makes that likelier than most: execute-plan runs a fresh subagent per
+# task, and several sessions routinely share one tree.
+
+[filesystem]
+
+# What to do when a write is not backed by a read of the same bytes.
+#
+#   block  refuse it and say why, naming the file (default)
+#   warn   allow it, and log the reason
+#   off    do nothing -- restores the behaviour before this policy existed
+#
+# Read, Grep and NotebookRead record what they showed; Edit, Write and
+# NotebookEdit are checked against it. Bash is not checked: a shell command can
+# write anywhere and names no path, so demanding a prior read of something it
+# never mentions would refuse work it cannot describe.
+#
+# Observations are per agent, not per session -- a parent's read is not
+# evidence for a subagent that never opened the file -- and are discarded when
+# the session ends rather than persisted.
+read_before_edit = "block"

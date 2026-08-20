@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const RELEASE_VERSION: &str = "1.9.2";
+const RELEASE_VERSION: &str = "1.9.3";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -76,12 +76,12 @@ fn first_line(contents: &str) -> Option<&str> {
 
 #[test]
 fn release_heading_accepts_platform_line_endings() {
-    assert_eq!(first_line("# v1.9.2\nbody"), Some("# v1.9.2"));
-    assert_eq!(first_line("# v1.9.2\r\nbody"), Some("# v1.9.2"));
+    assert_eq!(first_line("# v1.9.3\nbody"), Some("# v1.9.3"));
+    assert_eq!(first_line("# v1.9.3\r\nbody"), Some("# v1.9.3"));
 }
 
 #[test]
-fn v1_9_2_release_surfaces_are_synchronized() {
+fn v1_9_3_release_surfaces_are_synchronized() {
     assert_eq!(
         manifest_version(&read("Cargo.toml")).as_deref(),
         Some(RELEASE_VERSION)
@@ -112,25 +112,25 @@ fn v1_9_2_release_surfaces_are_synchronized() {
         "workspace lock versions differ: {local_versions:?}"
     );
 
-    assert!(read("README.md").contains("Current release: v1.9.2"));
-    assert!(read("docs/getting-started/installation.md").contains("archon 1.9.2 (<short-sha>)"));
-    assert!(read("docs/README.md").contains("[v1.9.2](release-notes/v1.9.2.md) — Patch:"));
+    assert!(read("README.md").contains("Current release: v1.9.3"));
+    assert!(read("docs/getting-started/installation.md").contains("archon 1.9.3 (<short-sha>)"));
+    assert!(read("docs/README.md").contains("[v1.9.3](release-notes/v1.9.3.md) — Patch:"));
     assert_eq!(
-        first_line(&read("docs/release-notes/v1.9.2.md")),
-        Some("# v1.9.2")
+        first_line(&read("docs/release-notes/v1.9.3.md")),
+        Some("# v1.9.3")
     );
 
     for snapshot in [
         "crates/archon-tui/tests/snapshots/tui_snapshots__splash_empty_activity.snap",
         "crates/archon-tui/tests/snapshots/tui_snapshots__splash_with_activity.snap",
     ] {
-        assert!(read(snapshot).contains("Archon v1.9.2"), "{snapshot}");
+        assert!(read(snapshot).contains("Archon v1.9.3"), "{snapshot}");
     }
 }
 
 #[test]
-fn historical_v1_9_1_release_surfaces_remain_available() {
-    assert!(root().join("docs/release-notes/v1.9.1.md").is_file());
-    assert!(read("docs/README.md").contains("[v1.9.1](release-notes/v1.9.1.md)"));
-    assert!(read("README.md").contains("docs/release-notes/v1.9.1.md"));
+fn historical_v1_9_2_release_surfaces_remain_available() {
+    assert!(root().join("docs/release-notes/v1.9.2.md").is_file());
+    assert!(read("docs/README.md").contains("[v1.9.2](release-notes/v1.9.2.md)"));
+    assert!(read("README.md").contains("docs/release-notes/v1.9.2.md"));
 }

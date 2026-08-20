@@ -1,9 +1,4 @@
-use std::io;
-
-use crossterm::ExecutableCommand;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyEvent, KeyEventKind};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use crossterm::event::{KeyEvent, KeyEventKind};
 
 use crate::agent_activity::AgentActivityRow;
 use crate::events::AgentActivityUpdate;
@@ -12,7 +7,6 @@ use crate::output::{OutputBuffer, ThinkingBlock, ThinkingState, ToolOutputState}
 use crate::splash::ActivityEntry;
 use crate::split_pane::SplitPaneManager;
 use crate::status::StatusBar;
-use crate::terminal::TerminalGuard;
 use crate::theme::{Theme, intj_theme};
 use crate::vim::VimState;
 
@@ -58,59 +52,8 @@ pub struct AppConfig {
     pub task_store: Option<std::sync::Arc<dyn crate::screens::task_overlay::TaskStore>>,
 }
 
-/// Thin entry point that sets up terminal infrastructure and delegates to
-/// [`crate::event_loop::run_inner`]. The public API called from `main.rs`.
-pub async fn run(config: AppConfig) -> Result<(), io::Error> {
-    // Setup terminal - TerminalGuard handles raw mode, alternate screen, and cursor hide.
-    // Its Drop will restore the terminal on function exit.
-    let _guard = TerminalGuard::enter()?;
-    // Keep normal terminal text selection available by default, but auto-capture
-    // on WSL because alternate-screen scrollback is unreliable there.
-    let mouse_capture = crate::terminal::mouse_capture_enabled();
-    if mouse_capture {
-        io::stdout().execute(EnableMouseCapture)?;
-    }
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)?;
-
-    // TASK-TUI-406: spawn BACKGROUND_AGENTS GC janitor at startup (60s
-    // interval). Detached — task runs for TUI session lifetime.
-    // Accessed via archon_core's re-export (archon-tools is dev-only dep).
-    let _gc_handle = archon_core::background_agents::spawn_gc_task();
-
-    let result = crate::event_loop::run_inner(config, &mut terminal).await;
-
-    // Restore terminal - TerminalGuard's Drop handles cursor show, leave
-    // alternate screen, bracketed paste, and raw mode.
-    if mouse_capture {
-        io::stdout().execute(DisableMouseCapture)?;
-    }
-
-    result
-}
-
-/// Backend-injection seam for integration tests (TUI-327).
-pub async fn run_with_backend<B>(
-    config: AppConfig,
-    terminal: &mut ratatui::Terminal<B>,
-) -> Result<(), io::Error>
-where
-    B: ratatui::backend::Backend,
-{
-    crate::event_loop::run_inner(config, terminal).await
-}
-
-/// Headless backend-injection seam for tests that use `TestBackend` and have
-/// no crossterm terminal-event source.
-pub async fn run_with_backend_without_terminal_events<B>(
-    config: AppConfig,
-    terminal: &mut ratatui::Terminal<B>,
-) -> Result<(), io::Error>
-where
-    B: ratatui::backend::Backend,
-{
-    crate::event_loop::run_inner_without_terminal_events(config, terminal).await
-}
+/// Entry points live in `app_run.rs` (500-line gate); the path is unchanged.
+pub use crate::app_run::{run, run_with_backend, run_with_backend_without_terminal_events};
 
 /// The main TUI application state.
 pub struct App {
@@ -121,6 +64,12 @@ pub struct App {
     pub thinking_blocks: Vec<ThinkingBlock>,
     pub thinking_archive: Option<usize>,
     pub theme: Theme,
+    /// Name of the applied theme (#192).
+    ///
+    /// Theme is a colour struct and cannot be reversed to the name that
+    /// produced it, so the /theme picker had no way to show which entry is
+    /// current — the one question you open it to answer.
+    pub theme_name: String,
     pub should_quit: bool,
     pub is_generating: bool,
     pub active_tool: Option<String>,
@@ -157,6 +106,28 @@ pub struct App {
     pub message_selector: Option<crate::screens::message_selector::MessageSelector>,
     /// TASK-TUI-627: active skills-menu modal (shown by /skills).
     pub skills_menu: Option<crate::screens::skills_menu::SkillsMenu>,
+    /// `/model` picker overlay (#192). Opened alongside the text summary, so
+    /// print mode and scrollback keep the reading they always had.
+    pub model_picker: Option<crate::screens::model_picker::ModelPicker>,
+    /// `/theme` picker overlay (#192).
+    pub theme_screen: Option<crate::screens::theme_screen::ThemeScreen>,
+    /// `/hooks` overlay (#192).
+    pub hooks_menu: Option<crate::screens::hooks_config_menu::HooksMenu>,
+    /// `/permissions` rules overlay (#192). Read-only: nothing at runtime can
+    /// change these rules.
+    pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
+    /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
+    pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
+    /// `/fork-at` picker (#192): which message to fork the session from.
+    pub branch_picker: Option<crate::screens::session_branching::BranchPicker>,
+    /// `/voice` capture overlay (#192): live microphone level and the last
+    /// transcription. Opened by `/voice` and by the recording hotkey.
+    pub voice_capture: Option<crate::screens::voice_capture::VoiceCaptureOverlay>,
+    /// `/context` attribution overlay (#192 scope B): which messages are
+    /// filling the window, ranked.
+    pub token_attribution: Option<crate::screens::token_attribution::TokenAttributionOverlay>,
+    /// `/config` settings overlay (#192).
+    pub settings_screen: Option<crate::screens::settings_screen::SettingsScreen>,
     /// TASK-#207 SLASH-FILES: active file-picker modal (shown by /files).
     pub file_picker: Option<crate::screens::file_picker::FilePicker>,
     /// TASK-#208 SLASH-SEARCH: active search-results modal (shown by /search).
@@ -187,6 +158,7 @@ impl Default for App {
             thinking_blocks: Vec::new(),
             thinking_archive: None,
             theme: intj_theme(),
+            theme_name: "intj".to_string(),
             should_quit: false,
             is_generating: false,
             active_tool: None,
@@ -210,6 +182,15 @@ impl Default for App {
             mcp_manager: None,
             message_selector: None,
             skills_menu: None,
+            model_picker: None,
+            theme_screen: None,
+            hooks_menu: None,
+            permissions_browser: None,
+            memory_browser: None,
+            branch_picker: None,
+            voice_capture: None,
+            token_attribution: None,
+            settings_screen: None,
             file_picker: None,
             search_results: None,
             task_overlay: None,
@@ -243,6 +224,15 @@ impl App {
             && self.message_selector.is_none()
             && self.thinking_archive.is_none()
             && self.skills_menu.is_none()
+            && self.model_picker.is_none()
+            && self.theme_screen.is_none()
+            && self.hooks_menu.is_none()
+            && self.permissions_browser.is_none()
+            && self.memory_browser.is_none()
+            && self.branch_picker.is_none()
+            && self.voice_capture.is_none()
+            && self.token_attribution.is_none()
+            && self.settings_screen.is_none()
             && self.file_picker.is_none()
             && self.search_results.is_none()
             && self.task_overlay.is_none()
@@ -417,6 +407,17 @@ impl App {
         });
         self.thinking.expanded = false;
         self.thinking.dot_offset = 0;
+    }
+
+    /// Show the speech toggle's new state, opening the voice overlay if needed.
+    ///
+    /// `Ctrl+P` flips a process-wide flag that the reply producer reads. Without
+    /// this the only evidence the key landed is whether the *next* reply speaks,
+    /// which is far too late to notice you missed it.
+    pub fn show_speech_state(&mut self, enabled: bool) {
+        self.voice_capture
+            .get_or_insert_with(crate::screens::voice_capture::VoiceCaptureOverlay::new)
+            .set_speech_enabled(enabled);
     }
 
     pub fn toggle_thinking(&mut self) {
