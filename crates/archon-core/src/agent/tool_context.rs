@@ -32,6 +32,10 @@ impl Agent {
             // GHOST-006: sandbox backend from session boot, checked at
             // both dispatch sites.
             sandbox: self.config.sandbox.clone(),
+            // #201 Phase 1: same field the read-before-edit guard reads, so the
+            // guard and the tools cannot disagree about which world they are
+            // in. Phase 2 is where each backend populates it.
+            fs: self.config.fs.clone(),
             activity_sink: self.provider_model_activity_sink(active_model),
             tool_run_parent_action_id: self.guardrail_action_id.clone(),
             tool_run_tool_use_id: None,

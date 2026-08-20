@@ -145,6 +145,14 @@ pub struct ToolContext {
     /// (agent.rs direct execute + dispatch.rs subagent path) check this
     /// before running a tool. Toggled via `/sandbox on/off`.
     pub sandbox: Option<Arc<dyn archon_permissions::SandboxBackend>>,
+    /// #201 Phase 1: the filesystem of the execution world.
+    ///
+    /// `None` means the host filesystem, which is what every context that
+    /// predates a sandbox means and keeps behaviour unchanged when none is
+    /// configured. A backend that holds the working tree somewhere else
+    /// installs its own here, and the world-bound tools follow it rather than
+    /// reading the host while `Bash` runs in a container.
+    pub fs: Option<Arc<dyn crate::filesystem::FileSystem>>,
     /// Canonical activity stream for TUI/log/persistence consumers. Tools do
     /// not need to know about rendering; dispatch emits lifecycle events here.
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
@@ -161,6 +169,15 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    /// The filesystem this invocation must use.
+    ///
+    /// Every world-bound tool goes through this rather than `std::fs`, so a
+    /// sandboxed context cannot end up reading the host by omission.
+    #[must_use]
+    pub fn fs(&self) -> Arc<dyn crate::filesystem::FileSystem> {
+        self.fs.clone().unwrap_or_else(crate::filesystem::local_fs)
+    }
+
     pub fn with_tool_run_attempt(&self, tool_use_id: impl Into<String>, attempt: u32) -> Self {
         let mut context = self.clone();
         context.tool_run_tool_use_id = Some(tool_use_id.into());
@@ -181,6 +198,7 @@ impl std::fmt::Debug for ToolContext {
             .field("nested", &self.nested)
             .field("cancel_parent", &self.cancel_parent)
             .field("sandbox", &self.sandbox.as_ref().map(|_| "<sandbox>"))
+            .field("fs", &self.fs.as_ref().map_or("<host>", |_| "<sandbox fs>"))
             .field(
                 "activity_sink",
                 &self.activity_sink.as_ref().map(|_| "<activity_sink>"),

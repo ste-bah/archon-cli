@@ -197,6 +197,9 @@ pub(super) async fn prepare(
         max_turns: None,
         cancel_token: None,
         sandbox: Some(sandbox_backend),
+        // #201 Phase 1: the host filesystem, which is what every backend
+        // operates on today. Phase 2 gives each backend its own world here.
+        fs: None,
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,

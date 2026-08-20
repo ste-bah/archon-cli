@@ -1,5 +1,4 @@
 use serde_json::json;
-use std::fs;
 
 use crate::path_guard::resolve_existing_file_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
@@ -51,7 +50,7 @@ impl Tool for ReadTool {
         };
 
         // Check if file is likely binary
-        let content = match fs::read(&path) {
+        let content = match ctx.fs().read(&path).await {
             Ok(bytes) => bytes,
             Err(e) => return ToolResult::error(format!("Failed to read file: {e}")),
         };

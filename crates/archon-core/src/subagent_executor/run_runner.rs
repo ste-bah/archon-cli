@@ -192,6 +192,9 @@ impl AgentSubagentExecutor {
             nested: false,
             cancel_parent: Some(tool_cancel),
             sandbox: parent_ctx.sandbox.clone(),
+            // A child runs in its parent's world, exactly as it inherits the
+            // parent's sandbox backend (#201).
+            fs: parent_ctx.fs.clone(),
             activity_sink: parent_ctx.activity_sink.clone(),
             tool_run_parent_action_id: parent_ctx.tool_run_parent_action_id.clone(),
             tool_run_tool_use_id: None,

@@ -1,6 +1,6 @@
-use std::fs;
-
 use serde_json::json;
+
+use crate::filesystem::FileSystem;
 
 use crate::path_guard::resolve_write_target_path;
 use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
@@ -97,19 +97,21 @@ impl Tool for WriteTool {
             Err(e) => return ToolResult::error(e),
         };
 
-        if let Err(message) = reject_large_existing_rewrite(&path, &content) {
+        let fs = ctx.fs();
+
+        if let Err(message) = reject_large_existing_rewrite(fs.as_ref(), &path, &content).await {
             return ToolResult::error(message);
         }
 
         // Create parent directories
         if let Some(parent) = path.parent()
-            && !parent.exists()
-            && let Err(e) = fs::create_dir_all(parent)
+            && !fs.exists(parent).await
+            && let Err(e) = fs.create_dir_all(parent).await
         {
             return ToolResult::error(format!("Failed to create parent directory: {e}"));
         }
 
-        match fs::write(&path, content) {
+        match fs.write(&path, content.as_bytes()).await {
             Ok(()) => ToolResult::success(format!("File created successfully at: {file_path}")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
@@ -124,12 +126,16 @@ impl Tool for WriteTool {
     }
 }
 
-fn reject_large_existing_rewrite(path: &std::path::Path, content: &str) -> Result<(), String> {
-    if !path.exists() {
+async fn reject_large_existing_rewrite(
+    fs: &dyn FileSystem,
+    path: &std::path::Path,
+    content: &str,
+) -> Result<(), String> {
+    if !fs.exists(path).await {
         return Ok(());
     }
 
-    let existing = fs::read(path).map_err(|e| {
+    let existing = fs.read(path).await.map_err(|e| {
         format!(
             "Failed to inspect existing file before Write '{}': {e}",
             path.display()

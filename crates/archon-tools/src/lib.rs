@@ -43,6 +43,8 @@ pub mod file_edit;
 pub mod file_observation;
 pub mod file_read;
 pub mod file_write;
+/// The filesystem of the execution world (#201 Phase 1).
+pub mod filesystem;
 pub mod gametheory;
 pub mod glob_tool;
 pub mod grep;
