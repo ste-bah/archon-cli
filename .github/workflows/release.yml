@@ -166,8 +166,23 @@ jobs:
             sudo sed -i -e '/^Architectures:/d' -e '/^Types:/a Architectures: amd64' "$sources"
           done
           sudo dpkg --add-architecture arm64
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          # Every pocket the amd64 side has, not just the release pocket.
+          # libasound2t64 is Multi-Arch: same, so dpkg requires the amd64 and
+          # arm64 copies to be the *same version*. With only `noble` on ports,
+          # arm64 could offer no more than the release build while the runner
+          # already carried a newer amd64 one from noble-updates, and apt
+          # reported the mismatch as an uninstallable dependency:
+          #   libasound2-dev:arm64 : Depends: libasound2t64:arm64 (= 1.2.11-1build2)
+          #                          but it is not going to be installed
+          suite=$(lsb_release -cs)
+          for pocket in "$suite" "$suite-updates" "$suite-security"; do
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $pocket main universe"
+          done | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           timeout 180 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          # What each arch is actually offered. The failure this replaces was a
+          # version mismatch, and the log showed only the consequence -- leaving
+          # the versions to be inferred rather than read.
+          apt-cache policy libasound2t64 libasound2t64:arm64 libasound2-dev:arm64 || true
           sudo apt-get install -y libasound2-dev:arm64
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
