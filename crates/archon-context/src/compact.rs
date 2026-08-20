@@ -41,8 +41,17 @@ pub fn compact_messages(
 
     let mut compacted = Vec::new();
 
-    // Add structured summary as first user message
-    let header = build_structured_summary_header(summary_text);
+    // Add structured summary as first user message. The originating task is
+    // restated ahead of it: the split above discards `messages[0]`, and for an
+    // agent that is told its job exactly once, that message is not history —
+    // it is the assignment.
+    let header = match crate::compact_task_block::preserved_task(messages, split_point) {
+        Some(task) => crate::compact_task_block::build_structured_summary_header_with_task(
+            &task,
+            summary_text,
+        ),
+        None => build_structured_summary_header(summary_text),
+    };
     compacted.push(ContextMessage::user(&header));
 
     // Add preserved recent messages (including any tool results)

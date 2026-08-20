@@ -57,8 +57,17 @@ pub fn microcompact_messages(
     };
 
     let mut result = Vec::with_capacity(2 + messages.len() - split);
-    // Summary replaces the removed messages.
-    result.push(ContextMessage::user(summary_text));
+    // Summary replaces the removed messages, with the originating task
+    // restated above it. `messages[..split]` includes `messages[0]`, which for
+    // a subagent is the only statement of what it was asked to do; dropping it
+    // left the summariser's scaffolding as the sole instruction in context.
+    // See `compact_task_block::build_structured_summary_header_with_task`.
+    match crate::compact_task_block::preserved_task(messages, split) {
+        Some(task) => result.push(ContextMessage::user(
+            &crate::compact_task_block::prepend_task_block(&task, summary_text),
+        )),
+        None => result.push(ContextMessage::user(summary_text)),
+    }
     // Boundary marker.
     result.push(boundary.to_message());
     // Remaining messages kept verbatim.
