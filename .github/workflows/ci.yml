@@ -534,6 +534,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make libasound2-dev
+      - name: check-tui-complexity
         run: bash scripts/check-tui-complexity.sh
 
   tui-coverage:
@@ -544,6 +549,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - name: Install system dependencies
+        run: |
+          timeout 120 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y pkg-config perl make libasound2-dev
+      - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
       - name: check-tui-coverage
         run: TUI_COVERAGE_MIN=10 bash scripts/check-tui-coverage.sh
