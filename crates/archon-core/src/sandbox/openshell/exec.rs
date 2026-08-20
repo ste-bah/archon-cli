@@ -71,7 +71,9 @@ fn openshell_workdir(
     Ok(workdir)
 }
 
-fn remote_workdir(config: &OpenShellConfig) -> String {
+/// Visible to `super::fs` so the filesystem roots itself at the same directory
+/// `Bash` is `cd`-ed into; two independent copies of this fallback would drift.
+pub(super) fn remote_workdir(config: &OpenShellConfig) -> String {
     config
         .remote_workdir
         .as_deref()

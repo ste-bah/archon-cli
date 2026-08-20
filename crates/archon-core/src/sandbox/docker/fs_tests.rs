@@ -79,7 +79,10 @@ async fn listings_come_back_as_container_paths() {
     let (dir, fs) = workspace();
     std::fs::write(dir.path().join("one.txt"), "1").expect("write");
 
-    let entries = fs.read_dir(Path::new("/workspace")).await.expect("read_dir");
+    let entries = fs
+        .read_dir(Path::new("/workspace"))
+        .await
+        .expect("read_dir");
 
     assert_eq!(
         entries,
@@ -141,7 +144,9 @@ async fn a_scratch_path_says_it_has_no_host_file() {
 async fn a_path_that_merely_starts_with_the_mount_name_is_left_alone() {
     let (_dir, fs) = workspace();
 
-    let translated = fs.to_host(Path::new("/workspaces/other")).expect("passthrough");
+    let translated = fs
+        .to_host(Path::new("/workspaces/other"))
+        .expect("passthrough");
 
     assert_eq!(translated, PathBuf::from("/workspaces/other"));
 }

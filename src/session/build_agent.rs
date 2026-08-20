@@ -104,6 +104,17 @@ pub(crate) async fn build_session_agent(
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
     let sandbox_backend = super::native_session_sandbox_backend(config, sandbox_flag).await;
+    // #201 Phase 2: the world the agent's file tools operate on. Fail the boot
+    // rather than fall back to the host — a session that reads one tree and
+    // executes against another is the failure this exists to prevent, and
+    // silently degrading to the host would reintroduce it without saying so.
+    let sandbox_fs = match archon_core::sandbox::sandbox_filesystem(&config.sandbox, &working_dir) {
+        Ok(fs) => fs,
+        Err(error) => {
+            eprintln!("Sandbox filesystem unavailable: {error}");
+            return Err(archon_core::print_mode::EXIT_ERROR);
+        }
+    };
 
     let mut agent_config = AgentConfig {
         model: super::active_session_model(config),
@@ -134,9 +145,7 @@ pub(crate) async fn build_session_agent(
         max_turns: None,
         cancel_token: None,
         sandbox: Some(sandbox_backend),
-        // #201 Phase 1: the host filesystem, which is what every backend
-        // operates on today. Phase 2 gives each backend its own world here.
-        fs: None,
+        fs: sandbox_fs,
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,

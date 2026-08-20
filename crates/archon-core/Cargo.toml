@@ -50,6 +50,10 @@ sha2.workspace = true
 semver.workspace = true
 hex.workspace = true
 async-trait.workspace = true
+# #201 Phase 2: the ssh/openshell remote filesystems move file payloads over
+# the command transport as base64, so stray output from a remote login profile
+# fails the decode instead of silently corrupting the file.
+base64.workspace = true
 # TASK-AGS-101: tokio-util used for CancellationToken wiring that
 # crosses archon-core boundaries. (dashmap + once_cell were moved to
 # archon-tools in TASK-AGS-104 along with the background_agents module.)

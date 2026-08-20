@@ -515,6 +515,7 @@ dependencies = [
  "archon-world-model",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "cozo-ce",
  "crc32fast",

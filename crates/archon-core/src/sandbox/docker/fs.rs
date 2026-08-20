@@ -86,10 +86,7 @@ impl DockerFs {
                 Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        format!(
-                            "{} leaves the workspace mount",
-                            path.display()
-                        ),
+                        format!("{} leaves the workspace mount", path.display()),
                     ));
                 }
             }

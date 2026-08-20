@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
 
 mod exec;
+mod fs;
 
 use exec::{openshell_create_args, openshell_output_result};
+pub use fs::openshell_filesystem;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

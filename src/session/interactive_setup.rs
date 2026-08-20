@@ -156,6 +156,11 @@ pub(super) async fn prepare(
     };
     let permission_mode_shared = Arc::new(tokio::sync::Mutex::new(initial_perm_mode));
     let sandbox_backend = super::native_session_sandbox_backend(config, sandbox_flag).await;
+    // #201 Phase 2: the world the agent's file tools operate on. An error is
+    // fatal on purpose; falling back to the host would leave the agent reading
+    // one tree and executing against another without saying so.
+    let sandbox_fs = archon_core::sandbox::sandbox_filesystem(&config.sandbox, &working_dir)
+        .map_err(|error| anyhow::anyhow!("sandbox filesystem unavailable: {error}"))?;
 
     let btw_system_prompt = system_prompt.clone();
     let system_prompt_chars: usize = system_prompt
@@ -197,9 +202,7 @@ pub(super) async fn prepare(
         max_turns: None,
         cancel_token: None,
         sandbox: Some(sandbox_backend),
-        // #201 Phase 1: the host filesystem, which is what every backend
-        // operates on today. Phase 2 gives each backend its own world here.
-        fs: None,
+        fs: sandbox_fs,
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,

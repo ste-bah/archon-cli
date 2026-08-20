@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
 
 mod exec;
+mod fs;
 
 use exec::{ssh_command_args, ssh_output_result};
+pub use fs::ssh_filesystem;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
