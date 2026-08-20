@@ -184,12 +184,20 @@ fn archon_bin() -> Option<PathBuf> {
 /// the shape of the 10.2s macOS CI failure: not a slow pong, a dead child that
 /// took ten seconds to be reported as one.
 ///
-/// Blocking on a worker thread and bounding it with `recv_timeout` keeps the
-/// timeout meaningful and distinguishes the two causes, so a failure says which
-/// happened instead of leaving it to be guessed.
-fn read_line_with_timeout(
+/// Blocking on a worker thread keeps the read honest. What it was bounded with
+/// -- a fixed budget -- could not tell "the protocol is broken" from "this
+/// runner is busy", so the budget had to be sized for the worst runner and
+/// still guessed wrong: 10s, then 30s, then a red main when a Windows runner
+/// needed longer than 30s for a handshake that takes ~2s on an idle machine.
+///
+/// `try_wait` answers the question the budget was standing in for. A child that
+/// is still running is making progress and is worth waiting for; a child that
+/// has exited is a failure worth reporting *immediately*, with its real exit
+/// status, instead of after a 30s stare at a process that is already dead.
+fn read_line_while_alive(
     stdout: std::process::ChildStdout,
-    budget: Duration,
+    child: &mut std::process::Child,
+    ceiling: Duration,
 ) -> Result<String, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -203,17 +211,31 @@ fn read_line_with_timeout(
         };
         let _ = tx.send(outcome);
     });
-    rx.recv_timeout(budget)
-        .unwrap_or_else(|_| Err(format!("no line within {budget:?}")))
+
+    let start = std::time::Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(outcome) => return outcome,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("reader thread stopped without an answer".to_string());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("child exited ({status}) before writing a line"));
+        }
+        if start.elapsed() >= ceiling {
+            return Err(format!("child alive but silent for {ceiling:?}"));
+        }
+    }
 }
 
-/// Cold-start budget for the spawned binary.
+/// Hang backstop for the spawned binary.
 ///
-/// The old 10s was measured against a warm local machine. A loaded CI runner
-/// starting a fresh process, reading config and initialising its runtime can
-/// legitimately need longer, and an under-budgeted wait is indistinguishable
-/// from a real protocol break.
-const HEADLESS_REPLY_BUDGET: Duration = Duration::from_secs(30);
+/// Deliberately not a performance budget. A live child is waited for however
+/// long it needs, so this only fires when headless has genuinely wedged -- and
+/// a wedge is worth two minutes of CI to catch, because nothing else would.
+const HEADLESS_HANG_CEILING: Duration = Duration::from_secs(120);
 
 fn minimal_config() -> String {
     r#"
@@ -288,13 +310,24 @@ max_checkpoints = 10
     .to_string()
 }
 
-/// Spawn headless archon, send a Ping, and verify Pong comes back.
-#[test]
-fn headless_ping_pong_round_trip() {
-    let bin = match archon_bin() {
-        Some(b) => b,
-        None => return, // skip if binary not built
-    };
+/// A spawned headless archon, plus everything needed to explain a silent one.
+struct Headless {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: Option<std::process::ChildStdout>,
+    stderr: std::process::ChildStderr,
+    log_dir: PathBuf,
+    /// Held for as long as the child runs. Dropping it removes the config,
+    /// data and log directories out from under a live process.
+    _tmp: tempfile::TempDir,
+}
+
+/// Spawn headless archon against throwaway config, data and log directories.
+///
+/// Returns `None` when the binary was not built, which is the pre-existing
+/// skip condition for these two tests.
+fn spawn_headless(session_id: &str) -> Option<Headless> {
+    let bin = archon_bin()?;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_dir = tmp.path().join("archon");
@@ -322,103 +355,117 @@ fn headless_ping_pong_round_trip() {
         .env("XDG_CONFIG_HOME", tmp.path())
         .arg("--headless")
         .arg("--session-id")
-        .arg("test-headless-ping")
+        .arg(session_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn archon");
 
-    let mut stdin = child.stdin.take().unwrap();
+    let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    Some(Headless {
+        child,
+        stdin,
+        stdout: Some(stdout),
+        stderr,
+        log_dir,
+        _tmp: tmp,
+    })
+}
 
-    // Send Ping
-    let ping = serde_json::json!({"type": "ping"});
-    writeln!(stdin, "{ping}").unwrap();
-    stdin.flush().unwrap();
+impl Drop for Headless {
+    /// Kill the child before the temp directory goes away.
+    ///
+    /// That directory holds the child's config, database and logs. Removing it
+    /// under a live process leaves a headless archon running against files that
+    /// no longer exist -- and on Windows the child's open handles make the
+    /// removal fail silently instead, so the runner accumulates both a stray
+    /// process and its litter. Running before the fields drop is exactly what
+    /// an explicit `Drop` on the owner buys.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
 
-    let result = read_line_with_timeout(stdout, HEADLESS_REPLY_BUDGET);
+impl Headless {
+    /// Send one line and return the child's first reply, or panic describing why
+    /// none came.
+    fn round_trip(&mut self, request: &str, expected: &str) -> String {
+        writeln!(self.stdin, "{request}").unwrap();
+        self.stdin.flush().unwrap();
 
-    let _ = child.kill();
-    let status = child.wait().ok();
-    let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
+        let stdout = self.stdout.take().expect("stdout taken once");
+        match read_line_while_alive(stdout, &mut self.child, HEADLESS_HANG_CEILING) {
+            Ok(line) => line,
+            Err(reason) => panic!("no {expected}: {reason}{}", self.diagnostics()),
+        }
+    }
 
-    let response = match result {
-        Ok(line) => line,
-        Err(reason) => panic!("no Pong: {reason}; status={status:?}; stderr={stderr_text}"),
+    /// Exit status, stderr and the child's own log files.
+    ///
+    /// The old message read `status` *after* `child.kill()`. On Windows that is
+    /// `TerminateProcess(handle, 1)`, so a healthy-but-slow child was reported
+    /// as "exited 1" -- pointing every reader at a crash that never happened.
+    /// Status is read before the kill now, and the log directory the test
+    /// already configures is included, because headless writes its startup
+    /// trace to a file rather than to stderr: without it a failure says only
+    /// `stderr=`, which is exactly as much as no diagnostics at all.
+    fn diagnostics(&mut self) -> String {
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => format!("exited {status}"),
+            Ok(None) => "still running".to_string(),
+            Err(error) => format!("unknown ({error})"),
+        };
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+
+        let mut stderr_text = String::new();
+        let _ = self.stderr.read_to_string(&mut stderr_text);
+
+        let mut logs = String::new();
+        if let Ok(entries) = std::fs::read_dir(&self.log_dir) {
+            for entry in entries.flatten() {
+                if let Ok(contents) = std::fs::read_to_string(entry.path()) {
+                    logs.push_str(&contents);
+                }
+            }
+        }
+        if logs.is_empty() {
+            logs.push_str("(no log files written)");
+        }
+
+        format!("; child={status}; stderr={stderr_text}; logs={logs}")
+    }
+}
+
+/// Spawn headless archon, send a Ping, and verify Pong comes back.
+#[test]
+fn headless_ping_pong_round_trip() {
+    let Some(mut headless) = spawn_headless("test-headless-ping") else {
+        return; // skip if binary not built
     };
-
+    let ping = serde_json::json!({"type": "ping"});
+    let response = headless.round_trip(&ping.to_string(), "Pong");
     assert!(
         response.contains("\"pong\""),
-        "expected Pong response, got: {response}; status={status:?}; stderr={stderr_text}"
+        "expected Pong response, got: {response}{}",
+        headless.diagnostics()
     );
 }
 
 /// Spawn headless archon, send invalid JSON, and verify Error comes back.
 #[test]
 fn headless_invalid_json_returns_error() {
-    let bin = match archon_bin() {
-        Some(b) => b,
-        None => return,
+    let Some(mut headless) = spawn_headless("test-headless-err") else {
+        return;
     };
-
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let config_dir = tmp.path().join("archon");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    std::fs::write(config_dir.join("config.toml"), minimal_config()).unwrap();
-    let log_dir = tmp.path().join("data").join("archon").join("logs");
-    let work_dir = tmp.path().join("work");
-    std::fs::create_dir_all(&work_dir).unwrap();
-
-    let mut child = Command::new(&bin)
-        .current_dir(&work_dir)
-        .env("ARCHON_CONFIG_DIR", &config_dir)
-        .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
-        .env("ARCHON_LOG_DIR", &log_dir)
-        // XDG_DATA_HOME alone does not redirect the child's memory database:
-        // `dirs::data_dir()` reads it only on Linux, and falls back to the
-        // shell known-folder API on Windows and ~/Library/Application Support
-        // on macOS. Without this the spawned binary opened the runner's real
-        // memory.db, which every other concurrent test is also using, and Cozo
-        // panicked on open with `database is locked` -- so the child exited 1
-        // having written nothing and the test reported a bare stdout EOF.
-        .env("ARCHON_DATA_DIR", tmp.path().join("data").join("archon"))
-        .env("XDG_DATA_HOME", tmp.path().join("data"))
-        .env("XDG_CACHE_HOME", tmp.path().join("cache"))
-        .env("XDG_CONFIG_HOME", tmp.path())
-        .arg("--headless")
-        .arg("--session-id")
-        .arg("test-headless-err")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn archon");
-
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-
-    // Send invalid JSON
-    writeln!(stdin, "this is not json at all").unwrap();
-    stdin.flush().unwrap();
-
-    let result = read_line_with_timeout(stdout, HEADLESS_REPLY_BUDGET);
-
-    let _ = child.kill();
-    let status = child.wait().ok();
-    let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
-
-    let response = match result {
-        Ok(line) => line,
-        Err(reason) => panic!("no Error reply: {reason}; status={status:?}; stderr={stderr_text}"),
-    };
-
+    let response = headless.round_trip("this is not json at all", "Error reply");
     assert!(
         response.contains("\"error\""),
-        "expected Error response for invalid JSON, got: {response}; status={status:?}; stderr={stderr_text}"
+        "expected Error response for invalid JSON, got: {response}{}",
+        headless.diagnostics()
     );
 }
