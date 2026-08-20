@@ -29,6 +29,17 @@ pub struct ToolsConfig {
     pub max_concurrency: u8,
     /// Resource limits applied to `cargo` commands the agent runs.
     pub cargo: CargoResourceConfig,
+    /// Extra environment variable names that receive the workflow run id.
+    ///
+    /// The engine always exports `ARCHON_WORKFLOW_RUN_ID` inside a workflow
+    /// run. A task set that declares the run's identifier under its own name —
+    /// via `required_env_keys` — names that key here, and it receives the same
+    /// value. Kept as project config rather than a constant in engine code
+    /// because the name belongs to the task set, not to the engine.
+    ///
+    /// Empty by default: a project whose tasks declare no such key needs
+    /// nothing here.
+    pub run_id_env_keys: Vec<String>,
 }
 
 impl Default for ToolsConfig {
@@ -39,6 +50,7 @@ impl Default for ToolsConfig {
             bash_max_output: 102400,
             max_concurrency: 4,
             cargo: CargoResourceConfig::default(),
+            run_id_env_keys: Vec::new(),
         }
     }
 }
@@ -61,6 +73,7 @@ impl ToolsConfig {
             dangerous_commands: permissions.dangerous_commands.clone(),
             provider_env: None,
             cargo_limits: self.cargo.to_limits(),
+            run_id_env_aliases: self.run_id_env_keys.clone(),
             // Unrestricted as built. A subagent's registry is narrowed to its
             // tier afterwards, by `ToolRegistry::set_bash_isolation_tier`
             // (#184 M3); the main agent's is never narrowed.
