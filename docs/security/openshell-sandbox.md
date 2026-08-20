@@ -34,6 +34,25 @@ OpenShell sandbox. `remote` mode runs from `remote_workdir` or `/sandbox`.
 `mirror` mode is only for environments where the same absolute path exists
 inside the OpenShell runtime.
 
+## Workspace Filesystem
+
+In `remote` mode the file tools operate on `remote_workdir` (or `/sandbox`) over
+the OpenShell transport, so `Read` returns what Bash would see. Paths must be
+absolute, contents are carried base64-encoded, and a write is confirmed by byte
+count — see [SSH sandbox](ssh-sandbox.md) for why, since the mechanism is
+shared.
+
+In `mirror` and `upload` mode the file tools operate on the host tree.
+
+For `upload` that is the only correct answer, and it has a consequence worth
+being explicit about. Every command runs `sandbox create --no-keep --upload
+<workdir>:/sandbox`, so each Bash call gets a *fresh* sandbox seeded from the
+host and destroyed afterwards. Anything Bash writes inside it is discarded, and
+the next command starts from the host tree again. So a file written by Bash in
+upload mode cannot be read back by `Read` — not because the file tools look in
+the wrong place, but because nothing durable was written. Use `remote` mode when
+Bash needs to leave something behind.
+
 ## Provider Routing
 
 Provider injection stays disabled by default. Anthropic Claude Code spoofing,

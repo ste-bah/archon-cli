@@ -31,6 +31,25 @@ normal host-side coding tools under permission preflight. Use
 `sandbox.mode = "all"` only for strict sessions where unsupported host-side
 tools should be blocked.
 
+## Workspace Paths
+
+The workspace is bind-mounted, so the container and the host hold the same
+bytes. What differs is the path: Bash runs with `--workdir /workspace`, so
+everything it prints — a compiler error, `find` output, a stack trace — names
+paths under `/workspace`.
+
+Those paths resolve. Handing `/workspace/src/main.rs` to `Read` reads the same
+file the container just wrote, and `Glob` returns container paths so they can be
+pasted straight into a Bash command. Host paths keep working unchanged.
+
+Two paths are refused rather than resolved:
+
+- A `/workspace/...` path containing `..` that would climb out of the mount.
+  Escaping the mount is the one thing the mount exists to prevent.
+- Anything under `/scratch`. That tmpfs exists only inside the container and is
+  discarded with it, so it has no host file at all. The error says so rather
+  than reporting a missing file.
+
 ## Writable Paths
 
 Use relative `docker.writable_paths` when a mostly read-only workspace needs a
