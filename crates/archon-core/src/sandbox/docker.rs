@@ -9,6 +9,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
 
 mod exec;
+mod fs;
+
+pub use fs::DockerFs;
 
 use exec::{
     docker_output_result, docker_run_args, normal_writable_path, validate_workspace_access,
