@@ -341,6 +341,19 @@ fn overlapping_targets(left: &[String], right: &[String]) -> Vec<String> {
     overlap
 }
 
+/// Whether two declared paths cover any of the same file.
+///
+/// Exposed for `write_scope_extension`, which must decide ownership with
+/// exactly the same rule the wave planner uses — a scope extension granted
+/// under looser matching than `plan()` applied would silently break the
+/// disjoint-ownership invariant the planner just established.
+///
+/// Prefix matching is boundary-aware: `src/data_la` does not cover
+/// `src/data_lake/identity.rs`, only a real `/` boundary counts.
+pub(crate) fn paths_overlap(left: &str, right: &str) -> bool {
+    path_overlaps(left, right)
+}
+
 fn path_overlaps(left: &str, right: &str) -> bool {
     left == right
         || left

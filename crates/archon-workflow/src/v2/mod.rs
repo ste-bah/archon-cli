@@ -60,6 +60,8 @@ pub mod validation;
 pub mod verification;
 pub mod write;
 pub mod write_mode;
+pub mod write_claim_gate;
+pub mod write_scope_extension;
 mod write_mode_paths;
 
 pub use agent_adapter::{

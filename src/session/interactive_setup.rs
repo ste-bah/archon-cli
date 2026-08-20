@@ -170,7 +170,7 @@ pub(super) async fn prepare(
 
     let mut agent_config = AgentConfig {
         model: active_model.clone(),
-        max_tokens: config.api.thinking_budget,
+        max_tokens: config.api.resolved_max_tokens(),
         thinking_budget: config.api.thinking_budget,
         system_prompt,
         tools: tool_defs,

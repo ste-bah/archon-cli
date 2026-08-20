@@ -107,7 +107,7 @@ pub(crate) async fn build_session_agent(
 
     let mut agent_config = AgentConfig {
         model: super::active_session_model(config),
-        max_tokens: config.api.thinking_budget,
+        max_tokens: config.api.resolved_max_tokens(),
         thinking_budget: config.api.thinking_budget,
         system_prompt,
         tools: tool_defs,

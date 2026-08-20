@@ -6,7 +6,29 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct ApiConfig {
     pub default_model: String,
+    /// Tokens the model may spend REASONING before it answers.
+    ///
+    /// Goes on the wire as Anthropic `thinking.budget_tokens`. This is a
+    /// different mechanism from `default_effort`, which selects a tier
+    /// (low/medium/high) and on most templates injects a different system
+    /// preamble — effort chooses how hard the model tries, this chooses how
+    /// long it may think. Neither substitutes for the other, which is why both
+    /// exist.
     pub thinking_budget: u32,
+    /// Ceiling on the tokens ONE response may produce, reasoning included.
+    ///
+    /// `None` falls back to `thinking_budget`, which is what archon did
+    /// unconditionally before this field existed — so an untouched config
+    /// behaves exactly as it did.
+    ///
+    /// Why it needed separating: servers RESERVE max_tokens out of the context
+    /// window before the prompt is placed, so sharing one number made a
+    /// reasoning-depth change silently resize the prompt window. On a 262,144
+    /// deployment a 65,536 budget left 179k for prompts; split, the same
+    /// reasoning depth with a 16,384 answer ceiling leaves ~228k.
+    ///
+    /// MUST stay above `thinking_budget` — see `validate_token_budgets`.
+    pub max_tokens: Option<u32>,
     pub default_effort: String,
     pub max_retries: u32,
     /// Override the Anthropic API base URL. Useful for pointing at LiteLLM,
@@ -32,6 +54,7 @@ impl Default for ApiConfig {
         Self {
             default_model: "claude-sonnet-4-6".into(),
             thinking_budget: 16384,
+            max_tokens: None,
             default_effort: "medium".into(),
             max_retries: 3,
             base_url: None,
@@ -39,6 +62,9 @@ impl Default for ApiConfig {
         }
     }
 }
+
+#[path = "api_token_budget.rs"]
+mod api_token_budget;
 
 /// LLM provider configuration.
 ///
