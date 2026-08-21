@@ -24,6 +24,10 @@ Set `sandbox.mode = "all"` only when you want strict backend compatibility and
 are willing to block unsupported host-side mutation, network, and agent-spawn
 tools.
 
+`mode` decides which tools are *gated* by the backend. It does not decide which
+filesystem they operate on — that follows the backend in every mode, so under a
+remote workspace `Write` writes the remote tree even on `risky`. See below.
+
 ## One world, not two
 
 A sandbox that routes only `Bash` leaves the agent reading one filesystem and
@@ -57,6 +61,47 @@ edited rather than a same-named file on the host.
 
 If a backend's filesystem cannot be built, session boot fails rather than
 falling back to the host. Falling back would silently restore the split.
+
+### Which tools a backend will run
+
+Backends used to decide by tool *name*, against a list of eight, with everything
+unlisted denied. A tool added anywhere in Archon was then unusable under every
+backend until three separate lists were updated, and nothing said so — the
+terminal tools shipped broken exactly that way.
+
+Each tool now declares what its effects reach, and the backends decide on that:
+
+| Class | Under a real isolation backend |
+|---|---|
+| Archon's own state — memory, tasks, board, config | allowed; it is in the same place whatever the world is |
+| Runs a command in the world | allowed, through the backend |
+| Reads or writes the world's files | allowed, through the backend's filesystem |
+| Opens an interactive terminal | the backend answers — see below |
+| Reaches the world through a host handle it cannot redirect | refused, because it would run outside the sandbox |
+| Leaves the machine | refused |
+| Spawns or schedules work | refused |
+
+A tool that declares nothing fails to compile, so the next one added is handled
+on the day it is added rather than silently denied.
+
+### Terminals
+
+Under a real isolation backend a terminal either opens **in that world** or is
+refused with the reason — it never quietly opens a host shell, which would be a
+straight bypass of the boundary `Bash` is being routed through.
+
+- **docker** attaches a TTY to a container built from the same arguments `Bash`
+  uses, so the terminal sees the same workspace.
+- **ssh** puts a TTY on the same connection, with the same strict options.
+- **openshell** declines. It builds and destroys a sandbox per command, so there
+  is no session to attach to, and one held open would be a different world from
+  the next `Bash` call's. The refusal names docker as what would work.
+- **`/sandbox on`** declines. It denies rather than relocating, so it has no
+  world to put a shell in.
+
+A terminal remembers the world it opened in. A host shell started before a
+sandbox was switched on cannot be written to afterwards; close it and open a
+new one.
 
 ### `openshell` `upload` is the exception
 

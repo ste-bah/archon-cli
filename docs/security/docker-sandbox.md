@@ -26,6 +26,15 @@ The workspace is read-only by default. `workspace_access = "rw"` mounts it
 read-write. `workspace_access = "scratch"` keeps the workspace read-only and
 adds ephemeral `/scratch`.
 
+On Unix the container also runs as **your** user, not as root. `--cap-drop ALL`
+removes `CAP_DAC_OVERRIDE`, and without it a container root cannot write
+through a bind mount it does not own — which on Linux is every ordinary
+checkout, so `workspace_access = "rw"` did not actually permit writes. Running
+as the host user fixes that and is the stronger posture besides: nothing in the
+container is root, and files it creates in the workspace belong to you rather
+than arriving owned by root. Windows passes no user; Docker Desktop translates
+ownership itself.
+
 The default `sandbox.mode = "risky"` routes Bash through Docker while leaving
 normal host-side coding tools under permission preflight. Use
 `sandbox.mode = "all"` only for strict sessions where unsupported host-side
