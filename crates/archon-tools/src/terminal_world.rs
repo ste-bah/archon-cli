@@ -35,6 +35,64 @@ pub(crate) struct Launch {
     pub(crate) sandboxed: bool,
 }
 
+/// What the active world will accept from a `TerminalCreate` call.
+///
+/// Read by the input schema so the model is offered the shells that exist
+/// where it is, rather than the four the host build knows about.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Offer {
+    /// A shell on this machine, which is what the world-independent schema
+    /// already describes. Nothing to say.
+    Host,
+    /// A backend's world, and the shells it answered for.
+    Shells {
+        available: Vec<String>,
+        default_shell: String,
+    },
+    /// No shell can be opened at all, and why.
+    Refused(String),
+}
+
+/// Ask the active world what it would accept, without opening anything.
+///
+/// Every answer here comes from [`decide`] — the same call [`plan`] makes, with
+/// the same arguments. Nothing restates a backend's shell list, so what is
+/// advertised cannot drift from what is refused: a backend that stops
+/// accepting `sh` stops advertising it in the same commit, and one that starts
+/// accepting a fifth shell needs `shells::SHELLS` extended before either side
+/// sees it.
+pub(crate) fn offer(ctx: &ToolContext, cwd: &Path) -> Offer {
+    // The bare request settles two things at once: whether a backend holds the
+    // execution world, and what a caller that names no shell actually gets.
+    // Taking `shells::default_shell()` for the second would promise PowerShell
+    // to a Linux container on a Windows host.
+    let (default_shell, on_the_host) = match decide(ctx, None, cwd) {
+        SandboxTerminal::Host => (shells::default_shell().to_string(), true),
+        SandboxTerminal::Open(command) => (command.shell, false),
+        SandboxTerminal::Refused(reason) => return Offer::Refused(reason),
+    };
+    // A shell stays on the menu unless the world refuses it *by name*. `Host`
+    // is not a refusal: it says the backend is not the one deciding this shell,
+    // and what remains is the host launcher's own platform limit, which the
+    // world-independent description already states.
+    let available: Vec<String> = shells::SHELLS
+        .iter()
+        .filter(|shell| !matches!(decide(ctx, Some(shell), cwd), SandboxTerminal::Refused(_)))
+        .map(|shell| (*shell).to_string())
+        .collect();
+    // Nothing world-specific happened. Asked separately from the bare request
+    // because a backend is free to answer `Host` for "any shell" and still
+    // refuse a named one, and a schema that stopped at the first answer would
+    // then advertise a shell the same backend rejects a moment later.
+    if on_the_host && available.len() == shells::SHELLS.len() {
+        return Offer::Host;
+    }
+    Offer::Shells {
+        available,
+        default_shell,
+    }
+}
+
 /// Resolve a terminal request to something launchable, or to the reason it
 /// cannot be. `Err` is a real answer here, not a failure.
 pub(crate) fn plan(ctx: &ToolContext, shell: Option<&str>, cwd: &Path) -> Result<Launch, String> {

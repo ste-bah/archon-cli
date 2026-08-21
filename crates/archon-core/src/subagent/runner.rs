@@ -97,6 +97,13 @@ impl SubagentRunner {
         identity: std::sync::Arc<IdentityProvider>,
     ) -> Self {
         let model = resolved_model(provider.as_ref(), &model);
+        // The definitions were built before this run had a context — the
+        // executor picks the toolset from names, then decides where the child
+        // will run. A child inherits its parent's backend but is rooted at its
+        // own working directory, so this is the first point where the world it
+        // will actually dispatch into is known, and it is the point the surface
+        // is described against.
+        let tool_definitions = registry.redescribe(&tool_definitions, &tool_context);
         Self {
             provider,
             system_prompt,

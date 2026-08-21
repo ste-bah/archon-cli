@@ -23,20 +23,6 @@ fn writer() -> TerminalWriteTool {
     }
 }
 
-#[test]
-fn the_create_schema_offers_the_shells_that_exist_and_names_the_default() {
-    let schema = TerminalCreateTool.input_schema();
-    let shells = schema["properties"]["shell"]["enum"]
-        .as_array()
-        .expect("shell is an enum");
-
-    assert!(shells.iter().any(|value| value == shells::default_shell()));
-    let described = schema["properties"]["shell"]["description"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(described.contains(shells::default_shell()), "{described}");
-}
-
 /// A command the operator marked dangerous must stay dangerous when it is
 /// typed into a terminal instead of passed to `Bash`. Otherwise this tool is a
 /// way around the gate rather than a way to keep a shell open.

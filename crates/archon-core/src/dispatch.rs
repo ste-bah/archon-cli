@@ -381,6 +381,9 @@ impl Default for ToolRegistry {
     }
 }
 
+#[path = "dispatch_world_schema.rs"]
+mod world_schema;
+
 /// Create a registry with all built-in tools.
 ///
 /// `working_dir` is passed to tools that operate on the current project

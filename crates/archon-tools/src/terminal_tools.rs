@@ -14,7 +14,7 @@
 use serde_json::json;
 
 use crate::terminal_registry as registry;
-use crate::terminal_shell as shells;
+use crate::terminal_schema as schema;
 use crate::terminal_world as world;
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
@@ -51,24 +51,14 @@ impl Tool for TerminalCreateTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "shell": {
-                    "type": "string",
-                    "enum": shells::SHELLS,
-                    "description": format!(
-                        "Which shell to run (default {}). \"cmd\" is Windows only.",
-                        shells::default_shell()
-                    )
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Directory to start in (default: the session working directory)"
-                }
-            },
-            "required": []
-        })
+        schema::host_schema()
+    }
+
+    /// Describe the shells that exist where this session runs, not the ones the
+    /// host build knows about. `None` means the world is the host, so
+    /// [`Self::input_schema`] is already the truth and nothing is rewritten.
+    fn input_schema_for(&self, ctx: &ToolContext) -> Option<serde_json::Value> {
+        schema::world_schema(ctx)
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {

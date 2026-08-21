@@ -114,6 +114,7 @@ pub mod sleep;
 // helper still trips `dead_code` — a lesson from Phase 0 of the same issue.
 pub(crate) mod terminal_buffer;
 pub(crate) mod terminal_registry;
+pub(crate) mod terminal_schema;
 pub(crate) mod terminal_shell;
 pub mod terminal_tools;
 pub(crate) mod terminal_world;

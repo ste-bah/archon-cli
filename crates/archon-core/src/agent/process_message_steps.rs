@@ -106,6 +106,19 @@ impl Agent {
             .build_base_request_fields_with(&active_model, ultrathink);
         let mut messages = self.messages_for_turn_request(&active_model)?;
 
+        // Described per turn rather than once at boot, because the world can
+        // change inside a session: `/sandbox on` installs a backend that
+        // refuses terminals outright, and a surface written at session start
+        // would go on offering shells afterwards. The context is built by the
+        // same function that builds the one the tool is dispatched with, so
+        // what is advertised and what is refused are decided from one input.
+        // A tool with nothing world-specific to say leaves its definition
+        // byte-identical, which is what keeps the cached prefix intact.
+        let tools = self.registry.redescribe(
+            &self.config.tools,
+            &self.build_tool_context(effective_mode, &active_model).await,
+        );
+
         // #178: the blocks appended above change almost every turn and sit in
         // front of the tools and the entire history, so they invalidate the
         // prefix for every provider. Moving them onto the last user turn — where
@@ -134,7 +147,7 @@ impl Agent {
             // The main-agent loop keeps its owned tool list (#171 non-goal:
             // no main-agent changes); it is wrapped here so the request type
             // stays shared-by-construction for the subagent path.
-            tools: archon_llm::provider::shared_tools(self.config.tools.clone()),
+            tools: archon_llm::provider::shared_tools(tools),
             thinking,
             speed,
             effort,

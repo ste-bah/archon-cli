@@ -348,6 +348,30 @@ pub trait Tool: Send + Sync {
     /// JSON Schema for the tool's input parameters.
     fn input_schema(&self) -> serde_json::Value;
 
+    /// The same schema, as it applies inside the world `ctx` runs in, or `None`
+    /// when the world does not change what this tool accepts.
+    ///
+    /// The convention for anything on this trait that depends on the live
+    /// session rather than on the tool alone: take `&ToolContext`, return
+    /// `Option<T>`, and let `None` mean *nothing to declare* so the caller
+    /// keeps what it would have used without asking. #200's per-call budget is
+    /// the next one and should read `fn timeout_for(&self, ctx: &ToolContext)
+    /// -> Option<Duration>` for the same reason — a caller has to be able to
+    /// tell "no opinion" from "an opinion that happens to match the default",
+    /// and cannot do that from the value alone.
+    ///
+    /// Defaulted, unlike [`Self::capability`], and the difference is what the
+    /// omission costs. A wrong `capability` is a sandbox escape, so the
+    /// compiler asks every tool once. A missing `input_schema_for` costs a
+    /// turn: the call is still refused by the world at execution time, so the
+    /// boundary holds and only the hint is lost. Requiring it would put
+    /// `self.input_schema()` on every tool that has no second world to describe
+    /// — boilerplate carrying no decision, which is how a required method stops
+    /// meaning anything.
+    fn input_schema_for(&self, _ctx: &ToolContext) -> Option<serde_json::Value> {
+        None
+    }
+
     /// Execute the tool with the given JSON input.
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult;
 
