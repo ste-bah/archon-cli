@@ -65,12 +65,24 @@ fn terminals_reach_the_backend_rather_than_being_decided_by_the_gate() {
 }
 
 #[test]
-fn egress_and_control_plane_stay_refused() {
+fn egress_stays_refused() {
     let egress = check_capability("openshell", "WebFetch", ToolCapability::Egress).unwrap_err();
-    let control = check_capability("openshell", "Agent", ToolCapability::ControlPlane).unwrap_err();
 
     assert!(egress.contains("network"), "{egress}");
-    assert!(control.contains("spawns or schedules"), "{control}");
+}
+
+/// Phase 4. A spawned child is built from its parent's context, so it carries
+/// the same backend and is gated by it on every call it makes; refusing the
+/// spawn bought nothing except that no workflow could run at all, since
+/// `agent()`, `agents()`, `parallel()` and `pipeline()` all bottom out here.
+#[test]
+fn spawning_is_served_now_that_children_inherit_the_backend() {
+    for backend in ["docker", "ssh", "openshell"] {
+        assert!(
+            check_capability(backend, "Agent", ToolCapability::ControlPlane).is_ok(),
+            "{backend} still refuses to let a workflow spawn its first agent"
+        );
+    }
 }
 
 /// The gate exists to stop the backends differing by accident. If one of them

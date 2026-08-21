@@ -57,13 +57,15 @@ pub(crate) fn check_capability(
              supported under isolation"
         )),
 
-        // Children inherit the parent's backend, so this is closer to landable
-        // than the rest — but proving that inheritance is #201 Phase 4's job,
-        // and until it is proven the conservative answer holds.
-        ToolCapability::ControlPlane => Err(format!(
-            "{backend} sandbox: {tool} spawns or schedules work, which is not supported under \
-             isolation yet (#201 Phase 4)"
-        )),
+        // Spawned work stays inside the world rather than escaping it. A child
+        // is built from its parent's context (`build_child_tool_context`): the
+        // same backend `Arc`, and the parent's filesystem rerooted at the
+        // child's own working directory. Every tool the child then calls goes
+        // back through this gate on that backend before it runs, so a subagent
+        // is not a hole in the boundary — it is another caller of it. That was
+        // the thing this arm was waiting on, and #201 Phase 4 proves it end to
+        // end under docker.
+        ToolCapability::ControlPlane => Ok(()),
     }
 }
 

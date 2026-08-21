@@ -63,9 +63,11 @@ const EXPECTED: [(ToolCapability, bool); 8] = [
     // Servable since Phase 2: each backend now has a filesystem of its own, so
     // a write lands in the world the shell sees rather than on the host.
     (ToolCapability::FILE_WRITE, true),
+    // Servable since Phase 4: a spawned child inherits the parent's backend and
+    // filesystem, so its own calls come back through this same table.
+    (ToolCapability::ControlPlane, true),
     (ToolCapability::HOST_HANDLE, false),
     (ToolCapability::Egress, false),
-    (ToolCapability::ControlPlane, false),
 ];
 
 #[test]
