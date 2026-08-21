@@ -123,6 +123,12 @@ fn workflow_cli_agent_config(
             always_deny: config.permissions.always_deny.clone(),
             always_ask: config.permissions.always_ask.clone(),
         },
+        // Same reason as `sandbox` and `fs`, and the same shape of defect: left
+        // to `AgentConfig::default()` this is `Block`, so `read_before_edit`
+        // set to `warn` or `off` reached every path except a workflow stage.
+        // It failed closed rather than open, which makes it milder, not
+        // correct — a knob that silently does not apply is not a knob.
+        filesystem: config.filesystem,
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         max_tool_concurrency: config.tools.max_concurrency as usize,

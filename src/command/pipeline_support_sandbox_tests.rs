@@ -80,6 +80,42 @@ fn no_isolation_configured_leaves_the_workflow_cli_on_the_host() {
     assert!(agent_config.fs.is_none());
 }
 
+/// The read-before-edit policy is a third field that was left to the default,
+/// and the default is `Block`. So a workflow stage enforced the strictest
+/// setting whatever the config said, and someone who turned it off would find
+/// their stages still refusing writes with no way to see why.
+///
+/// Asserted with `off` rather than `warn` because `off` is the one that must
+/// travel: it is the setting whose whole purpose is that the guard is not
+/// consulted at all, and a defaulted field defeats it completely.
+#[test]
+fn a_configured_read_before_edit_policy_reaches_a_workflow_stage() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = ArchonConfig::default();
+    config.filesystem.read_before_edit = archon_core::config::ReadBeforeEdit::Off;
+
+    let agent_config = workflow_cli_agent_config(&config, dir.path(), "workflow-run")
+        .expect("the default backend resolves");
+
+    assert!(
+        !agent_config.filesystem.enforces_freshness(),
+        "a workflow stage still enforces read-before-edit after it was turned off"
+    );
+}
+
+/// And the default is untouched when nothing is configured, so this does not
+/// become a way to lose the guard by accident.
+#[test]
+fn an_unconfigured_read_before_edit_policy_still_blocks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let agent_config =
+        workflow_cli_agent_config(&ArchonConfig::default(), dir.path(), "workflow-run")
+            .expect("the default configuration resolves");
+
+    assert!(agent_config.filesystem.enforces_freshness());
+}
+
 /// An unroutable remote workspace fails the call. Falling back to the host
 /// would hand the run a filesystem that disagrees with its own shell, which is
 /// worse than not starting.
