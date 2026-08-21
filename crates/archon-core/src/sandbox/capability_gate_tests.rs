@@ -14,10 +14,11 @@ const ALL_CLASSES: [ToolCapability; 7] = [
 ];
 
 #[test]
-fn execution_and_reads_and_host_local_state_are_servable() {
+fn execution_and_files_and_host_local_state_are_servable() {
     for capability in [
         ToolCapability::EXECUTION,
         ToolCapability::FILE_READ,
+        ToolCapability::FILE_WRITE,
         ToolCapability::HostLocal,
     ] {
         assert!(
@@ -28,18 +29,17 @@ fn execution_and_reads_and_host_local_state_are_servable() {
     }
 }
 
+/// The reason writes were refused was that every backend installed the host
+/// filesystem, so a write under a sandbox mutated the host. Phase 2 gave each
+/// backend its own world, and this is what that bought.
 #[test]
-fn world_writes_are_refused_until_the_world_has_a_filesystem() {
-    let error = check_capability("docker", "Write", ToolCapability::FILE_WRITE).unwrap_err();
-
-    assert!(
-        error.contains("Write"),
-        "denial must name the tool: {error}"
-    );
-    assert!(
-        error.contains("Phase 2"),
-        "denial must say what unblocks it: {error}"
-    );
+fn world_writes_are_served_now_that_each_backend_has_a_filesystem() {
+    for backend in ["docker", "ssh", "openshell"] {
+        assert!(
+            check_capability(backend, "Write", ToolCapability::FILE_WRITE).is_ok(),
+            "{backend} has a filesystem of its own, so a write lands in its world"
+        );
+    }
 }
 
 #[test]

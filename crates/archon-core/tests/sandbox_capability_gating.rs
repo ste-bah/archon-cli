@@ -57,7 +57,9 @@ const EXPECTED: [(ToolCapability, bool); 7] = [
     (ToolCapability::EXECUTION, true),
     (ToolCapability::FILE_READ, true),
     (ToolCapability::HostLocal, true),
-    (ToolCapability::FILE_WRITE, false),
+    // Servable since Phase 2: each backend now has a filesystem of its own, so
+    // a write lands in the world the shell sees rather than on the host.
+    (ToolCapability::FILE_WRITE, true),
     (ToolCapability::HOST_HANDLE, false),
     (ToolCapability::Egress, false),
     (ToolCapability::ControlPlane, false),
@@ -107,18 +109,20 @@ fn a_tool_no_backend_has_heard_of_is_decided_by_its_class() {
     }
 }
 
-/// Phase 2 has not landed, so a world-bound write would still hit the host
-/// tree. That refusal is deliberate and must survive the rewrite; the denial
-/// says which phase removes it.
+/// Writes were refused because every backend installed the host filesystem, so
+/// a write under a sandbox mutated the host while the session claimed
+/// isolation. Phase 2 gave each backend a filesystem of its own — docker
+/// translating against its bind mount, ssh and openshell reaching a remote
+/// workspace over the transport `execute_bash` already uses — so the write now
+/// lands in the world the shell sees.
 #[test]
-fn world_writes_stay_refused_until_phase_two() {
+fn world_writes_are_served_now_that_each_backend_has_a_filesystem() {
     for (label, backend) in backends() {
-        let denial = backend
+        backend
             .check("Write", ToolCapability::FILE_WRITE, &serde_json::json!({}))
-            .expect_err("a world-bound write must not be allowed yet");
-
-        assert!(denial.contains("Write"), "{label}: {denial}");
-        assert!(denial.contains("Phase 2"), "{label}: {denial}");
+            .unwrap_or_else(|denial| {
+                panic!("{label} still refuses a world-bound write: {denial}")
+            });
     }
 }
 

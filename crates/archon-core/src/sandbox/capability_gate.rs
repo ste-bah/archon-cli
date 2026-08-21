@@ -27,21 +27,14 @@ pub(crate) fn check_capability(
         // genuinely lands in the world.
         ToolCapability::WorldBound(WorldReach::Execution) => Ok(()),
 
-        // Served by `ToolContext::fs`. Under docker that is the bind-mounted
-        // workspace and reads are correct; under an ssh or openshell remote
-        // workspace they describe the host tree instead. Refusing reads would
-        // leave no usable session at all, so the tolerance predating this
-        // change stands until #201 Phase 2 gives each backend a filesystem.
-        ToolCapability::WorldBound(WorldReach::FileRead) => Ok(()),
-
-        // #201 Phase 1 gave these tools a `FileSystem` seam, but every backend
-        // still installs the host one. Allowing a write now would mutate the
-        // host tree while the session claims isolation. Phase 2 flips this arm
-        // to `Ok(())`.
-        ToolCapability::WorldBound(WorldReach::FileWrite) => Err(format!(
-            "{backend} sandbox: {tool} writes files in the execution world, and the world's \
-             filesystem is not wired yet — it would mutate the host instead (#201 Phase 2)"
-        )),
+        // Both served by `ToolContext::fs`, which #201 Phase 2 made the
+        // backend's own: docker translates against its bind mount, an ssh or
+        // openshell remote workspace is reached over the same transport
+        // `execute_bash` uses, and the mirror modes are the host tree by
+        // definition. A write therefore lands in the world the shell sees
+        // rather than on the host behind its back, which is the whole reason
+        // this arm was closed.
+        ToolCapability::WorldBound(WorldReach::FileRead | WorldReach::FileWrite) => Ok(()),
 
         // A host PTY, a host language server, a directly spawned subprocess:
         // nothing routes these through the backend, so running one under an
