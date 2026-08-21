@@ -82,7 +82,11 @@ mod tests {
 
     #[test]
     fn a_budget_below_max_tokens_is_accepted() {
-        assert!(config(32_768, Some(65_536)).validate_token_budgets(32_768).is_ok());
+        assert!(
+            config(32_768, Some(65_536))
+                .validate_token_budgets(32_768)
+                .is_ok()
+        );
     }
 
     /// Equality is a failure, not a boundary: the answer needs room after the

@@ -95,12 +95,12 @@ impl ContractTaskUniverse {
             // min_instances >= 1 — says the task must PRODUCE that many things,
             // which pointing at a source file can never prove.
             //
-            // The second is why the ingest tasks never ran. Live on wf-3d7efd28
-            // the inventory reported "10 verified_noop items (TDL-001..090 all
-            // deliverable contracts on disk)" and "classified 10 of 14 tasks as
-            // verified_noop (all source deliverables exist on disk)". The .rs
-            // files existed, so nine tasks were retired as already-done, and
-            // the registry they were supposed to fill stayed at zero rows.
+            // The second is why data-producing tasks silently never run. An
+            // inventory reported, in its own words, ten verified_noop items
+            // because "all deliverable contracts on disk" and "all source
+            // deliverables exist on disk". The source files existed, so nine
+            // tasks were retired as already-done and the registry they were
+            // meant to fill stayed at zero rows.
             //
             // Both are read off the contract, never off a task's wording, so
             // this holds for any PRD.

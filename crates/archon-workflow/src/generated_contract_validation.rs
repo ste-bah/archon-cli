@@ -87,14 +87,13 @@ pub(super) fn generated_item_issues(
     }
     // ONE item, ONE deliverable contract.
     //
-    // The reason the tasks never fired. Observed live: the inventory emitted
-    // `TASK-TDL-040-050-060-070-providers` claiming four canonical tasks, and
-    // `TASK-TDL-010-010-020-030-base` claiming three. Three of those four never
-    // appeared in any implementation wave, because they had no item of their
-    // own to be dispatched as. Acceptance is per ITEM, so one agent turn, one
-    // result and one no-op proof retired four separate contracts, and every
-    // rule that made acceptance stricter still only ever had one story to
-    // judge.
+    // The reason tasks silently never fire. Observed live: an inventory emitted
+    // one item claiming four canonical tasks and another claiming three. Three
+    // of that first group never appeared in any implementation wave, because
+    // they had no item of their own to be dispatched as. Acceptance is per
+    // ITEM, so one agent turn, one result and one no-op proof retired four
+    // separate contracts, and every rule that made acceptance stricter still
+    // only ever had one story to judge.
     //
     // Grouping itself was already policed in three directions — a task grouped
     // with its own prerequisite, a task claimed by two items, a task claimed by
@@ -104,7 +103,16 @@ pub(super) fn generated_item_issues(
     // Scoped to tasks that declare a deliverable contract, because that is
     // exactly where the harm is: each contract needs its own proof. Tasks with
     // no contract of their own may still share an item.
-    if work_type == "implementation" && universe.contracted_task_count(&canonical_task_ids) > 1 {
+    //
+    // It applies to BOTH work types, and the first version of this rule did not.
+    // It was scoped to `implementation` on the reasoning that the refuted-no-op
+    // and execution rules already policed no-ops — which was wrong: those decide
+    // whether a no-op is ALLOWED, not whether one item may cover four tasks.
+    // The very next run emitted a no-op item claiming four contracted tasks,
+    // and this rule watched it go past.
+    if matches!(work_type.as_str(), "implementation" | "verified_noop")
+        && universe.contracted_task_count(&canonical_task_ids) > 1
+    {
         issues.push(make_issue(
             GeneratedContractIssueKind::InventoryShapeRepair,
             "canonical_task_ids",

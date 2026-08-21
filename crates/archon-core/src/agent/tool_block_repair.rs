@@ -144,7 +144,10 @@ pub(crate) fn repair_pending_tool_calls(pending: &mut Vec<super::PendingToolCall
         return;
     }
     let names: Vec<&str> = pending.iter().map(|tool| tool.name.as_str()).collect();
-    let jsons: Vec<&str> = pending.iter().map(|tool| tool.input_json.as_str()).collect();
+    let jsons: Vec<&str> = pending
+        .iter()
+        .map(|tool| tool.input_json.as_str())
+        .collect();
     let plan = plan_split_tool_repairs(&names, &jsons);
     if plan.is_empty() {
         return;

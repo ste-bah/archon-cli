@@ -3,8 +3,8 @@
 //! Split from `request_round.rs` for the 500-line ceiling; the two are one
 //! unit and the caller lives there.
 
-use super::message_history::MessageHistory;
 use super::super::SubagentRunner;
+use super::message_history::MessageHistory;
 
 /// Re-arm margins for a proactive compaction that FAILED.
 ///
