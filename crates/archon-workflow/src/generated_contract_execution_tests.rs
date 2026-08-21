@@ -112,3 +112,91 @@ fn an_absent_task_universe_does_not_refuse_anything() {
 
     assert!(!issue_fields(&issues).contains(&"commands_run".to_string()));
 }
+
+// ---------------------------------------------------------------------------
+// The other way a contract says "this cannot be finished by looking".
+//
+// Live on wf-3d7efd28 the inventory reported "10 verified_noop items
+// (TDL-001..090 all deliverable contracts on disk)". The source files existed,
+// so nine tasks were retired as already-done and the registry they were meant
+// to fill stayed at zero rows. A declared instance floor is the contract
+// stating the task must PRODUCE that many things, which pointing at a file
+// cannot prove.
+// ---------------------------------------------------------------------------
+
+fn task_with_floor(id: &str, min_instances: usize) -> WorkflowV2TaskUniverseTask {
+    WorkflowV2TaskUniverseTask {
+        canonical_task_id: id.to_string(),
+        source_path: format!("/tmp/{id}.md"),
+        deliverable_contracts: vec![WorkflowV2DeliverableContract {
+            kind: "dataset".to_string(),
+            artifact_path: "data/registry.json".to_string(),
+            typed_verifier_command: None,
+            min_instances,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+/// THE live failure: no command declared, so the execution rule could not fire,
+/// and the task was retired because its source file existed.
+#[test]
+fn a_task_that_must_produce_instances_cannot_be_finished_by_inspection() {
+    let contract =
+        ContractTaskUniverse::from_authoritative(Some(&universe(vec![task_with_floor(
+            "TASK-A-001",
+            30,
+        )])));
+
+    let issues = generated_item_issues(&noop_item("TASK-A-001", None), &contract, None);
+
+    assert!(
+        issue_fields(&issues).contains(&"commands_run".to_string()),
+        "an instance floor must bar a no-op, got: {:?}",
+        issue_fields(&issues)
+    );
+}
+
+/// Recording what actually ran is still the way through, exactly as it is for a
+/// declared command.
+#[test]
+fn recording_the_run_satisfies_an_instance_floor() {
+    let contract =
+        ContractTaskUniverse::from_authoritative(Some(&universe(vec![task_with_floor(
+            "TASK-A-001",
+            30,
+        )])));
+    let commands = serde_json::json!([{
+        "command": "archon trading data ingest --all",
+        "status": "succeeded",
+        "exit_code": 0,
+    }]);
+
+    let issues = generated_item_issues(&noop_item("TASK-A-001", Some(commands)), &contract, None);
+
+    assert!(
+        !issue_fields(&issues).contains(&"commands_run".to_string()),
+        "got: {:?}",
+        issue_fields(&issues)
+    );
+}
+
+/// A contract with no floor and no command is genuinely inspectable, and must
+/// stay so: a document deliverable is proven by the document existing.
+#[test]
+fn a_contract_with_no_floor_and_no_command_is_still_inspectable() {
+    let contract =
+        ContractTaskUniverse::from_authoritative(Some(&universe(vec![task_with_floor(
+            "TASK-A-001",
+            0,
+        )])));
+
+    let issues = generated_item_issues(&noop_item("TASK-A-001", None), &contract, None);
+
+    assert!(
+        !issue_fields(&issues).contains(&"commands_run".to_string()),
+        "got: {:?}",
+        issue_fields(&issues)
+    );
+}
