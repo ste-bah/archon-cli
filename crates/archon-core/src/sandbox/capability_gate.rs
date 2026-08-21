@@ -14,7 +14,11 @@ use archon_permissions::{ToolCapability, WorldReach};
 /// outcome. Every arm is a statement about a seam: allowed means the backend
 /// has a way to put the work in its world, denied means it does not and would
 /// otherwise silently do the work on the host.
-pub(crate) fn check_capability(
+///
+/// Public because `archon sandbox explain` has to report this decision rather
+/// than describe it. An explanation assembled from a second copy of these arms
+/// is a claim about the gate that nothing keeps true.
+pub fn check_capability(
     backend: &str,
     tool: &str,
     capability: ToolCapability,

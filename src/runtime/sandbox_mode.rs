@@ -24,19 +24,52 @@ pub(crate) fn apply_configured_sandbox_mode(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SandboxRouteMode {
+pub(crate) enum SandboxRouteMode {
     Risky,
     Shell,
     All,
 }
 
+/// What the configured mode does with one tool before any backend sees it.
+///
+/// Named rather than inlined into `ModeScopedSandboxBackend::check` because
+/// `archon sandbox explain` has to say which of these three happened: "the
+/// backend allowed it" and "the backend was never asked" are both `Ok(())`
+/// here, and reporting them as the same thing is how an explanation starts
+/// describing a decision nobody makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModeRouting {
+    /// The mode defers to the backend, which decides on the declared class.
+    Backend,
+    /// The mode itself refuses, without consulting the backend.
+    RefusedByMode(&'static str),
+    /// The mode does not defer this tool, so the normal permission preflight
+    /// is what decides it.
+    PermissionPreflight,
+}
+
+/// A shell Archon cannot route into a Bash-compatible backend, and so will not
+/// run under one at all.
+const POWERSHELL_NOT_ROUTABLE: &str = "sandbox mode routes shell execution through Bash-compatible backends; PowerShell cannot be \
+     sandbox-routed yet";
+
 impl SandboxRouteMode {
-    fn from_config(value: &str) -> Self {
+    pub(crate) fn from_config(value: &str) -> Self {
         match value {
             "all" => Self::All,
             "shell" => Self::Shell,
             _ => Self::Risky,
         }
+    }
+
+    pub(crate) fn route(self, tool: &str) -> ModeRouting {
+        if self.should_delegate_check(tool) {
+            return ModeRouting::Backend;
+        }
+        if matches!(tool, "PowerShell") {
+            return ModeRouting::RefusedByMode(POWERSHELL_NOT_ROUTABLE);
+        }
+        ModeRouting::PermissionPreflight
     }
 
     fn should_delegate_check(self, tool: &str) -> bool {
@@ -60,16 +93,11 @@ impl SandboxBackend for ModeScopedSandboxBackend {
         capability: archon_permissions::ToolCapability,
         input: &serde_json::Value,
     ) -> Result<(), String> {
-        if self.mode.should_delegate_check(tool) {
-            return self.inner.check(tool, capability, input);
+        match self.mode.route(tool) {
+            ModeRouting::Backend => self.inner.check(tool, capability, input),
+            ModeRouting::RefusedByMode(reason) => Err(reason.into()),
+            ModeRouting::PermissionPreflight => Ok(()),
         }
-        if matches!(tool, "PowerShell") {
-            return Err(
-                "sandbox mode routes shell execution through Bash-compatible backends; PowerShell cannot be sandbox-routed yet"
-                    .into(),
-            );
-        }
-        Ok(())
     }
 
     /// Delegated whatever the mode is, exactly as `execute_bash` is.

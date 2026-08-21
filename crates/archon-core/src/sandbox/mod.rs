@@ -10,6 +10,7 @@ mod policy;
 mod remote_fs;
 mod ssh;
 
+pub use capability_gate::check_capability;
 pub use docker::{
     DockerConfig, DockerDoctorReport, DockerDoctorStatus, DockerFs, DockerProbe,
     DockerSandboxBackend, docker_doctor_report, probe_docker, render_docker_doctor_report,
