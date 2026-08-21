@@ -129,7 +129,14 @@ impl ConversationState {
         }));
     }
 
-    pub(super) fn fill_missing_tool_results(&mut self, expected_ids: &[String]) -> Vec<String> {
+    // `pub(in crate::agent)`, not `pub(super)`: this used to live in `types`,
+    // where `super` was `agent`. From a module one level deeper `pub(super)`
+    // would mean `types` and quietly narrow it — the split must not change who
+    // can call this.
+    pub(in crate::agent) fn fill_missing_tool_results(
+        &mut self,
+        expected_ids: &[String],
+    ) -> Vec<String> {
         if expected_ids.is_empty() {
             return Vec::new();
         }
