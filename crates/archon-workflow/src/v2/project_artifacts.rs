@@ -217,12 +217,9 @@ fn absolute_artifact_path(
     let Ok(relative) = clean.strip_prefix(project_root) else {
         return Ok(ProjectArtifactPath::NotArtifact);
     };
-    // `/` separators whatever the host uses. An agent reports a deliverable by
-    // absolute path; stripping the project root leaves a platform-native path,
-    // and on Windows that is backslash-separated. Every declared artifact path
-    // is `/`-separated, so the two never matched and a correctly written
-    // deliverable was classified NotArtifact — left in files_changed, where
-    // write-ownership then rejected the branch.
+    // `/` separators whatever the host uses: a Windows backslash path never
+    // matched the `/`-separated declared paths, so a written deliverable was
+    // classified NotArtifact and write-ownership rejected the branch.
     let relative =
         normalize_relative_path(item_id, &relative.to_string_lossy().replace('\\', "/"))?;
     if !allowed_relative_artifact(&relative, context) {

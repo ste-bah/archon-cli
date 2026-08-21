@@ -42,30 +42,13 @@ impl AnthropicClient {
     ///   2. `api.base_url` in config.toml
     ///   3. `None` → hardcoded default
     pub fn new(auth: AuthProvider, identity: IdentityProvider, api_url: Option<String>) -> Self {
-        // `.timeout()` bounds the WHOLE request, streaming response body
-        // included, so a 300s cap silently killed every generation that ran
-        // longer than five minutes: reqwest drops the body stream and reports
-        // `error decoding response body`, which reads as a network fault even
-        // though the provider is healthy and still sending. Observed live —
-        // litellm logged 200 OK with zero errors while archon failed stage
-        // after stage on hour-long reasoning turns, each retry dying the same
-        // way.
-        //
-        // `.read_timeout()` is the streaming-safe equivalent: it bounds the
-        // gap BETWEEN reads rather than the total duration, so a slow but live
-        // stream survives while a genuinely dead connection is still cut.
-        //
-        // The value has to sit ABOVE the stall guard that owns this decision,
-        // `[subagent] stream_idle_timeout_secs` (default 600s, and the knob a
-        // user actually tunes). A reasoning model emits NOTHING on the wire
-        // while it thinks — with a large thinking budget that silence runs for
-        // many minutes — so a transport read gap is not evidence of a stall.
-        // Setting this at or below the guard makes the transport fire first and
-        // silently overrides it: a 300s value still killed live reducers
-        // mid-reasoning, reported as `error decoding response body`, exactly
-        // the failure the guard's own comment records it was widened to stop.
-        // Keep it a strict backstop for a truly dead socket and let the
-        // configurable guard make the real call.
+        // `.timeout()` bounds the WHOLE request, streaming body included: a
+        // 300s cap killed any generation over five minutes, reported as
+        // `error decoding response body` while the provider was healthy.
+        // `.read_timeout()` bounds the gap BETWEEN reads, so a live stream
+        // survives. It must sit ABOVE `[subagent] stream_idle_timeout_secs`
+        // (600s) — a reasoning model emits nothing while it thinks, so set at
+        // or below that guard the transport fires first and overrides it.
         const TRANSPORT_READ_BACKSTOP_SECS: u64 = 1800;
         let http = reqwest::Client::builder()
             .read_timeout(Duration::from_secs(TRANSPORT_READ_BACKSTOP_SECS))
