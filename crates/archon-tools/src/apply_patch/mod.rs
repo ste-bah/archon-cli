@@ -31,7 +31,9 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::path_guard::resolve_write_target_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // Re-export submodule internals at the `apply_patch` module scope so
 // the existing `#[cfg(test)] mod tests { use super::*; }` block keeps
@@ -52,6 +54,10 @@ pub struct ApplyPatchTool;
 impl Tool for ApplyPatchTool {
     fn name(&self) -> &str {
         "ApplyPatch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {

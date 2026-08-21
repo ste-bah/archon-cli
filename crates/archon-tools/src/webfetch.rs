@@ -5,7 +5,9 @@ use futures_util::{Stream, StreamExt};
 use regex::Regex;
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 static RE_SCRIPT: OnceLock<Regex> = OnceLock::new();
 static RE_STYLE: OnceLock<Regex> = OnceLock::new();
@@ -91,6 +93,10 @@ fn extract_text(html: &str) -> String {
 impl Tool for WebFetchTool {
     fn name(&self) -> &str {
         "WebFetch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

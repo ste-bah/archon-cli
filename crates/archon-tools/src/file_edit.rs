@@ -1,7 +1,9 @@
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_file_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct EditTool;
 
@@ -9,6 +11,10 @@ pub struct EditTool;
 impl Tool for EditTool {
     fn name(&self) -> &str {
         "Edit"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     /// Claims the default, which the old one-liner did not.

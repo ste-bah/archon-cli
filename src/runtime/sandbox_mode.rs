@@ -51,9 +51,14 @@ struct ModeScopedSandboxBackend {
 }
 
 impl SandboxBackend for ModeScopedSandboxBackend {
-    fn check(&self, tool: &str, input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        input: &serde_json::Value,
+    ) -> Result<(), String> {
         if self.mode.should_delegate_check(tool) {
-            return self.inner.check(tool, input);
+            return self.inner.check(tool, capability, input);
         }
         if matches!(tool, "PowerShell") {
             return Err(
@@ -75,12 +80,18 @@ impl SandboxBackend for ModeScopedSandboxBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_permissions::ToolCapability;
 
     #[derive(Debug)]
     struct DenyUnsupportedBackend;
 
     impl SandboxBackend for DenyUnsupportedBackend {
-        fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        fn check(
+            &self,
+            tool: &str,
+            _capability: archon_permissions::ToolCapability,
+            _input: &serde_json::Value,
+        ) -> Result<(), String> {
             match tool {
                 "Bash" | "Shell" | "Read" => Ok(()),
                 other => Err(format!("blocked by real backend: {other}")),
@@ -116,10 +127,26 @@ mod tests {
             &docker_config("risky"),
         );
 
-        assert!(backend.check("Bash", &serde_json::json!({})).is_ok());
-        assert!(backend.check("Write", &serde_json::json!({})).is_ok());
-        assert!(backend.check("Edit", &serde_json::json!({})).is_ok());
-        assert!(backend.check("WebFetch", &serde_json::json!({})).is_ok());
+        assert!(
+            backend
+                .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
+                .is_ok()
+        );
+        assert!(
+            backend
+                .check("Write", ToolCapability::FILE_WRITE, &serde_json::json!({}))
+                .is_ok()
+        );
+        assert!(
+            backend
+                .check("Edit", ToolCapability::FILE_WRITE, &serde_json::json!({}))
+                .is_ok()
+        );
+        assert!(
+            backend
+                .check("WebFetch", ToolCapability::Egress, &serde_json::json!({}))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -127,7 +154,9 @@ mod tests {
         let backend =
             apply_configured_sandbox_mode(Arc::new(DenyUnsupportedBackend), &docker_config("all"));
 
-        let error = backend.check("Write", &serde_json::json!({})).unwrap_err();
+        let error = backend
+            .check("Write", ToolCapability::FILE_WRITE, &serde_json::json!({}))
+            .unwrap_err();
 
         assert!(error.contains("blocked by real backend"));
     }
@@ -140,7 +169,11 @@ mod tests {
         );
 
         let error = backend
-            .check("PowerShell", &serde_json::json!({}))
+            .check(
+                "PowerShell",
+                ToolCapability::HOST_HANDLE,
+                &serde_json::json!({}),
+            )
             .unwrap_err();
 
         assert!(error.contains("PowerShell cannot be sandbox-routed yet"));

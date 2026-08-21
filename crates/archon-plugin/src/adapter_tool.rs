@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 use crate::host::WasmPluginHost;
 
@@ -71,6 +71,13 @@ impl PluginToolAdapter {
 impl Tool for PluginToolAdapter {
     fn name(&self) -> &str {
         &self.namespaced_name
+    }
+
+    /// The guest declares a name and a schema, never what it will do. Its call
+    /// lands in a WASM host running in this process, which no sandbox backend
+    /// can redirect, so every plugin tool is a host handle.
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

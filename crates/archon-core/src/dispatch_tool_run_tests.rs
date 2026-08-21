@@ -14,7 +14,12 @@ struct AdmissionTestTool {
 struct DenyAllSandbox;
 
 impl archon_permissions::SandboxBackend for DenyAllSandbox {
-    fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         Err("sandbox denied".into())
     }
 }
@@ -23,6 +28,10 @@ impl archon_permissions::SandboxBackend for DenyAllSandbox {
 impl Tool for AdmissionTestTool {
     fn name(&self) -> &str {
         "AdmissionTest"
+    }
+
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

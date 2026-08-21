@@ -5,6 +5,11 @@ use archon_observability::AgentActivitySink;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+/// Re-exported so a tool declares its class without reaching past the trait it
+/// is implementing. The enum itself lives in `archon-permissions`, the leaf
+/// that the sandbox backends also see.
+pub use archon_permissions::{ToolCapability, WorldReach};
+
 // ---------------------------------------------------------------------------
 // Permission level -- tools declare their danger level
 // ---------------------------------------------------------------------------
@@ -348,6 +353,16 @@ pub trait Tool: Send + Sync {
 
     /// Classify the permission level for a specific invocation.
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel;
+
+    /// Declare which execution world this tool's effects land in (#201 Phase 3).
+    ///
+    /// Required, deliberately. A default of [`ToolCapability::HostLocal`] would
+    /// let a new tool claim host-only effects it does not have and quietly get
+    /// waved through a sandbox; a default of `WorldBound` would strand every
+    /// tool that has no world. Making the compiler ask once per tool is the
+    /// entire mechanism — it is what stops the next added tool from being
+    /// silently unusable under isolation, the way the #190 terminal tools were.
+    fn capability(&self) -> ToolCapability;
 
     /// Declare whether this tool can mutate files below the session working tree.
     fn working_tree_effect(&self) -> WorkingTreeEffect {

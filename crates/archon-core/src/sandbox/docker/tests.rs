@@ -1,4 +1,5 @@
 use super::*;
+use archon_permissions::ToolCapability;
 use std::path::PathBuf;
 
 #[test]
@@ -149,7 +150,9 @@ fn docker_backend_fails_closed_for_unsafe_config() {
         "rw",
     );
 
-    let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+    let error = backend
+        .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
+        .unwrap_err();
 
     assert!(error.contains("privileged"));
 }
@@ -164,7 +167,9 @@ fn docker_backend_rejects_invalid_workspace_access() {
         "home",
     );
 
-    let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+    let error = backend
+        .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
+        .unwrap_err();
 
     assert!(error.contains("workspace_access"));
 }

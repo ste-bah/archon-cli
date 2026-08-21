@@ -43,7 +43,7 @@ pub(crate) async fn execute_tool_attempt(
 
     if !sandbox_prechecked
         && let Some(backend) = &ctx.sandbox
-        && let Err(reason) = backend.check(tool.name(), &input)
+        && let Err(reason) = backend.check(tool.name(), tool.capability(), &input)
     {
         crate::dispatch::emit_tool_activity(
             ctx,

@@ -2,7 +2,9 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool for editing Jupyter notebook (.ipynb) cells.
 ///
@@ -14,6 +16,10 @@ pub struct NotebookEditTool;
 impl Tool for NotebookEditTool {
     fn name(&self) -> &str {
         "NotebookEdit"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {

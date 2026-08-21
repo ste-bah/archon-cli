@@ -2,7 +2,9 @@
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 const DEFAULT_MAX_RESULTS: usize = 5;
 
@@ -35,6 +37,10 @@ fn score_match(haystack: &str, terms: &[&str]) -> usize {
 impl Tool for ToolSearchTool {
     fn name(&self) -> &str {
         "ToolSearch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

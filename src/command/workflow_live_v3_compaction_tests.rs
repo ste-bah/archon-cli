@@ -148,6 +148,10 @@ impl Tool for FixtureDocumentTool {
     fn name(&self) -> &str {
         self.name
     }
+
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
     fn description(&self) -> &str {
         "Return deterministic oversized document text"
     }

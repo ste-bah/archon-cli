@@ -108,6 +108,10 @@ impl Tool for EchoTool {
         "Echo"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "Returns the supplied text."
     }

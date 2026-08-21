@@ -235,8 +235,13 @@ impl AuditedSandboxBackend {
 }
 
 impl SandboxBackend for AuditedSandboxBackend {
-    fn check(&self, tool: &str, input: &serde_json::Value) -> Result<(), String> {
-        match self.inner.check(tool, input) {
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        input: &serde_json::Value,
+    ) -> Result<(), String> {
+        match self.inner.check(tool, capability, input) {
             Ok(()) => {
                 self.record_event(tool, "allowed", "sandbox_check_allowed");
                 Ok(())

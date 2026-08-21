@@ -13,7 +13,12 @@ struct MockLlmProvider;
 struct DenyBlockedWriteSandbox;
 
 impl archon_permissions::SandboxBackend for DenyBlockedWriteSandbox {
-    fn check(&self, tool: &str, input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        input: &serde_json::Value,
+    ) -> Result<(), String> {
         if tool == "Write" && input.get("file_path").and_then(|v| v.as_str()) == Some("/blocked") {
             Err("sandbox blocked mutated write path".to_string())
         } else {

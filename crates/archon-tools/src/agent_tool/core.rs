@@ -22,7 +22,9 @@ use crate::background_agents::{
 use crate::board::DelegatedOutcome;
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::subagent_request::SubagentRequest;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // Re-exported so `agent_tool.rs`'s existing `core::AGENT_DESCRIPTION_LIMIT_BYTES`
 // path keeps resolving after the constant moved into the `descriptor` child.
@@ -75,6 +77,10 @@ fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
 impl Tool for AgentTool {
     fn name(&self) -> &str {
         "Agent"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

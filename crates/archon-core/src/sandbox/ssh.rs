@@ -251,22 +251,14 @@ impl SshSandboxBackend {
 }
 
 impl SandboxBackend for SshSandboxBackend {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         self.safe_to_route()?;
-        match tool {
-            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
-            "Bash" | "Shell" => Ok(()),
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "ssh sandbox: {tool} host-side file mutation is not supported"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "ssh sandbox: {tool} host-side network access is not supported"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "ssh sandbox: {tool} agent spawning is not supported"
-            )),
-            other => Err(format!("ssh sandbox: unsupported tool {other}")),
-        }
+        crate::sandbox::capability_gate::check_capability("ssh", tool, capability)
     }
 
     fn execute_bash<'a>(
@@ -347,6 +339,7 @@ impl SshSandboxBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_permissions::ToolCapability;
 
     #[test]
     fn ssh_defaults_are_safe() {
@@ -409,7 +402,9 @@ mod tests {
             ..SshConfig::default()
         });
 
-        let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+        let error = backend
+            .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
+            .unwrap_err();
 
         assert!(error.contains("sandbox.ssh.host"));
     }

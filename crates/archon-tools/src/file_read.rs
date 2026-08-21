@@ -1,7 +1,9 @@
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_file_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct ReadTool;
 
@@ -9,6 +11,10 @@ pub struct ReadTool;
 impl Tool for ReadTool {
     fn name(&self) -> &str {
         "Read"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {

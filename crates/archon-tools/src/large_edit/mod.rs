@@ -3,7 +3,9 @@ mod session;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 fn large_edit_effect() -> WorkingTreeEffect {
     WorkingTreeEffect::Arbitrary
@@ -20,6 +22,10 @@ pub struct LargeEditAbortTool;
 impl Tool for LargeEditBeginTool {
     fn name(&self) -> &str {
         "LargeEditBegin"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -73,6 +79,10 @@ impl Tool for LargeEditInsertAfterTool {
         "LargeEditInsertAfter"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
+    }
+
     fn description(&self) -> &str {
         "Insert a content chunk after an anchor line in a staged large edit. Requires an edit_id from LargeEditBegin."
     }
@@ -104,6 +114,10 @@ impl Tool for LargeEditInsertAfterTool {
 impl Tool for LargeEditReplaceSectionTool {
     fn name(&self) -> &str {
         "LargeEditReplaceSection"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -145,6 +159,10 @@ impl Tool for LargeEditDeleteSectionTool {
         "LargeEditDeleteSection"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
+    }
+
     fn description(&self) -> &str {
         "Delete a staged section by start anchor and optional end anchor. Without end_anchor, markdown headings delete through the next peer/parent heading."
     }
@@ -181,6 +199,10 @@ impl Tool for LargeEditDeleteSectionTool {
 impl Tool for LargeEditCommitTool {
     fn name(&self) -> &str {
         "LargeEditCommit"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -224,6 +246,10 @@ impl Tool for LargeEditCommitTool {
 impl Tool for LargeEditAbortTool {
     fn name(&self) -> &str {
         "LargeEditAbort"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {

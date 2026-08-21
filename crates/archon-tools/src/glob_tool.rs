@@ -1,7 +1,9 @@
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct GlobTool;
 
@@ -9,6 +11,10 @@ pub struct GlobTool;
 impl Tool for GlobTool {
     fn name(&self) -> &str {
         "Glob"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {

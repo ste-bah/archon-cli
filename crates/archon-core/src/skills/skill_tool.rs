@@ -17,7 +17,9 @@
 
 use serde_json::{Value, json};
 
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use archon_tools::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 use super::{SkillContext, SkillOutput, builtin, discovery};
 
@@ -27,6 +29,13 @@ pub struct SkillTool;
 impl Tool for SkillTool {
     fn name(&self) -> &str {
         "Skill"
+    }
+
+    /// A skill is an arbitrary named routine — several of them create agents or
+    /// dispatch work — so the class has to cover the most capable one, not the
+    /// median one that just returns prose.
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

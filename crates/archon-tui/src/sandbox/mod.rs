@@ -175,26 +175,31 @@ impl Default for SharedSandboxFlag {
 }
 
 impl SandboxBackend for SharedSandboxFlag {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    /// `/sandbox on` is a read-only session, not an isolated one: there is no
+    /// second world, so the flag simply refuses everything that changes
+    /// anything. It used to name the tools it refused and allow the rest, which
+    /// meant a tool added later — `PowerShell`, `Monitor`, the #190 terminals —
+    /// was waved through a session the user had asked to freeze. Deciding on
+    /// the declared class is the same fix as #201 Phase 3 makes in the
+    /// isolation backends, in the opposite direction.
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(());
         }
-        // When sandbox is enabled, block all write/network/shell tools.
-        // Read-only tools (Read, Glob, Grep, LSP, Task*) are allowed.
-        match tool {
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "sandbox: {tool} is blocked (write operations disabled)"
+        match capability {
+            archon_permissions::ToolCapability::WorldBound(
+                archon_permissions::WorldReach::FileRead,
+            )
+            | archon_permissions::ToolCapability::HostLocal => Ok(()),
+            other => Err(format!(
+                "sandbox: {tool} is blocked ({} is not read-only)",
+                other.label()
             )),
-            "Bash" | "Shell" => Err(format!(
-                "sandbox: {tool} is blocked (shell operations disabled)"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "sandbox: {tool} is blocked (network operations disabled)"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "sandbox: {tool} is blocked (agent spawning disabled)"
-            )),
-            _ => Ok(()),
         }
     }
 }

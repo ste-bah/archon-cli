@@ -31,7 +31,17 @@ pub struct SandboxCommandResult {
 pub trait SandboxBackend: Send + Sync + std::fmt::Debug {
     /// Check whether `tool` with `input` is permitted. Returns `Ok(())` if
     /// allowed, `Err(reason)` if blocked.
-    fn check(&self, tool: &str, input: &serde_json::Value) -> Result<(), String>;
+    ///
+    /// `capability` is the class the tool declares about itself (#201 Phase 3)
+    /// and is what a backend decides on. `tool` is carried alongside it only so
+    /// a denial can name the call the model made; a backend that branches on
+    /// the name has reintroduced the allowlist this replaced.
+    fn check(
+        &self,
+        tool: &str,
+        capability: crate::ToolCapability,
+        input: &serde_json::Value,
+    ) -> Result<(), String>;
 
     /// Optionally execute Bash inside this backend. Logical policy-only
     /// backends return `None`, which tells the tool to use the normal host

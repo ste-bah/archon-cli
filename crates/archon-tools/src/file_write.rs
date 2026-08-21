@@ -3,7 +3,9 @@ use serde_json::json;
 use crate::filesystem::FileSystem;
 
 use crate::path_guard::resolve_write_target_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct WriteTool;
 
@@ -14,6 +16,10 @@ const LARGE_REWRITE_MAX_LINES: usize = 300;
 impl Tool for WriteTool {
     fn name(&self) -> &str {
         "Write"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     /// Names the alternatives, because the model chooses from this sentence.

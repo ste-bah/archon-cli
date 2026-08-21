@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+mod capability_gate;
 mod docker;
 mod openshell;
 mod policy;

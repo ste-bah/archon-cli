@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 use crate::client::McpClient;
 use crate::types::{McpToolBridgePolicy, McpToolDef, McpToolRisk, ToolContent};
@@ -196,6 +196,10 @@ fn flatten_content(content: &[ToolContent]) -> String {
 impl Tool for McpTool {
     fn name(&self) -> &str {
         &self.qualified_name
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

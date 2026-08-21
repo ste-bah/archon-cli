@@ -4,7 +4,9 @@ use serde_json::json;
 
 use crate::filesystem::FileSystem;
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct GrepTool;
 
@@ -16,6 +18,10 @@ const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 impl Tool for GrepTool {
     fn name(&self) -> &str {
         "Grep"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {

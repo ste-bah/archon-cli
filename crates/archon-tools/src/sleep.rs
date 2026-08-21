@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Maximum allowed sleep duration in seconds.
 const MAX_SLEEP_SECS: u64 = 300;
@@ -13,6 +15,10 @@ pub struct SleepTool;
 impl Tool for SleepTool {
     fn name(&self) -> &str {
         "Sleep"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

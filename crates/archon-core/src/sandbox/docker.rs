@@ -234,22 +234,14 @@ impl DockerSandboxBackend {
 }
 
 impl SandboxBackend for DockerSandboxBackend {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         self.safe_to_execute()?;
-        match tool {
-            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
-            "Bash" | "Shell" => Ok(()),
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "docker sandbox: {tool} host-side file mutation is not supported yet"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "docker sandbox: {tool} host-side network access is not supported"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "docker sandbox: {tool} agent spawning is not supported"
-            )),
-            other => Err(format!("docker sandbox: unsupported tool {other}")),
-        }
+        crate::sandbox::capability_gate::check_capability("docker", tool, capability)
     }
 
     fn execute_bash<'a>(

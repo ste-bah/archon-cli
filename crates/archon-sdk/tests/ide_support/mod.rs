@@ -241,6 +241,10 @@ impl Tool for ProbeTool {
         PROBE_TOOL
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "Records that it ran. Test double for a tool with real side effects."
     }

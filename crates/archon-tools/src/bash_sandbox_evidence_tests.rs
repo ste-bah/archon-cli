@@ -13,7 +13,12 @@ struct FixedSandbox {
 }
 
 impl SandboxBackend for FixedSandbox {
-    fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         Ok(())
     }
 

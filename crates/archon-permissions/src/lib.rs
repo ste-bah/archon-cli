@@ -17,3 +17,6 @@ pub mod prompt {}
 
 pub mod sandbox;
 pub use sandbox::SandboxBackend;
+
+pub mod tool_capability;
+pub use tool_capability::{ToolCapability, WorldReach};

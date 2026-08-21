@@ -27,7 +27,9 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 use finding::{Finding, select_issues, severity_counts};
 use project::{JavaProject, Stage};
 
@@ -48,6 +50,10 @@ pub struct JavaToolchain;
 impl Tool for JavaToolchain {
     fn name(&self) -> &str {
         "JavaToolchain"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

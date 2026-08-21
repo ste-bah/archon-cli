@@ -15,7 +15,9 @@ use serde_json::json;
 
 use crate::terminal_registry as registry;
 use crate::terminal_shell as shells;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Most output one `TerminalRead` returns.
 ///
@@ -31,6 +33,10 @@ pub struct TerminalCreateTool;
 impl Tool for TerminalCreateTool {
     fn name(&self) -> &str {
         "TerminalCreate"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {
@@ -114,6 +120,10 @@ pub struct TerminalWriteTool {
 impl Tool for TerminalWriteTool {
     fn name(&self) -> &str {
         "TerminalWrite"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {
@@ -202,6 +212,10 @@ impl Tool for TerminalReadTool {
         "TerminalRead"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
+    }
+
     fn description(&self) -> &str {
         "Read output a terminal has produced since a byte offset. Start at 0, \
          then pass back the next_offset from the previous read to see only what \
@@ -278,6 +292,10 @@ pub struct TerminalCloseTool;
 impl Tool for TerminalCloseTool {
     fn name(&self) -> &str {
         "TerminalClose"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {
