@@ -158,29 +158,54 @@ async fn read_dir_lists_awkward_names_without_splitting_them() {
     assert_eq!(names, ["it's.txt", "nested", "plain.txt", "two words.txt"]);
 }
 
+/// `**` needs `globstar`, which arrived in bash 4. macOS still ships bash 3.2,
+/// so both outcomes are correct behaviour and which one is right here depends
+/// on the machine — asserting only the match made this a test of the runner's
+/// bash rather than of the code. An old shell must produce the *documented*
+/// refusal, naming globstar, rather than silently matching nothing: a glob that
+/// quietly returned no files would read as "no such source files" and send the
+/// agent looking for the wrong problem.
 #[tokio::test]
-async fn glob_descends_with_globstar_and_returns_far_side_paths() {
+async fn glob_descends_with_globstar_or_says_the_shell_is_too_old() {
     let (dir, fs) = world();
     std::fs::create_dir_all(dir.path().join("src/nested")).unwrap();
     std::fs::write(dir.path().join("src/a.rs"), "x").unwrap();
     std::fs::write(dir.path().join("src/nested/b.rs"), "x").unwrap();
     std::fs::write(dir.path().join("src/notes.md"), "x").unwrap();
 
-    let mut matched: Vec<String> = fs
-        .glob(Path::new(HOST_ROOT), "**/*.rs")
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|path| {
-            path.strip_prefix(dir.path())
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    matched.sort();
+    let result = fs.glob(Path::new(HOST_ROOT), "**/*.rs").await;
 
-    assert_eq!(matched, ["src/a.rs", "src/nested/b.rs"]);
+    if local_bash_has_globstar().await {
+        let mut matched: Vec<String> = result
+            .expect("a bash with globstar must match")
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(dir.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        matched.sort();
+
+        assert_eq!(matched, ["src/a.rs", "src/nested/b.rs"]);
+    } else {
+        let error = result.expect_err("a bash without globstar cannot match **");
+
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(
+            error.to_string().contains("globstar"),
+            "the refusal has to name what is missing: {error}"
+        );
+    }
+}
+
+/// Asked of the same shell the scripts run in, not inferred from the platform.
+async fn local_bash_has_globstar() -> bool {
+    BashExec
+        .run("shopt -s globstar 2>/dev/null && echo yes\n", &[])
+        .await
+        .is_ok_and(|out| out.status == Some(0) && out.stdout.starts_with(b"yes"))
 }
 
 #[tokio::test]

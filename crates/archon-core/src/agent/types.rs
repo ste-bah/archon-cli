@@ -337,3 +337,11 @@ impl Default for AgentConfig {
         }
     }
 }
+
+#[path = "types_conversation_state.rs"]
+mod conversation_state;
+pub use conversation_state::{ConversationState, SpillContext};
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod tests;
