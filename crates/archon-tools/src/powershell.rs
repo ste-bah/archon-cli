@@ -54,7 +54,7 @@ impl Tool for PowerShellTool {
         let shell = if which_pwsh() { "pwsh" } else { "powershell" };
 
         // Build sanitized environment (same as BashTool)
-        let env_vars = crate::bash::sanitized_env();
+        let env_vars = crate::bash::host_env();
 
         let mut cmd = Command::new(shell);
         cmd.arg("-Command")

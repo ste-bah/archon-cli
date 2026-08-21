@@ -46,6 +46,9 @@ use generated_contract_retry::*;
 mod generated_contract_invariants;
 use generated_contract_invariants::*;
 #[cfg(test)]
+#[path = "generated_contract_artifact_loop_tests.rs"]
+mod artifact_loop_tests;
+#[cfg(test)]
 #[path = "generated_contract_execution_tests.rs"]
 mod execution_tests;
 #[cfg(test)]

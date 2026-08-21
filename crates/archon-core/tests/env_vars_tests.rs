@@ -356,7 +356,7 @@ fn unrecognized_vars_detected() {
         ("NOT_ARCHON", "ignored"),
     ]);
 
-    let unrecognized = warn_unrecognized_archon_vars(&map);
+    let unrecognized = warn_unrecognized_archon_vars(&map, &[]);
 
     assert_eq!(unrecognized.len(), 2);
     assert!(unrecognized.contains(&"ARCHON_UNKNOWN_THING".to_string()));
@@ -371,7 +371,7 @@ fn no_unrecognized_vars_when_all_known() {
         ("ANTHROPIC_API_KEY", "sk-test"),
     ]);
 
-    let unrecognized = warn_unrecognized_archon_vars(&map);
+    let unrecognized = warn_unrecognized_archon_vars(&map, &[]);
     assert!(unrecognized.is_empty());
 }
 
@@ -383,8 +383,48 @@ fn non_archon_vars_ignored_in_unrecognized_check() {
         ("SOME_OTHER_VAR", "value"),
     ]);
 
-    let unrecognized = warn_unrecognized_archon_vars(&map);
+    let unrecognized = warn_unrecognized_archon_vars(&map, &[]);
     assert!(unrecognized.is_empty());
+}
+
+/// A caller-owned name is recognized without appearing in the engine constant.
+#[test]
+fn extra_known_names_are_recognized() {
+    let map = env_map(&[
+        ("ARCHON_STOOQ_CSV_URL", "http://example.invalid/csv"),
+        ("ARCHON_UNKNOWN_THING", "value"),
+    ]);
+
+    let unrecognized = warn_unrecognized_archon_vars(&map, &["ARCHON_STOOQ_CSV_URL"]);
+
+    assert_eq!(unrecognized, vec!["ARCHON_UNKNOWN_THING".to_string()]);
+}
+
+/// The same name warns when the caller does not claim it, which is what makes
+/// `extra_known` the working mechanism rather than decoration.
+#[test]
+fn caller_owned_names_are_not_baked_into_the_engine_constant() {
+    let map = env_map(&[("ARCHON_STOOQ_CSV_URL", "http://example.invalid/csv")]);
+
+    let unrecognized = warn_unrecognized_archon_vars(&map, &[]);
+
+    assert_eq!(unrecognized, vec!["ARCHON_STOOQ_CSV_URL".to_string()]);
+}
+
+/// No downstream project's vocabulary in the engine list. Three trading
+/// provider fixture variables lived here once, patched in to silence a startup
+/// warning; they belong beside the code that reads them.
+#[test]
+fn known_vars_carry_no_feature_specific_provider_names() {
+    for var in KNOWN_ARCHON_VARS {
+        for fragment in ["TRADINGVIEW", "STOOQ", "POLYGON", "OPENBB", "YFINANCE"] {
+            assert!(
+                !var.contains(fragment),
+                "{var} names a trading provider; it belongs with that feature, \
+                 passed as extra_known"
+            );
+        }
+    }
 }
 
 // ===========================================================================
@@ -491,18 +531,17 @@ fn known_vars_are_well_formed() {
 #[test]
 fn known_vars_covers_every_category() {
     let expected = [
-        "ANTHROPIC_API_KEY",                // auth
-        "ARCHON_MODEL",                     // model & behaviour
-        "ARCHON_DISABLE_HOOKS",             // feature control
-        "ARCHON_DOC_VECTOR_STORE_DIR",      // memory / embeddings
-        "ARCHON_LOG",                       // debugging
-        "ARCHON_DATA_DIR",                  // paths
-        "ARCHON_OCR_ENGINE",                // OCR / video tuning
-        "ARCHON_FFMPEG_BIN",                // tool binary overrides
-        "ARCHON_THEME_PREFER",              // TUI
-        "ARCHON_REMOTE_URL",                // runtime & agent lifecycle
-        "ARCHON_TRADINGVIEW_OHLCV_FIXTURE", // diagnostic fixtures
-        "ARCHON_DISABLE_TELEMETRY",         // telemetry
+        "ANTHROPIC_API_KEY",           // auth
+        "ARCHON_MODEL",                // model & behaviour
+        "ARCHON_DISABLE_HOOKS",        // feature control
+        "ARCHON_DOC_VECTOR_STORE_DIR", // memory / embeddings
+        "ARCHON_LOG",                  // debugging
+        "ARCHON_DATA_DIR",             // paths
+        "ARCHON_OCR_ENGINE",           // OCR / video tuning
+        "ARCHON_FFMPEG_BIN",           // tool binary overrides
+        "ARCHON_THEME_PREFER",         // TUI
+        "ARCHON_REMOTE_URL",           // runtime & agent lifecycle
+        "ARCHON_DISABLE_TELEMETRY",    // telemetry
     ];
 
     for var in &expected {

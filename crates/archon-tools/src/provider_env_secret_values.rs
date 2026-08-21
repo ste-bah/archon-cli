@@ -3,9 +3,9 @@
 // Redaction rewrites *every* occurrence of a value in a command's output. That
 // is correct for a credential and destructive for anything else, and the old
 // rule — replace every resolved value that is not the empty string — made no
-// distinction. Observed live: a resolved `OPENBB_PORT=6900` rewrote every
-// "6900" an agent ever read (byte counts, line numbers, timestamps) as
-// `<redacted:OPENBB_PORT>`, and a workflow run id resolved into the
+// distinction. Observed live: a resolved service port of `6900` rewrote every
+// "6900" an agent ever read (byte counts, line numbers, timestamps) as a
+// redaction marker, and a workflow run id resolved into the
 // environment rewrote the run's own paths, so agents were handed directory
 // names that do not exist.
 //

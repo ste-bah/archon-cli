@@ -29,7 +29,7 @@ mod bash_process_tests;
 
 #[path = "bash_env.rs"]
 pub(crate) mod bash_env;
-pub use bash_env::sanitized_env;
+pub use bash_env::host_env;
 
 const DEFAULT_BASH_TIMEOUT_SECS: u64 = 3600;
 

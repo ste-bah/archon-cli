@@ -30,9 +30,9 @@ const DRAIN_POLL: Duration = Duration::from_millis(50);
 /// subagent dispatched through `TaskCreate` records its terminal status from
 /// exactly such a task, and that is what closes its board item — so a subagent
 /// finishing in the same instant the run ends leaves an item claimed by an agent
-/// that no longer exists, forever. Observed live: `TASK-TDL-130`'s retry wrote
-/// its file at 18:22, the run exited at 18:22, and the item was still `claimed`
-/// twenty minutes later with the work sitting completed on disk.
+/// that no longer exists, forever. Observed live: a retried task wrote its file
+/// at 18:22, the run exited at 18:22, and the item was still `claimed` twenty
+/// minutes later with the work sitting completed on disk.
 ///
 /// Two phases, because the two cases want opposite things. **Wait first**: an
 /// agent that has already finished only needs its tail scheduled, so a short
