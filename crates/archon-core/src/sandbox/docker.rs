@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,11 +12,16 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
 
+mod doctor;
 mod exec;
 mod fs;
 mod pool;
 mod reap;
 
+pub use doctor::{
+    DockerDoctorReport, DockerDoctorStatus, DockerProbe, docker_doctor_report, probe_docker,
+    render_docker_doctor_report,
+};
 pub use fs::DockerFs;
 
 use exec::{
@@ -87,134 +92,6 @@ impl DockerConfig {
         }
         max_age_is_sane(self.container_max_age_secs)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DockerProbe {
-    pub found: bool,
-    pub version: Option<String>,
-    pub error: Option<String>,
-}
-
-impl DockerProbe {
-    pub fn missing(error: impl Into<String>) -> Self {
-        Self {
-            found: false,
-            version: None,
-            error: Some(error.into()),
-        }
-    }
-
-    pub fn found(version: impl Into<String>) -> Self {
-        Self {
-            found: true,
-            version: Some(version.into()),
-            error: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DockerDoctorStatus {
-    Disabled,
-    ReadyDetectOnly,
-    MissingBinary,
-    UnsafeConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DockerDoctorReport {
-    pub status: DockerDoctorStatus,
-    pub binary: String,
-    pub version: Option<String>,
-    pub findings: Vec<String>,
-}
-
-pub fn probe_docker(binary: &str) -> DockerProbe {
-    match Command::new(binary).arg("--version").output() {
-        Ok(output) => {
-            let version = crate::sandbox::first_non_empty_line(&output.stdout)
-                .or_else(|| crate::sandbox::first_non_empty_line(&output.stderr))
-                .unwrap_or_else(|| "present (version unavailable)".into());
-            DockerProbe::found(version)
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            DockerProbe::missing(format!("{binary} not found on PATH"))
-        }
-        Err(err) => DockerProbe {
-            found: false,
-            version: None,
-            error: Some(format!("{binary} probe failed: {err}")),
-        },
-    }
-}
-
-pub fn docker_doctor_report(config: &DockerConfig, probe: DockerProbe) -> DockerDoctorReport {
-    let mut findings = Vec::new();
-    findings
-        .push("doctor is detect-only; Bash execution routes through Docker when selected".into());
-    findings.push("provider credentials, SSH agents, Git credentials, and host home mounts are not passed by default".into());
-
-    let status = if let Err(error) = config.validate() {
-        findings.push(format!("invalid config: {error}"));
-        DockerDoctorStatus::UnsafeConfig
-    } else if config.privileged || config.mount_docker_socket || config.mount_home {
-        findings.push(
-            "unsafe config: privileged mode, Docker socket mount, or home mount is enabled".into(),
-        );
-        DockerDoctorStatus::UnsafeConfig
-    } else if !config.enabled {
-        findings.push("Docker backend is disabled in config".into());
-        DockerDoctorStatus::Disabled
-    } else if !probe.found {
-        findings.push(
-            probe
-                .error
-                .clone()
-                .unwrap_or_else(|| "Docker binary was not found".into()),
-        );
-        DockerDoctorStatus::MissingBinary
-    } else {
-        findings.push(format!("image: {}", config.image));
-        findings.push(format!("network: {}", config.network));
-        findings.push(format!(
-            "writable paths: {}",
-            if config.writable_paths.is_empty() {
-                "none".into()
-            } else {
-                config.writable_paths.join(", ")
-            }
-        ));
-        DockerDoctorStatus::ReadyDetectOnly
-    };
-
-    DockerDoctorReport {
-        status,
-        binary: config.binary.clone(),
-        version: probe.version,
-        findings,
-    }
-}
-
-pub fn render_docker_doctor_report(report: &DockerDoctorReport) -> String {
-    let status = match report.status {
-        DockerDoctorStatus::Disabled => "disabled",
-        DockerDoctorStatus::ReadyDetectOnly => "ready-detect-only",
-        DockerDoctorStatus::MissingBinary => "missing-binary",
-        DockerDoctorStatus::UnsafeConfig => "unsafe-config",
-    };
-    let version = report.version.as_deref().unwrap_or("unknown");
-    let mut out = format!(
-        "Sandbox doctor\nBackend: docker\nStatus: {status}\nBinary: {}\nVersion: {version}\n",
-        report.binary
-    );
-    for finding in &report.findings {
-        out.push_str("- ");
-        out.push_str(finding);
-        out.push('\n');
-    }
-    out.push_str("Execution: Bash routes through Docker when sandbox.backend=docker\n");
-    out
 }
 
 #[derive(Debug, Clone)]
@@ -336,7 +213,7 @@ impl DockerSandboxBackend {
             };
         }
         match self.pool.container_for(&request).await {
-            Ok(Some(name)) => self.execute_in_held(&request, name).await,
+            Ok(Some(lease)) => self.execute_in_held(&request, lease).await,
             // No lifetime is held for this request — `tool` scope, or `turn`
             // scope from a caller with no turn identity. Both mean one container
             // per command, which is what this path has always done.
@@ -351,34 +228,53 @@ impl DockerSandboxBackend {
 
     /// One command in the held container, rebuilt once if it has gone away.
     ///
-    /// The retry is bounded to a single attempt and only taken when the daemon
-    /// itself confirms the container is not running, so a command that fails on
-    /// its own merits is never silently run twice.
+    /// Two different failures, treated differently on purpose. The daemon
+    /// refusing the `exec` means the command never started, so rebuilding and
+    /// running it once is safe. A command *killed* mid-flight already ran, so it
+    /// is never re-run — re-running would repeat whatever side effects it had
+    /// got through. It is annotated instead, because a bare `Exit code 137` for
+    /// a container that disappeared underneath the command tells the model
+    /// nothing it can act on.
+    ///
+    /// Both paths ask the daemon before concluding anything, so a command that
+    /// failed on its own merits is neither retried nor annotated.
     async fn execute_in_held(
         &self,
         request: &SandboxCommandRequest,
-        name: String,
+        lease: pool::ContainerLease,
     ) -> SandboxCommandResult {
         let first = self
-            .spawn_docker(self.pool.exec_args(&name, request), request)
+            .spawn_docker(self.pool.exec_args(lease.name(), request), request)
             .await;
-        if !looks_like_a_missing_container(&first)
-            || !self.pool.forget_if_gone(request, &name).await
-        {
+        if !first.is_error {
             return first;
         }
-        match self.pool.container_for(request).await {
-            Ok(Some(rebuilt)) => {
-                self.spawn_docker(self.pool.exec_args(&rebuilt, request), request)
-                    .await
+        if looks_like_a_missing_container(&first) {
+            if !self.pool.forget_if_gone(request, lease.name()).await {
+                return first;
             }
-            Ok(None) => self.execute_in_fresh(request).await,
-            Err(error) => SandboxCommandResult {
-                content: format!("Error: {error}"),
-                is_error: true,
-                exit_code: None,
-            },
+            // Released before the rebuild so the vanished container's count
+            // cannot keep a replacement's eviction waiting on it.
+            drop(lease);
+            return match self.pool.container_for(request).await {
+                Ok(Some(rebuilt)) => {
+                    self.spawn_docker(self.pool.exec_args(rebuilt.name(), request), request)
+                        .await
+                }
+                Ok(None) => self.execute_in_fresh(request).await,
+                Err(error) => SandboxCommandResult {
+                    content: format!("Error: {error}"),
+                    is_error: true,
+                    exit_code: None,
+                },
+            };
         }
+        if looks_like_the_container_died_under_the_command(&first)
+            && self.pool.forget_if_gone(request, lease.name()).await
+        {
+            return annotate_lost_container(first);
+        }
+        first
     }
 
     async fn execute_in_fresh(&self, request: &SandboxCommandRequest) -> SandboxCommandResult {
@@ -459,6 +355,29 @@ impl DockerSandboxBackend {
 /// model, which is the truth.
 fn looks_like_a_missing_container(result: &SandboxCommandResult) -> bool {
     result.is_error && result.content.contains("Error response from daemon:")
+}
+
+/// A hint that the container was destroyed while the command was inside it.
+///
+/// 137 is 128+SIGKILL, which is what `docker exec` reports when the container it
+/// was running in is force-removed. An ordinary command can exit 137 too — it is
+/// what a host OOM kill looks like — so this only decides whether to *ask* the
+/// daemon whether the container is still there.
+fn looks_like_the_container_died_under_the_command(result: &SandboxCommandResult) -> bool {
+    matches!(result.exit_code, Some(137) | None)
+}
+
+/// Say what happened, because `Exit code 137` on its own reads as a memory limit
+/// and sends the model looking in the wrong place.
+fn annotate_lost_container(mut result: SandboxCommandResult) -> SandboxCommandResult {
+    result.content.push_str(
+        "\n\nThe sandbox container this command was running in stopped before the \
+         command finished, so the command was killed rather than failing on its \
+         own. The next command will start a fresh container. If this repeats, \
+         sandbox.docker.container_max_age_secs may be shorter than the commands \
+         being run.",
+    );
+    result
 }
 
 #[cfg(test)]

@@ -16,20 +16,35 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use archon_permissions::sandbox::{SandboxCommandRequest, SandboxScope};
 use tokio::process::Command as TokioCommand;
 
 use super::DockerConfig;
-use super::exec::{docker_exec_args, docker_pool_create_args};
+use super::exec::{ContainerKind, docker_exec_args, docker_pool_create_args};
 
-/// Label every container Archon creates carries, and the only handle teardown
+/// Labels every container Archon creates carries, and the only handle teardown
 /// has on a container whose creator is gone.
 pub(super) const OWNED_LABEL: &str = "archon.sandbox";
 pub(super) const OWNER_LABEL: &str = "archon.sandbox.owner";
 pub(super) const PID_LABEL: &str = "archon.sandbox.pid";
-const SCOPE_LABEL: &str = "archon.sandbox.scope";
+const KIND_LABEL: &str = "archon.sandbox.kind";
+
+/// The labels that make a container findable. Applied by `isolation_args`, so
+/// every container Archon starts carries them — held, per-command and terminal
+/// alike. A container without them can be neither reaped nor listed by the
+/// `docker ps --filter label=archon.sandbox=1` the docs hand operators, which
+/// makes it a leak nothing can even see.
+pub(super) fn archon_labels(kind: ContainerKind) -> Vec<(&'static str, String)> {
+    vec![
+        (OWNED_LABEL, "1".to_string()),
+        (OWNER_LABEL, owner_id().to_string()),
+        (PID_LABEL, std::process::id().to_string()),
+        (KIND_LABEL, kind.as_str().to_string()),
+    ]
+}
 
 /// Identity of *this* Archon process, for telling our containers from those of
 /// another Archon running concurrently — which is the normal case here, not an
@@ -57,6 +72,52 @@ struct LifetimeKey {
 #[derive(Debug, Clone)]
 struct Held {
     name: String,
+    /// Commands currently executing in this container.
+    ///
+    /// The turn boundary tears containers down with `docker rm --force`, and
+    /// force-removing a container with a command still inside it kills that
+    /// command — the model gets a bare `Exit code 137` for a container Archon
+    /// destroyed underneath it. "Turns are sequential" is true of one agent's
+    /// own turns and nothing enforces it across a tree: a subagent inherits its
+    /// parent's turn id and may still be running when the parent's next turn
+    /// begins. So eviction asks rather than assumes.
+    in_flight: Arc<AtomicUsize>,
+}
+
+impl Held {
+    /// Claim this container for one command. Taken under the pool lock, so a
+    /// container can never become a candidate for eviction between the decision
+    /// to use it and the count that protects it.
+    fn lease(&self) -> ContainerLease {
+        self.in_flight.fetch_add(1, Ordering::SeqCst);
+        ContainerLease {
+            name: self.name.clone(),
+            in_flight: Arc::clone(&self.in_flight),
+        }
+    }
+}
+
+/// A command's claim on a held container, held for exactly as long as the
+/// command runs.
+///
+/// The count is incremented under the pool lock, before the container can be a
+/// candidate for eviction, and decremented by `Drop` — so it is right even when
+/// the command panics or is cancelled.
+pub(super) struct ContainerLease {
+    name: String,
+    in_flight: Arc<AtomicUsize>,
+}
+
+impl ContainerLease {
+    pub(super) fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Drop for ContainerLease {
+    fn drop(&mut self) {
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// The containers this process is holding open.
@@ -106,20 +167,26 @@ impl ContainerPool {
         })
     }
 
-    /// Run `command` in the held container for this request.
+    /// A lease on the held container for this request.
     ///
     /// `Ok(None)` means this request has no lifetime to hold and the caller
     /// should fall back to the per-command `docker run`.
     pub(super) async fn container_for(
         &self,
         request: &SandboxCommandRequest,
-    ) -> Result<Option<String>, String> {
-        let Some(key) = self.key(request) else {
-            return Ok(None);
-        };
+    ) -> Result<Option<ContainerLease>, String> {
+        // Before the early return, not after it. Reaping used to sit below the
+        // `key()` bail-out, which meant it never ran under `scope = "tool"` —
+        // where `key()` is always `None` — nor for a `turn`-scoped caller with
+        // no turn id, which is what the TUI's pipeline adapter is. The two
+        // configurations that create the *most* uncollectable containers were
+        // exactly the two that never collected any.
         self.reaped
             .get_or_init(|| super::reap::reap_orphans(self.binary.clone()))
             .await;
+        let Some(key) = self.key(request) else {
+            return Ok(None);
+        };
         // Held across the `docker run` below, so two commands racing for one
         // key cannot each start a container and leave one of them orphaned with
         // nothing holding its name. The cost is that a concurrent command for a
@@ -130,27 +197,45 @@ impl ContainerPool {
             self.evict_finished_turns(&mut live, &key).await;
         }
         if let Some(held) = live.get(&key) {
-            return Ok(Some(held.name.clone()));
+            return Ok(Some(held.lease()));
         }
         let name = self.create(&key).await?;
-        live.insert(key, Held { name: name.clone() });
-        Ok(Some(name))
+        let held = Held {
+            name,
+            in_flight: Arc::new(AtomicUsize::new(0)),
+        };
+        let lease = held.lease();
+        live.insert(key, held);
+        Ok(Some(lease))
     }
 
-    /// Turns are sequential within a session, so a request carrying a turn id
-    /// this session has not seen means every earlier turn of it is over.
+    /// End the turns this session has moved past, sparing any container with a
+    /// command still inside it.
     ///
-    /// Restricted to the same session: a concurrent session's turns are not
-    /// ordered against this one's, and evicting on their behalf would destroy a
-    /// container still in use. Subagents inherit their parent's turn id — a
-    /// child's run happens inside one parent turn — so a worktree fan-out is not
-    /// evicted by its siblings.
+    /// Turns are sequential within *one agent's* own turns, and nothing enforces
+    /// that across an agent tree: a subagent inherits its parent's turn id and
+    /// may still be running when the parent's next turn begins. Force-removing
+    /// its container would kill its command and report a bare `Exit code 137`
+    /// for a container Archon destroyed itself. A busy container is therefore
+    /// left alone and reconsidered at the next turn boundary; if none comes,
+    /// `Drop` and the container's own age bound still end it.
     async fn evict_finished_turns(
         &self,
         live: &mut HashMap<LifetimeKey, Held>,
         current: &LifetimeKey,
     ) {
         for key in finished_turns(live.keys(), current) {
+            let Some(held) = live.get(&key) else {
+                continue;
+            };
+            if held.in_flight.load(Ordering::SeqCst) > 0 {
+                tracing::debug!(
+                    container = %held.name,
+                    "sandbox: a command is still running in the previous turn's \
+                     container; deferring teardown rather than killing it"
+                );
+                continue;
+            }
             if let Some(held) = live.remove(&key) {
                 self.destroy(&held.name).await;
             }
@@ -163,18 +248,11 @@ impl ContainerPool {
             owner_id(),
             NAME_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
-        let labels = vec![
-            (OWNED_LABEL.to_string(), "1".to_string()),
-            (OWNER_LABEL.to_string(), owner_id().to_string()),
-            (PID_LABEL.to_string(), std::process::id().to_string()),
-            (SCOPE_LABEL.to_string(), self.scope.as_str().to_string()),
-        ];
         let args = docker_pool_create_args(
             &self.config,
             &self.workspace_access,
             &key.working_dir,
             &name,
-            &labels,
             self.config.container_max_age_secs,
         );
         let output = TokioCommand::new(&self.binary)

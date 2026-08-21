@@ -9,6 +9,138 @@
 
 use super::*;
 
+/// The terminal container's own labels and age bound. A sibling file only
+/// because of the 500-line ceiling; it uses the helpers here.
+#[path = "terminal_lifetime.rs"]
+mod terminal_lifetime;
+
+/// Reaping used to sit *below* the `key()` bail-out in `container_for`, so under
+/// `scope = "tool"` — where the key is always `None` — it never ran at all.
+///
+/// The configuration that creates the most uncollectable containers, one per
+/// command, was the one that collected none of them. The same held for a
+/// `turn`-scoped caller with no turn id, which the TUI's pipeline adapter is.
+#[tokio::test]
+#[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
+async fn startup_reaping_runs_even_when_no_container_is_ever_held() {
+    for (scope, turn) in [
+        (SandboxScope::Tool, Some("t#1")),
+        (SandboxScope::Turn, None),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let suffix = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let orphaned = format!("archon-reap-nokey-{suffix}");
+        let _cleanup = Removed(orphaned.clone());
+        plant(&orphaned, "a-dead-archon", 0);
+
+        let backend = backend(scope);
+        let mut command = request(dir.path(), &suffix, "unused", "true");
+        command.turn_id = turn.map(ToOwned::to_owned);
+        run(&backend, command).await;
+
+        assert!(
+            !container_exists(&orphaned),
+            "{scope} scope holds no container, and so never reaped one either — \
+             leaving every orphan from a dead Archon running"
+        );
+    }
+}
+
+/// Every container Archon starts has to be findable, not just the pooled ones.
+///
+/// `docker ps --filter label=archon.sandbox=1` is the command the docs hand
+/// operators. A per-command container carried no labels at all, so that command
+/// could never show it and reaping could never collect it — and a per-command
+/// container is exactly what a timed-out command leaves behind.
+#[tokio::test]
+#[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
+async fn a_per_command_container_is_findable_by_label_while_it_runs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = backend(SandboxScope::Tool);
+
+    let running = tokio::spawn({
+        let workspace = dir.path().to_path_buf();
+        async move {
+            backend
+                .execute_bash(request(&workspace, "labelled", "labelled#1", "sleep 12"))
+                .await
+        }
+    });
+
+    let found = wait_for_labelled_container("command", dir.path()).await;
+    running.abort();
+
+    assert!(
+        found,
+        "the per-command container is invisible to the label filter, so nothing \
+         Archon has can find it once the command that owns it is gone"
+    );
+}
+
+/// Whether a container of `kind` is mounted on `workspace` right now.
+///
+/// Matched on the mount source rather than only the label, so a sibling test's
+/// container cannot satisfy this one.
+async fn wait_for_labelled_container(kind: &str, workspace: &Path) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        for id in labelled_container_ids(kind) {
+            if mount_sources(&id).iter().any(|source| {
+                std::path::Path::new(source) == workspace
+                    // Docker resolves symlinks in bind sources, and macOS and
+                    // some CI images put temp dirs behind one.
+                    || std::fs::canonicalize(source).ok().as_deref()
+                        == std::fs::canonicalize(workspace).ok().as_deref()
+            }) {
+                return true;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    false
+}
+
+fn labelled_container_ids(kind: &str) -> Vec<String> {
+    let output = std::process::Command::new("docker")
+        .args([
+            "ps",
+            "--quiet",
+            "--no-trunc",
+            "--filter",
+            "label=archon.sandbox=1",
+            "--filter",
+            &format!("label=archon.sandbox.kind={kind}"),
+        ])
+        .output();
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn mount_sources(id: &str) -> Vec<String> {
+    std::process::Command::new("docker")
+        .args(["inspect", "-f", "{{range .Mounts}}{{.Source}}\n{{end}}", id])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A container can go away for reasons that are nobody's bug: its own age bound
 /// expires, an operator runs `docker rm`, the daemon restarts. The next command
 /// must rebuild rather than hand the model a daemon error.

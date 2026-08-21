@@ -15,6 +15,7 @@ pub(super) fn docker_run_args(
         workspace_access,
         &request.working_dir,
         CONTAINER_WORKSPACE,
+        ContainerKind::Command,
     );
     args.extend(allowed_env_args(&request.env, &config.env_allowlist));
     args.extend([
@@ -26,13 +27,47 @@ pub(super) fn docker_run_args(
     args
 }
 
+/// What a container was created for, carried as a label.
+///
+/// Not the configured `sandbox.scope`: an operator looking at `docker ps` needs
+/// to know why a container exists and what will end it, and those are different
+/// questions from what the config file says. A `Command` container should be
+/// gone in seconds, a `Held` one at its scope boundary, a `Terminal` one when
+/// its shell exits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ContainerKind {
+    Held,
+    Command,
+    Terminal,
+}
+
+impl ContainerKind {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Held => "held",
+            Self::Command => "command",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
 /// A terminal's `docker run`, built from the same pieces as a command's.
 ///
-/// The differences are exactly two: `-i -t`, so the container gets a TTY on the
-/// PTY the caller opened; and a shell in place of a command, because the shell
-/// is what stays. Everything else — the mount, the caps, the network mode — is
-/// shared with [`docker_run_args`] on purpose, so a terminal cannot end up in a
-/// more permissive container than `Bash` gets.
+/// The differences are exactly three: `-i -t`, so the container gets a TTY on
+/// the PTY the caller opened; a shell in place of a command, because the shell
+/// is what stays; and an age bound, because a terminal's container is the one
+/// most likely to outlive the process that opened it. Everything else — the
+/// mount, the caps, the network mode, the labels — is shared with
+/// [`docker_run_args`] on purpose, so a terminal cannot end up in a more
+/// permissive or less discoverable container than `Bash` gets.
+///
+/// The bound is `timeout --signal=KILL`, and the signal is not a detail.
+/// Measured: `kill 1` from inside the container is dropped by the kernel, which
+/// ignores signals sent to PID 1 of a namespace unless PID 1 installed a
+/// handler; and plain `timeout`, whose default is SIGTERM, is ignored by an
+/// interactive bash. Only SIGKILL ends it. `timeout` becomes PID 1 and the shell
+/// its child, which measurement also confirms keeps the shell in the terminal's
+/// foreground process group — job control, `^C` and `^Z` all still work.
 pub(super) fn docker_terminal_args(
     config: &DockerConfig,
     workspace_access: &str,
@@ -40,13 +75,25 @@ pub(super) fn docker_terminal_args(
     container_workdir: &str,
     shell_program: &str,
 ) -> Vec<String> {
-    let mut args = docker_container_args(config, workspace_access, workspace, container_workdir);
+    let mut args = docker_container_args(
+        config,
+        workspace_access,
+        workspace,
+        container_workdir,
+        ContainerKind::Terminal,
+    );
     args.extend(["--interactive".into(), "--tty".into()]);
     // Claimed rather than inherited: the docker CLI's own `TERM` does not reach
     // the container, and a shell that finds it unset drops to line-at-a-time
     // behaviour that the output buffer then has to read back.
     args.extend(["--env".into(), "TERM=xterm-256color".into()]);
-    args.extend([config.image.clone(), shell_program.to_string()]);
+    args.extend([
+        config.image.clone(),
+        "timeout".into(),
+        "--signal=KILL".into(),
+        config.container_max_age_secs.to_string(),
+        shell_program.to_string(),
+    ]);
     args
 }
 
@@ -96,7 +143,6 @@ pub(super) fn docker_pool_create_args(
     workspace_access: &str,
     working_dir: &Path,
     name: &str,
-    labels: &[(String, String)],
     ttl_secs: u64,
 ) -> Vec<String> {
     let mut args = vec![
@@ -108,14 +154,12 @@ pub(super) fn docker_pool_create_args(
         "--name".into(),
         name.to_string(),
     ];
-    for (key, value) in labels {
-        args.extend(["--label".into(), format!("{key}={value}")]);
-    }
     args.extend(isolation_args(
         config,
         workspace_access,
         working_dir,
         CONTAINER_WORKSPACE,
+        ContainerKind::Held,
     ));
     args.extend([config.image.clone(), "sleep".into(), ttl_secs.to_string()]);
     args
@@ -155,6 +199,7 @@ fn docker_container_args(
     workspace_access: &str,
     working_dir: &Path,
     container_workdir: &str,
+    kind: ContainerKind,
 ) -> Vec<String> {
     let mut args = vec!["run".into(), "--rm".into(), "--pull".into(), "never".into()];
     args.extend(isolation_args(
@@ -162,17 +207,33 @@ fn docker_container_args(
         workspace_access,
         working_dir,
         container_workdir,
+        kind,
     ));
     args
 }
 
+/// Everything every Archon container gets, whatever created it.
+///
+/// The labels belong here rather than at the one call site that first needed
+/// them. They were added only to the pool's containers, which meant the
+/// per-command and terminal containers — the two that no scope boundary and no
+/// `Drop` ever touches — were invisible to `docker ps --filter
+/// label=archon.sandbox=1` and therefore uncollectable by reaping. A timed-out
+/// per-command container leaked with nothing able to find it. A container Archon
+/// creates and cannot name is a container Archon cannot clean up, so the
+/// labelling is part of building one, not part of pooling one.
 fn isolation_args(
     config: &DockerConfig,
     workspace_access: &str,
     working_dir: &Path,
     container_workdir: &str,
+    kind: ContainerKind,
 ) -> Vec<String> {
-    let mut args = vec!["--security-opt".into(), "no-new-privileges".into()];
+    let mut args = Vec::new();
+    for (key, value) in super::pool::archon_labels(kind) {
+        args.extend(["--label".into(), format!("{key}={value}")]);
+    }
+    args.extend(["--security-opt".into(), "no-new-privileges".into()]);
     args.extend(["--cap-drop".into(), "ALL".into()]);
     args.extend(host_identity_args());
     args.extend(["--pids-limit".into(), "256".into()]);

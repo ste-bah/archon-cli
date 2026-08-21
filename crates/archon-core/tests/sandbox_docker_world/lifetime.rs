@@ -206,6 +206,57 @@ async fn a_tool_scoped_backend_destroys_its_world_after_every_command() {
     assert_ne!(container_id(&first), container_id(&second));
 }
 
+/// A fan-out sharing one working directory now shares one container — which is
+/// a *tightening*, and the reason it is worth a test of its own.
+///
+/// Ten concurrent subagents in one tree used to get ten containers and ten times
+/// the memory and pid budget. They now share one container's `--memory 2g` and
+/// `--pids-limit 256`. That is the consolidation this change buys, and it is
+/// also how a fan-out that fitted before can stop fitting: the limits are
+/// per-container and there is now one container where there were ten.
+///
+/// Also the only test that drives concurrent `container_for` calls for the same
+/// key, so it is what would catch a pool that deadlocked or double-created under
+/// contention.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
+async fn a_same_directory_fan_out_shares_exactly_one_container() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = std::sync::Arc::new(backend(SandboxScope::Session));
+
+    let mut fan_out = Vec::new();
+    for agent in 0..10 {
+        let backend = std::sync::Arc::clone(&backend);
+        let workspace = dir.path().to_path_buf();
+        fan_out.push(tokio::spawn(async move {
+            let result = backend
+                .execute_bash(request(
+                    &workspace,
+                    "fan-out",
+                    "fan-out#1",
+                    &format!("printf 'agent {agent}\\n'; {WHICH_CONTAINER}"),
+                ))
+                .await
+                .expect("the docker backend executes bash");
+            assert!(!result.is_error, "agent {agent} failed: {}", result.content);
+            container_id(&result.content)
+        }));
+    }
+
+    let mut ids = std::collections::BTreeSet::new();
+    for agent in fan_out {
+        ids.insert(agent.await.expect("no agent panicked"));
+    }
+
+    assert_eq!(
+        ids.len(),
+        1,
+        "ten concurrent commands on one working directory produced {} containers; \
+         the pool either raced and double-created, or is not sharing at all: {ids:?}",
+        ids.len()
+    );
+}
+
 /// `workspace_access = "scratch"` promises "a read-only workspace plus somewhere
 /// to write". Under a container per command that promise could not be kept:
 /// `/scratch` was destroyed by the very command that wrote to it, so the mount

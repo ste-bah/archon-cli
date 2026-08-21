@@ -480,7 +480,7 @@ and OpenShell tooling with `scripts/install-system-deps.sh --with-docker`,
 [sandbox]
 backend = "disabled"       # "disabled" | "logical" | "docker" | "ssh" | "openshell"
 mode = "risky"             # "risky" | "shell" route shell only; "all" is strict
-scope = "session"          # "session" | "turn" | "tool" — how long one sandbox lives
+# scope = "session"        # "session" | "turn" | "tool" — how long one sandbox lives
 workspace_access = "ro"    # "ro" | "rw" | "scratch"
 
 [sandbox.docker]
@@ -525,7 +525,7 @@ host_shell_fallback = false
 |---|---|---|
 | `backend` | `"disabled"` | Selects the sandbox route for Bash. `logical` is a policy gate only; `docker`, `ssh`, and `openshell` are real isolation backends when their section is enabled. |
 | `mode` | `"risky"` | Chooses how broadly a real backend applies. `risky` and `shell` route Bash/Shell through Docker/SSH/OpenShell while normal host-side tools such as `Write`, `Edit`, and `WebFetch` continue through permission preflight. `all` is strict and blocks unsupported host-side mutation, network, and agent-spawn tools. |
-| `scope` | `"session"` | How long one sandbox lives. Under `docker`, `session` and `turn` hold a container open and re-enter it with `docker exec`, so build caches outside the workspace (`~/.cargo`, `~/.npm`, apt) survive between commands; `tool` builds and destroys one per command. Keyed by working directory too, so a worktree-isolated subagent never shares a sandbox with its parent. `ssh`'s world is durable under every scope. `openshell` supports only `"tool"` and refuses the others at config load. See [Sandboxing](../security/sandboxing.md#how-long-a-sandbox-lives). |
+| `scope` | `"session"` | How long one sandbox lives. Under `docker`, `session` and `turn` hold a container open and re-enter it with `docker exec`, so build caches outside the workspace (`~/.cargo`, `~/.npm`, apt) survive between commands; `tool` builds and destroys one per command. Keyed by working directory too, so a worktree-isolated subagent never shares a sandbox with its parent. Note that consolidating containers consolidates their memory and pid limits: a same-directory fan-out that fitted under `tool` may need a larger `memory_limit`. `ssh`'s world is durable under every scope. `openshell` supports only `"tool"`: writing another value fails config load, while leaving the key out falls back to `"tool"` with a warning. See [Sandboxing](../security/sandboxing.md#how-long-a-sandbox-lives). |
 | `sandbox.docker.container_max_age_secs` | `14400` | Hard upper bound on a held container's life, enforced by the container's own PID 1 rather than a host-side timer, so it holds even if Archon is killed and never restarted. Must exceed any Bash timeout; values under 60 are rejected. |
 | `workspace_access` | `"ro"` | Workspace mount policy. `rw` allows writes; `scratch` keeps the workspace read-only and provides ephemeral scratch space where supported. |
 | `sandbox.docker.*` | see template | Docker binary/image, resource limits, network mode, writable paths, and mount hardening. Docker socket, home mount, and privileged mode default to off. |

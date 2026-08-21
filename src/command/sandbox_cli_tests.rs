@@ -78,13 +78,43 @@ fn sandbox_status_says_what_the_backend_does_with_the_configured_scope() {
     );
 }
 
-/// A scope the backend cannot keep never reaches `render_status` in a real run —
-/// config load rejects it first — but status must not paper over one either.
+/// The reachable half of "the backend cannot keep this scope": a default nobody
+/// chose, which falls back rather than failing the configuration. Status has to
+/// show both what was configured and what is actually happening, or the fallback
+/// is silent.
 #[test]
-fn sandbox_status_names_a_scope_the_backend_cannot_honour() {
+fn sandbox_status_shows_a_scope_that_fell_back_and_says_why() {
+    let config = archon_core::sandbox::SandboxConfig {
+        backend: "openshell".into(),
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&config, false).unwrap();
+
+    assert!(
+        body.contains("Scope: session"),
+        "the configured value: {body}"
+    );
+    assert!(
+        body.contains("Sandbox lifetime: tool"),
+        "the effective value has to be shown next to it: {body}"
+    );
+    assert!(body.contains("--no-keep"), "and the reason: {body}");
+    assert!(
+        body.contains("Set sandbox.scope explicitly"),
+        "an operator has to be told how to take the decision back: {body}"
+    );
+}
+
+/// An explicitly chosen scope the backend cannot keep never reaches
+/// `render_status` in a real run — config load refuses it first — but status
+/// must not paper over one either.
+#[test]
+fn sandbox_status_names_a_scope_the_operator_chose_and_the_backend_refuses() {
     let config = archon_core::sandbox::SandboxConfig {
         backend: "openshell".into(),
         scope: "session".into(),
+        scope_explicit: true,
         ..archon_core::sandbox::SandboxConfig::default()
     };
 

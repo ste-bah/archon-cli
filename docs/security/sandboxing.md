@@ -71,18 +71,32 @@ something else:
 |---|---|---|---|
 | `docker` | one container held open, re-entered per command | one per turn, torn down at the boundary | one container per command |
 | `ssh` | the remote host is durable — Archon neither creates nor destroys it, so every scope reaches the same machine and state always survives | as `session` | as `session` |
-| `openshell` | **refused at config load** | **refused at config load** | one sandbox per command, which is what `--no-keep` does |
+| `openshell` | **not supported** | **not supported** | one sandbox per command, which is what `--no-keep` does |
 | `disabled`, `logical` | not applicable; no world is created | | |
 
 `archon sandbox status` prints the answer as `Sandbox lifetime:`, so the
 configured value and the actual behaviour are shown side by side.
 
-**This is a breaking config change for `openshell`.** The default
-`scope = "session"` no longer loads under `backend = "openshell"`; set
-`scope = "tool"`, which is what that backend has always done. Whether OpenShell
-can exec into an existing sandbox was not established — the CLI was not
-available to test against — so claiming a longer lifetime for it would have been
-a guess.
+#### When a backend cannot keep the scope
+
+What happens depends on whether you chose the value:
+
+- **You set `scope` in a config file.** The configuration fails to load, naming
+  the backend, the scope, and the setting that would work. A lifetime you asked
+  for and did not get is exactly the failure this whole area exists to stop.
+- **You did not set `scope` at all.** It falls back to `tool` — the narrowest
+  lifetime, and the behaviour that predates any of this — and logs a warning
+  saying so. `scope` defaults to `session`, so refusing here would fail an
+  entire configuration over a key that is not in the file.
+
+In practice this affects `openshell`: `backend = "openshell"` with no `scope`
+key loads and runs a sandbox per command; with `scope = "session"` written out,
+it refuses. The shipped templates leave `scope` commented out for this reason —
+uncomment it to choose deliberately.
+
+Whether OpenShell can exec into an existing sandbox was not established: the CLI
+was not available to test against, so claiming a longer lifetime for it would
+have been a guess.
 
 SSH connection multiplexing (`ControlMaster` + `ControlPersist`) is deliberately
 not implemented. It would make the transport cheaper and would change nothing
@@ -90,7 +104,26 @@ about lifetime, since the remote host is already durable; no SSH target was
 available to verify it against, and OpenSSH does not support `ControlMaster` on
 Windows at all.
 
-### Cleaning up held containers
+### Cleaning up containers
+
+**Every container Archon starts is labelled**, whether it is held for a scope,
+built for a single command, or hosting a terminal:
+
+| Label | Value |
+|---|---|
+| `archon.sandbox` | `1` |
+| `archon.sandbox.owner` | id unique to the Archon process that created it |
+| `archon.sandbox.pid` | that process's pid |
+| `archon.sandbox.kind` | `held`, `command`, or `terminal` |
+
+```bash
+docker ps -a --filter label=archon.sandbox=1
+```
+
+The labels are applied where the container's isolation arguments are built, so a
+new creation path cannot produce an unlabelled container by omission. That
+matters because an unlabelled container is not merely untidy: nothing can find
+it, so no cleanup mechanism can ever collect it.
 
 Holding a container open trades away `--rm`'s guarantee, so the guarantee is
 replaced by three independent mechanisms — independent because the first two do
@@ -98,46 +131,80 @@ not run in the case that matters most:
 
 1. **Scope boundary.** A new turn tears down the previous turn's containers for
    that session; the session's containers are removed when the last reference to
-   the backend is dropped. Best-effort by construction: `Drop` does not run under
-   SIGKILL, an abort, or `std::process::exit`, and it does not run when something
-   process-global still holds a reference — the workflow CLI installs its
-   subagent executor as exactly that, so on that path teardown rests entirely on
-   the two mechanisms below.
-2. **Startup reaping.** Before the first container of a process is created,
-   every container carrying Archon's labels whose creating process is gone is
-   removed. Ownership is checked twice — a foreign owner id *and* a dead pid —
-   because parallel Archon sessions on one machine are ordinary, and reaping on
-   "not mine" alone would have two runs destroying each other's containers.
+   the backend is dropped. A container with a command still executing inside it
+   is never torn down — it is left for the next boundary — because force-removing
+   it would kill that command and report a bare `Exit code 137` for a container
+   Archon destroyed itself.
+
+   Best-effort by construction: `Drop` does not run under SIGKILL, an abort, or
+   `std::process::exit`, and it does not run when something process-global still
+   holds a reference — the workflow CLI installs its subagent executor as exactly
+   that, so on that path teardown rests entirely on the two mechanisms below and
+   a container can live for the full `container_max_age_secs`.
+2. **Reaping.** Before the first sandboxed command a docker backend runs, every
+   container carrying Archon's labels whose creating process is gone is removed.
+   Ownership is checked twice — a foreign owner id *and* a dead pid — because
+   parallel Archon sessions on one machine are ordinary, and reaping on "not
+   mine" alone would have two runs destroying each other's containers.
+
+   It happens once per docker backend, which is once per session or workflow run
+   rather than literally once per process; and it is driven by `Bash`, so a
+   session that only ever opens a terminal does not trigger it.
 3. **The container's own age bound.** `sandbox.docker.container_max_age_secs`
-   (default 4h) is the container's PID 1, and `--rm` is set, so it stops and is
-   removed on its own. This is the only mechanism that needs nothing from the
-   host, and it is what bounds the leak when Archon is killed and never started
-   again. A command still running at that age is killed with the container, so
-   the value must stay well above any Bash timeout; below 60s it is rejected.
+   (default 4h) is enforced from *inside* the container — `sleep` as PID 1 for a
+   held or per-command container, `timeout --signal=KILL` wrapping the shell for
+   a terminal — with `--rm` set, so it stops and is removed on its own. This is
+   the only mechanism that needs nothing from the host, and it is what bounds the
+   leak when Archon is killed and never started again. A command or shell still
+   running at that age is killed with the container, so the value must stay well
+   above any Bash timeout; below 60s it is rejected.
+
+   SIGKILL rather than SIGTERM is not a detail: an interactive shell ignores
+   SIGTERM, and a signal sent to PID 1 of a namespace is dropped by the kernel
+   unless PID 1 installed a handler. Both were measured; neither of the gentler
+   options ends the container at all.
 
 A held container that has gone away for any of these reasons is rebuilt on the
 next command rather than surfacing a daemon error. The daemon is asked whether
 the container is running before anything is rebuilt, so an ordinary command
-failure is never silently retried.
+failure is never silently retried — and a command that was *killed* by its
+container disappearing is never re-run, because it already ran. It is annotated
+instead, since `Exit code 137` on its own reads as a memory limit.
 
 ### What a held sandbox accumulates
 
 A command that hits its Bash timeout has the local `docker` client killed, which
-does not stop the process it started inside the container. Under a container per
-command that process died with the container; under a held one it stays until the
-container does, counting against that container's `--pids-limit`, memory and CPU
-share for the rest of the scope. The container's age bound is the backstop.
-Nothing tracks individual `exec` processes, so a scope full of timed-out commands
-degrades rather than fails cleanly.
+does not stop the process it started inside the container. Under a held container
+that process stays until the container does, counting against its
+`--pids-limit 256`, memory and CPU share for the rest of the scope. Measured:
+five timed-out commands left 22 stray processes, so on the order of sixty such
+commands will wedge a session with "Resource temporarily unavailable". Nothing
+tracks individual `exec` processes, so a scope full of timed-out commands
+degrades rather than failing cleanly. The container's age bound is the backstop.
 
-### Resource limits under a held sandbox
+This is a real limitation and still an improvement on what it replaced: a
+timed-out command under the old per-command backend leaked the *entire
+container*, which carried no labels, so nothing could find it and no cleanup
+mechanism could collect it. Stray processes inside a bounded, labelled,
+self-expiring container are a smaller and more visible failure than a container
+nobody knows about.
 
-`--memory`, `--cpus` and `--pids-limit` are per container, and this change moves
-the multiplier rather than removing it. A ten-agent fan-out sharing one working
-directory used to run ten concurrent containers and now shares one, so the
-limits apply once instead of ten times. A fan-out across ten *worktrees* still
-gets ten containers, because they must not share a world — so the limits still
-multiply there, exactly as before. There is no aggregate cap; that remains open.
+### Resource limits — a tightening you may need to raise
+
+`--memory`, `--cpus` and `--pids-limit` are per container, and consolidating
+containers consolidates the limits with them. **A fan-out that fitted before this
+change can stop fitting after it.**
+
+Ten subagents sharing one working directory used to get ten containers, and so
+ten times 2 GB and ten times 256 pids. They now share a single container's 2 GB
+and 256 pids. If a workload was relying — knowingly or not — on that
+multiplication, it will now hit the limit and OOM or fail to fork. Raise
+`sandbox.docker.memory_limit` and `sandbox.docker.cpu_limit` to cover the whole
+fan-out, or set `sandbox.scope = "tool"` to restore a container per command.
+
+A fan-out across ten *worktrees* still gets ten containers, because they must not
+share a world — so the limits still multiply there, exactly as before. There is
+no aggregate cap across containers; that remains open.
 
 ## One world, not two
 
@@ -218,6 +285,13 @@ workspace: a package the terminal installs, or a file it writes to `/tmp`, is no
 what the next `Bash` call sees. `SandboxTerminal` is resolved synchronously and
 carries no session or turn identity, so joining the held container would need
 both; that is not done.
+
+A terminal's container carries the same labels and the same
+`container_max_age_secs` bound as any other, so a shell left open past that age
+is closed and its container removed. It is the container most likely to outlive
+the process that opened it — a `docker run -it` container keeps running when the
+client attached to it dies — which is why it is bounded rather than trusted to
+its owner.
 
 A terminal remembers the world it opened in. A host shell started before a
 sandbox was switched on cannot be written to afterwards; close it and open a

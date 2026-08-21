@@ -1,12 +1,19 @@
 # OpenShell Sandbox
 
-> **`sandbox.scope` must be `"tool"`.** Every command runs
+> **This backend only does `sandbox.scope = "tool"`.** Every command runs
 > `openshell sandbox create --no-keep --`, which destroys its sandbox on exit, so
-> `session` and `turn` are lifetimes this backend cannot keep and are refused at
-> config load. Whether the OpenShell CLI can exec into an existing sandbox was
-> not established; if `sandbox create` without `--no-keep` yields a durable
-> handle and some verb can run a command in it, this backend could hold one open
-> and terminals would stop having to be refused.
+> `session` and `turn` are lifetimes it cannot keep.
+>
+> Writing `scope = "session"` or `scope = "turn"` in a config file fails the load,
+> naming the setting that works. Leaving `scope` out entirely — it defaults to
+> `session` — falls back to `tool` with a warning, because failing a whole
+> configuration over a key nobody wrote is a different thing from refusing one
+> they did. The shipped templates leave it commented out for exactly this.
+>
+> Whether the OpenShell CLI can exec into an existing sandbox was not
+> established; if `sandbox create` without `--no-keep` yields a durable handle
+> and some verb can run a command in it, this backend could hold one open and
+> terminals would stop having to be refused.
 
 OpenShell support is conservative in this release slice. Configuration, status,
 explain, doctor, and Bash execution routing exist, with provider injection and

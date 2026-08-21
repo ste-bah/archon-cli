@@ -105,28 +105,41 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
 /// actually does, which is the question an operator wondering why their build
 /// re-downloads its dependencies is really asking.
 fn describe_scope(config: &archon_core::sandbox::SandboxConfig) -> String {
+    use archon_core::sandbox::ScopeDecision;
     use archon_permissions::SandboxScopeSupport;
 
-    match config.scope_support() {
-        Ok(None) => "not applicable; this backend creates no world of its own".into(),
-        Ok(Some(SandboxScopeSupport::Held)) => {
-            "one sandbox held open for the scope and re-entered per command; \
-             caches outside the workspace survive between commands"
-                .into()
+    match config.scope_decision() {
+        Ok(ScopeDecision::NotApplicable) => {
+            "not applicable; this backend creates no world of its own".into()
         }
-        Ok(Some(SandboxScopeSupport::Durable)) => {
-            "the world outlives Archon, so every scope reaches the same durable \
-             place and state always survives"
-                .into()
-        }
-        Ok(Some(SandboxScopeSupport::PerCommand)) => {
-            "a sandbox built and destroyed per command; nothing outside the \
-             workspace survives"
-                .into()
-        }
-        Ok(Some(SandboxScopeSupport::Unsupported(reason))) | Err(reason) => {
-            format!("unsupported: {reason}")
-        }
+        Ok(ScopeDecision::Honoured { support, .. }) => match support {
+            SandboxScopeSupport::Held => "one sandbox held open for the scope and re-entered \
+                 per command; caches outside the workspace survive between commands"
+                .into(),
+            SandboxScopeSupport::Durable => "the world outlives Archon, so every scope reaches \
+                 the same durable place and state always survives"
+                .into(),
+            SandboxScopeSupport::PerCommand => "a sandbox built and destroyed per command; \
+                 nothing outside the workspace survives"
+                .into(),
+            // `scope_decision` turns this into a fallback or an error, so it
+            // never arrives here. Matched rather than wildcarded so a variant
+            // added later has to be thought about.
+            SandboxScopeSupport::Unsupported(reason) => format!("unsupported: {reason}"),
+        },
+        Ok(ScopeDecision::FellBack {
+            scope,
+            from,
+            reason,
+        }) => format!(
+            "{scope} — sandbox.scope was not set, and \"{from}\" is not something this backend \
+             can do: {reason}. Set sandbox.scope explicitly to choose for yourself"
+        ),
+        // Reachable only if something renders a status for a configuration that
+        // did not load; `archon sandbox status` cannot, because validation runs
+        // first. Printed rather than swallowed so it can never become the quiet
+        // half of a bad configuration.
+        Err(reason) => format!("unsupported: {reason}"),
     }
 }
 

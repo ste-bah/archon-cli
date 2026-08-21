@@ -33,13 +33,16 @@ pub(crate) fn isolation_backend(config: &SandboxConfig) -> Option<Arc<dyn Sandbo
         "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
             config.docker.clone(),
             config.workspace_access.clone(),
-            // `unwrap_or_default` is `session`, and it is unreachable in any
-            // configured run: `SandboxConfig::validate` parses this at load and
-            // fails the whole config on an unknown value, so anything reaching
-            // here has already been through it.
+            // The *effective* scope, not the configured one: a defaulted scope
+            // this backend cannot keep has already fallen back, and rebuilding
+            // from the raw config value here would quietly undo that.
+            // `unwrap_or_default` is unreachable in any configured run —
+            // `SandboxConfig::validate` resolves this at load and fails the
+            // whole config on anything that cannot resolve.
             config
-                .policy()
-                .and_then(|p| p.scope_kind())
+                .scope_decision()
+                .ok()
+                .and_then(|decision| decision.scope())
                 .unwrap_or_default(),
         )),
         "ssh" => Arc::new(archon_core::sandbox::SshSandboxBackend::new(

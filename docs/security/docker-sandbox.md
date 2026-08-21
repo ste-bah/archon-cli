@@ -62,22 +62,51 @@ same limits, same network mode — because the same code builds both argument
 lists. Per-command environment moves from `--env` on `run` to `--env` on `exec`,
 under the same allowlist and the same credential filter.
 
+### Resource limits are now shared
+
+`--memory`, `--cpus` and `--pids-limit` are per container, so consolidating
+containers consolidates the limits. **A fan-out that fitted before can stop
+fitting.** Ten subagents in one working directory used to get ten containers and
+ten times the budget; they now share one container's `--memory 2g` and
+`--pids-limit 256`. Raise `memory_limit`/`cpu_limit` to cover the whole fan-out,
+or set `sandbox.scope = "tool"` for a container per command. Separate worktrees
+still get separate containers, and separate limits with them.
+
 ### Cleanup
 
-Held containers carry `archon.sandbox=1`, `archon.sandbox.owner`,
-`archon.sandbox.pid` and `archon.sandbox.scope` labels. Three mechanisms remove
-them; see [Sandboxing](sandboxing.md#cleaning-up-held-containers) for why there
-are three. The one that holds unconditionally is
-`sandbox.docker.container_max_age_secs` (default 4h, minimum 60s): it is the
-container's own PID 1 and `--rm` is set, so the container stops and is removed
-at that age even if Archon was SIGKILLed and never restarted. Keep it well above
-any Bash timeout — a command still running at that age dies with the container.
-
-To find anything left behind by hand:
+**Every** container Archon starts is labelled — held, per-command and terminal
+alike:
 
 ```bash
 docker ps -a --filter label=archon.sandbox=1
+docker ps -a --filter label=archon.sandbox.kind=terminal
 ```
+
+`archon.sandbox=1`, `archon.sandbox.owner`, `archon.sandbox.pid` and
+`archon.sandbox.kind` (`held` | `command` | `terminal`). The labels go on where
+the isolation arguments are built, so no creation path can produce an unfindable
+container by omission.
+
+Three mechanisms remove them; see
+[Sandboxing](sandboxing.md#cleaning-up-containers) for why there are three. The
+one that holds unconditionally is `sandbox.docker.container_max_age_secs`
+(default 4h, minimum 60s), enforced from inside the container — `sleep` as PID 1,
+or `timeout --signal=KILL` around a terminal's shell — with `--rm` set, so the
+container stops and is removed at that age even if Archon was SIGKILLed and never
+restarted. Keep it well above any Bash timeout: a command or shell still running
+at that age dies with the container.
+
+Reaping runs once per docker backend, before its first sandboxed command. Two
+consequences worth knowing:
+
+- **Under the workflow CLI, `Drop` never runs.** The subagent executor is
+  installed process-globally and holds the backend for the life of the process,
+  so a workflow run's containers are collected by the age bound, or by the next
+  Archon that starts and reaps them — not at the end of the run. Under a 4h
+  default that is a 4h window.
+- A session that only ever opens a terminal never runs a `Bash` command, so it
+  never triggers reaping. Its own containers are still labelled and still
+  age-bounded.
 
 ## Workspace Paths
 

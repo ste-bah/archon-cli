@@ -313,14 +313,16 @@ backend = "disabled"
 #   "all" requires every tool to be backend-compatible, so unsupported
 #   host-side mutation/network/agent-spawn tools are blocked.
 mode = "risky"
-# How long one sandbox lives: "session" | "turn" | "tool"
+# How long one sandbox lives: "session" | "turn" | "tool". Default "session".
 #   "session" holds one sandbox for the whole run, "turn" one per agent turn,
 #   "tool" builds and destroys one per command. Under docker, "session" and
 #   "turn" keep build caches (~/.cargo, ~/.npm, apt) alive between commands;
 #   "tool" destroys them every time. Keyed by working directory as well, so a
 #   worktree-isolated subagent never shares a sandbox with its parent.
-#   The openshell backend supports only "tool" and says so at config load.
-scope = "session"
+#   The openshell backend can only do "tool". Left commented on purpose: setting
+#   a lifetime a backend cannot keep fails config load, while leaving it unset
+#   falls back to "tool" with a warning. Uncomment to choose for yourself.
+# scope = "session"
 # Workspace mount policy: "ro" | "rw" | "scratch"
 workspace_access = "ro"
 

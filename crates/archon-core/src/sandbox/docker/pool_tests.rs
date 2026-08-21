@@ -4,6 +4,7 @@
 //! real daemon; nothing here can establish that a container was reused, and
 //! nothing here pretends to.
 
+use super::super::exec::{docker_run_args, docker_terminal_args};
 use super::*;
 use std::path::PathBuf;
 
@@ -147,31 +148,15 @@ fn a_new_turn_ends_only_its_own_sessions_earlier_turns() {
 /// Teardown's only handle on a container whose creator is gone.
 #[test]
 fn create_arguments_carry_the_labels_teardown_finds_containers_by() {
-    let labels = vec![
-        (OWNED_LABEL.to_string(), "1".to_string()),
-        (OWNER_LABEL.to_string(), "abc123".to_string()),
-        (PID_LABEL.to_string(), "4242".to_string()),
-    ];
-
     let args = docker_pool_create_args(
         &config(),
         "rw",
         std::path::Path::new("/repo"),
         "archon-sbx-abc123-0",
-        &labels,
         900,
     );
 
-    for expected in [
-        "archon.sandbox=1",
-        "archon.sandbox.owner=abc123",
-        "archon.sandbox.pid=4242",
-    ] {
-        assert!(
-            args.contains(&expected.to_string()),
-            "missing {expected} in {args:?}"
-        );
-    }
+    assert_labelled(&args, "held");
     assert!(args.contains(&"--detach".to_string()));
     assert!(
         args.contains(&"--rm".to_string()),
@@ -182,6 +167,69 @@ fn create_arguments_carry_the_labels_teardown_finds_containers_by() {
         vec!["900", "sleep"],
         "the container's own lifetime bound is its PID 1"
     );
+}
+
+/// **Every** container, not just the pooled ones.
+///
+/// The labels started life on the pool's containers alone, which left the
+/// per-command and terminal containers — the two nothing else ever tears down —
+/// invisible to `docker ps --filter label=archon.sandbox=1` and therefore
+/// uncollectable by reaping. A timed-out per-command container leaked with
+/// nothing able to find it, and a terminal whose owner was killed leaked
+/// forever.
+#[test]
+fn every_container_archon_starts_is_labelled_and_therefore_findable() {
+    let per_command = docker_run_args(&config(), "rw", &request("/repo", "s1", None));
+    assert_labelled(&per_command, "command");
+
+    let terminal = docker_terminal_args(
+        &config(),
+        "rw",
+        std::path::Path::new("/repo"),
+        "/workspace",
+        "/bin/bash",
+    );
+    assert_labelled(&terminal, "terminal");
+}
+
+/// A terminal's container is the one most likely to outlive its owner, and it
+/// was the only one with no age bound at all.
+#[test]
+fn a_terminal_container_carries_the_same_age_bound_as_a_held_one() {
+    let cfg = DockerConfig {
+        container_max_age_secs: 900,
+        ..config()
+    };
+
+    let args = docker_terminal_args(
+        &cfg,
+        "rw",
+        std::path::Path::new("/repo"),
+        "/workspace",
+        "/bin/bash",
+    );
+
+    assert_eq!(
+        args.iter().rev().take(4).collect::<Vec<_>>(),
+        vec!["/bin/bash", "900", "--signal=KILL", "timeout"],
+        "the shell must run under an age bound, and the signal must be KILL: \
+         measured, an interactive bash ignores the SIGTERM plain `timeout` sends"
+    );
+}
+
+fn assert_labelled(args: &[String], kind: &str) {
+    for expected in [
+        format!("{OWNED_LABEL}=1"),
+        format!("{OWNER_LABEL}={}", owner_id()),
+        format!("{PID_LABEL}={}", std::process::id()),
+        format!("archon.sandbox.kind={kind}"),
+    ] {
+        assert!(
+            args.contains(&expected),
+            "missing label {expected} — a container Archon cannot find is one it \
+             cannot clean up: {args:?}"
+        );
+    }
 }
 
 /// A held container must not become a way to smuggle in a variable the
@@ -204,6 +252,90 @@ fn a_held_containers_command_carries_only_allowlisted_non_secret_environment() {
         args.iter().rev().take(3).collect::<Vec<_>>(),
         vec!["true", "-lc", "/bin/bash"]
     );
+}
+
+/// A busy container must survive the turn boundary.
+///
+/// `docker rm --force` on a container with a command inside it kills that
+/// command, and the model gets a bare `Exit code 137` for a container Archon
+/// destroyed itself. "Turns are sequential" holds for one agent's own turns and
+/// nothing enforces it across a tree — a subagent inherits its parent's turn id
+/// and can still be running when the parent's next turn starts.
+#[tokio::test]
+async fn a_container_with_a_command_still_in_it_survives_the_turn_boundary() {
+    let pool = pool(SandboxScope::Turn);
+    let previous = pool
+        .key(&request("/repo", "s1", Some("s1#1")))
+        .expect("held");
+    let current = pool
+        .key(&request("/repo", "s1", Some("s1#2")))
+        .expect("held");
+    let mut live = HashMap::new();
+    live.insert(previous.clone(), held("archon-sbx-busy"));
+    let _lease = live[&previous].lease();
+
+    pool.evict_finished_turns(&mut live, &current).await;
+
+    assert!(
+        live.contains_key(&previous),
+        "the previous turn's container was torn down with a command still \
+         running in it"
+    );
+}
+
+/// And the deferral must be a deferral, not an exemption: once the command
+/// finishes, the next turn boundary collects it.
+#[tokio::test]
+async fn the_same_container_is_collected_once_its_command_finishes() {
+    let pool = pool(SandboxScope::Turn);
+    let previous = pool
+        .key(&request("/repo", "s1", Some("s1#1")))
+        .expect("held");
+    let current = pool
+        .key(&request("/repo", "s1", Some("s1#2")))
+        .expect("held");
+    let mut live = HashMap::new();
+    live.insert(previous.clone(), held("archon-sbx-idle"));
+
+    let lease = live[&previous].lease();
+    pool.evict_finished_turns(&mut live, &current).await;
+    assert!(live.contains_key(&previous), "busy, so deferred");
+
+    drop(lease);
+    pool.evict_finished_turns(&mut live, &current).await;
+
+    assert!(
+        !live.contains_key(&previous),
+        "an idle container from a finished turn must not survive a second boundary"
+    );
+}
+
+/// A lease is released even when the command it covers panics or is cancelled,
+/// because the count is a `Drop` and not a manual decrement.
+#[test]
+fn a_lease_is_released_when_its_command_unwinds() {
+    let container = held("archon-sbx-panicky");
+    let counter = std::sync::Arc::clone(&container.in_flight);
+
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _lease = container.lease();
+        assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+        panic!("the command blew up");
+    }));
+
+    assert!(unwound.is_err(), "the test's own premise");
+    assert_eq!(
+        counter.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a container stays pinned forever if a lease can be lost to a panic"
+    );
+}
+
+fn held(name: &str) -> Held {
+    Held {
+        name: name.into(),
+        in_flight: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    }
 }
 
 /// The bound is what stops a leaked container living forever, so a value that

@@ -27,13 +27,26 @@ pub use ssh::{
     render_ssh_doctor_report, ssh_doctor_report, ssh_filesystem,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+// No container-level `#[serde(default)]`: it is a deserialization attribute and
+// `Deserialize` is hand-written below, so leaving it here would only suggest
+// this struct fills its own defaults when the impl is what actually does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SandboxConfig {
     pub backend: String,
     pub mode: String,
     pub scope: String,
     pub workspace_access: String,
+    /// Whether `scope` came from the configuration or from this struct's
+    /// default.
+    ///
+    /// Refusing to load is right for a lifetime an operator asked for and the
+    /// backend cannot keep. It is not right for one they never chose: `scope`
+    /// defaults to `session`, so `backend = "openshell"` with no `scope` key at
+    /// all would have failed the *whole* configuration over a value nobody
+    /// wrote. Not serialised — it describes where the value came from, not what
+    /// it is, and a round trip through TOML would invent an answer.
+    #[serde(skip)]
+    pub scope_explicit: bool,
     pub docker: DockerConfig,
     pub ssh: SshConfig,
     pub openshell: OpenShellConfig,
@@ -45,10 +58,79 @@ impl Default for SandboxConfig {
             backend: "disabled".into(),
             mode: "risky".into(),
             scope: "session".into(),
+            scope_explicit: false,
             workspace_access: "ro".into(),
             docker: DockerConfig::default(),
             ssh: SshConfig::default(),
             openshell: OpenShellConfig::default(),
+        }
+    }
+}
+
+/// Hand-written so `scope_explicit` can record whether the key was present.
+///
+/// `#[serde(default)]` on the derive would fill `scope` in silently, which is
+/// the whole distinction this needs to keep.
+impl<'de> Deserialize<'de> for SandboxConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// Every scalar is an `Option` so an absent key stays distinguishable
+        /// from one written with the default value; the nested sections keep
+        /// their own defaults, which already do the right thing.
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct Wire {
+            backend: Option<String>,
+            mode: Option<String>,
+            scope: Option<String>,
+            workspace_access: Option<String>,
+            docker: DockerConfig,
+            ssh: SshConfig,
+            openshell: OpenShellConfig,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let defaults = SandboxConfig::default();
+        Ok(SandboxConfig {
+            backend: wire.backend.unwrap_or(defaults.backend),
+            mode: wire.mode.unwrap_or(defaults.mode),
+            scope_explicit: wire.scope.is_some(),
+            scope: wire.scope.unwrap_or(defaults.scope),
+            workspace_access: wire.workspace_access.unwrap_or(defaults.workspace_access),
+            docker: wire.docker,
+            ssh: wire.ssh,
+            openshell: wire.openshell,
+        })
+    }
+}
+
+/// What a configuration's `sandbox.scope` actually resolves to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopeDecision {
+    /// The backend does what the configuration asked for.
+    Honoured {
+        scope: archon_permissions::SandboxScope,
+        support: SandboxScopeSupport,
+    },
+    /// The backend cannot keep the scope, but nobody chose it — it is the
+    /// struct default — so the narrowest lifetime is used instead and this says
+    /// why. `tool` is the fallback because it is the least sharing a backend can
+    /// do and the behaviour that predates any of this.
+    FellBack {
+        scope: archon_permissions::SandboxScope,
+        from: archon_permissions::SandboxScope,
+        reason: String,
+    },
+    /// The backend creates no world, so no scope names anything.
+    NotApplicable,
+}
+
+impl ScopeDecision {
+    /// The lifetime that will actually be used, if any.
+    #[must_use]
+    pub fn scope(&self) -> Option<archon_permissions::SandboxScope> {
+        match self {
+            Self::Honoured { scope, .. } | Self::FellBack { scope, .. } => Some(*scope),
+            Self::NotApplicable => None,
         }
     }
 }
@@ -60,7 +142,20 @@ impl SandboxConfig {
         self.docker.validate()?;
         self.ssh.validate()?;
         self.openshell.validate()?;
-        self.scope_support()?;
+        if let ScopeDecision::FellBack {
+            scope,
+            from,
+            reason,
+        } = self.scope_decision()?
+        {
+            tracing::warn!(
+                configured = %from,
+                effective = %scope,
+                %reason,
+                "sandbox.scope was not set and this backend cannot keep the default; \
+                 using the narrowest lifetime instead"
+            );
+        }
         Ok(())
     }
 
@@ -69,18 +164,35 @@ impl SandboxConfig {
     /// The configuration asks the backend rather than deciding for it, which is
     /// the precedent `SandboxBackend::terminal` set: the backend is the only
     /// thing that knows whether it can hold a sandbox open, and one that cannot
-    /// says so here — at config load, in the operator's own vocabulary — instead
-    /// of quietly doing something else at the first command.
+    /// says so — at config load, in the operator's own vocabulary — instead of
+    /// quietly doing something else at the first command.
     ///
-    /// `Ok(None)` for a backend that does not isolate. `disabled` and `logical`
-    /// create no world, so there is no lifetime for a scope to name and no
-    /// setting of it that could be wrong.
-    pub fn scope_support(&self) -> Result<Option<SandboxScopeSupport>, String> {
+    /// An explicitly chosen scope the backend cannot keep is an error. A
+    /// defaulted one falls back to `tool`, because failing a whole configuration
+    /// over a value the operator never wrote is a different thing from refusing
+    /// one they did.
+    pub fn scope_decision(&self) -> Result<ScopeDecision, String> {
         let scope = self.policy()?.scope_kind()?;
         let Some(backend) = self.bare_backend()? else {
-            return Ok(None);
+            return Ok(ScopeDecision::NotApplicable);
         };
-        backend.scope_support(scope).into_result().map(Some)
+        let support = backend.scope_support(scope);
+        let SandboxScopeSupport::Unsupported(reason) = support else {
+            return Ok(ScopeDecision::Honoured { scope, support });
+        };
+        if self.scope_explicit {
+            return Err(reason);
+        }
+        // Verified rather than assumed: `tool` is the narrowest lifetime there
+        // is, but a backend that cannot keep even that has no honest fallback
+        // and must say so rather than be given one.
+        let fallback = archon_permissions::SandboxScope::Tool;
+        backend.scope_support(fallback).into_result()?;
+        Ok(ScopeDecision::FellBack {
+            scope: fallback,
+            from: scope,
+            reason,
+        })
     }
 
     /// The backend a configuration names, with no mode or audit wrapper on it.
@@ -153,222 +265,5 @@ pub(crate) fn first_non_empty_line(bytes: &[u8]) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sandbox_config_deserializes_openshell_section() {
-        let cfg: SandboxConfig = toml::from_str(
-            r#"
-            backend = "openshell"
-            mode = "all"
-            scope = "session"
-            workspace_access = "rw"
-
-            [openshell]
-            enabled = true
-            workspace_mode = "remote"
-            gateway = "team-gateway"
-            remote_workdir = "/workspace/team"
-            policy = "locked-down"
-            providers = ["ssh"]
-            gpu = true
-            "#,
-        )
-        .unwrap();
-
-        assert_eq!(cfg.backend, "openshell");
-        assert_eq!(cfg.backend_kind().unwrap(), SandboxBackendKind::OpenShell);
-        assert_eq!(cfg.policy().unwrap().mode, "all");
-        assert_eq!(cfg.policy().unwrap().workspace_access, "rw");
-        assert!(cfg.openshell.enabled);
-        assert_eq!(cfg.openshell.workspace_mode, "remote");
-        assert_eq!(cfg.openshell.gateway.as_deref(), Some("team-gateway"));
-        assert_eq!(
-            cfg.openshell.remote_workdir.as_deref(),
-            Some("/workspace/team")
-        );
-        assert!(cfg.openshell.gpu);
-        assert!(!cfg.openshell.provider_injection);
-        assert!(!cfg.openshell.host_shell_fallback);
-    }
-
-    #[test]
-    fn sandbox_config_deserializes_ssh_section() {
-        let cfg: SandboxConfig = toml::from_str(
-            r#"
-            backend = "ssh"
-            mode = "all"
-
-            [ssh]
-            enabled = true
-            host = "sandbox.example"
-            user = "archon"
-            port = 2222
-            workspace_mode = "remote"
-            "#,
-        )
-        .unwrap();
-
-        assert_eq!(cfg.backend, "ssh");
-        assert_eq!(cfg.backend_kind().unwrap(), SandboxBackendKind::Ssh);
-        assert!(cfg.ssh.enabled);
-        assert_eq!(cfg.ssh.host.as_deref(), Some("sandbox.example"));
-        assert_eq!(cfg.ssh.user.as_deref(), Some("archon"));
-        assert_eq!(cfg.ssh.port, 2222);
-        assert_eq!(cfg.ssh.workspace_mode, "remote");
-        assert!(cfg.ssh.host_key_checking);
-        assert!(!cfg.ssh.host_shell_fallback);
-    }
-
-    /// A backend that never leaves the host must not pay for a filesystem it
-    /// does not need — and `None` here is what keeps behaviour identical for
-    /// everyone not running a sandbox.
-    #[test]
-    fn a_host_bound_backend_gets_no_filesystem_of_its_own() {
-        for backend in ["disabled", "logical"] {
-            let cfg = SandboxConfig {
-                backend: backend.into(),
-                ..SandboxConfig::default()
-            };
-
-            assert!(
-                sandbox_filesystem(&cfg, std::path::Path::new("/tree"))
-                    .expect("host-bound backends always resolve")
-                    .is_none(),
-                "{backend} should run on the host filesystem"
-            );
-        }
-    }
-
-    /// Docker must get a *translating* filesystem, not merely some filesystem.
-    /// Asserting `is_some()` would pass if the factory handed back `LocalFs`,
-    /// which is the bug: `Bash` reports `/workspace/...` and `Read` would then
-    /// look for that path on the host.
-    #[tokio::test]
-    async fn docker_gets_a_filesystem_that_translates_container_paths() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("in_workspace.txt"), "mounted").expect("write");
-        let cfg = SandboxConfig {
-            backend: "docker".into(),
-            ..SandboxConfig::default()
-        };
-
-        let fs = sandbox_filesystem(&cfg, dir.path())
-            .expect("docker resolves")
-            .expect("docker has a world of its own");
-
-        assert_eq!(
-            fs.read(std::path::Path::new("/workspace/in_workspace.txt"))
-                .await
-                .expect("the path the container would name"),
-            b"mounted"
-        );
-    }
-
-    /// A remote backend that cannot be routed must fail loudly. Returning the
-    /// host here would be the silent split this whole issue exists to close.
-    #[test]
-    fn an_unroutable_remote_backend_is_an_error_not_a_fallback_to_the_host() {
-        let cfg = SandboxConfig {
-            backend: "ssh".into(),
-            ..SandboxConfig::default()
-        };
-
-        let error = sandbox_filesystem(&cfg, std::path::Path::new("/tree"))
-            .expect_err("a disabled ssh backend cannot supply a workspace");
-
-        assert!(!error.is_empty(), "the failure has to say why");
-    }
-
-    #[test]
-    fn sandbox_config_rejects_unknown_backend() {
-        let cfg = SandboxConfig {
-            backend: "host".into(),
-            ..SandboxConfig::default()
-        };
-
-        let error = cfg.validate().unwrap_err();
-
-        assert!(error.contains("sandbox.backend"));
-    }
-
-    fn config(backend: &str, scope: &str) -> SandboxConfig {
-        SandboxConfig {
-            backend: backend.into(),
-            scope: scope.into(),
-            docker: DockerConfig {
-                enabled: true,
-                ..DockerConfig::default()
-            },
-            ..SandboxConfig::default()
-        }
-    }
-
-    /// The failure this whole change exists to stop repeating: a scope that
-    /// loads cleanly and is then quietly not honoured. openshell destroys its
-    /// sandbox after every command, so a longer lifetime has to be refused where
-    /// the operator can see it.
-    #[test]
-    fn a_backend_that_cannot_hold_a_sandbox_refuses_the_scope_at_config_load() {
-        for scope in ["session", "turn"] {
-            let error = config("openshell", scope)
-                .validate()
-                .expect_err("this configuration must not load");
-
-            assert!(error.contains("--no-keep"), "{error}");
-            assert!(
-                error.contains("sandbox.scope = \"tool\""),
-                "the refusal has to name the setting that works: {error}"
-            );
-        }
-        config("openshell", "tool")
-            .validate()
-            .expect("`tool` is exactly what this backend does");
-    }
-
-    #[test]
-    fn docker_accepts_every_scope_and_says_which_hold_a_container() {
-        use archon_permissions::SandboxScopeSupport;
-
-        for scope in ["session", "turn"] {
-            assert_eq!(
-                config("docker", scope).scope_support().expect("supported"),
-                Some(SandboxScopeSupport::Held),
-                "{scope} should hold a container open"
-            );
-        }
-        assert_eq!(
-            config("docker", "tool").scope_support().expect("supported"),
-            Some(SandboxScopeSupport::PerCommand)
-        );
-    }
-
-    /// ssh's world is a machine Archon neither creates nor destroys, so no scope
-    /// can be wrong and none can be honoured either — state simply survives.
-    #[test]
-    fn a_backend_whose_world_outlives_archon_reports_no_lifetime_to_manage() {
-        use archon_permissions::SandboxScopeSupport;
-
-        for scope in ["session", "turn", "tool"] {
-            assert_eq!(
-                config("ssh", scope).scope_support().expect("supported"),
-                Some(SandboxScopeSupport::Durable)
-            );
-        }
-    }
-
-    /// A backend that creates no world has no lifetime for a scope to name, and
-    /// must not be made to answer for one.
-    #[test]
-    fn a_non_isolating_backend_has_no_scope_to_support() {
-        for backend in ["disabled", "logical"] {
-            assert_eq!(
-                config(backend, "session")
-                    .scope_support()
-                    .expect("resolves"),
-                None
-            );
-        }
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;
