@@ -409,6 +409,27 @@ pub(super) fn implementation_item(
     })
 }
 
+/// The criterion each fixture task declares, so a plan built here can claim it.
+///
+/// A verification plan must name the acceptance criteria it promises to check —
+/// a plan that proves nothing the tasks were written for used to pass because
+/// nothing compared the two. These fixtures predate that gate and declared no
+/// coverage at all, so every plan they produced was correctly refused, the
+/// repair could not invent coverage either, and the run died at
+/// `blocked-empty-verification` long before the board-drain gate the tests were
+/// actually written to exercise.
+fn fixture_criterion(task_id: &str) -> &'static str {
+    match task_id {
+        "TASK-EX-001" => "Existing evidence is sufficient.",
+        "TASK-EX-002" => "Refuted work is implemented.",
+        "TASK-EX-003" => "Plain implementation is present.",
+        "TASK-EX-004" => "Declared artifact verification passes.",
+        "TASK-EX-005" => "Artifact-only output is produced.",
+        "TASK-EX-006" => "Parameterized instance reports are contract-verified.",
+        _ => "Boundary behavior remains semantic.",
+    }
+}
+
 pub(super) fn verification_item(
     item_id: &str,
     task_id: &str,
@@ -421,6 +442,9 @@ pub(super) fn verification_item(
         "focused_verification": format!("test -f {target_file}"),
         "expected_evidence": format!("{target_file} exists"),
         "artifact_requirements": [],
+        // Quoted exactly as the task universe states it, which is what the
+        // coverage gate compares against.
+        "covered_acceptance_criteria": [fixture_criterion(task_id)],
     })
 }
 
