@@ -71,6 +71,24 @@ pub trait FileSystem: Send + Sync + std::fmt::Debug {
     /// not a thing this expresses.
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
 
+    /// Decide a path the model named, when this world names paths its own way.
+    ///
+    /// `None` means "not one of mine": the caller applies the host path guard,
+    /// which is what keeps `Read` and `Write` inside the working directory.
+    /// `Some(Ok(path))` is a path this world recognises and vouches for —
+    /// it is inside the workspace by construction, so the host guard must not
+    /// be applied to it, because canonicalising `/workspace/src/main.rs` on the
+    /// host fails and the tool would refuse a file that plainly exists.
+    /// `Some(Err(..))` is a path this world recognises and refuses.
+    ///
+    /// A world that answers `None` everywhere behaves exactly as before this
+    /// existed: its paths are host paths and the host guard bounds them. That is
+    /// why the default is safe — it fails closed and visibly (a world path is
+    /// rejected), never open.
+    fn admit_world_path(&self, _path: &Path) -> Option<io::Result<PathBuf>> {
+        None
+    }
+
     /// The same world, rooted at `working_dir`.
     ///
     /// A subagent may run somewhere other than its parent — a worktree, or an

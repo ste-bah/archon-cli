@@ -99,6 +99,11 @@ impl WorkspaceMap {
     /// Host-workspace paths are rewritten; a path that is already absolute in
     /// the far side's terms passes through, so the model can name `/tmp` or
     /// `/etc` there without the mapping guessing at it.
+    /// Where this workspace lives on the far side.
+    pub(crate) fn remote_root(&self) -> &str {
+        &self.remote_root
+    }
+
     /// The same remote root, reached from a different host directory.
     pub(crate) fn rerooted(&self, host_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -319,6 +324,24 @@ impl<T: RemoteExec> RemoteFs<T> {
 
 #[async_trait::async_trait]
 impl<T: RemoteExec + Clone + 'static> FileSystem for RemoteFs<T> {
+    /// A path already in the far side's terms is this world's own naming.
+    ///
+    /// `to_remote` passes such a path straight through, so the model can name
+    /// `/srv/workspace/src/main.rs` — which is what the remote shell prints —
+    /// and the host guard must not be asked about it: that path does not exist
+    /// here, and canonicalising it would refuse a file the remote plainly has.
+    ///
+    /// Host paths are left to the host guard, which still bounds them before
+    /// `to_remote` translates them.
+    fn admit_world_path(&self, path: &Path) -> Option<io::Result<PathBuf>> {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let root = self.map.remote_root();
+        if text != root && !text.starts_with(&format!("{}/", root.trim_end_matches('/'))) {
+            return None;
+        }
+        Some(self.map.to_remote(path).map(|_| path.to_path_buf()))
+    }
+
     /// Only the host side of the mapping moves.
     ///
     /// The far side is fixed: `remote` mode `cd`s to the configured

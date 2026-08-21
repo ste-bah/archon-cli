@@ -149,6 +149,31 @@ impl FileSystem for DockerFs {
             .await
     }
 
+    /// Container paths are this world's own naming, and the mount bounds them.
+    ///
+    /// `to_host` already refuses anything that would climb out of the mount, so
+    /// a `/workspace/...` path is inside the workspace by construction and the
+    /// host guard has nothing to add — it can only get it wrong, since the path
+    /// does not exist on the host under that name.
+    ///
+    /// A host path is left to the host guard: `to_host` passes those through
+    /// unchanged, so admitting them here would skip the working-directory check
+    /// they still need.
+    fn admit_world_path(&self, path: &Path) -> Option<io::Result<PathBuf>> {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let is_container_path = text == CONTAINER_WORKSPACE
+            || text.starts_with(&format!("{CONTAINER_WORKSPACE}/"))
+            || text == CONTAINER_SCRATCH
+            || text.starts_with(&format!("{CONTAINER_SCRATCH}/"));
+        if !is_container_path {
+            return None;
+        }
+        // Resolved for its verdict, then discarded: the operations translate
+        // for themselves, and handing back a host path here would defeat
+        // `to_container` on the way out.
+        Some(self.to_host(path).map(|_| path.to_path_buf()))
+    }
+
     /// The container mounts whichever directory the request names, so a child
     /// running in a worktree must translate against *that* tree.
     fn rerooted(self: Arc<Self>, working_dir: &Path) -> Arc<dyn FileSystem> {

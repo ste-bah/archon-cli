@@ -51,16 +51,24 @@ fn tool_decision(
             "sandbox.mode routes shell execution through the backend while non-shell tools continue through normal permission preflight",
         ),
         (_, "Write" | "Edit" | "NotebookEdit") => (
-            "host_mutation_blocked_by_backend",
-            "sandbox.mode=all requires backend-compatible tools and does not allow host-side file mutation tools",
+            "route_to_sandbox",
+            "the backend has a filesystem of its own, so the write lands in the world the shell sees rather than on the host (#201 Phase 2)",
+        ),
+        (_, "TerminalCreate" | "TerminalWrite" | "TerminalRead" | "TerminalClose") => (
+            "route_to_sandbox_or_refuse",
+            "docker and ssh open a terminal inside the world; openshell has no session to attach to and refuses by name",
+        ),
+        (_, "TaskCreate" | "TaskUpdate" | "Agent") => (
+            "route_to_sandbox",
+            "a spawned child inherits this backend and its filesystem, so its own tool calls are gated by the same boundary (#201 Phase 4)",
         ),
         (_, "WebFetch" | "WebSearch") => (
             "host_network_blocked_by_backend",
             "sandbox.mode=all requires backend-compatible tools and does not allow host-side network tools",
         ),
-        (_, "TaskCreate" | "TaskUpdate" | "Agent") => (
-            "agent_spawn_blocked_by_backend",
-            "sandbox.mode=all requires backend-compatible tools and does not allow host-side agent spawning",
+        (_, "PowerShell" | "lsp") => (
+            "host_handle_blocked_by_backend",
+            "this tool reaches the world through a host handle the backend cannot redirect, so it would run outside the sandbox",
         ),
         _ => (
             "permission_preflight_required",

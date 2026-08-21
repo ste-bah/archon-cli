@@ -148,12 +148,12 @@ async fn a_nested_path_printed_by_the_container_resolves() {
 /// #201 Phase 6, end to end: a terminal opens *inside* the container.
 ///
 /// The unit tests pin the `docker run` arguments; only this one proves the
-/// shell that comes up is in the container. The two facts it asks the shell for
-/// are the container's, not the image's: uid 0, because the test process is
-/// not root and a host shell would inherit its uid; and one network interface,
-/// because the backend runs with `--network none` while any host has more.
-/// Comparing distributions would prove nothing on a machine whose host happens
-/// to be the same one as the image.
+/// shell that comes up is in the container. The fact it asks the shell for is
+/// the container's, not the image's: exactly one network interface, because the
+/// backend runs with `--network none` while any host has more. Comparing
+/// distributions would prove nothing on a machine whose host happens to be the
+/// same one as the image, and the uid proves nothing either now that the
+/// container deliberately runs as the host user.
 #[tokio::test]
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn a_terminal_opens_inside_the_container() {

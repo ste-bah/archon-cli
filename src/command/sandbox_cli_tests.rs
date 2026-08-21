@@ -126,8 +126,12 @@ fn sandbox_explain_risky_mode_leaves_write_under_permission_preflight() {
     assert!(body.contains("Decision: permission_preflight_host_tool"));
 }
 
+/// Writes used to be refused under `mode = "all"` because every backend
+/// operated on the host filesystem. Each backend has its own now, so the
+/// explanation has to say the write is routed rather than blocked — a stale
+/// "blocked" here would send someone hunting for a restriction that is gone.
 #[test]
-fn sandbox_explain_all_mode_blocks_unsupported_write_tools() {
+fn sandbox_explain_all_mode_routes_write_tools_to_the_backend() {
     let config = archon_core::sandbox::SandboxConfig {
         backend: "docker".into(),
         mode: "all".into(),
@@ -140,7 +144,10 @@ fn sandbox_explain_all_mode_blocks_unsupported_write_tools() {
 
     let body = render_explain(&config, None, Some("Write"), None).unwrap();
 
-    assert!(body.contains("Decision: host_mutation_blocked_by_backend"));
+    assert!(
+        body.contains("Decision: route_to_sandbox"),
+        "explain still reports the pre-Phase-2 refusal: {body}"
+    );
 }
 
 #[test]
