@@ -165,6 +165,20 @@ pub(super) async fn discover_write_scopes(
     if execution.call.write_mode.is_none() {
         return;
     }
+    // OFF unless a project asks for it. This pass adds an agent call per write
+    // branch, which changes what a write fanout dispatches — a host that does
+    // not expect the extra call sees an unrecognised call id, and the
+    // worktree fixtures reach `unreachable!("unexpected worktree agent call")`.
+    //
+    // The scope it discovers is an optimisation over the declared one, never a
+    // gate, so defaulting it off costs correctness nothing and keeps a new
+    // dispatch out of every existing run until it is asked for.
+    if std::env::var("ARCHON_WORKFLOW_SCOPE_DISCOVERY")
+        .map(|value| value.trim() != "1" && !value.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(true)
+    {
+        return;
+    }
     let repository_root = target_repository_root.map(Path::new);
     let artifact_roots =
         crate::v2::project_artifacts::project_artifact_context_from_v2_root(v2_store.root())

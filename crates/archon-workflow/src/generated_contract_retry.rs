@@ -299,8 +299,8 @@ fn nested_alias_values(
 /// returns the identical routed shape, and the run cycles until the repair cap
 /// with no write wave ever scheduled.
 ///
-/// Observed live on wf-b40de9ee: five cycles over three hours, holding one
-/// TASK-TDL-030 failure that already carried its target files and required fix.
+/// Observed live: five cycles over three hours, holding one implementation
+/// failure that already carried its target files and its required fix.
 ///
 /// Returning `Some` claims the value as a routed triage inventory and stops the
 /// generic fallback from running at all — an empty vec means "triage routed
