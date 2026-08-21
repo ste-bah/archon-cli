@@ -43,9 +43,19 @@ pub enum WorldReach {
     FileRead,
     /// Writes the world's files, through `ToolContext::fs`.
     FileWrite,
+    /// Opens or drives an interactive shell, through
+    /// [`SandboxBackend::terminal`](crate::sandbox::SandboxBackend::terminal).
+    ///
+    /// Separate from [`Execution`](Self::Execution) because it is a different
+    /// seam with a different answer: docker attaches a TTY to a container and
+    /// ssh puts one on the connection it already has, while a backend that
+    /// builds and destroys a sandbox per command has no session to attach to.
+    /// The class says a terminal *can* be relocated; which backend actually
+    /// can is `terminal()`'s answer, not the gate's.
+    Terminal,
     /// Reaches the world through a host handle no backend can redirect: a host
-    /// PTY, a host language server, a subprocess spawned directly rather than
-    /// through the execution seam.
+    /// language server, a subprocess spawned directly rather than through the
+    /// execution seam.
     HostHandle,
 }
 
@@ -55,6 +65,7 @@ impl ToolCapability {
     pub const EXECUTION: Self = Self::WorldBound(WorldReach::Execution);
     pub const FILE_READ: Self = Self::WorldBound(WorldReach::FileRead);
     pub const FILE_WRITE: Self = Self::WorldBound(WorldReach::FileWrite);
+    pub const TERMINAL: Self = Self::WorldBound(WorldReach::Terminal);
     pub const HOST_HANDLE: Self = Self::WorldBound(WorldReach::HostHandle);
 
     /// A short stable label, for logs and denial messages.
@@ -64,6 +75,7 @@ impl ToolCapability {
             Self::WorldBound(WorldReach::Execution) => "world-bound/execution",
             Self::WorldBound(WorldReach::FileRead) => "world-bound/file-read",
             Self::WorldBound(WorldReach::FileWrite) => "world-bound/file-write",
+            Self::WorldBound(WorldReach::Terminal) => "world-bound/terminal",
             Self::WorldBound(WorldReach::HostHandle) => "world-bound/host-handle",
             Self::HostLocal => "host-local",
             Self::Egress => "egress",

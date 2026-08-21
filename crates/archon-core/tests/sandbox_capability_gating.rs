@@ -53,7 +53,10 @@ fn backends() -> Vec<(&'static str, Box<dyn SandboxBackend>)> {
 }
 
 /// The table the backends are supposed to implement, class by class.
-const EXPECTED: [(ToolCapability, bool); 7] = [
+const EXPECTED: [(ToolCapability, bool); 8] = [
+    // Allowed by the gate so the backend's `terminal()` can answer: docker and
+    // ssh can relocate a terminal, openshell cannot, and only they know which.
+    (ToolCapability::TERMINAL, true),
     (ToolCapability::EXECUTION, true),
     (ToolCapability::FILE_READ, true),
     (ToolCapability::HostLocal, true),
@@ -120,9 +123,7 @@ fn world_writes_are_served_now_that_each_backend_has_a_filesystem() {
     for (label, backend) in backends() {
         backend
             .check("Write", ToolCapability::FILE_WRITE, &serde_json::json!({}))
-            .unwrap_or_else(|denial| {
-                panic!("{label} still refuses a world-bound write: {denial}")
-            });
+            .unwrap_or_else(|denial| panic!("{label} still refuses a world-bound write: {denial}"));
     }
 }
 
@@ -131,15 +132,14 @@ fn world_writes_are_served_now_that_each_backend_has_a_filesystem() {
 /// denied before by falling off the end of the allowlist; now they are denied
 /// for the reason that is actually true, which is what makes the denial
 /// actionable.
+///
+/// Terminals used to be in this set and are not any more: `terminal()` can
+/// relocate one, so they are decided there instead.
 #[test]
 fn host_handles_are_refused_with_the_reason_that_is_true() {
     for (label, backend) in backends() {
         let denial = backend
-            .check(
-                "TerminalCreate",
-                ToolCapability::HOST_HANDLE,
-                &serde_json::json!({}),
-            )
+            .check("lsp", ToolCapability::HOST_HANDLE, &serde_json::json!({}))
             .expect_err("a host handle must not be allowed under isolation");
 
         assert!(denial.contains("outside the sandbox"), "{label}: {denial}");

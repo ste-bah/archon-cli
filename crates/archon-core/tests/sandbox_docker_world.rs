@@ -157,17 +157,10 @@ async fn a_nested_path_printed_by_the_container_resolves() {
 #[tokio::test]
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn a_terminal_opens_inside_the_container() {
+    // No chmod: the container runs as the host uid, so a 0700 tempdir owned by
+    // the invoking user is writable from inside. Opening the directory up would
+    // hide a regression in exactly that.
     let dir = tempfile::tempdir().expect("tempdir");
-    // The container drops every capability, and `CAP_DAC_OVERRIDE` is what lets
-    // its root write through host permissions it does not match. A tempdir is
-    // 0700 and owned by the invoking user, so without this the mount is
-    // read-only in practice however `workspace_access` is set.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777))
-            .expect("open the workspace to the container's uid");
-    }
     let backend = DockerSandboxBackend::new(docker_config(), "rw");
 
     let SandboxTerminal::Open(command) = backend.terminal(&SandboxTerminalRequest {
@@ -193,9 +186,13 @@ async fn a_terminal_opens_inside_the_container() {
     .expect("the docker terminal spawns");
     let (control, mut output) = session.split();
 
+    // The network namespace is the discriminator, not the uid: the container
+    // runs as the host user by design (see `host_identity_args`), so `id -u`
+    // now matches the host and proves nothing. `--network none` leaves exactly
+    // one interface, where a host shell sees eth0 and friends.
     control.send_input(
         b"printf 'from the terminal\\n' > /workspace/from_terminal.txt; \
-          printf 'RESULT %s %s\\n' \"uid$(id -u)\" \"$(ls /sys/class/net | tr '\\n' '+')\"\n"
+          printf 'NETS=%s\\n' \"$(ls /sys/class/net | tr '\\n' '+')\"\n"
             .to_vec(),
     );
 
@@ -204,7 +201,7 @@ async fn a_terminal_opens_inside_the_container() {
     // would end the wait before the shell had answered.
     let mut seen = String::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while std::time::Instant::now() < deadline && !seen.contains("RESULT uid") {
+    while std::time::Instant::now() < deadline && !seen.contains("NETS=lo") {
         match tokio::time::timeout(std::time::Duration::from_secs(5), output.recv()).await {
             Ok(Some(chunk)) => seen.push_str(&String::from_utf8_lossy(&chunk)),
             Ok(None) => break,
@@ -214,13 +211,9 @@ async fn a_terminal_opens_inside_the_container() {
     control.kill();
 
     assert!(
-        seen.contains("RESULT uid0 "),
-        "the shell inherited the test process's user, so it is a host shell: {seen}"
-    );
-    assert!(
-        seen.contains("RESULT uid0 lo+"),
-        "the shell can see host network interfaces, so it is not in the \
-         --network none container: {seen}"
+        seen.contains("NETS=lo+\r") || seen.contains("NETS=lo+\n"),
+        "the shell sees more than the loopback interface, so it is not in the \
+         --network none container — it is a host shell: {seen}"
     );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("from_terminal.txt"))

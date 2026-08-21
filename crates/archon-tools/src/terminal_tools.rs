@@ -37,7 +37,7 @@ impl Tool for TerminalCreateTool {
     }
 
     fn capability(&self) -> ToolCapability {
-        ToolCapability::HOST_HANDLE
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {
@@ -134,7 +134,7 @@ impl Tool for TerminalWriteTool {
     }
 
     fn capability(&self) -> ToolCapability {
-        ToolCapability::HOST_HANDLE
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {
@@ -235,7 +235,7 @@ impl Tool for TerminalReadTool {
     }
 
     fn capability(&self) -> ToolCapability {
-        ToolCapability::HOST_HANDLE
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {
@@ -317,7 +317,7 @@ impl Tool for TerminalCloseTool {
     }
 
     fn capability(&self) -> ToolCapability {
-        ToolCapability::HOST_HANDLE
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {

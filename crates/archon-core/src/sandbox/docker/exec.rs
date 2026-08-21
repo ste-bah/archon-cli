@@ -51,6 +51,35 @@ pub(super) fn docker_terminal_args(
 }
 
 /// The container `Bash` and a terminal both get: same isolation, same mount.
+/// Run as the user who owns the workspace.
+///
+/// `--cap-drop ALL` takes `CAP_DAC_OVERRIDE` with it, and without that the
+/// container's root cannot write through a bind mount it does not own. On Linux
+/// that is every ordinary checkout — the tree belongs to the developer, mode
+/// 0755 — so `workspace_access = "rw"` produced "Permission denied" for `Bash`
+/// and for terminals alike. Measured, not assumed: root in the container gets
+/// EACCES on a 0755 directory owned by uid 1000, and the same container run as
+/// that uid writes.
+///
+/// Running as the host user is also the stronger posture. It is not root in the
+/// container, and files it creates in the workspace belong to the developer
+/// rather than arriving owned by root.
+///
+/// Unix only. Windows has no uid to pass, and Docker Desktop's filesystem
+/// translation gives the container write access to a bind mount regardless —
+/// which is why this bug was invisible from a Windows host.
+#[cfg(unix)]
+fn host_identity_args() -> Vec<String> {
+    // Safe: `getuid`/`getgid` cannot fail and touch no shared state.
+    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+    vec!["--user".into(), format!("{uid}:{gid}")]
+}
+
+#[cfg(not(unix))]
+fn host_identity_args() -> Vec<String> {
+    Vec::new()
+}
+
 fn docker_container_args(
     config: &DockerConfig,
     workspace_access: &str,
@@ -60,6 +89,7 @@ fn docker_container_args(
     let mut args = vec!["run".into(), "--rm".into(), "--pull".into(), "never".into()];
     args.extend(["--security-opt".into(), "no-new-privileges".into()]);
     args.extend(["--cap-drop".into(), "ALL".into()]);
+    args.extend(host_identity_args());
     args.extend(["--pids-limit".into(), "256".into()]);
     args.extend(["--tmpfs".into(), "/tmp:rw,nosuid,size=256m".into()]);
     args.extend([

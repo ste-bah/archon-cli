@@ -44,7 +44,12 @@ impl SandboxBackend for FixedTerminalBackend {
     /// Deliberately permissive, and that is the point: under the default
     /// `sandbox.mode = "risky"` nothing consults `check` for terminal tools, so
     /// a plan that relied on it would pass this file while shipping the bypass.
-    fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         Ok(())
     }
 
@@ -166,7 +171,12 @@ fn the_request_carries_the_workspace_and_the_requested_directory_apart() {
     struct Capturing(std::sync::Mutex<Option<SandboxTerminalRequest>>);
 
     impl SandboxBackend for Capturing {
-        fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+        fn check(
+            &self,
+            _tool: &str,
+            _capability: archon_permissions::ToolCapability,
+            _input: &serde_json::Value,
+        ) -> Result<(), String> {
             Ok(())
         }
 

@@ -11,10 +11,16 @@ use super::*;
 /// `Clone` shares the recorded calls rather than copying them: a re-rooted
 /// filesystem clones its transport, and a double whose clone forgot what it had
 /// been asked would make those assertions look like nothing happened.
+/// One recorded call: the script sent, and the stdin sent with it.
+type RecordedCall = (String, Vec<u8>);
+
+/// Shared so a clone records into the same log — see the note on `FakeExec`.
+type Shared<T> = std::sync::Arc<Mutex<T>>;
+
 #[derive(Debug, Clone)]
 struct FakeExec {
-    calls: std::sync::Arc<Mutex<Vec<(String, Vec<u8>)>>>,
-    reply: std::sync::Arc<Mutex<Vec<RemoteOutput>>>,
+    calls: Shared<Vec<RecordedCall>>,
+    reply: Shared<Vec<RemoteOutput>>,
 }
 
 impl FakeExec {

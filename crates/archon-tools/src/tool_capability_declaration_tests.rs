@@ -54,13 +54,17 @@ fn declared() -> Vec<(Box<dyn Tool>, ToolCapability)> {
             Box::new(crate::monitor::MonitorTool),
             ToolCapability::HOST_HANDLE,
         ),
+        // Not a host handle: `SandboxBackend::terminal` can relocate a terminal
+        // into the world — docker attaches a TTY to a container, ssh puts one
+        // on the connection it already has. Which backends actually can is
+        // their answer to give, not the class's.
         (
             Box::new(crate::terminal_tools::TerminalCreateTool),
-            ToolCapability::HOST_HANDLE,
+            ToolCapability::TERMINAL,
         ),
         (
             Box::new(crate::terminal_tools::TerminalReadTool),
-            ToolCapability::HOST_HANDLE,
+            ToolCapability::TERMINAL,
         ),
         (
             Box::new(crate::worktree::EnterWorktreeTool),

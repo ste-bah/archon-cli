@@ -36,6 +36,14 @@ pub(crate) fn check_capability(
         // this arm was closed.
         ToolCapability::WorldBound(WorldReach::FileRead | WorldReach::FileWrite) => Ok(()),
 
+        // `SandboxBackend::terminal` is a seam too, so the class passes here
+        // and the backend gives the specific answer: docker attaches a TTY to a
+        // container, ssh puts one on the connection it already has, and a
+        // backend with no session to attach to refuses by name there. Deciding
+        // it here instead would have to guess which, and would refuse the two
+        // that work.
+        ToolCapability::WorldBound(WorldReach::Terminal) => Ok(()),
+
         // A host PTY, a host language server, a directly spawned subprocess:
         // nothing routes these through the backend, so running one under an
         // active sandbox is a bypass, not an escape hatch.

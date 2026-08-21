@@ -3,7 +3,8 @@ use archon_permissions::{ToolCapability, WorldReach};
 
 /// Every class the enum can produce, so a variant added later without a gate
 /// arm cannot slip past these tests by simply not being listed.
-const ALL_CLASSES: [ToolCapability; 7] = [
+const ALL_CLASSES: [ToolCapability; 8] = [
+    ToolCapability::WorldBound(WorldReach::Terminal),
     ToolCapability::WorldBound(WorldReach::Execution),
     ToolCapability::WorldBound(WorldReach::FileRead),
     ToolCapability::WorldBound(WorldReach::FileWrite),
@@ -44,10 +45,23 @@ fn world_writes_are_served_now_that_each_backend_has_a_filesystem() {
 
 #[test]
 fn host_handles_are_refused_because_they_would_run_outside_the_sandbox() {
-    let error = check_capability("ssh", "TerminalCreate", ToolCapability::HOST_HANDLE).unwrap_err();
+    let error = check_capability("ssh", "lsp", ToolCapability::HOST_HANDLE).unwrap_err();
 
-    assert!(error.contains("TerminalCreate"), "{error}");
+    assert!(error.contains("lsp"), "{error}");
     assert!(error.contains("outside the sandbox"), "{error}");
+}
+
+/// A terminal is not a host handle any more: `SandboxBackend::terminal` can
+/// relocate it. The gate lets it through so the backend can give the answer
+/// that is true for it — refusing here would refuse docker and ssh, which can.
+#[test]
+fn terminals_reach_the_backend_rather_than_being_decided_by_the_gate() {
+    for backend in ["docker", "ssh", "openshell"] {
+        assert!(
+            check_capability(backend, "TerminalCreate", ToolCapability::TERMINAL).is_ok(),
+            "{backend} must decide a terminal in terminal(), not here"
+        );
+    }
 }
 
 #[test]

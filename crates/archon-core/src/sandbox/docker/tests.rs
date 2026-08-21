@@ -329,20 +329,23 @@ mod terminals {
         assert!(reason.contains("privileged"), "{reason}");
     }
 
+    /// Docker can put a TTY on a container, so the gate must let a terminal
+    /// through to `terminal()` rather than deciding against it. Asserted by
+    /// class, not by name: the names are exactly what stopped deciding
+    /// anything.
     #[test]
-    fn terminal_tools_are_named_in_the_allowlist_rather_than_left_to_the_catch_all() {
+    fn a_terminal_reaches_the_backend_rather_than_being_refused_by_the_gate() {
         let backend = backend("rw");
 
-        for tool in [
-            "TerminalCreate",
-            "TerminalWrite",
-            "TerminalRead",
-            "TerminalClose",
-        ] {
-            assert!(
-                backend.check(tool, &serde_json::json!({})).is_ok(),
-                "{tool} falls through to `unsupported tool`"
-            );
-        }
+        assert!(
+            backend
+                .check(
+                    "TerminalCreate",
+                    archon_permissions::ToolCapability::TERMINAL,
+                    &serde_json::json!({})
+                )
+                .is_ok(),
+            "docker attaches a TTY to a container, so the gate must not refuse it"
+        );
     }
 }
