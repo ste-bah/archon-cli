@@ -194,7 +194,7 @@ fn classify_project_artifact_path(
     let Some(project_root) = project_root_path(context) else {
         return Ok(ProjectArtifactPath::NotArtifact);
     };
-    let trimmed = raw.trim();
+    let trimmed = strip_verbatim_prefix(raw.trim());
     if trimmed.is_empty() {
         return Ok(ProjectArtifactPath::NotArtifact);
     }
@@ -248,7 +248,7 @@ fn relative_artifact_path(
 }
 
 fn project_root_path(context: &WorkflowV2ProjectArtifactContext) -> Option<PathBuf> {
-    let root = context.project_root.as_deref()?.trim();
+    let root = strip_verbatim_prefix(context.project_root.as_deref()?.trim());
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
@@ -389,7 +389,7 @@ fn project_artifact_status(
 mod paths;
 use paths::{
     absolute_artifact_candidate, clean_absolute_artifact_path, ensure_existing_project_path,
-    ensure_project_path_parent_safe, normalize_relative_path,
+    ensure_project_path_parent_safe, normalize_relative_path, strip_verbatim_prefix,
 };
 
 fn artifact_from_file(path: String, purpose: Option<String>) -> WorkflowV2Artifact {
