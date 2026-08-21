@@ -25,6 +25,9 @@ pub use generated_contract_b::*;
 // The five modules below export only cluster-internal helpers (`pub(super)`),
 // so these imports stay private: nothing outside this module and its children
 // may name them, and a `pub`-flavoured glob here would re-export nothing.
+#[path = "generated_contract_validation_noop.rs"]
+mod generated_contract_validation_noop;
+use generated_contract_validation_noop::*;
 #[path = "generated_contract_validation.rs"]
 mod generated_contract_validation;
 use generated_contract_validation::*;
@@ -46,3 +49,6 @@ mod tests;
 #[cfg(test)]
 #[path = "generated_contract_execution_tests.rs"]
 mod execution_tests;
+#[cfg(test)]
+#[path = "generated_contract_refuted_noop_tests.rs"]
+mod refuted_noop_tests;
