@@ -122,6 +122,20 @@ pub struct ToolContext {
     /// caller reads this instead. `None` means the top-level agent made the
     /// call — that is a real answer, not absent data.
     pub subagent_id: Option<String>,
+    /// Identity of the agent turn this invocation belongs to
+    /// (`sandbox.scope = "turn"`).
+    ///
+    /// Distinct from `tool_run_parent_action_id`, which is the nearest-looking
+    /// field and is not a turn identity: it is `None` on the ordinary
+    /// interactive path, it is a guardrail *action* id that spans however many
+    /// turns that action takes, and the world-model path sets it to the session
+    /// id outright.
+    ///
+    /// `None` means the caller has no turn loop. It is not an identity and must
+    /// never be treated as one — two unrelated callers both answering `None`
+    /// have nothing in common, so a `turn`-scoped sandbox holds nothing for
+    /// them and each command gets its own world.
+    pub turn_id: Option<String>,
     pub mode: AgentMode,
     /// Additional directories added at runtime via `/add-dir`.
     pub extra_dirs: Vec<PathBuf>,
@@ -197,6 +211,7 @@ impl std::fmt::Debug for ToolContext {
             .field("working_dir", &self.working_dir)
             .field("session_id", &self.session_id)
             .field("subagent_id", &self.subagent_id)
+            .field("turn_id", &self.turn_id)
             .field("mode", &self.mode)
             .field("extra_dirs", &self.extra_dirs)
             .field("in_fork", &self.in_fork)

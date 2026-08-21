@@ -35,6 +35,13 @@ impl SandboxBackend for FakeSandboxBackend {
         })
     }
 
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
+
     fn execute_bash<'a>(
         &'a self,
         _request: SandboxCommandRequest,
@@ -124,6 +131,7 @@ async fn wrapper_records_redacted_check_and_bash_events() {
             timeout_ms: 1_000,
             max_output_bytes: 1024,
             env: vec![("TOKEN".to_string(), "secret".to_string())],
+            ..SandboxCommandRequest::default()
         })
         .await;
     let audit = wrapper.flush_audit().await;

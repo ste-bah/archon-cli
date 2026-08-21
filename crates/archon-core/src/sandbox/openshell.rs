@@ -5,8 +5,8 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use archon_permissions::sandbox::{
-    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
-    SandboxTerminalRequest,
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxScope, SandboxScopeSupport,
+    SandboxTerminal, SandboxTerminalRequest,
 };
 use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
@@ -222,7 +222,7 @@ pub fn render_openshell_doctor_report(report: &OpenShellDoctorReport) -> String 
 /// built for one command and destroyed with it, and in `upload` mode a fresh
 /// copy of the workspace each time. There is no session for a PTY to attach to,
 /// and a sandbox held open for a terminal would be a *different* world from the
-/// one the next `Bash` call creates â€” so the shell and the commands around it
+/// one the next `Bash` call creates — so the shell and the commands around it
 /// would disagree about what is on disk. Refusing says that; opening one on the
 /// host would hide it.
 const NO_PERSISTENT_SESSION: &str = "the openshell backend creates a throwaway \
@@ -284,6 +284,35 @@ impl SandboxBackend for OpenShellSandboxBackend {
 
     fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
         SandboxTerminal::Refused(format!("openshell sandbox: {NO_PERSISTENT_SESSION}"))
+    }
+
+    /// `tool` is the only lifetime this backend can honestly claim.
+    ///
+    /// Every command is `openshell sandbox create --no-keep --`, which builds a
+    /// sandbox and destroys it on exit; in `upload` mode the working directory
+    /// is re-uploaded each time as well. Nothing survives, so `session` and
+    /// `turn` would be claims the backend cannot keep, and this refuses them at
+    /// config load rather than pretending.
+    ///
+    /// Not a permanent verdict, and deliberately not guessed at: whether the
+    /// OpenShell CLI can exec into an existing sandbox was not checkable here
+    /// because the binary is not installed on this machine. What would need
+    /// establishing is whether `sandbox create` without `--no-keep` yields a
+    /// durable handle and whether some `sandbox exec`/`attach` verb can run a
+    /// command in it; if both hold, this becomes `Held` for `session` and
+    /// `turn` and `terminal` stops having to refuse.
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        match scope {
+            SandboxScope::Tool => SandboxScopeSupport::PerCommand,
+            SandboxScope::Session | SandboxScope::Turn => {
+                SandboxScopeSupport::Unsupported(format!(
+                    "sandbox.scope = \"{scope}\" asks for a sandbox that outlives one command, \
+                     and the openshell backend runs `sandbox create --no-keep` per command, so \
+                     nothing survives it. Set sandbox.scope = \"tool\", which is what this \
+                     backend actually does, or switch sandbox.backend to docker"
+                ))
+            }
+        }
     }
 
     fn execute_bash<'a>(

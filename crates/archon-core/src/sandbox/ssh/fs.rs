@@ -118,6 +118,10 @@ fn ssh_fs_args(
             // tool's output budget would hand the model a corrupt file.
             max_output_bytes: usize::MAX,
             env: Vec::new(),
+            // A file transfer belongs to no turn and no sandbox lifetime: the
+            // ssh backend's world is the remote host, which every command
+            // reaches regardless.
+            ..SandboxCommandRequest::default()
         },
     )
 }

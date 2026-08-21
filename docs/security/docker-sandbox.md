@@ -40,6 +40,45 @@ normal host-side coding tools under permission preflight. Use
 `sandbox.mode = "all"` only for strict sessions where unsupported host-side
 tools should be blocked.
 
+## Container Lifetime
+
+`sandbox.scope` decides how long one container lives, and Docker honours all
+three values:
+
+- `session` (default) and `turn` hold a container open and run each command with
+  `docker exec`. Everything outside the workspace mount — `~/.cargo/registry`,
+  `~/.npm`, pip wheels, apt lists, `/tmp`, `/scratch` — survives between
+  commands, which is the whole point: a `docker run --rm` per command destroyed
+  every build cache each time, so a sandboxed `cargo build` re-downloaded its
+  dependency graph forever. Measured here: 214ms per `docker run --rm` against
+  57ms per `docker exec`.
+- `tool` builds and destroys a container per command, which is what the backend
+  did for every scope before this existed.
+
+A held container is keyed by **working directory** as well as by scope, so a
+worktree-isolated subagent never shares one with its parent. Held containers are
+identical to per-command ones in isolation — same mount, same `--cap-drop ALL`,
+same limits, same network mode — because the same code builds both argument
+lists. Per-command environment moves from `--env` on `run` to `--env` on `exec`,
+under the same allowlist and the same credential filter.
+
+### Cleanup
+
+Held containers carry `archon.sandbox=1`, `archon.sandbox.owner`,
+`archon.sandbox.pid` and `archon.sandbox.scope` labels. Three mechanisms remove
+them; see [Sandboxing](sandboxing.md#cleaning-up-held-containers) for why there
+are three. The one that holds unconditionally is
+`sandbox.docker.container_max_age_secs` (default 4h, minimum 60s): it is the
+container's own PID 1 and `--rm` is set, so the container stops and is removed
+at that age even if Archon was SIGKILLed and never restarted. Keep it well above
+any Bash timeout — a command still running at that age dies with the container.
+
+To find anything left behind by hand:
+
+```bash
+docker ps -a --filter label=archon.sandbox=1
+```
+
 ## Workspace Paths
 
 The workspace is bind-mounted, so the container and the host hold the same

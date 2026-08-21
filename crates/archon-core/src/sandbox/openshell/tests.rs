@@ -95,6 +95,7 @@ async fn backend_execute_bash_runs_fail_closed_preflight() {
             timeout_ms: 1000,
             max_output_bytes: 1024,
             env: Vec::new(),
+            ..SandboxCommandRequest::default()
         })
         .await
         .unwrap();

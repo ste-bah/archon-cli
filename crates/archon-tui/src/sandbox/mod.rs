@@ -220,6 +220,16 @@ impl SandboxBackend for SharedSandboxFlag {
             SandboxTerminal::Host
         }
     }
+
+    /// This flag denies; it never creates a world. The host tree is where
+    /// everything already is and stays, so no scope changes anything about it —
+    /// the same answer the ssh backend gives, for the same reason.
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
+    }
 }
 
 #[cfg(test)]

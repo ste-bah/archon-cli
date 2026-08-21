@@ -207,6 +207,7 @@ fn the_translated_mount_point_is_the_one_actually_mounted() {
         timeout_ms: 1_000,
         max_output_bytes: 1_024,
         env: Vec::new(),
+        ..archon_permissions::sandbox::SandboxCommandRequest::default()
     };
     let args = super::super::exec::docker_run_args(&DockerConfig::default(), "rw", &request);
 

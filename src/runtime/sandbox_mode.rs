@@ -121,6 +121,17 @@ impl SandboxBackend for ModeScopedSandboxBackend {
         self.inner.terminal(request)
     }
 
+    /// Delegated, for the same reason `terminal` is: `mode` scopes which tools
+    /// defer their permission decision to the backend, never how long the
+    /// backend's world lives. A wrapper that answered for itself here would let
+    /// a configuration load against a lifetime the real backend cannot keep.
+    fn scope_support(
+        &self,
+        scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        self.inner.scope_support(scope)
+    }
+
     fn execute_bash<'a>(
         &'a self,
         request: SandboxCommandRequest,
@@ -148,6 +159,13 @@ mod tests {
                 "Bash" | "Shell" | "Read" => Ok(()),
                 other => Err(format!("blocked by real backend: {other}")),
             }
+        }
+
+        fn scope_support(
+            &self,
+            _scope: archon_permissions::SandboxScope,
+        ) -> archon_permissions::SandboxScopeSupport {
+            archon_permissions::SandboxScopeSupport::Held
         }
 
         fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {

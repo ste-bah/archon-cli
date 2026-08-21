@@ -1,3 +1,4 @@
+use archon_permissions::sandbox::SandboxScopeSupport;
 use serde::{Deserialize, Serialize};
 
 mod capability_gate;
@@ -54,10 +55,52 @@ impl Default for SandboxConfig {
 
 impl SandboxConfig {
     pub fn validate(&self) -> Result<(), String> {
-        self.policy()?.validate()?;
+        let policy = self.policy()?;
+        policy.validate()?;
         self.docker.validate()?;
         self.ssh.validate()?;
-        self.openshell.validate()
+        self.openshell.validate()?;
+        self.scope_support()?;
+        Ok(())
+    }
+
+    /// What the selected backend does with the selected `sandbox.scope`.
+    ///
+    /// The configuration asks the backend rather than deciding for it, which is
+    /// the precedent `SandboxBackend::terminal` set: the backend is the only
+    /// thing that knows whether it can hold a sandbox open, and one that cannot
+    /// says so here — at config load, in the operator's own vocabulary — instead
+    /// of quietly doing something else at the first command.
+    ///
+    /// `Ok(None)` for a backend that does not isolate. `disabled` and `logical`
+    /// create no world, so there is no lifetime for a scope to name and no
+    /// setting of it that could be wrong.
+    pub fn scope_support(&self) -> Result<Option<SandboxScopeSupport>, String> {
+        let scope = self.policy()?.scope_kind()?;
+        let Some(backend) = self.bare_backend()? else {
+            return Ok(None);
+        };
+        backend.scope_support(scope).into_result().map(Some)
+    }
+
+    /// The backend a configuration names, with no mode or audit wrapper on it.
+    ///
+    /// Wrappers delegate `scope_support`, but building them here would drag the
+    /// binary's runtime layers into config validation; this only ever asks a
+    /// question the wrappers forward verbatim.
+    fn bare_backend(&self) -> Result<Option<Box<dyn archon_permissions::SandboxBackend>>, String> {
+        Ok(match self.backend_kind()? {
+            SandboxBackendKind::Disabled | SandboxBackendKind::Logical => None,
+            SandboxBackendKind::Docker => Some(Box::new(DockerSandboxBackend::new(
+                self.docker.clone(),
+                self.workspace_access.clone(),
+                self.policy()?.scope_kind()?,
+            ))),
+            SandboxBackendKind::Ssh => Some(Box::new(SshSandboxBackend::new(self.ssh.clone()))),
+            SandboxBackendKind::OpenShell => Some(Box::new(OpenShellSandboxBackend::new(
+                self.openshell.clone(),
+            ))),
+        })
     }
 
     pub fn backend_kind(&self) -> Result<SandboxBackendKind, String> {
@@ -248,5 +291,84 @@ mod tests {
         let error = cfg.validate().unwrap_err();
 
         assert!(error.contains("sandbox.backend"));
+    }
+
+    fn config(backend: &str, scope: &str) -> SandboxConfig {
+        SandboxConfig {
+            backend: backend.into(),
+            scope: scope.into(),
+            docker: DockerConfig {
+                enabled: true,
+                ..DockerConfig::default()
+            },
+            ..SandboxConfig::default()
+        }
+    }
+
+    /// The failure this whole change exists to stop repeating: a scope that
+    /// loads cleanly and is then quietly not honoured. openshell destroys its
+    /// sandbox after every command, so a longer lifetime has to be refused where
+    /// the operator can see it.
+    #[test]
+    fn a_backend_that_cannot_hold_a_sandbox_refuses_the_scope_at_config_load() {
+        for scope in ["session", "turn"] {
+            let error = config("openshell", scope)
+                .validate()
+                .expect_err("this configuration must not load");
+
+            assert!(error.contains("--no-keep"), "{error}");
+            assert!(
+                error.contains("sandbox.scope = \"tool\""),
+                "the refusal has to name the setting that works: {error}"
+            );
+        }
+        config("openshell", "tool")
+            .validate()
+            .expect("`tool` is exactly what this backend does");
+    }
+
+    #[test]
+    fn docker_accepts_every_scope_and_says_which_hold_a_container() {
+        use archon_permissions::SandboxScopeSupport;
+
+        for scope in ["session", "turn"] {
+            assert_eq!(
+                config("docker", scope).scope_support().expect("supported"),
+                Some(SandboxScopeSupport::Held),
+                "{scope} should hold a container open"
+            );
+        }
+        assert_eq!(
+            config("docker", "tool").scope_support().expect("supported"),
+            Some(SandboxScopeSupport::PerCommand)
+        );
+    }
+
+    /// ssh's world is a machine Archon neither creates nor destroys, so no scope
+    /// can be wrong and none can be honoured either — state simply survives.
+    #[test]
+    fn a_backend_whose_world_outlives_archon_reports_no_lifetime_to_manage() {
+        use archon_permissions::SandboxScopeSupport;
+
+        for scope in ["session", "turn", "tool"] {
+            assert_eq!(
+                config("ssh", scope).scope_support().expect("supported"),
+                Some(SandboxScopeSupport::Durable)
+            );
+        }
+    }
+
+    /// A backend that creates no world has no lifetime for a scope to name, and
+    /// must not be made to answer for one.
+    #[test]
+    fn a_non_isolating_backend_has_no_scope_to_support() {
+        for backend in ["disabled", "logical"] {
+            assert_eq!(
+                config(backend, "session")
+                    .scope_support()
+                    .expect("resolves"),
+                None
+            );
+        }
     }
 }

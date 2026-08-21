@@ -85,6 +85,7 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
         policy.workspace_access,
         policy.describes_isolation()
     );
+    output.push_str(&format!("Sandbox lifetime: {}\n", describe_scope(config)));
     if verbose {
         output.push_str(
             "Compatibility: /sandbox toggles the logical TUI gate only; normal permission rules still apply\n",
@@ -97,19 +98,52 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
     Ok(output)
 }
 
+/// What the selected backend does with the selected scope, in a sentence.
+///
+/// `Scope: session` on its own says what was configured, which for the whole
+/// life of that field was not what happened. This line says what the backend
+/// actually does, which is the question an operator wondering why their build
+/// re-downloads its dependencies is really asking.
+fn describe_scope(config: &archon_core::sandbox::SandboxConfig) -> String {
+    use archon_permissions::SandboxScopeSupport;
+
+    match config.scope_support() {
+        Ok(None) => "not applicable; this backend creates no world of its own".into(),
+        Ok(Some(SandboxScopeSupport::Held)) => {
+            "one sandbox held open for the scope and re-entered per command; \
+             caches outside the workspace survive between commands"
+                .into()
+        }
+        Ok(Some(SandboxScopeSupport::Durable)) => {
+            "the world outlives Archon, so every scope reaches the same durable \
+             place and state always survives"
+                .into()
+        }
+        Ok(Some(SandboxScopeSupport::PerCommand)) => {
+            "a sandbox built and destroyed per command; nothing outside the \
+             workspace survives"
+                .into()
+        }
+        Ok(Some(SandboxScopeSupport::Unsupported(reason))) | Err(reason) => {
+            format!("unsupported: {reason}")
+        }
+    }
+}
+
 fn append_backend_verbose_status(
     output: &mut String,
     config: &archon_core::sandbox::SandboxConfig,
 ) {
     match config.backend.as_str() {
         "docker" => output.push_str(&format!(
-            "Docker: enabled={} image={} network={} privileged={} mount_home={} mount_docker_socket={}\n",
+            "Docker: enabled={} image={} network={} privileged={} mount_home={} mount_docker_socket={}\nDocker container max age: {}s (enforced by the container's own PID 1, so a held container stops and is removed at this age even if Archon is killed)\n",
             config.docker.enabled,
             config.docker.image,
             config.docker.network,
             config.docker.privileged,
             config.docker.mount_home,
-            config.docker.mount_docker_socket
+            config.docker.mount_docker_socket,
+            config.docker.container_max_age_secs
         )),
         "ssh" => output.push_str(&format!(
             "SSH: enabled={} workspace_mode={} remote_workdir_configured={} host_configured={} host_key_checking={} host_shell_fallback={}\n",

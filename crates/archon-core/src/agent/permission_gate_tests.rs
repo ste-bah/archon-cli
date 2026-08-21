@@ -32,6 +32,13 @@ impl archon_permissions::SandboxBackend for DenyBlockedWriteSandbox {
     ) -> archon_permissions::SandboxTerminal {
         archon_permissions::SandboxTerminal::Host
     }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
+    }
 }
 
 #[async_trait::async_trait]

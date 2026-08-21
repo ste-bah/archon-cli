@@ -275,6 +275,16 @@ impl SandboxBackend for AuditedSandboxBackend {
         decision
     }
 
+    /// Delegated verbatim: the audit layer observes decisions, it does not make
+    /// them, and a lifetime it answered for itself would be a claim about a
+    /// backend it only wraps.
+    fn scope_support(
+        &self,
+        scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        self.inner.scope_support(scope)
+    }
+
     fn execute_bash<'a>(
         &'a self,
         request: SandboxCommandRequest,

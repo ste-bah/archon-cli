@@ -33,6 +33,14 @@ pub(crate) fn isolation_backend(config: &SandboxConfig) -> Option<Arc<dyn Sandbo
         "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
             config.docker.clone(),
             config.workspace_access.clone(),
+            // `unwrap_or_default` is `session`, and it is unreachable in any
+            // configured run: `SandboxConfig::validate` parses this at load and
+            // fails the whole config on an unknown value, so anything reaching
+            // here has already been through it.
+            config
+                .policy()
+                .and_then(|p| p.scope_kind())
+                .unwrap_or_default(),
         )),
         "ssh" => Arc::new(archon_core::sandbox::SshSandboxBackend::new(
             config.ssh.clone(),

@@ -17,7 +17,8 @@ pub mod prompt {}
 
 pub mod sandbox;
 pub use sandbox::{
-    SandboxBackend, SandboxTerminal, SandboxTerminalCommand, SandboxTerminalRequest,
+    SandboxBackend, SandboxScope, SandboxScopeSupport, SandboxTerminal, SandboxTerminalCommand,
+    SandboxTerminalRequest,
 };
 
 pub mod tool_capability;

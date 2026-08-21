@@ -56,6 +56,13 @@ impl SandboxBackend for FixedTerminalBackend {
     fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
         self.answer.clone()
     }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
 }
 
 pub(crate) fn door() -> SandboxTerminalCommand {
@@ -183,6 +190,13 @@ fn the_request_carries_the_workspace_and_the_requested_directory_apart() {
         fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
             *self.0.lock().expect("lock") = Some(request.clone());
             SandboxTerminal::Open(door())
+        }
+
+        fn scope_support(
+            &self,
+            _scope: archon_permissions::SandboxScope,
+        ) -> archon_permissions::SandboxScopeSupport {
+            archon_permissions::SandboxScopeSupport::Held
         }
     }
 

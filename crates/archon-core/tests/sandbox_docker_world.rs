@@ -25,13 +25,25 @@ use std::path::{Path, PathBuf};
 
 use archon_core::sandbox::{DockerConfig, DockerFs, DockerSandboxBackend};
 use archon_permissions::sandbox::{
-    SandboxBackend, SandboxCommandRequest, SandboxTerminal, SandboxTerminalRequest,
+    SandboxBackend, SandboxCommandRequest, SandboxScope, SandboxTerminal, SandboxTerminalRequest,
 };
 use archon_tools::filesystem::FileSystem;
+
+/// `sandbox.scope`: whether a container is held across commands, keyed by
+/// working directory, and torn down at the right boundary. A module rather than
+/// a second test binary, so `--ignored` runs the whole docker suite at once; a
+/// separate file only because of the 500-line ceiling.
+#[path = "sandbox_docker_world/lifetime.rs"]
+mod lifetime;
 
 fn docker_config() -> DockerConfig {
     DockerConfig {
         enabled: true,
+        // Two minutes rather than the four-hour default. A container that
+        // escapes teardown because a test panicked has to die on its own, and
+        // soon: this is the same mechanism that bounds the leak in production,
+        // turned down to a length a test run can outlive.
+        container_max_age_secs: 120,
         ..DockerConfig::default()
     }
 }
@@ -43,6 +55,8 @@ fn request(working_dir: &Path, command: &str) -> SandboxCommandRequest {
         timeout_ms: 120_000,
         max_output_bytes: 64 * 1024,
         env: Vec::new(),
+        session_id: "docker-world".into(),
+        turn_id: Some("docker-world#1".into()),
     }
 }
 
@@ -51,7 +65,7 @@ fn request(working_dir: &Path, command: &str) -> SandboxCommandRequest {
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn read_returns_the_bytes_bash_wrote_in_the_container() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = DockerSandboxBackend::new(docker_config(), "rw");
+    let backend = DockerSandboxBackend::new(docker_config(), "rw", SandboxScope::Session);
     let fs = DockerFs::new(dir.path());
 
     let result = backend
@@ -83,7 +97,7 @@ async fn read_returns_the_bytes_bash_wrote_in_the_container() {
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn bash_sees_the_bytes_the_agent_wrote() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = DockerSandboxBackend::new(docker_config(), "rw");
+    let backend = DockerSandboxBackend::new(docker_config(), "rw", SandboxScope::Session);
     let fs = DockerFs::new(dir.path());
 
     fs.write(
@@ -112,7 +126,7 @@ async fn bash_sees_the_bytes_the_agent_wrote() {
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn a_nested_path_printed_by_the_container_resolves() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = DockerSandboxBackend::new(docker_config(), "rw");
+    let backend = DockerSandboxBackend::new(docker_config(), "rw", SandboxScope::Session);
     let fs = DockerFs::new(dir.path());
 
     let result = backend
@@ -161,7 +175,7 @@ async fn a_terminal_opens_inside_the_container() {
     // the invoking user is writable from inside. Opening the directory up would
     // hide a regression in exactly that.
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = DockerSandboxBackend::new(docker_config(), "rw");
+    let backend = DockerSandboxBackend::new(docker_config(), "rw", SandboxScope::Session);
 
     let SandboxTerminal::Open(command) = backend.terminal(&SandboxTerminalRequest {
         shell: None,
@@ -228,7 +242,7 @@ async fn a_terminal_opens_inside_the_container() {
 #[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
 async fn a_readonly_workspace_refuses_a_container_write() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let backend = DockerSandboxBackend::new(docker_config(), "ro");
+    let backend = DockerSandboxBackend::new(docker_config(), "ro", SandboxScope::Session);
 
     let result = backend
         .execute_bash(request(
@@ -407,7 +421,11 @@ async fn a_spawned_agent_runs_its_bash_in_the_parents_container() {
     let parent_ctx = archon_tools::tool::ToolContext {
         working_dir: dir.path().to_path_buf(),
         session_id: "docker-world-session".into(),
-        sandbox: Some(Arc::new(DockerSandboxBackend::new(docker_config(), "rw"))),
+        sandbox: Some(Arc::new(DockerSandboxBackend::new(
+            docker_config(),
+            "rw",
+            SandboxScope::Session,
+        ))),
         fs: Some(Arc::clone(&parent_fs)),
         ..archon_tools::tool::ToolContext::default()
     };

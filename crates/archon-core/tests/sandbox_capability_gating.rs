@@ -8,7 +8,7 @@ use archon_core::sandbox::{
     DockerConfig, DockerSandboxBackend, OpenShellConfig, OpenShellSandboxBackend, SshConfig,
     SshSandboxBackend,
 };
-use archon_permissions::{SandboxBackend, ToolCapability};
+use archon_permissions::{SandboxBackend, SandboxScope, ToolCapability};
 
 /// A binary whose `-V` and `--version` both succeed, guaranteed present because
 /// it is running this test. The ssh and openshell backends probe their binary
@@ -28,6 +28,7 @@ fn backends() -> Vec<(&'static str, Box<dyn SandboxBackend>)> {
                     ..DockerConfig::default()
                 },
                 "rw",
+                SandboxScope::Session,
             )),
         ),
         (
@@ -159,6 +160,7 @@ fn backend_preflight_still_precedes_the_class_decision() {
             ..DockerConfig::default()
         },
         "rw",
+        SandboxScope::Session,
     );
 
     for capability in [ToolCapability::EXECUTION, ToolCapability::Egress] {

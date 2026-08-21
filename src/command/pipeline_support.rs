@@ -63,6 +63,12 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         cancel_parent: agent_config.cancel_token.clone(),
+        // The workflow CLI has no turn loop — one invocation is one unit of
+        // work — so the run *is* the turn, and saying so is what stops
+        // `sandbox.scope = "turn"` from silently degrading to a container per
+        // command here. Leaving this `None` would be the honest answer for a
+        // caller whose turns are unknown; this caller's are not.
+        turn_id: Some(format!("{session_id}#run")),
         sandbox: agent_config.sandbox.clone(),
         // The world's filesystem travels with its backend or the pair is
         // useless: a stage that read the host while its `Bash` ran in a

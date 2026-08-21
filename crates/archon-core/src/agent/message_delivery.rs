@@ -79,6 +79,11 @@ impl RouterHost for AgentHost<'_> {
             // Parent-side context: `agent_id` reaches the child through the
             // executor, not through here.
             subagent_id: None,
+            turn_id: Some(format!(
+                "{}#{}",
+                self.agent.config.session_id,
+                self.agent.turn_number()
+            )),
             mode: archon_tools::tool::AgentMode::Normal,
             extra_dirs: vec![],
             in_fork: crate::agents::built_in::is_in_fork_child_by_messages(

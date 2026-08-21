@@ -114,6 +114,10 @@ fn openshell_fs_args(
             // truncate it into a corrupt one.
             max_output_bytes: usize::MAX,
             env: Vec::new(),
+            // A file transfer belongs to no turn and no sandbox lifetime: this
+            // backend builds a throwaway sandbox per command whatever the
+            // scope, which is what `scope_support` says out loud.
+            ..SandboxCommandRequest::default()
         },
     )
 }

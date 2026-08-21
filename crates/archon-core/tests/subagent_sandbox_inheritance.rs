@@ -23,7 +23,7 @@ use archon_llm::provider::{
 };
 use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
-use archon_permissions::{SandboxBackend, ToolCapability};
+use archon_permissions::{SandboxBackend, SandboxScope, ToolCapability};
 use archon_tools::subagent_executor::SubagentExecutor;
 use archon_tools::subagent_request::SubagentRequest;
 use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
@@ -286,6 +286,7 @@ async fn spawn_sandboxed_child(
             ..DockerConfig::default()
         },
         "rw",
+        SandboxScope::Session,
     ));
     let parent_ctx = ToolContext {
         working_dir: parent_dir.to_path_buf(),

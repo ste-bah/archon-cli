@@ -29,6 +29,13 @@ impl SandboxBackend for FixedSandbox {
         archon_permissions::sandbox::SandboxTerminal::Host
     }
 
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
+    }
+
     fn execute_bash<'a>(
         &'a self,
         _request: SandboxCommandRequest,

@@ -47,6 +47,7 @@ fn docker_run_args_default_to_no_network_and_readonly_workspace() {
             ("RUST_LOG".into(), "debug".into()),
             ("ANTHROPIC_API_KEY".into(), "secret".into()),
         ],
+        ..SandboxCommandRequest::default()
     };
 
     let args = docker_run_args(&cfg, "ro", &request);
@@ -80,6 +81,7 @@ fn docker_run_args_mount_explicit_writable_paths_over_readonly_workspace() {
         timeout_ms: 1_000,
         max_output_bytes: 1024,
         env: Vec::new(),
+        ..SandboxCommandRequest::default()
     };
 
     let args = docker_run_args(&cfg, "ro", &request);
@@ -109,6 +111,7 @@ fn docker_scratch_mode_adds_ephemeral_scratch_mount() {
         timeout_ms: 1_000,
         max_output_bytes: 1024,
         env: Vec::new(),
+        ..SandboxCommandRequest::default()
     };
 
     let args = docker_run_args(&cfg, "scratch", &request);
@@ -148,6 +151,7 @@ fn docker_backend_fails_closed_for_unsafe_config() {
             ..DockerConfig::default()
         },
         "rw",
+        SandboxScope::Session,
     );
 
     let error = backend
@@ -165,6 +169,7 @@ fn docker_backend_rejects_invalid_workspace_access() {
             ..DockerConfig::default()
         },
         "home",
+        SandboxScope::Session,
     );
 
     let error = backend
@@ -186,6 +191,7 @@ mod terminals {
                 ..DockerConfig::default()
             },
             workspace_access,
+            SandboxScope::Session,
         )
     }
 
@@ -222,6 +228,7 @@ mod terminals {
                 timeout_ms: 1_000,
                 max_output_bytes: 1_024,
                 env: Vec::new(),
+                ..SandboxCommandRequest::default()
             },
         );
 
@@ -320,6 +327,7 @@ mod terminals {
                 ..DockerConfig::default()
             },
             "rw",
+            SandboxScope::Session,
         );
 
         let SandboxTerminal::Refused(reason) = backend.terminal(&request("/repo")) else {

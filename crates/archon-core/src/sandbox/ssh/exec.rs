@@ -216,6 +216,7 @@ mod tests {
             timeout_ms: 1000,
             max_output_bytes: 1024,
             env: vec![("SECRET_TOKEN".into(), "nope".into())],
+            ..SandboxCommandRequest::default()
         }
     }
 

@@ -39,6 +39,61 @@ fn sandbox_status_verbose_shows_openshell_safety_knobs() {
     assert!(body.contains("Claude Code spoofing"));
 }
 
+/// `Scope: session` echoes the config file, and for the whole life of that field
+/// it was not what happened. Status has to say what the backend actually does
+/// with it — that is the question an operator whose build re-downloads its
+/// dependencies every command is really asking.
+#[test]
+fn sandbox_status_says_what_the_backend_does_with_the_configured_scope() {
+    let held = archon_core::sandbox::SandboxConfig {
+        backend: "docker".into(),
+        scope: "session".into(),
+        docker: archon_core::sandbox::DockerConfig {
+            enabled: true,
+            ..archon_core::sandbox::DockerConfig::default()
+        },
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&held, true).unwrap();
+    assert!(body.contains("Scope: session"), "{body}");
+    assert!(
+        body.contains("Sandbox lifetime: one sandbox held open"),
+        "status must say the container is reused, not just that a scope was set: {body}"
+    );
+    assert!(
+        body.contains("Docker container max age: 14400s"),
+        "the bound that stops a leaked container living forever is not shown: {body}"
+    );
+
+    let per_command = archon_core::sandbox::SandboxConfig {
+        scope: "tool".into(),
+        ..held
+    };
+    assert!(
+        render_status(&per_command, false)
+            .unwrap()
+            .contains("Sandbox lifetime: a sandbox built and destroyed per command"),
+        "`tool` must read differently from `session`, or the line is decoration"
+    );
+}
+
+/// A scope the backend cannot keep never reaches `render_status` in a real run —
+/// config load rejects it first — but status must not paper over one either.
+#[test]
+fn sandbox_status_names_a_scope_the_backend_cannot_honour() {
+    let config = archon_core::sandbox::SandboxConfig {
+        backend: "openshell".into(),
+        scope: "session".into(),
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&config, false).unwrap();
+
+    assert!(body.contains("Sandbox lifetime: unsupported:"), "{body}");
+    assert!(body.contains("--no-keep"), "{body}");
+}
+
 #[test]
 fn sandbox_explain_rejects_unknown_backend_override() {
     let config = archon_core::sandbox::SandboxConfig::default();

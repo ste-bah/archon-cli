@@ -72,6 +72,16 @@ impl Default for SandboxPolicy {
 }
 
 impl SandboxPolicy {
+    /// The configured lifetime, parsed.
+    ///
+    /// Kept as a `String` on the struct because the audit rows and the status
+    /// renderer serialise it verbatim; this is the accessor everything that
+    /// *acts* on the value goes through, so no second spelling of "session" can
+    /// appear anywhere that matters.
+    pub fn scope_kind(&self) -> Result<archon_permissions::SandboxScope, String> {
+        self.scope.parse()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         match self.mode.as_str() {
             "risky" | "all" | "shell" => {}
@@ -81,14 +91,7 @@ impl SandboxPolicy {
                 ));
             }
         }
-        match self.scope.as_str() {
-            "session" | "turn" | "tool" => {}
-            other => {
-                return Err(format!(
-                    "sandbox.scope must be session, turn, or tool, got \"{other}\""
-                ));
-            }
-        }
+        self.scope_kind()?;
         match self.workspace_access.as_str() {
             "ro" | "rw" | "scratch" => Ok(()),
             other => Err(format!(

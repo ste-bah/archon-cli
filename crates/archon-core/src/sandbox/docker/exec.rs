@@ -80,6 +80,76 @@ fn host_identity_args() -> Vec<String> {
     Vec::new()
 }
 
+/// The `docker run` that starts a held container (`sandbox.scope`).
+///
+/// Identical isolation to the per-command container — same mount, same caps,
+/// same limits — because it is the same function that builds them. What differs
+/// is only that it detaches, carries a name and the labels teardown finds it by,
+/// and runs `sleep` instead of a command: `docker exec` supplies the commands.
+///
+/// `--rm` on a detached container is deliberate and load-bearing. `sleep` is
+/// PID 1, so the container stops of its own accord after `ttl_secs` and docker
+/// then removes it — a hard upper bound on the leak that survives Archon being
+/// SIGKILLed and never restarted, which no host-side teardown can promise.
+pub(super) fn docker_pool_create_args(
+    config: &DockerConfig,
+    workspace_access: &str,
+    working_dir: &Path,
+    name: &str,
+    labels: &[(String, String)],
+    ttl_secs: u64,
+) -> Vec<String> {
+    let mut args = vec![
+        "run".into(),
+        "--detach".into(),
+        "--rm".into(),
+        "--pull".into(),
+        "never".into(),
+        "--name".into(),
+        name.to_string(),
+    ];
+    for (key, value) in labels {
+        args.extend(["--label".into(), format!("{key}={value}")]);
+    }
+    args.extend(isolation_args(
+        config,
+        workspace_access,
+        working_dir,
+        CONTAINER_WORKSPACE,
+    ));
+    args.extend([config.image.clone(), "sleep".into(), ttl_secs.to_string()]);
+    args
+}
+
+/// The `docker exec` that runs one command in a held container.
+///
+/// Per-command environment moves from `--env` on `run` to `-e` on `exec`, under
+/// the same allowlist and the same credential filter — a held container must not
+/// become a way to smuggle a variable the per-command path would have dropped.
+pub(super) fn docker_exec_args(
+    config: &DockerConfig,
+    name: &str,
+    request: &SandboxCommandRequest,
+) -> Vec<String> {
+    let mut args = vec![
+        "exec".into(),
+        "--workdir".into(),
+        CONTAINER_WORKSPACE.into(),
+    ];
+    for arg in allowed_env_args(&request.env, &config.env_allowlist) {
+        // `docker run` spells it `--env`; `docker exec` accepts `--env` too, so
+        // the shared builder needs no per-verb dialect.
+        args.push(arg);
+    }
+    args.extend([
+        name.to_string(),
+        "/bin/bash".into(),
+        "-lc".into(),
+        request.command.clone(),
+    ]);
+    args
+}
+
 fn docker_container_args(
     config: &DockerConfig,
     workspace_access: &str,
@@ -87,7 +157,22 @@ fn docker_container_args(
     container_workdir: &str,
 ) -> Vec<String> {
     let mut args = vec!["run".into(), "--rm".into(), "--pull".into(), "never".into()];
-    args.extend(["--security-opt".into(), "no-new-privileges".into()]);
+    args.extend(isolation_args(
+        config,
+        workspace_access,
+        working_dir,
+        container_workdir,
+    ));
+    args
+}
+
+fn isolation_args(
+    config: &DockerConfig,
+    workspace_access: &str,
+    working_dir: &Path,
+    container_workdir: &str,
+) -> Vec<String> {
+    let mut args = vec!["--security-opt".into(), "no-new-privileges".into()];
     args.extend(["--cap-drop".into(), "ALL".into()]);
     args.extend(host_identity_args());
     args.extend(["--pids-limit".into(), "256".into()]);

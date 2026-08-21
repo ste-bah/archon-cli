@@ -4,8 +4,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use archon_permissions::sandbox::{
-    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
-    SandboxTerminalRequest,
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxScope, SandboxScopeSupport,
+    SandboxTerminal, SandboxTerminalRequest,
 };
 use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
@@ -282,6 +282,25 @@ impl SandboxBackend for SshSandboxBackend {
         }
     }
 
+    /// The remote host is not a sandbox Archon builds, so it has no lifetime to
+    /// give it.
+    ///
+    /// Every scope names the same durable machine: a file `Bash` writes to
+    /// `/tmp` is there for the next command whatever `sandbox.scope` says, and
+    /// so is `~/.cargo/registry`. The property `scope` exists to buy — build
+    /// caches surviving between commands — this backend already has, and cannot
+    /// lose, because Archon neither creates nor destroys the world.
+    ///
+    /// Connection multiplexing (`ControlMaster` + `ControlPersist`) would make
+    /// the *transport* cheaper. It is deliberately not implemented here: it
+    /// changes latency and nothing about lifetime, no SSH target was available
+    /// to verify it against, and OpenSSH does not support `ControlMaster` on
+    /// Windows at all — an unexercised implementation would be exactly the kind
+    /// of plausible-looking machinery this backend has no way to prove.
+    fn scope_support(&self, _scope: SandboxScope) -> SandboxScopeSupport {
+        SandboxScopeSupport::Durable
+    }
+
     fn execute_bash<'a>(
         &'a self,
         request: SandboxCommandRequest,
@@ -444,6 +463,7 @@ mod tests {
                 timeout_ms: 1000,
                 max_output_bytes: 1024,
                 env: Vec::new(),
+                ..SandboxCommandRequest::default()
             })
             .await
             .unwrap();

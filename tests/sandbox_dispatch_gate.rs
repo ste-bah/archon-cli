@@ -51,6 +51,13 @@ impl SandboxBackend for FakeSandboxBackend {
             archon_permissions::SandboxTerminal::Host
         }
     }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
+    }
 }
 
 /// Minimal tool named "Write" — sandbox-classified as write-blocked.

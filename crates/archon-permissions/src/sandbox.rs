@@ -7,13 +7,107 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+/// How long a sandbox lives before it is destroyed (`sandbox.scope`).
+///
+/// The knob shipped validated, audited and printed, and read by nothing, so a
+/// `docker` session built and destroyed a container per command whatever it was
+/// set to. Every build cache a command warmed — `~/.cargo/registry`, `~/.npm`,
+/// pip wheels, apt lists — died with that container, because the bind mount
+/// covers only the workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SandboxScope {
+    /// One sandbox for the whole run.
+    #[default]
+    Session,
+    /// A fresh sandbox per agent turn.
+    Turn,
+    /// A fresh sandbox per command.
+    Tool,
+}
+
+impl SandboxScope {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Turn => "turn",
+            Self::Tool => "tool",
+        }
+    }
+}
+
+impl std::fmt::Display for SandboxScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SandboxScope {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "session" => Ok(Self::Session),
+            "turn" => Ok(Self::Turn),
+            "tool" => Ok(Self::Tool),
+            other => Err(format!(
+                "sandbox.scope must be session, turn, or tool, got \"{other}\""
+            )),
+        }
+    }
+}
+
+/// What a backend actually does when asked to honour a [`SandboxScope`].
+///
+/// Three of these are "supported" and mean visibly different things, which is
+/// why this is not a boolean: an operator reading `sandbox status` needs to know
+/// whether their build cache survives, and "supported" alone does not say.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SandboxScopeSupport {
+    /// The backend holds one sandbox open for this lifetime and re-enters it
+    /// per command, so anything a command leaves outside the workspace — build
+    /// caches, `/tmp`, installed packages — is there for the next one.
+    Held,
+    /// The world outlives Archon and is neither created nor destroyed by it, so
+    /// every scope names the same durable place and there is no lifetime to
+    /// manage. State survives regardless of the scope.
+    Durable,
+    /// Every command builds and destroys its own world. Honest for `tool`, and
+    /// under any longer scope it would be a lie.
+    PerCommand,
+    /// This backend cannot honour this lifetime. The string says why, in terms
+    /// an operator can act on.
+    Unsupported(String),
+}
+
+impl SandboxScopeSupport {
+    /// `Err(reason)` for the one variant a configuration must not load with.
+    pub fn into_result(self) -> Result<Self, String> {
+        match self {
+            Self::Unsupported(reason) => Err(reason),
+            supported => Ok(supported),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SandboxCommandRequest {
     pub command: String,
     pub working_dir: PathBuf,
     pub timeout_ms: u64,
     pub max_output_bytes: usize,
     pub env: Vec<(String, String)>,
+    /// The session that owns this command. Part of a held sandbox's identity so
+    /// two sessions sharing one process cannot land in one another's world.
+    pub session_id: String,
+    /// The agent turn this command belongs to, when the caller has turns.
+    ///
+    /// `None` is a real answer — the workflow CLI and every direct construction
+    /// site have no turn loop — and it is emphatically not an identity. Two
+    /// unrelated callers that both answer `None` must never share a sandbox on
+    /// the strength of it, so a backend under `turn` scope holds nothing for a
+    /// request that cannot name its turn.
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +187,17 @@ pub trait SandboxBackend: Send + Sync + std::fmt::Debug {
     /// but would silently disable terminals for every policy-only backend. The
     /// answer differs per backend, so every backend states it.
     fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal;
+
+    /// What this backend does when asked to honour `scope`.
+    ///
+    /// Required rather than defaulted, for the reason `terminal` is: the
+    /// configuration must not assume on a backend's behalf. `sandbox.scope`
+    /// spent its whole life validated and read by nobody, so a `docker` session
+    /// destroyed its container after every command whatever the operator had
+    /// set — which is the failure a default here would reproduce. A backend
+    /// that cannot hold a sandbox for a lifetime says so, and the configuration
+    /// fails to load rather than silently doing something else.
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport;
 
     /// Optionally execute Bash inside this backend. Logical policy-only
     /// backends return `None`, which tells the tool to use the normal host

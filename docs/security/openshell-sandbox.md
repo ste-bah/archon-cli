@@ -1,5 +1,13 @@
 # OpenShell Sandbox
 
+> **`sandbox.scope` must be `"tool"`.** Every command runs
+> `openshell sandbox create --no-keep --`, which destroys its sandbox on exit, so
+> `session` and `turn` are lifetimes this backend cannot keep and are refused at
+> config load. Whether the OpenShell CLI can exec into an existing sandbox was
+> not established; if `sandbox create` without `--no-keep` yields a durable
+> handle and some verb can run a command in it, this backend could hold one open
+> and terminals would stop having to be refused.
+
 OpenShell support is conservative in this release slice. Configuration, status,
 explain, doctor, and Bash execution routing exist, with provider injection and
 host shell fallback disabled by default.
