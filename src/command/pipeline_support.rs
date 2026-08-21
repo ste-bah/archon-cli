@@ -97,7 +97,7 @@ pub(crate) async fn build_subagent_pipeline_adapter(
 fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str) -> AgentConfig {
     AgentConfig {
         model: crate::session::active_session_model(config),
-        max_tokens: config.api.thinking_budget,
+        max_tokens: config.api.resolved_max_tokens(),
         thinking_budget: config.api.thinking_budget,
         permission_rules: archon_permissions::rules::RuleSet {
             always_allow: config.permissions.always_allow.clone(),

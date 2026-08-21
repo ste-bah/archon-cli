@@ -6,6 +6,10 @@ pub(super) struct PreparedWorktreeBranch {
     pub(super) coordinator_plan: WritePlan,
     pub(super) baseline: CanonicalBaseline,
     pub(super) workspace: ItemWorkspace,
+    /// Every claim in this branch's wave, including its own. Carried here
+    /// because the wave is known only while the wave is being prepared, and the
+    /// adapter that needs it runs much later.
+    pub(super) wave_claims: Vec<crate::v2::write_scope_extension::WaveClaim>,
 }
 
 pub(super) struct CompletedWorktreeBranch {

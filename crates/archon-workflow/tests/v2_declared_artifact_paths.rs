@@ -27,6 +27,7 @@ fn context_for(root: &std::path::Path) -> WorkflowV2ProjectArtifactContext {
         artifact_roots: vec![".archon/lab-data".to_string()],
         branch_evidence_root: None,
         policy_version: None,
+        ..Default::default()
     }
 }
 

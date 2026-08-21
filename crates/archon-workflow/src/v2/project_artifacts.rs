@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     WorkflowV2Artifact, WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap,
     WorkflowV2Result, WorkflowV2Status, WorkflowV2WriteSafetyError,
-    artifact_path_guard::artifact_file_defect,
+    artifact_path_guard::declared_artifact_defect,
     project_artifact_contract::{artifact_path_is_templated, artifact_requirement_paths},
 };
 
@@ -19,6 +19,29 @@ pub struct WorkflowV2ProjectArtifactContext {
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_roots: Vec<String>,
+    /// Exact deliverable paths an artifact-only item may write, taken from the
+    /// host-parsed task universe. Matched exactly, never as a prefix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_paths: Vec<String>,
+    /// Declared deliverables the TASK wrote as directories, normalised without
+    /// the trailing separator.
+    ///
+    /// Carried as its own list because the separator does not survive the
+    /// journey: `admissible_path` rebuilds a path with `segments.join("/")`,
+    /// `Path::join(..).display()` drops it again, and by the time a value
+    /// reaches the completion check it is an absolute path with no way to tell
+    /// a declared directory from a declared file. One live task declares
+    /// `<project-data>/coverage/history/` and was failed three times
+    /// for "is a directory, not the declared file" — including once after a fix
+    /// that read the separator off the string, which by then was gone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directory_artifacts: Vec<String>,
+    /// Where repository SOURCE lives, when that is a different tree from the
+    /// project artifact root. Existence checks only — write confinement still
+    /// answers to the project root alone. See `project_artifact_completion`
+    /// for why the second candidate exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_evidence_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,6 +82,9 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         project_root: project_root_for_v2_root(v2_root).map(|path| path.display().to_string()),
         run_id,
         artifact_roots,
+        artifact_paths: Vec::new(),
+        directory_artifacts: Vec::new(),
+        repository_root: None,
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
     }
@@ -168,7 +194,7 @@ fn classify_project_artifact_path(
     let Some(project_root) = project_root_path(context) else {
         return Ok(ProjectArtifactPath::NotArtifact);
     };
-    let trimmed = raw.trim();
+    let trimmed = strip_verbatim_prefix(raw.trim());
     if trimmed.is_empty() {
         return Ok(ProjectArtifactPath::NotArtifact);
     }
@@ -191,7 +217,11 @@ fn absolute_artifact_path(
     let Ok(relative) = clean.strip_prefix(project_root) else {
         return Ok(ProjectArtifactPath::NotArtifact);
     };
-    let relative = normalize_relative_path(item_id, &relative.to_string_lossy())?;
+    // `/` separators whatever the host uses: a Windows backslash path never
+    // matched the `/`-separated declared paths, so a written deliverable was
+    // classified NotArtifact and write-ownership rejected the branch.
+    let relative =
+        normalize_relative_path(item_id, &relative.to_string_lossy().replace('\\', "/"))?;
     if !allowed_relative_artifact(&relative, context) {
         return Ok(ProjectArtifactPath::NotArtifact);
     }
@@ -218,7 +248,7 @@ fn relative_artifact_path(
 }
 
 fn project_root_path(context: &WorkflowV2ProjectArtifactContext) -> Option<PathBuf> {
-    let root = context.project_root.as_deref()?.trim();
+    let root = strip_verbatim_prefix(context.project_root.as_deref()?.trim());
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
@@ -278,7 +308,11 @@ fn push_unique_root(roots: &mut Vec<String>, root: String) {
 }
 
 fn allowed_relative_artifact(relative: &str, context: &WorkflowV2ProjectArtifactContext) -> bool {
-    relative.starts_with("artifacts/")
+    context
+        .artifact_paths
+        .iter()
+        .any(|declared| declared == relative)
+        || relative.starts_with("artifacts/")
         || namespaced_project_data_artifact(relative)
         || run_prefixed_workflow_artifact(relative, context)
         || context
@@ -341,7 +375,9 @@ fn project_artifact_status(
 ) -> Result<ProjectArtifactPath, WorkflowV2WriteSafetyError> {
     let absolute = absolute_artifact_candidate(project_root, relative, context);
     ensure_project_path_parent_safe(item_id, project_root, &absolute, relative)?;
-    if let Some(defect) = artifact_file_defect(&absolute) {
+    if let Some(defect) =
+        declared_artifact_defect(relative, &absolute, context.declared_as_directory(relative))
+    {
         return Ok(ProjectArtifactPath::Missing(output_path, defect));
     }
     ensure_existing_project_path(item_id, project_root, &absolute, relative)?;
@@ -353,7 +389,7 @@ fn project_artifact_status(
 mod paths;
 use paths::{
     absolute_artifact_candidate, clean_absolute_artifact_path, ensure_existing_project_path,
-    ensure_project_path_parent_safe, normalize_relative_path,
+    ensure_project_path_parent_safe, normalize_relative_path, strip_verbatim_prefix,
 };
 
 fn artifact_from_file(path: String, purpose: Option<String>) -> WorkflowV2Artifact {

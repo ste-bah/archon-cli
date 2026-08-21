@@ -15,12 +15,14 @@
 pub mod adversarial;
 pub mod assignment_invalid;
 pub mod boundary_repair;
+pub mod cargo_serial;
 pub mod cross_cutting;
 pub mod drain_gate;
 pub mod inventory_items;
 pub mod noop_routing;
 pub mod terminal_gate;
 pub mod triage_outcomes;
+pub mod verify_batching;
 pub mod verify_invariants;
 pub mod verify_merge;
 pub mod verify_options;

@@ -161,7 +161,12 @@ pub(crate) async fn run_live_cli_action(
     // conditions that produce bugs. So the CLI builds the real channel and
     // drains it, and passes the sender through the same port a TUI run uses.
     let (tui_tx, mut rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(128);
-    let ui_sink = TuiWorkflowUiSink::arc(tui_tx);
+    // Resilient: a drain task that dies (or a detached TUI) must degrade the
+    // run to quiet, never fail the branch that happened to be emitting. Three
+    // overnight run halts were exactly that failure mode.
+    let ui_sink = archon_workflow::ui_sink_port::ResilientWorkflowUiSink::wrap(
+        TuiWorkflowUiSink::arc(tui_tx),
+    );
     let drain = archon_observability::spawn_named("workflow-cli-tui-drain", async move {
         while rx.recv().await.is_some() {}
     });

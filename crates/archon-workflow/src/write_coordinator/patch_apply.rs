@@ -21,10 +21,12 @@ const TAIL_BYTES: usize = 4096;
 mod apply_git;
 mod file_backup;
 mod lock;
+mod persist;
 pub use lock::lock_path_for;
 use lock::with_repo_lock_default;
 #[cfg(test)]
 use lock::with_repo_lock_tuned;
+use persist::{persist_io, persist_record, persist_verify};
 
 #[derive(Debug)]
 pub enum ApplyError {
@@ -250,6 +252,27 @@ fn apply_one(
     rec: &mut ApplyRecord,
 ) -> Result<(), ApplyError> {
     let mut updated = m.clone();
+    // Ignored deliverables first, in every branch: a patch that is empty of
+    // git-visible changes (status IdempotentNoop) can still carry sidecar
+    // files, and they are the item's actual deliverable.
+    match super::patch_sidecar::apply(&m.patch_path, canonical_root) {
+        Ok(copied) => {
+            for rel in copied {
+                if !updated.changed_files.contains(&rel) {
+                    updated.changed_files.push(rel);
+                }
+            }
+        }
+        Err(err) => {
+            updated.status = ManifestStatus::Failed {
+                reason: format!("sidecar deliverable copy failed: {err}"),
+            };
+            rec.items_failed
+                .push((m.item_id.clone(), format!("SidecarCopy: {err}")));
+            persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
+            return Ok(());
+        }
+    }
     if matches!(m.status, ManifestStatus::IdempotentNoop) {
         updated.status = ManifestStatus::IdempotentNoop;
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
@@ -297,6 +320,16 @@ fn apply_one(
     }
 }
 
+/// The first declared file this item intends to change whose canonical content
+/// has moved since the patch was computed.
+///
+/// The comparison itself is `write_claim_gate::decide_write_claim`, so there is
+/// ONE definition of "this baseline is stale" rather than a copy here and a
+/// second one wherever the question gets asked next.
+///
+/// A target with no recorded pre-hash is skipped, not failed: that is a file
+/// nothing captured a baseline for, and treating an unknown as a mismatch would
+/// reject every legitimately new file.
 fn stale_target(
     canonical_root: &Path,
     m: &PatchManifest,
@@ -307,8 +340,12 @@ fn stale_target(
         .iter()
         .filter(|t| m.changed_files.iter().any(|c| c == *t))
         .find(|t| {
+            let Some(baseline) = expected.get(t.as_str()) else {
+                return false;
+            };
             let now = hash_file(&canonical_root.join(t)).unwrap_or_else(|| "absent".to_string());
-            expected.get(t.as_str()).is_some_and(|exp| now != *exp)
+            !crate::v2::write_claim_gate::decide_write_claim(t, Some(baseline), Some(&now))
+                .should_proceed()
         })
         .cloned()
 }
@@ -416,53 +453,6 @@ pub fn resume_status(item_id: &ItemId, run_root: &Path, stage_id: &str) -> Apply
         ManifestStatus::PendingApply => ApplyResumeStatus::PendingApply,
         ManifestStatus::Failed { reason } => ApplyResumeStatus::Failed(reason),
     }
-}
-
-fn persist_record(
-    run_root: &Path,
-    stage_id: &str,
-    wave_id: WaveId,
-    rec: &ApplyRecord,
-) -> Result<(), ApplyError> {
-    let dir = stage_dir(run_root, stage_id).join("apply");
-    let json = serde_json::to_vec_pretty(rec).map_err(|e| ApplyError::PersistFailed {
-        source: std::io::Error::other(e),
-    })?;
-    write_atomic(&dir.join(format!("{wave_id}.json")), &json)
-}
-
-fn persist_verify(
-    run_root: &Path,
-    stage_id: &str,
-    wave_id: WaveId,
-    result: &VerifyResult,
-) -> Result<(), ApplyError> {
-    let dir = stage_dir(run_root, stage_id).join("tests");
-    let json = serde_json::to_vec_pretty(result).map_err(|e| ApplyError::PersistFailed {
-        source: std::io::Error::other(e),
-    })?;
-    write_atomic(&dir.join(format!("{wave_id}.json")), &json)
-}
-
-fn stage_dir(run_root: &Path, stage_id: &str) -> PathBuf {
-    run_root
-        .join("write-coordination")
-        .join("stages")
-        .join(stage_id)
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ApplyError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| ApplyError::PersistFailed { source })?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|source| ApplyError::PersistFailed { source })?;
-    std::fs::rename(&tmp, path).map_err(|source| ApplyError::PersistFailed { source })?;
-    Ok(())
-}
-
-fn persist_io(e: super::patch_manifest::PatchError) -> std::io::Error {
-    std::io::Error::other(e.to_string())
 }
 
 /// Last `max` bytes decoded at a valid UTF-8 boundary (never invalid bytes).

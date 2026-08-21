@@ -280,3 +280,56 @@ fn nested_alias_values(
         })
         .collect()
 }
+
+/// The ROUTED shape a verification triage emits: `implementation_failures` /
+/// `retry_items` / `superseded_items` / `terminal_blockers`, with no `items`
+/// array at any root.
+///
+/// Only `implementation_failures` describes work a WRITE remediation wave can
+/// run. `retry_items` is the read-only re-verification bucket — a batch of
+/// commands to re-execute, carrying no `target_files`, no `required_fix` and no
+/// `artifact_requirements` because it is not asking anyone to edit a file.
+///
+/// The generic collector gets both halves wrong for this shape. It never looks
+/// at `implementation_failures`, so the one actionable write item is dropped;
+/// and `push_generated_retry_plan_items` does collect `retry_items`, so a
+/// read-only batch is handed to the remediation normalizer and judged against
+/// write-item rules it can never satisfy. The resulting `unresolved_issues` are
+/// permanent: the inventory is never ready, the router regenerates it, triage
+/// returns the identical routed shape, and the run cycles until the repair cap
+/// with no write wave ever scheduled.
+///
+/// Observed live: five cycles over three hours, holding one implementation
+/// failure that already carried its target files and its required fix.
+///
+/// Returning `Some` claims the value as a routed triage inventory and stops the
+/// generic fallback from running at all — an empty vec means "triage routed
+/// nothing to a write", which is a real answer, not a missing one.
+pub(super) fn routed_triage_write_items(
+    value: &serde_json::Value,
+) -> Option<Vec<serde_json::Value>> {
+    const ROUTED_BUCKETS: [&str; 4] = [
+        "implementation_failures",
+        "retry_items",
+        "superseded_items",
+        "terminal_blockers",
+    ];
+    let roots = generated_inventory_roots(value);
+    let routed = roots.iter().any(|root| {
+        ROUTED_BUCKETS
+            .iter()
+            .any(|bucket| root.get(*bucket).is_some_and(serde_json::Value::is_array))
+    });
+    if !routed {
+        return None;
+    }
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for root in roots {
+        for key in ["implementation_failures", "implementationFailures"] {
+            push_array(root.get(key), &mut out);
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    out.retain(|item| seen.insert(item.to_string()));
+    Some(out)
+}

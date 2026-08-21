@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
+#[path = "provider_env_secret_values.rs"]
+mod secret_values;
 #[path = "provider_env_types_impl.rs"]
 mod types_impl;
 

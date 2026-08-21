@@ -60,11 +60,46 @@ fn split_artifact_object(
         }
         return;
     }
+    // A declaration may carry its paths as an array under a plural key —
+    // `{"kind": "create", "paths": ["src/a.rs", "src/b.rs"]}`. Classify each
+    // entry exactly as a bare string would be. This is the `absolute_path`
+    // lesson again (see `explicit_path`): the declaration was concrete, the
+    // reader did not know the key, and fifteen items looped to the repair cap
+    // over paths that were sitting in the payload the whole time.
+    //
+    // Checked before the evidence branch, or an object carrying both paths
+    // and a description would be filed as evidence and its concrete paths
+    // dropped; any evidence text it also carries is kept alongside.
+    if let Some(values) = plural_paths(&object) {
+        for value in values {
+            split_artifact_value(value, split);
+        }
+        if let Some(evidence) = object_evidence(&object) {
+            split.evidence.push(Value::String(evidence.to_string()));
+        }
+        return;
+    }
     if let Some(evidence) = object_evidence(&object) {
         split.evidence.push(Value::String(evidence.to_string()));
         return;
     }
     split.invalid.push(Value::Object(object));
+}
+
+/// Non-empty string entries under a plural path key, or `None` when the
+/// object declares no such key with usable entries.
+fn plural_paths(object: &serde_json::Map<String, Value>) -> Option<Vec<Value>> {
+    ["paths", "artifact_paths", "artifactPaths"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_array))
+        .map(|values| {
+            values
+                .iter()
+                .filter(|value| value.as_str().is_some_and(|text| !text.trim().is_empty()))
+                .cloned()
+                .collect::<Vec<Value>>()
+        })
+        .filter(|values| !values.is_empty())
 }
 
 fn collect_artifact_paths(value: &Value, in_artifact_field: bool, paths: &mut Vec<String>) {
@@ -97,12 +132,33 @@ fn collect_object_artifact_paths(
     }
 }
 
+/// Keys that name the path an artifact declaration points at.
+///
+/// `absolute_path` belongs here because the inventory emits it. Without it,
+/// `{"absolute_path": "...", "kind": "...", "must_exist": true}` matched no key,
+/// found no evidence text either, and fell through to `invalid` — which becomes
+/// `artifact_requirement_issues`, which
+/// `generated_contract_validation` reports as "artifact declarations must be
+/// concrete paths". The declaration WAS concrete; the reader did not know the
+/// key.
+///
+/// Nothing could clear that. The repair prompt tells the reducer to fix
+/// `artifact_requirements`, while the flag lives in a different field derived
+/// from re-splitting the same values, so a correct repair was re-classified
+/// invalid every round: six attempts in one run, three in another, five months
+/// apart on two different agents, with the issue count never moving off seven.
 fn explicit_path(object: &serde_json::Map<String, Value>) -> Option<&str> {
-    ["path", "artifact_path", "artifactPath"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
+    [
+        "path",
+        "artifact_path",
+        "artifactPath",
+        "absolute_path",
+        "absolutePath",
+    ]
+    .iter()
+    .find_map(|key| object.get(*key).and_then(Value::as_str))
+    .map(str::trim)
+    .filter(|path| !path.is_empty())
 }
 
 fn object_evidence(object: &serde_json::Map<String, Value>) -> Option<&str> {
@@ -183,4 +239,48 @@ fn dedupe_strings(values: Vec<String>) -> Vec<String> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && seen.insert(value.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod absolute_path_tests {
+    use super::*;
+
+    /// The live shape the inventory emits. Without `absolute_path` in the key
+    /// list this fell through to `invalid`, became
+    /// `artifact_requirement_issues`, and the validator reported the
+    /// declaration as non-concrete — which no repair could clear.
+    #[test]
+    fn an_absolute_path_declaration_is_a_path_not_an_issue() {
+        let split = split_artifact_requirement_values(vec![serde_json::json!({
+            "absolute_path": "/Volumes/work/project-1/docs/trading/data-lake-gap-audit.md",
+            "kind": "data_lake_gap_report",
+            "must_exist": true,
+        })]);
+        assert_eq!(split.paths.len(), 1, "must be a concrete path");
+        assert!(
+            split.invalid.is_empty(),
+            "must not be an issue: {:?}",
+            split.invalid
+        );
+    }
+
+    #[test]
+    fn the_camel_case_spelling_is_accepted_too() {
+        let split = split_artifact_requirement_values(vec![serde_json::json!({
+            "absolutePath": "/tmp/project/reports/out.json",
+        })]);
+        assert_eq!(split.paths.len(), 1);
+        assert!(split.invalid.is_empty());
+    }
+
+    /// An object naming no path and carrying no evidence text is still invalid.
+    #[test]
+    fn an_object_with_neither_path_nor_evidence_stays_invalid() {
+        let split = split_artifact_requirement_values(vec![serde_json::json!({
+            "kind": "something",
+            "must_exist": true,
+        })]);
+        assert_eq!(split.invalid.len(), 1);
+        assert!(split.paths.is_empty());
+    }
 }

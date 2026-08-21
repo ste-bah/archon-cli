@@ -41,7 +41,11 @@ fn review_verification_retry_items_keep_execution_failures_only() {
 }
 
 #[test]
-fn cargo_review_verification_items_are_serialized() {
+fn cargo_review_verification_items_are_not_wave_pinned() {
+    // Cargo serialization moved to per-role scheduler limits (`cargo_serial`),
+    // which the review verification wave shares by dispatching through the
+    // same read-only fanout. A wave-level pin would re-serialize the whole
+    // review wave for one cargo item.
     let options = review_verification_options(
         &[serde_json::json!({
             "item_id": "verify-cargo",
@@ -50,7 +54,7 @@ fn cargo_review_verification_items_are_serialized() {
         "run review verification",
     );
 
-    assert_eq!(options["maxParallelism"], 1);
+    assert!(options.get("maxParallelism").is_none());
 }
 
 #[test]

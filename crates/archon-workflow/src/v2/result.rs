@@ -285,6 +285,22 @@ pub enum WorkflowV2TaskCoverageStatus {
         alias = "warning"
     )]
     Partial,
+    #[serde(
+        // A task whose work failed is a task that is NOT covered, so `failed`
+        // reads as Missing — the fail-closed direction. Mapping it to Partial
+        // or Accepted would credit work that did not land.
+        //
+        // Agents reach for "failed" constantly because it is the word the
+        // result envelope's own status field uses; only this narrower
+        // coverage enum disagreed. Observed live: a dependency-graph reduce
+        // emitted `task_coverage[].status = "failed"`, was rejected with
+        // "unknown variant `failed`", and burned a whole repair iteration
+        // without ever reaching a verdict on the graph it had correctly
+        // built.
+        alias = "failure",
+        alias = "failed",
+        alias = "error"
+    )]
     Missing,
     Blocked,
     Unknown,
@@ -408,5 +424,27 @@ mod status_alias_tests {
             parsed.commands_run[0].status,
             WorkflowV2CommandStatus::Succeeded
         );
+    }
+}
+
+#[cfg(test)]
+mod coverage_failed_alias_tests {
+    use super::*;
+
+    /// `failed` is the word the result envelope's own status uses, so agents
+    /// reach for it in task_coverage too. It must land on Missing — the
+    /// fail-closed reading — never on Partial or Accepted.
+    #[test]
+    fn failed_task_coverage_status_reads_as_missing() {
+        for raw in ["failed", "failure", "error"] {
+            let value = serde_json::json!(raw);
+            let status: WorkflowV2TaskCoverageStatus =
+                serde_json::from_value(value).expect("alias parses");
+            assert_eq!(
+                status,
+                WorkflowV2TaskCoverageStatus::Missing,
+                "{raw} must be Missing, not a credit"
+            );
+        }
     }
 }

@@ -22,7 +22,7 @@ pub(super) async fn prepare_command(
     timeout_ms: u64,
     ctx: &ToolContext,
 ) -> Result<PreparedBashCommand, ToolResult> {
-    let mut env_vars = sanitized_env();
+    let mut env_vars = host_env();
     // `CARGO_INCREMENTAL=0` used to be set here, ahead of the resource defaults.
     // Since `ensure_env_default` is first-wins, that made `[tools.cargo]
     // incremental` unreachable, so the setting now lives entirely in
@@ -32,6 +32,14 @@ pub(super) async fn prepare_command(
         &mut env_vars,
         raw_command,
         &tool.cargo_limits,
+    );
+    // Inside a workflow run the session id IS the run id, so a task that
+    // declares the run's identifier as a required env key gets it without the
+    // operator exporting a value that is stale the moment the next run starts.
+    crate::workflow_run_env::apply_workflow_run_identity(
+        &mut env_vars,
+        &ctx.session_id,
+        &tool.run_id_env_aliases,
     );
     // An agent allowed to build inside its own worktree builds into a scratch
     // directory beside it, so prune can remove the build output along with the

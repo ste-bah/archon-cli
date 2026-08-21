@@ -116,13 +116,20 @@ mod waves;
 /// Only the remediation tests reach this scoping helper from outside `verify`.
 #[cfg(test)]
 pub(crate) use verify::scope_repair_inventory_to_failed_outcomes;
+// Everything except `is_transport_failure_text`, which is re-exported `pub`
+// below. A glob at pub(crate) alongside a named pub re-export of one of its
+// members leaves that name with two visibilities, and `-D warnings` rejects
+// the ambiguity.
 pub(crate) use verify_remediation::*;
 
 pub use orchestrated::OrchestrationLedger;
-pub use verify_remediation::is_transport_failure_text;
 
 #[cfg(test)]
 mod board_drain_tests;
+#[cfg(test)]
+mod completion_gap_remediation_tests;
+#[cfg(test)]
+mod preservation_retry_tests;
 #[cfg(test)]
 mod review_assignment_invalid_tests;
 #[cfg(test)]
@@ -133,6 +140,10 @@ mod review_round_bound_tests;
 mod review_test_host;
 #[cfg(test)]
 mod review_verification_tests;
+#[cfg(test)]
+mod verify_actionable_tests;
+#[cfg(test)]
+mod verify_escalation_tests;
 #[cfg(test)]
 mod verify_remediation_tests;
 
@@ -170,8 +181,25 @@ pub(crate) fn normalize_null_report_collections(value: &mut Value) {
     match value {
         Value::Object(object) => {
             for (key, child) in object {
-                if child.is_null() && COLLECTION_FIELDS.contains(&key.as_str()) {
-                    *child = Value::Array(Vec::new());
+                if COLLECTION_FIELDS.contains(&key.as_str()) {
+                    // A null collection becomes empty; a null ELEMENT inside a
+                    // present collection is dropped. The element carries no
+                    // evidence, so removing it loses nothing and cannot
+                    // fabricate a pass — but leaving it made a typed deserialize
+                    // (Vec<WorkflowV2FileRecord>, Vec<WorkflowV2Evidence>) fail
+                    // with "expected string or map" and crash terminal
+                    // reporting. Nested collections still recurse via the
+                    // retained elements below.
+                    if child.is_null() {
+                        *child = Value::Array(Vec::new());
+                    } else if let Some(elements) = child.as_array_mut() {
+                        elements.retain(|element| !element.is_null());
+                        for element in elements {
+                            normalize_null_report_collections(element);
+                        }
+                    } else {
+                        normalize_null_report_collections(child);
+                    }
                 } else {
                     normalize_null_report_collections(child);
                 }

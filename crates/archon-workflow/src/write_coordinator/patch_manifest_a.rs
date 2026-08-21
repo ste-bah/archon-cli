@@ -52,6 +52,12 @@ pub struct CapturedPatch {
     pub pre_hashes: BTreeMap<String, String>,
     pub post_hashes: BTreeMap<String, String>,
     pub baseline_commit: String,
+    /// Declared targets `.gitignore` covers, carried as bytes because no git
+    /// diff can carry them: `git add --intent-to-add` refuses an ignored path
+    /// outright, and forcing it would stage files that are ignored on purpose.
+    /// Persisted beside the patch and copied — not applied — into the
+    /// canonical tree. See `patch_sidecar`.
+    pub ignored_files: Vec<(String, Vec<u8>)>,
 }
 
 #[derive(Debug, Error)]
@@ -128,8 +134,20 @@ pub fn capture_patch(
     let diff_targets = diff_targets(isolated, declared_targets, &changed_paths);
     // Step 1: intent-to-add untracked declared targets so creates appear in diff.
     let mut intent_added: Vec<String> = Vec::new();
+    let mut ignored_files: Vec<(String, Vec<u8>)> = Vec::new();
     for rel in &diff_targets {
         if isolated.join(rel).exists() && !is_tracked(isolated, rel) {
+            // A declared target `.gitignore` covers cannot go through the
+            // diff: `--intent-to-add` errors on ignored paths, and one such
+            // error used to fail the branch — and with it the whole wave. The
+            // path is already validated as DECLARED, so it is carried by bytes
+            // and proven by hash instead (`post_hashes` below).
+            if is_ignored(isolated, rel) {
+                let bytes = std::fs::read(isolated.join(rel))
+                    .map_err(|source| PatchError::PersistFailed { source })?;
+                ignored_files.push((rel.clone(), bytes));
+                continue;
+            }
             run_git(&["add", "--intent-to-add", rel], isolated).map_err(|e| {
                 PatchError::GitDiffFailed {
                     stderr: e.to_string(),
@@ -167,6 +185,7 @@ pub fn capture_patch(
         pre_hashes,
         post_hashes,
         baseline_commit: workspace.baseline_commit.clone(),
+        ignored_files,
     })
 }
 
@@ -182,6 +201,11 @@ fn run_diff(isolated: &Path, prefix: &[&str], targets: &[String]) -> Result<Vec<
 
 fn is_tracked(isolated: &Path, rel: &str) -> bool {
     run_git(&["ls-files", "--error-unmatch", rel], isolated).is_ok()
+}
+
+/// Whether `.gitignore` covers `rel` — the paths git will refuse to stage.
+fn is_ignored(isolated: &Path, rel: &str) -> bool {
+    run_git(&["check-ignore", "-q", rel], isolated).is_ok()
 }
 
 fn validated_workspace_changes(
@@ -307,7 +331,10 @@ pub fn validate_patch(
             })
             .unwrap_or(false);
         let unchanged_targets = captured.pre_hashes == captured.post_hashes;
-        if !(idempotent || unchanged_targets) {
+        // An ignored deliverable produces an empty git patch by construction —
+        // its bytes travel in the sidecar — so its presence is work done, not
+        // a missing noop declaration.
+        if !(idempotent || unchanged_targets || !captured.ignored_files.is_empty()) {
             return Err(PatchError::EmptyPatch);
         }
     }

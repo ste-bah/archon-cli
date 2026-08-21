@@ -99,9 +99,26 @@ pub fn valid_inventory_item(contract: &LifecycleContract<'_>, item: &Value) -> b
     let artifact_declared = item.get("artifact_requirements").is_some();
     match work_type_for(item) {
         "implementation" => {
+            // `target_files: []` is valid ONLY for artifact-only work — a task
+            // whose every deliverable is a project artifact rather than a
+            // repository file. Requiring repo-owned targets unconditionally
+            // gave the reducer two bad options for such a task: fabricate a
+            // repository path (one run wrote the artifact into the repo tree
+            // and died on scope/gitignore) or refuse to schedule it (the next
+            // run blocked the whole inventory). Remediation has carried this
+            // exact rule for a while — "[] only for artifact-only remediation"
+            // — and the inventory gate now matches it. The artifact
+            // requirements must be concrete for the empty form, or an item
+            // could declare no work of either kind.
+            let no_targets = match item.get("target_files") {
+                None => true,
+                Some(Value::Array(targets)) => targets.is_empty(),
+                Some(_) => false,
+            };
+            let artifact_only = no_targets && present(item.get("artifact_requirements"));
             has_id
                 && canonical_ok
-                && present(item.get("target_files"))
+                && (present(item.get("target_files")) || artifact_only)
                 && present(item.get("acceptance_criteria"))
                 && present(item.get("focused_verification"))
                 && artifact_declared

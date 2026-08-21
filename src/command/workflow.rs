@@ -48,7 +48,13 @@ impl CommandHandler for WorkflowHandler {
                 // Same shape as the LLM client above: the interactive surface
                 // owns the TUI channel, and the live workflow only ever sees it
                 // through the port.
-                crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink::arc(ctx.tui_tx.clone()),
+                // Resilient: a closed TUI channel degrades the run to quiet
+                // instead of failing whichever branch was emitting.
+                archon_workflow::ui_sink_port::ResilientWorkflowUiSink::wrap(
+                    crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink::arc(
+                        ctx.tui_tx.clone(),
+                    ),
+                ),
                 ctx.config_path.clone(),
             );
             ctx.emit(TuiEvent::SlashCommandComplete);

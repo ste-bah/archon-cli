@@ -202,32 +202,34 @@ fn classify_required_tasks(
     let mut missing = BTreeSet::new();
 
     for task_id in required_task_ids {
-        let Some(records) = coverage_by_task.get(task_id) else {
+        // The CURRENT verdict, not the worst one ever recorded. Coverage
+        // records are appended in stage order, so the last one speaks for the
+        // task as it stands after every wave, repair and remediation that
+        // touched it.
+        //
+        // Classifying by "any record ever failed" made remediation incapable of
+        // clearing a failure: one live task was reported Missing by the
+        // implementation wave (its files genuinely did not exist yet), then
+        // Accepted by remediation once all eleven were written — and stayed
+        // failed, because the stale record outvoted the current one. Everything
+        // downstream depended on it, so twelve tasks were never attempted and
+        // the run terminated with one of fifteen credited. A wave-mate dying on
+        // a provider outage was enough to discard a sibling's completed work.
+        let Some(current) = coverage_by_task
+            .get(task_id)
+            .and_then(|records| records.last())
+        else {
             missing.insert(task_id.clone());
             continue;
         };
-        if records
-            .iter()
-            .any(|coverage| coverage.status == WorkflowV2TaskCoverageStatus::Blocked)
-        {
-            blocked.insert(task_id.clone());
-        } else if records.iter().any(|coverage| {
-            matches!(
-                coverage.status,
-                WorkflowV2TaskCoverageStatus::Partial
-                    | WorkflowV2TaskCoverageStatus::Missing
-                    | WorkflowV2TaskCoverageStatus::Unknown
-            )
-        }) {
-            failed.insert(task_id.clone());
-        } else if records
-            .iter()
-            .all(|coverage| coverage.status == WorkflowV2TaskCoverageStatus::Noop)
-        {
-            noop.insert(task_id.clone());
-        } else {
-            accepted.insert(task_id.clone());
-        }
+        match current.status {
+            WorkflowV2TaskCoverageStatus::Blocked => blocked.insert(task_id.clone()),
+            WorkflowV2TaskCoverageStatus::Partial
+            | WorkflowV2TaskCoverageStatus::Missing
+            | WorkflowV2TaskCoverageStatus::Unknown => failed.insert(task_id.clone()),
+            WorkflowV2TaskCoverageStatus::Noop => noop.insert(task_id.clone()),
+            WorkflowV2TaskCoverageStatus::Accepted => accepted.insert(task_id.clone()),
+        };
     }
     report.accepted_tasks = accepted.into_iter().collect();
     report.noop_tasks = noop.into_iter().collect();

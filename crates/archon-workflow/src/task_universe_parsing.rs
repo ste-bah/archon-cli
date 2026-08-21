@@ -17,6 +17,7 @@
 //! naming the file path and the specific keys that are missing. There is no
 //! partial-parse path left.
 
+#[cfg(test)]
 use std::fs;
 use std::path::Path;
 
@@ -261,33 +262,28 @@ fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
 /// real, and its fix is in the task that invokes the runner. `required_tools`
 /// and `tool_bundles` in an existing manifest are read by nothing and left in
 /// place; `sync-capabilities` reports them as inert rather than removing them.
+///
+/// `required_env_keys` has since gone the same way, because "granting one
+/// project-wide is free" held only while every hoisted key could be satisfied.
+/// A key that cannot be does not cost a `checked_keys` line — it fails the
+/// branch. Observed live: `AHDM_REVIEW_RUN_ID` is a per-review identifier
+/// declared by one task, hoisted into the manifest as the union of all fifteen
+/// tasks' keys, and inherited by every one of them. It then failed a TDL-020
+/// verification branch outright, on work that had no relationship to it, while
+/// the run's real gaps were being fixed elsewhere.
+///
+/// So both fields are now task-only and this function reads neither. A key
+/// genuinely needed by every task is declared by every task, which is the same
+/// trade already accepted for tools: explicit repetition over an inherited
+/// obligation nobody can see from the task file.
 pub fn merge_project_capabilities(
     task: &mut WorkflowV2TaskUniverseTask,
     task_path: &Path,
 ) -> WorkflowResult<()> {
-    let Some(project_root) = task_path
-        .ancestors()
-        .find(|ancestor| ancestor.join(".archon").is_dir())
-    else {
-        return Ok(());
-    };
-    let manifest_path = project_root.join(".archon/project.json");
-    if !manifest_path.is_file() {
-        return Ok(());
-    }
-    let raw = fs::read_to_string(&manifest_path).map_err(|source| WorkflowError::Io {
-        path: manifest_path.clone(),
-        source,
-    })?;
-    let manifest: serde_json::Value = serde_json::from_str(&raw)?;
-    task.required_env_keys = sorted_unique(
-        task.required_env_keys
-            .iter()
-            .cloned()
-            .chain(metadata_strings(&manifest, "required_env_keys"))
-            .collect(),
-    );
-    // `task.required_tools` is deliberately untouched: see the doc comment.
+    // Both capability fields are task-only; nothing is read from the manifest.
+    // Kept as a call site so the boundary stays visible where the universe is
+    // assembled, rather than silently disappearing into the parser.
+    let _ = (task, task_path);
     Ok(())
 }
 
@@ -305,34 +301,6 @@ fn declared_task_artifact_requirements(raw: &str, metadata: &serde_json::Value) 
             .map(|value| value.trim().trim_matches('`').trim().to_string())
             .collect(),
     )
-}
-
-fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut in_section = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if let Some(heading) = trimmed.strip_prefix('#') {
-            in_section = heading
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case(section);
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-        if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let item = item.trim();
-            if !item.is_empty() {
-                items.push(item.to_string());
-            }
-        }
-    }
-    sorted_unique(items)
 }
 
 #[cfg(test)]
@@ -475,3 +443,11 @@ mod tests {
         assert_eq!(contract.registry_allowed_statuses, ["Healthy"]);
     }
 }
+
+#[path = "task_universe_list_items.rs"]
+mod list_items;
+use list_items::declared_task_section_items;
+
+#[cfg(test)]
+#[path = "task_universe_parsing_list_tests.rs"]
+mod list_tests;

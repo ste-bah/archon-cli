@@ -237,7 +237,7 @@ impl WorkflowV2ScriptRunner {
                 let mut summary = host.summary().await;
                 summary.script_result = Some(result);
                 if emit_terminal_status {
-                    host.emit_terminal_status(summary.status);
+                    host.emit_terminal_status(&summary);
                 }
                 Ok(summary)
             }
@@ -246,7 +246,7 @@ impl WorkflowV2ScriptRunner {
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
                     if emit_terminal_status {
-                        host.emit_terminal_status(summary.status);
+                        host.emit_terminal_status(&summary);
                     }
                     return Ok(summary);
                 }

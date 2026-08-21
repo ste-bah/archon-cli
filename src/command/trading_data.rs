@@ -16,7 +16,7 @@ use crate::command::trading_tools::project_root;
 mod provider;
 mod snapshot;
 #[path = "trading_data_env.rs"]
-mod trading_data_env;
+pub(crate) mod trading_data_env;
 mod yfinance;
 
 pub(crate) fn render_data(action: &TradingCliDataAction) -> Result<String> {

@@ -257,3 +257,77 @@ fn fabel_contract() -> LifecycleContract<'static> {
         target_repository_root: Some("/repo"),
     }
 }
+
+/// A task whose only deliverables are project artifacts is a valid
+/// implementation item with `target_files: []` — the rule remediation has
+/// always had. Requiring repo-owned targets unconditionally forced the reducer
+/// to fabricate a repository path (one run died on scope, the next on
+/// gitignore) or refuse to schedule (a third bricked the inventory).
+#[test]
+fn artifact_only_implementation_item_with_empty_targets_is_valid() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let item = serde_json::json!({
+        "item_id": "impl-audit",
+        "work_type": "implementation",
+        "canonical_task_ids": ["TASK-X-020"],
+        "target_files": [],
+        "acceptance_criteria": ["report exists with required sections"],
+        "focused_verification": ["report section check"],
+        "artifact_requirements": ["docs/generated/report.md"]
+    });
+    assert!(valid_inventory_item(&contract, &item));
+}
+
+/// Empty targets WITHOUT concrete artifact requirements stays invalid: an item
+/// declaring no work of either kind is not schedulable.
+#[test]
+fn empty_targets_without_artifact_requirements_is_still_invalid() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let item = serde_json::json!({
+        "item_id": "impl-nothing",
+        "work_type": "implementation",
+        "canonical_task_ids": ["TASK-X-020"],
+        "target_files": [],
+        "acceptance_criteria": ["something"],
+        "focused_verification": ["something"],
+        "artifact_requirements": []
+    });
+    assert!(!valid_inventory_item(&contract, &item));
+}
+
+/// The second half of the artifact-only rule: normalization must not raise a
+/// target-file issue for it either. The item gate accepted such items while
+/// this issue stayed unresolved, so the run bricked at `inventory_has_issues`
+/// with zero malformed items — the gate said yes and the issue said no.
+#[test]
+fn artifact_only_item_raises_no_target_file_issue() {
+    let universe = universe();
+    let contract = LifecycleContract {
+        task_universe: &universe,
+        target_repository_root: Some("/repo"),
+    };
+    let inventory = contract.normalize_inventory(&serde_json::json!({
+        "items": [{
+            "item_id": "impl-audit",
+            "work_type": "implementation",
+            "canonical_task_ids": ["TASK-X-020"],
+            "target_files": [],
+            "acceptance_criteria": ["report exists"],
+            "focused_verification": ["report check"],
+            "artifact_requirements": ["docs/generated/report.md"]
+        }]
+    }));
+    assert!(
+        issues_of_kind(&inventory, "target_file_discovery").is_empty(),
+        "an artifact-only item must not carry an unresolvable target-file issue: {:?}",
+        inventory.get("unresolved_issues")
+    );
+}

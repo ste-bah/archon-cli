@@ -229,6 +229,37 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             injected and its absence is never reported as a gap, so the task \
             fails later for a reason that looks like the service being \
             down.\n\
+         9. An `artifact_path` must be a path a build can account for. Check \
+            the target repository's `.gitignore` before declaring one: a \
+            deliverable inside an ignored directory cannot travel in a git \
+            patch and is handled by a slower bytes-sidecar fallback, so \
+            prefer version-controlled paths for anything reviewers must see. \
+            Ignored paths are legitimate ONLY for content that must never \
+            enter history — user documentation, generated data — and then \
+            the ignored location is the point, not an accident.\n\
+        10. A criterion describing a RUNTIME OUTCOME — data written, a count \
+            reached, a status reported, a service answering — is not captured \
+            by a contract that only names a file. Existence is satisfied the \
+            moment the file is created, including empty, so such a task is \
+            complete on sight and never runs. Encode the outcome instead: a \
+            `typed_verifier_command` that produces or reads it back, or a \
+            `min_instances` floor on the artifact that must hold the records. \
+            `min_instances: 0` is vacuous here for the same reason it is \
+            vacuous for a template.\n\
+            Observed on a reference corpus: a PRD whose criteria required \
+            ingestion to STORE a registry entry decomposed into tasks named \
+            `...-native-ingest` whose every contract was a source file. Five \
+            runs closed them all as already-done because the sources existed, \
+            no run ever fetched anything, and the registry the PRD exists to \
+            fill stayed at zero rows. Nothing lied and nothing failed — the \
+            work as decomposed really was complete.\n\
+            The downstream task that CONSUMES the data cannot repair this. It \
+            is usually forbidden from producing any, so it correctly reports \
+            every cell as a gap while the tasks that owed it data are green. \
+            Before writing a contract, read the criterion back and ask what \
+            would be TRUE at run time that is not true now; if the answer is \
+            not decidable from the file system alone, the contract needs a \
+            command or a floor.\n\
          \n\
          AFTER WRITING:\n\
          1. Run `archon workflow lint --tasks {task_dir}/`. Its `## declared \

@@ -104,3 +104,67 @@ pub(super) fn normalize_relative_path(
         .then(|| parts.join("/"))
         .ok_or_else(|| unsafe_target(item_id, raw))
 }
+
+/// Windows `canonicalize()` returns a verbatim path (`\\?\C:\...`), and the
+/// `?` in that prefix is indistinguishable from a glob to
+/// `artifact_path_is_templated`, so every canonicalized absolute path was
+/// classified as an unexpanded template: dropped from `files_changed`,
+/// never recorded as an artifact, and raising a blocking
+/// `unexpanded_artifact_template_*` gap. The prefix is a host addressing
+/// detail, not part of the path the contract names. Stripped from both the
+/// reported path and the project root, or the two no longer share a prefix.
+pub(super) fn strip_verbatim_prefix(path: &str) -> &str {
+    path.strip_prefix(r"\\?\UNC\")
+        .or_else(|| path.strip_prefix(r"\\?\"))
+        .unwrap_or(path)
+}
+
+#[cfg(test)]
+mod verbatim_prefix_tests {
+    use super::strip_verbatim_prefix;
+
+    /// Asserted on the prefix directly, not through classification. A
+    /// mistyped escape here still reads as a plausible fix and still strips
+    /// nothing; the only thing that caught it was an unrelated end-to-end
+    /// assertion four layers away.
+    #[test]
+    fn a_verbatim_drive_prefix_is_not_part_of_the_path() {
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\proj\docs\audit.md"),
+            r"C:\proj\docs\audit.md"
+        );
+    }
+
+    #[test]
+    fn a_verbatim_unc_prefix_leaves_the_share_path() {
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\audit.md"),
+            r"server\share\audit.md"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_path_is_returned_untouched() {
+        assert_eq!(strip_verbatim_prefix("docs/audit.md"), "docs/audit.md");
+        assert_eq!(
+            strip_verbatim_prefix(r"C:\proj\docs\audit.md"),
+            r"C:\proj\docs\audit.md"
+        );
+    }
+
+    /// The `?` this strips is the verbatim marker alone. A genuine glob still
+    /// has to reach `artifact_path_is_templated` intact, or stripping the
+    /// prefix would smuggle unexpanded templates past the check it exists to
+    /// keep honest.
+    #[test]
+    fn a_real_glob_survives_stripping() {
+        assert_eq!(
+            strip_verbatim_prefix("docs/report-?.md"),
+            "docs/report-?.md"
+        );
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\proj\docs\report-?.md"),
+            r"C:\proj\docs\report-?.md"
+        );
+    }
+}

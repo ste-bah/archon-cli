@@ -1128,6 +1128,14 @@ max_retries = 2
 [subagent]
 max_concurrent = 4
 
+# Seconds a subagent's LLM stream may go silent before the round is abandoned.
+# This is a stalled-provider guard, not a thinking budget: a reducer working on
+# a large context routinely pauses longer between stream events than a short
+# guard allows, and the agent is then killed mid-round with its work discarded.
+# The former hardcoded 120s was sixty times tighter than the
+# host_call_timeout_secs stage it runs inside. Keep it well below that stage
+# timeout, and above the longest pause a healthy provider takes.
+stream_idle_timeout_secs = 600
 # When to isolate an agent that did not ask to be isolated.
 #
 #   "overlap"  only when this agent's declared writes collide with a running

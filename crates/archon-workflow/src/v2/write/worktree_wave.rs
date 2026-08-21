@@ -30,6 +30,7 @@ pub(super) struct WorktreePlanRunContext<'a> {
     pub(super) semaphore: Arc<Semaphore>,
     pub(super) active: Arc<AtomicUsize>,
     pub(super) peak: Arc<AtomicUsize>,
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 pub(super) fn worktree_plan_context<'a>(
@@ -52,6 +53,7 @@ pub(super) fn worktree_plan_context<'a>(
         semaphore: Arc::new(Semaphore::new(max_parallelism)),
         active: Arc::new(AtomicUsize::new(0)),
         peak: Arc::new(AtomicUsize::new(0)),
+        task_universe: ctx.task_universe,
     }
 }
 
@@ -112,6 +114,10 @@ pub(super) fn prepare_worktree_wave(
     cfg: &WriteCoordinatorConfig,
     store_for_control: &crate::WorkflowStore,
 ) -> crate::WorkflowResult<Vec<PreparedWorktreeBranch>> {
+    // One list per wave, shared by every branch in it: ownership is a property
+    // of the wave, and recomputing it per branch would let two branches
+    // disagree about who owns what.
+    let wave_claims = crate::v2::write_scope_extension::wave_claims_for(wave);
     let mut prepared = Vec::new();
     for assignment in &wave.assignments {
         let branch = branch_for_assignment(branches, assignment)?;
@@ -130,6 +136,7 @@ pub(super) fn prepare_worktree_wave(
         prepared.push(PreparedWorktreeBranch {
             branch,
             assignment: assignment.clone(),
+            wave_claims: wave_claims.clone(),
             coordinator_plan,
             baseline,
             workspace,
@@ -298,6 +305,7 @@ pub(super) struct WorktreeWaveRunContext<'a> {
     pub(super) semaphore: Arc<Semaphore>,
     pub(super) active: Arc<AtomicUsize>,
     pub(super) peak: Arc<AtomicUsize>,
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 impl WorktreePlanRunContext<'_> {
@@ -317,6 +325,7 @@ impl WorktreePlanRunContext<'_> {
             semaphore: self.semaphore.clone(),
             active: self.active.clone(),
             peak: self.peak.clone(),
+            task_universe: self.task_universe,
         }
     }
 }

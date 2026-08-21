@@ -59,9 +59,14 @@ pub(crate) struct CanonicalIdNormalization {
 #[derive(Debug, Clone, Default)]
 pub(super) struct ContractTaskUniverse {
     pub(super) canonical: BTreeSet<String>,
-    aliases: BTreeMap<String, String>,
-    dependencies: BTreeMap<String, Vec<String>>,
-    tasks_with_deliverable_contracts: BTreeSet<String>,
+    pub(super) aliases: BTreeMap<String, String>,
+    pub(super) dependencies: BTreeMap<String, Vec<String>>,
+    pub(super) tasks_with_deliverable_contracts: BTreeSet<String>,
+    /// Tasks a no-op can never satisfy: the contract either names a command
+    /// that has to RUN, or declares an instance floor the task must PRODUCE.
+    /// Derived from the contract, not from any task's wording, so it holds for
+    /// every PRD. See the rule in `generated_contract_validation`.
+    pub(super) tasks_requiring_execution: BTreeSet<String>,
 }
 
 impl ContractTaskUniverse {
@@ -84,58 +89,29 @@ impl ContractTaskUniverse {
                 out.tasks_with_deliverable_contracts
                     .insert(task.canonical_task_id.clone());
             }
-        }
-        out
-    }
-
-    pub(super) fn has_deliverable_contract(&self, task_ids: &[String]) -> bool {
-        task_ids
-            .iter()
-            .any(|id| self.tasks_with_deliverable_contracts.contains(id))
-    }
-
-    fn add_canonical(&mut self, task_id: &str) {
-        let canonical = task_id.trim();
-        if canonical.is_empty() {
-            return;
-        }
-        self.canonical.insert(canonical.to_string());
-        self.aliases
-            .insert(canonical.to_string(), canonical.to_string());
-        if let Some(short) = short_task_alias(canonical) {
-            self.aliases.insert(short, canonical.to_string());
-        }
-    }
-
-    pub(super) fn resolve(&self, value: &str) -> Option<String> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        if self.canonical.is_empty() {
-            return Some(trimmed.to_string());
-        }
-        let mut matches = self
-            .aliases
-            .iter()
-            .filter(|(alias, _)| alias.eq_ignore_ascii_case(trimmed))
-            .map(|(_, canonical)| canonical.clone())
-            .collect::<BTreeSet<_>>();
-        for canonical in &self.canonical {
-            let Some((_, suffix)) = canonical.split_once('-') else {
-                continue;
-            };
-            if suffix.contains('-') && suffix.eq_ignore_ascii_case(trimmed) {
-                matches.insert(canonical.clone());
+            // Two ways a contract says "this cannot be finished by looking".
+            //
+            // A named command has to RUN. And a declared instance floor —
+            // min_instances >= 1 — says the task must PRODUCE that many things,
+            // which pointing at a source file can never prove.
+            //
+            // The second is why data-producing tasks silently never run. An
+            // inventory reported, in its own words, ten verified_noop items
+            // because "all deliverable contracts on disk" and "all source
+            // deliverables exist on disk". The source files existed, so nine
+            // tasks were retired as already-done and the registry they were
+            // meant to fill stayed at zero rows.
+            //
+            // Both are read off the contract, never off a task's wording, so
+            // this holds for any PRD.
+            if task.deliverable_contracts.iter().any(|contract| {
+                contract.typed_verifier_command.is_some() || contract.min_instances > 0
+            }) {
+                out.tasks_requiring_execution
+                    .insert(task.canonical_task_id.clone());
             }
         }
-        (matches.len() == 1)
-            .then(|| matches.into_iter().next())
-            .flatten()
-    }
-
-    pub(super) fn dependencies_for(&self, task_id: &str) -> Vec<String> {
-        self.dependencies.get(task_id).cloned().unwrap_or_default()
+        out
     }
 }
 

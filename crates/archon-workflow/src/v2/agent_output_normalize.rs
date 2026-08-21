@@ -21,21 +21,24 @@ pub(super) fn normalize_agent_output(
 
 /// Parse the agent reply as one JSON envelope. Providers routinely wrap an
 /// otherwise-valid envelope in markdown fences or prose; when the whole reply
-/// is not bare JSON, accept it only if it contains exactly one complete
-/// top-level JSON object carrying a `status` member. Location only — no
-/// content is invented, ambiguity stays a loud failure, the forbidden-text
+/// is not bare JSON, take the LAST complete top-level object that looks like a
+/// result envelope. Location only — no content is invented, the forbidden-text
 /// guard has already seen the full raw reply, and every schema and validation
 /// gate still runs on whatever parses here.
+///
+/// Last-wins is not a guess: agent output is sequential, so in both observed
+/// multi-object shapes — an echoed schema example followed by the real
+/// envelope, and a fenced draft followed by "now as pure JSON" and the final
+/// envelope — the reply the agent means is the one it wrote last. Rejecting
+/// instead (the previous behavior) failed branches whose final envelope was
+/// complete and valid, live: a verify branch drafted its envelope, restated it
+/// verbatim, and was binned as "expected value at line 1 column 1".
 fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
     let root_error = match serde_json::from_str(output.trim()) {
         Ok(value) => return Ok(value),
         Err(error) => error,
     };
-    // Tolerate EXACTLY ONE complete top-level object wrapped in fences or
-    // prose. Two or more complete objects is an ambiguous reply (echoed
-    // schema example + real envelope, draft + final): never guess which is
-    // the envelope — surface the root error so the repair loop re-asks.
-    let mut found: Option<Value> = None;
+    let mut last_envelope: Option<Value> = None;
     let mut skip_until = 0;
     for (index, _) in output.match_indices(['{', '[']) {
         if index < skip_until {
@@ -45,40 +48,57 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
         match stream.next() {
             Some(Ok(value)) => {
                 skip_until = index + stream.byte_offset();
-                // A complete array is another JSON document, not prose. In
-                // particular, never extract a validating envelope nested in
-                // a one-element array and pretend it was top-level.
+                // A complete array is skipped, not fatal. `raw_decode`
+                // consumed the whole array and `skip_until` is now past it, so
+                // an envelope nested inside it is never seen as a top-level
+                // document — the "a one-element array must not impersonate the
+                // envelope" rule holds by construction, without aborting.
+                //
+                // This used to `return Err`, which was harmless while ANY
+                // second document also aborted the parse. Once the multi-object
+                // rule became "take the last envelope", the array arm was the
+                // only hard exit left in the loop, so a bracketed list written
+                // in an agent's prose preamble killed a reply whose envelope
+                // was complete and valid a few lines later. Observed live on a
+                // shape-repair call.
                 if value.is_array() {
-                    return Err(root_error);
-                }
-                if !value.is_object() {
                     continue;
                 }
-                if found.is_some() {
-                    return Err(root_error);
+                // Every envelope declares `status`; evidence items lack it,
+                // and task_coverage entries are told apart inside
+                // `is_result_envelope`. Non-envelope objects (echoed
+                // examples, prose-adjacent fragments) are skipped, not fatal.
+                if is_result_envelope(&value) {
+                    last_envelope = Some(value);
                 }
-                found = Some(value);
             }
             // An unterminated object is a truncation signature: the reply is
             // structurally incomplete, and any complete object inside it (an
             // echoed branch envelope in data.items, a coverage entry) could
             // impersonate the real reply. Never extract from a truncated
             // reply. (Prose braces fail with non-EOF errors and fall through.)
-            Some(Err(error)) if error.is_eof() || starts_like_json_container(&output[index..]) => {
+            //
+            // Which error is surfaced matters as much as the refusal. A
+            // container that fails to parse for a reason OTHER than running
+            // out of input is malformed, not truncated — a stray unescaped
+            // quote inside a shell command, a trailing comma — and the reply
+            // is otherwise complete. Returning `root_error` there tells the
+            // repair loop "expected value at line 1 column 1", which is true
+            // of the prose preamble and useless as a correction: observed
+            // live, an agent re-emitted the same 41k-char envelope with the
+            // same bad escape because nothing ever named the real fault.
+            // Serde's own error carries the line and column, so hand that
+            // back instead and let the repair prompt quote it.
+            Some(Err(error)) if error.is_eof() => {
                 return Err(root_error);
+            }
+            Some(Err(error)) if starts_like_json_container(&output[index..]) => {
+                return Err(error);
             }
             _ => {}
         }
     }
-    // Every envelope declares `status`; a lone complete NESTED object inside
-    // a truncated envelope must not impersonate the reply. Evidence items
-    // lack `status`; task_coverage entries carry `status` AND `task_id` —
-    // and `task_id` is never a top-level envelope key, so its presence marks
-    // a fragment.
-    match found {
-        Some(value) if is_result_envelope(&value) => Ok(value),
-        _ => Err(root_error),
-    }
+    last_envelope.ok_or(root_error)
 }
 
 /// Distinguish the real result envelope from a nested task_coverage entry when
@@ -110,6 +130,13 @@ fn is_result_envelope(value: &Value) -> bool {
     ENVELOPE_ONLY.iter().any(|key| value.get(key).is_some())
 }
 
+/// Decide whether a bracket that FAILED to parse was a real JSON container or
+/// just punctuation in the agent's prose. A malformed container is fatal: no
+/// complete object inside it may be promoted to the reply envelope. Prose is
+/// skipped, and scanning continues to the envelope that follows.
+///
+/// The discriminator is the first non-whitespace character after the opener,
+/// because that is where JSON and prose diverge unambiguously.
 fn starts_like_json_container(candidate: &str) -> bool {
     let mut chars = candidate.chars();
     match chars.next() {
@@ -118,9 +145,25 @@ fn starts_like_json_container(candidate: &str) -> bool {
         // promoted to the reply envelope. Natural-language braces such as
         // "{ curly braces" remain eligible prose.
         Some('{') => matches!(chars.find(|ch| !ch.is_whitespace()), Some('"' | '}')),
-        // Arrays are never result envelopes. A malformed array can still
-        // contain one complete validating object, so it is always ambiguous.
-        Some('[') => true,
+        // A JSON array element opens with a quote, a nested container, a
+        // number, or the array closes immediately. Treating EVERY `[` as a
+        // container instead was the second array exit from this loop, and it
+        // outlived the reason for it: once multi-object output resolved to
+        // "take the last envelope", a bracket in prose that is not valid JSON
+        // became the only remaining way for a complete, valid envelope to be
+        // thrown away. Observed live and repeatedly on this workspace — a
+        // verification branch wrote "contains 7 `#[test]` annotations" in its
+        // preamble, `[test]` failed as an array at column 3, and 40 lines of
+        // finished, well-formed result went in the bin. `[dependencies]`,
+        // `[cfg(...)]` and every other Rust-flavoured bracket read the same.
+        //
+        // The shape this arm actually guards against is unaffected: a
+        // malformed `[{...}, garbage]` still opens with `{`, is still a
+        // container, and its contents are still never promoted.
+        Some('[') => matches!(
+            chars.find(|ch| !ch.is_whitespace()),
+            Some('"' | '{' | '[' | ']' | '-' | '0'..='9')
+        ),
         _ => false,
     }
 }
@@ -186,6 +229,7 @@ fn normalize_commands(object: &mut Map<String, Value>) {
             continue;
         };
         insert_missing(fields, "kind", Value::String("other".to_string()));
+        derive_command_status_from_exit_code(fields);
         normalize_command_status(fields);
         synthesize_missing_output_summary(fields);
     }
@@ -215,6 +259,31 @@ fn synthesize_missing_output_summary(fields: &mut Map<String, Value>) {
             "(no output_summary provided by agent; command status: {status})"
         )),
     );
+}
+
+/// Derive a missing command status from the exit code the agent already gave.
+///
+/// A `commands_run` entry with no `status` fails the WHOLE reply — the field
+/// has no default, deliberately, because a wrongly-normalised command status
+/// is how a failed test gets recorded as a pass. Observed live: a verification
+/// branch recorded two commands, the second carrying `command`, `kind`,
+/// `output_summary` and `exit_code` but no `status`, and the entire envelope
+/// was rejected with "missing field `status`" after the branch had done all
+/// its work.
+///
+/// The exit code is not a guess — it is the outcome, stated by the agent, in
+/// the same record. `0` succeeded, anything else failed. Where there is no
+/// exit code there is nothing to infer from and the reply is still rejected,
+/// so this cannot invent a pass out of silence.
+fn derive_command_status_from_exit_code(fields: &mut Map<String, Value>) {
+    if fields.get("status").is_some_and(value_present) {
+        return;
+    }
+    let Some(code) = fields.get("exit_code").and_then(Value::as_i64) else {
+        return;
+    };
+    let derived = if code == 0 { "succeeded" } else { "failed" };
+    fields.insert("status".to_string(), Value::String(derived.to_string()));
 }
 
 fn normalize_command_status(fields: &mut Map<String, Value>) {

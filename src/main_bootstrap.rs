@@ -52,7 +52,10 @@ fn apply_remote_url_env(cli: &Cli) {
 
 fn warn_unrecognized_archon_vars() {
     let all_env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let unrecognized = env_vars::warn_unrecognized_archon_vars(&all_env);
+    let unrecognized = env_vars::warn_unrecognized_archon_vars(
+        &all_env,
+        crate::command::trading_data::trading_data_env::TRADING_ENV_VARS,
+    );
     for var_name in &unrecognized {
         eprintln!("warning: unrecognized environment variable: {var_name}");
     }

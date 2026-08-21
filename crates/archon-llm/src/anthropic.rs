@@ -42,8 +42,16 @@ impl AnthropicClient {
     ///   2. `api.base_url` in config.toml
     ///   3. `None` → hardcoded default
     pub fn new(auth: AuthProvider, identity: IdentityProvider, api_url: Option<String>) -> Self {
+        // `.timeout()` bounds the WHOLE request, streaming body included: a
+        // 300s cap killed any generation over five minutes, reported as
+        // `error decoding response body` while the provider was healthy.
+        // `.read_timeout()` bounds the gap BETWEEN reads, so a live stream
+        // survives. It must sit ABOVE `[subagent] stream_idle_timeout_secs`
+        // (600s) — a reasoning model emits nothing while it thinks, so set at
+        // or below that guard the transport fires first and overrides it.
+        const TRANSPORT_READ_BACKSTOP_SECS: u64 = 1800;
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(300))
+            .read_timeout(Duration::from_secs(TRANSPORT_READ_BACKSTOP_SECS))
             .no_proxy()
             .build()
             .expect("reqwest client should build");

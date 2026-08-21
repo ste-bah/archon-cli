@@ -6,11 +6,15 @@ use crate::v2::deliverable_contract;
 use super::verify_scope;
 
 pub fn prepare_verification_items(
-    mut items: Vec<Value>,
+    items: Vec<Value>,
     project_artifact_root: Option<&str>,
     implementation_evidence: &[Value],
     task_universe: &Value,
 ) -> Vec<Value> {
+    // Merge the reducer's one-command-per-item cargo checks BEFORE the host
+    // adds its declared-contract verifiers, so host-authored items are never
+    // folded into an agent-authored batch.
+    let mut items = super::verify_batching::batch_cargo_verification_items(items);
     add_declared_deliverable_verifications(&mut items, project_artifact_root, task_universe);
     bind_contract_verifiers_to_cited_artifacts(&mut items, project_artifact_root, task_universe);
     let scopes = verify_scope::manifest_scopes(implementation_evidence);
@@ -256,9 +260,14 @@ pub fn verification_options(items: &[Value], task: &str, focused: bool) -> Value
     if focused {
         options["itemKind"] = Value::String("focused_verification".to_string());
     }
-    if items_have_cargo_commands(items) {
-        options["maxParallelism"] = serde_json::json!(1);
-    }
+    // Cargo contention is no longer answered here. Pinning the WHOLE wave to
+    // maxParallelism=1 because one item ran cargo serialized 27-branch waves
+    // whose members were mostly file inspections; the configured width was
+    // never reached on any live wave. Cargo branches are instead retagged into
+    // a serial scheduling role at dispatch (`cargo_serial`), which preserves
+    // the never-two-cargo-at-once guarantee without holding the rest of the
+    // wave hostage.
+    let _ = items;
     options
 }
 
@@ -285,19 +294,9 @@ pub fn write_wave_parallelism(items: &[Value], learned_width: Option<usize>) -> 
 }
 
 fn items_have_cargo_commands(items: &[Value]) -> bool {
-    items.iter().any(|item| {
-        support::raw_strings(
-            item,
-            &[
-                "focused_verification",
-                "commands",
-                "command",
-                "expected_evidence",
-            ],
-        )
+    items
         .iter()
-        .any(|text| text.to_ascii_lowercase().contains("cargo "))
-    })
+        .any(super::cargo_serial::item_has_cargo_commands)
 }
 
 #[cfg(test)]

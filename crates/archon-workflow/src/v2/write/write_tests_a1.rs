@@ -286,3 +286,46 @@ fn repo_root_fallback_without_item_targets_is_rejected() {
 
     assert!(error.to_string().contains("unsafe"));
 }
+
+/// An artifact-only branch must own the directories of its declared artifacts,
+/// or its agent is told it may write nothing and refuses the deliverable it was
+/// dispatched to produce — the wall three consecutive runs died on for
+/// TASK-TDL-001's `docs/trading/data-lake-gap-audit.md`.
+#[test]
+fn artifact_only_branch_owns_its_declared_artifact_directories() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp.path().display().to_string();
+    let call = WorkflowV2HostCall {
+        id: "implementation-wave-1".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Worktree),
+        options: WorkflowV2HostOptions {
+            target_files_from_item: true,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let branch = WorkflowV2FanoutItem::read_only(
+        "implementation-wave-1-inventory-tdl-001",
+        "coder",
+        call.clone(),
+        serde_json::json!({ "item": {
+            "item_id": "inventory-tdl-001",
+            "work_type": "implementation",
+            "canonical_task_ids": ["TASK-TDL-001"],
+            "target_files": [],
+            "artifact_requirements": ["docs/trading/data-lake-gap-audit.md"]
+        }}),
+    );
+
+    let write_items =
+        write_items_for_branches(Some(&repo_root), &call, &[branch]).expect("write items");
+    assert!(
+        write_items[0].artifact_only,
+        "no repo targets => artifact-only"
+    );
+    assert_eq!(
+        write_items[0].owned_scopes,
+        vec!["docs/trading".to_string()],
+        "the branch must own the directory of the artifact it produces"
+    );
+}

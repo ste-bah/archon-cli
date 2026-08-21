@@ -57,6 +57,7 @@ pub mod plan_mode_state;
 mod plan_reconciliation;
 mod process_message;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
+mod conversation_state;
 mod process_message_recovery;
 mod process_message_steps;
 mod process_message_support;
@@ -78,6 +79,7 @@ mod support;
 #[cfg(test)]
 mod tests;
 pub mod token_surface;
+pub(crate) mod tool_block_repair;
 mod tool_completion_evidence;
 mod tool_context;
 mod tool_dispatch;
@@ -103,6 +105,7 @@ mod types;
 
 pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};
 pub use compaction::ManualCompactOutcome;
+pub use conversation_state::{ConversationState, SpillContext};
 pub use payloads::{
     ReasoningEvidenceEventPayload, ReasoningTurnEventPayload, UserCorrectionEventPayload,
 };
@@ -112,10 +115,7 @@ pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
-pub use types::{
-    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, SpillContext,
-    TimestampedEvent,
-};
+pub use types::{AgentConfig, AgentEvent, AskUserPromptKind, SessionStats, TimestampedEvent};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 

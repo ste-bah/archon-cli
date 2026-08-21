@@ -39,9 +39,19 @@ pub fn normalize_remediation_inventory(contract: &LifecycleContract<'_>, value: 
 /// array wins; the deep root-walking fallback lives in the Rust contract twin
 /// (`collect_generated_inventory_items` via normalize_inventory), so reuse the
 /// normalized item list for item-less shapes.
+///
+/// A verification-triage inventory is neither of those. It carries the routed
+/// buckets and no `items` anywhere, and the generic fallback reads it wrong in
+/// both directions — dropping the actionable write failures and promoting the
+/// read-only retry batch into a write item that can never satisfy write-item
+/// rules. `lifecycle_routed_write_items` claims that shape and answers it
+/// directly; see its doc comment for the loop this caused.
 fn inventory_source_items(value: &Value) -> Vec<Value> {
     if value.get("items").is_some_and(Value::is_array) {
         return array(value.get("items"));
+    }
+    if let Some(routed) = crate::generated_contract::lifecycle_routed_write_items(value) {
+        return routed;
     }
     crate::generated_contract::lifecycle_inventory_source_items(value)
 }
@@ -215,6 +225,18 @@ fn remediation_item_with_source_ownership(
 }
 
 /// JS `remediationInventoryReady`.
+///
+/// Readiness means "there is remediation work to run, and every item is
+/// well-formed enough to hand to a write wave". Both halves matter: a populated
+/// inventory whose items carry permanent shape issues is NOT ready, and the
+/// router answers not-ready with `RegenerateInventory`.
+///
+/// That is why the routed shape has to be resolved upstream in
+/// `inventory_source_items` rather than special-cased here. Feeding a read-only
+/// `retry_items` batch into this predicate produces unresolved issues that no
+/// regeneration can clear, because the batch is not a write item and never will
+/// be. Widening the work test to accept routed buckets does not help — it moves
+/// the wrong half of the condition. See `routed_triage_write_items`.
 pub fn remediation_inventory_ready(inventory: &Value) -> bool {
     !array(inventory.get("items")).is_empty()
         && array(inventory.get("unresolved_issues")).is_empty()

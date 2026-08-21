@@ -160,7 +160,15 @@ impl WorkflowScriptHost {
         );
     }
 
-    pub(crate) fn emit_terminal_status(&self, status: WorkflowV2Status) {
+    /// Emit the run's terminal event WITH the call that decided it.
+    ///
+    /// This used to carry only `status`: a run that stalled overnight logged
+    /// `stage_stalled` with an empty `call_id` and no reason, so nothing
+    /// watching the event log could say what halted or why. The failed call
+    /// and the recorded next action are exactly what an operator (or monitor)
+    /// needs to react without opening the state file.
+    pub(crate) fn emit_terminal_status(&self, summary: &WorkflowV2ScriptSummary) {
+        let status = summary.status;
         self.emit_v2_event(
             match status {
                 WorkflowV2Status::Accepted | WorkflowV2Status::Noop => {
@@ -179,6 +187,9 @@ impl WorkflowScriptHost {
             serde_json::json!({
                 "event": "terminal_status",
                 "status": status,
+                "call_id": summary.failed_call,
+                "result_path": summary.failed_result_path,
+                "next_action": summary.next_action,
             }),
         );
     }

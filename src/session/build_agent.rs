@@ -107,7 +107,7 @@ pub(crate) async fn build_session_agent(
 
     let mut agent_config = AgentConfig {
         model: super::active_session_model(config),
-        max_tokens: config.api.thinking_budget,
+        max_tokens: config.api.resolved_max_tokens(),
         thinking_budget: config.api.thinking_budget,
         system_prompt,
         tools: tool_defs,
@@ -137,6 +137,7 @@ pub(crate) async fn build_session_agent(
         activity_sink: super::session_activity_sink(session_id),
         context: config.context.clone(),
         max_subagent_concurrency: config.subagent.max_concurrent,
+        subagent_stream_idle_timeout_secs: config.subagent.stream_idle_timeout_secs,
         subagent_auto_isolation: config.subagent.auto_isolation,
         subagent_isolation_max_tier: config.subagent.isolation_max_tier,
         filesystem: config.filesystem,

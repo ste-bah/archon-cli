@@ -28,6 +28,11 @@ use crate::generated_contract::{
 };
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
+
+mod repository_root;
+mod size_retry;
+mod target_budgets;
+
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
 use crate::v2::completion_evidence::attach_completion_evidence_for_call;
@@ -73,6 +78,13 @@ pub(super) struct WriteFanoutContext<'a> {
     pub(super) v2_store: &'a WorkflowV2ResultStore,
     pub(super) store_for_control: &'a WorkflowStore,
     pub(super) run_id: &'a str,
+    /// The authoritative task universe, carried to the agent dispatch.
+    ///
+    /// Write branches passed `None` here, so every host rule keyed on the
+    /// universe was inert on the only path that writes — an artifact-only item
+    /// could not be granted the deliverable its own task declares, and its
+    /// branch was rejected for changing files outside declared targets.
+    pub(super) task_universe: Option<&'a crate::task_universe::WorkflowV2TaskUniverse>,
 }
 
 /// Run one write-capable fan-out call to completion.
@@ -108,6 +120,43 @@ pub async fn run_write_capable_v2_fanout(
     // dynamic_source_kind, so no graph exists for them and the graph-based
     // stamp never runs. Stamp straight from the task universe instead.
     stamp_required_tools_from_universe(&mut branches, task_universe);
+    // A task states what it produces in `deliverable_contracts`. When one of
+    // those is repository source, the item that owns the task must be able to
+    // KEEP it: the write layer captures declared targets only, so a contract
+    // that never reached `target_files` was produced by the agent and then
+    // dropped with the worktree. One live task lost a 455-line source file
+    // and `coverage_tests.rs` exactly that way, then failed for their absence.
+    stamp_contract_code_targets(&mut branches, task_universe, v2_store);
+    // The line cap is enforced when the manifest is validated — after the agent
+    // has written everything. Give it the budget first, or it discovers the cap
+    // by losing the whole patch.
+    // An agent that is not told where the repository is guesses the artifact
+    // root and hunts for `<project>/crates/...` files that cannot exist.
+    repository_root::stamp_target_repository_root(&mut branches, target_repository_root);
+    target_budgets::stamp_target_file_budgets(
+        &mut branches,
+        target_repository_root,
+        crate::write_coordinator::config::WriteCoordinatorConfig::default().max_source_file_lines,
+    );
+    // Replace the guessed write scope with an evidence-bound one BEFORE the
+    // plan is built. Everything downstream — the ownership rejection, the scope
+    // grant, the overlap guard, the stale-baseline recheck — exists to cope
+    // with planning "disjoint" waves out of scopes declared before anything
+    // read the code. Two items wanting the same undeclared file is not an edge
+    // case there, it is the guaranteed consequence.
+    //
+    // Best-effort: a branch whose pass fails keeps the scope it had, so the
+    // worst case is today's behaviour plus one read-only turn.
+    scope_discovery::discover_write_scopes(
+        &mut branches,
+        target_repository_root,
+        &execution,
+        &adapter,
+        dispatch,
+        v2_store,
+        task_universe,
+    )
+    .await;
     let all_write_items =
         write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let planner = WorkflowV2WritePlanner::new(
@@ -155,6 +204,7 @@ pub async fn run_write_capable_v2_fanout(
         v2_store,
         store_for_control,
         run_id,
+        task_universe,
     };
     match (execution.call.write_mode, workspace_boundary_supported) {
         (Some(WorkflowV2WriteMode::Coordinated), true) => {
@@ -242,6 +292,52 @@ pub fn stamp_project_artifact_policy(
 /// works for authored (v3) and generated (v2) call ids alike. Agent-authored
 /// tool declarations were already stripped at the shared builder, so this is
 /// the only writer of the field.
+/// Admit each item's declared repository deliverables to its writable targets.
+///
+/// Host-parsed contracts only, and only for items that already own repository
+/// code — an artifact-only item is served by `add_contract_artifact_paths` and
+/// must not acquire code writes here. Paths under an artifact root stay
+/// artifacts.
+fn stamp_contract_code_targets(
+    branches: &mut [crate::WorkflowV2FanoutItem],
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
+    v2_store: &WorkflowV2ResultStore,
+) {
+    let Some(universe) = task_universe else {
+        return;
+    };
+    let artifact_roots =
+        crate::v2::project_artifacts::project_artifact_context_from_v2_root(v2_store.root())
+            .artifact_roots;
+    for branch in branches.iter_mut() {
+        let Some(item) = branch.input.get("item") else {
+            continue;
+        };
+        let added = crate::v2::contract_code_targets::contract_code_targets_for_item(
+            universe,
+            item,
+            &artifact_roots,
+        );
+        if added.is_empty() {
+            continue;
+        }
+        let mut targets = branch.call.options.target_files.clone();
+        for path in &added {
+            if !targets.contains(path) {
+                targets.push(path.clone());
+            }
+        }
+        branch.call.options.target_files = targets.clone();
+        if let Some(object) = branch
+            .input
+            .get_mut("item")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            object.insert("target_files".to_string(), serde_json::json!(targets));
+        }
+    }
+}
+
 fn stamp_required_tools_from_universe(
     branches: &mut [crate::WorkflowV2FanoutItem],
     task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
@@ -343,9 +439,17 @@ mod errors;
 mod ownership;
 mod preflight;
 mod result;
+mod scope_discovery;
+#[cfg(test)]
+#[path = "scope_discovery_tests.rs"]
+mod scope_discovery_tests;
 mod serial;
 mod worktree;
 mod worktree_branch;
+mod worktree_scope_grant;
+#[cfg(test)]
+#[path = "worktree_scope_grant_tests.rs"]
+mod worktree_scope_grant_tests;
 mod worktree_wave;
 
 use contract::*;

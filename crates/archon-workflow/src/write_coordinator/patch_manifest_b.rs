@@ -21,6 +21,9 @@ pub fn persist_manifest(
     create_parents(&manifest_path)?;
     create_parents(&patch_path)?;
     write_atomic(&patch_path, &captured.patch_bytes)?;
+    // Ignored deliverables ride beside the patch, not inside it; see
+    // `patch_sidecar` for why git cannot carry them.
+    super::patch_sidecar::persist(&patch_path, &captured.ignored_files)?;
 
     let declared: Vec<String> = captured.post_hashes.keys().cloned().collect();
     let manifest = PatchManifest {
@@ -100,3 +103,6 @@ mod line_count_tests;
 #[cfg(test)]
 #[path = "patch_manifest_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "patch_manifest_capture_gate_tests.rs"]
+mod capture_gate_tests;

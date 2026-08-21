@@ -12,7 +12,8 @@ pub(crate) async fn install_project_tools(
     registry: &mut ToolRegistry,
     rules: &mut RuleSet,
 ) {
-    let configs = match archon_mcp::config::load_merged_configs(project_root) {
+    let root = archon_mcp::config::nearest_config_root(project_root);
+    let configs = match archon_mcp::config::load_merged_configs(&root) {
         Ok(configs) => configs,
         Err(error) => {
             tracing::warn!(%error, "workflow MCP config unavailable");
@@ -20,6 +21,15 @@ pub(crate) async fn install_project_tools(
         }
     };
     if configs.is_empty() {
+        // Say so. This returning silently is how project MCP tools vanished
+        // from workflow subagents without a single error: the agents simply
+        // had no tradingview tools, and every task requiring one failed for
+        // "never exercised" instead of "no config found".
+        tracing::warn!(
+            searched = %root.display(),
+            from = %project_root.display(),
+            "no project MCP servers configured; subagents get no MCP tools"
+        );
         return;
     }
     let policies = policy_by_server(&configs);

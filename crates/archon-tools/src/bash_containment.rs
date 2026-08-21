@@ -1,6 +1,6 @@
-// Used only by the unix descendant-cleanup path below; on Windows the import
-// is dead and trips `-D warnings`.
-#[cfg(unix)]
+// Used only by the Linux descendant-cleanup path below, which walks /proc. The
+// gate said `unix`, so every macOS build warned on a dead import.
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 
 use tokio::process::Command;

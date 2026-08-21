@@ -26,7 +26,13 @@ impl LifecycleDriver {
             )
             .await?;
         let mut routes = lifecycle_policy::verify_routing::triage_routes(triage);
-        if routes.implementation_failures.is_empty() {
+        // Fall back to the actionable set only when triage classified nothing.
+        // A triage that routed every outcome into retry/superseded/blockers and
+        // left implementation_failures empty has decided no write is needed;
+        // overriding it asserts work that does not exist, the inventory returns
+        // zero items, and the empty result reads as "not ready" rather than
+        // "nothing to do" — which regenerates the inventory forever.
+        if !lifecycle_policy::verify_routing::triage_classified_any(&routes) {
             routes.implementation_failures = actionable.to_vec();
         }
         let route_plan = lifecycle_policy::verify_routing::triage_route_plan(&routes);

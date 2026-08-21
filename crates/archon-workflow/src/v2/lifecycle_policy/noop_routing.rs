@@ -60,9 +60,26 @@ pub fn route_refuted_noops(
     reclassified_ids: &mut BTreeSet<String>,
 ) -> NoopProofExhaustionRoute {
     let semantic_refuted_ids = semantic_refuted_task_ids(contract, failed_outcomes);
-    let single_item_semantic_fallback = semantic_refuted_ids.is_empty()
-        && ready_noop_items.len() == 1
-        && failed_outcomes.iter().any(semantic_noop_refutation);
+    // A refutation that names no task still refutes the wave.
+    //
+    // The task ids are collected from the failure records, which works when an
+    // agent judged a specific task. It does not when the host itself rejects
+    // the wave — `source_data[0].acceptance_criteria is missing or empty` is a
+    // shape complaint about the input, so it carries no canonical id and
+    // `semantic_refuted_ids` comes back empty. The old fallback only rescued a
+    // single-item wave, so any larger wave had nothing to reclassify and the
+    // whole run blocked.
+    //
+    // Live: twelve identical iterations on that one message, while the paired
+    // evidence repair had already established that the task was no no-op
+    // and listed three concrete implementation failures. Repair knew the work,
+    // the demotion route existed, and the run halted between them.
+    //
+    // The proof failed and repair is exhausted, so the honest conclusion is
+    // that these items are not proven no-ops. Implementing them is recoverable;
+    // blocking the run is not.
+    let unattributed_semantic_fallback =
+        semantic_refuted_ids.is_empty() && failed_outcomes.iter().any(semantic_noop_refutation);
     let mut implementation_items = Vec::new();
     for item in ready_noop_items {
         if !noop_item_is_implementable(contract, item, completed_ids) {
@@ -74,7 +91,7 @@ pub fn route_refuted_noops(
             .filter(|id| {
                 !accepted_ids.contains(id)
                     && !reclassified_ids.contains(id)
-                    && (single_item_semantic_fallback || semantic_refuted_ids.contains(id))
+                    && (unattributed_semantic_fallback || semantic_refuted_ids.contains(id))
             })
             .collect::<Vec<_>>();
         if ids.is_empty() {
@@ -384,3 +401,7 @@ fn inventory_values(inventory: &Value, key: &str) -> Vec<Value> {
 #[cfg(test)]
 #[path = "noop_routing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "noop_routing_classification_tests.rs"]
+mod classification_tests;

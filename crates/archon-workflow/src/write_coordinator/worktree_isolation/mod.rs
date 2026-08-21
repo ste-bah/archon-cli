@@ -137,6 +137,44 @@ pub fn capture_canonical_baseline(
     })
 }
 
+/// Record canonical state for a path granted AFTER the baseline was captured.
+///
+/// A scope granted at capture time is not in `declared_target_meta`, so
+/// `target_hashes` finds no `pre_hash` for it and the apply-time stale recheck —
+/// which only compares paths it has a baseline hash for — skips it entirely.
+/// The overlap guard is then the only thing standing between two items writing
+/// the same file.
+///
+/// Hashing here is sound because of WHEN it runs: branches in a wave all
+/// capture before anything applies, so the canonical tree has not yet been
+/// touched by this wave and its current content IS the baseline the patch was
+/// computed against.
+///
+/// A path that cannot be read is skipped rather than failed: it then has no
+/// pre-hash, which is exactly where it started.
+pub fn extend_baseline_with_granted_targets(
+    baseline: &CanonicalBaseline,
+    canonical_root: &Path,
+    granted: &[String],
+) -> CanonicalBaseline {
+    let mut declared_target_meta = baseline.declared_target_meta.clone();
+    for path in granted {
+        if declared_target_meta.contains_key(path) {
+            continue;
+        }
+        if let Ok(meta) = file_meta(&canonical_root.join(path)) {
+            declared_target_meta.insert(path.clone(), meta);
+        }
+    }
+    CanonicalBaseline {
+        repo_fingerprint: baseline.repo_fingerprint.clone(),
+        tracked_diff_binary: baseline.tracked_diff_binary.clone(),
+        untracked_files: baseline.untracked_files.clone(),
+        declared_target_meta,
+        verify_input_meta: baseline.verify_input_meta.clone(),
+    }
+}
+
 /// Create the per-item worktree, overlay the dirty state, seal the baseline.
 pub fn create_item_workspace(
     canonical_root: &Path,
