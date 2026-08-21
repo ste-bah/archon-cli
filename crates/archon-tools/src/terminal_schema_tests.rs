@@ -1,10 +1,13 @@
 //! What the model is told `TerminalCreate` accepts, per world.
 //!
-//! The assertion that carries the whole file is
-//! `every_advertised_shell_opens_and_every_omitted_one_is_refused`: it runs the
-//! advertised list back through `terminal_world::plan` — the call `execute`
-//! makes — so a schema that promised something the world would refuse fails
-//! here rather than in a wasted turn.
+//! This file holds the stand-in worlds and the helpers that read a schema. The
+//! assertions live in [`menus`] and [`refusals`].
+//!
+//! Each fake answers a *different* combination of the three things
+//! `SandboxBackend::terminal` may say, including two no shipping backend
+//! produces. That is deliberate: every defect this suite exists to catch is a
+//! case where one shell's answer differs from the bare request's, and fakes
+//! that all agree with each other prove only that the code agrees with itself.
 
 use std::sync::Arc;
 
@@ -100,6 +103,97 @@ impl SandboxBackend for HostMinusWindowsShells {
     }
 }
 
+/// A world that relocates a bare request into a sandbox but answers `Host` for
+/// `sh`. The mirror of the case above and the worse one: advertising `sh` on a
+/// sandboxed menu would claim an isolation `plan` does not give it.
+#[derive(Debug)]
+struct SandboxWithOneHostShell;
+
+impl SandboxBackend for SandboxWithOneHostShell {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        match request.shell.as_deref() {
+            Some("sh") => SandboxTerminal::Host,
+            Some("powershell" | "cmd") => SandboxTerminal::Refused("Linux container".into()),
+            _ => SandboxTerminal::Open(door()),
+        }
+    }
+}
+
+/// The other way round: a world that hosts its shells but relocates `bash`
+/// into a sandbox. Advertising `bash` on this menu would be the same defect
+/// pointing the other way — the menu's prose says these run here, and that one
+/// does not.
+///
+/// The two Windows shells are refused rather than hosted so that `plan` gives
+/// a definite answer for them on every platform; see `host_schema`'s note on
+/// what the host launcher refuses at call time.
+#[derive(Debug)]
+struct HostWithOneSandboxedShell;
+
+impl SandboxBackend for HostWithOneSandboxedShell {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        match request.shell.as_deref() {
+            Some("bash") => SandboxTerminal::Open(door()),
+            Some("powershell" | "cmd") => SandboxTerminal::Refused("not offered here".into()),
+            _ => SandboxTerminal::Host,
+        }
+    }
+}
+
+/// A world whose bare request means `sh`, which is neither platform's host
+/// default. Without one, every fake here answers a bare request with the same
+/// shell Linux would have picked anyway, and an implementation that ignored
+/// the world's answer and returned a literal `bash` would pass the whole suite
+/// on Linux and macOS — caught only by Windows CI, which is coverage by
+/// accident.
+#[derive(Debug)]
+struct PosixShWorld;
+
+impl SandboxBackend for PosixShWorld {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        let shell = match request.shell.as_deref() {
+            None | Some("sh") => "sh",
+            Some("bash") => "bash",
+            Some(other) => {
+                return SandboxTerminal::Refused(format!("this world has no {other}"));
+            }
+        };
+        SandboxTerminal::Open(SandboxTerminalCommand {
+            program: "container-door".into(),
+            args: vec!["run".into(), format!("/bin/{shell}")],
+            shell: shell.to_string(),
+            location: "/workspace in the busybox container".into(),
+        })
+    }
+}
+
 fn ctx(sandbox: Option<Arc<dyn SandboxBackend>>) -> ToolContext {
     ToolContext {
         working_dir: std::env::temp_dir(),
@@ -135,178 +229,9 @@ fn described(built: &serde_json::Value) -> &str {
         .expect("the shell argument is described")
 }
 
-#[test]
-fn the_host_schema_offers_every_shell_and_names_the_platform_default() {
-    let built = host_schema();
-
-    assert_eq!(advertised(&built), shells::SHELLS.to_vec());
-    assert!(
-        described(&built).contains(shells::default_shell()),
-        "{}",
-        described(&built)
-    );
-}
-
-/// The pin on the no-sandbox case. A context with no world of its own declares
-/// nothing, so the surface an unsandboxed session sees is not rebuilt — it is
-/// untouched.
-#[test]
-fn a_session_with_no_backend_is_described_exactly_as_before() {
-    assert_eq!(world_schema(&ctx(None)), None);
-    assert_eq!(
-        world_schema(&ctx(Some(FixedTerminalBackend::host()))),
-        None,
-        "a policy-only backend runs host shells, so it has nothing to re-describe"
-    );
-}
-
-#[test]
-fn a_linux_world_advertises_only_the_shells_it_has() {
-    let built = world_schema(&linux()).expect("a container is not a host");
-
-    assert_eq!(advertised(&built), vec!["bash", "sh"]);
-    assert!(
-        !described(&built).contains("powershell") && !described(&built).contains("cmd"),
-        "{}",
-        described(&built)
-    );
-}
-
-/// The default differs per world: the host default on Windows is PowerShell,
-/// and promising that to a Linux container would refuse every terminal the
-/// model opened without naming a shell.
-#[test]
-fn the_advertised_default_is_the_one_a_bare_request_actually_gets() {
-    let ctx = linux();
-    let built = world_schema(&ctx).expect("a container is not a host");
-
-    let opened = plan(&ctx, None, &ctx.working_dir).expect("a bare request opens");
-    assert_eq!(opened.shell, "bash");
-    assert!(
-        described(&built).contains(&format!("default {}", opened.shell)),
-        "schema says {:?}, the call opens {}",
-        described(&built),
-        opened.shell
-    );
-}
-
-/// The whole point, stated as a round trip. Everything the schema offers must
-/// open, and everything it leaves out must be refused — checked against `plan`,
-/// which is the function `TerminalCreateTool::execute` calls.
-#[test]
-fn every_advertised_shell_opens_and_every_omitted_one_is_refused() {
-    let ctx = linux();
-    let built = world_schema(&ctx).expect("a container is not a host");
-    let offered = advertised(&built);
-
-    assert!(
-        !offered.is_empty(),
-        "a world that opens terminals must offer something"
-    );
-    for shell in shells::SHELLS {
-        let is_offered = offered.iter().any(|name| name == shell);
-        let outcome = plan(&ctx, Some(shell), &ctx.working_dir);
-        assert_eq!(
-            is_offered,
-            outcome.is_ok(),
-            "{shell}: advertised={is_offered}, plan refused with {:?}",
-            outcome.err()
-        );
-    }
-}
-
-#[test]
-fn a_world_that_cannot_host_a_shell_says_so_instead_of_offering_four() {
-    let built = world_schema(&ctx(Some(FixedTerminalBackend::refusing(
-        "openshell sandbox: throwaway sandbox per command",
-    ))))
-    .expect("a refusal is something to say");
-
-    assert!(advertised(&built).is_empty());
-    assert!(
-        described(&built).contains("throwaway sandbox per command"),
-        "{}",
-        described(&built)
-    );
-}
-
-#[test]
-fn a_world_that_accepts_no_named_shell_offers_no_enum_at_all() {
-    let ctx = ctx(Some(Arc::new(NamelessWorld)));
-    let built = world_schema(&ctx).expect("it is not a host");
-
-    assert!(
-        shell_property(&built).get("enum").is_none(),
-        "an empty enum matches nothing and providers reject it"
-    );
-    assert!(described(&built).contains("Omit"), "{}", described(&built));
-    assert!(plan(&ctx, Some("bash"), &ctx.working_dir).is_err());
-    assert!(plan(&ctx, None, &ctx.working_dir).is_ok());
-}
-
-/// Every world describes the same argument object, so the only thing that
-/// changes between sessions is the shell menu.
-#[test]
-fn the_argument_shape_is_the_same_in_every_world() {
-    let host = host_schema();
-    let sandboxed = world_schema(&linux()).expect("a container is not a host");
-
-    for built in [&host, &sandboxed] {
-        assert_eq!(built["type"], "object");
-        assert_eq!(built["required"], serde_json::json!([]));
-        assert_eq!(built["properties"]["cwd"], host["properties"]["cwd"]);
-        assert_eq!(shell_property(built)["type"], "string");
-    }
-}
-
-/// A host shell for the bare request does not license the whole host menu. The
-/// backend is asked about each shell separately, because it is allowed to
-/// answer differently — and here it does.
-#[test]
-fn a_world_that_hosts_shells_but_bans_two_advertises_only_the_rest() {
-    let ctx = ctx(Some(Arc::new(HostMinusWindowsShells)));
-    let built =
-        world_schema(&ctx).expect("two shells were taken away, so there is something to say");
-
-    assert_eq!(advertised(&built), vec!["bash", "sh"]);
-    for shell in ["powershell", "cmd"] {
-        assert!(
-            plan(&ctx, Some(shell), &ctx.working_dir).is_err(),
-            "{shell} is advertised nowhere and must open nowhere"
-        );
-    }
-}
-
-/// A world can only narrow the menu, never add to it: `offer` filters
-/// `shells::SHELLS`, the same list the host launcher builds from, so a backend
-/// cannot advertise a shell nothing here knows how to name.
-#[test]
-fn no_world_can_advertise_a_shell_the_launcher_does_not_know() {
-    for backend in [
-        Arc::new(LinuxWorld) as Arc<dyn SandboxBackend>,
-        FixedTerminalBackend::opening(door()),
-    ] {
-        let Some(built) = world_schema(&ctx(Some(backend))) else {
-            continue;
-        };
-        for shell in advertised(&built) {
-            assert!(
-                shells::SHELLS.contains(&shell.as_str()),
-                "{shell} is not a shell this build can launch"
-            );
-        }
-    }
-}
-
-#[test]
-fn the_tool_itself_answers_with_the_world_it_is_asked_about() {
-    use crate::terminal_tools::TerminalCreateTool;
-    use crate::tool::Tool;
-
-    assert_eq!(TerminalCreateTool.input_schema(), host_schema());
-    assert_eq!(TerminalCreateTool.input_schema_for(&ctx(None)), None);
-    assert_eq!(
-        TerminalCreateTool.input_schema_for(&linux()),
-        world_schema(&linux())
-    );
-}
+// Explicit paths: this module is itself `#[path]`-loaded, so a bare `mod`
+// would be looked for under the module's name rather than beside this file.
+#[path = "terminal_schema_tests/menus.rs"]
+mod menus;
+#[path = "terminal_schema_tests/refusals.rs"]
+mod refusals;

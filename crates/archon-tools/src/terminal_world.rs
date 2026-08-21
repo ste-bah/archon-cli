@@ -44,10 +44,15 @@ pub(crate) enum Offer {
     /// A shell on this machine, which is what the world-independent schema
     /// already describes. Nothing to say.
     Host,
-    /// A backend's world, and the shells it answered for.
+    /// A narrowed menu, and the shell a bare request gets.
     Shells {
         available: Vec<String>,
         default_shell: String,
+        /// Whether these land inside a backend's world. Carried because a menu
+        /// can be narrowed without being relocated — a backend may refuse two
+        /// shells and host the rest — and describing that as sandboxed would
+        /// claim an isolation the shell does not have.
+        sandboxed: bool,
     },
     /// No shell can be opened at all, and why.
     Refused(String),
@@ -55,12 +60,18 @@ pub(crate) enum Offer {
 
 /// Ask the active world what it would accept, without opening anything.
 ///
-/// Every answer here comes from [`decide`] — the same call [`plan`] makes, with
-/// the same arguments. Nothing restates a backend's shell list, so what is
-/// advertised cannot drift from what is refused: a backend that stops
-/// accepting `sh` stops advertising it in the same commit, and one that starts
-/// accepting a fifth shell needs `shells::SHELLS` extended before either side
-/// sees it.
+/// Every answer here comes from [`decide`] — the same call [`plan`] makes.
+/// Nothing restates a backend's shell list, so which shells are advertised
+/// cannot drift from which are refused: a backend that stops accepting `sh`
+/// stops advertising it in the same commit, and one that starts accepting a
+/// fifth shell needs `shells::SHELLS` extended before either side sees it.
+///
+/// **The agreement is exact for `cwd`, and only for the `cwd` it is asked
+/// about.** A backend decides on the directory as well as the shell — docker
+/// refuses one outside the workspace mount, ssh in `remote` mode refuses every
+/// one — so a caller that passes a *different* directory can still be refused
+/// for a reason this answer never covered. Callers describing a menu must say
+/// so rather than imply the shell list is the whole gate.
 pub(crate) fn offer(ctx: &ToolContext, cwd: &Path) -> Offer {
     // The bare request settles two things at once: whether a backend holds the
     // execution world, and what a caller that names no shell actually gets.
@@ -71,25 +82,40 @@ pub(crate) fn offer(ctx: &ToolContext, cwd: &Path) -> Offer {
         SandboxTerminal::Open(command) => (command.shell, false),
         SandboxTerminal::Refused(reason) => return Offer::Refused(reason),
     };
-    // A shell stays on the menu unless the world refuses it *by name*. `Host`
-    // is not a refusal: it says the backend is not the one deciding this shell,
-    // and what remains is the host launcher's own platform limit, which the
-    // world-independent description already states.
+    // Every shell is asked about separately, because a backend is free to
+    // answer differently for each — and both ways of differing are traps. One
+    // is a shell the bare request's world would refuse, which costs a turn. The
+    // other is the mirror: a shell answering `Host` while the bare request
+    // opened inside a backend. Advertising that one under a sandboxed menu
+    // would claim isolation for a shell `plan` then opens on the machine.
     let available: Vec<String> = shells::SHELLS
         .iter()
-        .filter(|shell| !matches!(decide(ctx, Some(shell), cwd), SandboxTerminal::Refused(_)))
+        .filter(|shell| lands_in_the_same_world(&decide(ctx, Some(shell), cwd), on_the_host))
         .map(|shell| (*shell).to_string())
         .collect();
-    // Nothing world-specific happened. Asked separately from the bare request
-    // because a backend is free to answer `Host` for "any shell" and still
-    // refuse a named one, and a schema that stopped at the first answer would
-    // then advertise a shell the same backend rejects a moment later.
+    // Nothing world-specific happened: host shells, and none of them taken
+    // away.
     if on_the_host && available.len() == shells::SHELLS.len() {
         return Offer::Host;
     }
     Offer::Shells {
         available,
         default_shell,
+        sandboxed: !on_the_host,
+    }
+}
+
+/// Whether a named shell ends up where the bare request did.
+///
+/// A menu may only contain shells that land in the world it says they land in.
+/// `Refused` is the obvious exclusion; the two crossed cases are excluded for
+/// the same reason, since either one would have the schema describe a shell in
+/// terms of a world `plan` does not put it in.
+fn lands_in_the_same_world(answer: &SandboxTerminal, on_the_host: bool) -> bool {
+    match answer {
+        SandboxTerminal::Host => on_the_host,
+        SandboxTerminal::Open(_) => !on_the_host,
+        SandboxTerminal::Refused(_) => false,
     }
 }
 

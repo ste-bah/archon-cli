@@ -354,21 +354,39 @@ pub trait Tool: Send + Sync {
     /// The convention for anything on this trait that depends on the live
     /// session rather than on the tool alone: take `&ToolContext`, return
     /// `Option<T>`, and let `None` mean *nothing to declare* so the caller
-    /// keeps what it would have used without asking. #200's per-call budget is
-    /// the next one and should read `fn timeout_for(&self, ctx: &ToolContext)
-    /// -> Option<Duration>` for the same reason — a caller has to be able to
-    /// tell "no opinion" from "an opinion that happens to match the default",
-    /// and cannot do that from the value alone.
+    /// keeps what it would have used without asking. [`Self::description_for`]
+    /// is the other one today. #200's per-call budget should read `fn
+    /// timeout_for(&self, ctx: &ToolContext) -> Option<Duration>` for the same
+    /// reason — a caller has to be able to tell "no opinion" from "an opinion
+    /// that happens to match the default", and cannot do that from the value
+    /// alone.
     ///
-    /// Defaulted, unlike [`Self::capability`], and the difference is what the
-    /// omission costs. A wrong `capability` is a sandbox escape, so the
-    /// compiler asks every tool once. A missing `input_schema_for` costs a
-    /// turn: the call is still refused by the world at execution time, so the
-    /// boundary holds and only the hint is lost. Requiring it would put
-    /// `self.input_schema()` on every tool that has no second world to describe
-    /// — boilerplate carrying no decision, which is how a required method stops
-    /// meaning anything.
+    /// Defaulted, unlike [`Self::capability`]. Not because a wrong answer here
+    /// is cheap in general: it is cheap *for `TerminalCreate`*, and only
+    /// because `terminal_world::plan` refuses the same call independently at
+    /// execution time. That second enforcer is what turns an omission into a
+    /// wasted turn instead of a breached boundary, and it is a property of
+    /// that tool, not of this method. **A tool whose advertisement is its only
+    /// gate gets no such protection, and this default will not catch it
+    /// declaring the wrong thing** — the compiler asks about `capability`
+    /// precisely because nothing else does. What the default buys is that the
+    /// tools with no second world to describe say nothing, rather than pasting
+    /// `self.input_schema()` back — boilerplate carrying no decision, which is
+    /// how a required method stops meaning anything.
     fn input_schema_for(&self, _ctx: &ToolContext) -> Option<serde_json::Value> {
+        None
+    }
+
+    /// The description as it applies inside the world `ctx` runs in, or `None`
+    /// when the world does not change what this tool is.
+    ///
+    /// Separate from [`Self::input_schema_for`] because the two are read at
+    /// different moments. A model picks a tool from its description and only
+    /// then reads the schema, so a world that refuses a tool outright has to
+    /// say so here: a refusal hidden in an argument's description is invisible
+    /// to the call that names no arguments, which is exactly the call a
+    /// zero-required-argument tool invites.
+    fn description_for(&self, _ctx: &ToolContext) -> Option<String> {
         None
     }
 

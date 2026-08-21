@@ -115,7 +115,7 @@ impl Agent {
         // A tool with nothing world-specific to say leaves its definition
         // byte-identical, which is what keeps the cached prefix intact.
         let tools = self.registry.redescribe(
-            &self.config.tools,
+            self.config.tools.clone(),
             &self.build_tool_context(effective_mode, &active_model).await,
         );
 

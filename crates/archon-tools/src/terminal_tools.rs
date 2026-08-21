@@ -30,6 +30,18 @@ const MAX_READ_BYTES: usize = 16_000;
 /// Opens a shell that outlives the call.
 pub struct TerminalCreateTool;
 
+impl TerminalCreateTool {
+    /// Named rather than inlined so a world that has to prepend a refusal can
+    /// still say what the tool would do, from the one copy of the sentence.
+    const WHAT_IT_DOES: &'static str = "Start a persistent shell and return its id. Unlike Bash, the shell \
+         stays alive between calls, so a directory change, an activated \
+         environment or an exported variable is still in effect for the next \
+         TerminalWrite. Use it for interactive programs, for long-running \
+         processes you want to check on later, and for any sequence where one \
+         command depends on the state the last one left. Feed the id to \
+         TerminalWrite and TerminalRead, and call TerminalClose when done.";
+}
+
 #[async_trait::async_trait]
 impl Tool for TerminalCreateTool {
     fn name(&self) -> &str {
@@ -41,13 +53,14 @@ impl Tool for TerminalCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Start a persistent shell and return its id. Unlike Bash, the shell \
-         stays alive between calls, so a directory change, an activated \
-         environment or an exported variable is still in effect for the next \
-         TerminalWrite. Use it for interactive programs, for long-running \
-         processes you want to check on later, and for any sequence where one \
-         command depends on the state the last one left. Feed the id to \
-         TerminalWrite and TerminalRead, and call TerminalClose when done."
+        Self::WHAT_IT_DOES
+    }
+
+    /// A world with no terminal in it has to say so here, not only in an
+    /// argument: nothing about this tool is required, so `TerminalCreate {}` is
+    /// the call a model makes, and it reads no argument description on the way.
+    fn description_for(&self, ctx: &ToolContext) -> Option<String> {
+        schema::world_description(ctx, Self::WHAT_IT_DOES)
     }
 
     fn input_schema(&self) -> serde_json::Value {
