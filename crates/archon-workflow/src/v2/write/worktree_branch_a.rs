@@ -461,6 +461,7 @@ pub(super) fn capture_worktree_branch_manifest(
         &prepared.baseline,
         cfg,
         result,
+        Some(prepared.wave_claims.as_slice()),
     ) {
         Ok(captured) => captured,
         Err(err) => {

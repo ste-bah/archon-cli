@@ -46,11 +46,25 @@ pub(super) fn capture_and_validate_worktree_patch(
     baseline: &CanonicalBaseline,
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
+    wave_claims: Option<&[crate::v2::write_scope_extension::WaveClaim]>,
 ) -> crate::WorkflowResult<CapturedPatch> {
-    let captured = capture_patch(workspace, &coordinator_plan.target_files, baseline)
+    // ONE effective plan for all three gates. Capture reads
+    // `workspace.plan`, the diff scope reads the targets argument, and
+    // `validate_patch` reads the plan again — widening any one of them alone
+    // leaves the other two rejecting the same path.
+    let plan = super::worktree_scope_grant::plan_extended_to_unclaimed_changes(
+        coordinator_plan,
+        result,
+        wave_claims,
+    );
+    let workspace = ItemWorkspace {
+        plan: plan.clone(),
+        baseline_commit: workspace.baseline_commit.clone(),
+    };
+    let captured = capture_patch(&workspace, &plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let agent_body = serde_json::to_string(result)?;
-    validate_captured_patch(coordinator_plan, cfg, &agent_body, captured)
+    validate_captured_patch(&plan, cfg, &agent_body, captured)
 }
 
 pub(super) fn validate_captured_patch(

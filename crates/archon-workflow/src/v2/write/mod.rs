@@ -423,6 +423,10 @@ mod result;
 mod serial;
 mod worktree;
 mod worktree_branch;
+mod worktree_scope_grant;
+#[cfg(test)]
+#[path = "worktree_scope_grant_tests.rs"]
+mod worktree_scope_grant_tests;
 mod worktree_wave;
 
 use contract::*;

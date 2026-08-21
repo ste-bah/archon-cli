@@ -103,3 +103,6 @@ mod line_count_tests;
 #[cfg(test)]
 #[path = "patch_manifest_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "patch_manifest_capture_gate_tests.rs"]
+mod capture_gate_tests;
