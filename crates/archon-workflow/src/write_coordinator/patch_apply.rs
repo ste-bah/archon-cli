@@ -320,6 +320,16 @@ fn apply_one(
     }
 }
 
+/// The first declared file this item intends to change whose canonical content
+/// has moved since the patch was computed.
+///
+/// The comparison itself is `write_claim_gate::decide_write_claim`, so there is
+/// ONE definition of "this baseline is stale" rather than a copy here and a
+/// second one wherever the question gets asked next.
+///
+/// A target with no recorded pre-hash is skipped, not failed: that is a file
+/// nothing captured a baseline for, and treating an unknown as a mismatch would
+/// reject every legitimately new file.
 fn stale_target(
     canonical_root: &Path,
     m: &PatchManifest,
@@ -330,8 +340,12 @@ fn stale_target(
         .iter()
         .filter(|t| m.changed_files.iter().any(|c| c == *t))
         .find(|t| {
+            let Some(baseline) = expected.get(t.as_str()) else {
+                return false;
+            };
             let now = hash_file(&canonical_root.join(t)).unwrap_or_else(|| "absent".to_string());
-            expected.get(t.as_str()).is_some_and(|exp| now != *exp)
+            !crate::v2::write_claim_gate::decide_write_claim(t, Some(baseline), Some(&now))
+                .should_proceed()
         })
         .cloned()
 }

@@ -130,3 +130,94 @@ fn an_unnormalisable_path_is_never_granted() {
         plan_extended_to_unclaimed_changes(&base, &changed(&["../outside/escape.rs"]), Some(&wave));
     assert_eq!(declared(&extended), declared(&base));
 }
+
+// ---------------------------------------------------------------------------
+// A granted path must carry a baseline, or the apply-time stale recheck skips
+// it and the overlap guard stands alone between two items writing one file.
+// ---------------------------------------------------------------------------
+
+use crate::write_coordinator::worktree_isolation::{
+    CanonicalBaseline, extend_baseline_with_granted_targets,
+};
+
+fn baseline_of(root: &std::path::Path, declared: &[&str]) -> CanonicalBaseline {
+    let mut base = CanonicalBaseline {
+        repo_fingerprint: "fp".into(),
+        tracked_diff_binary: Vec::new(),
+        untracked_files: Default::default(),
+        declared_target_meta: Default::default(),
+        verify_input_meta: Default::default(),
+    };
+    base = extend_baseline_with_granted_targets(
+        &base,
+        root,
+        &declared
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect::<Vec<_>>(),
+    );
+    base
+}
+
+#[test]
+fn a_granted_path_gains_a_baseline_hash() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    std::fs::write(dir.path().join("src/granted.rs"), "// content\n").expect("write");
+
+    let base = baseline_of(dir.path(), &[]);
+    assert!(base.declared_target_meta.is_empty());
+
+    let extended =
+        extend_baseline_with_granted_targets(&base, dir.path(), &["src/granted.rs".to_string()]);
+    let meta = extended
+        .declared_target_meta
+        .get("src/granted.rs")
+        .expect("granted path must be recorded, or the stale recheck skips it");
+    assert!(meta.exists);
+    assert!(!meta.blake3_hex.is_empty());
+}
+
+/// An existing baseline entry is authoritative: re-recording it would replace a
+/// true baseline with the file as it is NOW, which is the opposite of the check.
+#[test]
+fn an_existing_baseline_entry_is_never_overwritten() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    let path = dir.path().join("src/declared.rs");
+    std::fs::write(&path, "// original\n").expect("write");
+
+    let base = baseline_of(dir.path(), &["src/declared.rs"]);
+    let original = base.declared_target_meta["src/declared.rs"]
+        .blake3_hex
+        .clone();
+
+    std::fs::write(&path, "// changed since\n").expect("rewrite");
+    let extended =
+        extend_baseline_with_granted_targets(&base, dir.path(), &["src/declared.rs".to_string()]);
+
+    assert_eq!(
+        extended.declared_target_meta["src/declared.rs"].blake3_hex, original,
+        "re-recording would hide exactly the drift this check exists to find"
+    );
+}
+
+/// A path that cannot be read is skipped, not failed: it then has no pre-hash,
+/// which is where it started.
+#[test]
+fn an_unreadable_granted_path_is_skipped() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base = baseline_of(dir.path(), &[]);
+    let extended = extend_baseline_with_granted_targets(
+        &base,
+        dir.path(),
+        &["src/never/created.rs".to_string()],
+    );
+    assert!(
+        extended
+            .declared_target_meta
+            .get("src/never/created.rs")
+            .is_none_or(|meta| !meta.exists),
+        "an absent file must not be recorded as present"
+    );
+}

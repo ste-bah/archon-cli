@@ -61,6 +61,28 @@ pub(super) fn capture_and_validate_worktree_patch(
         plan: plan.clone(),
         baseline_commit: workspace.baseline_commit.clone(),
     };
+    // A granted path was not in the baseline, so it would carry no pre-hash and
+    // the apply-time stale recheck would skip it — leaving the overlap guard
+    // alone between two items writing the same file. Sound to hash now: every
+    // branch in a wave captures before anything applies, so canonical is still
+    // the content these patches were computed against.
+    let granted: Vec<String> = plan
+        .target_files
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .filter(|path| {
+            !coordinator_plan
+                .target_files
+                .iter()
+                .any(|declared| declared.as_str() == path.as_str())
+        })
+        .collect();
+    let baseline =
+        &crate::write_coordinator::worktree_isolation::extend_baseline_with_granted_targets(
+            baseline,
+            &plan.canonical_root,
+            &granted,
+        );
     let captured = capture_patch(&workspace, &plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let agent_body = serde_json::to_string(result)?;
