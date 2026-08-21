@@ -24,6 +24,37 @@ pub fn is_tool_field(key: &str) -> bool {
     TOOL_DECLARATION_FIELDS.contains(&key)
 }
 
+/// Reduce a declared tool name to the bare name a grant and a command both
+/// speak: `mcp__provider__quote_get` and `mcp_action:quote_get` alike become
+/// `quote_get`.
+///
+/// Two qualifier conventions are in use, and this must reduce BOTH or the two
+/// sides of a comparison never meet. That is not hypothetical: the binding
+/// filter intersected task-declared names against project-permitted ones, each
+/// side reduced by a copy of this function that knew only `mcp__server__`. A
+/// task declaring `mcp_action:tv_health_check` kept its qualifier, the
+/// permitted `mcp__provider__x_health_check` reduced to `x_health_check`,
+/// the intersection came out empty, and the stage fell back to the hardcoded
+/// tool list — so no agent on that task ever received an MCP tool, while the
+/// separate exercise gate failed it for never using one.
+pub fn raw_tool_name(name: &str) -> &str {
+    let name = name.trim();
+    if let Some(raw) = name
+        .strip_prefix("mcp__")
+        .and_then(|suffix| suffix.split_once("__"))
+        .map(|(_, raw)| raw)
+    {
+        return raw.trim();
+    }
+    // Any `mcp*:` qualifier, so a new spelling cannot silently break binding.
+    if let Some((qualifier, raw)) = name.split_once(':')
+        && qualifier.to_ascii_lowercase().starts_with("mcp")
+    {
+        return raw.trim();
+    }
+    name
+}
+
 /// Remove every tool-declaration key at EVERY level of a value.
 ///
 /// `allowed_mcp_tools` (and the write no-op guard) scan the whole input

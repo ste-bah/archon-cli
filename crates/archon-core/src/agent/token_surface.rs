@@ -191,7 +191,7 @@ impl TokenSurface {
     }
 }
 
-impl super::types::ConversationState {
+impl super::conversation_state::ConversationState {
     /// Per-message attribution for the current message set.
     ///
     /// Built on demand rather than cached: the message list changes several

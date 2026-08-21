@@ -58,5 +58,6 @@ fn empty_failure_capture(it: &ItemState<'_>) -> CapturedPatch {
         pre_hashes: Default::default(),
         post_hashes,
         baseline_commit: it.workspace.baseline_commit.clone(),
+        ignored_files: Vec::new(),
     }
 }

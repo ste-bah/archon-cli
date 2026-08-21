@@ -298,6 +298,24 @@ fn final_report_input_normalizes_nested_null_collections_only() {
     assert!(input["triage"]["data"].is_null());
 }
 
+/// The live crash: a blocked-silent finalReport source held a null ELEMENT
+/// inside a present collection, and the typed deserialize died with "expected
+/// string or map". Null elements must be dropped, not just null arrays.
+#[test]
+fn final_report_input_drops_null_elements_inside_collections() {
+    let mut input = serde_json::json!({
+        "files_read": [null, {"path": "a.rs"}, null],
+        "evidence": [{"kind": "review", "summary": "s"}, null],
+        "wave": {"outcomes": [null, {"canonical_task_ids": ["T"]}]}
+    });
+
+    normalize_null_report_collections(&mut input);
+
+    assert_eq!(input["files_read"], serde_json::json!([{"path": "a.rs"}]));
+    assert_eq!(input["evidence"].as_array().unwrap().len(), 1);
+    assert_eq!(input["wave"]["outcomes"].as_array().unwrap().len(), 1);
+}
+
 #[test]
 fn failed_final_report_terminal_marker_routes_to_host_fallback() {
     assert!(terminal_marker_requires_report_fallback(Some(

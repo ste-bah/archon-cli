@@ -134,3 +134,11 @@ pub(crate) fn lifecycle_inventory_source_items(
 ) -> Vec<serde_json::Value> {
     collect_generated_inventory_items(value)
 }
+
+/// Lifecycle shim for [`routed_triage_write_items`] — see that function for why
+/// a routed triage inventory must not reach the generic item collector.
+pub(crate) fn lifecycle_routed_write_items(
+    value: &serde_json::Value,
+) -> Option<Vec<serde_json::Value>> {
+    routed_triage_write_items(value)
+}

@@ -230,11 +230,11 @@ impl Agent {
             archon_context::boundary::CompactionStrategy::Micro
             | archon_context::boundary::CompactionStrategy::Auto => {
                 // Both Micro and Auto need an LLM-generated summary.
-                let active_model = self.active_model_for_compaction().await;
+                let summary_model = self.resolve_summary_model().await;
                 let mut summary_text =
                     match super::autocompact::generate_compaction_summary_structured(
                         self.client.as_ref(),
-                        &active_model,
+                        &summary_model,
                         &self.state.messages,
                         self.config.runtime_attribution_extra(
                             "compaction",
@@ -405,6 +405,38 @@ impl Agent {
         } else {
             override_model.clone()
         }
+    }
+
+    /// The model that writes a compaction summary.
+    ///
+    /// Summarising is a different job from the work the agent is doing, and on
+    /// a reasoning model the difference is fatal: asked to summarise, the model
+    /// spends its whole budget reasoning and returns no text at all. The
+    /// summary collector reads text only, so it sees an empty string and the
+    /// agent dies with "reactive subagent compaction failed". Measured on a
+    /// live deployment at max_tokens=300: the default model returned 0
+    /// characters with finish_reason `length`, the same model with reasoning
+    /// disabled returned a complete sentence and stopped cleanly.
+    ///
+    /// `[context] compaction_model` already existed for exactly this and was
+    /// honoured only by background segment compaction; this reactive path used
+    /// the active model regardless, so one setting produced two behaviours and
+    /// the path that actually fails under pressure was the unfixable one.
+    ///
+    /// Resolution degrades to the active model when nothing is configured or
+    /// the configured model is not among the provider's live models, so a
+    /// deployment that sets nothing behaves exactly as before.
+    async fn resolve_summary_model(&self) -> String {
+        let active = self.active_model_for_compaction().await;
+        let models = self.client.models();
+        let available: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        super::autocompact::resolve_compaction_model(
+            self.config.context.compaction_model.as_deref(),
+            None,
+            &active,
+            &available,
+        )
+        .model
     }
 }
 

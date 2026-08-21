@@ -23,6 +23,9 @@ use bash_process::{
 #[cfg(test)]
 #[path = "bash_process_tests.rs"]
 mod bash_process_tests;
+#[cfg(test)]
+#[path = "bash_output_bound_tests.rs"]
+mod bash_output_bound_tests;
 
 #[path = "bash_env.rs"]
 pub(crate) mod bash_env;
@@ -114,6 +117,13 @@ pub struct BashTool {
     pub provider_env: Option<ProviderEnvSource>,
     /// Resource defaults for agent-run `cargo` commands, from `[tools.cargo]`.
     pub cargo_limits: CargoResourceLimits,
+    /// Extra environment names that should receive the workflow run id, from
+    /// `[tools] run_id_env_keys`.
+    ///
+    /// The engine always exports `ARCHON_WORKFLOW_RUN_ID`; this is how a
+    /// project whose tasks declare a differently-named key gets the same value
+    /// without that project's key name appearing in engine code.
+    pub run_id_env_aliases: Vec<String>,
     /// How isolated the agent owning this tool is (#184 M3).
     ///
     /// Carried on the tool rather than on `ToolContext` because the registry is
@@ -136,6 +146,7 @@ impl Default for BashTool {
             dangerous_commands: Vec::new(),
             provider_env: None,
             cargo_limits: CargoResourceLimits::default(),
+            run_id_env_aliases: Vec::new(),
             // The main agent and any non-isolated subagent: unrestricted.
             isolation_tier: crate::isolation::IsolationTier::Shared,
         }

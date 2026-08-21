@@ -7,7 +7,7 @@
 //!
 //! Split from `types.rs` to keep that file under the 500-line ceiling.
 
-use super::types::ConversationState;
+use super::conversation_state::ConversationState;
 use crate::spill::SpillLocator;
 
 /// Key under which a tool_result block records where its full output went.
@@ -24,7 +24,7 @@ pub const SPILL_PATH_KEY: &str = "archon_spill";
 pub(super) fn open_spill(
     working_dir: &std::path::Path,
     session_id: &str,
-) -> Option<super::types::SpillContext> {
+) -> Option<super::conversation_state::SpillContext> {
     let config = crate::config::load_config()
         .map(|loaded| loaded.spill)
         .unwrap_or_default();
@@ -32,7 +32,7 @@ pub(super) fn open_spill(
     if pruned > 0 {
         tracing::debug!(pruned, "pruned expired tool-output spill directories");
     }
-    Some(super::types::SpillContext {
+    Some(super::conversation_state::SpillContext {
         working_dir: working_dir.to_path_buf(),
         session_id: session_id.to_string(),
         config,
@@ -103,7 +103,7 @@ impl ConversationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::types::SpillContext;
+    use crate::agent::conversation_state::SpillContext;
     use crate::config::SpillConfig;
 
     fn state_with_tool(dir: &std::path::Path, tool: &str) -> ConversationState {

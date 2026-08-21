@@ -464,3 +464,30 @@ fn write_project_artifact_file(request: &WorkflowV2AgentRequest, path: &str) {
     std::fs::create_dir_all(absolute.parent().expect("artifact parent")).expect("artifact dir");
     std::fs::write(absolute, "{}").expect("artifact");
 }
+
+/// The guard polices capabilities, not means. A task declaring `find`/`grep`
+/// alongside a live MCP action must be rejected only for the MCP action it
+/// never called — an agent that searched with its own tooling has done the
+/// work, and rejecting it for not shelling out to `find` cost a whole run.
+#[test]
+fn generic_shell_utilities_do_not_gate_but_capabilities_do() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["bash", "find", "git", "grep", "wc", "cargo", "mcp_action:tv_health_check"] }
+    });
+    let mut result = WorkflowV2Result::accepted("did the work");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test -p archon-trading".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "ok".to_string(),
+    }];
+
+    let unexercised = super::unexercised_required_tools(&input, &result);
+    assert_eq!(
+        unexercised,
+        vec!["tv_health_check".to_string()],
+        "only the live capability may gate; shell utilities must be ignored"
+    );
+}
+

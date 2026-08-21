@@ -69,7 +69,7 @@ pub struct SubagentRunner {
 }
 
 /// A single pending tool call collected from the stream.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PendingTool {
     id: String,
     name: String,
@@ -121,6 +121,11 @@ impl SubagentRunner {
             agent_config,
             identity,
         }
+    }
+
+    /// The parent agent configuration threaded into this runner.
+    pub(crate) fn agent_config(&self) -> &crate::agent::AgentConfig {
+        &self.agent_config
     }
 
     pub fn model(&self) -> &str {

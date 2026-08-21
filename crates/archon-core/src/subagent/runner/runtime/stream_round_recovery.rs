@@ -382,9 +382,31 @@ pub(super) async fn compact_messages_for_retry(
         None,
         None,
     );
+    // Summarise with the configured compaction model, not the subagent's active
+    // model. A reasoning model (deepseek-v4-flash here) answers a summarise
+    // request with reasoning_content and no text, so the provider returns an
+    // empty summary and this path fails with "reactive subagent compaction
+    // failed: provider returned empty summary" — killing the branch mid-run.
+    // The main-agent compaction already resolves `[context] compaction_model`
+    // (a think-disabled sibling) for exactly this; the subagent path passed
+    // `runner.model` straight through and never did, so the fix did not reach
+    // here. Resolve the same way; falls back to the active model when no
+    // compaction model is configured or available, preserving prior behaviour.
+    let available_models = runner.provider.models();
+    let available: Vec<&str> = available_models
+        .iter()
+        .map(|model| model.id.as_str())
+        .collect();
+    let summary_model = crate::agent::autocompact::resolve_compaction_model(
+        runner.agent_config.context.compaction_model.as_deref(),
+        None,
+        &runner.model,
+        &available,
+    )
+    .model;
     let result = crate::agent::autocompact::compact_json_messages_with_provider(
         runner.provider.as_ref(),
-        &runner.model,
+        &summary_model,
         messages.as_slice(),
         crate::agent::CompactAction::Full,
         true,

@@ -118,3 +118,54 @@ pub trait WorkflowUiSink: Send + Sync {
 /// A run hands the same sink to every stage, fanout branch and spawned driver,
 /// so the clonable form is the one that appears in signatures.
 pub type SharedWorkflowUiSink = Arc<dyn WorkflowUiSink>;
+
+/// A sink whose delivery failures never become the run's failures.
+///
+/// UI delivery used to be load-bearing: every `emit` error at a "required"
+/// call site was wrapped in `WorkflowError::NotificationDelivery` and
+/// propagated like a control signal, so a TUI channel whose receiver had gone
+/// away failed the branch — or the run — that happened to be emitting. Three
+/// separate overnight run halts traced to exactly that: hours of valid agent
+/// work discarded because a progress line had nowhere to land.
+///
+/// This wrapper restores the invariant the durable event log already states
+/// for itself: *a log write must never change a call's outcome.* Presentation
+/// is presentation. The inner sink is still asked to deliver every event (a
+/// bounded-but-alive channel keeps its backpressure semantics untouched); only
+/// a refusal is downgraded — announced on stderr once, on the first failure,
+/// so a headless or detached run says plainly that it has gone quiet rather
+/// than spamming a warning per event or dying.
+pub struct ResilientWorkflowUiSink {
+    inner: SharedWorkflowUiSink,
+    degraded: std::sync::atomic::AtomicBool,
+}
+
+impl ResilientWorkflowUiSink {
+    pub fn wrap(inner: SharedWorkflowUiSink) -> SharedWorkflowUiSink {
+        Arc::new(Self {
+            inner,
+            degraded: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+}
+
+#[async_trait]
+impl WorkflowUiSink for ResilientWorkflowUiSink {
+    async fn emit(&self, event: WorkflowUiEvent) -> WorkflowUiResult {
+        if let Err(error) = self.inner.emit(event).await {
+            if !self
+                .degraded
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                eprintln!(
+                    "workflow ui delivery degraded; run continues without live progress: {error}"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "ui_sink_port_tests.rs"]
+mod tests;

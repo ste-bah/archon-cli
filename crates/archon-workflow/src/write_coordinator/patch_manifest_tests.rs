@@ -46,7 +46,7 @@ fn np(raw: &str, root: &Path) -> NormalizedPath {
     normalize_target(raw, root).unwrap_or_else(|e| panic!("normalize {raw}: {e}"))
 }
 
-fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
+pub(super) fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
     WritePlan {
         run_id: "run1".into(),
         stage_id: "impl".into(),
@@ -69,7 +69,7 @@ fn cfg() -> WriteCoordinatorConfig {
 }
 
 /// Build canonical repo + isolated workspace, returning (tempdir, plan, workspace, baseline).
-fn isolate(
+pub(super) fn isolate(
     targets: &[&str],
 ) -> (
     tempfile::TempDir,
@@ -168,6 +168,7 @@ fn manual_capture(patch: &[u8], changed: &[&str]) -> CapturedPatch {
         pre_hashes: BTreeMap::new(),
         post_hashes: BTreeMap::new(),
         baseline_commit: "abc".into(),
+        ignored_files: vec![],
     }
 }
 

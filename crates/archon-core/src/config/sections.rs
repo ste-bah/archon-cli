@@ -6,7 +6,29 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct ApiConfig {
     pub default_model: String,
+    /// Tokens the model may spend REASONING before it answers.
+    ///
+    /// Goes on the wire as Anthropic `thinking.budget_tokens`. This is a
+    /// different mechanism from `default_effort`, which selects a tier
+    /// (low/medium/high) and on most templates injects a different system
+    /// preamble — effort chooses how hard the model tries, this chooses how
+    /// long it may think. Neither substitutes for the other, which is why both
+    /// exist.
     pub thinking_budget: u32,
+    /// Ceiling on the tokens ONE response may produce, reasoning included.
+    ///
+    /// `None` falls back to `thinking_budget`, which is what archon did
+    /// unconditionally before this field existed — so an untouched config
+    /// behaves exactly as it did.
+    ///
+    /// Why it needed separating: servers RESERVE max_tokens out of the context
+    /// window before the prompt is placed, so sharing one number made a
+    /// reasoning-depth change silently resize the prompt window. On a 262,144
+    /// deployment a 65,536 budget left 179k for prompts; split, the same
+    /// reasoning depth with a 16,384 answer ceiling leaves ~228k.
+    ///
+    /// MUST stay above `thinking_budget` — see `validate_token_budgets`.
+    pub max_tokens: Option<u32>,
     pub default_effort: String,
     pub max_retries: u32,
     /// Override the Anthropic API base URL. Useful for pointing at LiteLLM,
@@ -16,6 +38,15 @@ pub struct ApiConfig {
     ///   2. This field in config.toml
     ///   3. Hardcoded default: `https://api.anthropic.com/v1/messages`
     pub base_url: Option<String>,
+    /// Repair `tool_use` content blocks that a proxy split across a named block
+    /// and an unnamed continuation.
+    ///
+    /// Defaults ON. When it is not needed the pass never runs — a conforming
+    /// stream has no unnamed `tool_use` block — so leaving it on costs nothing,
+    /// while leaving it off on a proxy that splits blocks kills every agent turn
+    /// that issues parallel tool calls. Switch it off to get strict Anthropic
+    /// spec behaviour. See `agent::tool_block_repair`.
+    pub repair_split_tool_blocks: bool,
 }
 
 impl Default for ApiConfig {
@@ -23,12 +54,17 @@ impl Default for ApiConfig {
         Self {
             default_model: "claude-sonnet-4-6".into(),
             thinking_budget: 16384,
+            max_tokens: None,
             default_effort: "medium".into(),
             max_retries: 3,
             base_url: None,
+            repair_split_tool_blocks: true,
         }
     }
 }
+
+#[path = "api_token_budget.rs"]
+mod api_token_budget;
 
 /// LLM provider configuration.
 ///
@@ -252,6 +288,17 @@ impl Default for CustomIdentityConfig {
 #[serde(default)]
 pub struct SubagentConfig {
     pub max_concurrent: usize,
+    /// Seconds a subagent's LLM stream may go silent before the round is
+    /// abandoned.
+    ///
+    /// This guards against a provider that has stopped sending without closing
+    /// the connection. It is not a thinking budget, and the two are easy to
+    /// confuse: a reducer on a large context routinely pauses longer between
+    /// stream events than a short guard allows, and the agent is then killed
+    /// mid-work with everything it had done discarded. The hardcoded 120s was
+    /// sixty times tighter than the `host_call_timeout_secs` stage it runs
+    /// inside, and killed a live inventory reducer three turns into its work.
+    pub stream_idle_timeout_secs: u64,
 
     /// When to isolate an agent that did not ask to be isolated (#184 M3).
     ///
@@ -272,10 +319,15 @@ pub struct SubagentConfig {
     pub isolation_max_tier: archon_tools::isolation::IsolationTier,
 }
 
+/// Generous enough that only a genuinely stalled provider trips it, and still
+/// far inside the enclosing stage timeout.
+pub const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 600;
+
 impl Default for SubagentConfig {
     fn default() -> Self {
         Self {
             max_concurrent: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
+            stream_idle_timeout_secs: DEFAULT_STREAM_IDLE_TIMEOUT_SECS,
             auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
             // Deliberately not the top rung. Reaching the expensive tier should
             // be an operator's decision, not something a spawn can talk itself

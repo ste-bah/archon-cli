@@ -239,6 +239,25 @@ fn terminal_blocker_is_independent(blocker: &Value, retry_items: &[Value]) -> bo
         .any(|item_id| retry_ids.contains(item_id.as_str()))
 }
 
+/// Whether triage said anything at all about the outcomes it was given.
+///
+/// An empty `implementation_failures` means two very different things. Triage
+/// may have returned nothing — a shape failure, and the caller is right to fall
+/// back on the actionable set. Or triage may have classified every outcome into
+/// `retry_items` / `superseded_items` / `terminal_blockers` and deliberately
+/// concluded that none of them require a write. Overriding the second case
+/// asserts work that does not exist: the inventory then correctly returns zero
+/// items, which reads as "inventory not ready", and the loop regenerates it
+/// forever. A live run spent five of six repair iterations doing exactly that,
+/// re-deriving the same twenty-four `retry_resolved_by_sibling_evidence`
+/// outcomes and never reaching the next task.
+pub fn triage_classified_any(routes: &VerificationTriageRoutes) -> bool {
+    !routes.implementation_failures.is_empty()
+        || !routes.retry_items.is_empty()
+        || !routes.superseded_items.is_empty()
+        || !routes.terminal_blockers.is_empty()
+}
+
 pub fn remediation_inventory_route(
     plan: &VerificationTriageRoutePlan,
     inventory_ready: bool,
@@ -456,3 +475,7 @@ fn dedup_items(items: &mut Vec<Value>) {
 #[cfg(test)]
 #[path = "verify_routing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "verify_routing_classification_tests.rs"]
+mod classification_tests;

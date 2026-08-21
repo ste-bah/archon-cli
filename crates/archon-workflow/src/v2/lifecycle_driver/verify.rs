@@ -36,8 +36,19 @@ impl LifecycleDriver {
             )
             .await?;
         let mut verification_plan = contract.normalize_inventory(&raw_plan);
+        // A plan is only ready when it is well-shaped AND promises to check
+        // what the tasks were written for. Shape alone let a compile-only plan
+        // run a full wave and accept every branch while the declared outcome
+        // was never executed; the uncovered criteria are handed to the same
+        // bounded repair loop that already fixes shape.
+        let mut criteria_gaps = support::verification_plan_criteria_gaps(
+            &self.task_universe,
+            implementation_candidate_ids_unique,
+            &verification_plan,
+        );
         let mut plan_repair_attempt = 1usize;
-        while !support::verification_inventory_ready(&verification_plan)
+        while (!support::verification_inventory_ready(&verification_plan)
+            || !criteria_gaps.is_empty())
             && plan_repair_attempt <= self.max_repair_iterations
         {
             let call_id = format!("verification-plan-repair-{wave_index}-{plan_repair_attempt}");
@@ -49,7 +60,8 @@ impl LifecycleDriver {
                         ready_implementation_items,
                         implementation_candidate_ids_unique,
                         evidence.implementation,
-                        verification_plan
+                        verification_plan,
+                        { "uncoveredAcceptanceCriteria": criteria_gaps }
                     ]),
                     "reducer",
                     prompts::VERIFICATION_PLAN_REPAIR_TASK,
@@ -66,9 +78,16 @@ impl LifecycleDriver {
                 &repair,
             );
             verification_plan = contract.normalize_inventory(&repair);
+            criteria_gaps = support::verification_plan_criteria_gaps(
+                &self.task_universe,
+                implementation_candidate_ids_unique,
+                &verification_plan,
+            );
             plan_repair_attempt += 1;
         }
-        let plan_items = if support::verification_inventory_ready(&verification_plan) {
+        let plan_items = if support::verification_inventory_ready(&verification_plan)
+            && criteria_gaps.is_empty()
+        {
             support::verification_items(&contract, &verification_plan)
         } else {
             Vec::new()
@@ -86,6 +105,7 @@ impl LifecycleDriver {
                         "verificationPlan": verification_plan,
                         "implementationEvidence": evidence.implementation,
                         "repair_attempts": evidence.repair_attempts,
+                        "uncoveredAcceptanceCriteria": criteria_gaps,
                     }),
                     prompts::BLOCKED_EMPTY_VERIFICATION_TASK,
                 )
@@ -142,6 +162,29 @@ impl LifecycleDriver {
                             .get("verification_failure_next_action")
                             .and_then(|v| v.as_str())
                             == Some("write_remediation")
+                        // A failed verification IS the request to fix something.
+                        //
+                        // The three markers above are opt-in fields the verifier
+                        // must set, and a verifier that simply reports the defect
+                        // sets none of them. Silence then read as "nothing to
+                        // act on": the only route to a write branch is this
+                        // filter, so an empty `actionable` means the loop falls
+                        // through to plan, reshape and re-verify against an
+                        // unchanged tree until the budget dies.
+                        //
+                        // Observed live: one task failed five branches with
+                        // precise, fixable findings — "implement all 17 exact
+                        // stable validation IDs", "add the seven missing focused
+                        // test functions" — none of which carried a marker.
+                        // `verification-failure-triage` never ran once in the
+                        // whole run, so no writer was ever dispatched and the
+                        // task sat at 9 of 11 artifacts for hours.
+                        //
+                        // Default to actionable instead. A verifier that failed
+                        // and recorded a gap has asked for work; opting out
+                        // stays available by failing without gaps, or by any of
+                        // the explicit markers above.
+                        || failed_with_residual_gaps(outcome)
                 })
                 .cloned()
                 .collect();
@@ -423,4 +466,32 @@ pub(crate) fn item_matches_ids(
 
 pub(crate) fn item_match_ids(item: &serde_json::Value) -> Vec<String> {
     lifecycle_policy::verify_invariants::verification_item_ids(item)
+}
+
+/// Did this verification outcome fail AND say what is wrong?
+///
+/// The failure alone is not enough — a branch can fail for a reason no writer
+/// can act on (a transport death, an unreadable input), and dispatching a
+/// worktree at that wastes a round. A recorded residual gap is the difference:
+/// it names a defect, which is a request for work.
+///
+/// Reads only status and residual_gaps, so it carries no knowledge of any
+/// verifier, task or PRD and holds for every workflow.
+pub(crate) fn failed_with_residual_gaps(outcome: &serde_json::Value) -> bool {
+    let result = outcome.get("result").unwrap_or(outcome);
+    let status = result
+        .get("status")
+        .or_else(|| outcome.get("status"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if !matches!(status, "failed" | "needs_review" | "blocked") {
+        return false;
+    }
+    let gaps = result
+        .get("residual_gaps")
+        .or_else(|| outcome.get("residual_gaps"))
+        .and_then(|value| value.as_array())
+        .map(|gaps| gaps.len())
+        .unwrap_or(0);
+    gaps > 0
 }

@@ -129,7 +129,7 @@ impl Agent {
                 .await?;
 
             let mut round_rx = rx;
-            let round = loop {
+            let mut round = loop {
                 match self
                     .collect_stream_round(
                         round_rx,
@@ -150,6 +150,14 @@ impl Agent {
             self.state.auto_compact.on_ordinary_success();
 
             if !round.pending_tools.is_empty() {
+                // Reattach the halves of any tool_use block the provider split
+                // across a named block and an unnamed continuation, BEFORE the
+                // assistant message is inserted — the repaired call has to be
+                // what lands in history, not the fragments.
+                // See `agent::tool_block_repair`.
+                crate::agent::tool_block_repair::repair_pending_tool_calls(
+                    &mut round.pending_tools,
+                );
                 let assistant_message_index = self.state.messages.len();
                 let includes_plan_exit = round
                     .pending_tools

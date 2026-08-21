@@ -46,11 +46,47 @@ pub(super) fn capture_and_validate_worktree_patch(
     baseline: &CanonicalBaseline,
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
+    wave_claims: Option<&[crate::v2::write_scope_extension::WaveClaim]>,
 ) -> crate::WorkflowResult<CapturedPatch> {
-    let captured = capture_patch(workspace, &coordinator_plan.target_files, baseline)
+    // ONE effective plan for all three gates. Capture reads
+    // `workspace.plan`, the diff scope reads the targets argument, and
+    // `validate_patch` reads the plan again — widening any one of them alone
+    // leaves the other two rejecting the same path.
+    let plan = super::worktree_scope_grant::plan_extended_to_unclaimed_changes(
+        coordinator_plan,
+        result,
+        wave_claims,
+    );
+    let workspace = ItemWorkspace {
+        plan: plan.clone(),
+        baseline_commit: workspace.baseline_commit.clone(),
+    };
+    // A granted path was not in the baseline, so it would carry no pre-hash and
+    // the apply-time stale recheck would skip it — leaving the overlap guard
+    // alone between two items writing the same file. Sound to hash now: every
+    // branch in a wave captures before anything applies, so canonical is still
+    // the content these patches were computed against.
+    let granted: Vec<String> = plan
+        .target_files
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .filter(|path| {
+            !coordinator_plan
+                .target_files
+                .iter()
+                .any(|declared| declared.as_str() == path.as_str())
+        })
+        .collect();
+    let baseline =
+        &crate::write_coordinator::worktree_isolation::extend_baseline_with_granted_targets(
+            baseline,
+            &plan.canonical_root,
+            &granted,
+        );
+    let captured = capture_patch(&workspace, &plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let agent_body = serde_json::to_string(result)?;
-    validate_captured_patch(coordinator_plan, cfg, &agent_body, captured)
+    validate_captured_patch(&plan, cfg, &agent_body, captured)
 }
 
 pub(super) fn validate_captured_patch(

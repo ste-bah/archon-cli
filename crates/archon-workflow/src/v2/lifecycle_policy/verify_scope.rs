@@ -96,6 +96,25 @@ fn matching_scope<'a>(item: &Value, scopes: &'a [ManifestScope]) -> Option<&'a M
         return Some(scope);
     }
     let task_ids = support::strings_of(item.get("canonical_task_ids"));
+    // Prefer a scope that speaks ONLY for this item's tasks.
+    //
+    // Matching on any overlap hands a single-task verification the write scope
+    // of a branch that also covered other tasks, and every file those other
+    // tasks legitimately wrote then reads as an out-of-scope write. Observed
+    // live: one task's focused verification failed on
+    // `data_store/validation.rs`, a file TDL-050 neither declares nor appends
+    // to — it belonged to a sibling task whose remediation ran in the same wave.
+    // The deliverable checks passed every round; only the scope check failed,
+    // and no retry could change it because the write and the declaration were
+    // both correct and simply belonged to different tasks.
+    if let Some(scope) = scopes.iter().rev().find(|scope| {
+        !scope.task_ids.is_empty()
+            && scope.task_ids.iter().all(|id| task_ids.contains(id))
+            && task_ids.iter().any(|id| scope.task_ids.contains(id))
+    }) {
+        return Some(scope);
+    }
+    // No exclusive scope exists, so overlap is the best available attribution.
     scopes
         .iter()
         .rev()
@@ -116,4 +135,106 @@ fn string_field(value: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope(item_id: &str, tasks: &[&str], observed: &[&str], declared: &[&str]) -> ManifestScope {
+        ManifestScope {
+            item_id: item_id.to_string(),
+            task_ids: tasks.iter().map(|t| t.to_string()).collect(),
+            value: serde_json::json!({
+                "declared_target_files": declared,
+                "changed_files": observed,
+            }),
+        }
+    }
+
+    fn item(tasks: &[&str]) -> Value {
+        serde_json::json!({ "canonical_task_ids": tasks })
+    }
+
+    fn stamped(item: &Value) -> Vec<String> {
+        item.get("write_coordination_scope")
+            .and_then(|s| s.get("changed_files"))
+            .and_then(Value::as_array)
+            .map(|v| {
+                v.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The live failure: TDL-050's verification took a multi-task scope and
+    /// inherited `validation.rs`, which TASK-TDL-020 wrote and owns.
+    #[test]
+    fn a_single_task_item_does_not_inherit_another_tasks_writes() {
+        let scopes = vec![
+            scope(
+                "impl-050",
+                &["TASK-TDL-050"],
+                &["providers/openbb_polygon.rs"],
+                &["providers/openbb_polygon.rs"],
+            ),
+            scope(
+                "wave-completion",
+                &["TASK-TDL-020", "TASK-TDL-050"],
+                &["data_store/validation.rs", "providers/openbb_polygon.rs"],
+                &["data_store/validation.rs"],
+            ),
+        ];
+        let mut it = item(&["TASK-TDL-050"]);
+        stamp_manifest_scope(&mut it, &scopes);
+        assert_eq!(
+            stamped(&it),
+            vec!["providers/openbb_polygon.rs".to_string()]
+        );
+    }
+
+    /// With no exclusive scope, overlap is still the best attribution there is.
+    #[test]
+    fn overlap_is_used_when_no_exclusive_scope_exists() {
+        let scopes = vec![scope(
+            "wave-completion",
+            &["TASK-TDL-020", "TASK-TDL-050"],
+            &["data_store/validation.rs"],
+            &["data_store/validation.rs"],
+        )];
+        let mut it = item(&["TASK-TDL-050"]);
+        stamp_manifest_scope(&mut it, &scopes);
+        assert_eq!(stamped(&it), vec!["data_store/validation.rs".to_string()]);
+    }
+
+    /// An item covering both tasks legitimately takes the shared scope.
+    #[test]
+    fn a_multi_task_item_takes_the_shared_scope() {
+        let scopes = vec![scope(
+            "wave-completion",
+            &["TASK-TDL-020", "TASK-TDL-050"],
+            &["data_store/validation.rs"],
+            &["data_store/validation.rs"],
+        )];
+        let mut it = item(&["TASK-TDL-020", "TASK-TDL-050"]);
+        stamp_manifest_scope(&mut it, &scopes);
+        assert_eq!(stamped(&it), vec!["data_store/validation.rs".to_string()]);
+    }
+
+    /// source_item_id still wins outright when it matches.
+    #[test]
+    fn an_explicit_source_item_id_still_takes_precedence() {
+        let scopes = vec![
+            scope("impl-050", &["TASK-TDL-050"], &["a.rs"], &["a.rs"]),
+            scope("impl-020", &["TASK-TDL-020"], &["b.rs"], &["b.rs"]),
+        ];
+        let mut it = serde_json::json!({
+            "canonical_task_ids": ["TASK-TDL-050"],
+            "source_item_id": "impl-020",
+        });
+        stamp_manifest_scope(&mut it, &scopes);
+        assert_eq!(stamped(&it), vec!["b.rs".to_string()]);
+    }
 }

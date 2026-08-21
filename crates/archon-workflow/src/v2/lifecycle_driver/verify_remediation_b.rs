@@ -204,8 +204,20 @@ impl LifecycleDriver {
         evidence: &mut LifecycleEvidence,
     ) -> crate::WorkflowResult<Option<Vec<serde_json::Value>>> {
         let mut post_plan = contract.normalize_inventory(&raw_plan);
+        // The remediation path verifies the same tasks against the same
+        // criteria, so it is held to the same coverage bar as the first plan.
+        // Without this a compile-only plan is merely deferred: the first plan
+        // is repaired, remediation runs, and its own plan re-opens the hole.
+        let remediated_task_ids = support::canonical_task_ids_of_items(&support::array(
+            remediation_inventory.get("items"),
+        ));
+        let mut criteria_gaps = support::verification_plan_criteria_gaps(
+            &self.task_universe,
+            &remediated_task_ids,
+            &post_plan,
+        );
         let mut shape_attempt = 1usize;
-        while !support::verification_inventory_ready(&post_plan)
+        while (!support::verification_inventory_ready(&post_plan) || !criteria_gaps.is_empty())
             && shape_attempt <= self.max_repair_iterations
         {
             post_plan = self
@@ -219,9 +231,14 @@ impl LifecycleDriver {
                     evidence,
                 )
                 .await?;
+            criteria_gaps = support::verification_plan_criteria_gaps(
+                &self.task_universe,
+                &remediated_task_ids,
+                &post_plan,
+            );
             shape_attempt += 1;
         }
-        if !support::verification_inventory_ready(&post_plan) {
+        if !support::verification_inventory_ready(&post_plan) || !criteria_gaps.is_empty() {
             return Ok(None);
         }
         let items = support::verification_items(contract, &post_plan);

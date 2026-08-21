@@ -238,124 +238,19 @@ pub fn verification_inventory_ready(inventory: &Value) -> bool {
     !array(inventory.get("items")).is_empty() && !inventory_has_issues(inventory)
 }
 
-/// JS `mergeInventoryRepair`: fold repaired items into the existing inventory
-/// keyed by item_id then canonical task ids, replacing matches and appending
-/// new items in first-seen order.
-pub fn merge_inventory_repair(
-    contract: &LifecycleContract<'_>,
-    inventory: &Value,
-    repair: &Value,
-) -> Value {
-    let data = repair.get("data");
-    let data_items = data.and_then(|data| data.get("items"));
-    let mut repair_items: Vec<Value> = Vec::new();
-    let direct = repair
-        .get("items")
-        .filter(|value| present(Some(value)))
-        .or_else(|| repair.get("inventory").and_then(|inner| inner.get("items")))
-        .or(data_items);
-    repair_items.extend(array(direct));
-    for extra_key in [
-        "repaired_items",
-        "implementation_items",
-        "verified_noop_items",
-    ] {
-        repair_items.extend(array(data.and_then(|data| data.get(extra_key))));
-        repair_items.extend(array(data_items.and_then(|items| items.get(extra_key))));
-    }
-    if repair_items.is_empty() {
-        return inventory.clone();
-    }
-    fn item_keys(item: &Value) -> Vec<String> {
-        let mut keys = Vec::new();
-        if let Some(id) = item.get("item_id").and_then(Value::as_str) {
-            keys.push(format!("item:{id}"));
-        }
-        for id in strings_of(item.get("canonical_task_ids")) {
-            keys.push(format!("task:{id}"));
-        }
-        keys
-    }
-    fn primary_key(item: &Value) -> Option<String> {
-        item_keys(item).into_iter().next()
-    }
-    let mut order: Vec<String> = Vec::new();
-    let mut merged: std::collections::BTreeMap<String, Value> = Default::default();
-    fn put_item(
-        item: Value,
-        order: &mut Vec<String>,
-        merged: &mut std::collections::BTreeMap<String, Value>,
-    ) {
-        let Some(key) = primary_key(&item) else {
-            return;
-        };
-        if !merged.contains_key(&key) {
-            order.push(key.clone());
-        }
-        for alias in item_keys(&item) {
-            merged.insert(alias, item.clone());
-        }
-        merged.insert(key, item);
-    }
-    for item in array(inventory.get("items")) {
-        put_item(contract.normalize_item(&item), &mut order, &mut merged);
-    }
-    for raw_repair_item in repair_items {
-        let repair_item = contract.normalize_item(&raw_repair_item);
-        let keys = item_keys(&repair_item);
-        let matched = keys.iter().find(|key| merged.contains_key(*key)).cloned();
-        let tombstone = ["remove", "tombstone", "deleted"]
-            .iter()
-            .any(|key| repair_item.get(*key) == Some(&Value::Bool(true)));
-        if tombstone {
-            // D74: no repair prompt grants item removal — a tombstone must not
-            // shed scheduled work (and never becomes a new item). Genuine
-            // completion is proven through the noop/verification lifecycle.
-            continue;
-        }
-        if let Some(matched_key) = matched {
-            let existing = merged.get(&matched_key).cloned().unwrap_or_default();
-            let mut combined = existing.as_object().cloned().unwrap_or_default();
-            for (key, value) in repair_item.as_object().cloned().unwrap_or_default() {
-                combined.insert(key, value);
-            }
-            // D74: identity fields on a host-known item survive the merge; a
-            // repair may add them when absent but never reassign them.
-            for protected in ["canonical_task_ids", "source_item_id"] {
-                if let Some(value) = existing.get(protected).filter(|value| present(Some(value))) {
-                    combined.insert(protected.to_string(), value.clone());
-                }
-            }
-            let combined = Value::Object(combined);
-            if let Some(existing_primary) = primary_key(&existing) {
-                merged.insert(existing_primary, combined.clone());
-            }
-            for alias in item_keys(&existing).into_iter().chain(item_keys(&combined)) {
-                merged.insert(alias, combined.clone());
-            }
-            continue;
-        }
-        put_item(repair_item, &mut order, &mut merged);
-    }
-    let mut object = inventory.as_object().cloned().unwrap_or_default();
-    object.insert("unresolved_issues".to_string(), Value::Array(Vec::new()));
-    object.insert(
-        "items".to_string(),
-        Value::Array(
-            order
-                .iter()
-                .filter_map(|key| merged.get(key).cloned())
-                .collect(),
-        ),
-    );
-    Value::Object(object)
-}
+#[path = "generated_lifecycle_split.rs"]
+mod split;
 
 #[path = "generated_lifecycle_scheduling.rs"]
 mod scheduling;
+
+#[path = "generated_lifecycle_criteria.rs"]
+mod criteria;
+pub use criteria::{canonical_task_ids_of_items, verification_plan_criteria_gaps};
 pub use scheduling::{
     retry_verification_items, split_focused_verification_items, verification_items,
 };
+pub use split::merge_inventory_repair;
 
 /// JS `generatedContractConstrainInventoryTasks`.
 pub fn constrain_inventory_tasks(

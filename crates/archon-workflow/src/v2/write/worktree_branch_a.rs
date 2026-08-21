@@ -17,6 +17,7 @@ pub(crate) async fn run_one_worktree_branch(
         ctx.v2_store,
         ctx.adapter,
         &branch,
+        ctx.task_universe,
     )
     .await?;
     poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
@@ -70,6 +71,10 @@ pub(super) fn prepare_worktree_branch_execution(
         "target_ownership_scopes".to_string(),
         serde_json::to_value(&prepared.assignment.owned_scopes)?,
     );
+    call.options.extra.insert(
+        "wave_claims".to_string(),
+        serde_json::to_value(&prepared.wave_claims)?,
+    );
     Ok(WorktreeBranchExecution {
         id,
         role: prepared.branch.role.clone(),
@@ -107,23 +112,67 @@ pub(super) async fn run_worktree_branch_agent(
     v2_store: &WorkflowV2ResultStore,
     adapter: WorkflowV2AgentAdapter,
     branch: &WorktreeBranchExecution,
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
     // The worktree branch runs against its own sealed workspace, which takes
     // precedence over the run's target repository root — the same `or`
     // precedence the two-parameter host function applied.
     let repository_root =
         Some(branch.workspace_root.display().to_string()).or(target_repository_root);
-    let result = dispatch
-        .run_call(
-            task,
-            repository_root,
-            &branch.execution,
-            &adapter,
-            Some(v2_store),
-            None,
-        )
-        .await;
-    normalize_worktree_agent_result(result, branch)
+    // A wholesale line-cap rejection discards the branch's ENTIRE patch and
+    // says exactly how to avoid it. That is a correctable instruction, not a
+    // verdict on the work, so it is fed back and the branch re-asked for as
+    // long as it keeps getting closer to the cap.
+    let mut prompt = task.to_string();
+    let mut previous_overshoot: Option<u32> = None;
+    // Transport failures are counted separately: a dropped provider connection
+    // is not an answer about the work, so it must not consume the budget that
+    // exists for correcting a rejection.
+    let mut transport_failures = 0usize;
+    for _ in 0..=super::size_retry::MAX_SIZE_RETRIES {
+        let result = dispatch
+            .run_call(
+                &prompt,
+                repository_root.clone(),
+                &branch.execution,
+                &adapter,
+                Some(v2_store),
+                task_universe,
+            )
+            .await;
+        let Err(err) = &result else {
+            return normalize_worktree_agent_result(result, branch);
+        };
+        let text = err.to_string();
+        // The provider dropped the call. Nothing landed and no verdict was
+        // produced, so re-ask rather than ending the branch and, with it, the
+        // wave — two runs died this way in one morning on `response_failed`.
+        if crate::v2::transport_retry::is_transport_failure(&text)
+            && !crate::v2::transport_retry::is_content_rejection(&text)
+        {
+            if transport_failures >= crate::v2::transport_retry::MAX_TRANSPORT_RETRIES {
+                return normalize_worktree_agent_result(result, branch);
+            }
+            transport_failures += 1;
+            continue;
+        }
+        if !super::size_retry::is_line_cap_rejection(&text) {
+            return normalize_worktree_agent_result(result, branch);
+        }
+        let overshoot = super::size_retry::rejected_line_count(&text);
+        if !super::size_retry::should_retry(previous_overshoot, overshoot) {
+            return normalize_worktree_agent_result(result, branch);
+        }
+        previous_overshoot = overshoot;
+        prompt = format!("{}\n\n{}", task, super::size_retry::retry_notice(&text));
+    }
+    normalize_worktree_agent_result(
+        Err(crate::WorkflowError::port(format!(
+            "write branch '{}' could not fit its patch under the source-file line cap",
+            branch.id
+        ))),
+        branch,
+    )
 }
 
 pub(super) fn normalize_worktree_agent_result(
@@ -412,6 +461,7 @@ pub(super) fn capture_worktree_branch_manifest(
         &prepared.baseline,
         cfg,
         result,
+        Some(prepared.wave_claims.as_slice()),
     ) {
         Ok(captured) => captured,
         Err(err) => {
@@ -436,20 +486,4 @@ pub(super) fn capture_worktree_branch_manifest(
     let manifest = persist_worktree_manifest(run_root, run_id, execution, branch_id, &captured)?;
     push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
     Ok((Some(manifest), Some(captured.pre_hashes)))
-}
-
-pub(crate) fn persist_rejected_worktree_result(
-    store: &WorkflowV2ResultStore,
-    branch_id: &str,
-    attempt: &str,
-    result: &WorkflowV2Result,
-    error: &str,
-) {
-    let raw_body = serde_json::to_string(result).unwrap_or_else(|_| result.summary.clone());
-    let record = WorkflowV2RejectedOutput {
-        attempt: attempt.to_string(),
-        error: error.to_string(),
-        raw_body,
-    };
-    let _ = store.append_rejected_output(branch_id, record);
 }

@@ -203,7 +203,16 @@ pub(super) fn write_items_for_branches(
         .map(|branch| {
             let expanded = expanded_targets_for_branch(target_repository_root, call, branch)?;
             if expanded.target_files.is_empty() {
-                Ok(WorkflowV2WriteItem::artifact_only(branch.id.clone(), mode))
+                // An artifact-only branch still needs ownership scopes, or its
+                // agent is told it may write nothing and refuses the very
+                // deliverable it was dispatched to produce (observed live:
+                // TDL-001 blocked three runs with "target_files and ownership
+                // scopes are empty"). Grant the directories of the artifacts it
+                // is contracted to produce; the write-safety layer still rejects
+                // anything outside them.
+                let scopes = artifact_ownership_scopes(branch);
+                Ok(WorkflowV2WriteItem::artifact_only(branch.id.clone(), mode)
+                    .with_owned_scopes(scopes))
             } else {
                 Ok(
                     WorkflowV2WriteItem::new(branch.id.clone(), mode, expanded.target_files)
@@ -270,6 +279,69 @@ pub(super) fn target_files_from_branch_item(branch: &crate::WorkflowV2FanoutItem
         .and_then(serde_json::Value::as_array)
         .map(|items| target_file_strings(items))
         .unwrap_or_default()
+}
+
+/// Directory scopes an artifact-only branch owns: the parent directory of
+/// each declared artifact requirement path. Reads the same `artifact_requirements`
+/// field `item_has_artifact_requirements` gates on, so a branch that qualified
+/// as artifact-only necessarily yields a non-empty scope set unless every
+/// declared path is a bare filename. Skips templated/absolute/glob paths, which
+/// cannot name a safe directory.
+pub(super) fn artifact_ownership_scopes(branch: &crate::WorkflowV2FanoutItem) -> Vec<String> {
+    let Some(item) = branch.input.get("item") else {
+        return Vec::new();
+    };
+    let mut scopes: Vec<String> = Vec::new();
+    for key in ["artifact_requirements", "project_artifact_requirements"] {
+        for path in artifact_requirement_strings(item.get(key)) {
+            if let Some(dir) = artifact_parent_scope(&path)
+                && !scopes.contains(&dir)
+            {
+                scopes.push(dir);
+            }
+        }
+    }
+    scopes
+}
+
+fn artifact_requirement_strings(value: Option<&serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(|entry| match entry {
+                serde_json::Value::String(text) => Some(text.trim().to_string()),
+                serde_json::Value::Object(map) => map
+                    .get("path")
+                    .or_else(|| map.get("artifact_path"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(|text| text.trim().to_string()),
+                _ => None,
+            })
+            .filter(|text| !text.is_empty())
+            .collect(),
+        Some(serde_json::Value::String(text)) if !text.trim().is_empty() => {
+            vec![text.trim().to_string()]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn artifact_parent_scope(raw: &str) -> Option<String> {
+    if raw.contains("${")
+        || raw.contains('*')
+        || raw.contains('<')
+        || std::path::Path::new(raw).is_absolute()
+    {
+        return None;
+    }
+    let segments: Vec<&str> = raw
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect();
+    if segments.contains(&"..") || segments.len() < 2 {
+        return None;
+    }
+    Some(segments[..segments.len() - 1].join("/"))
 }
 
 pub(super) fn target_file_strings(items: &[serde_json::Value]) -> Vec<String> {

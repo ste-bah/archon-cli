@@ -62,6 +62,7 @@ mod process_message_steps;
 mod process_message_support;
 mod prompt_ordering;
 pub mod prune;
+pub(crate) mod tool_block_repair;
 mod prune_agent;
 /// Acceptance coverage for the read-before-write policy (#193 Phase A).
 #[cfg(test)]
@@ -99,6 +100,7 @@ mod tool_preflight_steps;
 pub(crate) mod tool_result_context;
 mod tool_types;
 mod turn_completion;
+mod conversation_state;
 mod types;
 
 pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};
@@ -112,10 +114,8 @@ pub use support::AgentLoopError;
 use support::{
     message_text_content, parse_plan_from_text, stored_correction_content, user_correction_excerpt,
 };
-pub use types::{
-    AgentConfig, AgentEvent, AskUserPromptKind, ConversationState, SessionStats, SpillContext,
-    TimestampedEvent,
-};
+pub use conversation_state::{ConversationState, SpillContext};
+pub use types::{AgentConfig, AgentEvent, AskUserPromptKind, SessionStats, TimestampedEvent};
 
 pub const AGENT_EVENT_CHANNEL_CAPACITY: usize = 1024;
 

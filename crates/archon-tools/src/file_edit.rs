@@ -13,8 +13,13 @@ impl Tool for EditTool {
         "Edit"
     }
 
+    /// Claims the default, which the old one-liner did not.
+    ///
+    /// "Performs exact string replacements in files." is accurate and says
+    /// nothing about when to choose it, so it read as one option beside Write
+    /// rather than the one to reach for first.
     fn description(&self) -> &str {
-        "Performs exact string replacements in files."
+        "The default way to change a file that already exists: an exact string          replacement that leaves everything outside the match untouched.          old_string must appear exactly once — widen it with surrounding lines          to disambiguate. A series of small edits is cheaper and safer than one          whole-file Write, because only the changed region is emitted."
     }
 
     fn input_schema(&self) -> serde_json::Value {

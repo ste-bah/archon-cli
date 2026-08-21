@@ -247,3 +247,51 @@ fn prompt_renders_project_artifact_root_from_the_typed_context_not_the_input() {
         "typed context must render an absolute root"
     );
 }
+
+/// An `mcp_action:` qualifier must reduce to the bare tool name, or the gate
+/// compares a string no command can ever hold and the task is unsatisfiable
+/// however the agent behaves. `.mcp.json` configures these tools under their
+/// bare names — `tv_health_check`, `quote_get` — and that is what an
+/// invocation contains.
+///
+/// Only the `mcp__server__tool` wire form reduced, so every task declaring
+/// `mcp_action:` tools was permanently blocked: TDL-040 was rejected for
+/// "required tools were never exercised" across consecutive remediation waves
+/// while its code landed cleanly each time.
+#[test]
+fn an_mcp_qualified_tool_is_satisfied_by_invoking_the_configured_name() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["mcp_action:tv_health_check", "mcp_server:tradingview"] }
+    });
+    let mut result = WorkflowV2Result::accepted("checked the live source");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Other,
+        command: "archon agent call tradingview tv_health_check".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "ok".to_string(),
+    }];
+
+    assert!(
+        super::unexercised_required_tools(&input, &result).is_empty(),
+        "invoking the configured tool name must satisfy the qualified declaration"
+    );
+}
+
+/// The wire form keeps reducing as it always did.
+#[test]
+fn the_double_underscore_wire_form_still_reduces() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["mcp__tradingview__quote_get"] }
+    });
+    let mut result = WorkflowV2Result::accepted("quoted");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Other,
+        command: "archon agent call tradingview quote_get".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "ok".to_string(),
+    }];
+
+    assert!(super::unexercised_required_tools(&input, &result).is_empty());
+}

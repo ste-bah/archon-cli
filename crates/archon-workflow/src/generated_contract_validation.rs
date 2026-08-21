@@ -85,6 +85,34 @@ pub(super) fn generated_item_issues(
             "task produces artifacts but declares no deliverable contract and no target_files",
         ));
     }
+    // ONE item, ONE deliverable contract.
+    //
+    // The reason the tasks never fired. Observed live: the inventory emitted
+    // `TASK-TDL-040-050-060-070-providers` claiming four canonical tasks, and
+    // `TASK-TDL-010-010-020-030-base` claiming three. Three of those four never
+    // appeared in any implementation wave, because they had no item of their
+    // own to be dispatched as. Acceptance is per ITEM, so one agent turn, one
+    // result and one no-op proof retired four separate contracts, and every
+    // rule that made acceptance stricter still only ever had one story to
+    // judge.
+    //
+    // Grouping itself was already policed in three directions — a task grouped
+    // with its own prerequisite, a task claimed by two items, a task claimed by
+    // none — and the repair that splits a grouped item already exists. Nothing
+    // triggered it. The inventory prompt asks for splits; asking is not a rule.
+    //
+    // Scoped to tasks that declare a deliverable contract, because that is
+    // exactly where the harm is: each contract needs its own proof. Tasks with
+    // no contract of their own may still share an item.
+    if work_type == "implementation" && universe.contracted_task_count(&canonical_task_ids) > 1 {
+        issues.push(make_issue(
+            GeneratedContractIssueKind::InventoryShapeRepair,
+            "canonical_task_ids",
+            "this item claims more than one canonical task that declares its own \
+             deliverable contract: split it so each contracted task has an item, \
+             or one result will close all of them",
+        ));
+    }
     match work_type.as_str() {
         "implementation" => {
             if let Some(message) = target_files_issue(value, target_repository_root) {
@@ -116,31 +144,13 @@ pub(super) fn generated_item_issues(
                 ));
             }
         }
-        "verified_noop" => {
-            if !value_present(value.get("acceptance_criteria")) {
-                issues.push(make_issue(
-                    GeneratedContractIssueKind::VerificationRequirementsDiscovery,
-                    "acceptance_criteria",
-                    "verified_noop item is missing acceptance criteria",
-                ));
-            }
-            if !value_present(value.get("noop_proof"))
-                || !value_present(value.get("noop_proof_refs"))
-            {
-                issues.push(make_issue(
-                    GeneratedContractIssueKind::EvidenceRepair,
-                    "noop_proof_refs",
-                    "verified_noop item is missing no-op proof or proof references",
-                ));
-            }
-            if value.get("artifact_requirements").is_none() {
-                issues.push(make_issue(
-                    GeneratedContractIssueKind::ArtifactRequirementsDiscovery,
-                    "artifact_requirements",
-                    "verified_noop item is missing artifact requirements metadata",
-                ));
-            }
-        }
+        "verified_noop" => verified_noop_issues(
+            value,
+            universe,
+            &canonical_task_ids,
+            &mut issues,
+            &make_issue,
+        ),
         _ => issues.push(make_issue(
             GeneratedContractIssueKind::InventoryShapeRepair,
             "work_type",
@@ -376,6 +386,16 @@ fn target_files_issue(
 ) -> Option<String> {
     let targets = raw_strings_from_aliases(value, &["target_files"]);
     if targets.is_empty() {
+        // Empty is legitimate for artifact-only work — a task whose every
+        // deliverable is a project artifact has no repository file to name,
+        // and raising an issue here created one no repair could ever resolve:
+        // the reducer cannot invent a repo path the write layer would accept,
+        // so the issue stayed unresolved and bricked the inventory. Same rule
+        // as `valid_inventory_item` and artifact-only remediation: [] is valid
+        // exactly when the artifact requirements are concrete.
+        if value_present(value.get("artifact_requirements")) {
+            return None;
+        }
         return Some("implementation item is missing target files".to_string());
     }
     let root = target_repository_root.and_then(normalized_contract_path)?;

@@ -33,6 +33,14 @@ pub(super) async fn prepare_command(
         raw_command,
         &tool.cargo_limits,
     );
+    // Inside a workflow run the session id IS the run id, so a task that
+    // declares the run's identifier as a required env key gets it without the
+    // operator exporting a value that is stale the moment the next run starts.
+    crate::workflow_run_env::apply_workflow_run_identity(
+        &mut env_vars,
+        &ctx.session_id,
+        &tool.run_id_env_aliases,
+    );
     // An agent allowed to build inside its own worktree builds into a scratch
     // directory beside it, so prune can remove the build output along with the
     // checkout. Without this the build lands in the worktree's own `target/`
