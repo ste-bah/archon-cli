@@ -269,6 +269,46 @@ fn sandbox_explain_asks_each_backend_about_its_own_terminal() {
     );
 }
 
+/// Asking the terminal seam is what makes this command spawn a process at all:
+/// ssh's `terminal()` probes its binary. The shape of that failure is the
+/// property worth holding — the backend's own message, in the report, and no
+/// hang or panic — so the binary is a name that cannot exist on any machine
+/// rather than one that depends on whether ssh happens to be installed.
+///
+/// Deliberately no timing assertion. `-V` exits before OpenSSH parses config or
+/// resolves anything, which is why this costs a process spawn and not a
+/// network round trip, but a wall-clock bound would be a stopwatch pinned to
+/// whatever the CI box was doing that second.
+#[test]
+fn sandbox_explain_reports_a_missing_ssh_binary_as_the_backends_refusal() {
+    let config = archon_core::sandbox::SandboxConfig {
+        backend: "ssh".into(),
+        mode: "all".into(),
+        ssh: archon_core::sandbox::SshConfig {
+            enabled: true,
+            host: Some("sandbox.invalid".into()),
+            // Set because `safe_to_route` rejects a remote workspace without
+            // one *before* it probes, and the probe is what this is about.
+            remote_workdir: Some("/workspace".into()),
+            binary: "definitely-not-ssh-binary".into(),
+            ..archon_core::sandbox::SshConfig::default()
+        },
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_explain(&config, None, Some("TerminalCreate"), None).unwrap();
+
+    assert_eq!(decision(&body), "refused_by_backend_terminal");
+    assert!(
+        reason(&body).contains("definitely-not-ssh-binary"),
+        "the refusal has to name the binary it could not run: {body}"
+    );
+    assert!(
+        reason(&body).contains("not found on PATH"),
+        "a missing binary must read as missing, not as some other failure: {body}"
+    );
+}
+
 /// `mode` scopes `check`, never `terminal`, so under `risky` the permission is
 /// the preflight's while the shell is still the backend's. Saying only the
 /// first would imply the terminal opens on the host.
