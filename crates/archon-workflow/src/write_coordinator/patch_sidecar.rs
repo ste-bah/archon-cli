@@ -72,11 +72,15 @@ pub(super) fn apply(patch_path: &Path, canonical_root: &Path) -> std::io::Result
                 stack.push(path);
                 continue;
             }
+            // Reported with `/` separators whatever the host uses. These
+            // strings travel back as the manifest's copied deliverables and are
+            // compared against declared paths, which are always `/`-separated;
+            // on Windows a walked path yields backslashes and matched nothing.
             let rel = path
                 .strip_prefix(&root)
                 .expect("walked from root")
                 .to_string_lossy()
-                .into_owned();
+                .replace('\\', "/");
             let dest = canonical_root.join(&rel);
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent)?;
