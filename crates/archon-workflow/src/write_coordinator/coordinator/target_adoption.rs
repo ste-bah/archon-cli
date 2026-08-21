@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::write_coordinator::patch_manifest::{CapturedPatch, PatchError, capture_patch};
-use crate::write_coordinator::write_plan::{
-    NormalizedPath, TargetFilesSource, WritePlan, normalize_target,
-};
+use crate::write_coordinator::write_plan::{NormalizedPath, WritePlan, normalize_target};
 use crate::write_coordinator::{WriteCoordinatorConfig, coordinator::FanoutError};
 
 use super::ItemState;
@@ -218,6 +216,7 @@ fn file_name(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::write_coordinator::write_plan::TargetFilesSource;
 
     fn plan_with(root: &Path, targets: &[&str]) -> WritePlan {
         let mut plan = WritePlan {

@@ -151,5 +151,8 @@ fn the_default_idle_timeout_is_not_a_thinking_budget() {
         crate::agent::AgentConfig::default().subagent_stream_idle_timeout_secs,
         crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS
     );
-    assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600);
+    // A const assertion: clippy is right that this cannot fail at runtime, and
+    // that is the point — it is a compile-time floor on the shipped default, so
+    // lowering it below ten minutes fails the build rather than a test run.
+    const _: () = assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600);
 }

@@ -120,7 +120,7 @@ impl WorkflowV2ScriptRunner {
         match outcome {
             Ok(()) => {
                 let summary = host.summary().await;
-                host.emit_terminal_status(summary.status);
+                host.emit_terminal_status(&summary);
                 Ok(summary)
             }
             Err(err) => {
@@ -133,7 +133,7 @@ impl WorkflowV2ScriptRunner {
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
-                    host.emit_terminal_status(summary.status);
+                    host.emit_terminal_status(&summary);
                     return Ok(summary);
                 }
                 let summary = host.mark_script_failure(&error, true).await;

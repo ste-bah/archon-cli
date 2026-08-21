@@ -174,7 +174,10 @@ fn repair_split_tool_blocks(
     if !enabled {
         return pending_tools.to_vec();
     }
-    let names: Vec<&str> = pending_tools.iter().map(|tool| tool.name.as_str()).collect();
+    let names: Vec<&str> = pending_tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect();
     let jsons: Vec<&str> = pending_tools
         .iter()
         .map(|tool| tool.input_json.as_str())

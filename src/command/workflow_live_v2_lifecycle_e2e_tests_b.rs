@@ -426,9 +426,15 @@ async fn triage_shape_repair_cannot_trade_predicate_identity_for_better_accounti
         attempt["call_id"] == "semantic-triage-shape-repair-1"
             && attempt["issue_kind"] == "semantic_preservation_rejected"
     }));
+    // The rejection now earns exactly one corrective re-ask (shown the
+    // violations); when that retry repeats the identity trade it is rejected
+    // on the same terms and no further attempts follow.
     assert_eq!(
         llm.calls.lock().expect("calls lock").as_slice(),
-        ["semantic-triage-shape-repair-1"]
+        [
+            "semantic-triage-shape-repair-1",
+            "semantic-triage-shape-repair-1-preservation-retry"
+        ]
     );
     // D78: the rejection must persist as a monitor-visible typed record, not
     // only in in-memory repair-attempt evidence.

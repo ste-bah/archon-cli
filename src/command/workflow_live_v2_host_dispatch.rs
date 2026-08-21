@@ -198,7 +198,32 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     let mut request = v2_agent_request(task, repository_root, &execution, task_universe);
     if let Some(store) = v2_store {
         let mut context = archon_workflow::project_artifact_context_from_v2_root(store.root());
+        // A deliverable contract may name repository SOURCE, which does not
+        // live under the project artifact root. Without this the completion
+        // check reports an existing file as absent — observed live as a task
+        // failing on "does not exist" for a 455-line file present in the
+        // repository. Existence only; write confinement is unchanged.
+        context.repository_root = request.repository_root.clone();
         context.add_artifact_requirements(&request.input);
+        // An artifact-only item declares no repository targets, so without this
+        // it owns nothing and its agent is refused the deliverable it was
+        // dispatched to produce. Admit the exact paths the host parsed from its
+        // tasks — one file each, never a directory, never agent-authored.
+        if let Some(universe) = task_universe
+            && let Some(item) = request.input.get("item")
+        {
+            context.add_contract_artifact_paths(universe, item);
+        }
+        // Record what was actually computed. When a branch is rejected for
+        // writing "outside declared target_files", this is the difference
+        // between reading the inputs and guessing at them after the worktree
+        // is gone.
+        super::workflow_live_v2_artifact_context_log::record(
+            store,
+            &request.call.id,
+            request.repository_root.as_deref(),
+            &context,
+        );
         request.project_artifacts = context;
     }
     let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(

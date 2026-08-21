@@ -75,6 +75,37 @@ impl WorkflowLlmClient for CannedLifecycleLlm {
                 Vec::new(),
                 Vec::new(),
             )
+        } else if self.scenario == CannedLifecycleScenario::TriagePreservation
+            && call_id == "semantic-triage-shape-repair-1-preservation-retry"
+        {
+            // The corrective re-ask repeats the identity trade: the host must
+            // reject it on the same terms and keep the original triage
+            // authoritative.
+            accepted_result(
+                "corrective retry still rewrote the predicate",
+                serde_json::json!({
+                    "implementation_failures": [{
+                        "item_id": "failed-one",
+                        "source_item_id": "source-one",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "implementation_failure",
+                        "failed_predicate": "mutated predicate again",
+                        "source_residual_gap_ids": ["gap-one"],
+                    }],
+                    "retry_items": [{
+                        "item_id": "failed-two",
+                        "source_item_id": "source-two",
+                        "canonical_task_ids": ["TASK-EX-BOUNDARY"],
+                        "classification": "retryable_verification_shape_issue",
+                        "failed_predicate": "second predicate",
+                        "source_residual_gap_ids": ["gap-two"],
+                    }],
+                    "superseded_items": [],
+                    "terminal_blockers": [],
+                }),
+                Vec::new(),
+                Vec::new(),
+            )
         } else if self.scenario == CannedLifecycleScenario::RepairPlanPreservation
             && call_id == "post-remediation-verification-plan-repair-1-1-1"
         {

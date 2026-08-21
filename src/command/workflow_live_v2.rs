@@ -116,6 +116,9 @@ use workflow_live_v2_learning::*;
 #[path = "workflow_live_v2_learning_tests.rs"]
 mod learning_fidelity_tests;
 
+#[path = "workflow_live_v2_artifact_context_log.rs"]
+mod workflow_live_v2_artifact_context_log;
+
 #[path = "workflow_live_v2_host_dispatch.rs"]
 mod workflow_live_v2_host_dispatch;
 pub(crate) use workflow_live_v2_host_dispatch::*;

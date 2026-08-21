@@ -152,15 +152,14 @@ impl ResilientWorkflowUiSink {
 #[async_trait]
 impl WorkflowUiSink for ResilientWorkflowUiSink {
     async fn emit(&self, event: WorkflowUiEvent) -> WorkflowUiResult {
-        if let Err(error) = self.inner.emit(event).await {
-            if !self
+        if let Err(error) = self.inner.emit(event).await
+            && !self
                 .degraded
                 .swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                eprintln!(
-                    "workflow ui delivery degraded; run continues without live progress: {error}"
-                );
-            }
+        {
+            eprintln!(
+                "workflow ui delivery degraded; run continues without live progress: {error}"
+            );
         }
         Ok(())
     }

@@ -318,10 +318,10 @@ fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
         if !in_section {
             continue;
         }
-        if let Some(item) = list_item_text(trimmed) {
-            if !item.is_empty() {
-                items.push(item.to_string());
-            }
+        if let Some(item) = list_item_text(trimmed)
+            && !item.is_empty()
+        {
+            items.push(item.to_string());
         }
     }
     sorted_unique(items)

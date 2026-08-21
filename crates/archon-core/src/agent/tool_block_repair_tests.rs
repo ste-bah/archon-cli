@@ -14,7 +14,13 @@ fn the_live_capture_repairs_to_the_call_that_was_split() {
 
     let plan = plan_split_tool_repairs(&names, &jsons);
 
-    assert_eq!(plan, vec![SplitToolRepair { target: 1, orphan: 2 }]);
+    assert_eq!(
+        plan,
+        vec![SplitToolRepair {
+            target: 1,
+            orphan: 2
+        }]
+    );
 }
 
 /// Two split calls in one message. The first repair must make call 0 parse,
@@ -35,8 +41,14 @@ fn two_split_calls_in_one_message_stay_unambiguous() {
     assert_eq!(
         plan,
         vec![
-            SplitToolRepair { target: 0, orphan: 1 },
-            SplitToolRepair { target: 2, orphan: 3 },
+            SplitToolRepair {
+                target: 0,
+                orphan: 1
+            },
+            SplitToolRepair {
+                target: 2,
+                orphan: 3
+            },
         ]
     );
 }
@@ -113,7 +125,10 @@ fn an_orphan_carrying_the_entire_object_repairs_an_empty_named_block() {
 
     assert_eq!(
         plan_split_tool_repairs(&names, &jsons),
-        vec![SplitToolRepair { target: 0, orphan: 1 }]
+        vec![SplitToolRepair {
+            target: 0,
+            orphan: 1
+        }]
     );
 }
 
