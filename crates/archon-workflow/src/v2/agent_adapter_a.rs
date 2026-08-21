@@ -250,6 +250,14 @@ fn has_successful_test_command(result: &WorkflowV2Result) -> bool {
     })
 }
 
+#[cfg(test)]
+pub(super) fn validate_write_ownership_for_tests(
+    request: &WorkflowV2AgentRequest,
+    result: &mut WorkflowV2Result,
+) -> Result<(), WorkflowV2AgentError> {
+    validate_write_ownership(request, result)
+}
+
 fn validate_write_ownership(
     request: &WorkflowV2AgentRequest,
     result: &mut WorkflowV2Result,
@@ -269,6 +277,8 @@ fn validate_write_ownership(
                 WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
             })?;
     }
+    let target_files =
+        extend_scope_for_unclaimed_files(request, result, target_files, repository_root);
     let write_item = WorkflowV2WriteItem::new(
         request.call.id.clone(),
         request

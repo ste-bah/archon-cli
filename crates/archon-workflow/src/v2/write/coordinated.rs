@@ -22,11 +22,17 @@ pub(super) async fn run_coordinated_v2_write_fanout(
     let mut peak_parallelism = 0usize;
     let max_parallelism = dispatch.fanout_parallelism(execution.call.options.max_parallelism);
     for wave in &plan.waves {
+        // One list per wave, shared by every branch in it. Coordinated mode runs
+        // items concurrently exactly as worktree mode does, so it needs the same
+        // context: without it a correct patch touching one undeclared file is
+        // still discarded here.
+        let wave_claims = crate::v2::write_scope_extension::wave_claims_for(wave);
         let semaphore = Arc::new(Semaphore::new(max_parallelism));
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let jobs = wave.assignments.iter().map(|assignment| {
             let assignment = assignment.clone();
+            let wave_claims = wave_claims.clone();
             let branch = branches
                 .iter()
                 .find(|branch| branch.id == assignment.item_id)
@@ -57,6 +63,10 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                     "target_ownership_scopes".to_string(),
                     serde_json::to_value(&assignment.owned_scopes)?,
                 );
+                branch_call
+                    .options
+                    .extra
+                    .insert("wave_claims".to_string(), serde_json::to_value(&wave_claims)?);
                 let branch_execution = WorkflowV2CallExecution {
                     call: branch_call,
                     input: branch.input,

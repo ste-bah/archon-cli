@@ -62,6 +62,9 @@ pub mod write;
 pub mod write_mode;
 pub mod write_claim_gate;
 pub mod write_scope_extension;
+#[cfg(test)]
+#[path = "write_scope_extension_wiring_tests.rs"]
+mod write_scope_extension_wiring_tests;
 mod write_mode_paths;
 
 pub use agent_adapter::{

@@ -71,6 +71,10 @@ pub(super) fn prepare_worktree_branch_execution(
         "target_ownership_scopes".to_string(),
         serde_json::to_value(&prepared.assignment.owned_scopes)?,
     );
+    call.options.extra.insert(
+        "wave_claims".to_string(),
+        serde_json::to_value(&prepared.wave_claims)?,
+    );
     Ok(WorktreeBranchExecution {
         id,
         role: prepared.branch.role.clone(),
@@ -481,20 +485,4 @@ pub(super) fn capture_worktree_branch_manifest(
     let manifest = persist_worktree_manifest(run_root, run_id, execution, branch_id, &captured)?;
     push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
     Ok((Some(manifest), Some(captured.pre_hashes)))
-}
-
-pub(crate) fn persist_rejected_worktree_result(
-    store: &WorkflowV2ResultStore,
-    branch_id: &str,
-    attempt: &str,
-    result: &WorkflowV2Result,
-    error: &str,
-) {
-    let raw_body = serde_json::to_string(result).unwrap_or_else(|_| result.summary.clone());
-    let record = WorkflowV2RejectedOutput {
-        attempt: attempt.to_string(),
-        error: error.to_string(),
-        raw_body,
-    };
-    let _ = store.append_rejected_output(branch_id, record);
 }

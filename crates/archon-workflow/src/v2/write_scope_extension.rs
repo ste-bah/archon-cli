@@ -61,7 +61,11 @@ impl WriteScopeExtension {
 }
 
 /// One item's claim on the paths it owns, as the wave planner assigned them.
-#[derive(Debug, Clone)]
+///
+/// Serialisable because the claim list crosses the `call.options.extra`
+/// boundary to reach the adapter that validates a result, exactly as
+/// `target_ownership_scopes` already does.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WaveClaim {
     pub item_id: String,
     pub owned: BTreeSet<String>,
@@ -80,6 +84,29 @@ impl WaveClaim {
             .iter()
             .any(|owned| crate::v2::write_mode::paths_overlap(owned, path))
     }
+}
+
+/// Every claim in a planned wave, in the form the adapter compares against.
+///
+/// Both write paths that run items concurrently — worktree and coordinated —
+/// build this, and they build it HERE so the two cannot drift into disagreeing
+/// about what a wave claims. Targets and scopes are unioned: a directory scope
+/// is as real a claim as a named file, and `paths_overlap` already treats it
+/// as one.
+pub fn wave_claims_for(wave: &crate::v2::write_mode::WorkflowV2WriteWave) -> Vec<WaveClaim> {
+    wave.assignments
+        .iter()
+        .map(|assignment| {
+            WaveClaim::new(
+                assignment.item_id.clone(),
+                assignment
+                    .owned_targets
+                    .iter()
+                    .chain(assignment.owned_scopes.iter())
+                    .cloned(),
+            )
+        })
+        .collect()
 }
 
 /// Decide whether `item_id` may extend its scope to cover `path`.
