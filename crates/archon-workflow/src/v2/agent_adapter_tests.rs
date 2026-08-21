@@ -462,7 +462,12 @@ fn write_project_artifact_file(request: &WorkflowV2AgentRequest, path: &str) {
         .expect("project root");
     let absolute = Path::new(root).join(path);
     std::fs::create_dir_all(absolute.parent().expect("artifact parent")).expect("artifact dir");
-    std::fs::write(absolute, "{}").expect("artifact");
+    // Holds a record, rather than `{}`. The filler was incidental to every
+    // test using this helper — they assert that a declared artifact EXISTS —
+    // but a declared artifact whose every collection is empty is no longer
+    // evidence that it was produced, so filler that says "I contain nothing"
+    // would now be asserting the opposite of what these tests mean.
+    std::fs::write(absolute, r#"{"records": [{"id": "r-1"}]}"#).expect("artifact");
 }
 
 /// The guard polices capabilities, not means. A task declaring `find`/`grep`
