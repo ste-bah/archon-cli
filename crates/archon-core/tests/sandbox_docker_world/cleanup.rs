@@ -169,6 +169,86 @@ async fn a_held_container_that_disappears_underneath_us_is_rebuilt() {
     assert_ne!(first_id, container_id(&second));
 }
 
+/// A container that goes away *while a command is inside it* must say so.
+///
+/// The in-flight guard means Archon no longer does this to itself at a turn
+/// boundary, but a container can still vanish under a running command — its age
+/// bound expires, an operator runs `docker rm`, the daemon restarts. `docker
+/// exec` reports that as `Exit code 137`, which reads as a memory limit and
+/// sends the model looking in entirely the wrong place.
+///
+/// The command is *not* re-run: it already ran, and repeating it would repeat
+/// whatever side effects it got through before it was killed.
+#[tokio::test]
+#[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
+async fn a_command_killed_by_its_container_disappearing_is_told_so() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = std::sync::Arc::new(backend(SandboxScope::Session));
+
+    // One command to establish the container, so the second can be removed out
+    // from under a command that is already running in it.
+    let established = run(
+        &backend,
+        request(dir.path(), "killed", "killed#1", WHICH_CONTAINER),
+    )
+    .await;
+    let id = container_id(&established);
+    let _cleanup = Removed(id.clone());
+
+    let long_running = tokio::spawn({
+        let backend = std::sync::Arc::clone(&backend);
+        let workspace = dir.path().to_path_buf();
+        async move {
+            backend
+                .execute_bash(request(
+                    &workspace,
+                    "killed",
+                    "killed#1",
+                    "printf started; sleep 30",
+                ))
+                .await
+                .expect("the docker backend executes bash")
+        }
+    });
+
+    // Removed once the command is demonstrably inside the container, not on a
+    // fixed sleep: `docker top` is what says a process of ours is running.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline && !container_runs_a_sleep(&id) {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert!(
+        container_runs_a_sleep(&id),
+        "the command never got inside the container, so this proves nothing"
+    );
+    remove_container(&id);
+
+    let result = long_running.await.expect("no panic");
+
+    assert!(result.is_error, "a killed command is not a success");
+    assert!(
+        result.content.contains("stopped before the command finished"),
+        "a bare exit code tells the model nothing it can act on: {}",
+        result.content
+    );
+    assert_eq!(
+        result.content.matches("started").count(),
+        1,
+        "the command was re-run after being killed; whatever side effects it had \
+         already had would happen twice: {}",
+        result.content
+    );
+}
+
+fn container_runs_a_sleep(id: &str) -> bool {
+    std::process::Command::new("docker")
+        .args(["top", id])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("sleep 30")
+        })
+}
+
 /// The session boundary. Best-effort by construction — `Drop` does not run under
 /// SIGKILL — which is why it is one of three mechanisms, but it is the one that
 /// runs on every ordinary exit and it has to actually work.
