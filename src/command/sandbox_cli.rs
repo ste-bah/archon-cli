@@ -340,3 +340,7 @@ fn persist_sandbox_command_event(
 #[cfg(test)]
 #[path = "sandbox_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sandbox_explain_tool_tests.rs"]
+mod explain_tool_tests;

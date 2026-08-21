@@ -117,20 +117,29 @@ fn decide(
         // saying "routed" here would be the drift this file is being fixed for.
         ModeRouting::PermissionPreflight => ToolDecision {
             decision: "permission_preflight_only",
-            reason: preflight_reason(policy, tool),
+            reason: preflight_reason(policy, tool, capability),
             provenance: None,
         },
     }
 }
 
-fn preflight_reason(policy: &SandboxPolicy, tool: &str) -> String {
-    format!(
+fn preflight_reason(policy: &SandboxPolicy, tool: &str, capability: ToolCapability) -> String {
+    let mut reason = format!(
         "sandbox.mode = {} defers only shell execution to the backend, so {tool} is decided by the \
-         normal permission preflight rather than by the sandbox; the mode scopes which decisions \
-         the backend makes, not where work lands — `ToolContext::fs` and `terminal()` go to the \
-         configured backend under every mode",
+         normal permission preflight rather than by the sandbox",
         policy.mode
-    )
+    );
+    // True of the mode whatever the tool is, but only worth saying about a tool
+    // whose effects land in a world. Printed under `TodoWrite` it describes two
+    // seams the call does not go anywhere near, which is the same fault as
+    // describing a gate by name: a sentence the case does not warrant.
+    if matches!(capability, ToolCapability::WorldBound(_)) {
+        reason.push_str(
+            "; the mode scopes which decisions the backend makes, not where work lands — \
+             `ToolContext::fs` and `terminal()` go to the configured backend under every mode",
+        );
+    }
+    reason
 }
 
 /// The gate deliberately does not decide a terminal, and says so; asking it and
