@@ -16,7 +16,7 @@ use tempfile::TempDir;
 use super::*;
 
 /// The far side, minus the wire.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BashExec;
 
 #[async_trait::async_trait]
@@ -105,14 +105,23 @@ async fn metadata_reports_the_real_size_and_a_real_mtime() {
     assert_eq!(file.len, 10);
     assert!(!file.is_dir);
     assert!(subdir.is_dir);
-    let now = std::time::SystemTime::now()
+    // Checked against the host's own view of the same file, not against the
+    // wall clock. "Close to now" is a stopwatch standing in for a fact that can
+    // be established directly, and it fails whenever the clock steps between
+    // the write and the assertion — which under WSL it does, sporadically.
+    // `stat -c %Y` reports whole seconds, so the comparison is at that
+    // granularity.
+    let host_seconds = std::fs::metadata(dir.path().join("a.txt"))
+        .and_then(|meta| meta.modified())
+        .expect("the host can see the file too")
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+        .expect("a modification time after the epoch")
+        .as_secs();
     let modified = file.modified_nanos.expect("no mtime from stat");
-    assert!(
-        modified <= now && now - modified < 60 * 1_000_000_000,
-        "mtime {modified} is not close to {now}"
+    assert_eq!(
+        modified / 1_000_000_000,
+        u128::from(host_seconds),
+        "stat reported a different mtime than the host holds for the same file"
     );
     assert!(fs.version(&host("a.txt")).await.is_some());
 }

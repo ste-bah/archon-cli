@@ -408,6 +408,10 @@ impl FileSystem for OtherWorld {
         Err(elsewhere())
     }
 
+    fn rerooted(self: Arc<Self>, _working_dir: &Path) -> Arc<dyn FileSystem> {
+        self
+    }
+
     async fn glob(&self, _base: &Path, _pattern: &str) -> io::Result<Vec<PathBuf>> {
         Err(elsewhere())
     }

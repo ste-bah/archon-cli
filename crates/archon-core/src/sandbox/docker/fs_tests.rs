@@ -151,6 +151,50 @@ async fn a_path_that_merely_starts_with_the_mount_name_is_left_alone() {
     assert_eq!(translated, PathBuf::from("/workspaces/other"));
 }
 
+/// A subagent in a worktree runs `Bash` with its own directory mounted at
+/// `/workspace`. A filesystem left rooted at the parent's tree would resolve
+/// the child's `/workspace/...` onto the parent's files — the same two-world
+/// split, reintroduced exactly where Archon runs the most agents at once.
+#[tokio::test]
+async fn rerooting_follows_a_child_into_its_own_working_directory() {
+    let parent = tempfile::tempdir().expect("parent tree");
+    let child = tempfile::tempdir().expect("child worktree");
+    std::fs::write(parent.path().join("shared.txt"), "the parent's copy").expect("write");
+    std::fs::write(child.path().join("shared.txt"), "the child's copy").expect("write");
+
+    let parent_fs: Arc<dyn FileSystem> = Arc::new(DockerFs::new(parent.path()));
+    let child_fs = Arc::clone(&parent_fs).rerooted(child.path());
+
+    assert_eq!(
+        child_fs
+            .read(Path::new("/workspace/shared.txt"))
+            .await
+            .expect("the child's own tree"),
+        b"the child's copy"
+    );
+    assert_eq!(
+        parent_fs
+            .read(Path::new("/workspace/shared.txt"))
+            .await
+            .expect("the parent is unaffected"),
+        b"the parent's copy"
+    );
+}
+
+/// Re-rooting to the directory it already has should not build a second one.
+#[tokio::test]
+async fn rerooting_to_the_same_directory_keeps_the_filesystem_it_has() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fs: Arc<dyn FileSystem> = Arc::new(DockerFs::new(dir.path()));
+
+    let same = Arc::clone(&fs).rerooted(dir.path());
+
+    assert!(
+        Arc::ptr_eq(&fs, &same),
+        "an unchanged working directory should not mint a new world"
+    );
+}
+
 /// The mount point is duplicated between `exec.rs` (which builds the
 /// `docker run` arguments) and `fs.rs` (which translates paths). If they ever
 /// disagree the agent reads one tree and executes against another — the exact

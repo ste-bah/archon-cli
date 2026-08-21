@@ -99,6 +99,14 @@ impl WorkspaceMap {
     /// Host-workspace paths are rewritten; a path that is already absolute in
     /// the far side's terms passes through, so the model can name `/tmp` or
     /// `/etc` there without the mapping guessing at it.
+    /// The same remote root, reached from a different host directory.
+    pub(crate) fn rerooted(&self, host_root: impl Into<PathBuf>) -> Self {
+        Self {
+            host_root: host_root.into(),
+            remote_root: self.remote_root.clone(),
+        }
+    }
+
     pub(crate) fn to_remote(&self, path: &Path) -> io::Result<String> {
         let text = path.to_str().ok_or_else(|| {
             io::Error::new(
@@ -310,7 +318,24 @@ impl<T: RemoteExec> RemoteFs<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: RemoteExec + 'static> FileSystem for RemoteFs<T> {
+impl<T: RemoteExec + Clone + 'static> FileSystem for RemoteFs<T> {
+    /// Only the host side of the mapping moves.
+    ///
+    /// The far side is fixed: `remote` mode `cd`s to the configured
+    /// `remote_workdir` for every command, whatever directory the request
+    /// names. So a child running in a worktree is still looking at the same
+    /// remote tree — what changes is which host paths translate into it, and
+    /// without this the child's own paths would fail to translate at all.
+    fn rerooted(self: std::sync::Arc<Self>, working_dir: &Path) -> std::sync::Arc<dyn FileSystem> {
+        if self.map.host_root == working_dir {
+            return self;
+        }
+        std::sync::Arc::new(RemoteFs {
+            exec: self.exec.clone(),
+            map: self.map.rerooted(working_dir),
+        })
+    }
+
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let remote = self.map.to_remote(path)?;
         let out = self.exec.run(&read_script(&remote), &[]).await?;

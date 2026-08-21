@@ -149,6 +149,15 @@ impl FileSystem for DockerFs {
             .await
     }
 
+    /// The container mounts whichever directory the request names, so a child
+    /// running in a worktree must translate against *that* tree.
+    fn rerooted(self: Arc<Self>, working_dir: &Path) -> Arc<dyn FileSystem> {
+        if working_dir == self.working_dir {
+            return self;
+        }
+        Arc::new(Self::new(working_dir))
+    }
+
     async fn glob(&self, base: &Path, pattern: &str) -> io::Result<Vec<PathBuf>> {
         let matched = self.host.glob(&self.to_host(base)?, pattern).await?;
         Ok(matched

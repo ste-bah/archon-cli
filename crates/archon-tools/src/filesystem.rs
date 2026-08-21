@@ -71,6 +71,20 @@ pub trait FileSystem: Send + Sync + std::fmt::Debug {
     /// not a thing this expresses.
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
 
+    /// The same world, rooted at `working_dir`.
+    ///
+    /// A subagent may run somewhere other than its parent — a worktree, or an
+    /// explicit `cwd` — and its shell takes *that* directory as the workspace:
+    /// docker mounts `ctx.working_dir`, not the session's. A filesystem left
+    /// rooted at the parent's tree would then translate the child's own paths
+    /// to the wrong files, silently, which is the split this seam exists to
+    /// close — reintroduced exactly where Archon runs the most agents at once.
+    ///
+    /// Required rather than defaulted to `self`, because a default is right for
+    /// a world with no root and quietly wrong for every world that has one, and
+    /// the wrongness is invisible.
+    fn rerooted(self: Arc<Self>, working_dir: &Path) -> Arc<dyn FileSystem>;
+
     /// Paths under `base` matching `pattern`, as absolute paths in this world.
     ///
     /// Required rather than defaulted to a `read_dir` walk, because the naive
@@ -168,6 +182,11 @@ impl FileSystem for LocalFs {
         let from = from.to_path_buf();
         let to = to.to_path_buf();
         spawn_blocking_io(move || std::fs::rename(&from, &to)).await
+    }
+
+    /// The host has no root to move: every path in it is already absolute.
+    fn rerooted(self: Arc<Self>, _working_dir: &Path) -> Arc<dyn FileSystem> {
+        self
     }
 
     async fn glob(&self, base: &Path, pattern: &str) -> io::Result<Vec<PathBuf>> {

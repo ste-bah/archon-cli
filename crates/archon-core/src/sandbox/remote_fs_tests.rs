@@ -8,17 +8,20 @@ use super::*;
 /// Every command this module builds is exercised through it, so the
 /// construction and the parsing are both under test without a far side. What
 /// it cannot test is the transport itself; that is the ssh/openshell half.
-#[derive(Debug)]
+/// `Clone` shares the recorded calls rather than copying them: a re-rooted
+/// filesystem clones its transport, and a double whose clone forgot what it had
+/// been asked would make those assertions look like nothing happened.
+#[derive(Debug, Clone)]
 struct FakeExec {
-    calls: Mutex<Vec<(String, Vec<u8>)>>,
-    reply: Mutex<Vec<RemoteOutput>>,
+    calls: std::sync::Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    reply: std::sync::Arc<Mutex<Vec<RemoteOutput>>>,
 }
 
 impl FakeExec {
     fn with(outputs: Vec<RemoteOutput>) -> Self {
         Self {
-            calls: Mutex::new(Vec::new()),
-            reply: Mutex::new(outputs),
+            calls: std::sync::Arc::new(Mutex::new(Vec::new())),
+            reply: std::sync::Arc::new(Mutex::new(outputs)),
         }
     }
 

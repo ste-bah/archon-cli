@@ -173,6 +173,7 @@ impl AgentSubagentExecutor {
                 tool_cancel_for_parent.cancel();
             });
         }
+        let child_working_dir = working_dir.clone();
         ToolContext {
             working_dir,
             // The parent's `session_id` is deliberately kept alongside
@@ -193,8 +194,15 @@ impl AgentSubagentExecutor {
             cancel_parent: Some(tool_cancel),
             sandbox: parent_ctx.sandbox.clone(),
             // A child runs in its parent's world, exactly as it inherits the
-            // parent's sandbox backend (#201).
-            fs: parent_ctx.fs.clone(),
+            // parent's sandbox backend — but rooted at its OWN working
+            // directory (#201). `Bash` mounts `ctx.working_dir`, so a child in
+            // a worktree whose filesystem still pointed at the parent's tree
+            // would read one tree and execute against another, which is the
+            // split this seam exists to close.
+            fs: parent_ctx
+                .fs
+                .clone()
+                .map(|fs| fs.rerooted(&child_working_dir)),
             activity_sink: parent_ctx.activity_sink.clone(),
             tool_run_parent_action_id: parent_ctx.tool_run_parent_action_id.clone(),
             tool_run_tool_use_id: None,
