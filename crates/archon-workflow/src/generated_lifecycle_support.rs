@@ -238,7 +238,6 @@ pub fn verification_inventory_ready(inventory: &Value) -> bool {
     !array(inventory.get("items")).is_empty() && !inventory_has_issues(inventory)
 }
 
-
 #[path = "generated_lifecycle_split.rs"]
 mod split;
 
@@ -248,10 +247,10 @@ mod scheduling;
 #[path = "generated_lifecycle_criteria.rs"]
 mod criteria;
 pub use criteria::{canonical_task_ids_of_items, verification_plan_criteria_gaps};
-pub use split::merge_inventory_repair;
 pub use scheduling::{
     retry_verification_items, split_focused_verification_items, verification_items,
 };
+pub use split::merge_inventory_repair;
 
 /// JS `generatedContractConstrainInventoryTasks`.
 pub fn constrain_inventory_tasks(

@@ -116,7 +116,13 @@ pub(super) fn generated_item_issues(
                 ));
             }
         }
-        "verified_noop" => verified_noop_issues(value, universe, &canonical_task_ids, &mut issues, &make_issue),
+        "verified_noop" => verified_noop_issues(
+            value,
+            universe,
+            &canonical_task_ids,
+            &mut issues,
+            &make_issue,
+        ),
         _ => issues.push(make_issue(
             GeneratedContractIssueKind::InventoryShapeRepair,
             "work_type",

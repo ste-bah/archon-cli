@@ -38,9 +38,10 @@ pub fn batch_cargo_verification_items(items: Vec<Value>) -> Vec<Value> {
             continue;
         }
         let key = batch_key(&item);
-        match batches.iter_mut().find(|(existing, batch)| {
-            *existing == key && batch.len() < MAX_BATCHED_CHECKS
-        }) {
+        match batches
+            .iter_mut()
+            .find(|(existing, batch)| *existing == key && batch.len() < MAX_BATCHED_CHECKS)
+        {
             Some((_, batch)) => batch.push(item),
             None => batches.push((key, vec![item])),
         }
@@ -107,10 +108,7 @@ fn merge_batch(batch: Vec<Value>) -> Value {
             ids.first().map(String::as_str).unwrap_or("verification")
         )),
     );
-    merged.insert(
-        "batched_from_item_ids".to_string(),
-        serde_json::json!(ids),
-    );
+    merged.insert("batched_from_item_ids".to_string(), serde_json::json!(ids));
     // A merged branch now spans tasks, so it must declare every task it
     // answers for — inheriting only the first item's ids would silently drop
     // the rest from coverage. Provenance is kept alongside it so a failure in
@@ -134,7 +132,10 @@ fn merge_batch(batch: Vec<Value>) -> Value {
     if !tasks.is_empty() {
         merged.insert("canonical_task_ids".to_string(), Value::Array(tasks));
     }
-    merged.insert("batched_item_provenance".to_string(), Value::Array(provenance));
+    merged.insert(
+        "batched_item_provenance".to_string(),
+        Value::Array(provenance),
+    );
     for field in ["focused_verification", "expected_evidence"] {
         let values: Vec<Value> = batch
             .iter()
@@ -148,7 +149,10 @@ fn merge_batch(batch: Vec<Value>) -> Value {
         "source_residual_gap_ids",
     ] {
         let mut union: Vec<Value> = Vec::new();
-        for value in batch.iter().flat_map(|item| support::array(item.get(field))) {
+        for value in batch
+            .iter()
+            .flat_map(|item| support::array(item.get(field)))
+        {
             if !union.contains(&value) {
                 union.push(value);
             }

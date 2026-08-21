@@ -38,13 +38,19 @@ fn plan(item_id: &str, targets: &[&str]) -> WritePlan {
 fn changed(paths: &[&str]) -> WorkflowV2Result {
     WorkflowV2Result {
         status: WorkflowV2Status::Accepted,
-        files_changed: paths.iter().map(|p| WorkflowV2FileRecord::new(*p)).collect(),
+        files_changed: paths
+            .iter()
+            .map(|p| WorkflowV2FileRecord::new(*p))
+            .collect(),
         ..Default::default()
     }
 }
 
 fn declared(plan: &WritePlan) -> Vec<String> {
-    plan.target_files.iter().map(|p| p.as_str().to_string()).collect()
+    plan.target_files
+        .iter()
+        .map(|p| p.as_str().to_string())
+        .collect()
 }
 
 /// THE failure mode: no wave context must never widen the plan.
@@ -85,11 +91,8 @@ fn a_contested_file_is_not_granted() {
         WaveClaim::new("item-a", ["src/declared.rs".to_string()]),
         WaveClaim::new("item-b", ["src/contested.rs".to_string()]),
     ];
-    let extended = plan_extended_to_unclaimed_changes(
-        &base,
-        &changed(&["src/contested.rs"]),
-        Some(&wave),
-    );
+    let extended =
+        plan_extended_to_unclaimed_changes(&base, &changed(&["src/contested.rs"]), Some(&wave));
     assert_eq!(declared(&extended), declared(&base));
 }
 
@@ -123,10 +126,7 @@ fn a_path_inside_a_declared_scope_is_not_re_granted() {
 fn an_unnormalisable_path_is_never_granted() {
     let base = plan("item-a", &["src/declared.rs"]);
     let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
-    let extended = plan_extended_to_unclaimed_changes(
-        &base,
-        &changed(&["../outside/escape.rs"]),
-        Some(&wave),
-    );
+    let extended =
+        plan_extended_to_unclaimed_changes(&base, &changed(&["../outside/escape.rs"]), Some(&wave));
     assert_eq!(declared(&extended), declared(&base));
 }

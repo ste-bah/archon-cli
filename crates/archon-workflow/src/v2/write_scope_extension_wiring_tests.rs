@@ -64,12 +64,12 @@ fn request(
 #[test]
 fn without_wave_context_an_undeclared_file_is_still_rejected() {
     let mut result = changed(&["src/declared.rs", "src/forgotten.rs"]);
-    let err = validate_write_ownership_for_tests(&request("item-a", &["src/declared.rs"], None), &mut result)
-        .expect_err("no wave context must not relax ownership");
-    assert!(
-        err.to_string().contains("src/forgotten.rs"),
-        "got: {err}"
-    );
+    let err = validate_write_ownership_for_tests(
+        &request("item-a", &["src/declared.rs"], None),
+        &mut result,
+    )
+    .expect_err("no wave context must not relax ownership");
+    assert!(err.to_string().contains("src/forgotten.rs"), "got: {err}");
 }
 
 /// An EMPTY wave list grants everything, because nothing claims anything.
@@ -147,7 +147,10 @@ fn a_file_another_item_owns_is_still_refused() {
 fn an_item_does_not_block_itself_via_its_own_claim() {
     let wave = vec![WaveClaim::new(
         "item-a",
-        ["src/declared.rs".to_string(), "src/also-mine.rs".to_string()],
+        [
+            "src/declared.rs".to_string(),
+            "src/also-mine.rs".to_string(),
+        ],
     )];
     let mut result = changed(&["src/also-mine.rs"]);
     validate_write_ownership_for_tests(

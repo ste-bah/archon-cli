@@ -73,7 +73,10 @@ fn a_directory_claim_contests_a_file_beneath_it() {
         &wave,
     );
 
-    assert!(matches!(outcome, WriteScopeExtension::Contested { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, WriteScopeExtension::Contested { .. }),
+        "{outcome:?}"
+    );
 }
 
 /// A prefix that is not a path boundary is a different path, not a parent.

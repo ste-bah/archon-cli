@@ -138,6 +138,25 @@ pub async fn run_write_capable_v2_fanout(
         target_repository_root,
         crate::write_coordinator::config::WriteCoordinatorConfig::default().max_source_file_lines,
     );
+    // Replace the guessed write scope with an evidence-bound one BEFORE the
+    // plan is built. Everything downstream — the ownership rejection, the scope
+    // grant, the overlap guard, the stale-baseline recheck — exists to cope
+    // with planning "disjoint" waves out of scopes declared before anything
+    // read the code. Two items wanting the same undeclared file is not an edge
+    // case there, it is the guaranteed consequence.
+    //
+    // Best-effort: a branch whose pass fails keeps the scope it had, so the
+    // worst case is today's behaviour plus one read-only turn.
+    scope_discovery::discover_write_scopes(
+        &mut branches,
+        target_repository_root,
+        &execution,
+        &adapter,
+        dispatch,
+        v2_store,
+        task_universe,
+    )
+    .await;
     let all_write_items =
         write_items_for_branches(target_repository_root, &execution.call, &branches)?;
     let planner = WorkflowV2WritePlanner::new(
@@ -420,6 +439,10 @@ mod errors;
 mod ownership;
 mod preflight;
 mod result;
+mod scope_discovery;
+#[cfg(test)]
+#[path = "scope_discovery_tests.rs"]
+mod scope_discovery_tests;
 mod serial;
 mod worktree;
 mod worktree_branch;

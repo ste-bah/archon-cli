@@ -115,11 +115,17 @@ fn batches_chunk_at_the_cap() {
 
     assert_eq!(batched.len(), 2);
     assert_eq!(
-        batched[0]["batched_from_item_ids"].as_array().unwrap().len(),
+        batched[0]["batched_from_item_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
         10
     );
     assert_eq!(
-        batched[1]["batched_from_item_ids"].as_array().unwrap().len(),
+        batched[1]["batched_from_item_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
 }

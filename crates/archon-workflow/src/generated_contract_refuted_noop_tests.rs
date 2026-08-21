@@ -85,7 +85,11 @@ fn a_refuted_noop_cannot_be_re_proposed_as_a_noop() {
 /// bars repeating a lost argument, not making one.
 #[test]
 fn a_first_time_noop_is_still_allowed() {
-    let issues = generated_item_issues(&noop_item("TASK-A-001", None), &contract_for("TASK-A-001"), None);
+    let issues = generated_item_issues(
+        &noop_item("TASK-A-001", None),
+        &contract_for("TASK-A-001"),
+        None,
+    );
 
     assert!(
         !issue_fields(&issues).contains(&"work_type".to_string()),

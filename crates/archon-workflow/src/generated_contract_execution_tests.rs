@@ -91,9 +91,8 @@ fn a_noop_with_recorded_commands_is_allowed() {
 /// inspection, and this rule must not make every no-op illegal.
 #[test]
 fn a_task_without_a_verifier_command_still_allows_a_noop() {
-    let contract = ContractTaskUniverse::from_authoritative(Some(&universe(vec![task(
-        "TASK-A-002", None,
-    )])));
+    let contract =
+        ContractTaskUniverse::from_authoritative(Some(&universe(vec![task("TASK-A-002", None)])));
 
     let issues = generated_item_issues(&noop_item("TASK-A-002", None), &contract, None);
 

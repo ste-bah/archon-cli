@@ -64,7 +64,10 @@ fn a_covering_split_supersedes_the_grouped_item() {
 
     let superseded = grouped_items_superseded_by_splits(&contract, &[grouped()], &parts);
 
-    assert!(superseded.contains("item:noop-group-001-010-020"), "{superseded:?}");
+    assert!(
+        superseded.contains("item:noop-group-001-010-020"),
+        "{superseded:?}"
+    );
 }
 
 /// The tombstone guarantee: a split that leaves a task with no home would shed
@@ -74,11 +77,17 @@ fn a_split_that_drops_a_task_is_refused() {
     let universe = typed_universe();
     let contract = contract_for(&universe);
     // TASK-EX-020 has no part.
-    let parts = vec![part("impl-001", "TASK-EX-001"), part("impl-010", "TASK-EX-010")];
+    let parts = vec![
+        part("impl-001", "TASK-EX-001"),
+        part("impl-010", "TASK-EX-010"),
+    ];
 
     let superseded = grouped_items_superseded_by_splits(&contract, &[grouped()], &parts);
 
-    assert!(superseded.is_empty(), "incomplete split must not drop the group");
+    assert!(
+        superseded.is_empty(),
+        "incomplete split must not drop the group"
+    );
 }
 
 /// One repair item is a correction, not a split — the existing merge path
@@ -124,7 +133,10 @@ fn a_repair_reusing_the_group_id_is_not_a_part() {
 
     let superseded = grouped_items_superseded_by_splits(&contract, &[grouped()], &parts);
 
-    assert!(superseded.is_empty(), "only one genuine part; not a covering split");
+    assert!(
+        superseded.is_empty(),
+        "only one genuine part; not a covering split"
+    );
 }
 
 /// The group's aliases must be cleared, or a split part matches the very

@@ -84,10 +84,7 @@ pub fn tag_cargo_serial_roles(items: Vec<WorkflowV2FanoutItem>) -> Vec<WorkflowV
     items
         .into_iter()
         .map(|mut item| {
-            let in_item = item
-                .input
-                .get("item")
-                .is_some_and(item_has_cargo_commands);
+            let in_item = item.input.get("item").is_some_and(item_has_cargo_commands);
             if in_item || item_has_cargo_commands(&item.input) {
                 item.role = CARGO_SERIAL_ROLE.to_string();
             }

@@ -54,18 +54,18 @@ pub(crate) mod semantic_preservation;
 pub mod source_graph;
 pub mod source_pack;
 pub mod target_expansion;
-pub mod transport_retry;
 pub mod task_record;
+pub mod transport_retry;
 pub mod validation;
 pub mod verification;
 pub mod write;
-pub mod write_mode;
 pub mod write_claim_gate;
+pub mod write_mode;
+mod write_mode_paths;
 pub mod write_scope_extension;
 #[cfg(test)]
 #[path = "write_scope_extension_wiring_tests.rs"]
 mod write_scope_extension_wiring_tests;
-mod write_mode_paths;
 
 pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,

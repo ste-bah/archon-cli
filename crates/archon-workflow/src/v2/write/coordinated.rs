@@ -63,10 +63,10 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                     "target_ownership_scopes".to_string(),
                     serde_json::to_value(&assignment.owned_scopes)?,
                 );
-                branch_call
-                    .options
-                    .extra
-                    .insert("wave_claims".to_string(), serde_json::to_value(&wave_claims)?);
+                branch_call.options.extra.insert(
+                    "wave_claims".to_string(),
+                    serde_json::to_value(&wave_claims)?,
+                );
                 let branch_execution = WorkflowV2CallExecution {
                     call: branch_call,
                     input: branch.input,

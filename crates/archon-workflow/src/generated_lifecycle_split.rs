@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
-use super::{array, present, strings_of, LifecycleContract};
+use super::{LifecycleContract, array, present, strings_of};
 
 /// Primary keys (`item:<id>`) of grouped items that a repair supersedes by
 /// splitting them into one item per task.
@@ -76,7 +76,10 @@ pub(super) fn grouped_items_superseded_by_splits(
         let parts: Vec<&BTreeSet<String>> = repairs
             .iter()
             .filter(|(id, ids)| {
-                id != grouped_id && !ids.is_empty() && ids.is_subset(&grouped_ids) && ids != &grouped_ids
+                id != grouped_id
+                    && !ids.is_empty()
+                    && ids.is_subset(&grouped_ids)
+                    && ids != &grouped_ids
             })
             .map(|(_, ids)| ids)
             .collect();
@@ -184,8 +187,7 @@ pub fn merge_inventory_repair(
     // Only splits whose union covers the grouped item's tasks qualify, so no
     // scheduled work is shed.
     let inventory_items = array(inventory.get("items"));
-    let superseded =
-        grouped_items_superseded_by_splits(contract, &inventory_items, &repair_items);
+    let superseded = grouped_items_superseded_by_splits(contract, &inventory_items, &repair_items);
     let stale_aliases = superseded_aliases(contract, &inventory_items, &superseded);
     for item in inventory_items {
         let item = contract.normalize_item(&item);

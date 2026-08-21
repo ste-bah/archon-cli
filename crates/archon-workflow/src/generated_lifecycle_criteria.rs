@@ -144,7 +144,10 @@ fn claimed_criteria(plan: &Value) -> BTreeMap<String, BTreeSet<String>> {
             continue;
         }
         for task_id in task_ids {
-            claimed.entry(task_id).or_default().extend(claims.iter().cloned());
+            claimed
+                .entry(task_id)
+                .or_default()
+                .extend(claims.iter().cloned());
         }
     }
     claimed
