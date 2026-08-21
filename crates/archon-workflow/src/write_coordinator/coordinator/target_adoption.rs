@@ -215,6 +215,8 @@ fn file_name(path: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    // Only the fixture below needs this; importing it at module scope left a
+    // dead import in every non-test build.
     use super::*;
     use crate::write_coordinator::write_plan::TargetFilesSource;
 

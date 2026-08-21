@@ -303,30 +303,6 @@ fn declared_task_artifact_requirements(raw: &str, metadata: &serde_json::Value) 
     )
 }
 
-fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut in_section = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if let Some(heading) = trimmed.strip_prefix('#') {
-            in_section = heading
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case(section);
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-        if let Some(item) = list_item_text(trimmed)
-            && !item.is_empty()
-        {
-            items.push(item.to_string());
-        }
-    }
-    sorted_unique(items)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,7 +446,7 @@ mod tests {
 
 #[path = "task_universe_list_items.rs"]
 mod list_items;
-use list_items::list_item_text;
+use list_items::declared_task_section_items;
 
 #[cfg(test)]
 #[path = "task_universe_parsing_list_tests.rs"]

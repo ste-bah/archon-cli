@@ -45,6 +45,26 @@ struct RawMcpConfig {
     mcp_servers: HashMap<String, RawServerEntry>,
 }
 
+/// The nearest ancestor of `start` holding a `.mcp.json`, else `start` itself.
+///
+/// `load_merged_configs` joins `.mcp.json` to exactly one directory. That held
+/// while agents ran in the project root, and broke when workflow write
+/// branches moved into git worktrees: a worktree is a checkout of the
+/// REPOSITORY, `.mcp.json` is untracked PROJECT configuration, so the file is
+/// absent there and can never appear. Every worktree agent silently received
+/// an empty tool registry — while the worktrees sit under the very project
+/// root that holds the file.
+///
+/// Walking up recovers it wherever an agent is placed. A directory with its
+/// own config still wins, and a path under no project is returned unchanged.
+pub fn nearest_config_root(start: &Path) -> PathBuf {
+    start
+        .ancestors()
+        .find(|ancestor| ancestor.join(".mcp.json").is_file())
+        .unwrap_or(start)
+        .to_path_buf()
+}
+
 /// Load and merge MCP server configs from project and global paths.
 ///
 /// Project-local entries override global entries by server name.
@@ -144,6 +164,45 @@ mod tests {
     fn parse_empty_object() {
         let configs = parse_mcp_json("{}", Path::new("test.json")).expect("parse");
         assert!(configs.is_empty());
+    }
+
+    /// The live regression: a workflow write branch runs inside
+    /// `<project>/.archon/workflows/<run>/v2/worktrees/<branch>/<item>`, a
+    /// checkout of the REPOSITORY. `.mcp.json` is untracked project config, so
+    /// it is absent there and always will be. Joining `.mcp.json` to that
+    /// directory alone found nothing, and every worktree agent silently got no
+    /// MCP tools at all.
+    #[test]
+    fn a_worktree_finds_the_project_config_above_it() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::write(root.join(".mcp.json"), r#"{"mcpServers":{}}"#).expect("config");
+        let worktree = root.join(".archon/workflows/wf-1/v2/worktrees/impl-wave-1/item-abc");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+
+        assert_eq!(nearest_config_root(&worktree), root);
+    }
+
+    #[test]
+    fn the_nearest_config_wins_over_an_ancestor() {
+        let outer = tempfile::tempdir().expect("outer");
+        std::fs::write(outer.path().join(".mcp.json"), "{}").expect("outer");
+        let inner = outer.path().join("nested/project");
+        std::fs::create_dir_all(&inner).expect("inner dir");
+        std::fs::write(inner.join(".mcp.json"), "{}").expect("inner");
+
+        assert_eq!(nearest_config_root(&inner), inner);
+    }
+
+    /// No config anywhere above: the caller's own path is returned, so a run
+    /// outside any project behaves exactly as it did before.
+    #[test]
+    fn a_path_under_no_project_is_returned_unchanged() {
+        let bare = tempfile::tempdir().expect("bare");
+        let nested = bare.path().join("a/b");
+        std::fs::create_dir_all(&nested).expect("nested");
+
+        assert_eq!(nearest_config_root(&nested), nested);
     }
 
     #[test]

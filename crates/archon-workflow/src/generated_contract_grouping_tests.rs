@@ -119,17 +119,58 @@ fn uncontracted_tasks_may_still_share_an_item() {
     );
 }
 
-/// A no-op item is not what this rule is for: it has its own bar to clear, and
-/// the refuted-no-op and execution rules already police it.
+/// The test that was WRONG, replaced by the item that proved it wrong.
+///
+/// The first version of this file asserted that a no-op group is not this
+/// rule's business, on the reasoning that the refuted-no-op and execution rules
+/// already policed no-ops. They do not: they decide whether a no-op is ALLOWED,
+/// never whether one item may cover four tasks. The very next run emitted
+/// exactly this item and the rule watched it go past.
 #[test]
-fn the_rule_targets_implementation_items() {
-    let universe = universe_of(vec![contracted("TASK-TDL-040"), contracted("TASK-TDL-050")]);
-    let mut value = item("group", &["TASK-TDL-040", "TASK-TDL-050"]);
+fn the_noop_group_that_actually_shipped_is_refused() {
+    let universe = universe_of(vec![
+        contracted("TASK-TDL-040"),
+        contracted("TASK-TDL-050"),
+        contracted("TASK-TDL-060"),
+        contracted("TASK-TDL-070"),
+    ]);
+    let mut value = item(
+        "verified-noop-tdl-040-050-060-070",
+        &[
+            "TASK-TDL-040",
+            "TASK-TDL-050",
+            "TASK-TDL-060",
+            "TASK-TDL-070",
+        ],
+    );
     value["work_type"] = serde_json::json!("verified_noop");
-    value["noop_proof"] = serde_json::json!("already done");
-    value["noop_proof_refs"] = serde_json::json!(["src/x.rs"]);
+    value["noop_proof"] = serde_json::json!(
+        "Host-stamped artifact_status confirms all deliverable contracts for \
+         TDL-040, TDL-050, TDL-060, TDL-070 have exists:true"
+    );
+    value["noop_proof_refs"] = serde_json::json!(["crates/x/src/lib.rs"]);
 
     let issues = generated_item_issues(&value, &universe, None);
+
+    assert!(
+        fields(&issues).contains(&"canonical_task_ids".to_string()),
+        "a no-op may not close four contracted tasks either, got: {:?}",
+        fields(&issues)
+    );
+}
+
+/// A single-task no-op is untouched: this rule is about how many contracts one
+/// result closes, not about whether no-ops are legitimate.
+#[test]
+fn a_single_task_noop_is_not_refused_by_this_rule() {
+    let universe = universe_of(vec![contracted("TASK-TDL-050")]);
+    let mut value = item("verified-noop-tdl-050", &["TASK-TDL-050"]);
+    value["work_type"] = serde_json::json!("verified_noop");
+    value["noop_proof"] = serde_json::json!("already complete");
+    value["noop_proof_refs"] = serde_json::json!(["crates/x/src/lib.rs"]);
+
+    let issues = generated_item_issues(&value, &universe, None);
+
     assert!(
         !fields(&issues).contains(&"canonical_task_ids".to_string()),
         "got: {:?}",

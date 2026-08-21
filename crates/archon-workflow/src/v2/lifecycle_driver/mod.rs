@@ -116,10 +116,13 @@ mod waves;
 /// Only the remediation tests reach this scoping helper from outside `verify`.
 #[cfg(test)]
 pub(crate) use verify::scope_repair_inventory_to_failed_outcomes;
+// Everything except `is_transport_failure_text`, which is re-exported `pub`
+// below. A glob at pub(crate) alongside a named pub re-export of one of its
+// members leaves that name with two visibilities, and `-D warnings` rejects
+// the ambiguity.
 pub(crate) use verify_remediation::*;
 
 pub use orchestrated::OrchestrationLedger;
-pub use verify_remediation::is_transport_failure_text;
 
 #[cfg(test)]
 mod board_drain_tests;
