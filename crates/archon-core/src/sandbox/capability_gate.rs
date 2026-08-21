@@ -8,6 +8,26 @@
 
 use archon_permissions::{ToolCapability, WorldReach};
 
+/// Why the gate allowed a class, in the gate's own words.
+///
+/// The `Ok` was empty, which left the one caller that has to *explain* the
+/// decision — `archon sandbox explain` — nothing to quote and no choice but to
+/// compose a second account of these arms. Composing one gets three of the five
+/// wrong: `HostLocal` is allowed because nothing is relocated, `ControlPlane`
+/// because a child comes back through this gate rather than because a seam
+/// carries it, and `Terminal` because the answer is not this function's to
+/// give. Carrying the reason out with the verdict is what stops a caller
+/// inventing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapabilityAllowance(&'static str);
+
+impl CapabilityAllowance {
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        self.0
+    }
+}
+
 /// Decide whether a backend that owns an execution world can host `tool`.
 ///
 /// `backend` names the caller for the denial message; it never changes the
@@ -22,31 +42,37 @@ pub fn check_capability(
     backend: &str,
     tool: &str,
     capability: ToolCapability,
-) -> Result<(), String> {
+) -> Result<CapabilityAllowance, String> {
     match capability {
-        // Archon's own state is in the same place whatever the world is.
-        ToolCapability::HostLocal => Ok(()),
+        ToolCapability::HostLocal => Ok(CapabilityAllowance(
+            "this tool touches only Archon's own state, which is in the same place whatever the \
+             world is, so the sandbox has nothing to relocate",
+        )),
 
-        // `execute_bash` is the seam every backend implements, so this work
-        // genuinely lands in the world.
-        ToolCapability::WorldBound(WorldReach::Execution) => Ok(()),
+        ToolCapability::WorldBound(WorldReach::Execution) => Ok(CapabilityAllowance(
+            "`execute_bash` is the seam every backend implements, so the work lands in the \
+             backend's world rather than on the host",
+        )),
 
-        // Both served by `ToolContext::fs`, which #201 Phase 2 made the
-        // backend's own: docker translates against its bind mount, an ssh or
-        // openshell remote workspace is reached over the same transport
-        // `execute_bash` uses, and the mirror modes are the host tree by
-        // definition. A write therefore lands in the world the shell sees
-        // rather than on the host behind its back, which is the whole reason
-        // this arm was closed.
-        ToolCapability::WorldBound(WorldReach::FileRead | WorldReach::FileWrite) => Ok(()),
+        // #201 Phase 2 made `ToolContext::fs` the backend's own: docker
+        // translates against its bind mount, an ssh or openshell remote
+        // workspace is reached over the same transport `execute_bash` uses, and
+        // the mirror modes are the host tree by definition. Closing that is
+        // what let this arm open.
+        ToolCapability::WorldBound(WorldReach::FileRead | WorldReach::FileWrite) => {
+            Ok(CapabilityAllowance(
+                "`ToolContext::fs` is the backend's own filesystem, so the read or write lands in \
+                 the world the shell sees rather than on the host behind its back",
+            ))
+        }
 
-        // `SandboxBackend::terminal` is a seam too, so the class passes here
-        // and the backend gives the specific answer: docker attaches a TTY to a
-        // container, ssh puts one on the connection it already has, and a
-        // backend with no session to attach to refuses by name there. Deciding
-        // it here instead would have to guess which, and would refuse the two
-        // that work.
-        ToolCapability::WorldBound(WorldReach::Terminal) => Ok(()),
+        // Deciding it here instead would have to guess which backend has a
+        // session, and would refuse the two that do.
+        ToolCapability::WorldBound(WorldReach::Terminal) => Ok(CapabilityAllowance(
+            "`SandboxBackend::terminal` is a seam too, so this gate lets the class through and the \
+             backend gives the specific answer; which backends actually have a session to attach a \
+             TTY to is `terminal()`'s answer, not this one's",
+        )),
 
         // A host PTY, a host language server, a directly spawned subprocess:
         // nothing routes these through the backend, so running one under an
@@ -61,15 +87,16 @@ pub fn check_capability(
              supported under isolation"
         )),
 
-        // Spawned work stays inside the world rather than escaping it. A child
-        // is built from its parent's context (`build_child_tool_context`): the
-        // same backend `Arc`, and the parent's filesystem rerooted at the
-        // child's own working directory. Every tool the child then calls goes
-        // back through this gate on that backend before it runs, so a subagent
-        // is not a hole in the boundary — it is another caller of it. That was
-        // the thing this arm was waiting on, and #201 Phase 4 proves it end to
-        // end under docker.
-        ToolCapability::ControlPlane => Ok(()),
+        // A child is built from its parent's context
+        // (`build_child_tool_context`): the same backend `Arc`, and the
+        // parent's filesystem rerooted at the child's own working directory.
+        // That was the thing this arm was waiting on, and #201 Phase 4 proves
+        // it end to end under docker.
+        ToolCapability::ControlPlane => Ok(CapabilityAllowance(
+            "a spawned child is built from this backend and its filesystem, and every tool the \
+             child calls comes back through this gate, so spawning stays inside the boundary \
+             instead of escaping it",
+        )),
     }
 }
 

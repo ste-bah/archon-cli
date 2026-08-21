@@ -245,7 +245,7 @@ impl SandboxBackend for DockerSandboxBackend {
         _input: &serde_json::Value,
     ) -> Result<(), String> {
         self.safe_to_execute()?;
-        crate::sandbox::capability_gate::check_capability("docker", tool, capability)
+        crate::sandbox::capability_gate::check_capability("docker", tool, capability).map(|_| ())
     }
 
     /// A terminal is a container with a TTY on it.

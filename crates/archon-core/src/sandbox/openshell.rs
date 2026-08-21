@@ -279,7 +279,7 @@ impl SandboxBackend for OpenShellSandboxBackend {
         _input: &serde_json::Value,
     ) -> Result<(), String> {
         self.safe_to_route()?;
-        crate::sandbox::capability_gate::check_capability("openshell", tool, capability)
+        crate::sandbox::capability_gate::check_capability("openshell", tool, capability).map(|_| ())
     }
 
     fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {

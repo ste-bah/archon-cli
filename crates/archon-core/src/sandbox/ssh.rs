@@ -261,7 +261,7 @@ impl SandboxBackend for SshSandboxBackend {
         _input: &serde_json::Value,
     ) -> Result<(), String> {
         self.safe_to_route()?;
-        crate::sandbox::capability_gate::check_capability("ssh", tool, capability)
+        crate::sandbox::capability_gate::check_capability("ssh", tool, capability).map(|_| ())
     }
 
     /// A terminal is the same SSH connection with a TTY on it.

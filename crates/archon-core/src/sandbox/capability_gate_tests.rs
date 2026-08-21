@@ -64,6 +64,44 @@ fn terminals_reach_the_backend_rather_than_being_decided_by_the_gate() {
     }
 }
 
+/// Every allow carries a reason of its own, and the three that a single
+/// composed sentence gets wrong say something different from the seam arm.
+/// `sandbox explain` relays these; when the `Ok` was empty it had to write its
+/// own, and wrote "the backend has a seam for this work" over `HostLocal`,
+/// where nothing is carried anywhere, and over `ControlPlane`, where there is
+/// no seam at all.
+#[test]
+fn each_allowed_class_carries_its_own_reason() {
+    for capability in ALL_CLASSES {
+        if let Ok(allowance) = check_capability("docker", "T", capability) {
+            assert!(
+                !allowance.reason().trim().is_empty(),
+                "{} was allowed without saying why",
+                capability.label()
+            );
+        }
+    }
+
+    let reason = |capability| {
+        check_capability("docker", "T", capability)
+            .expect("allowed")
+            .reason()
+    };
+    let execution = reason(ToolCapability::EXECUTION);
+
+    assert_ne!(reason(ToolCapability::HostLocal), execution);
+    assert_ne!(reason(ToolCapability::ControlPlane), execution);
+    assert_ne!(reason(ToolCapability::TERMINAL), execution);
+    assert!(
+        reason(ToolCapability::HostLocal).contains("nothing to relocate"),
+        "host-local is allowed because nothing moves, not because a seam moves it"
+    );
+    assert!(
+        reason(ToolCapability::TERMINAL).contains("`terminal()`"),
+        "the terminal arm has to name what actually decides"
+    );
+}
+
 #[test]
 fn egress_stays_refused() {
     let egress = check_capability("openshell", "WebFetch", ToolCapability::Egress).unwrap_err();

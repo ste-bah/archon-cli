@@ -156,13 +156,20 @@ fn render_explain(
         policy.backend = backend.parse().map_err(anyhow::Error::msg)?;
     }
     policy.validate().map_err(anyhow::Error::msg)?;
+    // The configuration this explanation is about, `--backend` included, so the
+    // backend the tool section builds is the one being explained rather than
+    // the one on disk.
+    let effective = archon_core::sandbox::SandboxConfig {
+        backend: policy.backend.as_str().to_string(),
+        ..config.clone()
+    };
     let mut output = format!(
         "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker, ssh, and openshell can route Bash when selected; direct host shell fallback stays forbidden\n",
         policy.backend,
         policy.describes_isolation()
     );
     append_explain_details(&mut output, config, &policy)?;
-    sandbox_explain_tools::append_tool_explain(&mut output, &policy, tool, command);
+    sandbox_explain_tools::append_tool_explain(&mut output, &effective, &policy, tool, command);
     Ok(output)
 }
 
@@ -218,7 +225,7 @@ fn append_explain_details(
             ));
         }
         archon_core::sandbox::SandboxBackendKind::Logical => output.push_str(
-            "Isolation policy: logical permission gate only; no process, network, or filesystem isolation is claimed\n",
+            "Isolation policy: no isolation backend is installed; a session runs under the /sandbox toggle and no process, network, or filesystem isolation is claimed\n",
         ),
         archon_core::sandbox::SandboxBackendKind::Disabled => output.push_str(
             "Isolation policy: sandbox backend disabled; normal permission checks still apply\n",

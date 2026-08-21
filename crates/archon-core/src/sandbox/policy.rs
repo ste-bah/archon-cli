@@ -97,11 +97,16 @@ impl SandboxPolicy {
         }
     }
 
+    /// `logical` installs no backend of its own — `isolation_backend` returns
+    /// `None` for it exactly as it does for `disabled`, and a session then runs
+    /// under the `/sandbox` toggle. Calling it a "policy gate" implied a gate
+    /// that is not there, and read as a contradiction next to an explanation
+    /// saying no isolation backend is configured.
     pub fn describes_isolation(&self) -> &'static str {
         if self.backend.is_real_isolation() {
             "process isolation backend"
         } else if self.backend == SandboxBackendKind::Logical {
-            "logical policy gate only"
+            "no isolation backend; session /sandbox toggle only"
         } else {
             "disabled"
         }

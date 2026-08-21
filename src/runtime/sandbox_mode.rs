@@ -72,6 +72,18 @@ impl SandboxRouteMode {
         ModeRouting::PermissionPreflight
     }
 
+    /// Whether the mode's shell list names this tool, whatever the configured
+    /// mode is.
+    ///
+    /// `Shell` is the mode whose delegation is exactly that list, so asking it
+    /// is asking the list itself — and the list stays in one place. `explain`
+    /// needs this to report the case where the list names something no tool
+    /// declares: `Shell` itself, which would be routed here and resolves to
+    /// nothing in the registry.
+    pub(crate) fn is_named_shell_tool(tool: &str) -> bool {
+        matches!(Self::Shell.route(tool), ModeRouting::Backend)
+    }
+
     fn should_delegate_check(self, tool: &str) -> bool {
         match self {
             Self::All => true,
