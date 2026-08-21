@@ -28,6 +28,8 @@ pub use generated_contract_b::*;
 #[path = "generated_contract_validation_noop.rs"]
 mod generated_contract_validation_noop;
 use generated_contract_validation_noop::*;
+#[path = "generated_contract_universe_queries.rs"]
+mod generated_contract_universe_queries;
 #[path = "generated_contract_validation.rs"]
 mod generated_contract_validation;
 use generated_contract_validation::*;
@@ -46,6 +48,9 @@ use generated_contract_invariants::*;
 #[cfg(test)]
 #[path = "generated_contract_execution_tests.rs"]
 mod execution_tests;
+#[cfg(test)]
+#[path = "generated_contract_grouping_tests.rs"]
+mod grouping_tests;
 #[cfg(test)]
 #[path = "generated_contract_refuted_noop_tests.rs"]
 mod refuted_noop_tests;

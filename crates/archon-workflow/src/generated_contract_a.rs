@@ -61,7 +61,7 @@ pub(super) struct ContractTaskUniverse {
     pub(super) canonical: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
     dependencies: BTreeMap<String, Vec<String>>,
-    tasks_with_deliverable_contracts: BTreeSet<String>,
+    pub(super) tasks_with_deliverable_contracts: BTreeSet<String>,
     /// Tasks a no-op can never satisfy, because a deliverable contract names a
     /// command that has to RUN. Derived from the contract, not from any task's
     /// wording, so it holds for every PRD. See the rule in

@@ -85,6 +85,34 @@ pub(super) fn generated_item_issues(
             "task produces artifacts but declares no deliverable contract and no target_files",
         ));
     }
+    // ONE item, ONE deliverable contract.
+    //
+    // The reason the tasks never fired. Observed live: the inventory emitted
+    // `TASK-TDL-040-050-060-070-providers` claiming four canonical tasks, and
+    // `TASK-TDL-010-010-020-030-base` claiming three. Three of those four never
+    // appeared in any implementation wave, because they had no item of their
+    // own to be dispatched as. Acceptance is per ITEM, so one agent turn, one
+    // result and one no-op proof retired four separate contracts, and every
+    // rule that made acceptance stricter still only ever had one story to
+    // judge.
+    //
+    // Grouping itself was already policed in three directions — a task grouped
+    // with its own prerequisite, a task claimed by two items, a task claimed by
+    // none — and the repair that splits a grouped item already exists. Nothing
+    // triggered it. The inventory prompt asks for splits; asking is not a rule.
+    //
+    // Scoped to tasks that declare a deliverable contract, because that is
+    // exactly where the harm is: each contract needs its own proof. Tasks with
+    // no contract of their own may still share an item.
+    if work_type == "implementation" && universe.contracted_task_count(&canonical_task_ids) > 1 {
+        issues.push(make_issue(
+            GeneratedContractIssueKind::InventoryShapeRepair,
+            "canonical_task_ids",
+            "this item claims more than one canonical task that declares its own \
+             deliverable contract: split it so each contracted task has an item, \
+             or one result will close all of them",
+        ));
+    }
     match work_type.as_str() {
         "implementation" => {
             if let Some(message) = target_files_issue(value, target_repository_root) {
