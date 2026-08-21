@@ -125,9 +125,8 @@ mod tests {
     /// first draft of this rule return None on the live file.
     #[test]
     fn a_wrapper_full_of_metadata_does_not_vouch_for_its_empty_collections() {
-        let (_dir, path) = artifact(
-            r#"{"schema": "v1", "generated_at": "2026-08-15", "cells": [], "gaps": []}"#,
-        );
+        let (_dir, path) =
+            artifact(r#"{"schema": "v1", "generated_at": "2026-08-15", "cells": [], "gaps": []}"#);
         assert!(structurally_empty_defect(&path).is_some());
     }
 

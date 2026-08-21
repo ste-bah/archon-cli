@@ -59,8 +59,7 @@ pub(super) fn enforce_declared_artifact_requirements(
                 // case: an item that DECLARED it would produce this artifact,
                 // and is now claiming it did.
                 super::artifact_emptiness::structurally_empty_defect(Path::new(absolute))
-            })
-        {
+            }) {
             None => record_declared_artifact(result, raw),
             // Not under the project artifact root — try the repository. A
             // deliverable contract may name a source file, and source does not

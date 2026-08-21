@@ -21,11 +21,11 @@ use bash_process::{
 };
 
 #[cfg(test)]
-#[path = "bash_process_tests.rs"]
-mod bash_process_tests;
-#[cfg(test)]
 #[path = "bash_output_bound_tests.rs"]
 mod bash_output_bound_tests;
+#[cfg(test)]
+#[path = "bash_process_tests.rs"]
+mod bash_process_tests;
 
 #[path = "bash_env.rs"]
 pub(crate) mod bash_env;
