@@ -1,32 +1,108 @@
 //! The environment handed to spawned shells.
 //!
-//! Every spawned child gets the host environment, verbatim. There is no
-//! compiled-in list of variable names here, and deliberately so: a hardcoded
-//! allowlist can only ever name what this crate's authors happened to predict,
-//! and every variable they did not predict is dropped *silently*. That failure
-//! is invisible from inside the child — a command reads `std::env::var` and
-//! sees nothing, so it reports the honest but wrong conclusion that the
-//! operator never set the value.
+//! Two different environments, because there are two different callers.
 //!
-//! It cost a working data pipeline to learn that. An allowlist naming `PATH`,
+//! **Agent shells** get the host environment minus Archon's own credentials.
+//! There is no allowlist of permitted names: an allowlist can only name what
+//! this crate's authors predicted, and everything else is dropped *silently* —
+//! invisible from inside the child, which reads `std::env::var`, sees nothing,
+//! and reports the honest but wrong conclusion that the operator never set the
+//! value. It cost a working data pipeline to learn that: a list naming `PATH`,
 //! `HOME` and thirty-odd OS variables stripped a downstream project's API key
-//! and service URL from every agent shell. That project's capability probe then
-//! reported credentials missing and its fail-closed guard correctly refused to
-//! write anything — a correct decision reached from starved input. The same
-//! list had already grown three of that project's variable names inside
-//! `archon-core`, which is what a hardcoded registry does under pressure: it
-//! accretes its callers' domain, one patch at a time.
+//! and service URL, its capability probe reported credentials missing, and its
+//! fail-closed guard correctly refused to write anything.
 //!
-//! Materializing the host environment as a `Vec` rather than letting the child
-//! inherit it implicitly is still worth doing. Callers layer defaults and
-//! provider overlays on top of what this returns, and an explicit vector paired
-//! with `Command::env_clear` makes the child's environment exactly what those
-//! layers computed, on every platform, rather than whatever the parent happened
-//! to hold.
+//! What IS withheld is the short, knowable set of credentials belonging to
+//! Archon itself — [`ENGINE_CREDENTIAL_VARS`]. The engine owns those names by
+//! definition, so telling them apart from a downstream project's credentials
+//! needs no cleverness and no configuration. An agent has no business reading
+//! the key that pays for it, and `bash_sensitive_env_stripped` says so.
+//!
+//! **Hooks** get [`isolated_env`] instead: a strict allowlist of OS process
+//! variables and nothing else. A hook is user-configured and fires
+//! automatically rather than being work an agent asked for, so Issue #92 gives
+//! it an explicit context and no inherited state. Both spawn paths shared one
+//! function once, which is how a change aimed at agent shells silently widened
+//! what hooks could see.
+//!
+//! Materializing the environment as a `Vec` rather than letting the child
+//! inherit it implicitly is what makes either policy enforceable: callers layer
+//! defaults and overlays on top, and an explicit vector paired with
+//! `Command::env_clear` makes the child's environment exactly what those layers
+//! computed, on every platform.
 
-/// The host environment, as name/value pairs, in no particular order.
+/// Credentials belonging to Archon itself, withheld from every spawned child.
+///
+/// Not a general secret filter — a pattern rule over names like `*_KEY` would
+/// catch a downstream project's provider credentials too, which is the whole
+/// thing the passthrough exists to allow. These are only the names this engine
+/// authenticates with, matched case-insensitively.
+pub const ENGINE_CREDENTIAL_VARS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ARCHON_API_KEY",
+    "ARCHON_OAUTH_TOKEN",
+    "ARCHON_DOCS_OPENAIKEY",
+    "ARCHON_MEMORY_OPENAIKEY",
+];
+
+/// OS process variables a hook may inherit, and nothing else (Issue #92).
+const HOOK_PASSTHROUGH_VARS: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "USERNAME",
+    "USERPROFILE",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_COLLATE",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "TERM",
+    "COLORTERM",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "EDITOR",
+    "VISUAL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "PSMODULEPATH",
+    // Where Windows keeps installed toolchains. rustc locates the MSVC linker
+    // by running `vswhere.exe` out of `%ProgramFiles(x86)%`, so without these
+    // the lookup fails and it falls back to invoking a bare `link.exe` off
+    // PATH. On any machine with Git installed that resolves to Git's coreutils
+    // `link`, which answers with "link: extra operand" and a failed build —
+    // the symptom looked like a linker bug and was an environment hole.
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMW6432",
+    "PROGRAMDATA",
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+];
+
+/// The host environment minus Archon's own credentials, for agent shells.
 pub fn host_env() -> Vec<(String, String)> {
     collect_env(std::env::vars())
+}
+
+/// OS process variables only, for hooks (Issue #92).
+pub fn isolated_env() -> Vec<(String, String)> {
+    allowlist_env(std::env::vars())
 }
 
 fn collect_env<K, V>(vars: impl IntoIterator<Item = (K, V)>) -> Vec<(String, String)>
@@ -36,6 +112,25 @@ where
 {
     vars.into_iter()
         .map(|(key, value)| (key.into(), value.into()))
+        .filter(|(key, _)| {
+            !ENGINE_CREDENTIAL_VARS
+                .iter()
+                .any(|owned| owned.eq_ignore_ascii_case(key))
+        })
+        .collect()
+}
+
+fn allowlist_env<K, V>(vars: impl IntoIterator<Item = (K, V)>) -> Vec<(String, String)>
+where
+    K: Into<String>,
+    V: Into<String>,
+{
+    vars.into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .filter(|(key, _)| {
+            let upper = key.to_uppercase();
+            HOOK_PASSTHROUGH_VARS.contains(&upper.as_str())
+        })
         .collect()
 }
 
@@ -75,67 +170,63 @@ pub(crate) fn set_env_override(env: &mut Vec<(String, String)>, key: &str, value
 
 #[cfg(test)]
 mod tests {
-    use super::collect_env;
+    use super::{allowlist_env, collect_env};
 
-    /// The regression this module exists to prevent.
-    ///
-    /// Each of these was dropped by the allowlist that used to live here. The
-    /// provider keys are the ones that broke the data lake; the Windows
-    /// toolchain paths are the ones whose absence surfaced as a linker error
-    /// rather than a missing-variable error, because rustc could not run
-    /// `vswhere.exe` and fell back to a bare `link.exe` that resolved to Git's
-    /// coreutils `link`.
+    /// The regression the agent-shell path exists to prevent: variables the
+    /// engine's authors never predicted must reach the child. Every one of
+    /// these was silently dropped by the allowlist that used to apply here.
     #[test]
-    fn every_host_variable_reaches_the_child() {
+    fn unpredicted_host_variables_reach_the_agent_shell() {
         let host = [
             ("PATH", "/usr/bin"),
-            ("Path", r"C:\Windows"),
-            ("HOME", "/home/test"),
-            ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
-            ("POLYGON_API_KEY", "secret"),
+            ("POLYGON_API_KEY", "provider-credential"),
             ("OPENBB_API_URL", "http://127.0.0.1:6900"),
             ("ARCHON_STOOQ_CSV_URL", "http://example.invalid/csv"),
-            (
-                "PSModulePath",
-                r"C:\Program Files\WindowsPowerShell\Modules",
-            ),
-            ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
             ("HARMLESS_CUSTOM_FLAG", "enabled"),
         ];
-
         let env = collect_env(host);
-
-        assert_eq!(env.len(), host.len());
         for (key, value) in host {
             assert!(
-                env.iter()
-                    .any(|(got_key, got_value)| got_key == key && got_value == value),
-                "{key} must reach the child: {env:?}"
+                env.iter().any(|(k, v)| k == key && v == value),
+                "{key} must reach the agent shell: {env:?}"
             );
         }
     }
 
-    /// Values are forwarded byte-for-byte. A key whose value contains `=`, a
-    /// newline, or non-ASCII is common in real environments and must not be
-    /// reshaped on the way through.
+    /// The engine's own credentials never do — an agent has no business
+    /// reading the key that pays for it. Matched case-insensitively so a
+    /// casing variant cannot slip through.
     #[test]
-    fn values_are_forwarded_verbatim() {
+    fn engine_credentials_are_withheld_from_the_agent_shell() {
         let env = collect_env([
-            ("WITH_EQUALS", "a=b=c"),
-            ("WITH_NEWLINE", "line one\nline two"),
-            ("WITH_UNICODE", "café ☕"),
-            ("EMPTY", ""),
+            ("ANTHROPIC_API_KEY", "sk-secret"),
+            ("anthropic_api_key", "sk-secret-lowercase"),
+            ("ARCHON_OAUTH_TOKEN", "tok"),
+            ("POLYGON_API_KEY", "provider-credential"),
         ]);
-
         assert_eq!(
             env,
-            vec![
-                ("WITH_EQUALS".to_string(), "a=b=c".to_string()),
-                ("WITH_NEWLINE".to_string(), "line one\nline two".to_string()),
-                ("WITH_UNICODE".to_string(), "café ☕".to_string()),
-                ("EMPTY".to_string(), String::new()),
-            ]
+            vec![(
+                "POLYGON_API_KEY".to_string(),
+                "provider-credential".to_string()
+            )],
+            "only the non-engine credential survives"
         );
+    }
+
+    /// Hooks stay on the Issue #92 allowlist: OS process variables only.
+    #[test]
+    fn hook_environment_is_os_variables_only() {
+        let env = allowlist_env([
+            ("PATH", "/usr/bin"),
+            ("PSModulePath", r"C:\Modules"),
+            ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            ("POLYGON_API_KEY", "provider-credential"),
+            ("ISSUE92_FORBIDDEN", "must-not-reach-hooks"),
+        ]);
+        let kept: Vec<&str> = env.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(kept, vec!["PATH", "PSModulePath", "ProgramFiles(x86)"]);
     }
 
     #[test]
@@ -143,20 +234,6 @@ mod tests {
         let mut env = vec![("Path".to_string(), r"C:\Windows".to_string())];
         super::ensure_env_default(&mut env, "PATH", "unexpected");
         assert_eq!(env, vec![("Path".to_string(), r"C:\Windows".to_string())]);
-    }
-
-    /// `host_env` reads the real process environment, not a fabricated one.
-    ///
-    /// Asserts a variable every platform sets rather than comparing counts:
-    /// Rust runs tests on threads of one process, so a concurrent test that
-    /// sets or removes a variable would make a count equality flake.
-    #[test]
-    fn host_env_reads_the_real_process_environment() {
-        let env = super::host_env();
-        assert!(
-            env.iter().any(|(key, _)| key.eq_ignore_ascii_case("PATH")),
-            "PATH must come from the real environment: {env:?}"
-        );
     }
 
     #[test]

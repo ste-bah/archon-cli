@@ -98,7 +98,7 @@ impl SpawnRequest {
             .arg(&self.command)
             .current_dir(&self.cwd)
             .env_clear()
-            .envs(archon_tools::bash::host_env())
+            .envs(archon_tools::bash::isolated_env())
             .env("ARCHON_SESSION_ID", &self.session_id)
             .env("ARCHON_CWD", &self.cwd)
             .env("ARCHON_HOOK_EVENT", &self.event_name)
