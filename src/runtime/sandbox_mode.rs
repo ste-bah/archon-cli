@@ -2,7 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
+    SandboxTerminalRequest,
+};
 
 pub(crate) fn apply_configured_sandbox_mode(
     inner: Arc<dyn SandboxBackend>,
@@ -69,6 +72,15 @@ impl SandboxBackend for ModeScopedSandboxBackend {
         Ok(())
     }
 
+    /// Delegated whatever the mode is, exactly as `execute_bash` is.
+    ///
+    /// `mode` scopes which tools have their *permission* deferred to the
+    /// backend; it has never scoped where execution happens. A terminal is
+    /// execution, so under every mode it belongs in the backend's world.
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        self.inner.terminal(request)
+    }
+
     fn execute_bash<'a>(
         &'a self,
         request: SandboxCommandRequest,
@@ -96,6 +108,15 @@ mod tests {
                 "Bash" | "Shell" | "Read" => Ok(()),
                 other => Err(format!("blocked by real backend: {other}")),
             }
+        }
+
+        fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
+            SandboxTerminal::Open(archon_permissions::SandboxTerminalCommand {
+                program: "fake-backend".into(),
+                args: vec!["--shell".into()],
+                shell: "bash".into(),
+                location: "/workspace in the fake world".into(),
+            })
         }
 
         fn execute_bash<'a>(
@@ -159,6 +180,31 @@ mod tests {
             .unwrap_err();
 
         assert!(error.contains("blocked by real backend"));
+    }
+
+    /// Under the default `risky` mode `check` is not consulted for terminal
+    /// tools at all, so if the mode scoped `terminal` the way it scopes
+    /// `check`, a terminal would open on the host while `Bash` went through the
+    /// backend. That is the #201 Phase 6 bypass, restated as a test.
+    #[test]
+    fn every_mode_puts_a_terminal_in_the_backends_world() {
+        for mode in ["risky", "shell", "all"] {
+            let backend = apply_configured_sandbox_mode(
+                Arc::new(DenyUnsupportedBackend),
+                &docker_config(mode),
+            );
+
+            let terminal = backend.terminal(&SandboxTerminalRequest {
+                shell: None,
+                workspace: std::path::PathBuf::from("/repo"),
+                cwd: std::path::PathBuf::from("/repo"),
+            });
+
+            assert!(
+                matches!(terminal, SandboxTerminal::Open(_)),
+                "{mode} mode let a terminal out onto the host"
+            );
+        }
     }
 
     #[test]

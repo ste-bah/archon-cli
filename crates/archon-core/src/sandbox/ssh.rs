@@ -3,14 +3,17 @@ use std::pin::Pin;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
+    SandboxTerminalRequest,
+};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
 
 mod exec;
 mod fs;
 
-use exec::{ssh_command_args, ssh_output_result};
+use exec::{ssh_command_args, ssh_output_result, ssh_terminal_args};
 pub use fs::ssh_filesystem;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +262,24 @@ impl SandboxBackend for SshSandboxBackend {
     ) -> Result<(), String> {
         self.safe_to_route()?;
         crate::sandbox::capability_gate::check_capability("ssh", tool, capability)
+    }
+
+    /// A terminal is the same SSH connection with a TTY on it.
+    ///
+    /// Refused rather than falling back the moment the connection cannot be
+    /// made safely, for the reason the rest of this backend refuses: a host
+    /// shell offered in place of a remote one is not a degraded sandbox, it is
+    /// no sandbox.
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        if let Err(error) = self.safe_to_route() {
+            return SandboxTerminal::Refused(format!(
+                "ssh sandbox refused a terminal: {error}; no host shell fallback was used"
+            ));
+        }
+        match ssh_terminal_args(&self.config, request) {
+            Ok(command) => SandboxTerminal::Open(command),
+            Err(error) => SandboxTerminal::Refused(format!("ssh sandbox: {error}")),
+        }
     }
 
     fn execute_bash<'a>(

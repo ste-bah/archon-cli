@@ -4,7 +4,10 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
+    SandboxTerminalRequest,
+};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
 
@@ -213,6 +216,19 @@ pub fn render_openshell_doctor_report(report: &OpenShellDoctorReport) -> String 
     out
 }
 
+/// Why this backend has no terminal to offer (#201 Phase 6).
+///
+/// Every command here is `openshell sandbox create --no-keep -- ...`: a sandbox
+/// built for one command and destroyed with it, and in `upload` mode a fresh
+/// copy of the workspace each time. There is no session for a PTY to attach to,
+/// and a sandbox held open for a terminal would be a *different* world from the
+/// one the next `Bash` call creates â€” so the shell and the commands around it
+/// would disagree about what is on disk. Refusing says that; opening one on the
+/// host would hide it.
+const NO_PERSISTENT_SESSION: &str = "the openshell backend creates a throwaway \
+     sandbox per command, so there is no session for a terminal to live in. Use \
+     Bash, or switch sandbox.backend to docker for a shell inside the sandbox";
+
 #[derive(Debug, Clone)]
 pub struct OpenShellSandboxBackend {
     config: OpenShellConfig,
@@ -264,6 +280,10 @@ impl SandboxBackend for OpenShellSandboxBackend {
     ) -> Result<(), String> {
         self.safe_to_route()?;
         crate::sandbox::capability_gate::check_capability("openshell", tool, capability)
+    }
+
+    fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
+        SandboxTerminal::Refused(format!("openshell sandbox: {NO_PERSISTENT_SESSION}"))
     }
 
     fn execute_bash<'a>(
@@ -363,103 +383,5 @@ fn apply_openshell_env_policy(cmd: &mut TokioCommand, config: &OpenShellConfig) 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use archon_permissions::ToolCapability;
-
-    #[test]
-    fn openshell_defaults_are_safe() {
-        let cfg = OpenShellConfig::default();
-
-        assert!(!cfg.enabled);
-        assert_eq!(cfg.binary, "openshell");
-        assert_eq!(cfg.workspace_mode, "upload");
-        assert_eq!(cfg.gateway.as_deref(), Some("openshell"));
-        assert!(!cfg.provider_injection);
-        assert!(!cfg.host_shell_fallback);
-    }
-
-    #[test]
-    fn doctor_fails_closed_when_binary_missing() {
-        let cfg = OpenShellConfig {
-            enabled: true,
-            ..OpenShellConfig::default()
-        };
-
-        let report = openshell_doctor_report(&cfg, OpenShellProbe::missing("not installed"));
-
-        assert_eq!(report.status, OpenShellDoctorStatus::MissingBinary);
-        assert!(render_openshell_doctor_report(&report).contains("missing-binary"));
-    }
-
-    #[test]
-    fn doctor_rejects_provider_injection_and_host_fallback() {
-        let cfg = OpenShellConfig {
-            enabled: true,
-            provider_injection: true,
-            host_shell_fallback: true,
-            ..OpenShellConfig::default()
-        };
-
-        let report = openshell_doctor_report(&cfg, OpenShellProbe::found("openshell 1.0.0"));
-
-        assert_eq!(report.status, OpenShellDoctorStatus::UnsafeConfig);
-        assert!(render_openshell_doctor_report(&report).contains("unsafe-config"));
-    }
-
-    #[test]
-    fn doctor_reports_routed_execution_without_provider_injection() {
-        let cfg = OpenShellConfig {
-            enabled: true,
-            providers: vec!["my-claude".into()],
-            ..OpenShellConfig::default()
-        };
-
-        let report = openshell_doctor_report(&cfg, OpenShellProbe::found("openshell 1.2.3"));
-        let body = render_openshell_doctor_report(&report);
-
-        assert_eq!(report.status, OpenShellDoctorStatus::ReadyDetectOnly);
-        assert!(body.contains("Bash routes through OpenShell"));
-        assert!(body.contains("providers are ignored"));
-        assert!(body.contains("Anthropic spoofing remains host-side"));
-    }
-
-    #[test]
-    fn backend_fails_closed_when_openshell_missing() {
-        let backend = OpenShellSandboxBackend::new(OpenShellConfig {
-            enabled: true,
-            binary: "__definitely_missing_openshell__".into(),
-            ..OpenShellConfig::default()
-        });
-
-        let error = backend
-            .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
-            .unwrap_err();
-
-        assert!(error.contains("__definitely_missing_openshell__"));
-    }
-
-    #[tokio::test]
-    async fn backend_execute_bash_runs_fail_closed_preflight() {
-        let backend = OpenShellSandboxBackend::new(OpenShellConfig {
-            enabled: true,
-            binary: "__definitely_missing_openshell__".into(),
-            ..OpenShellConfig::default()
-        });
-        let result = backend
-            .execute_bash(SandboxCommandRequest {
-                command: "echo no-host".into(),
-                working_dir: std::path::PathBuf::from("."),
-                timeout_ms: 1000,
-                max_output_bytes: 1024,
-                env: Vec::new(),
-            })
-            .await
-            .unwrap();
-
-        assert!(result.is_error);
-        assert!(result.content.contains("refused execution"));
-        assert!(result.content.contains("__definitely_missing_openshell__"));
-        assert!(result.content.contains("no host shell fallback"));
-    }
-}
+#[path = "openshell/tests.rs"]
+mod tests;

@@ -23,6 +23,18 @@ impl SandboxBackend for FakeSandboxBackend {
         }
     }
 
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Open(archon_permissions::SandboxTerminalCommand {
+            program: "fake".into(),
+            args: vec!["shell".into()],
+            shell: "bash".into(),
+            location: "/workspace".into(),
+        })
+    }
+
     fn execute_bash<'a>(
         &'a self,
         _request: SandboxCommandRequest,

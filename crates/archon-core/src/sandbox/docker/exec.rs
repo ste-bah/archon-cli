@@ -3,11 +3,59 @@ use std::path::{Component, Path};
 use archon_permissions::sandbox::{SandboxCommandRequest, SandboxCommandResult};
 
 use super::DockerConfig;
+use super::fs::CONTAINER_WORKSPACE;
 
 pub(super) fn docker_run_args(
     config: &DockerConfig,
     workspace_access: &str,
     request: &SandboxCommandRequest,
+) -> Vec<String> {
+    let mut args = docker_container_args(
+        config,
+        workspace_access,
+        &request.working_dir,
+        CONTAINER_WORKSPACE,
+    );
+    args.extend(allowed_env_args(&request.env, &config.env_allowlist));
+    args.extend([
+        config.image.clone(),
+        "/bin/bash".into(),
+        "-lc".into(),
+        request.command.clone(),
+    ]);
+    args
+}
+
+/// A terminal's `docker run`, built from the same pieces as a command's.
+///
+/// The differences are exactly two: `-i -t`, so the container gets a TTY on the
+/// PTY the caller opened; and a shell in place of a command, because the shell
+/// is what stays. Everything else — the mount, the caps, the network mode — is
+/// shared with [`docker_run_args`] on purpose, so a terminal cannot end up in a
+/// more permissive container than `Bash` gets.
+pub(super) fn docker_terminal_args(
+    config: &DockerConfig,
+    workspace_access: &str,
+    workspace: &Path,
+    container_workdir: &str,
+    shell_program: &str,
+) -> Vec<String> {
+    let mut args = docker_container_args(config, workspace_access, workspace, container_workdir);
+    args.extend(["--interactive".into(), "--tty".into()]);
+    // Claimed rather than inherited: the docker CLI's own `TERM` does not reach
+    // the container, and a shell that finds it unset drops to line-at-a-time
+    // behaviour that the output buffer then has to read back.
+    args.extend(["--env".into(), "TERM=xterm-256color".into()]);
+    args.extend([config.image.clone(), shell_program.to_string()]);
+    args
+}
+
+/// The container `Bash` and a terminal both get: same isolation, same mount.
+fn docker_container_args(
+    config: &DockerConfig,
+    workspace_access: &str,
+    working_dir: &Path,
+    container_workdir: &str,
 ) -> Vec<String> {
     let mut args = vec!["run".into(), "--rm".into(), "--pull".into(), "never".into()];
     args.extend(["--security-opt".into(), "no-new-privileges".into()]);
@@ -25,35 +73,85 @@ pub(super) fn docker_run_args(
         args.extend(["--cpus".into(), cpus.clone()]);
     }
     args.extend(workspace_mount_args(
-        &request.working_dir,
+        working_dir,
         workspace_access,
         &config.writable_paths,
+        container_workdir,
     ));
-    args.extend(allowed_env_args(&request.env, &config.env_allowlist));
-    args.extend([
-        config.image.clone(),
-        "/bin/bash".into(),
-        "-lc".into(),
-        request.command.clone(),
-    ]);
     args
+}
+
+/// The container path a host path names, for a shell that must start there.
+///
+/// Strict where `DockerFs::to_container` is lenient: that one translates
+/// results the model will merely read, while this one chooses the directory a
+/// live shell comes up in. A path outside the mount has no container form at
+/// all, and starting the shell at the workspace root instead would silently
+/// answer a different question than the one asked.
+pub(super) fn container_workdir(workspace: &Path, cwd: &Path) -> Result<String, String> {
+    let Ok(relative) = cwd.strip_prefix(workspace) else {
+        return Err(format!(
+            "{} is outside the sandbox workspace ({}), which is the only host \
+             directory the container can see",
+            cwd.display(),
+            workspace.display()
+        ));
+    };
+    let mut path = CONTAINER_WORKSPACE.to_string();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => {
+                path.push('/');
+                path.push_str(&part.to_string_lossy());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "{} leaves the sandbox workspace mount",
+                    cwd.display()
+                ));
+            }
+        }
+    }
+    Ok(path)
+}
+
+/// The shell to run in the container, by the name the model asked for.
+///
+/// `None` means the caller did not say, and the container's answer is bash
+/// regardless of what the host would have chosen — the host default on Windows
+/// is PowerShell, and asking a Linux image for it would refuse every terminal
+/// opened without an explicit `shell` on the platform this is developed on.
+pub(super) fn container_shell(shell: Option<&str>) -> Result<(String, String), String> {
+    match shell {
+        None | Some("bash") => Ok(("bash".into(), "/bin/bash".into())),
+        Some("sh") => Ok(("sh".into(), "/bin/sh".into())),
+        Some(other @ ("powershell" | "cmd")) => Err(format!(
+            "the docker sandbox runs a Linux container, which has no {other}; \
+             ask for bash or sh"
+        )),
+        Some(other) => Err(format!(
+            "unknown shell {other:?}; the docker sandbox offers bash and sh"
+        )),
+    }
 }
 
 fn workspace_mount_args(
     working_dir: &Path,
     workspace_access: &str,
     writable_paths: &[String],
+    container_workdir: &str,
 ) -> Vec<String> {
     let readonly = workspace_access != "rw";
     let mut args = vec![
         "--mount".into(),
         format!(
-            "type=bind,src={},dst=/workspace{}",
+            "type=bind,src={},dst={CONTAINER_WORKSPACE}{}",
             working_dir.display(),
             if readonly { ",readonly" } else { "" }
         ),
         "--workdir".into(),
-        "/workspace".into(),
+        container_workdir.to_string(),
     ];
     if workspace_access == "scratch" {
         args.extend(["--tmpfs".into(), "/scratch:rw,nosuid,size=512m".into()]);
@@ -85,7 +183,7 @@ fn writable_path_mount_args(working_dir: &Path, writable_paths: &[String]) -> Ve
         );
         args.extend([
             "--mount".into(),
-            format!("type=bind,src={source},dst=/workspace/{relative}"),
+            format!("type=bind,src={source},dst={CONTAINER_WORKSPACE}/{relative}"),
         ]);
     }
     args

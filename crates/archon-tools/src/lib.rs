@@ -116,6 +116,7 @@ pub(crate) mod terminal_buffer;
 pub(crate) mod terminal_registry;
 pub(crate) mod terminal_shell;
 pub mod terminal_tools;
+pub(crate) mod terminal_world;
 pub mod todo_write;
 pub mod tool;
 #[cfg(test)]

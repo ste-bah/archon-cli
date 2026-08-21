@@ -93,6 +93,9 @@ serde_yaml_ng.workspace = true
 archon-session = { path = "../archon-session", features = ["test-support"] }
 archon-tools = { path = "../archon-tools", features = ["test-support"] }
 archon-permissions = { path = "../archon-permissions" }
+# #201 Phase 6: the docker-world integration test opens the terminal the backend
+# describes, which needs a real PTY. Dev-only — archon-core never spawns one.
+archon-pty = { path = "../archon-pty" }
 # TASK-AGS-506: test-util feature needed for tokio::time::pause/advance in
 # circuit_breaker tests. This only affects test builds.
 tokio = { workspace = true, features = ["test-util"] }

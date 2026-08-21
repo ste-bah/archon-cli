@@ -24,7 +24,9 @@
 use std::path::{Path, PathBuf};
 
 use archon_core::sandbox::{DockerConfig, DockerFs, DockerSandboxBackend};
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxTerminal, SandboxTerminalRequest,
+};
 use archon_tools::filesystem::FileSystem;
 
 fn docker_config() -> DockerConfig {
@@ -141,6 +143,90 @@ async fn a_nested_path_printed_by_the_container_resolves() {
         .expect("the exact path the container printed");
 
     assert_eq!(seen, "fn main() {}");
+}
+
+/// #201 Phase 6, end to end: a terminal opens *inside* the container.
+///
+/// The unit tests pin the `docker run` arguments; only this one proves the
+/// shell that comes up is in the container. The two facts it asks the shell for
+/// are the container's, not the image's: uid 0, because the test process is
+/// not root and a host shell would inherit its uid; and one network interface,
+/// because the backend runs with `--network none` while any host has more.
+/// Comparing distributions would prove nothing on a machine whose host happens
+/// to be the same one as the image.
+#[tokio::test]
+#[ignore = "requires a Docker daemon and the ubuntu:24.04 image"]
+async fn a_terminal_opens_inside_the_container() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // The container drops every capability, and `CAP_DAC_OVERRIDE` is what lets
+    // its root write through host permissions it does not match. A tempdir is
+    // 0700 and owned by the invoking user, so without this the mount is
+    // read-only in practice however `workspace_access` is set.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777))
+            .expect("open the workspace to the container's uid");
+    }
+    let backend = DockerSandboxBackend::new(docker_config(), "rw");
+
+    let SandboxTerminal::Open(command) = backend.terminal(&SandboxTerminalRequest {
+        shell: None,
+        workspace: dir.path().to_path_buf(),
+        cwd: dir.path().to_path_buf(),
+    }) else {
+        panic!("the docker backend must open a terminal in the container");
+    };
+    assert_eq!(command.shell, "bash");
+
+    let mut builder = archon_pty::CommandBuilder::new(&command.program);
+    builder.args(&command.args);
+    let session = archon_pty::PtySession::spawn_headless(
+        builder,
+        archon_pty::PtySize {
+            rows: 50,
+            cols: 240,
+            pixel_width: 0,
+            pixel_height: 0,
+        },
+    )
+    .expect("the docker terminal spawns");
+    let (control, mut output) = session.split();
+
+    control.send_input(
+        b"printf 'from the terminal\\n' > /workspace/from_terminal.txt; \
+          printf 'RESULT %s %s\\n' \"uid$(id -u)\" \"$(ls /sys/class/net | tr '\\n' '+')\"\n"
+            .to_vec(),
+    );
+
+    // Waiting on the expanded text, never on anything the command line itself
+    // contains: the PTY echoes what was typed, so a marker present in both
+    // would end the wait before the shell had answered.
+    let mut seen = String::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline && !seen.contains("RESULT uid") {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), output.recv()).await {
+            Ok(Some(chunk)) => seen.push_str(&String::from_utf8_lossy(&chunk)),
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+    control.kill();
+
+    assert!(
+        seen.contains("RESULT uid0 "),
+        "the shell inherited the test process's user, so it is a host shell: {seen}"
+    );
+    assert!(
+        seen.contains("RESULT uid0 lo+"),
+        "the shell can see host network interfaces, so it is not in the \
+         --network none container: {seen}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("from_terminal.txt"))
+            .expect("the terminal's write reached the host through the mount"),
+        "from the terminal\n"
+    );
 }
 
 /// A read-only workspace must actually be read-only in the container. If this

@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use archon_permissions::SandboxBackend;
+use archon_permissions::{SandboxBackend, SandboxTerminal, SandboxTerminalRequest};
 
 /// Sandbox configuration — allowlists for paths, toggles for
 /// network/shell. `enabled` turns the whole sandbox on/off.
@@ -200,6 +200,24 @@ impl SandboxBackend for SharedSandboxFlag {
                 "sandbox: {tool} is blocked ({} is not read-only)",
                 other.label()
             )),
+        }
+    }
+
+    /// This flag denies; it does not isolate. It has no world of its own to put
+    /// a shell in, so with it on there is nowhere for a terminal to go — and
+    /// the host is the one place it must not be, since that is where `Bash` is
+    /// being refused.
+    fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
+        if self.enabled.load(Ordering::SeqCst) {
+            SandboxTerminal::Refused(
+                "sandbox: terminals are blocked (shell operations disabled). This \
+                 sandbox blocks execution rather than relocating it, so there is \
+                 no sandboxed shell to open. Turn it off with /sandbox off, or \
+                 configure sandbox.backend = docker for a shell inside a container."
+                    .into(),
+            )
+        } else {
+            SandboxTerminal::Host
         }
     }
 }

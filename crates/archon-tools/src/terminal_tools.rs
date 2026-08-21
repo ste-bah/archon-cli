@@ -15,6 +15,7 @@ use serde_json::json;
 
 use crate::terminal_registry as registry;
 use crate::terminal_shell as shells;
+use crate::terminal_world as world;
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
@@ -71,23 +72,33 @@ impl Tool for TerminalCreateTool {
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let shell = string_arg(&input, "shell").unwrap_or_else(|| shells::default_shell().into());
+        // The shell stays unresolved until the world is chosen: the host
+        // default and a Linux backend's default are different answers, and
+        // picking the host's here would refuse every sandboxed terminal opened
+        // without an explicit `shell` on Windows.
+        let shell = string_arg(&input, "shell");
         let cwd = string_arg(&input, "cwd").map_or_else(
             || ctx.working_dir.clone(),
             |value| ctx.working_dir.join(value),
         );
-        let program = match shells::build(&shell, &cwd) {
-            Ok(program) => program,
+        let launch = match world::plan(ctx, shell.as_deref(), &cwd) {
+            Ok(launch) => launch,
             Err(error) => return ToolResult::error(error),
         };
 
         let id = format!("term-{}", uuid::Uuid::new_v4().simple());
-        match registry::create(&ctx.session_id, id.clone(), shell.clone(), program) {
+        match registry::create(
+            &ctx.session_id,
+            id.clone(),
+            launch.shell.clone(),
+            launch.sandboxed,
+            launch.command,
+        ) {
             Ok(_) => ToolResult::success(format!(
-                "Terminal {id} is running {shell} in {}.\n\
+                "Terminal {id} is running {} in {}.\n\
                  Write to it with TerminalWrite, then read with TerminalRead \
                  (start at offset 0).",
-                cwd.display()
+                launch.shell, launch.location
             )),
             Err(error) => ToolResult::error(error),
         }
@@ -150,7 +161,7 @@ impl Tool for TerminalWriteTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let Some(id) = string_arg(&input, "id") else {
             return ToolResult::error("id is required");
         };
@@ -160,6 +171,17 @@ impl Tool for TerminalWriteTool {
         let Some(terminal) = registry::get(&id) else {
             return ToolResult::error(unknown_terminal(&id));
         };
+        // A terminal keeps the world it was opened in. Turning a sandbox on
+        // mid-session does not move an already-running host shell into it, and
+        // typing into that shell afterwards would run on the host while
+        // everything else went through the backend.
+        if !terminal.sandboxed && !world::host_terminals_allowed(ctx) {
+            return ToolResult::error(format!(
+                "terminal {id} is a host shell, opened before the sandbox took \
+                 effect. Writing to it would run outside the sandbox. Close it \
+                 with TerminalClose and open a new one with TerminalCreate."
+            ));
+        }
 
         // Where the caller resumes reading. Taken before the write so output
         // the command produces immediately cannot land in the gap.

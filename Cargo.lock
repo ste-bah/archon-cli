@@ -507,6 +507,7 @@ dependencies = [
  "archon-memory",
  "archon-observability",
  "archon-permissions",
+ "archon-pty",
  "archon-session",
  "archon-shell",
  "archon-test-support",

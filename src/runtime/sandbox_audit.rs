@@ -253,6 +253,28 @@ impl SandboxBackend for AuditedSandboxBackend {
         }
     }
 
+    fn terminal(
+        &self,
+        request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        let decision = self.inner.terminal(request);
+        // Audited like a check rather than like an execution: this records
+        // where the terminal was sent, and the shell it opens keeps running
+        // long after this call returns, so there is no outcome to wait for.
+        match &decision {
+            archon_permissions::SandboxTerminal::Host => {
+                self.record_event("TerminalCreate", "host", "sandbox_terminal_host");
+            }
+            archon_permissions::SandboxTerminal::Open(_) => {
+                self.record_event("TerminalCreate", "sandboxed", "sandbox_terminal_opened");
+            }
+            archon_permissions::SandboxTerminal::Refused(_) => {
+                self.record_event("TerminalCreate", "denied", "sandbox_terminal_refused");
+            }
+        }
+        decision
+    }
+
     fn execute_bash<'a>(
         &'a self,
         request: SandboxCommandRequest,

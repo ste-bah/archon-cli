@@ -16,7 +16,9 @@ pub use checker::{
 pub mod prompt {}
 
 pub mod sandbox;
-pub use sandbox::SandboxBackend;
+pub use sandbox::{
+    SandboxBackend, SandboxTerminal, SandboxTerminalCommand, SandboxTerminalRequest,
+};
 
 pub mod tool_capability;
 pub use tool_capability::{ToolCapability, WorldReach};

@@ -22,6 +22,13 @@ impl archon_permissions::SandboxBackend for DenyAllSandbox {
     ) -> Result<(), String> {
         Err("sandbox denied".into())
     }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Refused("sandbox denied".into())
+    }
 }
 
 #[async_trait::async_trait]

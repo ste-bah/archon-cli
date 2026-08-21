@@ -3,7 +3,10 @@ use std::pin::Pin;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxTerminal,
+    SandboxTerminalCommand, SandboxTerminalRequest,
+};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
@@ -14,7 +17,8 @@ mod fs;
 pub use fs::DockerFs;
 
 use exec::{
-    docker_output_result, docker_run_args, normal_writable_path, validate_workspace_access,
+    container_shell, container_workdir, docker_output_result, docker_run_args,
+    docker_terminal_args, normal_writable_path, validate_workspace_access,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +246,37 @@ impl SandboxBackend for DockerSandboxBackend {
     ) -> Result<(), String> {
         self.safe_to_execute()?;
         crate::sandbox::capability_gate::check_capability("docker", tool, capability)
+    }
+
+    /// A terminal is a container with a TTY on it.
+    ///
+    /// The bind mount makes this the same world `execute_bash` runs in, down to
+    /// the bytes, so a shell opened here sees what `Bash` sees and writes what
+    /// `Read` reads.
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        if let Err(error) = self.safe_to_execute() {
+            return SandboxTerminal::Refused(format!("docker sandbox: {error}"));
+        }
+        let (shell, program) = match container_shell(request.shell.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => return SandboxTerminal::Refused(error),
+        };
+        let workdir = match container_workdir(&request.workspace, &request.cwd) {
+            Ok(workdir) => workdir,
+            Err(error) => return SandboxTerminal::Refused(format!("docker sandbox: {error}")),
+        };
+        SandboxTerminal::Open(SandboxTerminalCommand {
+            program: self.config.binary.clone(),
+            args: docker_terminal_args(
+                &self.config,
+                &self.workspace_access,
+                &request.workspace,
+                &workdir,
+                &program,
+            ),
+            shell,
+            location: format!("{workdir} in the {} container", self.config.image),
+        })
     }
 
     fn execute_bash<'a>(

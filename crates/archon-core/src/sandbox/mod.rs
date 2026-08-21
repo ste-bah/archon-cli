@@ -203,8 +203,6 @@ mod tests {
     /// look for that path on the host.
     #[tokio::test]
     async fn docker_gets_a_filesystem_that_translates_container_paths() {
-        use archon_tools::filesystem::FileSystem;
-
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("in_workspace.txt"), "mounted").expect("write");
         let cfg = SandboxConfig {

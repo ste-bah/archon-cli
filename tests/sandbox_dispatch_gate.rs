@@ -36,6 +36,21 @@ impl SandboxBackend for FakeSandboxBackend {
             other => Err(format!("sandbox: {tool} is blocked ({})", other.label())),
         }
     }
+
+    /// Mirrors `SharedSandboxFlag`: this backend denies rather than relocating,
+    /// so with it on there is no world to open a terminal in.
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        if self.enabled.load(Ordering::SeqCst) {
+            archon_permissions::SandboxTerminal::Refused(
+                "sandbox: terminals are blocked (shell operations disabled)".into(),
+            )
+        } else {
+            archon_permissions::SandboxTerminal::Host
+        }
+    }
 }
 
 /// Minimal tool named "Write" — sandbox-classified as write-blocked.

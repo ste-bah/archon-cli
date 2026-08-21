@@ -22,6 +22,13 @@ impl SandboxBackend for FixedSandbox {
         Ok(())
     }
 
+    fn terminal(
+        &self,
+        _request: &archon_permissions::sandbox::SandboxTerminalRequest,
+    ) -> archon_permissions::sandbox::SandboxTerminal {
+        archon_permissions::sandbox::SandboxTerminal::Host
+    }
+
     fn execute_bash<'a>(
         &'a self,
         _request: SandboxCommandRequest,

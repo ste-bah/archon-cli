@@ -25,6 +25,13 @@ impl archon_permissions::SandboxBackend for DenyBlockedWriteSandbox {
             Ok(())
         }
     }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Host
+    }
 }
 
 #[async_trait::async_trait]
