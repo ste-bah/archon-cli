@@ -72,8 +72,8 @@ pub mod toolsearch;
 pub mod webfetch;
 // Public because `CargoResourceLimits` is a field on `BashTool`, which callers
 // construct from their own config.
-pub mod workflow_resource_env;
 pub mod workflow_run_env;
+pub mod workflow_resource_env;
 
 pub mod agent_tool;
 // TASK-AGS-105: SubagentExecutor trait + OnceLock registry. The

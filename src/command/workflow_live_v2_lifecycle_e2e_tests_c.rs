@@ -411,13 +411,12 @@ pub(super) fn implementation_item(
 
 /// The criterion each fixture task declares, so a plan built here can claim it.
 ///
-/// A verification plan must name the acceptance criteria it promises to check —
-/// a plan that proves nothing the tasks were written for used to pass because
-/// nothing compared the two. These fixtures predate that gate and declared no
-/// coverage at all, so every plan they produced was correctly refused, the
-/// repair could not invent coverage either, and the run died at
-/// `blocked-empty-verification` long before the board-drain gate the tests were
-/// actually written to exercise.
+/// A verification plan must name the acceptance criteria it promises to check.
+/// These fixtures predate that gate and declared no coverage, so every plan they
+/// produced was correctly refused, the repair call has no handler here so it
+/// retried as a transport failure, and the run stopped at
+/// `blocked-empty-verification` — three stages before the board-drain gate these
+/// tests were written to exercise.
 fn fixture_criterion(task_id: &str) -> &'static str {
     match task_id {
         "TASK-EX-001" => "Existing evidence is sufficient.",

@@ -47,6 +47,19 @@ pub(super) fn enforce_declared_artifact_requirements(
     let mut missing = Vec::new();
     for (raw, absolute) in &declared.entries {
         match declared_artifact_defect(raw, Path::new(absolute), context.declared_as_directory(raw))
+            .or_else(|| {
+                // Existence was the only question asked, and a registry holding
+                // `{}` answered it. Observed live: a task that edited source and
+                // produced nothing was ACCEPTED against 141 bytes of
+                // `{"datasets": {}, ..., "snapshots": {}}`.
+                //
+                // Applied HERE and not in `artifact_file_defect`, which answers
+                // the broader question "is this file evidence" for callers that
+                // use `{}` as ordinary placeholder content. This is the narrower
+                // case: an item that DECLARED it would produce this artifact,
+                // and is now claiming it did.
+                super::artifact_emptiness::structurally_empty_defect(Path::new(absolute))
+            })
         {
             None => record_declared_artifact(result, raw),
             // Not under the project artifact root — try the repository. A
