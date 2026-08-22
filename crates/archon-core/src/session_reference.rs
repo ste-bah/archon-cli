@@ -4,10 +4,9 @@
 //! takes any id. What was missing is everything that makes the read safe to
 //! put in front of a model:
 //!
-//! - **Bounding.** The stored log is unbounded and predates whatever the
-//!   source session compacted away, so injecting it verbatim can be larger
-//!   than the target session's entire context window. Only the last N
-//!   messages are taken, and the rendered transcript is capped in bytes.
+//! - **Bounding.** A session's surface is unbounded, so injecting it verbatim
+//!   can be larger than the target session's entire context window. Only the
+//!   last N entries are taken, and the rendered transcript is capped in bytes.
 //!   Over the cap the *whole* transcript is written to the spill store and
 //!   the excerpt names the file — it is never quietly cut short.
 //! - **Untrustedness.** A transcript is model output and tool results. Text
@@ -21,14 +20,21 @@
 //!   mistyped id and says nothing about it. Existence is checked separately
 //!   here and every reason a reference cannot be prepared is an error.
 //!
-//! This is the bounded first version the issue calls for. The correct
-//! version projects the source session's *current* surface rather than its
-//! raw log, which is the general problem #193 Phase B solves; until that
-//! lands, "the last N messages" is what can honestly be offered, and the
-//! header says so to the model.
+//! What is read is the source session's **current surface**, not its raw
+//! log — [`archon_session::projection_surface`], which is #193 Phase B's
+//! projection machinery applied to exactly this question. The distinction is
+//! the whole reason this module was reworked. Staged segment compaction never
+//! rewrites the log: it closes a span into a `compaction_segments` row and
+//! swaps the summary in at request-assembly time, leaving every original
+//! message in the log for good. Taking the tail of the log therefore re-imports
+//! into session A precisely the content session B had already judged not worth
+//! carrying — the summarised-away middle of a long debugging run, tool output
+//! that was superseded, a wrong turn that was abandoned. Reading the projection
+//! imports what B would actually say if asked.
 
 use std::path::Path;
 
+use archon_session::projection_surface::{SurfaceMessage, session_surface};
 use archon_session::storage::{SessionError, SessionStore};
 
 use crate::spill::{self, SpillLocator};
@@ -43,7 +49,7 @@ const TAG_STEM: &str = "referenced-session";
 /// How much of another session may be pulled in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionReferenceLimits {
-    /// Most recent stored messages considered, before byte capping.
+    /// Most recent surface entries considered, before byte capping.
     pub max_messages: usize,
     /// Hard cap on the rendered transcript. Overflow spills; it never
     /// disappears.
@@ -78,7 +84,7 @@ pub enum SessionReferenceError {
         #[source]
         source: SessionError,
     },
-    #[error("session {0} has no stored messages: there is nothing to inject")]
+    #[error("session {0} has no messages on its surface: there is nothing to inject")]
     Empty(String),
     #[error(
         "session {session_id} rendered to {bytes} bytes, over the {cap}-byte cap, \
@@ -100,10 +106,13 @@ pub struct SessionSnapshot {
     pub session_id: String,
     /// Random suffix on this snapshot's wrapper tags.
     pub nonce: String,
-    /// Messages rendered into the transcript.
+    /// Surface entries rendered into the transcript.
     pub messages_included: usize,
-    /// Messages the source session has stored in total.
+    /// Entries the source session's surface carries in total.
     pub messages_total: usize,
+    /// Stored messages the source session compacted off its own surface, and
+    /// which this snapshot therefore does not carry verbatim.
+    pub messages_replaced: usize,
     /// Bytes of transcript actually placed in the block.
     pub body_bytes_included: usize,
     /// Bytes the transcript would have been unbounded.
@@ -171,19 +180,20 @@ pub fn prepare_session_reference(
         }
     }
 
-    let messages = store
-        .load_messages(id)
-        .map_err(|source| SessionReferenceError::Unreadable {
+    // The projection, not the log. See the module doc: the log outlives what
+    // the source session decided to keep, and the surface is what it kept.
+    let surface =
+        session_surface(store, id).map_err(|source| SessionReferenceError::Unreadable {
             session_id: id.to_string(),
             source,
         })?;
-    if messages.is_empty() {
+    if surface.messages.is_empty() {
         return Err(SessionReferenceError::Empty(id.to_string()));
     }
 
-    let messages_total = messages.len();
+    let messages_total = surface.messages.len();
     let first_shown = messages_total.saturating_sub(limits.max_messages);
-    let body = render_transcript(&messages[first_shown..], first_shown);
+    let body = render_transcript(&surface.messages[first_shown..]);
     let body_bytes_total = body.len();
     let messages_included = messages_total - first_shown;
 
@@ -211,14 +221,18 @@ pub fn prepare_session_reference(
 
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let body_bytes_included = shown.len();
+    let messages_replaced = surface.replaced_messages as usize;
     let text = wrap(
-        id,
+        Scope {
+            session_id: id,
+            messages_included,
+            messages_total,
+            messages_replaced,
+            body_bytes_total,
+        },
         &nonce,
         &shown,
-        messages_included,
-        messages_total,
         spill.as_ref(),
-        body_bytes_total,
     );
 
     Ok(SessionSnapshot {
@@ -226,6 +240,7 @@ pub fn prepare_session_reference(
         nonce,
         messages_included,
         messages_total,
+        messages_replaced,
         body_bytes_included,
         body_bytes_total,
         spill,
@@ -246,19 +261,29 @@ fn head_bytes(text: &str, cap: usize) -> &str {
     &text[..end]
 }
 
-/// Render stored messages, numbering them by their real index in the source
-/// log so the excerpt is honest about where it sits.
-fn render_transcript(messages: &[String], first_index: usize) -> String {
+/// Render surface entries, labelling each with the span of the source log it
+/// occupies so the excerpt is honest about where it sits — and, for a
+/// compaction stand-in, about how many messages it stands in for.
+fn render_transcript(messages: &[SurfaceMessage]) -> String {
     let mut out = String::new();
-    for (offset, raw) in messages.iter().enumerate() {
-        let (role, text) = split_message(raw);
-        out.push_str(&format!("[{} | {}]\n", first_index + offset, role));
+    for entry in messages {
+        let (role, text) = split_message(&entry.payload);
+        out.push_str(&format!("[{} | {role}]\n", label(entry)));
         out.push_str(escape_markup(&text).trim_end());
         out.push_str("\n\n");
     }
     let trimmed = out.trim_end().len();
     out.truncate(trimmed);
     out
+}
+
+/// The position label for one surface entry.
+fn label(entry: &SurfaceMessage) -> String {
+    if entry.compacted {
+        format!("{}-{} compacted", entry.first_index, entry.last_index)
+    } else {
+        entry.first_index.to_string()
+    }
 }
 
 /// Neutralise the wrapper's delimiters inside referenced content.
@@ -335,25 +360,41 @@ fn render_block(block: &serde_json::Value) -> String {
     }
 }
 
-/// Wrap the transcript in its untrusted-content block.
-#[allow(clippy::too_many_arguments)]
-fn wrap(
-    session_id: &str,
-    nonce: &str,
-    body: &str,
+/// What the header has to state about where this excerpt came from.
+struct Scope<'a> {
+    session_id: &'a str,
     messages_included: usize,
     messages_total: usize,
-    spill: Option<&SpillLocator>,
+    messages_replaced: usize,
     body_bytes_total: usize,
-) -> String {
+}
+
+/// Wrap the transcript in its untrusted-content block.
+fn wrap(scope: Scope<'_>, nonce: &str, body: &str, spill: Option<&SpillLocator>) -> String {
+    let Scope {
+        session_id,
+        messages_included,
+        messages_total,
+        messages_replaced,
+        body_bytes_total,
+    } = scope;
     let mut out = String::new();
     out.push_str(&format!("<{TAG_STEM}-{nonce}>\n"));
     out.push_str(&preamble(session_id));
     out.push_str(&format!(
-        "\nScope: the last {messages_included} of {messages_total} stored messages \
-         in that session, as they were logged (not as that session's own context \
-         now stands after compaction).\n"
+        "\nScope: the last {messages_included} of {messages_total} entries on that \
+         session's current surface — what it would itself carry into its next turn, \
+         not its raw stored log.\n"
     ));
+    if messages_replaced > 0 {
+        out.push_str(&format!(
+            "Compaction: that session has compacted {messages_replaced} of its stored \
+             messages off its own surface. They are still in its log and are \
+             deliberately not reproduced here; each compacted span appears as a \
+             single entry marked `compacted` carrying the summary that session kept \
+             in their place.\n"
+        ));
+    }
     match spill {
         Some(locator) => out.push_str(&format!(
             "Bounding: the transcript was {body_bytes_total} bytes, over this \

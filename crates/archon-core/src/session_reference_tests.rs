@@ -436,17 +436,28 @@ fn unparseable_stored_message_is_shown_rather_than_dropped() {
     assert!(snapshot.injectable_text().contains("[0 | unknown]"));
 }
 
+/// The excerpt is now a projection of the source session's surface, so the
+/// header has to say that. It used to say the opposite — that the excerpt was
+/// the raw stored log "not as that session's own context now stands after
+/// compaction" — and leaving that sentence in place after the rework would
+/// have made the header wrong in the one direction the model cannot check.
+///
+/// The compacted case is covered end to end in
+/// `crates/archon-core/tests/session_reference_surface.rs`.
 #[test]
-fn header_states_the_excerpt_is_the_raw_log_not_the_live_surface() {
+fn header_states_the_excerpt_is_the_sessions_current_surface() {
     let fixture = fixture();
     let id = seed(&fixture, &[message("user", "hello")]);
 
     let snapshot = prepare(&fixture, &id, SessionReferenceLimits::default()).expect("prepare");
+    let text = snapshot.injectable_text();
 
     assert!(
-        snapshot
-            .injectable_text()
-            .contains("not as that session's own context now stands after compaction"),
-        "the snapshot must not imply it is the source session's live context"
+        text.contains("current surface"),
+        "the snapshot must say the excerpt is the source session's surface"
+    );
+    assert!(
+        !text.contains("as they were logged"),
+        "the snapshot still describes itself as the raw stored log"
     );
 }

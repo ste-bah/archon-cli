@@ -100,9 +100,21 @@ pub(crate) async fn apply_reference_session(
             )
         })
         .unwrap_or_default();
+    let compacted = if snapshot.messages_replaced > 0 {
+        format!(
+            " That session has compacted {} of its stored messages off its own surface; those are represented by the summaries it kept, not reproduced verbatim.",
+            snapshot.messages_replaced
+        )
+    } else {
+        String::new()
+    };
     let notice = format!(
-        "\nReferencing session {}: the last {} of {} stored messages will be attached to your next message as untrusted, quoted context.{}\n",
-        snapshot.session_id, snapshot.messages_included, snapshot.messages_total, spilled
+        "\nReferencing session {}: the last {} of {} entries on that session's current surface will be attached to your next message as untrusted, quoted context.{}{}\n",
+        snapshot.session_id,
+        snapshot.messages_included,
+        snapshot.messages_total,
+        compacted,
+        spilled
     );
 
     slash_ctx
