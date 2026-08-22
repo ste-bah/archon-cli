@@ -74,6 +74,13 @@ has gone missing, or if `spawn_turn` is no longer called anywhere in the region.
 exit status, because exit 0 from a lint that looked at nothing is what this whole
 paragraph is about.
 
+The full account — including how long each rule was vacuous, and why restoring the
+markers was rejected rather than done — is
+[postmortem 0001](../postmortem/0001-arch-lint-inspected-nothing-and-reported-green.md)
+and its [decision record](../decisions/rejected/2026-08-22-restore-the-input-handler-markers.md).
+The rules that came out of it are DP-1 through DP-4 in
+[`docs/defensive-patterns.md`](../defensive-patterns.md).
+
 ## Why this is a philosophy, not a lint rule
 
 The three rules are architectural invariants: they describe **where**

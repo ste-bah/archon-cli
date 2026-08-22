@@ -131,6 +131,11 @@ were your text.
 A session id that does not exist, or one with no messages, is an error you see —
 never an empty attachment that looks like it worked.
 
+Escaping rather than refusing is a deliberate choice: rejecting an excerpt that
+mentions the wrapper's tag would let any session make itself unreferenceable by
+naming it. See
+[the decision record](../decisions/rejected/2026-08-22-reject-content-that-mentions-the-wrapper-tag.md).
+
 ### `@` instead of an id
 
 Typing `@` in the prompt opens a picker of the sessions you could reference, so

@@ -39,7 +39,7 @@ Govern every code change, inside or outside a pipeline.
 **6. Surface conflicts, don't average them.** When two patterns clash, pick one (newer / better-tested), say why, mark the other for cleanup. Never blend both.
 **7. Read before you write.** Before adding code, check the crate's exports, call sites, and shared utilities (`LeannSearch` / `CartographerScan`). "Looks unrelated" is not sufficient — don't duplicate an existing function.
 **8. Code decides deterministic things; the model decides judgment.** Use agents for classification, drafting, synthesis, and judgment — not for what a status code, match arm, or config already determines. (Pipeline routing is code-driven by design.)
-**9. Tests verify intent, not just behaviour.** Every test must be able to fail when the business logic breaks. A test that only asserts "something returned" is decoration. Test-first (Gate 1).
+**9. Tests verify intent, not just behaviour.** Every test must be able to fail when the business logic breaks. A test that only asserts "something returned" is decoration. Test-first (Gate 1). Before writing a gate, lint, CI step, or any test touching a subprocess, a platform difference, or a clock, read [`docs/defensive-patterns.md`](docs/defensive-patterns.md) — every rule there is traced to a check in this repo that reported green while inspecting nothing, three of them for over four months.
 **10. Checkpoint after each significant step.** State what was done, what was verified, what remains. If you can't explain current state, don't continue. Critical mid-pipeline and post-compaction.
 **11. Match the codebase's conventions.** Follow existing style and structure even if you'd choose differently (snake_case, error patterns, crate layout). You may flag a bad convention — you may not quietly impose your own.
 **12. Fail loud.** "Complete" is false if anything was skipped silently; "tests pass" is false if any were skipped. Surface uncertainty by default — "I couldn't verify X" beats a confident wrong "Done".
@@ -113,6 +113,18 @@ Run locally and confirm **exit 0 before any PR or push to main**. Steps fail fas
 
 ---
 
+## Written Practice — read before repeating a mistake
+
+| Document | When to read it |
+|---|---|
+| [`docs/defensive-patterns.md`](docs/defensive-patterns.md) | Before writing any gate, lint, CI step, or test involving a subprocess, a platform difference, or a clock. The unifying rule: **a check whose scan target can vanish must fail, not pass.** |
+| [`docs/postmortem/`](docs/postmortem/README.md) | Numbered incident writeups. Every rule above traces to one. Add a new one when a check is found to have been lying. |
+| [`docs/decisions/`](docs/decisions/README.md) | Before proposing a change to a threshold, a gate, an eviction policy, or a shared macro — **check [`rejected/`](docs/decisions/README.md#rejected) first.** It exists so a turned-down option is not re-proposed as new. |
+
+Turning something down is a deliverable: write the record, say what would reopen it, and link it from the subsystem doc. `tests/docs_cross_references.rs` fails if a record is unindexed or a link does not resolve.
+
+---
+
 ## Truth & Audit Protocol
 
 Subagents state only verified facts — no fallbacks/workarounds without approval, no illusions about what runs. Self-assess 1–100 vs intent; iterate to 100.
@@ -139,4 +151,5 @@ Subagents state only verified facts — no fallbacks/workarounds without approva
 
 - **Prime directive:** stop and ask before acting; never auto-resume after compaction.
 - **Memory:** `memory_store`/`memory_recall` only — built-in CozoDB graph, never markdown, never external.
-- **Gates:** `scripts/ci-gate.sh` exit 0 before PR/push.
+- **Gates:** `scripts/ci-gate.sh` exit 0 before PR/push. Judge by exit code, never by grepping output ([DP-13](docs/defensive-patterns.md#dp-13--judge-by-exit-code-never-by-counting-matches-in-output)).
+- **Practice:** [`docs/defensive-patterns.md`](docs/defensive-patterns.md) before writing a check; [`docs/decisions/rejected/`](docs/decisions/README.md#rejected) before re-proposing one that was turned down.

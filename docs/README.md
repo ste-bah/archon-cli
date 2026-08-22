@@ -133,6 +133,15 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [Setup wizard](operations/setup-wizard.md) — `/setup-archon-skills` interactive configuration walkthrough
 - [TUI drain-stall warning](operations/tui-drain-stall.md) — what the render-loop stall warning means
 
+## Engineering practice
+
+Read these before writing a gate, a lint, a CI step, or a test that touches a
+subprocess, a platform difference, or a clock.
+
+- [Defensive patterns](defensive-patterns.md) — the rules, each traced to the incident that produced it. Starts with the one they are all instances of: **a check whose scan target can vanish must fail, not pass**.
+- [Postmortems](postmortem/README.md) — numbered incident writeups. Four checks that reported green while inspecting nothing, three of them for over four months.
+- [Decision records](decisions/README.md) — dated notes in `proposed`/`implemented`/`rejected`/`archived`. The [`rejected`](decisions/README.md#rejected) bucket is the valuable one: it is the only place the option that was *not* taken leaves a trace.
+
 ## Development
 
 - [Contributing](development/contributing.md) — workflow, code style, review process

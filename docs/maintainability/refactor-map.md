@@ -13,6 +13,8 @@ This map assigns each oversized subsystem to a reviewable refactor group. The or
 - Remove allowlist entries in the same change that brings a file below 500 lines.
 - Run one package-filtered Cargo command at a time with WSL-safe limits: `CARGO_BUILD_JOBS=1`, `-j1`, and `--test-threads=1` where applicable.
 - Do not change CLI, TUI, provider, persistence, or pipeline behaviour as a side effect of a split.
+- Do not raise a gate's threshold to clear a red. `scripts/check-tui-duplication.sh` is pinned at 5% and the duplication was extracted instead — see [the decision record](../decisions/rejected/2026-08-22-raise-the-tui-duplication-threshold.md), and [`docs/defensive-patterns.md`](../defensive-patterns.md) DP-16.
+- When extracting a shared shape, every generated body must be the body it replaced. `is_empty` is [deliberately excluded](../decisions/implemented/2026-08-22-delegate-virtual-list-excludes-is-empty.md) from `delegate_virtual_list!` for this reason.
 
 ## Group Order
 
