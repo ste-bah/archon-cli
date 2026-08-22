@@ -4,7 +4,9 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 static RE_RESULT_LINK: OnceLock<Regex> = OnceLock::new();
 static RE_RESULT_SNIPPET: OnceLock<Regex> = OnceLock::new();
@@ -163,6 +165,10 @@ pub(crate) fn clamp_max_results(input: &serde_json::Value) -> usize {
 impl Tool for WebSearchTool {
     fn name(&self) -> &str {
         "WebSearch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

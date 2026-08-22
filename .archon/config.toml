@@ -313,8 +313,16 @@ backend = "disabled"
 #   "all" requires every tool to be backend-compatible, so unsupported
 #   host-side mutation/network/agent-spawn tools are blocked.
 mode = "risky"
-# Backend lifecycle: "session" | "turn" | "tool"
-scope = "session"
+# How long one sandbox lives: "session" | "turn" | "tool". Default "session".
+#   "session" holds one sandbox for the whole run, "turn" one per agent turn,
+#   "tool" builds and destroys one per command. Under docker, "session" and
+#   "turn" keep build caches (~/.cargo, ~/.npm, apt) alive between commands;
+#   "tool" destroys them every time. Keyed by working directory as well, so a
+#   worktree-isolated subagent never shares a sandbox with its parent.
+#   The openshell backend can only do "tool". Left commented on purpose: setting
+#   a lifetime a backend cannot keep fails config load, while leaving it unset
+#   falls back to "tool" with a warning. Uncomment to choose for yourself.
+# scope = "session"
 # Workspace mount policy: "ro" | "rw" | "scratch"
 workspace_access = "ro"
 
@@ -332,6 +340,11 @@ env_allowlist = []
 privileged = false
 mount_docker_socket = false
 mount_home = false
+# Hard upper bound on a held container's life, in seconds (default 4h).
+# Enforced by the container's own PID 1, not by a host-side timer, so it holds
+# even if Archon is killed and never restarted. Must be well above any Bash
+# timeout: a command still running at this age is killed with the container.
+container_max_age_secs = 14400
 
 [sandbox.ssh]
 # Real Bash execution backend when sandbox.backend = "ssh" and enabled=true.

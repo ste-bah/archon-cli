@@ -1,5 +1,20 @@
 # OpenShell Sandbox
 
+> **This backend only does `sandbox.scope = "tool"`.** Every command runs
+> `openshell sandbox create --no-keep --`, which destroys its sandbox on exit, so
+> `session` and `turn` are lifetimes it cannot keep.
+>
+> Writing `scope = "session"` or `scope = "turn"` in a config file fails the load,
+> naming the setting that works. Leaving `scope` out entirely — it defaults to
+> `session` — falls back to `tool` with a warning, because failing a whole
+> configuration over a key nobody wrote is a different thing from refusing one
+> they did. The shipped templates leave it commented out for exactly this.
+>
+> Whether the OpenShell CLI can exec into an existing sandbox was not
+> established; if `sandbox create` without `--no-keep` yields a durable handle
+> and some verb can run a command in it, this backend could hold one open and
+> terminals would stop having to be refused.
+
 OpenShell support is conservative in this release slice. Configuration, status,
 explain, doctor, and Bash execution routing exist, with provider injection and
 host shell fallback disabled by default.
@@ -33,6 +48,25 @@ before running Bash. This is the safe default for macOS external volumes such as
 OpenShell sandbox. `remote` mode runs from `remote_workdir` or `/sandbox`.
 `mirror` mode is only for environments where the same absolute path exists
 inside the OpenShell runtime.
+
+## Workspace Filesystem
+
+In `remote` mode the file tools operate on `remote_workdir` (or `/sandbox`) over
+the OpenShell transport, so `Read` returns what Bash would see. Paths must be
+absolute, contents are carried base64-encoded, and a write is confirmed by byte
+count — see [SSH sandbox](ssh-sandbox.md) for why, since the mechanism is
+shared.
+
+In `mirror` and `upload` mode the file tools operate on the host tree.
+
+For `upload` that is the only correct answer, and it has a consequence worth
+being explicit about. Every command runs `sandbox create --no-keep --upload
+<workdir>:/sandbox`, so each Bash call gets a *fresh* sandbox seeded from the
+host and destroyed afterwards. Anything Bash writes inside it is discarded, and
+the next command starts from the host tree again. So a file written by Bash in
+upload mode cannot be read back by `Read` — not because the file tools look in
+the wrong place, but because nothing durable was written. Use `remote` mode when
+Bash needs to leave something behind.
 
 ## Provider Routing
 

@@ -132,6 +132,12 @@ pub(super) async fn execute_in_sandbox(
             timeout_ms: prepared.timeout_ms,
             max_output_bytes: tool.max_output_bytes,
             env: prepared.env_vars.clone(),
+            // The two halves of a held sandbox's identity. The third — the
+            // working directory — is already above, and it is the one that
+            // stops a worktree-isolated subagent from sharing a world with the
+            // parent it believes it is isolated from.
+            session_id: ctx.session_id.clone(),
+            turn_id: ctx.turn_id.clone(),
         })
         .await?;
     let content = redact_provider_env_output(prepared.provider_env.as_ref(), result.content);

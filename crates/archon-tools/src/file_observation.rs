@@ -31,20 +31,21 @@ use std::sync::{LazyLock, Mutex};
 pub struct FileVersion(String);
 
 impl FileVersion {
-    /// Read the current version of `path`, or `None` when it does not exist.
+    /// Build a token from what a world reports about a path (#201 Phase 1).
     ///
-    /// An unreadable path is `None` too. "I could not see it" and "it was not
-    /// there" are the same evidence for this purpose: neither is grounds for
-    /// believing a later edit is applied to what the model read.
+    /// The caller is whichever [`FileSystem`](crate::filesystem::FileSystem)
+    /// holds the file, so the token describes the bytes a write will land on
+    /// rather than a same-named file on the host.
+    ///
+    /// A world that cannot report a modification time degrades the token to
+    /// length alone, which cannot see a modification that preserved the length.
+    /// That is weaker than the host token, and deliberately not hidden: the
+    /// alternative is refusing every write in such a world. A backend that can
+    /// do better should override `FileSystem::version` with a content hash.
     #[must_use]
-    pub fn current(path: &Path) -> Option<Self> {
-        let meta = std::fs::metadata(path).ok()?;
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or_else(|| "?".to_string(), |d| d.as_nanos().to_string());
-        Some(Self(format!("{}:{modified}", meta.len())))
+    pub fn from_parts(len: u64, modified_nanos: Option<u128>) -> Self {
+        let modified = modified_nanos.map_or_else(|| "?".to_string(), |nanos| nanos.to_string());
+        Self(format!("{len}:{modified}"))
     }
 }
 
@@ -112,17 +113,12 @@ pub static FILE_OBSERVATIONS: LazyLock<ObservationRegistry> =
     LazyLock::new(ObservationRegistry::default);
 
 impl ObservationRegistry {
-    /// Record what is at `path` right now.
+    /// Record what a caller saw at `path`.
     ///
-    /// Called after a tool has genuinely shown the agent those bytes. A missing
-    /// file records [`Observation::Absent`] rather than nothing.
-    pub fn record(&self, observer: &Observer, path: &Path) {
-        let observation =
-            FileVersion::current(path).map_or(Observation::Absent, Observation::Present);
-        self.record_as(observer, path, observation);
-    }
-
-    /// Record a specific observation, for callers that already have one.
+    /// Called after a tool has genuinely shown the agent those bytes. The
+    /// caller supplies the observation because only it knows which world it
+    /// read — under a sandbox the host's copy of a path is not the file being
+    /// edited, and a token minted here would describe the wrong one (#201).
     pub fn record_as(&self, observer: &Observer, path: &Path, observation: Observation) {
         let key = normalise(path);
         if let Ok(mut seen) = self.seen.lock() {
@@ -141,12 +137,20 @@ impl ObservationRegistry {
     }
 
     /// Judge a pending write against what this agent has seen.
+    ///
+    /// `current` is this path's version *in the world the write will land in*,
+    /// or `None` when nothing is there. The caller reads it rather than this
+    /// module, for the reason given on [`record_as`](Self::record_as).
     #[must_use]
-    pub fn verdict(&self, observer: &Observer, path: &Path) -> Verdict {
+    pub fn verdict(
+        &self,
+        observer: &Observer,
+        path: &Path,
+        current: Option<FileVersion>,
+    ) -> Verdict {
         let Some(observation) = self.observation(observer, path) else {
             return Verdict::Unobserved;
         };
-        let current = FileVersion::current(path);
         match (observation, current) {
             (Observation::Present(seen), Some(now)) if seen == now => Verdict::Fresh,
             (Observation::Present(_), Some(_)) => Verdict::Stale {
@@ -215,196 +219,5 @@ fn normalise(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn observer(name: &str) -> Observer {
-        Observer::new(name, None)
-    }
-
-    #[test]
-    fn a_path_nobody_looked_at_is_unobserved() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "fn main() {}").expect("write");
-
-        assert_eq!(registry.verdict(&observer("s"), &file), Verdict::Unobserved);
-    }
-
-    #[test]
-    fn an_unchanged_file_reads_fresh() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "fn main() {}").expect("write");
-
-        registry.record(&observer("s"), &file);
-
-        assert_eq!(registry.verdict(&observer("s"), &file), Verdict::Fresh);
-    }
-
-    /// The failure this exists to catch: something else changed the file
-    /// between the read and the write.
-    #[test]
-    fn an_externally_modified_file_reads_stale() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "fn main() {}").expect("write");
-        registry.record(&observer("s"), &file);
-
-        std::fs::write(&file, "fn main() { changed_underneath() }").expect("rewrite");
-
-        match registry.verdict(&observer("s"), &file) {
-            Verdict::Stale { detail } => assert!(detail.contains("modified"), "{detail}"),
-            other => panic!("expected stale, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_deleted_file_reads_stale() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "x").expect("write");
-        registry.record(&observer("s"), &file);
-        std::fs::remove_file(&file).expect("remove");
-
-        match registry.verdict(&observer("s"), &file) {
-            Verdict::Stale { detail } => assert!(detail.contains("deleted"), "{detail}"),
-            other => panic!("expected stale, got {other:?}"),
-        }
-    }
-
-    /// "I checked and it was not there" is evidence, and a file appearing
-    /// since contradicts it.
-    #[test]
-    fn a_file_that_appeared_after_a_negative_observation_reads_stale() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("new.rs");
-
-        registry.record(&observer("s"), &file);
-        assert_eq!(
-            registry.observation(&observer("s"), &file),
-            Some(Observation::Absent)
-        );
-        assert_eq!(registry.verdict(&observer("s"), &file), Verdict::Fresh);
-
-        std::fs::write(&file, "someone else made it").expect("write");
-
-        match registry.verdict(&observer("s"), &file) {
-            Verdict::Stale { detail } => assert!(detail.contains("did not exist"), "{detail}"),
-            other => panic!("expected stale, got {other:?}"),
-        }
-    }
-
-    /// A parent's read is not evidence for a child that never looked.
-    #[test]
-    fn a_subagent_does_not_inherit_its_parents_observations() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "x").expect("write");
-
-        let parent = Observer::new("session-1", None);
-        let child = Observer::new("session-1", Some("agent-7"));
-        registry.record(&parent, &file);
-
-        assert_eq!(registry.verdict(&parent, &file), Verdict::Fresh);
-        assert_eq!(
-            registry.verdict(&child, &file),
-            Verdict::Unobserved,
-            "session_id is copied verbatim to children, so keying on it alone \
-             would hand a subagent evidence it never gathered"
-        );
-    }
-
-    #[test]
-    fn two_spellings_of_one_path_are_the_same_observation() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir(dir.path().join("src")).expect("mkdir");
-        let file = dir.path().join("src").join("a.rs");
-        std::fs::write(&file, "x").expect("write");
-
-        registry.record(&observer("s"), &file);
-        let indirect = dir.path().join("src").join(".").join("a.rs");
-
-        assert_eq!(registry.verdict(&observer("s"), &indirect), Verdict::Fresh);
-    }
-
-    #[test]
-    fn ending_a_session_forgets_it_and_its_subagents() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "x").expect("write");
-
-        let parent = Observer::new("session-1", None);
-        let child = Observer::new("session-1", Some("agent-7"));
-        let other = Observer::new("session-2", None);
-        registry.record(&parent, &file);
-        registry.record(&child, &file);
-        registry.record(&other, &file);
-
-        registry.forget_session("session-1");
-
-        assert!(registry.is_empty(&parent));
-        assert!(registry.is_empty(&child));
-        assert_eq!(registry.len(&other), 1, "another session was collateral");
-    }
-
-    /// The token is compared, never parsed. This pins that two different files
-    /// do not collide on it, without asserting anything about its shape.
-    #[test]
-    fn versions_of_different_content_differ() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-        std::fs::write(&file, "short").expect("write");
-        let first = FileVersion::current(&file).expect("present");
-        std::fs::write(&file, "considerably longer content").expect("rewrite");
-        let second = FileVersion::current(&file).expect("present");
-
-        assert_ne!(first, second);
-    }
-
-    /// The key must not depend on whether the file is there, or the two
-    /// transitions this module exists to catch both report "never looked".
-    #[test]
-    fn an_observation_survives_the_file_appearing_and_vanishing() {
-        let registry = ObservationRegistry::default();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("a.rs");
-
-        registry.record(&observer("s"), &file);
-        assert_eq!(registry.len(&observer("s")), 1);
-
-        std::fs::write(&file, "x").expect("write");
-        assert_ne!(
-            registry.verdict(&observer("s"), &file),
-            Verdict::Unobserved,
-            "the observation was lost when the file appeared"
-        );
-
-        registry.record(&observer("s"), &file);
-        std::fs::remove_file(&file).expect("remove");
-        assert_ne!(
-            registry.verdict(&observer("s"), &file),
-            Verdict::Unobserved,
-            "the observation was lost when the file vanished"
-        );
-        assert_eq!(
-            registry.len(&observer("s")),
-            1,
-            "one file must not occupy two keys"
-        );
-    }
-
-    #[test]
-    fn a_missing_file_has_no_version() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        assert_eq!(FileVersion::current(&dir.path().join("nope")), None);
-    }
-}
+#[path = "file_observation_tests.rs"]
+mod tests;

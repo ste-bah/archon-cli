@@ -3,13 +3,18 @@ use std::pin::Pin;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use archon_permissions::sandbox::{SandboxBackend, SandboxCommandRequest, SandboxCommandResult};
+use archon_permissions::sandbox::{
+    SandboxBackend, SandboxCommandRequest, SandboxCommandResult, SandboxScope, SandboxScopeSupport,
+    SandboxTerminal, SandboxTerminalRequest,
+};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command as TokioCommand;
 
 mod exec;
+mod fs;
 
-use exec::{ssh_command_args, ssh_output_result};
+use exec::{ssh_command_args, ssh_output_result, ssh_terminal_args};
+pub use fs::ssh_filesystem;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -249,22 +254,51 @@ impl SshSandboxBackend {
 }
 
 impl SandboxBackend for SshSandboxBackend {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         self.safe_to_route()?;
-        match tool {
-            "Read" | "Glob" | "Grep" | "ToolSearch" | "TodoWrite" | "Sleep" => Ok(()),
-            "Bash" | "Shell" => Ok(()),
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "ssh sandbox: {tool} host-side file mutation is not supported"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "ssh sandbox: {tool} host-side network access is not supported"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "ssh sandbox: {tool} agent spawning is not supported"
-            )),
-            other => Err(format!("ssh sandbox: unsupported tool {other}")),
+        crate::sandbox::capability_gate::check_capability("ssh", tool, capability).map(|_| ())
+    }
+
+    /// A terminal is the same SSH connection with a TTY on it.
+    ///
+    /// Refused rather than falling back the moment the connection cannot be
+    /// made safely, for the reason the rest of this backend refuses: a host
+    /// shell offered in place of a remote one is not a degraded sandbox, it is
+    /// no sandbox.
+    fn terminal(&self, request: &SandboxTerminalRequest) -> SandboxTerminal {
+        if let Err(error) = self.safe_to_route() {
+            return SandboxTerminal::Refused(format!(
+                "ssh sandbox refused a terminal: {error}; no host shell fallback was used"
+            ));
         }
+        match ssh_terminal_args(&self.config, request) {
+            Ok(command) => SandboxTerminal::Open(command),
+            Err(error) => SandboxTerminal::Refused(format!("ssh sandbox: {error}")),
+        }
+    }
+
+    /// The remote host is not a sandbox Archon builds, so it has no lifetime to
+    /// give it.
+    ///
+    /// Every scope names the same durable machine: a file `Bash` writes to
+    /// `/tmp` is there for the next command whatever `sandbox.scope` says, and
+    /// so is `~/.cargo/registry`. The property `scope` exists to buy — build
+    /// caches surviving between commands — this backend already has, and cannot
+    /// lose, because Archon neither creates nor destroys the world.
+    ///
+    /// Connection multiplexing (`ControlMaster` + `ControlPersist`) would make
+    /// the *transport* cheaper. It is deliberately not implemented here: it
+    /// changes latency and nothing about lifetime, no SSH target was available
+    /// to verify it against, and OpenSSH does not support `ControlMaster` on
+    /// Windows at all — an unexercised implementation would be exactly the kind
+    /// of plausible-looking machinery this backend has no way to prove.
+    fn scope_support(&self, _scope: SandboxScope) -> SandboxScopeSupport {
+        SandboxScopeSupport::Durable
     }
 
     fn execute_bash<'a>(
@@ -345,6 +379,7 @@ impl SshSandboxBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archon_permissions::ToolCapability;
 
     #[test]
     fn ssh_defaults_are_safe() {
@@ -407,7 +442,9 @@ mod tests {
             ..SshConfig::default()
         });
 
-        let error = backend.check("Bash", &serde_json::json!({})).unwrap_err();
+        let error = backend
+            .check("Bash", ToolCapability::EXECUTION, &serde_json::json!({}))
+            .unwrap_err();
 
         assert!(error.contains("sandbox.ssh.host"));
     }
@@ -426,6 +463,7 @@ mod tests {
                 timeout_ms: 1000,
                 max_output_bytes: 1024,
                 env: Vec::new(),
+                ..SandboxCommandRequest::default()
             })
             .await
             .unwrap();

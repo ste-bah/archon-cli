@@ -45,7 +45,8 @@ async fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
         Arc::new(FakeProvider),
         temp.path(),
         "workflow-cli-test",
-        workflow_cli_agent_config(&config, temp.path(), "workflow-cli-test"),
+        workflow_cli_agent_config(&config, temp.path(), "workflow-cli-test")
+            .expect("the default configuration resolves"),
     )
     .await;
 

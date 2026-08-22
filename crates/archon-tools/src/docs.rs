@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::evidence_cli;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub const DOC_TOOL_NAMES: &[&str] = &[
     "DocIngest",
@@ -47,12 +49,23 @@ macro_rules! doc_tool {
                 WorkingTreeEffect::Arbitrary
             }
 
+            fn capability(&self) -> ToolCapability {
+                DOC_TOOL_CAPABILITY
+            }
+
             fn permission_level(&self, _input: &Value) -> PermissionLevel {
                 $perm
             }
         }
     };
 }
+
+/// The document tools reach the evidence store by spawning the `archon`
+/// executable in the session working directory (`evidence_cli::run_archon`).
+/// That subprocess is a host handle, not host-local state: a sandbox routing
+/// `Bash` into a container has no way to route this one, so a document tool run
+/// under isolation would execute outside it.
+const DOC_TOOL_CAPABILITY: ToolCapability = ToolCapability::HOST_HANDLE;
 
 doc_tool!(
     DocIngest,
@@ -68,6 +81,10 @@ pub struct DocList;
 impl Tool for DocList {
     fn name(&self) -> &str {
         "DocList"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        DOC_TOOL_CAPABILITY
     }
 
     fn description(&self) -> &str {
@@ -100,6 +117,10 @@ pub struct DocGet;
 impl Tool for DocGet {
     fn name(&self) -> &str {
         "DocGet"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        DOC_TOOL_CAPABILITY
     }
 
     fn description(&self) -> &str {
@@ -141,6 +162,10 @@ impl Tool for DocSearch {
         "DocSearch"
     }
 
+    fn capability(&self) -> ToolCapability {
+        DOC_TOOL_CAPABILITY
+    }
+
     fn description(&self) -> &str {
         "Search document chunks with exact, semantic, or hybrid retrieval."
     }
@@ -171,6 +196,10 @@ pub struct DocAnswer;
 impl Tool for DocAnswer {
     fn name(&self) -> &str {
         "DocAnswer"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        DOC_TOOL_CAPABILITY
     }
 
     fn description(&self) -> &str {

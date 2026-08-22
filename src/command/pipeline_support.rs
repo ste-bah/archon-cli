@@ -50,7 +50,7 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
             .with_origin(origin),
     );
-    let agent_config = workflow_cli_agent_config(config, cwd, session_id);
+    let agent_config = workflow_cli_agent_config(config, cwd, session_id)?;
     install_workflow_cli_subagent_executor(
         config,
         Arc::clone(&provider),
@@ -63,7 +63,18 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         cancel_parent: agent_config.cancel_token.clone(),
+        // The workflow CLI has no turn loop — one invocation is one unit of
+        // work — so the run *is* the turn, and saying so is what stops
+        // `sandbox.scope = "turn"` from silently degrading to a container per
+        // command here. Leaving this `None` would be the honest answer for a
+        // caller whose turns are unknown; this caller's are not.
+        turn_id: Some(format!("{session_id}#run")),
         sandbox: agent_config.sandbox.clone(),
+        // The world's filesystem travels with its backend or the pair is
+        // useless: a stage that read the host while its `Bash` ran in a
+        // container is the split #201 exists to close, and every subagent this
+        // client spawns inherits this context.
+        fs: agent_config.fs.clone(),
         activity_sink: agent_config.activity_sink.clone(),
         ..ToolContext::default()
     };
@@ -94,8 +105,22 @@ pub(crate) async fn build_subagent_pipeline_adapter(
 /// complete at the call site while quietly supplying values the operator never
 /// chose. `install_workflow_cli_subagent_executor` extends `permission_rules`
 /// with project MCP grants, so seeding it from config here is additive.
-fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str) -> AgentConfig {
-    AgentConfig {
+///
+/// `sandbox` and `fs` were defaulted for the same reason and cost more: the
+/// workflow CLI never goes through session boot, so `sandbox.backend =
+/// "docker"` produced a run whose stages executed on the host while the config
+/// said they were isolated (#201 Phase 4). A filesystem that cannot be built
+/// fails the call exactly as it fails session boot — degrading quietly to the
+/// host is the failure, not the mitigation.
+fn workflow_cli_agent_config(
+    config: &ArchonConfig,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<AgentConfig> {
+    Ok(AgentConfig {
+        sandbox: crate::runtime::sandbox_world::isolation_backend(&config.sandbox),
+        fs: archon_core::sandbox::sandbox_filesystem(&config.sandbox, cwd)
+            .map_err(|error| anyhow::anyhow!("sandbox filesystem unavailable: {error}"))?,
         model: crate::session::active_session_model(config),
         max_tokens: config.api.resolved_max_tokens(),
         thinking_budget: config.api.thinking_budget,
@@ -104,6 +129,12 @@ fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str
             always_deny: config.permissions.always_deny.clone(),
             always_ask: config.permissions.always_ask.clone(),
         },
+        // Same reason as `sandbox` and `fs`, and the same shape of defect: left
+        // to `AgentConfig::default()` this is `Block`, so `read_before_edit`
+        // set to `warn` or `off` reached every path except a workflow stage.
+        // It failed closed rather than open, which makes it milder, not
+        // correct — a knob that silently does not apply is not a knob.
+        filesystem: config.filesystem,
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         max_tool_concurrency: config.tools.max_concurrency as usize,
@@ -112,7 +143,7 @@ fn workflow_cli_agent_config(config: &ArchonConfig, cwd: &Path, session_id: &str
         subagent_isolation_max_tier: config.subagent.isolation_max_tier,
         context: config.context.clone(),
         ..AgentConfig::default()
-    }
+    })
 }
 
 async fn install_workflow_cli_subagent_executor(
@@ -409,3 +440,7 @@ fn build_pipeline_auto_trainer_from_db(
 #[cfg(test)]
 #[path = "pipeline_support_tests.rs"]
 mod pipeline_support_tests;
+
+#[cfg(test)]
+#[path = "pipeline_support_sandbox_tests.rs"]
+mod pipeline_support_sandbox_tests;

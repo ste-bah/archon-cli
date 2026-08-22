@@ -72,6 +72,16 @@ impl Default for SandboxPolicy {
 }
 
 impl SandboxPolicy {
+    /// The configured lifetime, parsed.
+    ///
+    /// Kept as a `String` on the struct because the audit rows and the status
+    /// renderer serialise it verbatim; this is the accessor everything that
+    /// *acts* on the value goes through, so no second spelling of "session" can
+    /// appear anywhere that matters.
+    pub fn scope_kind(&self) -> Result<archon_permissions::SandboxScope, String> {
+        self.scope.parse()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         match self.mode.as_str() {
             "risky" | "all" | "shell" => {}
@@ -81,14 +91,7 @@ impl SandboxPolicy {
                 ));
             }
         }
-        match self.scope.as_str() {
-            "session" | "turn" | "tool" => {}
-            other => {
-                return Err(format!(
-                    "sandbox.scope must be session, turn, or tool, got \"{other}\""
-                ));
-            }
-        }
+        self.scope_kind()?;
         match self.workspace_access.as_str() {
             "ro" | "rw" | "scratch" => Ok(()),
             other => Err(format!(
@@ -97,11 +100,16 @@ impl SandboxPolicy {
         }
     }
 
+    /// `logical` installs no backend of its own — `isolation_backend` returns
+    /// `None` for it exactly as it does for `disabled`, and a session then runs
+    /// under the `/sandbox` toggle. Calling it a "policy gate" implied a gate
+    /// that is not there, and read as a contradiction next to an explanation
+    /// saying no isolation backend is configured.
     pub fn describes_isolation(&self) -> &'static str {
         if self.backend.is_real_isolation() {
             "process isolation backend"
         } else if self.backend == SandboxBackendKind::Logical {
-            "logical policy gate only"
+            "no isolation backend; session /sandbox toggle only"
         } else {
             "disabled"
         }

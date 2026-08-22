@@ -12,7 +12,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // ---------------------------------------------------------------------------
 // ResourceProvider trait — implemented by archon-core to bridge to MCP
@@ -103,6 +105,10 @@ impl Tool for ListMcpResourcesTool {
         "ListMcpResources"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
+    }
+
     fn description(&self) -> &str {
         "List resources available from connected MCP servers. Optionally filter by server name."
     }
@@ -174,6 +180,10 @@ impl Default for ReadMcpResourceTool {
 impl Tool for ReadMcpResourceTool {
     fn name(&self) -> &str {
         "ReadMcpResource"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

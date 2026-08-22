@@ -4,7 +4,9 @@ use serde_json::json;
 use std::sync::LazyLock;
 
 use crate::provider_env::{ProviderEnvPolicy, ProviderEnvResolution, ProviderEnvSource};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 use crate::workflow_resource_env::CargoResourceLimits;
 
 #[path = "bash_output.rs"]
@@ -180,6 +182,10 @@ impl BashTool {
 impl Tool for BashTool {
     fn name(&self) -> &str {
         "Bash"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::EXECUTION
     }
 
     fn description(&self) -> &str {

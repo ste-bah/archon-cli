@@ -48,6 +48,13 @@ pub(crate) struct Terminal {
     /// The agent session that opened it, so session end can close its own.
     session_id: String,
     pub(crate) shell: String,
+    /// Whether the shell runs inside a sandbox backend's world.
+    ///
+    /// Kept per terminal rather than asked of the context at write time,
+    /// because the two can disagree: a terminal opened before `/sandbox on` is
+    /// a host shell for the rest of its life, and writing to it afterwards
+    /// would run on the host while every other tool went through the backend.
+    pub(crate) sandboxed: bool,
     control: Arc<PtyControl>,
     buffer: Mutex<OutputBuffer>,
     last_used: Mutex<Instant>,
@@ -110,6 +117,7 @@ pub(crate) fn create(
     session_id: &str,
     id: String,
     shell: String,
+    sandboxed: bool,
     program: CommandBuilder,
 ) -> Result<Arc<Terminal>, String> {
     reap_idle();
@@ -128,6 +136,7 @@ pub(crate) fn create(
         id: id.clone(),
         session_id: session_id.to_string(),
         shell,
+        sandboxed,
         control,
         buffer: Mutex::new(OutputBuffer::new()),
         last_used: Mutex::new(Instant::now()),
@@ -154,6 +163,7 @@ pub(crate) fn create(
         terminal = %terminal.id,
         shell = %terminal.shell,
         session = %terminal.session_id,
+        sandboxed = terminal.sandboxed,
         "terminal: opened a persistent shell"
     );
     TERMINALS.insert(id, Arc::clone(&terminal));

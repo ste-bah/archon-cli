@@ -79,6 +79,11 @@ impl RouterHost for AgentHost<'_> {
             // Parent-side context: `agent_id` reaches the child through the
             // executor, not through here.
             subagent_id: None,
+            turn_id: Some(format!(
+                "{}#{}",
+                self.agent.config.session_id,
+                self.agent.turn_number()
+            )),
             mode: archon_tools::tool::AgentMode::Normal,
             extra_dirs: vec![],
             in_fork: crate::agents::built_in::is_in_fork_child_by_messages(
@@ -87,6 +92,7 @@ impl RouterHost for AgentHost<'_> {
             nested: false,
             cancel_parent: self.agent.config.cancel_token.clone(),
             sandbox: self.agent.config.sandbox.clone(),
+            fs: self.agent.config.fs.clone(),
             activity_sink: self.agent.provider_model_activity_sink(&self.active_model),
             tool_run_parent_action_id: self.agent.guardrail_action_id.clone(),
             tool_run_tool_use_id: None,

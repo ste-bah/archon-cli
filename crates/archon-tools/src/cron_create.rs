@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use crate::cron_scheduler::validate_cron_expression;
 use crate::cron_task::{CronStore, CronTask};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that creates a new scheduled cron task.
 pub struct CronCreateTool {
@@ -50,6 +52,10 @@ impl CronCreateTool {
 impl Tool for CronCreateTool {
     fn name(&self) -> &str {
         "CronCreate"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

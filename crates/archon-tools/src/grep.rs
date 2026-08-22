@@ -1,10 +1,12 @@
-use std::fs;
 use std::path::Path;
 
 use serde_json::json;
 
+use crate::filesystem::FileSystem;
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct GrepTool;
 
@@ -16,6 +18,10 @@ const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 impl Tool for GrepTool {
     fn name(&self) -> &str {
         "Grep"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {
@@ -92,10 +98,12 @@ impl Tool for GrepTool {
 
         // Collect files to search. Use the same bounded walker for glob and
         // non-glob searches so filters like `*` do not traverse target/.
-        let (files, file_limit_hit) = match collect_files(&search_path, glob_filter) {
-            Ok(result) => result,
-            Err(err) => return ToolResult::error(err),
-        };
+        let fs = ctx.fs();
+        let (files, file_limit_hit) =
+            match collect_files(fs.as_ref(), &search_path, glob_filter).await {
+                Ok(result) => result,
+                Err(err) => return ToolResult::error(err),
+            };
 
         let mut results: Vec<String> = Vec::new();
         let mut result_limit_hit = false;
@@ -106,11 +114,11 @@ impl Tool for GrepTool {
                 result_limit_hit = true;
                 break;
             }
-            if file_too_large(file_path) {
+            if file_too_large(fs.as_ref(), file_path).await {
                 skipped_large += 1;
                 continue;
             }
-            let content = match fs::read_to_string(file_path) {
+            let content = match fs.read_to_string(file_path).await {
                 Ok(c) => c,
                 Err(_) => continue, // skip binary/unreadable files
             };
@@ -172,18 +180,18 @@ impl Tool for GrepTool {
 }
 
 /// Recursively collect files from a path, optionally filtering by glob pattern.
-fn collect_files(
+async fn collect_files(
+    fs: &dyn FileSystem,
     path: &Path,
     glob_filter: Option<&str>,
 ) -> Result<(Vec<std::path::PathBuf>, bool), String> {
     let mut files = Vec::new();
 
-    if path.is_file() {
-        files.push(path.to_path_buf());
+    let Ok(meta) = fs.metadata(path).await else {
         return Ok((files, false));
-    }
-
-    if !path.is_dir() {
+    };
+    if !meta.is_dir {
+        files.push(path.to_path_buf());
         return Ok((files, false));
     }
 
@@ -191,36 +199,47 @@ fn collect_files(
         Some(filter) => Some(glob::Pattern::new(filter).map_err(|e| format!("{e}"))?),
         None => None,
     };
-    let limit_hit = walk_dir(path, path, matcher.as_ref(), &mut files);
+    let limit_hit = walk_dir(fs, path, matcher.as_ref(), &mut files).await;
 
     Ok((files, limit_hit))
 }
 
-fn walk_dir(
+/// Walk `base` breadth-first, collecting files that pass `matcher`.
+///
+/// Iterative rather than recursive: an `async fn` that calls itself needs its
+/// future boxed at every level, and the worklist says the same thing without
+/// an allocation per directory.
+async fn walk_dir(
+    fs: &dyn FileSystem,
     base: &Path,
-    dir: &Path,
     matcher: Option<&glob::Pattern>,
     files: &mut Vec<std::path::PathBuf>,
 ) -> bool {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
+    let mut pending = vec![base.to_path_buf()];
 
-    for entry in entries.flatten() {
-        if files.len() >= MAX_SEARCH_FILES {
-            return true;
-        }
-        let path = entry.path();
-        if path.is_file() {
-            if matches_glob(base, &path, matcher) {
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs.read_dir(&dir).await else {
+            continue;
+        };
+
+        for path in entries {
+            if files.len() >= MAX_SEARCH_FILES {
+                return true;
+            }
+            let Ok(meta) = fs.metadata(&path).await else {
+                continue;
+            };
+            if meta.is_dir {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !skip_dir(&name) {
+                    pending.push(path);
+                }
+            } else if matches_glob(base, &path, matcher) {
                 files.push(path);
             }
-        } else if path.is_dir()
-            && !skip_dir(&entry.file_name().to_string_lossy())
-            && walk_dir(base, &path, matcher, files)
-        {
-            return true;
         }
     }
     false
@@ -254,9 +273,10 @@ fn matches_glob(base: &Path, path: &Path, matcher: Option<&glob::Pattern>) -> bo
             .is_some_and(|name| pattern.matches(name))
 }
 
-fn file_too_large(path: &Path) -> bool {
-    fs::metadata(path)
-        .map(|metadata| metadata.len() > MAX_FILE_BYTES)
+async fn file_too_large(fs: &dyn FileSystem, path: &Path) -> bool {
+    fs.metadata(path)
+        .await
+        .map(|metadata| metadata.len > MAX_FILE_BYTES)
         .unwrap_or(false)
 }
 

@@ -4,7 +4,9 @@ use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Maximum number of todo items allowed.
 const MAX_ITEMS: usize = 100;
@@ -40,6 +42,10 @@ pub struct TodoWriteTool;
 impl Tool for TodoWriteTool {
     fn name(&self) -> &str {
         "TodoWrite"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

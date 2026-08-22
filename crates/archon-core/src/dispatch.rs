@@ -381,6 +381,9 @@ impl Default for ToolRegistry {
     }
 }
 
+#[path = "dispatch_world_schema.rs"]
+mod world_schema;
+
 /// Create a registry with all built-in tools.
 ///
 /// `working_dir` is passed to tools that operate on the current project
@@ -564,11 +567,17 @@ pub fn create_default_registry(
         ));
     }
 
-    // Register ToolSearch with a snapshot of all tool definitions captured at this point.
-    // Must be registered LAST so the snapshot includes all other tools.
-    let tool_defs_snapshot = registry.tool_definitions();
+    // Register ToolSearch LAST, so the snapshot holds every other tool and not
+    // itself — which is also what keeps these `Arc`s from forming a cycle.
+    //
+    // A snapshot of the tools, not of their definitions: it is consulted long
+    // after this, when the session has a world, and renders each match then.
+    // Which tools it holds is still fixed here, before the session replaces
+    // `Bash` and `TerminalWrite`, applies filters, or registers MCP tools — a
+    // pre-existing staleness this does not address.
+    let tool_snapshot = registry.tool_handles();
     registry.register(Box::new(archon_tools::toolsearch::ToolSearchTool::new(
-        tool_defs_snapshot,
+        tool_snapshot,
     )));
 
     registry

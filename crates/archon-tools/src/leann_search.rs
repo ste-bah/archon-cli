@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 use archon_leann::CodeIndex;
 
 pub struct LeannSearchTool {
@@ -24,6 +26,10 @@ impl LeannSearchTool {
 impl Tool for LeannSearchTool {
     fn name(&self) -> &str {
         "LeannSearch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {

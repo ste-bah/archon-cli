@@ -232,6 +232,10 @@ impl Tool for BulkTool {
         "Bulk"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "Returns a deterministic block of text sized for the #171 fixture."
     }

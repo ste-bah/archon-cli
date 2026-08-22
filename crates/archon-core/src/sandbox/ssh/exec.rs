@@ -1,4 +1,8 @@
-use archon_permissions::sandbox::{SandboxCommandRequest, SandboxCommandResult};
+use std::path::Path;
+
+use archon_permissions::sandbox::{
+    SandboxCommandRequest, SandboxCommandResult, SandboxTerminalCommand, SandboxTerminalRequest,
+};
 
 use super::SshConfig;
 
@@ -6,8 +10,45 @@ pub(super) fn ssh_command_args(
     config: &SshConfig,
     request: &SandboxCommandRequest,
 ) -> Result<Vec<String>, String> {
+    let mut args = ssh_connection_args(config, "-T")?;
+    args.push(remote_bash_command(config, request)?);
+    Ok(args)
+}
+
+/// A terminal over the same connection `Bash` uses, with a TTY on it.
+///
+/// `-tt` forces TTY allocation even though the caller's stdin is a PTY the
+/// local `ssh` cannot see as one, and `exec` replaces the login shell so the
+/// terminal's process *is* the shell — otherwise closing it would leave the
+/// remote shell behind under a wrapper.
+pub(super) fn ssh_terminal_args(
+    config: &SshConfig,
+    request: &SandboxTerminalRequest,
+) -> Result<SandboxTerminalCommand, String> {
+    let (shell, program) = remote_shell(request.shell.as_deref())?;
+    let workdir = terminal_workdir(config, request)?;
+    let mut args = ssh_connection_args(config, "-tt")?;
+    args.push(format!(
+        "cd -- {} && exec {program} -i",
+        shell_quote(&workdir)
+    ));
+    Ok(SandboxTerminalCommand {
+        program: config.binary.clone(),
+        args,
+        shell,
+        location: format!("{workdir} on {}", ssh_target(config)?),
+    })
+}
+
+/// Everything up to and including the target: options, key, `user@host`.
+///
+/// Shared with [`ssh_command_args`] so a terminal cannot reach the host under
+/// weaker options than a command does — `BatchMode=yes` in particular, which is
+/// what stops a PTY session from turning into an interactive credential prompt
+/// the model would be the one answering.
+fn ssh_connection_args(config: &SshConfig, tty_flag: &str) -> Result<Vec<String>, String> {
     let mut args = vec![
-        "-T".into(),
+        tty_flag.into(),
         "-p".into(),
         config.port.to_string(),
         "-o".into(),
@@ -25,8 +66,42 @@ pub(super) fn ssh_command_args(
         args.extend(["-i".into(), key_file.into()]);
     }
     args.push(ssh_target(config)?);
-    args.push(remote_bash_command(config, request)?);
     Ok(args)
+}
+
+fn remote_shell(shell: Option<&str>) -> Result<(String, String), String> {
+    match shell {
+        None | Some("bash") => Ok(("bash".into(), "/bin/bash".into())),
+        Some("sh") => Ok(("sh".into(), "/bin/sh".into())),
+        Some(other @ ("powershell" | "cmd")) => Err(format!(
+            "the ssh sandbox reaches a POSIX host, which has no {other}; \
+             ask for bash or sh"
+        )),
+        Some(other) => Err(format!(
+            "unknown shell {other:?}; the ssh sandbox offers bash and sh"
+        )),
+    }
+}
+
+/// Where a terminal's shell starts.
+///
+/// In `remote` mode the workspace is a directory on the far side with no
+/// relationship to any host path, so a caller-chosen `cwd` cannot be honoured
+/// and must not be quietly dropped either — starting somewhere other than where
+/// it asked is how an agent ends up editing the wrong tree.
+fn terminal_workdir(
+    config: &SshConfig,
+    request: &SandboxTerminalRequest,
+) -> Result<String, String> {
+    if config.workspace_mode == "remote" && request.cwd != request.workspace {
+        return Err(format!(
+            "sandbox.ssh.workspace_mode is \"remote\", so the shell starts in \
+             sandbox.ssh.remote_workdir; the host path {} names nothing there. \
+             Open the terminal without a cwd and cd once it is up",
+            request.cwd.display()
+        ));
+    }
+    workspace_workdir(config, &request.cwd)
 }
 
 fn ssh_target(config: &SshConfig) -> Result<String, String> {
@@ -47,7 +122,7 @@ fn remote_bash_command(
     config: &SshConfig,
     request: &SandboxCommandRequest,
 ) -> Result<String, String> {
-    let workdir = remote_workdir(config, request)?;
+    let workdir = workspace_workdir(config, &request.working_dir)?;
     Ok(format!(
         "cd -- {} && /bin/bash -lc {}",
         shell_quote(&workdir),
@@ -55,7 +130,9 @@ fn remote_bash_command(
     ))
 }
 
-fn remote_workdir(config: &SshConfig, request: &SandboxCommandRequest) -> Result<String, String> {
+/// The directory the far side works in. `host_dir` is used only in `mirror`
+/// mode, where the remote tree is the same paths as the local one.
+fn workspace_workdir(config: &SshConfig, host_dir: &Path) -> Result<String, String> {
     let workdir = if config.workspace_mode == "remote" {
         config
             .remote_workdir
@@ -64,7 +141,7 @@ fn remote_workdir(config: &SshConfig, request: &SandboxCommandRequest) -> Result
             .trim()
             .to_string()
     } else {
-        request.working_dir.to_string_lossy().to_string()
+        host_dir.to_string_lossy().to_string()
     };
     if workdir.trim().is_empty() || workdir.contains('\0') {
         return Err("ssh sandbox remote workdir must not be empty or contain NUL".into());
@@ -139,6 +216,7 @@ mod tests {
             timeout_ms: 1000,
             max_output_bytes: 1024,
             env: vec![("SECRET_TOKEN".into(), "nope".into())],
+            ..SandboxCommandRequest::default()
         }
     }
 
@@ -190,6 +268,98 @@ mod tests {
         let args = ssh_command_args(&cfg, &request()).unwrap();
 
         assert!(args.last().unwrap().contains("cd -- '/workspace/local'"));
+    }
+
+    fn terminal_request(cwd: &str) -> SandboxTerminalRequest {
+        SandboxTerminalRequest {
+            shell: None,
+            workspace: PathBuf::from("/workspace/local"),
+            cwd: PathBuf::from(cwd),
+        }
+    }
+
+    fn remote_config() -> SshConfig {
+        SshConfig {
+            enabled: true,
+            host: Some("sandbox.example".into()),
+            user: Some("archon".into()),
+            remote_workdir: Some("/srv/workspace".into()),
+            ..SshConfig::default()
+        }
+    }
+
+    /// The connection a terminal makes must be the connection a command makes,
+    /// option for option — `BatchMode=yes` above all, since a PTY session
+    /// without it would put a credential prompt in front of the model.
+    #[test]
+    fn a_terminal_reaches_the_host_under_the_same_options_a_command_does() {
+        let command = ssh_terminal_args(&remote_config(), &terminal_request("/workspace/local"))
+            .expect("remote terminal");
+
+        assert_eq!(command.program, "ssh");
+        assert_eq!(command.args[0], "-tt", "a PTY session needs a remote TTY");
+        for option in [
+            "BatchMode=yes",
+            "StrictHostKeyChecking=yes",
+            "ForwardAgent=no",
+            "PermitLocalCommand=no",
+        ] {
+            assert!(
+                command.args.contains(&option.to_string()),
+                "missing {option}"
+            );
+        }
+        assert!(command.args.contains(&"archon@sandbox.example".to_string()));
+        assert_eq!(
+            command.args.last().map(String::as_str),
+            Some("cd -- '/srv/workspace' && exec /bin/bash -i")
+        );
+        assert_eq!(command.location, "/srv/workspace on archon@sandbox.example");
+    }
+
+    /// In `remote` mode a host path names nothing on the far side. Dropping it
+    /// and starting at the remote root would put the shell somewhere the caller
+    /// did not ask for and would never be told about.
+    #[test]
+    fn remote_mode_refuses_a_caller_chosen_directory_instead_of_ignoring_it() {
+        let error = ssh_terminal_args(&remote_config(), &terminal_request("/workspace/local/src"))
+            .expect_err("a host subdirectory has no remote meaning");
+
+        assert!(error.contains("remote"), "{error}");
+        assert!(error.contains("/workspace/local/src"), "{error}");
+    }
+
+    #[test]
+    fn mirror_mode_starts_the_terminal_where_it_was_asked_to() {
+        let config = SshConfig {
+            workspace_mode: "mirror".into(),
+            ..remote_config()
+        };
+
+        let command = ssh_terminal_args(&config, &terminal_request("/workspace/local/src"))
+            .expect("mirror terminal");
+
+        assert!(
+            command
+                .args
+                .last()
+                .expect("remote command")
+                .contains("cd -- '/workspace/local/src'"),
+            "{:?}",
+            command.args
+        );
+    }
+
+    #[test]
+    fn a_windows_only_shell_is_refused_with_the_reason() {
+        let mut request = terminal_request("/workspace/local");
+        request.shell = Some("cmd".into());
+
+        let error =
+            ssh_terminal_args(&remote_config(), &request).expect_err("no cmd on a POSIX host");
+
+        assert!(error.contains("POSIX"), "{error}");
+        assert!(error.contains("bash"), "{error}");
     }
 
     #[test]

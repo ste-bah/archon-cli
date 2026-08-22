@@ -5,6 +5,11 @@ use archon_observability::AgentActivitySink;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+/// Re-exported so a tool declares its class without reaching past the trait it
+/// is implementing. The enum itself lives in `archon-permissions`, the leaf
+/// that the sandbox backends also see.
+pub use archon_permissions::{ToolCapability, WorldReach};
+
 // ---------------------------------------------------------------------------
 // Permission level -- tools declare their danger level
 // ---------------------------------------------------------------------------
@@ -117,6 +122,20 @@ pub struct ToolContext {
     /// caller reads this instead. `None` means the top-level agent made the
     /// call — that is a real answer, not absent data.
     pub subagent_id: Option<String>,
+    /// Identity of the agent turn this invocation belongs to
+    /// (`sandbox.scope = "turn"`).
+    ///
+    /// Distinct from `tool_run_parent_action_id`, which is the nearest-looking
+    /// field and is not a turn identity: it is `None` on the ordinary
+    /// interactive path, it is a guardrail *action* id that spans however many
+    /// turns that action takes, and the world-model path sets it to the session
+    /// id outright.
+    ///
+    /// `None` means the caller has no turn loop. It is not an identity and must
+    /// never be treated as one — two unrelated callers both answering `None`
+    /// have nothing in common, so a `turn`-scoped sandbox holds nothing for
+    /// them and each command gets its own world.
+    pub turn_id: Option<String>,
     pub mode: AgentMode,
     /// Additional directories added at runtime via `/add-dir`.
     pub extra_dirs: Vec<PathBuf>,
@@ -145,6 +164,14 @@ pub struct ToolContext {
     /// (agent.rs direct execute + dispatch.rs subagent path) check this
     /// before running a tool. Toggled via `/sandbox on/off`.
     pub sandbox: Option<Arc<dyn archon_permissions::SandboxBackend>>,
+    /// #201 Phase 1: the filesystem of the execution world.
+    ///
+    /// `None` means the host filesystem, which is what every context that
+    /// predates a sandbox means and keeps behaviour unchanged when none is
+    /// configured. A backend that holds the working tree somewhere else
+    /// installs its own here, and the world-bound tools follow it rather than
+    /// reading the host while `Bash` runs in a container.
+    pub fs: Option<Arc<dyn crate::filesystem::FileSystem>>,
     /// Canonical activity stream for TUI/log/persistence consumers. Tools do
     /// not need to know about rendering; dispatch emits lifecycle events here.
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
@@ -161,6 +188,15 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    /// The filesystem this invocation must use.
+    ///
+    /// Every world-bound tool goes through this rather than `std::fs`, so a
+    /// sandboxed context cannot end up reading the host by omission.
+    #[must_use]
+    pub fn fs(&self) -> Arc<dyn crate::filesystem::FileSystem> {
+        self.fs.clone().unwrap_or_else(crate::filesystem::local_fs)
+    }
+
     pub fn with_tool_run_attempt(&self, tool_use_id: impl Into<String>, attempt: u32) -> Self {
         let mut context = self.clone();
         context.tool_run_tool_use_id = Some(tool_use_id.into());
@@ -175,12 +211,14 @@ impl std::fmt::Debug for ToolContext {
             .field("working_dir", &self.working_dir)
             .field("session_id", &self.session_id)
             .field("subagent_id", &self.subagent_id)
+            .field("turn_id", &self.turn_id)
             .field("mode", &self.mode)
             .field("extra_dirs", &self.extra_dirs)
             .field("in_fork", &self.in_fork)
             .field("nested", &self.nested)
             .field("cancel_parent", &self.cancel_parent)
             .field("sandbox", &self.sandbox.as_ref().map(|_| "<sandbox>"))
+            .field("fs", &self.fs.as_ref().map_or("<host>", |_| "<sandbox fs>"))
             .field(
                 "activity_sink",
                 &self.activity_sink.as_ref().map(|_| "<activity_sink>"),
@@ -325,11 +363,63 @@ pub trait Tool: Send + Sync {
     /// JSON Schema for the tool's input parameters.
     fn input_schema(&self) -> serde_json::Value;
 
+    /// The same schema, as it applies inside the world `ctx` runs in, or `None`
+    /// when the world does not change what this tool accepts.
+    ///
+    /// The convention for anything on this trait that depends on the live
+    /// session rather than on the tool alone: take `&ToolContext`, return
+    /// `Option<T>`, and let `None` mean *nothing to declare* so the caller
+    /// keeps what it would have used without asking. [`Self::description_for`]
+    /// is the other one today. #200's per-call budget should read `fn
+    /// timeout_for(&self, ctx: &ToolContext) -> Option<Duration>` for the same
+    /// reason — a caller has to be able to tell "no opinion" from "an opinion
+    /// that happens to match the default", and cannot do that from the value
+    /// alone.
+    ///
+    /// Defaulted, unlike [`Self::capability`]. Not because a wrong answer here
+    /// is cheap in general: it is cheap *for `TerminalCreate`*, and only
+    /// because `terminal_world::plan` refuses the same call independently at
+    /// execution time. That second enforcer is what turns an omission into a
+    /// wasted turn instead of a breached boundary, and it is a property of
+    /// that tool, not of this method. **A tool whose advertisement is its only
+    /// gate gets no such protection, and this default will not catch it
+    /// declaring the wrong thing** — the compiler asks about `capability`
+    /// precisely because nothing else does. What the default buys is that the
+    /// tools with no second world to describe say nothing, rather than pasting
+    /// `self.input_schema()` back — boilerplate carrying no decision, which is
+    /// how a required method stops meaning anything.
+    fn input_schema_for(&self, _ctx: &ToolContext) -> Option<serde_json::Value> {
+        None
+    }
+
+    /// The description as it applies inside the world `ctx` runs in, or `None`
+    /// when the world does not change what this tool is.
+    ///
+    /// Separate from [`Self::input_schema_for`] because the two are read at
+    /// different moments. A model picks a tool from its description and only
+    /// then reads the schema, so a world that refuses a tool outright has to
+    /// say so here: a refusal hidden in an argument's description is invisible
+    /// to the call that names no arguments, which is exactly the call a
+    /// zero-required-argument tool invites.
+    fn description_for(&self, _ctx: &ToolContext) -> Option<String> {
+        None
+    }
+
     /// Execute the tool with the given JSON input.
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult;
 
     /// Classify the permission level for a specific invocation.
     fn permission_level(&self, input: &serde_json::Value) -> PermissionLevel;
+
+    /// Declare which execution world this tool's effects land in (#201 Phase 3).
+    ///
+    /// Required, deliberately. A default of [`ToolCapability::HostLocal`] would
+    /// let a new tool claim host-only effects it does not have and quietly get
+    /// waved through a sandbox; a default of `WorldBound` would strand every
+    /// tool that has no world. Making the compiler ask once per tool is the
+    /// entire mechanism — it is what stops the next added tool from being
+    /// silently unusable under isolation, the way the #190 terminal tools were.
+    fn capability(&self) -> ToolCapability;
 
     /// Declare whether this tool can mutate files below the session working tree.
     fn working_tree_effect(&self) -> WorkingTreeEffect {

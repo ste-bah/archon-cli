@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that updates a task's description or status.
 pub struct TaskUpdateTool;
@@ -9,6 +11,10 @@ pub struct TaskUpdateTool;
 impl Tool for TaskUpdateTool {
     fn name(&self) -> &str {
         "TaskUpdate"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

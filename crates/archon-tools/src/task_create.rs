@@ -2,7 +2,9 @@ use serde_json::json;
 
 use crate::agent_tool::{SubagentRequest, run_subagent_foreground, run_subagent_with_completion};
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Appended to every delegated prompt.
 ///
@@ -39,6 +41,10 @@ pub struct TaskCreateTool;
 impl Tool for TaskCreateTool {
     fn name(&self) -> &str {
         "TaskCreate"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

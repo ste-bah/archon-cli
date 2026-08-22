@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use archon_permissions::SandboxBackend;
+use archon_permissions::{SandboxBackend, SandboxTerminal, SandboxTerminalRequest};
 
 /// Sandbox configuration — allowlists for paths, toggles for
 /// network/shell. `enabled` turns the whole sandbox on/off.
@@ -175,27 +175,60 @@ impl Default for SharedSandboxFlag {
 }
 
 impl SandboxBackend for SharedSandboxFlag {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    /// `/sandbox on` is a read-only session, not an isolated one: there is no
+    /// second world, so the flag simply refuses everything that changes
+    /// anything. It used to name the tools it refused and allow the rest, which
+    /// meant a tool added later — `PowerShell`, `Monitor`, the #190 terminals —
+    /// was waved through a session the user had asked to freeze. Deciding on
+    /// the declared class is the same fix as #201 Phase 3 makes in the
+    /// isolation backends, in the opposite direction.
+    fn check(
+        &self,
+        tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(());
         }
-        // When sandbox is enabled, block all write/network/shell tools.
-        // Read-only tools (Read, Glob, Grep, LSP, Task*) are allowed.
-        match tool {
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "sandbox: {tool} is blocked (write operations disabled)"
+        match capability {
+            archon_permissions::ToolCapability::WorldBound(
+                archon_permissions::WorldReach::FileRead,
+            )
+            | archon_permissions::ToolCapability::HostLocal => Ok(()),
+            other => Err(format!(
+                "sandbox: {tool} is blocked ({} is not read-only)",
+                other.label()
             )),
-            "Bash" | "Shell" => Err(format!(
-                "sandbox: {tool} is blocked (shell operations disabled)"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "sandbox: {tool} is blocked (network operations disabled)"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "sandbox: {tool} is blocked (agent spawning disabled)"
-            )),
-            _ => Ok(()),
         }
+    }
+
+    /// This flag denies; it does not isolate. It has no world of its own to put
+    /// a shell in, so with it on there is nowhere for a terminal to go — and
+    /// the host is the one place it must not be, since that is where `Bash` is
+    /// being refused.
+    fn terminal(&self, _request: &SandboxTerminalRequest) -> SandboxTerminal {
+        if self.enabled.load(Ordering::SeqCst) {
+            SandboxTerminal::Refused(
+                "sandbox: terminals are blocked (shell operations disabled). This \
+                 sandbox blocks execution rather than relocating it, so there is \
+                 no sandboxed shell to open. Turn it off with /sandbox off, or \
+                 configure sandbox.backend = docker for a shell inside a container."
+                    .into(),
+            )
+        } else {
+            SandboxTerminal::Host
+        }
+    }
+
+    /// This flag denies; it never creates a world. The host tree is where
+    /// everything already is and stays, so no scope changes anything about it —
+    /// the same answer the ssh backend gives, for the same reason.
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
     }
 }
 

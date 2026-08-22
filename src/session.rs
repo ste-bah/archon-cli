@@ -85,23 +85,15 @@ async fn native_session_sandbox_backend(
     config: &archon_core::config::ArchonConfig,
     sandbox_flag: Arc<AtomicBool>,
 ) -> Arc<dyn archon_permissions::SandboxBackend> {
-    let backend: Arc<dyn archon_permissions::SandboxBackend> = match config.sandbox.backend.as_str()
-    {
-        "docker" => Arc::new(archon_core::sandbox::DockerSandboxBackend::new(
-            config.sandbox.docker.clone(),
-            config.sandbox.workspace_access.clone(),
-        )),
-        "ssh" => Arc::new(archon_core::sandbox::SshSandboxBackend::new(
-            config.sandbox.ssh.clone(),
-        )),
-        "openshell" => Arc::new(archon_core::sandbox::OpenShellSandboxBackend::new(
-            config.sandbox.openshell.clone(),
-        )),
-        _ => Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
+    // Shared with the workflow CLI, which composes its own agent config and so
+    // used to get no backend at all (#201 Phase 4). The `/sandbox` toggle is
+    // the session's alone, which is why the host case is answered here rather
+    // than there.
+    crate::runtime::sandbox_world::isolation_backend(&config.sandbox).unwrap_or_else(|| {
+        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
             sandbox_flag,
-        )),
-    };
-    crate::runtime::sandbox_mode::apply_configured_sandbox_mode(backend, &config.sandbox)
+        ))
+    })
 }
 
 fn finish_loop_and_audit(

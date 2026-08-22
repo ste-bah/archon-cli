@@ -29,6 +29,55 @@ mod authoritative_bash_execution_compile_contract {
     #[allow(dead_code)]
     pub struct ExternalCallersCannotForgeBashExecutions;
 }
+/// #201 Phase 3's acceptance criterion, as a pair: adding a tool without a
+/// declared class must fail to compile, and adding one *with* a class must
+/// still compile. Only the pair is meaningful — a `compile_fail` alone would
+/// pass just as happily if the snippet failed for some unrelated reason, such
+/// as `async_trait` not resolving in a doctest.
+mod tool_capability_compile_contract {
+    /// ```
+    /// use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
+    ///
+    /// struct DeclaredTool;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl Tool for DeclaredTool {
+    ///     fn name(&self) -> &str { "Declared" }
+    ///     fn description(&self) -> &str { "declares its class" }
+    ///     fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+    ///     fn capability(&self) -> ToolCapability { ToolCapability::HostLocal }
+    ///     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+    ///         PermissionLevel::Safe
+    ///     }
+    ///     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    ///         ToolResult::success("ok")
+    ///     }
+    /// }
+    /// ```
+    #[allow(dead_code)]
+    pub struct ADeclaredToolCompiles;
+
+    /// ```compile_fail
+    /// use archon_tools::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+    ///
+    /// struct UndeclaredTool;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl Tool for UndeclaredTool {
+    ///     fn name(&self) -> &str { "Undeclared" }
+    ///     fn description(&self) -> &str { "declares no class" }
+    ///     fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+    ///     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+    ///         PermissionLevel::Safe
+    ///     }
+    ///     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    ///         ToolResult::success("ok")
+    ///     }
+    /// }
+    /// ```
+    #[allow(dead_code)]
+    pub struct AToolWithoutACapabilityClassDoesNot;
+}
 pub(crate) mod bash_observability;
 pub(crate) mod cargo_target_env;
 pub use cargo_target_env::{current_timeout_exempt_cargo_wait, take_timeout_exempt_cargo_wait};
@@ -43,6 +92,8 @@ pub mod file_edit;
 pub mod file_observation;
 pub mod file_read;
 pub mod file_write;
+/// The filesystem of the execution world (#201 Phase 1).
+pub mod filesystem;
 pub mod gametheory;
 pub mod glob_tool;
 pub mod grep;
@@ -63,10 +114,15 @@ pub mod sleep;
 // helper still trips `dead_code` — a lesson from Phase 0 of the same issue.
 pub(crate) mod terminal_buffer;
 pub(crate) mod terminal_registry;
+pub(crate) mod terminal_schema;
 pub(crate) mod terminal_shell;
 pub mod terminal_tools;
+pub(crate) mod terminal_world;
 pub mod todo_write;
 pub mod tool;
+#[cfg(test)]
+#[path = "tool_capability_declaration_tests.rs"]
+mod tool_capability_declaration_tests;
 
 pub mod toolsearch;
 pub mod webfetch;

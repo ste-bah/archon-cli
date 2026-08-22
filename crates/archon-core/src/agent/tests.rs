@@ -131,6 +131,7 @@ async fn process_message_fires_runtime_lifecycle_hooks() {
 }
 
 include!("tests/tool_result_projection.rs");
+include!("tests/world_aware_tool_surface.rs");
 
 struct CountingLlmProvider {
     stream_calls: Arc<AtomicUsize>,

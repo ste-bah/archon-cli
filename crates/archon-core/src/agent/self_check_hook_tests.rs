@@ -26,6 +26,10 @@ impl Tool for StubTool {
         &self.0
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "stub"
     }

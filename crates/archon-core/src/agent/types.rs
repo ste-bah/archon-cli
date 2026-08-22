@@ -213,6 +213,12 @@ pub struct AgentConfig {
     /// boot, threaded into ToolContext, and consulted by both tool-execution
     /// dispatch paths. Toggled at runtime via `/sandbox on/off`.
     pub sandbox: Option<std::sync::Arc<dyn archon_permissions::SandboxBackend>>,
+    /// #201 Phase 1: the filesystem of the execution world.
+    ///
+    /// One field, read both by `build_tool_context` and by the read-before-edit
+    /// guard, so a backend cannot end up enforcing freshness against the host
+    /// while the tools write somewhere else. `None` is the host.
+    pub fs: Option<std::sync::Arc<dyn archon_tools::filesystem::FileSystem>>,
     /// Canonical activity event sink shared by parent, subagent, and tool
     /// execution paths.
     pub activity_sink: Option<Arc<dyn AgentActivitySink>>,
@@ -319,6 +325,7 @@ impl Default for AgentConfig {
             max_turns: None,
             cancel_token: None,
             sandbox: None,
+            fs: None,
             activity_sink: None,
             context: crate::config::ContextConfig::default(),
             max_subagent_concurrency: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,

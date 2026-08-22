@@ -97,6 +97,23 @@ impl SubagentRunner {
         identity: std::sync::Arc<IdentityProvider>,
     ) -> Self {
         let model = resolved_model(provider.as_ref(), &model);
+        // The definitions were built before this run had a context — the
+        // executor picks the toolset from names, then decides where the child
+        // will run. A child inherits its parent's backend but is rooted at its
+        // own working directory, so this is the first point where the world it
+        // will actually dispatch into is known, and it is the point the surface
+        // is described against.
+        //
+        // Once per run, not once per round, unlike the parent. The parent
+        // rebuilds its whole request every turn and the tool list was already
+        // being cloned into it, so re-describing there is free; a runner's
+        // `tool_definitions` is deliberately an `Arc` shared across every round
+        // (see `shared_tools`), and re-describing per round would mean cloning
+        // the list again each time, for every concurrent subagent. The cost of
+        // being stale is the same one this whole change is about — a `/sandbox`
+        // toggle mid-run leaves the child one refused call, which
+        // `terminal_world::plan` still produces correctly.
+        let tool_definitions = registry.redescribe(tool_definitions, &tool_context);
         Self {
             provider,
             system_prompt,

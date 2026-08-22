@@ -21,7 +21,9 @@ use std::path::PathBuf;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Results returned when the model does not ask for a specific number.
 const DEFAULT_LIMIT: usize = 10;
@@ -67,6 +69,10 @@ impl SessionSearchTool {
 impl Tool for SessionSearchTool {
     fn name(&self) -> &str {
         "SessionSearch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

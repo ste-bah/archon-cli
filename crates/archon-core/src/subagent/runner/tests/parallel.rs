@@ -20,6 +20,10 @@ impl Tool for RiskySubagentTool {
         "RiskySubagent"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "subagent admission test"
     }
@@ -43,6 +47,9 @@ impl Tool for RiskySubagentTool {
 impl Tool for SleeperTool {
     fn name(&self) -> &str {
         &self.name
+    }
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
     }
     fn description(&self) -> &str {
         "test sleeper"

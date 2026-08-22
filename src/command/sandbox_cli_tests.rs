@@ -39,6 +39,91 @@ fn sandbox_status_verbose_shows_openshell_safety_knobs() {
     assert!(body.contains("Claude Code spoofing"));
 }
 
+/// `Scope: session` echoes the config file, and for the whole life of that field
+/// it was not what happened. Status has to say what the backend actually does
+/// with it — that is the question an operator whose build re-downloads its
+/// dependencies every command is really asking.
+#[test]
+fn sandbox_status_says_what_the_backend_does_with_the_configured_scope() {
+    let held = archon_core::sandbox::SandboxConfig {
+        backend: "docker".into(),
+        scope: "session".into(),
+        docker: archon_core::sandbox::DockerConfig {
+            enabled: true,
+            ..archon_core::sandbox::DockerConfig::default()
+        },
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&held, true).unwrap();
+    assert!(body.contains("Scope: session"), "{body}");
+    assert!(
+        body.contains("Sandbox lifetime: one sandbox held open"),
+        "status must say the container is reused, not just that a scope was set: {body}"
+    );
+    assert!(
+        body.contains("Docker container max age: 14400s"),
+        "the bound that stops a leaked container living forever is not shown: {body}"
+    );
+
+    let per_command = archon_core::sandbox::SandboxConfig {
+        scope: "tool".into(),
+        ..held
+    };
+    assert!(
+        render_status(&per_command, false)
+            .unwrap()
+            .contains("Sandbox lifetime: a sandbox built and destroyed per command"),
+        "`tool` must read differently from `session`, or the line is decoration"
+    );
+}
+
+/// The reachable half of "the backend cannot keep this scope": a default nobody
+/// chose, which falls back rather than failing the configuration. Status has to
+/// show both what was configured and what is actually happening, or the fallback
+/// is silent.
+#[test]
+fn sandbox_status_shows_a_scope_that_fell_back_and_says_why() {
+    let config = archon_core::sandbox::SandboxConfig {
+        backend: "openshell".into(),
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&config, false).unwrap();
+
+    assert!(
+        body.contains("Scope: session"),
+        "the configured value: {body}"
+    );
+    assert!(
+        body.contains("Sandbox lifetime: tool"),
+        "the effective value has to be shown next to it: {body}"
+    );
+    assert!(body.contains("--no-keep"), "and the reason: {body}");
+    assert!(
+        body.contains("Set sandbox.scope explicitly"),
+        "an operator has to be told how to take the decision back: {body}"
+    );
+}
+
+/// An explicitly chosen scope the backend cannot keep never reaches
+/// `render_status` in a real run — config load refuses it first — but status
+/// must not paper over one either.
+#[test]
+fn sandbox_status_names_a_scope_the_operator_chose_and_the_backend_refuses() {
+    let config = archon_core::sandbox::SandboxConfig {
+        backend: "openshell".into(),
+        scope: "session".into(),
+        scope_explicit: true,
+        ..archon_core::sandbox::SandboxConfig::default()
+    };
+
+    let body = render_status(&config, false).unwrap();
+
+    assert!(body.contains("Sandbox lifetime: unsupported:"), "{body}");
+    assert!(body.contains("--no-keep"), "{body}");
+}
+
 #[test]
 fn sandbox_explain_rejects_unknown_backend_override() {
     let config = archon_core::sandbox::SandboxConfig::default();
@@ -89,58 +174,6 @@ fn sandbox_explain_openshell_keeps_provider_routing_host_side() {
     assert!(body.contains("Claude Code spoofing stays in Archon's provider runtime"));
     assert!(body.contains("host_shell_fallback=false"));
     assert!(body.contains("generated memory databases"));
-}
-
-#[test]
-fn sandbox_explain_can_show_tool_routing_without_execution() {
-    let config = archon_core::sandbox::SandboxConfig {
-        backend: "openshell".into(),
-        openshell: archon_core::sandbox::OpenShellConfig {
-            enabled: true,
-            ..archon_core::sandbox::OpenShellConfig::default()
-        },
-        ..archon_core::sandbox::SandboxConfig::default()
-    };
-
-    let body = render_explain(&config, None, Some("Bash"), Some("cargo test")).unwrap();
-
-    assert!(body.contains("Tool: Bash"));
-    assert!(body.contains("Decision: route_to_sandbox"));
-    assert!(body.contains("Command preview: cargo test"));
-}
-
-#[test]
-fn sandbox_explain_risky_mode_leaves_write_under_permission_preflight() {
-    let config = archon_core::sandbox::SandboxConfig {
-        backend: "docker".into(),
-        mode: "risky".into(),
-        docker: archon_core::sandbox::DockerConfig {
-            enabled: true,
-            ..archon_core::sandbox::DockerConfig::default()
-        },
-        ..archon_core::sandbox::SandboxConfig::default()
-    };
-
-    let body = render_explain(&config, None, Some("Write"), None).unwrap();
-
-    assert!(body.contains("Decision: permission_preflight_host_tool"));
-}
-
-#[test]
-fn sandbox_explain_all_mode_blocks_unsupported_write_tools() {
-    let config = archon_core::sandbox::SandboxConfig {
-        backend: "docker".into(),
-        mode: "all".into(),
-        docker: archon_core::sandbox::DockerConfig {
-            enabled: true,
-            ..archon_core::sandbox::DockerConfig::default()
-        },
-        ..archon_core::sandbox::SandboxConfig::default()
-    };
-
-    let body = render_explain(&config, None, Some("Write"), None).unwrap();
-
-    assert!(body.contains("Decision: host_mutation_blocked_by_backend"));
 }
 
 #[test]

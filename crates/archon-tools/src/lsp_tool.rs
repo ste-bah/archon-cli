@@ -9,7 +9,9 @@ use tokio::sync::Mutex;
 use crate::lsp_formatters;
 use crate::lsp_manager::LspServerManager;
 use crate::lsp_types::{LspInput, LspOperation, LspOutput};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // ---------------------------------------------------------------------------
 // LspTool
@@ -52,6 +54,10 @@ impl LspTool {
 impl Tool for LspTool {
     fn name(&self) -> &str {
         "lsp"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

@@ -14,6 +14,9 @@ pub(crate) fn resolve_existing_path(
     requested_path: &str,
     ctx: &ToolContext,
 ) -> Result<PathBuf, String> {
+    if let Some(world) = world_path(requested_path, ctx) {
+        return world;
+    }
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     let resolved = fs::canonicalize(&normalized).map_err(|e| {
@@ -34,11 +37,37 @@ pub(crate) fn resolve_write_target_path(
     requested_path: &str,
     ctx: &ToolContext,
 ) -> Result<PathBuf, String> {
+    if let Some(world) = world_path(requested_path, ctx) {
+        return world;
+    }
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     let resolved = canonicalize_write_target(&normalized)?;
     ensure_allowed(&resolved, ctx)?;
     Ok(resolved)
+}
+
+/// The execution world's answer for a path it names itself, if it has one.
+///
+/// Under a sandbox the model's paths come from two places: the ones `Read` and
+/// `Glob` handed it, which are host paths, and the ones `Bash` printed, which
+/// are the world's — `/workspace/src/main.rs` under docker, the remote workdir
+/// over ssh. The host guard is right about the first and cannot be right about
+/// the second: canonicalising a container path on the host fails, so the tool
+/// refused a file that plainly existed. That was the whole gap between the
+/// filesystem seam and the tools that use it (#201).
+///
+/// The world vouches for its own paths because it already bounds them — a
+/// container path that would climb out of the mount is refused by the
+/// translation itself. Host paths still go through the host guard below, so
+/// nothing here widens what a tool may touch on this machine.
+fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf, String>> {
+    let fs = ctx.fs.as_ref()?;
+    let admitted = fs.admit_world_path(Path::new(requested_path))?;
+    Some(
+        admitted
+            .map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}")),
+    )
 }
 
 fn anchor_requested_path(requested_path: &str, ctx: &ToolContext) -> Result<PathBuf, String> {
