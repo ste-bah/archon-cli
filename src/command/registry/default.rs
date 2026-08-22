@@ -58,7 +58,7 @@ pub(crate) fn default_registry() -> Registry {
     // Primaries FIRST — builder panics on duplicate primary names.
     b.insert_primary("fast", Arc::new(FastHandler));
     b.insert_primary("compact", Arc::new(CompactHandler::new()));
-    b.insert_primary("clear", Arc::new(ClearHandler::new()));
+    b.insert_primary(ClearHandler::NAME, Arc::new(ClearHandler::new()));
     b.insert_primary("export", Arc::new(ExportHandler));
     b.insert_primary("thinking", Arc::new(ThinkingHandler));
     b.insert_primary("effort", Arc::new(EffortHandler));
@@ -72,7 +72,7 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("permissions", Arc::new(PermissionsHandler));
     // TASK-TUI-626: /plan Plan Mode toggle (SNAPSHOT+EFFECT via SetPermissionMode("plan")).
     b.insert_primary("plan", Arc::new(crate::command::plan::PlanHandler));
-    b.insert_primary("config", Arc::new(ConfigHandler::new()));
+    b.insert_primary(ConfigHandler::NAME, Arc::new(ConfigHandler::new()));
     b.insert_primary("memory", Arc::new(MemoryHandler));
     b.insert_primary("doctor", Arc::new(DoctorHandler::new()));
     b.insert_primary("bug", Arc::new(BugHandler));

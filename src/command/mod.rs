@@ -107,6 +107,9 @@ pub(crate) mod hooks;
 // #189 Phase 11: Agent Client Protocol over stdio.
 pub(crate) mod acp;
 pub(crate) mod ide_stdio;
+/// Spelling-complete recognition for commands whose bodies run upstream of
+/// the dispatcher (`/clear`, `/config`).
+pub(crate) mod intercept;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
 /// `kb kbs` — the only surface that enumerates knowledge-base names.
