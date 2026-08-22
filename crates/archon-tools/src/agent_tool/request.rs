@@ -109,6 +109,7 @@ pub(super) fn validate_and_build(
         run_in_background,
         cwd,
         isolation,
+        write_roots: Vec::new(),
         provider_env: None,
     })
 }

@@ -199,6 +199,7 @@ fn sample_request() -> SubagentRequest {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     }
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::path_guard::resolve_existing_file_path;
+use crate::path_guard::resolve_existing_write_target;
 use crate::tool::ToolContext;
 
 const SESSION_DIR: &str = ".archon/large-edits";
@@ -25,7 +25,7 @@ pub(super) struct LargeEditSession {
 }
 
 pub(super) fn begin(file_path: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
-    let target = resolve_existing_file_path(file_path, ctx)?;
+    let target = resolve_existing_write_target(file_path, ctx)?;
     let original = fs::read(&target)
         .map_err(|e| format!("Failed to read target '{}': {e}", target.display()))?;
     let edit_id = Uuid::new_v4().to_string();
@@ -94,7 +94,7 @@ pub(super) fn commit(
     required_fragments: &[String],
 ) -> Result<String, String> {
     let session = load(edit_id, ctx)?;
-    let target = resolve_existing_file_path(&session.meta.target_path, ctx)?;
+    let target = resolve_existing_write_target(&session.meta.target_path, ctx)?;
     let current = fs::read(&target)
         .map_err(|e| format!("Failed to read target '{}': {e}", target.display()))?;
     let current_hash = content_hash(&current);

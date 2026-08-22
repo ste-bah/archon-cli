@@ -310,6 +310,7 @@ fn subagent_manager_register_before_run_complete_after() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
 
@@ -347,6 +348,7 @@ fn subagent_manager_max_concurrent_enforced() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
 

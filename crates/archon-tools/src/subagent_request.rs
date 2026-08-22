@@ -26,6 +26,22 @@ pub struct SubagentRequest {
     /// When set to "worktree", the subagent runs in an isolated git worktree.
     #[serde(default)]
     pub isolation: Option<String>,
+    /// Directories this subagent may WRITE to. Empty means unconfined.
+    ///
+    /// Isolation says where an agent RUNS; this says what it may change, and
+    /// the two are not the same question. An agent handed its own worktree is
+    /// still given the checkout it was branched from to read, and while one
+    /// list governed reads and writes alike, being able to read that tree meant
+    /// being able to write it — which a worktree-isolated write agent did,
+    /// editing five files in the canonical checkout unnoticed.
+    ///
+    /// Named by the caller rather than inferred from the working directory,
+    /// because the correct set is not derivable here: an agent may legitimately
+    /// have to write a declared artifact that lives outside its workspace
+    /// altogether, and confining it to the workspace would refuse the one write
+    /// the task exists to make.
+    #[serde(default)]
+    pub write_roots: Vec<String>,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub provider_env: Option<ProviderEnvSource>,
 }

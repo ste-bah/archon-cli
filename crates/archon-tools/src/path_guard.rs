@@ -10,6 +10,22 @@ pub(crate) fn resolve_existing_file_path(
     resolve_existing_path(requested_path, ctx)
 }
 
+/// An existing file this context is allowed to MODIFY.
+///
+/// `resolve_existing_file_path` answers "may this be read", and `Edit` used it
+/// to decide whether a file may be rewritten. Those are the same question only
+/// while writing is unconfined; for an agent sealed into its own workspace they
+/// differ, and conflating them is what let a worktree-isolated agent edit the
+/// checkout it was branched from.
+pub(crate) fn resolve_existing_write_target(
+    requested_path: &str,
+    ctx: &ToolContext,
+) -> Result<PathBuf, String> {
+    let resolved = resolve_existing_path(requested_path, ctx)?;
+    ensure_write_allowed(&resolved, ctx)?;
+    Ok(resolved)
+}
+
 pub(crate) fn resolve_existing_path(
     requested_path: &str,
     ctx: &ToolContext,
@@ -44,7 +60,57 @@ pub(crate) fn resolve_write_target_path(
     let normalized = normalize_lexically(&anchored)?;
     let resolved = canonicalize_write_target(&normalized)?;
     ensure_allowed(&resolved, ctx)?;
+    ensure_write_allowed(&resolved, ctx)?;
     Ok(resolved)
+}
+
+/// Refuse a write outside the directories this context may write to.
+///
+/// Applied on top of [`ensure_allowed`], never instead of it: a path must still
+/// be somewhere the context can see before the question of writing it arises.
+///
+/// `ToolContext::write_roots` empty means writing is unconfined and this is a
+/// no-op, which is what every interactive session has and keeps: a directory
+/// added with `/add-dir` is one the user asked for and intends to edit in, so
+/// `extra_dirs` is not silently demoted to read-only.
+///
+/// It is populated for an agent given its own workspace. Such an agent still
+/// receives the checkout it was branched from in `extra_dirs`, because reading
+/// it is legitimate and usually necessary — but one list served reads and
+/// writes alike, so being allowed to read the real checkout meant being allowed
+/// to write it. A worktree-isolated write agent did exactly that: it edited
+/// five files in the canonical tree, including 111 lines of debug scaffolding,
+/// while the run recorded its repository root as a worktree. Nothing refused
+/// the write and nothing noticed; a person reading `git status` found it hours
+/// later.
+fn ensure_write_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String> {
+    if ctx.write_roots.is_empty() {
+        return Ok(());
+    }
+    let mut roots = Vec::new();
+    for root in &ctx.write_roots {
+        // A root that cannot be resolved is not silently skipped: dropping it
+        // would quietly widen the confinement it exists to impose.
+        let canonical = fs::canonicalize(root)
+            .map_err(|e| format!("Failed to resolve write root '{}': {e}", root.display()))?;
+        roots.push(canonical);
+    }
+    if roots
+        .iter()
+        .any(|root| resolved_path == root || resolved_path.starts_with(root))
+    {
+        return Ok(());
+    }
+    let allowed = roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "Path '{}' is readable but outside this agent's writable directories: {allowed}. \
+         Make the change in your own workspace; another agent owns that tree.",
+        resolved_path.display()
+    ))
 }
 
 /// The execution world's answer for a path it names itself, if it has one.
@@ -189,3 +255,7 @@ fn normalize_lexically(path: &Path) -> Result<PathBuf, String> {
 
     Ok(normalized)
 }
+
+#[cfg(test)]
+#[path = "path_guard_write_roots_tests.rs"]
+mod write_roots_tests;

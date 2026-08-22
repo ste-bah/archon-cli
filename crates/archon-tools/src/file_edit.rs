@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::path_guard::resolve_existing_file_path;
+use crate::path_guard::resolve_existing_write_target;
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
@@ -77,7 +77,7 @@ impl Tool for EditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let path = match resolve_existing_file_path(file_path, ctx) {
+        let path = match resolve_existing_write_target(file_path, ctx) {
             Ok(path) => path,
             Err(e) => return ToolResult::error(e),
         };

@@ -179,6 +179,7 @@ fn subagent_type_serializes_to_json() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
     let json = serde_json::to_value(&request).unwrap();
@@ -197,6 +198,7 @@ fn provider_env_policy_is_internal_only() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: Some(crate::provider_env::ProviderEnvSource::Policy(
             crate::provider_env::ProviderEnvPolicy::new(vec!["POLYGON_API_KEY".to_string()]),
         )),
@@ -271,6 +273,7 @@ fn run_in_background_serializes_to_json() {
         run_in_background: true,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
     let json = serde_json::to_value(&request).unwrap();
@@ -313,6 +316,7 @@ fn cwd_serializes_to_json() {
         run_in_background: false,
         cwd: Some("/tmp".into()),
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
     let json = serde_json::to_value(&request).unwrap();
@@ -394,6 +398,7 @@ fn isolation_serializes_to_json() {
         run_in_background: false,
         cwd: None,
         isolation: Some("worktree".into()),
+        write_roots: Vec::new(),
         provider_env: None,
     };
     let json = serde_json::to_value(&request).unwrap();

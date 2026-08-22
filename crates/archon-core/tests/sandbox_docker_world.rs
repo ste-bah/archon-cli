@@ -443,6 +443,7 @@ async fn a_spawned_agent_runs_its_bash_in_the_parents_container() {
             run_in_background: false,
             cwd: None,
             isolation: None,
+            write_roots: Vec::new(),
             provider_env: None,
         },
         parent_ctx,

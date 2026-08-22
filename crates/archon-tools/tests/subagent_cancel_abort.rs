@@ -122,6 +122,7 @@ async fn cancelling_foreground_subagent_waits_for_executor_cleanup() {
             run_in_background: false,
             cwd: None,
             isolation: None,
+            write_roots: Vec::new(),
             provider_env: None,
         },
         cancel.clone(),

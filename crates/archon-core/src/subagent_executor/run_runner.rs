@@ -49,6 +49,7 @@ impl AgentSubagentExecutor {
                 worktree_info.as_ref(),
                 prepared,
                 cancel,
+                &request.write_roots,
             )
             .await;
         let mut runner = crate::subagent::runner::SubagentRunner::new(
@@ -139,6 +140,7 @@ impl AgentSubagentExecutor {
         worktree_info: Option<&WorktreeInfo>,
         prepared: &PreparedSubagentRun,
         cancel: &tokio_util::sync::CancellationToken,
+        write_roots: &[String],
     ) -> ToolContext {
         let working_dir = worktree_info
             .map(|wt| wt.worktree_path.clone())
@@ -195,6 +197,15 @@ impl AgentSubagentExecutor {
             turn_id: parent_ctx.turn_id.clone(),
             mode,
             extra_dirs,
+            // Named by the caller, never derived here. Deriving it from "the
+            // child got its own directory" confines every isolated subagent,
+            // including the interactive ones a user spawns with `/add-dir`
+            // directories they mean to edit in — and, worse, confines a
+            // workflow agent to a worktree when the artifact it must produce
+            // lives outside the repository entirely. A caller that knows both
+            // the workspace and the declared artifact roots is the only one
+            // that can name this set correctly.
+            write_roots: write_roots.iter().map(Into::into).collect(),
             in_fork,
             nested: false,
             cancel_parent: Some(tool_cancel),

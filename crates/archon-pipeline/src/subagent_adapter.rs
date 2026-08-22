@@ -215,6 +215,16 @@ impl LlmClient for SubagentPipelineClient {
             run_in_background: false,
             cwd: Some(self.cwd_for_request(&request)),
             isolation: strict_workspace_boundary.then(|| "workspace-boundary".to_string()),
+            // Empty, so writing stays unconfined until this can name the set
+            // correctly — which is the agent's workspace PLUS the artifact
+            // roots its task declared. Those roots routinely sit outside the
+            // repository: one reference PRD's whole purpose is a registry under
+            // a project directory that is not a git repository at all, so an
+            // agent confined to its worktree would be refused the single write
+            // the task exists to make. `AgentExecutionRequest` does not carry
+            // them yet; confining on the workspace alone would trade a silent
+            // escape for a silent blockage, which is the worse of the two.
+            write_roots: Vec::new(),
             provider_env,
         };
 

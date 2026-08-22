@@ -140,12 +140,13 @@ pub struct ToolContext {
     pub mode: AgentMode,
     /// Additional directories added at runtime via `/add-dir`.
     pub extra_dirs: Vec<PathBuf>,
-    /// TASK-AGS-105: true if the parent agent is currently inside a fork
-    /// child (computed via `is_in_fork_child_by_messages` at turn start
-    /// on the Agent side). Used by `SubagentExecutor` implementations
-    /// to block fork-in-fork without crossing the `state.messages`
-    /// boundary into archon-tools. Default is `false` for all non-Agent
-    /// construction sites.
+    /// Writable directories; empty means unconfined. See `path_guard`.
+    pub write_roots: Vec<PathBuf>,
+    /// TASK-AGS-105: true if the parent agent is currently inside a fork child
+    /// (computed via `is_in_fork_child_by_messages` at turn start on the Agent
+    /// side). Used by `SubagentExecutor` implementations to block fork-in-fork
+    /// without crossing the `state.messages` boundary into archon-tools.
+    /// Default is `false` for all non-Agent construction sites.
     pub in_fork: bool,
     /// TASK-AGS-105: true if this tool invocation was routed via
     /// `TaskCreate` (as opposed to the direct `Agent` tool). Preserves

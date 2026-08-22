@@ -61,6 +61,7 @@ async fn classify_routes_background_flag() {
         run_in_background: true,
         cwd: None,
         isolation: None,
+        write_roots: Vec::new(),
         provider_env: None,
     };
     let fg_req = SubagentRequest {

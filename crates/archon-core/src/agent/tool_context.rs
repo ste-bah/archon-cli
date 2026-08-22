@@ -27,6 +27,9 @@ impl Agent {
             turn_id: Some(format!("{}#{}", self.config.session_id, self.turn_number())),
             mode: effective_mode,
             extra_dirs: extra,
+            // The interactive agent writes wherever it can read; confinement is
+            // for an agent given a workspace of its own.
+            write_roots: Vec::new(),
             in_fork,
             // `nested` stays false here — only TaskCreateTool::execute
             // flips it to true when routing a subagent request through
