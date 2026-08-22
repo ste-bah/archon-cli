@@ -76,6 +76,13 @@ pub(crate) async fn build_subagent_pipeline_adapter(
         // client spawns inherits this context.
         fs: agent_config.fs.clone(),
         activity_sink: agent_config.activity_sink.clone(),
+        // The guard reads its policy from the CONTEXT, not from `AgentConfig`
+        // — `Agent::build_tool_context` is what normally carries it across, and
+        // a workflow never goes through there. Omitted, this took
+        // `RepeatToolConfig::default()`, so `[guard.repeat_tool]` applied to
+        // every path except the one running unattended for hours, which is the
+        // path it was written for. Every subagent inherits this value.
+        repeat_tool: agent_config.repeat_tool.clone(),
         ..ToolContext::default()
     };
     crate::command::world_model::configure_tool_run_context(config, &mut tool_context);
@@ -135,6 +142,28 @@ fn workflow_cli_agent_config(
         // It failed closed rather than open, which makes it milder, not
         // correct — a knob that silently does not apply is not a knob.
         filesystem: config.filesystem,
+        // The same defect once more, and this one does not fail closed.
+        // `AgentConfig::default()` is `"auto"`, so `permissions.mode` reached
+        // every path except this one: a workflow ran in `auto` however the
+        // config or a permission preset was set. A preset writes one permission
+        // mode and four sandbox knobs — the four arrived here and the mode did
+        // not, so `read-only` gave a workflow no sandbox AND no plan mode,
+        // neither half of what was chosen.
+        permission_mode: std::sync::Arc::new(tokio::sync::Mutex::new(
+            config.permissions.mode.clone(),
+        )),
+        // Every tool-lifecycle emitter is guarded on this being present, so
+        // `None` did not degrade the signal — it removed it. A workflow run
+        // produced no ToolStarted/ToolCompleted events and no Bash heartbeat at
+        // all: the 30-second line carrying pid, elapsed time and output size,
+        // which is the one thing that distinguishes an agent still working from
+        // an agent stuck, was absent from the only path that runs unattended
+        // for hours. A six-hour stall was invisible for exactly this reason.
+        activity_sink: crate::session::session_activity_sink(session_id),
+        // Read off the AgentConfig by the interactive path only. The workflow's
+        // own ToolContext is a separate literal below, and the guard reads it
+        // from there, so this line alone does not deliver it — see the
+        // `repeat_tool` assignment in `workflow_tool_context`.
         repeat_tool: config.guard.repeat_tool.clone(),
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
