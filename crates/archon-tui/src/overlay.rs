@@ -25,9 +25,12 @@
 //! author has to remember.
 
 use ratatui::Frame;
+use ratatui::layout::Constraint;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{
+    Block, Borders, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+};
 
 use crate::theme::Theme;
 
@@ -110,6 +113,60 @@ pub(crate) fn header_style(theme: &Theme) -> Style {
 /// Style for ordinary, unselected content.
 pub(crate) fn body_style(theme: &Theme) -> Style {
     Style::default().fg(theme.fg)
+}
+
+/// Draw a selectable list into the region [`open`] returned.
+///
+/// Every list overlay ended with the same six lines: wrap the items in a
+/// `List`, attach the block, attach the shared highlight symbol and style,
+/// point a `ListState` at the selected row, render. Three screens carried
+/// their own copy, and a fourth arriving is what tipped the duplication gate
+/// over its threshold. The lines were identical because there is only one
+/// right answer here, which is the definition of something that belongs in
+/// one place.
+///
+/// It is not merely deduplication. `highlight_symbol` and `highlight_style`
+/// are what make a selection visible at all (see [`HIGHLIGHT_SYMBOL`]), and a
+/// screen that renders through this function cannot ship without them the way
+/// every screen did before #192.
+pub(crate) fn render_list<'a>(
+    frame: &mut Frame,
+    region: Rect,
+    block: Block<'a>,
+    items: Vec<ListItem<'a>>,
+    selected: usize,
+    theme: &Theme,
+) {
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol(HIGHLIGHT_SYMBOL)
+        .highlight_style(selection_style(theme));
+    let mut state = ListState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(list, region, &mut state);
+}
+
+/// Draw a selectable table into the region [`open`] returned.
+///
+/// The table counterpart of [`render_list`], and the more duplicated of the
+/// two: seven screens had this same tail, differing only in their header
+/// labels and column widths, which are the two things passed in.
+pub(crate) fn render_table<'a>(
+    frame: &mut Frame,
+    region: Rect,
+    block: Block<'a>,
+    header: Row<'a>,
+    rows: Vec<Row<'a>>,
+    widths: &[Constraint],
+    selected: usize,
+    theme: &Theme,
+) {
+    let table = Table::new(rows, widths)
+        .header(header.style(header_style(theme)))
+        .block(block)
+        .highlight_symbol(HIGHLIGHT_SYMBOL)
+        .row_highlight_style(selection_style(theme));
+    let mut state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, region, &mut state);
 }
 
 /// Draw an overlay whose only content is a message.
