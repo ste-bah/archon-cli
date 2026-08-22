@@ -45,6 +45,8 @@ pub mod reasoning;
 pub mod remote;
 pub mod sandbox;
 pub mod schema_validation;
+/// Bounded, untrusted-wrapped excerpts of another session (#200 Phase 4).
+pub mod session_reference;
 pub mod skills;
 pub mod spill;
 pub mod subagent;

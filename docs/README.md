@@ -119,7 +119,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Operations
 
-- [Session management](operations/session-management.md) — resume, fork, fork-at, rate, checkpoint, rewind
+- [Session management](operations/session-management.md) — resume, fork, fork-at, session-ref, rate, checkpoint, rewind
 - [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, provider-aware model selection, latency tuning

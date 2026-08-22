@@ -212,6 +212,9 @@ pub(crate) mod sandbox_doctor;
 pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.
 pub(crate) mod session;
+/// #200 Phase 4: `/session-ref` — a bounded, untrusted-wrapped excerpt of
+/// another session, injected into the next turn.
+pub(crate) mod session_ref;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
 pub(crate) mod skills;
 pub(crate) mod slash;

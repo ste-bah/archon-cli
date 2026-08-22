@@ -73,7 +73,13 @@ pub(super) async fn dispatch_user_prompt(
             .await;
     }
     let current_mode = current_permission_mode(cmd_ctx).await;
-    let effective_input = compose_turn_input(input, initial_prompt_pending, current_mode);
+    let session_references = drain_pending_session_references(cmd_ctx).await;
+    let effective_input = compose_turn_input(
+        input,
+        initial_prompt_pending,
+        session_references,
+        current_mode,
+    );
     let dispatch =
         dispatch_turn_after_generation_started(dispatcher, effective_input, turn_runner).await;
     if dispatch.is_none() {
@@ -102,15 +108,34 @@ async fn current_permission_mode(
     })
 }
 
+/// Take whatever `/session-ref` prepared, leaving the slot empty.
+///
+/// A prepared reference rides exactly one turn. Draining here rather than
+/// re-reading a persistent list is what keeps a one-off "look at what the
+/// other session found" from becoming a permanent tax on every later request.
+async fn drain_pending_session_references(cmd_ctx: &SlashCommandContext) -> Vec<String> {
+    std::mem::take(&mut *cmd_ctx.pending_session_references.lock().await)
+}
+
 fn compose_turn_input(
     input: String,
     initial_prompt_pending: &mut Option<String>,
+    session_references: Vec<String>,
     current_mode: archon_permissions::mode::PermissionMode,
 ) -> String {
     let input = if let Some(prefix) = initial_prompt_pending.take() {
         format!("{prefix}\n\n{input}")
     } else {
         input
+    };
+    // References go first and the user's own words last, so the closing
+    // instruction the model reads is the one that actually carries authority.
+    // Each block already carries its own untrusted wrapper from
+    // `archon_core::session_reference`; nothing here unwraps or reformats it.
+    let input = if session_references.is_empty() {
+        input
+    } else {
+        format!("{}\n\n{input}", session_references.join("\n\n"))
     };
     crate::session::plan_hint::inject_plan_mode_hint(input, current_mode)
 }
@@ -238,6 +263,7 @@ mod tests {
             compose_turn_input(
                 "Update src/a.rs and src/b.rs".into(),
                 &mut initial_prompt,
+                Vec::new(),
                 archon_permissions::mode::PermissionMode::Default,
             ),
             runner,
@@ -269,6 +295,7 @@ mod tests {
             compose_turn_input(
                 "What update happened in src/a.rs and src/b.rs?".into(),
                 &mut initial_prompt,
+                Vec::new(),
                 archon_permissions::mode::PermissionMode::Default,
             ),
             runner,
@@ -279,6 +306,56 @@ mod tests {
         assert_eq!(
             captured.lock().expect("prompt capture").as_slice(),
             ["What update happened in src/a.rs and src/b.rs?"],
+        );
+    }
+
+    /// #200 Phase 4. A prepared cross-session block must reach the prompt the
+    /// turn actually runs, and it must lead: the user's own words come last so
+    /// the closing instruction is the one that carries authority.
+    #[test]
+    fn session_references_lead_the_composed_turn() {
+        let block = "<referenced-session-abc>quoted transcript</referenced-session-abc>";
+        let mut initial_prompt = None;
+        let composed = compose_turn_input(
+            "summarise what that session concluded".into(),
+            &mut initial_prompt,
+            vec![block.to_string()],
+            archon_permissions::mode::PermissionMode::Default,
+        );
+
+        assert!(
+            composed.starts_with(block),
+            "reference did not lead: {composed}"
+        );
+        assert!(composed.ends_with("summarise what that session concluded"));
+    }
+
+    /// The slot is emptied as it is read, so a block rides one turn. The same
+    /// reference silently re-attached to every later request is the leak this
+    /// pins against.
+    #[tokio::test]
+    async fn draining_the_reference_slot_empties_it() {
+        let fixture = crate::command::context::slash_ctx_test_fixture::build_test_slash_context(
+            "current-session",
+            "default",
+            None,
+            None,
+        );
+        fixture
+            .ctx
+            .pending_session_references
+            .lock()
+            .await
+            .push("<referenced-session-abc>x</referenced-session-abc>".to_string());
+
+        assert_eq!(
+            drain_pending_session_references(&fixture.ctx).await.len(),
+            1
+        );
+        assert!(
+            drain_pending_session_references(&fixture.ctx)
+                .await
+                .is_empty()
         );
     }
 

@@ -125,6 +125,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         cozo_db: input.cozo_db,
         governed_learning_db: input.governed_learning_db,
         auto_trainer: input.auto_trainer,
+        pending_session_references: Arc::new(tokio::sync::Mutex::new(Vec::new())),
     }
 }
 

@@ -159,6 +159,7 @@ pub fn build_test_slash_context(
             Arc::new(crate::agent_handle::NoopAgentRouter),
             tokio::sync::mpsc::channel(1).0,
         ))),
+        pending_session_references: Arc::new(tokio::sync::Mutex::new(Vec::new())),
     };
 
     SlashCtxFixture {

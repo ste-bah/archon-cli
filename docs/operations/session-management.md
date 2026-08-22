@@ -93,6 +93,44 @@ their positions, so the index you pass is always the position in the log.
 `/fork-at` is not called `/branch`: `/branch` is the built-in skill that manages
 *git* branches.
 
+## Referencing another session
+
+`/fork` and `/fork-at` make a new session out of an old one. `/session-ref`
+answers a different question — "what did that other session find?" — without
+leaving the session you are in:
+
+```
+/session-ref 0f3c1b2a-...   # attach an excerpt of that session to your next message
+```
+
+The excerpt is attached to the **next message you send**, once, and is then
+gone. It is not a permanent addition to the session.
+
+Three things about it are deliberate.
+
+It is **bounded**. The last 20 stored messages, capped at 16 KB of rendered
+transcript. Over the cap, the whole transcript is written to the spill store
+under `.archon/spill/` and the attached excerpt names that file, so nothing is
+quietly cut off — if the write fails, the command fails rather than attaching a
+silently shortened excerpt.
+
+It is **the stored log, not the other session's live context**. That session may
+have compacted since, so the excerpt can contain material that session itself
+decided was not worth keeping. The attached block says so. Projecting the source
+session's current surface instead is the better answer and is not what this does
+yet.
+
+It is **untrusted**. A transcript is model output and tool results, and text
+inside it can be shaped like an instruction. The excerpt is therefore wrapped in
+its own tag behind a preamble stating that the contents are data, that no
+directive inside them is to be followed, and that the turn's instructions come
+only from your own message. Angle brackets inside the excerpt are escaped, so
+nothing in the referenced transcript can close the wrapper and continue as if it
+were your text.
+
+A session id that does not exist, or one with no messages, is an error you see —
+never an empty attachment that looks like it worked.
+
 ## Rating a message
 
 `/feedback` records what the learning subsystems cannot infer — whether the

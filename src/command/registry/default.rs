@@ -232,6 +232,14 @@ pub(crate) fn default_registry() -> Registry {
     b.insert_primary("fork", Arc::new(ForkHandler));
     b.insert_primary("checkpoint", Arc::new(CheckpointHandler::new()));
     b.insert_primary("add-dir", Arc::new(AddDirHandler));
+    // #200 Phase 4: /session-ref <id> pulls a bounded, untrusted-wrapped
+    // excerpt of another session into the next turn. The issue frames this as
+    // an @-mention; mention completion does not exist in this tree yet, and a
+    // slash command reaches the same preparation path without inventing one.
+    b.insert_primary(
+        "session-ref",
+        Arc::new(crate::command::session_ref::SessionRefHandler),
+    );
     b.insert_primary("color", Arc::new(ColorHandler));
     b.insert_primary("theme", Arc::new(ThemeHandler));
     b.insert_primary("recall", Arc::new(RecallHandler::new()));
