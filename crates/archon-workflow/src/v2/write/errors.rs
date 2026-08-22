@@ -223,9 +223,24 @@ pub(super) fn failure_kind_from_write_result(
         })
 }
 
+/// Marker phrase shared by the branch loop and the predicate below.
+///
+/// Both sides name the same constant rather than one of them matching prose the
+/// other happens to write, because a message reworded on one side and matched on
+/// the other is a silent behaviour change: the branch would stop being
+/// recoverable and nobody would see it in the diff.
+pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time budget";
+
 pub(super) fn is_recoverable_write_branch_timeout(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("subagent timed out") || lower.contains("timed out after")
+    lower.contains("subagent timed out")
+        || lower.contains("timed out after")
+        // Running out of the budget for the WHOLE call is the same kind of
+        // event as one dispatch timing out: the work is unfinished, nothing is
+        // wrong with the branch itself, and the evidence gathered so far is
+        // worth keeping. Treated as a hard error it would take the wave with it
+        // and discard what the branch had learned.
+        || lower.contains(CALL_TIME_BUDGET_EXHAUSTED)
 }
 
 pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {

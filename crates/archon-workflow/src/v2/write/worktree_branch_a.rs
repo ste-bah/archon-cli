@@ -129,7 +129,16 @@ pub(super) async fn run_worktree_branch_agent(
     // is not an answer about the work, so it must not consume the budget that
     // exists for correcting a rejection.
     let mut transport_failures = 0usize;
+    // Every budget above counts ATTEMPTS, none counts time, and the transport
+    // branch consumes no attempt at all — so the loop could re-dispatch far past
+    // any timeout set: observed as one task at 6h20m under a two-hour one.
+    let started = std::time::Instant::now();
+    let time_budget = dispatch.call_time_budget();
     for _ in 0..=super::size_retry::MAX_SIZE_RETRIES {
+        if super::size_retry::call_time_budget_exhausted(started, time_budget) {
+            let err = super::size_retry::call_time_budget_error(&branch.id, started, time_budget);
+            return normalize_worktree_agent_result(Err(err), branch);
+        }
         let result = dispatch
             .run_call(
                 &prompt,

@@ -206,6 +206,10 @@ struct Chain {
     fired: usize,
     pending: Vec<String>,
     touched: u64,
+    /// Distinct-answer tracking, which is what catches an agent that varies its
+    /// calls trivially and learns nothing — the run counter above resets on any
+    /// argument change and cannot see that at all.
+    novelty: crate::repeat_tool_novelty::ResultNovelty,
 }
 
 /// Process-global chains, one per agent.
@@ -270,6 +274,49 @@ impl RepeatToolChains {
         let level = chain.fired;
         chain.fired += 1;
         let reminder = reminder_text(config, chain, level);
+        if chain.pending.len() >= MAX_PENDING_REMINDERS {
+            chain.pending.remove(0);
+        }
+        chain.pending.push(reminder);
+    }
+
+    /// Record what a completed call RETURNED, and warn when the answers stop
+    /// changing.
+    ///
+    /// Separate from [`Self::observe`] because the two detect different things.
+    /// That one counts a call reissued verbatim; this one counts distinct
+    /// answers, which is the only thing that catches an agent varying its calls
+    /// trivially and learning nothing — `grep x`, `grep -i x`, `grep "x"` reset
+    /// the run counter every time and returned one answer for six hours.
+    /// Either may fire alone, so neither gates the other.
+    ///
+    /// Only a call that actually produced an answer belongs here. A refused
+    /// call has none, and feeding it a placeholder would make every refusal
+    /// digest alike and trip this on its own.
+    pub fn observe_result(
+        &self,
+        key: &ChainKey,
+        config: &RepeatToolConfig,
+        tool_name: &str,
+        result_text: &str,
+    ) {
+        if !config.enabled || config.excludes(tool_name) {
+            return;
+        }
+        let Ok(mut chains) = self.chains.lock() else {
+            return;
+        };
+        let Some(chain) = chains.get_mut(key) else {
+            return;
+        };
+        if !chain
+            .novelty
+            .observe(crate::repeat_tool_novelty::result_digest(result_text))
+        {
+            return;
+        }
+        let distinct = chain.novelty.distinct_in_window();
+        let reminder = crate::repeat_tool_novelty::novelty_reminder(tool_name, distinct);
         if chain.pending.len() >= MAX_PENDING_REMINDERS {
             chain.pending.remove(0);
         }

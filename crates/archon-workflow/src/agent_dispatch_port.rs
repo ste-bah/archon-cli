@@ -43,6 +43,24 @@ use crate::v2::result_store::WorkflowV2ResultStore;
 /// Dispatches one workflow agent call and returns its typed result.
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {
+    /// Wall clock a single call may spend IN TOTAL, across every re-dispatch.
+    ///
+    /// The timeout the host already applies bounds one dispatch, and a call is
+    /// re-dispatched by several independent budgets — a size-rejection re-ask,
+    /// transport retries that deliberately do not consume it, a schema repair,
+    /// and the port's own transient retry. None of them looks at the clock, and
+    /// nothing added their elapsed time together, so a two-hour timeout
+    /// permitted a day of work: observed as a single task running 6h20m and
+    /// still going when it was killed by hand.
+    ///
+    /// `None` means unbounded, which is the honest answer for a caller that has
+    /// no configured timeout to derive one from. The bound belongs to the
+    /// dispatcher rather than the loop because only the dispatcher knows what
+    /// the operator asked for; a constant here would be a number nobody chose.
+    fn call_time_budget(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// Run `execution` as a single agent call.
     ///
     /// `repository_root` is the working directory the agent runs against.

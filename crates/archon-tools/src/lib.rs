@@ -111,6 +111,7 @@ pub mod push_notification;
 pub mod registry;
 /// Consecutive identical tool calls, counted per agent (#200 Phase 2).
 pub mod repeat_tool_guard;
+pub(crate) mod repeat_tool_novelty;
 pub mod session_search;
 pub mod sleep;
 // Persistent shell sessions (#189 Phase 6). Only the tools are public; the

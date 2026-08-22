@@ -469,3 +469,7 @@ use worktree_wave::*;
 #[cfg(test)]
 #[path = "write_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "call_time_budget_tests.rs"]
+mod call_time_budget_tests;

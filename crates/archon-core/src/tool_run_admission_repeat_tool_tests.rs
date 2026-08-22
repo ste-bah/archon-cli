@@ -77,6 +77,39 @@ impl SandboxBackend for RefusingSandbox {
     }
 }
 
+/// A tool that answers with its own input, so a test can vary the ANSWER
+/// rather than only the question. `FixedTool` above returns one constant
+/// whatever it is called, which makes it useless for proving that genuine
+/// progress is not reported as a stall.
+struct EchoTool;
+
+#[async_trait::async_trait]
+impl Tool for EchoTool {
+    fn name(&self) -> &str {
+        "Echo"
+    }
+
+    fn description(&self) -> &str {
+        "repeat-tool guard test"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({ "type": "object" })
+    }
+
+    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+        ToolResult::success(input.to_string())
+    }
+
+    fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
+    }
+}
+
 fn registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(FixedTool {
@@ -91,6 +124,7 @@ fn registry() -> ToolRegistry {
         name: "Bash",
         level: PermissionLevel::Risky,
     }));
+    registry.register(Box::new(EchoTool));
     registry
 }
 
@@ -268,5 +302,62 @@ async fn a_disabled_guard_records_nothing() {
         REPEAT_TOOL_CHAINS
             .take_reminders(&ChainKey::of(&ctx))
             .is_empty()
+    );
+}
+
+/// The failure the run counter cannot see, exercised through `dispatch`.
+///
+/// Every call below uses DIFFERENT arguments, so the consecutive-identical
+/// counter resets on each one and never fires — which is exactly what happened
+/// live: `grep x`, `grep -i x`, `grep "x"` are three distinct argument strings
+/// returning one answer, and the guard stayed silent for six hours.
+///
+/// This asserts through the real dispatch path rather than against the detector
+/// directly, so deleting the call that feeds it fails this test. A unit test of
+/// the detector alone would still pass with the wiring removed.
+#[tokio::test]
+async fn varied_calls_returning_one_answer_earn_a_reminder_through_dispatch() {
+    let registry = registry();
+    let ctx = ctx("novelty-run");
+
+    for attempt in 0..8 {
+        // Different arguments every time; the tool's answer never changes.
+        let input = serde_json::json!({"pattern": format!("variant-{attempt}"), "path": "crates"});
+        registry.dispatch("Grep", input, &ctx).await;
+    }
+
+    let reminders = REPEAT_TOOL_CHAINS.take_reminders(&ChainKey::of(&ctx));
+    assert_eq!(reminders.len(), 1, "got {reminders:?}");
+    assert!(
+        reminders[0].contains("distinct result"),
+        "the reminder must name the thing observed: {}",
+        reminders[0]
+    );
+    assert!(
+        !reminders[0].contains("in a row"),
+        "this is not the consecutive-identical reminder: {}",
+        reminders[0]
+    );
+}
+
+/// And varied calls that keep returning NEW answers are ordinary work.
+///
+/// The false-positive direction, and the one that matters most: a detector
+/// that fires on healthy exploration gets ignored, which leaves the real
+/// stalls undetected too.
+#[tokio::test]
+async fn varied_calls_returning_new_answers_earn_nothing() {
+    let registry = registry();
+    let ctx = ctx("novelty-progress-run");
+
+    for attempt in 0..8 {
+        let input = serde_json::json!({"finding": format!("distinct-answer-{attempt}")});
+        registry.dispatch("Echo", input, &ctx).await;
+    }
+
+    let reminders = REPEAT_TOOL_CHAINS.take_reminders(&ChainKey::of(&ctx));
+    assert!(
+        reminders.iter().all(|r| !r.contains("distinct result")),
+        "progress must not be reported as a stall: {reminders:?}"
     );
 }

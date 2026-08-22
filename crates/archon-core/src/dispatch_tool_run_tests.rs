@@ -268,3 +268,114 @@ async fn an_admitted_attempt_reports_admission_evaluated() {
     assert_eq!(outcomes.len(), 1);
     assert!(outcomes[0].admission_evaluated);
 }
+
+/// A backend that answers on the CAPABILITY it was handed, not on the tool
+/// name, and records what it saw.
+#[derive(Debug)]
+struct CapabilityRecordingSandbox {
+    seen: Arc<Mutex<Vec<archon_permissions::ToolCapability>>>,
+    deny: archon_permissions::ToolCapability,
+}
+
+impl archon_permissions::SandboxBackend for CapabilityRecordingSandbox {
+    fn check(
+        &self,
+        _tool: &str,
+        capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
+        self.seen.lock().unwrap().push(capability);
+        if capability == self.deny {
+            return Err("sandbox denied this capability".into());
+        }
+        Ok(())
+    }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Refused("not used".into())
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
+    }
+}
+
+fn capability_ctx(
+    seen: &Arc<Mutex<Vec<archon_permissions::ToolCapability>>>,
+    deny: archon_permissions::ToolCapability,
+) -> ToolContext {
+    ToolContext {
+        sandbox: Some(Arc::new(CapabilityRecordingSandbox {
+            seen: Arc::clone(seen),
+            deny,
+        })),
+        session_id: "session-capability".into(),
+        ..ToolContext::default()
+    }
+}
+
+/// The tool's declared capability must be what the backend is asked about.
+///
+/// `DenyAllSandbox` above refuses everything, so it cannot tell whether the
+/// capability was forwarded, defaulted, or wrong — a tool declaring the wrong
+/// one would be refused just the same and the test would still pass. This is
+/// the path a workflow subagent takes: its tool loop calls
+/// `ToolRegistry::dispatch`, which is the only caller of the admission entry
+/// that performs the sandbox check, and the check runs whenever a sandbox is
+/// present. It is present exactly when the configured backend is an isolating
+/// one, so this is the behaviour that has to hold once sandboxing is switched
+/// on.
+#[tokio::test]
+async fn the_tools_declared_capability_reaches_the_sandbox() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(AdmissionTestTool {
+        permission: PermissionLevel::Risky,
+        executions: Arc::clone(&executions),
+    }));
+    // Deny something the tool does NOT declare, so it must be allowed through.
+    let ctx = capability_ctx(&seen, archon_permissions::ToolCapability::Egress);
+
+    let result = registry
+        .dispatch("AdmissionTest", serde_json::json!({}), &ctx)
+        .await;
+
+    assert!(!result.is_error, "an unrelated denial must not refuse it");
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[archon_tools::tool::ToolCapability::HostLocal],
+        "the backend must be asked about the capability the tool declares"
+    );
+}
+
+/// And denying that same declared capability refuses the call before it runs.
+#[tokio::test]
+async fn denying_the_declared_capability_refuses_the_call() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(AdmissionTestTool {
+        permission: PermissionLevel::Risky,
+        executions: Arc::clone(&executions),
+    }));
+    let ctx = capability_ctx(&seen, archon_tools::tool::ToolCapability::HostLocal);
+
+    let result = registry
+        .dispatch("AdmissionTest", serde_json::json!({}), &ctx)
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        0,
+        "a refused call must not execute"
+    );
+}

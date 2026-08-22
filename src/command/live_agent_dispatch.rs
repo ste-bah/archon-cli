@@ -40,8 +40,25 @@ impl LiveAgentDispatch {
     }
 }
 
+/// How much total wall clock a call gets, as a multiple of one dispatch's.
+///
+/// Expressed against the operator's own timeout rather than as a duration, so
+/// the bound moves with the setting instead of contradicting it. Three means a
+/// call may spend its attempt and two corrections' worth of time; a call still
+/// going after that is not converging, and the retry budgets above it — up to
+/// thirteen size re-asks, plus transport retries that deliberately do not
+/// consume that budget — would otherwise let it run for a day under a
+/// two-hour timeout.
+const CALL_TIME_BUDGET_DISPATCHES: u64 = 3;
+
 #[async_trait]
 impl WorkflowAgentDispatch for LiveAgentDispatch {
+    fn call_time_budget(&self) -> Option<std::time::Duration> {
+        self.client.timeout_secs().map(|secs| {
+            std::time::Duration::from_secs(secs.saturating_mul(CALL_TIME_BUDGET_DISPATCHES))
+        })
+    }
+
     async fn run_call(
         &self,
         task: &str,

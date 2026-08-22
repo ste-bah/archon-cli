@@ -87,6 +87,7 @@ pub(crate) async fn execute_tool_attempt(
         admission_enabled,
     );
     observe_tool_attempt(ctx, tool.name(), &outcome_input, false);
+    observe_tool_result(ctx, tool.name(), &result);
     result
 }
 
@@ -119,6 +120,20 @@ fn observe_tool_attempt(
         tool_name,
         input,
         refused,
+    );
+}
+
+/// Feed the distinct-answer detector, which only a completed call can.
+fn observe_tool_result(
+    ctx: &ToolContext,
+    tool_name: &str,
+    result: &archon_tools::tool::ToolResult,
+) {
+    REPEAT_TOOL_CHAINS.observe_result(
+        &ChainKey::of(ctx),
+        &ctx.repeat_tool,
+        tool_name,
+        &result.content,
     );
 }
 

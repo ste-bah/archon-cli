@@ -80,6 +80,11 @@ impl LiveV2AgentClient {
         }
     }
 
+    /// The per-dispatch timeout this client applies, if one is configured.
+    pub(super) fn timeout_secs(&self) -> Option<u64> {
+        self.timeout_secs
+    }
+
     pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>) -> Self {
         Self {
             llm: self.llm.clone(),
