@@ -189,6 +189,9 @@ async fn a_denied_tool_is_refused_with_the_reason() {
         checker,
         working_dir: std::env::temp_dir(),
         session_id: "denied-tool-test".to_string(),
+        // Refused before anything executes, so no world is reached.
+        sandbox: None,
+        fs: None,
     };
 
     let refusal = host
@@ -219,6 +222,9 @@ async fn a_tool_needing_confirmation_is_refused_because_nobody_can_answer() {
         ),
         working_dir: std::env::temp_dir(),
         session_id: "ask-tool-test".to_string(),
+        // Refused before anything executes, so no world is reached.
+        sandbox: None,
+        fs: None,
     };
 
     let refusal = host
@@ -233,5 +239,120 @@ async fn a_tool_needing_confirmation_is_refused_because_nobody_can_answer() {
     assert!(
         refusal.contains("always_allow"),
         "the message must say how to permit it: {refusal}"
+    );
+}
+
+/// A world, built here rather than borrowed from `archon_tui`: every
+/// `src/command/workflow*.rs` file is destined for `archon-workflow`, which
+/// must not require a terminal UI, and `workflow_crate_boundary_tests` enforces
+/// that as a filename rule test files do not escape.
+#[derive(Debug)]
+struct AWorld;
+
+impl archon_permissions::SandboxBackend for AWorld {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Refused("this world hosts no shell".into())
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
+}
+
+/// Records the world its context named, so a test can ask what the host
+/// actually handed the tool rather than what the host meant to.
+#[derive(Debug)]
+struct WorldProbe(Arc<std::sync::Mutex<Option<bool>>>);
+
+#[async_trait::async_trait]
+impl archon_tools::tool::Tool for WorldProbe {
+    fn name(&self) -> &str {
+        "WorldProbe"
+    }
+
+    fn description(&self) -> &str {
+        "Reports whether its context carried an execution world."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    fn capability(&self) -> archon_permissions::ToolCapability {
+        archon_permissions::ToolCapability::EXECUTION
+    }
+
+    fn permission_level(&self, _input: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
+        archon_tools::tool::PermissionLevel::Safe
+    }
+
+    async fn execute(
+        &self,
+        _input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> archon_tools::tool::ToolResult {
+        *self.0.lock().expect("lock") = Some(ctx.sandbox.is_some());
+        archon_tools::tool::ToolResult::success("probed")
+    }
+}
+
+/// The escape this closes. A script's tool call used to be built from
+/// `ToolContext::default()`, which leaves `sandbox: None` — and `None` does not
+/// mean "refuse", it means "the host". So `Bash` from a script ran unconfined
+/// however `[sandbox]` was set, while the same call from an agent turn was
+/// confined.
+///
+/// Asserted on the context the tool is actually given, not on the host's
+/// fields: a test that reads `host.sandbox` back would pass even if `run` never
+/// put it on the context, which is precisely the defect.
+#[tokio::test]
+async fn a_scripts_tool_call_runs_in_the_session_world_not_the_host() {
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let mut registry = archon_core::dispatch::ToolRegistry::new();
+    registry.register(Box::new(WorldProbe(seen.clone())));
+
+    let world: Arc<dyn archon_permissions::SandboxBackend> = Arc::new(AWorld);
+    let host = ScriptToolHost {
+        registry,
+        checker: PermissionChecker::new(
+            archon_permissions::mode::PermissionMode::default(),
+            archon_permissions::rules::RuleSet {
+                always_allow: vec![rule("WorldProbe")],
+                always_deny: Vec::new(),
+                always_ask: Vec::new(),
+            },
+        ),
+        working_dir: std::env::temp_dir(),
+        session_id: "script-world-tests".to_string(),
+        sandbox: Some(world),
+        fs: None,
+    };
+
+    host.run(&RunToolRequest {
+        name: "WorldProbe".to_string(),
+        input: serde_json::json!({}),
+    })
+    .await
+    .expect("the probe runs");
+
+    assert_eq!(
+        *seen.lock().expect("lock"),
+        Some(true),
+        "the tool must be told which world it is in; None reads as the host"
     );
 }
