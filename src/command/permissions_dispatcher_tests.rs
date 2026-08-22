@@ -32,6 +32,7 @@ fn dispatcher_routes_slash_permissions_to_handler_end_to_end() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
 
@@ -108,6 +109,7 @@ fn dispatcher_routes_slash_permissions_with_plan_arg_end_to_end() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
 

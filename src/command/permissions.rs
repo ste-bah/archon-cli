@@ -203,6 +203,13 @@ pub(crate) struct PermissionsSnapshot {
     /// Whether `--allow-dangerously-skip-permissions` was passed on the
     /// CLI; unlocks the `bypassPermissions` mode.
     pub(crate) allow_bypass_permissions: bool,
+    /// The preset the live permission mode plus `[sandbox]` knobs correspond
+    /// to, or `custom` when they match none (#200 Phase 3).
+    ///
+    /// Derived at snapshot time from the values themselves. `custom` is never
+    /// stored anywhere, so a hand-edited config and a per-agent override both
+    /// keep working and simply read back as `custom`.
+    pub(crate) active_preset: String,
 }
 
 /// Build a [`PermissionsSnapshot`] by awaiting the `permission_mode`
@@ -231,10 +238,21 @@ pub(crate) async fn build_permissions_snapshot(
     flattened.extend(flatten("allow", &rules.always_allow));
     flattened.extend(flatten("ask", &rules.always_ask));
 
+    let sandbox = &slash_ctx.sandbox_config;
+    let active_preset = archon_core::config::derive_permission_preset_from_parts(
+        &current_mode,
+        &sandbox.backend,
+        &sandbox.mode,
+        &sandbox.scope,
+        &sandbox.workspace_access,
+    )
+    .to_string();
+
     PermissionsSnapshot {
         current_mode,
         rules: flattened,
         allow_bypass_permissions: slash_ctx.allow_bypass_permissions,
+        active_preset,
     }
 }
 
@@ -271,6 +289,23 @@ impl CommandHandler for PermissionsHandler {
         // `if arg.is_empty()` check.
         let joined = args.join(" ");
         let arg = joined.trim();
+
+        // #200 Phase 3: `presets` / `preset <name>`. Claimed before the mode
+        // path, and neither token is a permission mode, so no input that
+        // worked before changes meaning.
+        if let Some(preset_arg) = crate::command::permissions_presets::parse_preset_arg(arg) {
+            let active = ctx
+                .permissions_snapshot
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "PermissionsHandler invoked without permissions_snapshot populated - build_command_context bug"
+                    )
+                })?
+                .active_preset
+                .clone();
+            return crate::command::permissions_presets::handle(ctx, preset_arg, &active);
+        }
 
         if arg.is_empty() {
             // READ branch: consume the pre-built snapshot populated

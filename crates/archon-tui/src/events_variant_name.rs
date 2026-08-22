@@ -41,6 +41,7 @@ impl TuiEvent {
             Self::ShowSettings(_) => "ShowSettings",
             Self::ShowHooks(_) => "ShowHooks",
             Self::ShowPermissions { .. } => "ShowPermissions",
+            Self::ShowPermissionPresets { .. } => "ShowPermissionPresets",
             Self::ShowMemoryFiles(_) => "ShowMemoryFiles",
             Self::ShowBranchPicker(_) => "ShowBranchPicker",
             Self::ShowVoiceCapture { .. } => "ShowVoiceCapture",

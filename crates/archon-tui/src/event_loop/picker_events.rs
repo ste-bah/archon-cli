@@ -136,6 +136,35 @@ pub(crate) fn open_permissions(app: &mut App, mode: String, rules: Vec<(String, 
     app.permissions_browser = Some(browser);
 }
 
+/// Populate and open the permission-preset selector (`/permissions presets`).
+///
+/// The rows are passed in rather than read from a table here: `archon-tui`
+/// does not depend on `archon-core`, and duplicating the preset tuples in the
+/// UI is exactly how a selector starts disagreeing with what it selects.
+pub(crate) fn open_permission_presets(
+    app: &mut App,
+    active: String,
+    presets: Vec<(String, String, String, String)>,
+) {
+    use crate::screens::permission_presets::{PermissionPresetPicker, PresetEntry};
+
+    let mut picker = PermissionPresetPicker::new(active);
+    picker.set_presets(
+        presets
+            .into_iter()
+            .map(
+                |(name, description, permission_mode, sandbox_backend)| PresetEntry {
+                    name,
+                    description,
+                    permission_mode,
+                    sandbox_backend,
+                },
+            )
+            .collect(),
+    );
+    app.permission_presets = Some(picker);
+}
+
 /// Populate and open the memory-files overlay (`/memory files`).
 pub(crate) fn open_memory_files(app: &mut App, entries: Vec<(String, String, u64)>) {
     let mut browser = crate::screens::memory_file_selector::MemoryBrowser::new();

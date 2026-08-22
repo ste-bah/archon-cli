@@ -150,6 +150,9 @@ pub(super) async fn handle_tui_event(
         TuiEvent::ShowPermissions { mode, rules } => {
             super::picker_events::open_permissions(app, mode, rules);
         }
+        TuiEvent::ShowPermissionPresets { active, presets } => {
+            super::picker_events::open_permission_presets(app, active, presets);
+        }
         TuiEvent::ShowMemoryFiles(entries) => {
             super::picker_events::open_memory_files(app, entries);
         }

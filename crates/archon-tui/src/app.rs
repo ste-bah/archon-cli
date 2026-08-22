@@ -116,6 +116,9 @@ pub struct App {
     /// `/permissions` rules overlay (#192). Read-only: nothing at runtime can
     /// change these rules.
     pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
+    /// `/permissions presets` selector (#200 Phase 3). Enter injects
+    /// `/permissions preset <name>`; the overlay itself writes nothing.
+    pub permission_presets: Option<crate::screens::permission_presets::PermissionPresetPicker>,
     /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
     pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
     /// `/fork-at` picker (#192): which message to fork the session from.
@@ -186,6 +189,7 @@ impl Default for App {
             theme_screen: None,
             hooks_menu: None,
             permissions_browser: None,
+            permission_presets: None,
             memory_browser: None,
             branch_picker: None,
             voice_capture: None,
@@ -228,6 +232,7 @@ impl App {
             && self.theme_screen.is_none()
             && self.hooks_menu.is_none()
             && self.permissions_browser.is_none()
+            && self.permission_presets.is_none()
             && self.memory_browser.is_none()
             && self.branch_picker.is_none()
             && self.voice_capture.is_none()

@@ -353,6 +353,7 @@ pub(crate) async fn spawn_web_session(
                 always_deny: config.permissions.always_deny.clone(),
                 always_ask: config.permissions.always_ask.clone(),
             },
+            sandbox_config: config.sandbox.clone(),
             memory: Arc::clone(&memory),
             garden_config: config.memory.garden.clone(),
             mcp_manager: mcp_manager.clone(),

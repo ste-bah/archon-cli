@@ -311,6 +311,9 @@ pub(super) async fn handle_key_event(
             if super::picker_input::handle_permissions_key(app, key) {
                 return;
             }
+            if super::picker_input::handle_permission_presets_key(app, key) {
+                return;
+            }
             if super::picker_input::handle_memory_files_key(app, key) {
                 return;
             }

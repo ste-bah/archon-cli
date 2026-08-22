@@ -101,6 +101,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: permission rules (#192, /permissions)
     body::draw_permissions_browser(frame, app);
 
+    // Overlays: permission presets (#200 Phase 3, /permissions presets)
+    body::draw_permission_presets(frame, app);
+
     // Overlays: memory files (#192, /memory files)
     body::draw_memory_browser(frame, app);
 
