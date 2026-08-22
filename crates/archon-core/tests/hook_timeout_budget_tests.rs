@@ -153,10 +153,28 @@ async fn test_fast_hooks_all_complete_within_budget() {
 // test_per_hook_timeout_clamped_to_remaining_budget
 // ---------------------------------------------------------------------------
 
+/// Which deadline wins when a hook asks for more time than the aggregate budget
+/// has left: the budget.
+///
+/// The claim is about the *outcome*, not the duration. This used to assert
+/// `elapsed.as_secs() < 4` around a 2s budget, which is a measurement of how
+/// loaded the machine is — it was observed failing at 5.7s while other builds
+/// ran and passing on a quiet re-run, in both cases against a clamp that worked.
+/// Worse, a machine where the shell could not spawn at all would fail in
+/// milliseconds and sail through the old assertion.
+///
+/// A `sleep 5` under a 2s budget and a 60s hook timeout can only end two ways,
+/// and they are distinguishable without a clock: the clamp holds and the hook is
+/// killed by its deadline (`RunError::Timeout` → gating-event block policy), or
+/// the clamp is gone, 60s wins, and the sleep exits 0 into a clean Success. The
+/// wall clock never enters into it — on a machine slow enough to take 5.7s, this
+/// still reports a timeout, because the sleep is longer than the budget by
+/// construction.
+///
+/// The clamp arithmetic itself is covered without any process at all in
+/// `hooks::registry::budget`.
 #[tokio::test]
 async fn test_per_hook_timeout_clamped_to_remaining_budget() {
-    // Budget = 2 seconds. Hook has timeout=60s but command sleeps 5s.
-    // The hook should be killed at ~2s (clamped to remaining budget), not 60s.
     let config = HookExecutionConfig {
         aggregate_timeout_ms: 2_000,
     };
@@ -171,17 +189,22 @@ async fn test_per_hook_timeout_clamped_to_remaining_budget() {
     let input = serde_json::json!({"tool_name": "Bash"});
     let cwd = PathBuf::from("/tmp");
 
-    let start = std::time::Instant::now();
-    let _result = registry
+    let result = registry
         .execute_hooks(HookEvent::PreToolUse, input, &cwd, "test-session")
         .await;
-    let elapsed = start.elapsed();
 
-    // Should complete in roughly 2s (budget), NOT 5s (sleep) or 60s (hook timeout).
+    assert_eq!(
+        result.skipped_count, 0,
+        "the hook must have been started and then cut short, not skipped before it \
+         ran; a skipped hook would prove nothing about the per-hook clamp"
+    );
+    let reason = result.block_reason().unwrap_or_default();
     assert!(
-        elapsed.as_secs() < 4,
-        "Expected hook to be killed within ~2s budget, but took {:.1}s",
-        elapsed.as_secs_f64()
+        reason.contains("timed out"),
+        "expected the hook to be killed by the clamped 2s budget rather than run to \
+         completion under its own 60s timeout, but the reported outcome was \
+         {reason:?} (blocked: {})",
+        result.is_blocked()
     );
 }
 
