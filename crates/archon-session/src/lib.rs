@@ -17,6 +17,9 @@ mod plan_store;
 pub mod projection;
 /// The migrated consumer that proves the projection machinery (#193 Phase B).
 pub mod projection_stats;
+/// A session's current surface — the log minus what it compacted away
+/// (#193 Phase B, #200 Phase 4).
+pub mod projection_surface;
 pub mod registry;
 pub mod resume;
 pub mod search;

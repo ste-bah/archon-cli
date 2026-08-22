@@ -320,6 +320,11 @@ pub(super) async fn handle_key_event(
             if super::picker_input::handle_branch_picker_key(app, key) {
                 return;
             }
+            // `@`-mention picker (#200 Phase 4): claims only its own keys, so
+            // text and Backspace fall through and narrow the list.
+            if super::mention_input::handle_session_mention_key(app, key) {
+                return;
+            }
             if super::picker_input::handle_voice_capture_key(app, key) {
                 return;
             }
@@ -421,16 +426,8 @@ pub(super) async fn handle_key_event(
                     _ => return, // swallow other keys while overlay is up
                 }
             }
-            // Handle Evidence Engine inspection overlay. Data navigation is
-            // screen-local; Esc closes the overlay so it never traps the user.
-            if app.evidence_view.is_some() {
-                match key.code {
-                    KeyCode::Esc => {
-                        app.evidence_view = None;
-                        return;
-                    }
-                    _ => return,
-                }
+            if super::picker_input::handle_evidence_view_key(app, key) {
+                return;
             }
             // Vim mode key routing — Ctrl+D / Ctrl+C fall through to normal handling
             let is_ctrl_quit = key.modifiers == KeyModifiers::CONTROL
@@ -492,6 +489,7 @@ pub(super) async fn handle_key_event(
                 app.ask_user_draft.push_str(&text);
             } else if app.input_accepts_paste() {
                 app.input.inject_text(&text);
+                super::mention_input::sync_session_mention(app);
             }
         }
         _ => {} // FocusGained/FocusLost

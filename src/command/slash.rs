@@ -57,13 +57,17 @@ pub(crate) fn handle_slash_command<'a>(
         // deleted arm lineage.
 
         // /config async-upstream pre-branch — invoked BEFORE
-        // Dispatcher::dispatch because `handle_config_command` is async
-        // and requires SlashCommandContext access that is not exposed
-        // through CommandContext. ConfigHandler in registry.rs remains a
-        // THIN-WRAPPER no-op so Dispatcher::recognizes returns true for
-        // /config (consistency with the rest of the catalog).
-        if input.trim() == "/config" || input.trim().starts_with("/config ") {
-            handle_config_command(input.trim(), tui_tx, ctx).await;
+        // Dispatcher::dispatch because `handle_config_command` is async and
+        // requires SlashCommandContext access that is not exposed through
+        // CommandContext. `ConfigHandler` stays registered so
+        // `Dispatcher::recognizes` and `/help` still know the command.
+        //
+        // Matched under every spelling the registry resolves to
+        // `ConfigHandler`, not just the literal `/config`: the `settings` and
+        // `prefs` aliases used to miss this branch and reach a handler whose
+        // body was `Ok(())`, so they printed nothing and changed nothing.
+        if let Some(args) = crate::command::config::command_args(input) {
+            handle_config_command(args, tui_tx, ctx).await;
             return true;
         }
 

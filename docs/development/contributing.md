@@ -14,7 +14,7 @@
 - `cargo`, `rustfmt`, `clippy` (bundled with Rust)
 - Optional: `cargo-nextest` for faster test runs
 - Optional: `lld` linker for faster builds
-- WSL2: see [Installation](../getting-started/installation.md#wsl2-caveat)
+- WSL2: see [Installation](../getting-started/installation.md#wsl2-caveat--parallelism-limit)
 
 ## Git hooks (one-time setup after clone)
 
@@ -41,6 +41,7 @@ Hook scripts are tracked in the repo, so updates land via `git pull` — no manu
 - Tests near the code: `#[cfg(test)] mod tests` inside the file, or `tests/` for integration
 - Mock external deps (network, file system, time)
 - Integration tests for cross-crate behavior in `crates/<crate>/tests/`
+- **Assert the outcome, never the elapsed time.** Before writing a test that touches a subprocess, a platform difference, or a clock, read [`docs/defensive-patterns.md`](../defensive-patterns.md) — every rule there is traced to a [postmortem](../postmortem/README.md) of a check in this repo that reported green while inspecting nothing.
 
 ## CI gates
 
@@ -52,6 +53,8 @@ archon-cli's CI flow is `scripts/ci-gate.sh` — 8 technical gates (file-size, b
 ```
 
 See [CI gates](dev-flow-gates.md) for the full step list and rationale.
+
+Judge every gate by its **exit code**. Counting matches in a command's output tests the output, not the command: a tool that is missing, unauthenticated, or silently reformatted still yields a number, and zero is indistinguishable from clean. That is [postmortem 0004](../postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md).
 
 ## Cargo discipline
 
@@ -82,3 +85,6 @@ If you change anything user-facing, update the relevant `docs/` page in the same
 - [Adding a skill](adding-a-skill.md)
 - [Adding an agent](adding-an-agent.md)
 - [Release process](release-process.md)
+- [Defensive patterns](../defensive-patterns.md) — rules for writing checks that cannot lie
+- [Postmortems](../postmortem/README.md) — the incidents those rules came from
+- [Decision records](../decisions/README.md) — including the `rejected` bucket

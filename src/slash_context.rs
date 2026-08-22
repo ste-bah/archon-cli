@@ -154,4 +154,14 @@ pub(crate) struct SlashCommandContext {
     /// GHOST-007: AgentDispatcher for is_busy() + cancel_current().
     /// Wrapped in std::sync::Mutex for interior mutability.
     pub(crate) agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
+    /// #200 Phase 4: cross-session excerpts prepared by `/session-ref` and
+    /// waiting for the next user prompt to carry them into the turn.
+    ///
+    /// Each entry is already wrapped as untrusted by
+    /// `archon_core::session_reference` — nothing downstream re-wraps, and
+    /// nothing downstream may unwrap. Drained by `dispatch_user_prompt`, so
+    /// a prepared reference rides exactly one turn: it is context for the
+    /// question the user is about to ask, not a permanent addition to the
+    /// session.
+    pub(crate) pending_session_references: Arc<tokio::sync::Mutex<Vec<String>>>,
 }

@@ -244,6 +244,11 @@ pub struct AgentConfig {
     /// `[filesystem]` — whether a write must be backed by a read of the same
     /// bytes (#193 Phase A).
     pub filesystem: crate::config::FilesystemConfig,
+    /// `[guard.repeat_tool]` — when to tell the model it is repeating itself
+    /// (#200 Phase 2). Threaded into every `ToolContext` this agent builds, so
+    /// the parent loop and the subagent loop cannot end up on different
+    /// policies.
+    pub repeat_tool: crate::config::RepeatToolConfig,
     /// Which subagent this agent is, if it is one (#193 Phase A).
     ///
     /// `session_id` is copied verbatim from parent to child, so on its own it
@@ -333,6 +338,7 @@ impl Default for AgentConfig {
             subagent_auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
             subagent_isolation_max_tier: archon_tools::isolation::IsolationTier::Worktree,
             filesystem: crate::config::FilesystemConfig::default(),
+            repeat_tool: crate::config::RepeatToolConfig::default(),
             subagent_id: None,
         }
     }

@@ -63,7 +63,14 @@ pub(super) async fn dispatch_slash_or_skill(
         handle_compact(trimmed, &ctx).await;
         return SlashDispatchResult::Handled;
     }
-    if trimmed == "/clear" {
+    // Every spelling of clear, not just the primary. `/clear` and `/cls`
+    // resolve to the same registry entry, and the body they need lives here
+    // rather than in `ClearHandler::execute`; matching only the literal
+    // `/clear` sent `/cls` to that handler, whose body was `Ok(())`. Clearing
+    // purges the log and everything the store derived from it, so the spelling
+    // that did nothing did nothing *silently* about a privacy operation. See
+    // `command::clear` for what keeps the two together.
+    if crate::command::clear::command_args(trimmed).is_some() {
         handle_clear_command(
             ctx.agent,
             ctx.cmd_ctx,
@@ -302,3 +309,7 @@ mod tests {
         assert!(!SlashDispatchResult::Handled.should_exit());
     }
 }
+
+#[cfg(test)]
+#[path = "slash_dispatch_clear_tests.rs"]
+mod clear_tests;

@@ -121,6 +121,15 @@ fn a_thin_cohort_is_insufficient_evidence_rather_than_a_verdict() {
 
     assert_eq!(report.verdict, ReleaseGateVerdict::NotEvaluated);
     assert_eq!(report.segments_evaluated, 0);
+    // The distinction this test draws is between "reported as unjudged" and
+    // "silently absent", and `.all()` over an empty `checks` cannot tell them
+    // apart — a gate that emitted no checks at all would satisfy it, alongside
+    // `segments_evaluated == 0`. The thin cohort has to appear in the report.
+    assert!(
+        !report.checks.is_empty(),
+        "the thin cohort must be reported as unjudged, not omitted from the \
+         report altogether"
+    );
     assert!(
         report
             .checks

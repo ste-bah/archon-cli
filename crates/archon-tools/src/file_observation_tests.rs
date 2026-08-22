@@ -178,6 +178,43 @@ async fn ending_a_session_forgets_it_and_its_subagents() {
     assert_eq!(registry.len(&other), 1, "another session was collateral");
 }
 
+/// A subagent ending must take its own record with it and nothing else.
+///
+/// The parent is still running when a child finishes, and it holds readings
+/// behind edits it has not made yet. Widening this to `forget_session` would
+/// flip those from `Fresh` to `Unobserved` and — under the default
+/// `read_before_edit = "block"` — refuse a write the parent had every right to
+/// make, at a moment determined by whichever child happened to finish.
+#[tokio::test]
+async fn an_agent_can_be_forgotten_without_touching_its_parent_or_siblings() {
+    let registry = ObservationRegistry::default();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.rs");
+    std::fs::write(&file, "x").expect("write");
+
+    let parent = Observer::new("session-1", None);
+    let finished = Observer::new("session-1", Some("agent-7"));
+    let sibling = Observer::new("session-1", Some("agent-8"));
+    record(&registry, &parent, &file).await;
+    record(&registry, &finished, &file).await;
+    record(&registry, &sibling, &file).await;
+
+    registry.forget_agent(&finished);
+
+    assert!(registry.is_empty(&finished), "the agent that ended is gone");
+    assert_eq!(
+        verdict(&registry, &parent, &file).await,
+        Verdict::Fresh,
+        "the parent's reading must survive its child ending, or its next edit \
+         is refused for a file it has read"
+    );
+    assert_eq!(
+        verdict(&registry, &sibling, &file).await,
+        Verdict::Fresh,
+        "a sibling still running must survive too"
+    );
+}
+
 /// The token is compared, never parsed. This pins that two different files
 /// do not collide on it, without asserting anything about its shape.
 #[tokio::test]

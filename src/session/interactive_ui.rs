@@ -265,6 +265,10 @@ pub(super) async fn run(
         context_threshold: config.context.compact_threshold,
         command_catalog,
         task_store: Some(crate::session::task_overlay_store::TaskManagerStore::shared()),
+        session_mentions: Some(crate::session::mention_source::StoreMentionSource::shared(
+            Arc::clone(&session_store),
+            session_id,
+        )),
     })
     .await;
 

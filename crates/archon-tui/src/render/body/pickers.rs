@@ -206,6 +206,15 @@ pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
     picker.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the `@`-mention picker (#200 Phase 4).
+pub fn draw_session_mention(frame: &mut Frame, app: &App) {
+    let picker = match &app.session_mention {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the token attribution overlay (#192 scope B, `/context`).
 pub fn draw_token_attribution(frame: &mut Frame, app: &App) {
     let overlay = match &app.token_attribution {

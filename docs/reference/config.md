@@ -415,6 +415,15 @@ Freshness is tracked by size and modification time, not content hashing. That
 is cheap enough to run on every tool call and catches the case that matters — a
 file that changed between the read and the write.
 
+The record is released on a lifecycle boundary and is deliberately **not** an
+LRU or any other bounded cache. Under the `"block"` default, dropping an
+observation turns a fresh verdict into "you have not read this file" and refuses
+a write the agent had every right to make — and *which* write gets refused would
+depend on how many other files happened to be in the map. See
+[the decision record](../decisions/rejected/2026-08-22-bounded-lru-for-the-observation-registry.md),
+and [its sibling](../decisions/rejected/2026-08-22-wire-forget-session-at-finish-session.md)
+for which release seams do and do not cover long-lived processes.
+
 ### When to turn it off
 
 `"off"` is a genuine no-op, not a check whose answer is ignored. Turn it down to

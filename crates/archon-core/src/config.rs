@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 mod generated_shape;
 mod generated_tuning;
+/// `[guard]` — advisories that nudge the model without vetoing it (#200).
+mod guard;
 mod interfaces;
 mod io;
 mod learning;
@@ -29,6 +31,7 @@ pub use context_section::ContextConfig;
 pub use filesystem::{FilesystemConfig, ReadBeforeEdit};
 pub use generated_shape::*;
 pub use generated_tuning::*;
+pub use guard::{GuardConfig, RepeatToolConfig};
 pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
@@ -137,6 +140,9 @@ pub struct ArchonConfig {
     /// Whether a write has to be backed by a read of the same bytes (#193).
     #[serde(default)]
     pub filesystem: FilesystemConfig,
+    /// Advisories that nudge the model without vetoing it (#200).
+    #[serde(default)]
+    pub guard: GuardConfig,
 }
 
 #[cfg(test)]

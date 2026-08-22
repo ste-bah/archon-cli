@@ -97,6 +97,7 @@ impl RouterHost for AgentHost<'_> {
             tool_run_parent_action_id: self.agent.guardrail_action_id.clone(),
             tool_run_tool_use_id: None,
             tool_run_attempt: 0,
+            repeat_tool: self.agent.config.repeat_tool.clone(),
             tool_run_admission: self.agent.tool_run_admission_callback.clone(),
             tool_run_outcome: self.agent.tool_run_outcome_callback.clone(),
         };

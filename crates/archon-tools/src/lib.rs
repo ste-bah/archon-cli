@@ -107,6 +107,8 @@ pub mod powershell;
 pub mod provider_env;
 pub mod push_notification;
 pub mod registry;
+/// Consecutive identical tool calls, counted per agent (#200 Phase 2).
+pub mod repeat_tool_guard;
 pub mod session_search;
 pub mod sleep;
 // Persistent shell sessions (#189 Phase 6). Only the tools are public; the

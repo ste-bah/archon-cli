@@ -48,6 +48,11 @@ impl Agent {
             tool_run_attempt: 0,
             tool_run_admission: self.tool_run_admission_callback.clone(),
             tool_run_outcome: self.tool_run_outcome_callback.clone(),
+            // #200 Phase 2. Every context this agent builds carries the same
+            // policy, and the subagent executor derives child contexts from
+            // one of these — so the parent loop and the child loop cannot end
+            // up counting runs under different rules.
+            repeat_tool: self.config.repeat_tool.clone(),
         }
     }
 }

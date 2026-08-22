@@ -164,6 +164,7 @@ The docs are organised by user goal:
 | **Cookbook** | [`docs/cookbook/`](docs/cookbook/) — real-world evidence workflows, YouTube/video evidence, strategic engagement, memory-driven coding, pipeline rewind, god-code pipeline, custom agents |
 | **Operations** | [`docs/operations/`](docs/operations/) — sessions, web workbench, TUI, cost, compaction, cron, remote control, troubleshooting, data locations |
 | **Development** | [`docs/development/`](docs/development/) — contributing, dev flow gates, adding tools/skills/agents, release process |
+| **Engineering practice** | [`docs/defensive-patterns.md`](docs/defensive-patterns.md) — rules for writing checks that cannot lie · [`docs/postmortem/`](docs/postmortem/README.md) — numbered incident writeups · [`docs/decisions/`](docs/decisions/README.md) — decision records, including the `rejected` bucket |
 | **Release notes** | [`docs/release-notes/`](docs/release-notes/) — per-version changelogs |
 
 ## Repository structure
@@ -299,6 +300,8 @@ current release and what changes on upgrade — nothing a reader can look up.
 ## Contributing
 
 See [`docs/development/contributing.md`](docs/development/contributing.md). Every task passes the 6-gate dev flow ([`docs/development/dev-flow-gates.md`](docs/development/dev-flow-gates.md)) before merge.
+
+Before writing a gate, a lint, a CI step, or a test involving a subprocess, a platform difference, or a clock, read [`docs/defensive-patterns.md`](docs/defensive-patterns.md). Every rule there is traced to a [postmortem](docs/postmortem/README.md) of a check in this repo that reported green while inspecting nothing.
 
 ## License
 
