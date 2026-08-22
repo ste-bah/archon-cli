@@ -49,6 +49,14 @@ impl Tool for SlowTool {
         serde_json::json!({ "type": "object" })
     }
 
+    /// This double stands in for the tools a budget is declared on — the
+    /// network- and IPC-bound ones — every one of which runs somewhere. The
+    /// method is required rather than defaulted so a tool cannot reach dispatch
+    /// without having answered which world it belongs to (#201).
+    fn capability(&self) -> archon_permissions::ToolCapability {
+        archon_permissions::ToolCapability::EXECUTION
+    }
+
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         self.executions.fetch_add(1, Ordering::SeqCst);
         let guard = DropFlag(Arc::clone(&self.dropped));
