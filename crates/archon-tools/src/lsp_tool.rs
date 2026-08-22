@@ -1,6 +1,7 @@
 //! LspTool: implements the Tool trait with 9 LSP operations (TASK-CLI-313).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -12,6 +13,17 @@ use crate::lsp_types::{LspInput, LspOperation, LspOutput};
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
+
+/// Whole-call budget reported to the dispatcher through [`Tool::timeout`].
+///
+/// Unlike the HTTP tools this one is load-bearing rather than a backstop.
+/// `LspClient` bounds initialization (30s) and each request (10s), but the
+/// first thing `execute` does is `self.manager.lock().await`, and that wait has
+/// no bound at all: one wedged language-server request holds the manager for as
+/// long as it likes and every later `lsp` call queues behind it forever. 60s
+/// leaves room for a cold `rust-analyzer` start (30s) plus a request (10s) plus
+/// a queued predecessor, and stops the queue from being unbounded.
+const CALL_BUDGET: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------------------
 // LspTool
@@ -351,6 +363,25 @@ impl Tool for LspTool {
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
+    }
+
+    /// Safe to cancel. The await points are, in order:
+    ///
+    /// 1. `self.manager.lock().await` — a `tokio::sync::Mutex`. Dropping the
+    ///    future either releases the guard or removes it from the wait queue;
+    ///    it cannot leave the mutex held. This is the one that matters, because
+    ///    a leaked guard here would wedge every later `lsp` call.
+    /// 2. `ensure_connected()` — spawns the server with `kill_on_drop(true)`
+    ///    and only stores the client in the manager once `connect` returns, so
+    ///    a cancellation part-way through kills the child rather than parking a
+    ///    half-initialised server in the manager.
+    /// 3. The request itself. Dropping abandons the response, leaving one
+    ///    orphaned entry in `async-lsp`'s pending map that is reclaimed when the
+    ///    server eventually answers. The connection stays usable.
+    ///
+    /// See `tests/lsp_timeout_tests.rs` for the lock-release proof.
+    fn timeout(&self) -> Option<Duration> {
+        Some(CALL_BUDGET)
     }
 }
 

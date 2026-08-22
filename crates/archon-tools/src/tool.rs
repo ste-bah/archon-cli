@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use archon_observability::AgentActivitySink;
 use serde::{Deserialize, Serialize};
@@ -424,6 +425,40 @@ pub trait Tool: Send + Sync {
     /// Declare whether this tool can mutate files below the session working tree.
     fn working_tree_effect(&self) -> WorkingTreeEffect {
         WorkingTreeEffect::default()
+    }
+
+    /// Time budget for a single call. `None` — the default — means unbounded.
+    ///
+    /// A declared budget is enforced once, at the dispatch choke point every
+    /// tool call passes through (`execute_tool_attempt` in `archon-core`),
+    /// using [`crate::execution_deadline::ExecutionDeadline`]. Expiry produces
+    /// an ordinary error [`ToolResult`], so the model sees it as it would any
+    /// other tool failure and the turn continues.
+    ///
+    /// **Returning `Some` is a per-tool decision, never a blanket switch.**
+    /// `ExecutionDeadline` is built on `tokio::time::timeout_at`, which *drops*
+    /// the `execute` future at the deadline: the tool simply stops being polled
+    /// part-way through whatever await it was parked on, and every destructor
+    /// on its stack runs. Before declaring a budget, read each await point in
+    /// `execute` and confirm that dropping there releases what the tool holds:
+    ///
+    /// * A child process is safe only if it is spawned with kill-on-drop —
+    ///   `Bash` is, which is why it can afford its own deadline in
+    ///   `bash_process.rs` and does not declare one here.
+    /// * A lock guard held across the await is released by the drop, but only
+    ///   if it is a guard and not, say, a flag someone else must clear.
+    /// * A request already sent to a peer is the dangerous case. Dropping the
+    ///   future abandons the response; the peer is left working on a call
+    ///   nobody will read unless the tool explicitly cancels on drop. MCP
+    ///   (`archon-mcp`) does this by sending `notifications/cancelled`; a tool
+    ///   speaking any other protocol must arrange the equivalent before opting
+    ///   in.
+    ///
+    /// Tools that are long-running by design — `Agent`, `TaskCreate`, the
+    /// pipeline tools — must leave this `None`. A budget there would kill work
+    /// that is behaving correctly.
+    fn timeout(&self) -> Option<Duration> {
+        None
     }
 
     /// Clone this tool restricted to an isolation tier, when it has anything to

@@ -28,6 +28,17 @@ const MAX_BODY_BYTES: usize = 1_024 * 1_024;
 /// Request timeout.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Whole-call budget reported to the dispatcher through [`Tool::timeout`].
+///
+/// [`TIMEOUT`] already bounds the reqwest round-trip, so in the normal case
+/// this never fires. It is the backstop for the part of the call reqwest does
+/// not cover — DNS resolution handed to the system resolver, and the body
+/// decode and HTML strip afterwards — and for the case where the reqwest timer
+/// itself fails to arm. Set above `TIMEOUT` so that a plain slow host still
+/// produces reqwest's specific "Request timed out after 30s" message rather
+/// than the generic dispatcher one.
+const CALL_BUDGET: Duration = Duration::from_secs(45);
+
 /// Maximum redirects to follow.
 const MAX_REDIRECTS: usize = 5;
 
@@ -191,6 +202,16 @@ impl Tool for WebFetchTool {
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Risky
     }
+
+    /// Safe to cancel: the only thing held across an await is the reqwest
+    /// request/response future. Dropping it drops the `hyper` response
+    /// handle, which cannot be resynchronised mid-stream and so closes the
+    /// TCP connection instead of returning it to the pool. Nothing is left
+    /// behind on either side — see
+    /// `dropping_the_fetch_at_the_deadline_closes_the_connection`.
+    fn timeout(&self) -> Option<Duration> {
+        Some(CALL_BUDGET)
+    }
 }
 
 #[cfg(test)]
@@ -315,5 +336,55 @@ mod tests {
         let tool = WebFetchTool;
         let result = tool.execute(json!({"url": "not-a-url"}), &test_ctx()).await;
         assert!(result.is_error);
+    }
+
+    #[test]
+    fn declares_a_call_budget_above_the_reqwest_timeout() {
+        let budget = WebFetchTool.timeout().expect("WebFetch declares a budget");
+        assert!(
+            budget > TIMEOUT,
+            "the dispatcher budget is a backstop, not the primary bound"
+        );
+    }
+
+    /// The whole design rests on it being safe to *drop* an opted-in tool's
+    /// future at the deadline. For `WebFetch` the resource at stake is the
+    /// TCP connection to the peer, so this stalls a real server, cancels the
+    /// call, and requires the server to see the connection close.
+    #[tokio::test]
+    async fn dropping_the_fetch_at_the_deadline_closes_the_connection() {
+        use tokio::io::AsyncReadExt;
+
+        use crate::execution_deadline::ExecutionDeadline;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("client connects");
+            let mut buf = [0u8; 4096];
+            let request_bytes = socket.read(&mut buf).await.expect("request arrives");
+            assert!(request_bytes > 0, "expected an HTTP request");
+            // Deliberately never answer. The next read only completes when the
+            // client closes its half, which is what dropping the future must do.
+            tokio::time::timeout(Duration::from_secs(10), socket.read(&mut buf)).await
+        });
+
+        let outcome = ExecutionDeadline::new(Duration::from_millis(300))
+            .wait(WebFetchTool.execute(json!({"url": format!("http://{addr}/")}), &test_ctx()))
+            .await;
+
+        assert!(outcome.is_none(), "the stalled fetch must not complete");
+        let after_drop = server
+            .await
+            .expect("server task")
+            .expect("server must see the connection close, not hang for 10s");
+        assert_eq!(
+            after_drop.expect("read after drop"),
+            0,
+            "dropping the fetch must close the client half of the connection"
+        );
     }
 }

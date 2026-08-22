@@ -15,6 +15,16 @@ static RE_STRIP_TAGS: OnceLock<Regex> = OnceLock::new();
 /// Request timeout for DuckDuckGo searches.
 const TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Whole-call budget reported to the dispatcher through [`Tool::timeout`].
+///
+/// Set above [`TIMEOUT`] for the same reason as `WebFetch`: reqwest owns the
+/// primary bound and produces the better message, and this only catches the
+/// slack around it — system DNS, and the regex pass over the result page.
+const CALL_BUDGET: Duration = Duration::from_secs(30);
+
+/// The DuckDuckGo HTML endpoint the tool searches.
+const SEARCH_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
+
 /// User-Agent header value.
 const USER_AGENT: &str = "archon-cli/0.1.0";
 
@@ -152,6 +162,49 @@ pub(crate) fn format_results(results: &[SearchResult]) -> String {
     out
 }
 
+/// Run the search round-trip against `endpoint` and return the result page.
+///
+/// Split out of `execute` because this future is the only thing `WebSearch`
+/// holds across an await, which makes it the thing whose cancellation safety
+/// the declared call budget depends on. Taking the endpoint as an argument lets
+/// the drop-release test aim it at a stalled local listener; production has one
+/// caller and it passes [`SEARCH_ENDPOINT`].
+pub(crate) async fn fetch_search_html(endpoint: &str, query: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let response = client
+        .get(endpoint)
+        .query(&[("q", query)])
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("Search request timed out after {}s", TIMEOUT.as_secs())
+            } else {
+                format!("Search request failed: {e}")
+            }
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("Unknown")
+        ));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))
+}
+
 /// Clamp max_results to 1..=20, defaulting to 5.
 pub(crate) fn clamp_max_results(input: &serde_json::Value) -> usize {
     let v = input
@@ -201,46 +254,9 @@ impl Tool for WebSearchTool {
 
         let max_results = clamp_max_results(&input);
 
-        let client = match reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .user_agent(USER_AGENT)
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("Failed to create HTTP client: {e}")),
-        };
-
-        let response = match client
-            .get("https://html.duckduckgo.com/html/")
-            .query(&[("q", query)])
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                if e.is_timeout() {
-                    return ToolResult::error(format!(
-                        "Search request timed out after {}s",
-                        TIMEOUT.as_secs()
-                    ));
-                }
-                return ToolResult::error(format!("Search request failed: {e}"));
-            }
-        };
-
-        let status = response.status();
-        if !status.is_success() {
-            return ToolResult::error(format!(
-                "HTTP {}: {}",
-                status.as_u16(),
-                status.canonical_reason().unwrap_or("Unknown")
-            ));
-        }
-
-        let html = match response.text().await {
-            Ok(t) => t,
-            Err(e) => return ToolResult::error(format!("Failed to read response: {e}")),
+        let html = match fetch_search_html(SEARCH_ENDPOINT, query).await {
+            Ok(html) => html,
+            Err(message) => return ToolResult::error(message),
         };
 
         let results = parse_results(&html, max_results);
@@ -258,6 +274,14 @@ impl Tool for WebSearchTool {
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
+    }
+
+    /// Safe to cancel: [`fetch_search_html`] is the sole await and holds only
+    /// the reqwest future and a client built for this call. Dropping closes the
+    /// connection and frees both — see
+    /// `dropping_the_search_at_the_deadline_closes_the_connection`.
+    fn timeout(&self) -> Option<Duration> {
+        Some(CALL_BUDGET)
     }
 }
 
@@ -445,3 +469,7 @@ mod tests {
         assert_eq!(lines.len(), 2); // title + url only
     }
 }
+
+#[cfg(test)]
+#[path = "web_search_timeout_tests.rs"]
+mod timeout_tests;

@@ -3,6 +3,7 @@
 //! Provides .mcp.json config parsing, stdio transport management,
 //! MCP protocol client operations, and multi-server lifecycle management.
 
+mod call_cancellation;
 pub mod client;
 pub mod config;
 pub mod http_transport;
