@@ -260,6 +260,13 @@ async fn subagent_tool_round_admits_provider_tool_use_id_before_execution() {
     );
 }
 
+/// The subagent's own wall-clock cap for this run, named so the constructor
+/// argument and the assertion below cannot drift apart. It must stay well under
+/// the 60s `BashTool` timeout, because the whole point is proving which of the
+/// two deadlines ended the run.
+#[cfg(unix)]
+const SUBAGENT_WALL_CLOCK_CAP_SECS: u64 = 2;
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_round_timeout_kills_bash_process_group() {
@@ -292,7 +299,7 @@ async fn tool_round_timeout_kills_bash_process_group() {
         },
         "mock".into(),
         5,
-        2,
+        SUBAGENT_WALL_CLOCK_CAP_SECS,
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
@@ -315,9 +322,15 @@ async fn tool_round_timeout_kills_bash_process_group() {
     .unwrap_err();
     let message = error.to_string();
     assert!(message.contains("during tool round"), "{message}");
+    // Built from the same constant the runner was given, so a change to the cap
+    // cannot leave this asserting a number nothing configures. It previously
+    // read `5s` — the max-turns argument, not the cap — which made the test
+    // fail everywhere it actually ran. It only ever ran on unix, and the
+    // Windows-only verification that cleared it could not compile this file.
+    let expected_cap = format!("(cap: {SUBAGENT_WALL_CLOCK_CAP_SECS}s)");
     assert!(
-        message.contains("(cap: 5s)"),
-        "the run must end on the subagent's own 5s cap, not the tool's 60s one: {message}"
+        message.contains(&expected_cap),
+        "the run must end on the subagent's own cap, not the tool's 60s one: {message}"
     );
     let pid = std::fs::read_to_string(pid_file).unwrap();
     assert_process_stopped(pid.trim()).await;

@@ -173,6 +173,14 @@ async fn test_fast_hooks_all_complete_within_budget() {
 ///
 /// The clamp arithmetic itself is covered without any process at all in
 /// `hooks::registry::budget`.
+///
+/// `cfg(unix)` because the hook command is `sleep`, following the
+/// `cfg(unix)`/`cfg(windows)` split the other hook process tests already use.
+/// This was previously ungated and ran on Windows, where neither `sleep` nor
+/// `/tmp` exists — so the hook failed to spawn in milliseconds and the old
+/// `elapsed` assertion passed on a run that proved nothing. Asserting the
+/// outcome instead is what surfaced it.
+#[cfg(unix)]
 #[tokio::test]
 async fn test_per_hook_timeout_clamped_to_remaining_budget() {
     let config = HookExecutionConfig {
@@ -187,7 +195,10 @@ async fn test_per_hook_timeout_clamped_to_remaining_budget() {
     );
 
     let input = serde_json::json!({"tool_name": "Bash"});
-    let cwd = PathBuf::from("/tmp");
+    // A directory that exists on the machine running the test. The literal
+    // `/tmp` resolved to `\tmp` on the current drive under Windows, which is
+    // the other half of why this passed while doing nothing.
+    let cwd = std::env::temp_dir();
 
     let result = registry
         .execute_hooks(HookEvent::PreToolUse, input, &cwd, "test-session")
