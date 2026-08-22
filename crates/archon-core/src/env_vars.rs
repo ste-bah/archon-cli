@@ -4,12 +4,18 @@
 //! are read once at startup into an [`ArchonEnvVars`] struct, and follow the
 //! precedence: CLI flags > env vars > config file > hardcoded defaults.
 //!
-//! Feature-local variables (OCR timeouts, tool binary overrides, offline test
-//! fixtures) are still read at their point of use rather than through this
-//! struct, so they do **not** participate in that precedence chain. Both kinds
-//! must be listed in [`KNOWN_ARCHON_VARS`], which is the allowlist backing
-//! unrecognized-variable warnings — a variable the code honours but omits from
-//! that list produces a spurious warning on every startup.
+//! Feature-local variables (OCR timeouts, tool binary overrides) are still read
+//! at their point of use rather than through this struct, so they do **not**
+//! participate in that precedence chain. Both kinds are listed in
+//! [`KNOWN_ARCHON_VARS`], which backs unrecognized-variable warnings — a
+//! variable the code honours but omits produces a spurious warning on startup.
+//!
+//! [`KNOWN_ARCHON_VARS`] names what *this crate* reads, and nothing else. A
+//! feature living in another crate owns its own names and passes them to
+//! [`warn_unrecognized_archon_vars`] as `extra_known`. That boundary is load
+//! bearing: three trading-provider fixture variables were once patched into the
+//! list here because they warned on startup, which is how an engine constant
+//! quietly acquires a downstream project's vocabulary.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -128,10 +134,6 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_SCRIPT_LIFECYCLE",
     "ARCHON_SPEC_PATH",
     "ARCHON_WEB_DEV",
-    // Diagnostic / offline fixtures
-    "ARCHON_STOOQ_CSV_URL",
-    "ARCHON_TRADINGVIEW_OHLCV_FIXTURE",
-    "ARCHON_TRADINGVIEW_SNAPSHOT_FIXTURE",
     // Telemetry (recognized but no-op)
     "ARCHON_DISABLE_TELEMETRY",
 ];
@@ -349,14 +351,22 @@ pub fn mask_secret(value: &str) -> String {
 // Unrecognized variable detection
 // ---------------------------------------------------------------------------
 
-/// Find `ARCHON_*` or `ANTHROPIC_*` env vars that are not in `KNOWN_ARCHON_VARS`.
+/// Find `ARCHON_*` or `ANTHROPIC_*` env vars recognized by neither
+/// `KNOWN_ARCHON_VARS` nor `extra_known`.
+///
+/// `extra_known` carries the names owned by features outside this crate — the
+/// caller assembling the binary knows which features it linked in, and this
+/// crate does not. Pass an empty slice for a build with no such features.
 ///
 /// Returns the list of unrecognized variable names. Caller should log at
 /// debug level.
-pub fn warn_unrecognized_archon_vars(env: &HashMap<String, String>) -> Vec<String> {
+pub fn warn_unrecognized_archon_vars(
+    env: &HashMap<String, String>,
+    extra_known: &[&str],
+) -> Vec<String> {
     env.keys()
         .filter(|k| k.starts_with("ARCHON_") || k.starts_with("ANTHROPIC_"))
-        .filter(|k| !KNOWN_ARCHON_VARS.contains(&k.as_str()))
+        .filter(|k| !KNOWN_ARCHON_VARS.contains(&k.as_str()) && !extra_known.contains(&k.as_str()))
         .cloned()
         .collect()
 }

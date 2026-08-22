@@ -60,11 +60,46 @@ fn split_artifact_object(
         }
         return;
     }
+    // A declaration may carry its paths as an array under a plural key —
+    // `{"kind": "create", "paths": ["src/a.rs", "src/b.rs"]}`. Classify each
+    // entry exactly as a bare string would be. This is the `absolute_path`
+    // lesson again (see `explicit_path`): the declaration was concrete, the
+    // reader did not know the key, and fifteen items looped to the repair cap
+    // over paths that were sitting in the payload the whole time.
+    //
+    // Checked before the evidence branch, or an object carrying both paths
+    // and a description would be filed as evidence and its concrete paths
+    // dropped; any evidence text it also carries is kept alongside.
+    if let Some(values) = plural_paths(&object) {
+        for value in values {
+            split_artifact_value(value, split);
+        }
+        if let Some(evidence) = object_evidence(&object) {
+            split.evidence.push(Value::String(evidence.to_string()));
+        }
+        return;
+    }
     if let Some(evidence) = object_evidence(&object) {
         split.evidence.push(Value::String(evidence.to_string()));
         return;
     }
     split.invalid.push(Value::Object(object));
+}
+
+/// Non-empty string entries under a plural path key, or `None` when the
+/// object declares no such key with usable entries.
+fn plural_paths(object: &serde_json::Map<String, Value>) -> Option<Vec<Value>> {
+    ["paths", "artifact_paths", "artifactPaths"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_array))
+        .map(|values| {
+            values
+                .iter()
+                .filter(|value| value.as_str().is_some_and(|text| !text.trim().is_empty()))
+                .cloned()
+                .collect::<Vec<Value>>()
+        })
+        .filter(|values| !values.is_empty())
 }
 
 fn collect_artifact_paths(value: &Value, in_artifact_field: bool, paths: &mut Vec<String>) {

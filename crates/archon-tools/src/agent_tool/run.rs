@@ -243,7 +243,7 @@ async fn run_subagent_with_auto_background(
             biased;
             r = &mut join => match r {
                 Ok(execution) => execution.outcome(),
-                Err(e) => SubagentOutcome::Failed(format!("join panic: {e}")),
+                Err(e) => SubagentOutcome::Failed(describe_join_error(&e)),
             },
             _ = cancel.cancelled() => {
                 await_cancelled_foreground(&mut join, exec.as_ref(), &subagent_id).await
@@ -255,7 +255,7 @@ async fn run_subagent_with_auto_background(
             biased;
             r = &mut join => match r {
                 Ok(execution) => execution.outcome(),
-                Err(e) => SubagentOutcome::Failed(format!("join panic: {e}")),
+                Err(e) => SubagentOutcome::Failed(describe_join_error(&e)),
             },
             _ = cancel.cancelled() => {
                 await_cancelled_foreground(&mut join, exec.as_ref(), &subagent_id).await
@@ -312,6 +312,22 @@ async fn run_subagent_with_auto_background(
     outcome
 }
 
+/// Describe why a subagent's task ended without a result.
+///
+/// A `JoinError` covers two unrelated situations and this used to print both
+/// as "join panic". Observed live: an authoring call that was CANCELLED
+/// reported `join panic: task 431 was cancelled`, which reads as a crash in
+/// the subagent and sends the reader looking for a panic that never happened.
+/// The distinction also decides policy upstream — a cancellation is not the
+/// work's fault and must not consume a retry budget reserved for defects.
+fn describe_join_error(err: &tokio::task::JoinError) -> String {
+    if err.is_cancelled() {
+        format!("subagent cancelled before returning a result: {err}")
+    } else {
+        format!("join panic: {err}")
+    }
+}
+
 async fn await_cancelled_foreground(
     join: &mut tokio::task::JoinHandle<ExecutionResult>,
     exec: &dyn SubagentExecutor,
@@ -324,7 +340,7 @@ async fn await_cancelled_foreground(
     .await
     {
         Ok(Ok(_)) => SubagentOutcome::Cancelled,
-        Ok(Err(err)) => SubagentOutcome::Failed(format!("join panic: {err}")),
+        Ok(Err(err)) => SubagentOutcome::Failed(describe_join_error(&err)),
         Err(_) => {
             join.abort();
             let _ = join.await;

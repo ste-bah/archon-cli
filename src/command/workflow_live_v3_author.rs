@@ -8,6 +8,39 @@
 
 use super::*;
 
+/// How many times an authoring attempt may come back with a script the
+/// pre-flight rejects before the run gives up.
+///
+/// Was effectively 2 (one attempt plus one retry). A rejection is a defect the
+/// author can learn from — it now receives its own rejected draft and repairs
+/// it — so the budget matches `max_repair_iterations`' reasoning rather than
+/// being the smallest number that is not one.
+const MAX_AUTHORING_DEFECT_ATTEMPTS: usize = 4;
+
+/// How many times the authoring call may die in transport before the run gives
+/// up. Separate from the defect budget on purpose: a cancelled or dropped call
+/// produced no script, taught the author nothing, and must not consume the
+/// chances reserved for actually fixing a defect.
+const MAX_AUTHORING_TRANSPORT_ATTEMPTS: usize = 3;
+
+/// A failure that produced no script to learn from, rather than a defective one.
+///
+/// Cancellations are the case that matters: the subagent layer reports a
+/// cancelled task as `join panic: task N was cancelled`, and treating that as
+/// an authoring defect burns a retry on a network blip.
+fn is_transport_failure(err: &archon_workflow::WorkflowError) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    [
+        "cancelled",
+        "canceled",
+        "transport failed",
+        "timed out",
+        "timeout",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
 impl WorkflowV2ScriptRunner {
     /// v3 entry: author workflow.js if absent (journaled, cache-keyed on the composed brief
     /// (task paths + per-file content fingerprints + lessons)), persist it, then execute it. Re-runs with an unchanged
@@ -50,30 +83,60 @@ impl WorkflowV2ScriptRunner {
             // ONE bounded retry covers BOTH failure kinds: a rejected plan
             // AND an unusable authoring envelope (e.g. workflow_js outside
             // data) — each retry names the specific defect.
-            let first = match self
-                .author_workflow_source(None, &governed_learning_context)
-                .await
-            {
-                Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
-                    Ok(()) => Ok(source),
-                    Err(reason) => Err(reason),
-                },
-                Err(err) => Err(format!(
-                    "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
-                )),
-            };
-            let source = match first {
-                Ok(source) => source,
-                Err(reason) => {
-                    let source = self
-                        .author_workflow_source(Some(&reason), &governed_learning_context)
-                        .await?;
-                    if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
-                        return Err(WorkflowError::SpecInvalid(format!(
-                            "authored workflow failed its dry-run pre-flight twice; last error: {reason}"
-                        )));
+            // Attempts are budgeted against DEFECTS, not against luck. A
+            // transport cancellation is neither an authoring defect nor a
+            // reason to end the run, and treating it as one is what killed
+            // wf-ac47347c: attempt 1 was rejected for a one-line missing
+            // marker, attempt 2 was cancelled 33 seconds in without ever
+            // producing a script, and the run died with its single retry
+            // spent on a network blip.
+            let mut rejection: Option<(String, Option<String>)> = None;
+            let mut defect_attempts = 0usize;
+            let mut transport_attempts = 0usize;
+            let source = loop {
+                let (feedback, draft) = match &rejection {
+                    Some((reason, draft)) => (Some(reason.as_str()), draft.as_deref()),
+                    None => (None, None),
+                };
+                let authored = self
+                    .author_workflow_source(feedback, draft, &governed_learning_context)
+                    .await;
+                match authored {
+                    Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
+                        Ok(()) => break source,
+                        Err(reason) => {
+                            defect_attempts += 1;
+                            if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
+                                return Err(WorkflowError::SpecInvalid(format!(
+                                    "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
+                                )));
+                            }
+                            rejection = Some((reason, Some(source)));
+                        }
+                    },
+                    Err(err) if is_transport_failure(&err) => {
+                        transport_attempts += 1;
+                        if transport_attempts >= MAX_AUTHORING_TRANSPORT_ATTEMPTS {
+                            return Err(err);
+                        }
+                        // The prior rejection (if any) stands: this attempt
+                        // produced nothing to learn from, so the next one asks
+                        // the same question rather than starting over blind.
                     }
-                    source
+                    Err(err) => {
+                        defect_attempts += 1;
+                        let reason = format!(
+                            "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
+                        );
+                        if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
+                            return Err(WorkflowError::SpecInvalid(format!(
+                                "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
+                            )));
+                        }
+                        // No usable script came back, so there is no draft to
+                        // repair — the next attempt gets the reason alone.
+                        rejection = Some((reason, None));
+                    }
                 }
             };
             std::fs::write(&authored_path, &source).map_err(|err| WorkflowError::Io {
@@ -103,6 +166,7 @@ impl WorkflowV2ScriptRunner {
     pub(super) async fn author_workflow_source(
         &self,
         retry_feedback: Option<&str>,
+        rejected_draft: Option<&str>,
         governed_learning_context: &serde_json::Value,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
@@ -146,11 +210,32 @@ impl WorkflowV2ScriptRunner {
             ("task_paths", &task_paths),
             (
                 "retry_feedback",
+                // The rejected draft rides with the reason. Without it the
+                // author rewrites the whole script from a blank page to fix
+                // whatever the reason names — observed live: a missing
+                // one-line `export const meta` marker cost a full 85-minute
+                // regeneration, because the previous 35,000 characters were
+                // never handed back.
+                //
+                // The retry is also told not to repeat the investigation. The
+                // brief it shares with the first attempt orders a full read of
+                // the PRD and every task file, and the first attempt spent 27
+                // file reads on exactly that — almost all of its 85 minutes,
+                // each read re-sending the whole grown context. Handing the
+                // draft back saves the writing; this saves the reading, which
+                // was the larger half.
                 &retry_feedback
-                    .map(|reason| {
-                        format!(
-                            "YOUR PREVIOUS ATTEMPT WAS REJECTED: {reason}. Fix EVERY defect listed.\n"
-                        )
+                    .map(|reason| match rejected_draft {
+                        Some(draft) => [
+                            &format!("YOUR PREVIOUS ATTEMPT WAS REJECTED: {reason}. Fix EVERY defect listed.\n\n"),
+                            "Your previous draft follows in full. REPAIR IT — keep everything that was already correct and change only what the rejection names. Return the complete repaired script, not a diff.\n\n",
+                            "DO NOT REPEAT THE INVESTIGATION. The draft below already reflects the task files and repository state you read last time; re-reading them all costs far more than the repair does. Re-read ONLY the specific files the rejection above forces you to check, and none of the others.\n\n",
+                            &format!("--- BEGIN REJECTED DRAFT ---\n{draft}\n--- END REJECTED DRAFT ---\n"),
+                        ]
+                        .concat(),
+                        None => {
+                            format!("YOUR PREVIOUS ATTEMPT WAS REJECTED: {reason}. Fix EVERY defect listed.\n")
+                        }
                     })
                     .unwrap_or_default(),
             ),
@@ -182,3 +267,7 @@ impl WorkflowV2ScriptRunner {
         validate_authored_workflow_source(source)
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_live_v3_author_tests.rs"]
+mod workflow_live_v3_author_tests;

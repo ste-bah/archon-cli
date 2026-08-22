@@ -21,15 +21,15 @@ use bash_process::{
 };
 
 #[cfg(test)]
-#[path = "bash_process_tests.rs"]
-mod bash_process_tests;
-#[cfg(test)]
 #[path = "bash_output_bound_tests.rs"]
 mod bash_output_bound_tests;
+#[cfg(test)]
+#[path = "bash_process_tests.rs"]
+mod bash_process_tests;
 
 #[path = "bash_env.rs"]
 pub(crate) mod bash_env;
-pub use bash_env::sanitized_env;
+pub use bash_env::{host_env, isolated_env};
 
 const DEFAULT_BASH_TIMEOUT_SECS: u64 = 3600;
 

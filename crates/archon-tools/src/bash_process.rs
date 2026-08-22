@@ -22,7 +22,7 @@ pub(super) async fn prepare_command(
     timeout_ms: u64,
     ctx: &ToolContext,
 ) -> Result<PreparedBashCommand, ToolResult> {
-    let mut env_vars = sanitized_env();
+    let mut env_vars = host_env();
     // `CARGO_INCREMENTAL=0` used to be set here, ahead of the resource defaults.
     // Since `ensure_env_default` is first-wins, that made `[tools.cargo]
     // incremental` unreachable, so the setting now lives entirely in

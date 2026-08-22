@@ -10,6 +10,13 @@ pub(super) fn copy_artifact_requirement_aliases(
 ) {
     let explicit = ARTIFACT_ALIASES.iter().any(|key| value.get(*key).is_some());
     object.remove("artifact_requirements");
+    // Derived state, recomputed from the declarations below — never inherited
+    // from the incoming value. A stale copy used to survive here, and it made
+    // the repair loop unwinnable: a repair replaced `artifact_requirements`
+    // with clean paths, the old marker rode through re-normalization, the
+    // validator re-raised the same issue, and the issue count that adoption
+    // measures never moved. Five correct repairs were rejected in one run.
+    object.remove("artifact_requirement_issues");
     let split = split_artifact_requirement_values(raw_values_from_aliases(value, ARTIFACT_ALIASES));
     append_artifact_split(object, split, explicit);
 }
