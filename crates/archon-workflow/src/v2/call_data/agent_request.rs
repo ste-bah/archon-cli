@@ -25,18 +25,18 @@ pub fn v2_agent_request(
         );
     }
     let mut input = execution.input.clone();
-    if needs_request_task_universe(execution.call.method, &execution.call.id)
-        && let Some(universe) = task_universe
+    if let Some(universe) = task_universe
+        && let Some(carried) = request_task_universe(execution, universe)
     {
-        let universe =
-            serde_json::to_value(universe).expect("WorkflowV2TaskUniverse must serialize to JSON");
-        if !contains_task_universe(&input, &universe) {
+        let carried =
+            serde_json::to_value(&carried).expect("WorkflowV2TaskUniverse must serialize to JSON");
+        if !contains_task_universe(&input, &carried) {
             match &mut input {
                 serde_json::Value::Object(object) => {
-                    object.insert("task_universe".to_string(), universe);
+                    object.insert("task_universe".to_string(), carried);
                 }
-                serde_json::Value::Array(values) => values.push(universe),
-                _ => input = serde_json::json!([input, universe]),
+                serde_json::Value::Array(values) => values.push(carried),
+                _ => input = serde_json::json!([input, carried]),
             }
         }
     }
@@ -63,25 +63,95 @@ pub fn v2_agent_request(
     }
 }
 
-/// Whether this call's request carries the task universe.
+/// The task universe this call's request carries, if any.
 ///
-/// Implementation branches need it because they are the calls being asked to
-/// satisfy a task, and a task's acceptance criteria live nowhere else. Without
-/// this the prompt layer's contract context has nothing to read: it digests the
-/// universes it finds in the request, and finding none it produces an empty
-/// block that looks exactly like a task declaring nothing.
+/// Implementation branches need one, because they are the calls being asked to
+/// satisfy a task and a task's acceptance criteria live nowhere else. Before
+/// they received it the prompt layer's contract context had nothing to read:
+/// it digests the universes it finds in the request, and finding none produced
+/// an empty block indistinguishable from a task that declares nothing.
 ///
-/// The universe is large — one reference decomposition serialises to well over
-/// 100KB — so `agent_prompt` reduces it to identity digests for these calls and
-/// carries the criteria separately, scoped to the tasks the call actually
-/// claims. Attaching it here without that reduction would put every task's
-/// criteria in every write agent's prompt.
-pub(super) fn needs_request_task_universe(method: WorkflowV2HostMethod, call_id: &str) -> bool {
-    method == WorkflowV2HostMethod::Implementation
-        || call_id
-            .rsplit_once("-transport-retry-")
-            .map_or(call_id, |(base, _)| base)
-            .starts_with("completion-claim-repair-")
+/// What they receive is SCOPED to the tasks the branch claims, and that is a
+/// correctness requirement rather than a size optimisation. `request.input` is
+/// walked recursively by the enforcement paths, not just read at its top level:
+/// `project_artifact_contract::artifact_requirement_paths` harvests every
+/// `artifact_requirements` key it can reach and
+/// `agent_adapter_a::collect_required_tool_names` every `required_tools` key.
+/// A whole universe in the input therefore makes one branch answerable for the
+/// artifacts and tools of EVERY task in the decomposition — its result is
+/// demoted to Failed for an artifact another task declared, and a Noop verdict
+/// becomes unreachable because evidence is demanded for tools its own task
+/// never named. `agent_prompt_contract` already scopes what the agent is SHOWN
+/// to the same claimed ids; leaving the input unscoped meant an agent shown its
+/// own contract and judged against all of them.
+fn request_task_universe(
+    execution: &WorkflowV2CallExecution,
+    universe: &crate::task_universe::WorkflowV2TaskUniverse,
+) -> Option<crate::task_universe::WorkflowV2TaskUniverse> {
+    // Checked before the method, so a reconciliation call keeps the whole set
+    // whatever method it is derived as.
+    if carries_whole_task_universe(&execution.call.id) {
+        return Some(universe.clone());
+    }
+    if execution.call.method == WorkflowV2HostMethod::Implementation {
+        return scoped_task_universe(&execution.input, universe);
+    }
+    None
+}
+
+/// A completion-claim repair reconciles the run's claims against the whole
+/// decomposition, so the whole set genuinely is its subject. It is read-only
+/// and carries no declared artifacts or tools of its own, so the enforcement
+/// paths above have nothing to over-apply.
+fn carries_whole_task_universe(call_id: &str) -> bool {
+    call_id
+        .rsplit_once("-transport-retry-")
+        .map_or(call_id, |(base, _)| base)
+        .starts_with("completion-claim-repair-")
+}
+
+/// The universe cut to the tasks this branch claims.
+///
+/// A branch that claims nothing resolvable gets `None` — no universe at all —
+/// rather than the whole one. Falling back to everything is exactly the
+/// behaviour that made a branch answerable for every task's contract, so the
+/// fallback would re-create the defect at the one moment the claim is unknown.
+/// An agent that receives no contract is a visible gap; an agent judged against
+/// fifteen other tasks' contracts fails in a way that reads as its own error.
+fn scoped_task_universe(
+    input: &serde_json::Value,
+    universe: &crate::task_universe::WorkflowV2TaskUniverse,
+) -> Option<crate::task_universe::WorkflowV2TaskUniverse> {
+    let claimed = crate::v2::branch_stamping::branch_canonical_task_ids(input);
+    if claimed.is_empty() {
+        return None;
+    }
+    let tasks = universe
+        .tasks
+        .iter()
+        .filter(|task| task_is_claimed(task, &claimed))
+        .cloned()
+        .collect::<Vec<_>>();
+    if tasks.is_empty() {
+        return None;
+    }
+    Some(crate::task_universe::WorkflowV2TaskUniverse {
+        schema_version: universe.schema_version.clone(),
+        source_roots: universe.source_roots.clone(),
+        tasks,
+    })
+}
+
+/// Matched on the canonical id or any declared alias — the same test
+/// `agent_prompt_contract` applies, so what a branch is shown and what it is
+/// judged against cannot drift apart.
+fn task_is_claimed(
+    task: &crate::task_universe::WorkflowV2TaskUniverseTask,
+    claimed: &[String],
+) -> bool {
+    std::iter::once(&task.canonical_task_id)
+        .chain(task.aliases.iter())
+        .any(|name| claimed.iter().any(|id| id == name))
 }
 
 pub(super) fn contains_task_universe(

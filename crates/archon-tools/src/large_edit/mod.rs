@@ -50,7 +50,7 @@ impl Tool for LargeEditBeginTool {
             Some(value) => value,
             None => return ToolResult::error("file_path is required and must be a string"),
         };
-        match session::begin(&file_path, ctx) {
+        match session::begin(&file_path, ctx).await {
             Ok(session) => ToolResult::success(
                 json!({
                     "edit_id": session.meta.edit_id,
@@ -97,7 +97,8 @@ impl Tool for LargeEditInsertAfterTool {
         };
         let result = session::mutate(&args.edit_id, ctx, |staged| {
             ops::insert_after(staged, &args.anchor, &args.content, args.occurrence)
-        });
+        })
+        .await;
         tool_result(result)
     }
 
@@ -140,7 +141,8 @@ impl Tool for LargeEditReplaceSectionTool {
                 &args.content,
                 args.occurrence,
             )
-        });
+        })
+        .await;
         tool_result(result)
     }
 
@@ -182,7 +184,8 @@ impl Tool for LargeEditDeleteSectionTool {
                 args.end_anchor.as_deref(),
                 args.occurrence,
             )
-        });
+        })
+        .await;
         tool_result(result)
     }
 
@@ -230,7 +233,7 @@ impl Tool for LargeEditCommitTool {
             None => return ToolResult::error("edit_id is required and must be a string"),
         };
         let required = string_array_field(&input, "required_fragments");
-        tool_result(session::commit(&edit_id, ctx, &required))
+        tool_result(session::commit(&edit_id, ctx, &required).await)
     }
 
     fn working_tree_effect(&self) -> WorkingTreeEffect {
@@ -269,7 +272,7 @@ impl Tool for LargeEditAbortTool {
             Some(value) => value,
             None => return ToolResult::error("edit_id is required and must be a string"),
         };
-        tool_result(session::abort(&edit_id, ctx))
+        tool_result(session::abort(&edit_id, ctx).await)
     }
 
     fn working_tree_effect(&self) -> WorkingTreeEffect {

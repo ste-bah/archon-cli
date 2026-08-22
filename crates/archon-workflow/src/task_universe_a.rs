@@ -120,6 +120,9 @@ pub struct WorkflowV2TaskUniverseTask {
     pub shared_append_target_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acceptance_criteria: Vec<String>,
+    /// Declared `## Focused Tests` commands, verbatim; see `parsing` for why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focused_tests: Vec<String>,
     /// Per-task adversarial checks declared under an `## Adversarial Review
     /// Notes` heading in the TASK file. Consumed ONLY by the per-task
     /// `adversarial-review` stage: they are the task author's own falsification
@@ -207,12 +210,6 @@ pub struct WorkflowV2DeliverableContract {
     pub required_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub non_constant_fields: Vec<String>,
-    /// Name of the payload field holding each record's observation instant. When
-    /// declared, the verifier rejects any record dated after the verification
-    /// time: an observed series cannot contain future records, and fabricated
-    /// payloads built by incrementing a timestamp N times routinely overshoot
-    /// now. Domain-neutral — the contract names the field, the engine only
-    /// compares instants.
     /// Format of the declared deliverable: `json` (default) or `text`.
     ///
     /// A contract may legitimately declare a prose or tabular artifact — an
@@ -223,6 +220,9 @@ pub struct WorkflowV2DeliverableContract {
     /// honestly assert about unstructured content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_format: Option<String>,
+    /// Payload field carrying each record's observation instant. Declared, the
+    /// verifier rejects records dated after the verification time: an observed
+    /// series has no future records, and fabricated ones routinely overshoot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_time_field: Option<String>,
     /// Weekday indices (Mon=0 … Sun=6) on which the observed venue does not

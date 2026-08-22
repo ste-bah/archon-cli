@@ -208,6 +208,22 @@ impl WorkflowV2ScriptRunner {
             ),
             ("source_roots", &source_roots),
             ("task_paths", &task_paths),
+            // The commands the task authors already verified. Handed over
+            // rather than left to the author agent, which has no shell: left to
+            // guess, one live run invented a package-wide test filter, drew in
+            // failures no task in the universe owned, and could neither satisfy
+            // nor abandon them for six hours.
+            (
+                "declared_focused_tests",
+                &self
+                    .task_universe
+                    .as_ref()
+                    // Named in full: the shared import block in
+                    // `workflow_live_v2_script` is deliberately explicit, and
+                    // this is the only caller here.
+                    .map(archon_workflow::v2::script::render_declared_focused_tests)
+                    .unwrap_or_else(|| "<none>".to_string()),
+            ),
             // Computed here rather than asked of the author. The universe
             // already carries `dependency_ids` and the declared target files,
             // so the batching is determined data, not a judgement — and left as

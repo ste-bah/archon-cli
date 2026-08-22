@@ -54,7 +54,72 @@ pub(super) fn call_id_names_task(call_id_lower: &str, task_id_lower: &str) -> bo
         })
 }
 
+/// Whether `err` is a control decision that killed the call rather than an
+/// outcome of the work. `NotificationDelivery` is deliberately absent — see
+/// `execute`.
+pub(super) fn control_interruption_reason(err: &WorkflowError) -> Option<&'static str> {
+    match err {
+        WorkflowError::ControlCancelled(_) => Some("cancelled"),
+        WorkflowError::ControlPaused(_) => Some("paused"),
+        _ => None,
+    }
+}
+
 impl WorkflowScriptHost {
+    /// Persist why a call stopped when a pause or cancel killed it mid-flight.
+    ///
+    /// Mirrors [`failed_v2_result`]'s shape but claims `NeedsReview`, not
+    /// `Failed`: the work did not fail, it was stopped, so the honest statement
+    /// is that it did not complete and a human must decide. That status is
+    /// outside `is_reusable_status`, so this can never be replayed as a success,
+    /// and it takes no `residual_gaps` — an interrupted call establishes no gap.
+    pub(super) fn save_interrupted_call_record(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        reason: &str,
+        err: &WorkflowError,
+        elapsed: std::time::Duration,
+        attempt: u32,
+        input_hash: &str,
+        source_fingerprint: Option<String>,
+    ) {
+        let call_id = &execution.call.id;
+        let elapsed_seconds = elapsed.as_secs();
+        let detail = err.to_string();
+        let summary = format!(
+            "workflow v2 call '{call_id}' was {reason} after {elapsed_seconds}s in flight and produced no result: {detail}"
+        );
+        let result = WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            summary: summary.clone(),
+            evidence: vec![WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Blocker,
+                summary,
+            )],
+            data: serde_json::json!({
+                "call_id": call_id,
+                "interrupted": reason,
+                "elapsed_seconds": elapsed_seconds,
+                "error": detail,
+            }),
+            ..WorkflowV2Result::default()
+        };
+        let record = WorkflowV2CallRecord::new(
+            self.runner.v2_store.run_id(),
+            execution.call.clone(),
+            attempt,
+            input_hash.to_string(),
+            result,
+            execution.depends_on.clone(),
+        )
+        // No source task graph: it seeds `completed_ids` for a call that did none.
+        .with_source_metadata(source_fingerprint, None)
+        .with_scaffold_hash(Some(self.scaffold_hash.clone()));
+        if let Err(err) = self.runner.v2_store.save_call_record(&record) {
+            tracing::warn!(%call_id, reason, %err, "interrupted call record not saved");
+        }
+    }
+
     /// Record that a call just RE-EXECUTED, so every task it speaks for — and
     /// everything downstream of those tasks in the authoritative task universe —
     /// can no longer be served from cache by a reuse path that cannot key on the
@@ -322,6 +387,8 @@ impl WorkflowScriptHost {
                 .await;
         }
         let call_id = execution.call.id.clone();
+        // Measured, not guessed: this call's own in-flight time.
+        let dispatched_at = std::time::Instant::now();
         let result = match execute_v2_live_call(
             &self.runner.task,
             &self.runner.runtime,
@@ -339,12 +406,25 @@ impl WorkflowScriptHost {
         {
             Ok(result) => result,
             Err(err) => {
-                if matches!(
-                    &err,
-                    WorkflowError::ControlPaused(_)
-                        | WorkflowError::ControlCancelled(_)
-                        | WorkflowError::NotificationDelivery(_)
-                ) {
+                // A pause or cancel still unwinds with the error untouched, but
+                // must stop unwinding SILENTLY: this early return sits above
+                // `save_call_record`, so an authoring call killed two hours in
+                // left nothing saying what it had been doing.
+                if let Some(reason) = control_interruption_reason(&err) {
+                    self.save_interrupted_call_record(
+                        &execution,
+                        reason,
+                        &err,
+                        dispatched_at.elapsed(),
+                        attempt,
+                        &input_hash,
+                        source_metadata.source_fingerprint.clone(),
+                    );
+                    return Err(err);
+                }
+                // `NotificationDelivery` keeps its untouched early return: a
+                // transport fault says nothing about whether the work happened.
+                if matches!(&err, WorkflowError::NotificationDelivery(_)) {
                     return Err(err);
                 }
                 failed_v2_result(&call_id, err)
@@ -413,3 +493,7 @@ impl WorkflowScriptHost {
         result_view_json(&record.result)
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_live_v2_script_host_interrupt_tests.rs"]
+mod workflow_live_v2_script_host_interrupt_tests;

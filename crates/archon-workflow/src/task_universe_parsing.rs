@@ -136,6 +136,9 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
             "shared_append_target_files",
         )),
         acceptance_criteria: declared_task_section_items(raw, "acceptance criteria"),
+        // Verified by the task author, who could run them. The script author
+        // agent has no shell, so any filter it invents instead is a guess.
+        focused_tests: declared_task_section_items(raw, "focused tests"),
         // Additive: the per-task adversarial reviewer reads these verbatim.
         adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),
         files_expected_to_change: declared_task_section_items(raw, "files expected to change"),

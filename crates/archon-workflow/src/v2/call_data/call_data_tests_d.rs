@@ -98,11 +98,108 @@ fn an_implementation_branch_is_not_shown_another_tasks_criteria() {
         !rendered.contains("a criterion belonging to another task"),
         "another task's criteria leaked into the branch prompt"
     );
-    // The other task still exists in the prompt as an identity, so dependency
-    // and ownership reasoning survives the reduction.
+    // The other task does not survive even as an identity, and that is the
+    // deliberate trade. It used to, because the whole universe was attached and
+    // only the PROMPT was reduced; but `request.input` is walked recursively by
+    // the enforcement paths, so every task left in it made this branch
+    // answerable for that task's artifacts and tools. There is no way to keep a
+    // foreign task's identity in the input without putting a foreign object in
+    // reach of scanners that do not know whose it is, so the identity goes.
+    //
+    // Ordering information is not lost with it: the branch's OWN task still
+    // carries its `dependency_ids` verbatim, so it still knows which ids it
+    // depends on — it simply no longer receives those tasks' own entries.
     assert!(
-        rendered.contains("TASK-2"),
-        "the reduction erased the task graph"
+        !rendered.contains("TASK-2"),
+        "another task's entry reached a branch that does not claim it"
+    );
+    assert!(rendered.contains("TASK-1"), "the branch lost its own task");
+}
+
+/// The scoping that the three tests above depend on, pinned at the boundary the
+/// enforcement paths actually read: `request.input`.
+///
+/// `project_artifact_contract::artifact_requirement_paths` and
+/// `agent_adapter_a::collect_required_tool_names` both recurse the whole input
+/// and harvest by KEY, with no notion of which task an entry belongs to. So a
+/// foreign `artifact_requirements` or `required_tools` anywhere in the input is
+/// enough to demote this branch's result for work it was never assigned — the
+/// defect that made a Noop verdict unreachable and sent a real run into
+/// noop-proof remediation instead of verification.
+#[test]
+fn an_implementation_branch_input_carries_no_other_tasks_contract() {
+    let mut universe = universe();
+    universe.tasks[0].artifact_requirements = vec!["artifacts/mine.json".to_string()];
+    universe.tasks[0].required_tools = vec!["mine-tool".to_string()];
+    universe.tasks[1].artifact_requirements = vec!["artifacts/not-mine.json".to_string()];
+    universe.tasks[1].required_tools = vec!["not-mine-tool".to_string()];
+
+    let request = v2_agent_request(
+        "objective",
+        None,
+        &implementation_execution(),
+        Some(&universe),
+    );
+    let input = request.input.to_string();
+
+    assert!(
+        input.contains("TASK-1") && input.contains("artifacts/mine.json"),
+        "the branch's own declared contract never reached its input: {input}"
+    );
+    assert!(
+        !input.contains("artifacts/not-mine.json"),
+        "another task's artifact requirement reached this branch's input: {input}"
+    );
+    assert!(
+        !input.contains("not-mine-tool"),
+        "another task's required tool reached this branch's input: {input}"
+    );
+}
+
+/// A branch whose claim resolves to nothing receives NO universe rather than
+/// the whole one.
+///
+/// The fallback is the tempting shape and it is wrong: the moment the claim is
+/// unknown is exactly the moment "give it everything" re-creates the original
+/// defect, and it does so silently. An agent handed no contract is a gap
+/// somebody can see; an agent judged against every task's contract fails in a
+/// way that reads as its own error.
+#[test]
+fn a_branch_claiming_an_unresolvable_task_receives_no_universe() {
+    for claim in [
+        serde_json::json!({"item": {"canonical_task_ids": ["TASK-ABSENT"]}}),
+        serde_json::json!({"item": {}}),
+    ] {
+        let mut execution = implementation_execution();
+        execution.input = claim.clone();
+
+        let request = v2_agent_request("objective", None, &execution, Some(&universe()));
+        assert!(
+            !request
+                .input
+                .to_string()
+                .contains("workflow-v2-task-universe-v1"),
+            "an unresolvable claim ({claim}) was answered with a universe"
+        );
+    }
+}
+
+/// A completion-claim repair still receives the whole set. Reconciling the
+/// run's claims against the decomposition is legitimately about every task, and
+/// it is a read-only call that declares no artifacts or tools of its own, so
+/// there is nothing for the enforcement paths to over-apply.
+#[test]
+fn a_completion_claim_repair_still_receives_the_whole_universe() {
+    let mut execution = implementation_execution();
+    execution.call.id = "completion-claim-repair-1".to_string();
+    execution.input = serde_json::json!({});
+
+    let request = v2_agent_request("objective", None, &execution, Some(&universe()));
+    let input = request.input.to_string();
+
+    assert!(
+        input.contains("TASK-1") && input.contains("TASK-2"),
+        "a reconciliation call lost tasks it exists to reconcile: {input}"
     );
 }
 

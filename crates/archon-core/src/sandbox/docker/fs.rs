@@ -36,15 +36,110 @@ const CONTAINER_SCRATCH: &str = "/scratch";
 pub struct DockerFs {
     working_dir: PathBuf,
     host: Arc<dyn FileSystem>,
+    /// The `sandbox.workspace_access` this world was built for.
+    ///
+    /// Only `"rw"` mounts `/workspace` writable; `"ro"` (the default) and
+    /// `"scratch"` both mount it `readonly` — see `workspace_mount_args` in
+    /// `super::exec`, which computes exactly `workspace_access != "rw"`.
+    workspace_access: String,
+    /// Workspace-relative paths re-mounted writable over a read-only mount.
+    ///
+    /// `sandbox.docker.writable_paths`. Carried here for the same reason the
+    /// access mode is: a gate that ignored them would refuse file-tool writes
+    /// to a directory the container itself accepts, which is a different lie
+    /// from the one being fixed but still a lie.
+    writable_paths: Vec<String>,
+    /// The workspace root as `path_guard` will have spelled it.
+    ///
+    /// A tool hands this filesystem a *canonicalised* host path, because
+    /// `path_guard` canonicalises before it permits a write. On macOS a
+    /// workspace under `/var` canonicalises to `/private/var`, and a
+    /// containment check against the configured spelling alone would then say
+    /// "outside the workspace" about every file in it — turning the gate off
+    /// for exactly the paths that reach it.
+    canonical_working_dir: PathBuf,
 }
 
 impl DockerFs {
+    /// The workspace filesystem with **no write gate**.
+    ///
+    /// Preserved verbatim for callers that have no access mode to hand. It does
+    /// not enforce the read-only mount — see
+    /// [`with_workspace_access`](Self::with_workspace_access), which is the
+    /// constructor a sandbox should use.
     #[must_use]
     pub fn new(working_dir: impl Into<PathBuf>) -> Self {
+        Self::with_workspace_access(working_dir, "rw", &[])
+    }
+
+    /// The workspace filesystem that answers writes the way the mount does.
+    ///
+    /// `DockerFs` is not a container filesystem: it translates a container path
+    /// back to a host path and hands the operation to [`LocalFs`], because the
+    /// bind mount means both names address the same bytes. That reasoning holds
+    /// for reads and breaks for writes. `workspace_access = "ro"` mounts
+    /// `/workspace` read-only, so `Bash` cannot write it — while `Write`,
+    /// `Edit`, `ApplyPatch` and `LargeEdit` went around the mount entirely and
+    /// changed the host disk. The setting read as enforced and governed only
+    /// the shell.
+    ///
+    /// Given the mode, this refuses those writes with the setting named, so the
+    /// filesystem and the shell give the same answer. Reads are untouched: the
+    /// mount permits them and so does this.
+    #[must_use]
+    pub fn with_workspace_access(
+        working_dir: impl Into<PathBuf>,
+        workspace_access: &str,
+        writable_paths: &[String],
+    ) -> Self {
+        let working_dir = working_dir.into();
+        let canonical_working_dir = working_dir
+            .canonicalize()
+            .unwrap_or_else(|_| working_dir.clone());
         Self {
-            working_dir: working_dir.into(),
+            working_dir,
             host: Arc::new(LocalFs),
+            workspace_access: workspace_access.to_string(),
+            writable_paths: writable_paths.to_vec(),
+            canonical_working_dir,
         }
+    }
+
+    /// Refuse a write the container's own mount would refuse.
+    ///
+    /// `host` is the already-translated path, so the check is about the file
+    /// that would actually change. A path outside the workspace is left alone:
+    /// it is not under the mount at all, and bounding it is the host path
+    /// guard's job, not this one's.
+    fn ensure_writable(&self, requested: &Path, host: &Path, operation: &str) -> io::Result<()> {
+        if self.workspace_access == "rw" {
+            return Ok(());
+        }
+        let inside = host
+            .strip_prefix(&self.working_dir)
+            .or_else(|_| host.strip_prefix(&self.canonical_working_dir));
+        let Ok(relative) = inside else {
+            return Ok(());
+        };
+        if self
+            .writable_paths
+            .iter()
+            .any(|writable| is_under(relative, writable))
+        {
+            return Ok(());
+        }
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "cannot {operation} {}: the sandbox workspace is mounted read-only because \
+                 sandbox.workspace_access = \"{}\". The container refuses this write, and \
+                 performing it on the host copy instead would change a file the sandboxed \
+                 shell is not allowed to change. Set sandbox.workspace_access = \"rw\", or \
+                 list the path under sandbox.docker.writable_paths.",
+                requested.display(),
+                self.workspace_access
+            ),
+        ))
     }
 
     /// The host path for a path the model may have taken from `Bash` output.
@@ -120,11 +215,15 @@ impl FileSystem for DockerFs {
     }
 
     async fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
-        self.host.write(&self.to_host(path)?, contents).await
+        let host = self.to_host(path)?;
+        self.ensure_writable(path, &host, "write")?;
+        self.host.write(&host, contents).await
     }
 
     async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.host.create_dir_all(&self.to_host(path)?).await
+        let host = self.to_host(path)?;
+        self.ensure_writable(path, &host, "create directory")?;
+        self.host.create_dir_all(&host).await
     }
 
     async fn metadata(&self, path: &Path) -> io::Result<FileMeta> {
@@ -140,13 +239,20 @@ impl FileSystem for DockerFs {
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
-        self.host.remove_file(&self.to_host(path)?).await
+        let host = self.to_host(path)?;
+        self.ensure_writable(path, &host, "remove")?;
+        self.host.remove_file(&host).await
     }
 
+    /// Both ends are checked: a rename removes `from` as surely as it creates
+    /// `to`, so guarding only the destination would let a read-only workspace
+    /// be emptied one move at a time.
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        self.host
-            .rename(&self.to_host(from)?, &self.to_host(to)?)
-            .await
+        let host_from = self.to_host(from)?;
+        let host_to = self.to_host(to)?;
+        self.ensure_writable(from, &host_from, "rename")?;
+        self.ensure_writable(to, &host_to, "rename onto")?;
+        self.host.rename(&host_from, &host_to).await
     }
 
     /// Container paths are this world's own naming, and the mount bounds them.
@@ -180,7 +286,13 @@ impl FileSystem for DockerFs {
         if working_dir == self.working_dir {
             return self;
         }
-        Arc::new(Self::new(working_dir))
+        // The access mode travels with the reroot. A child that inherited a
+        // permissive filesystem would be the bypass with one extra step in it.
+        Arc::new(Self::with_workspace_access(
+            working_dir,
+            &self.workspace_access,
+            &self.writable_paths,
+        ))
     }
 
     async fn glob(&self, base: &Path, pattern: &str) -> io::Result<Vec<PathBuf>> {
@@ -192,6 +304,38 @@ impl FileSystem for DockerFs {
     }
 }
 
+/// Whether a workspace-relative path is at or below a `writable_paths` entry.
+///
+/// Compared component by component so `targeted/` is not matched by a plain
+/// string prefix of `target`, and so the `/` separators these entries are
+/// written with survive on a host that spells paths with `\\`.
+fn is_under(relative: &Path, writable: &str) -> bool {
+    let mut wanted = writable
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .peekable();
+    if wanted.peek().is_none() {
+        return false;
+    }
+    let mut actual = relative
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        });
+    for part in wanted {
+        match actual.next() {
+            Some(have) if have == part => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 #[path = "fs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fs_readonly_tests.rs"]
+mod readonly_tests;

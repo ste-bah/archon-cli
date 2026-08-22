@@ -2,6 +2,8 @@
 // the dialect, never the fixture domain. Prompt copy is byte-identical to what
 // the binary shipped: agents parse structured output against these strings.
 
+use crate::task_universe::WorkflowV2TaskUniverse;
+
 pub const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
 
 Shape — top-level script, exactly like this (no wrapper function):
@@ -103,8 +105,9 @@ Primitives:
                                           // verification machinery WITH command execution. Without it (or a
                                           // non-empty focusedTests) the agent has NO shell and any test runs
                                           // it claims are downgraded to inspection — hollow verification.
-    focusedTests: ['test command'],       // OPTIONAL — only commands you VERIFIED exist (a wrong package or
-                                          // module name fails the run); omit to let the agent choose its own.
+    focusedTests: ['test command'],       // ONLY commands the task file itself DECLARES, copied verbatim;
+                                          // omit when it declares none. Never invent or widen one — a command
+                                          // naming something the project does not have fails the run.
                                           // If given, must match >0 tests. On a read-only agent a non-empty
                                           // list routes through the verification machinery like verify:true.
     artifacts: ['relative/artifact.path'],// artifacts the work must produce
@@ -162,7 +165,7 @@ Then write the script per the dialect reference and SELF-CHECK before returning:
 - every canonical task id appears in EXACTLY ONE INITIAL write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks); bounded remediation calls repeat only that same task id and target ownership;
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
 - EVERY task has a remediation path: after its verifier, a bounded loop (max 3 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
-- write agents are told to prove their change by running tests IN-SESSION; only add focusedTests commands you verified against the repo (a wrong package or module name fails the gauntlet — when unsure, omit them);
+- write agents are told to prove their change by running tests IN-SESSION; the ONLY focusedTests you may pass are the commands the task itself declares, listed verbatim under DECLARED FOCUSED TESTS below — copy them character for character. You have no shell, so you cannot check a command of your own; NEVER invent one, never widen a declared one into a broader filter, and never pattern-match a name out of the repository tree. An invented command fails the gauntlet or drags in work the task never owned. A task that declares none gets no focusedTests at all: omit the option and let its agent choose;
 - SCOPE EVERY TEST COMMAND TO WHAT THE TASK CHANGED. Use the project's own tooling to run the package, module or suite the task touches — never the whole repository. A task editing one component does not need the entire tree built and tested to prove itself, and on a large project that difference is hours per task, repeated for every task and every remediation attempt. Tell the write agent the same thing: prove the change with the narrowest command that actually exercises it, and widen only if the narrow one cannot;
 - the two mandatory map→reduce reviews are present after all work, read-only, critic-tier throughout, cover every accepted task exactly once, preserve map findings into reducers, and return adversarial_findings/uncovered_requirements from those reducers;
 - meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
@@ -174,6 +177,11 @@ Repository root: {repo_root}
 Source requirement roots: {source_roots}
 Task files (read every one; the fingerprint changes when the file changes):
 {task_paths}
+
+DECLARED FOCUSED TESTS — each task file's own verified commands. The task
+authors ran these; you cannot run anything, so these are the only test commands
+you may put in a focusedTests option, and they go in exactly as written:
+{declared_focused_tests}
 
 Execution waves (computed by the host from declared dependencies and target
 files — batch exactly as grouped here):
@@ -212,6 +220,7 @@ pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
             "{repo_root}",
             "{source_roots}",
             "{task_paths}",
+            "{declared_focused_tests}",
             "{task_waves}",
             "{retry_feedback}",
             "{learning_context}",
@@ -223,3 +232,57 @@ pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
     );
     out
 }
+
+/// Every task's declared focused-test commands, rendered for the author brief.
+///
+/// The author agent has READ tools and no shell, so it can neither verify a
+/// test command nor discover one by running anything — and the brief used to
+/// hand it task ids, paths and fingerprints only. Left to guess, it guessed:
+/// one live run invented a whole-package filter, drew in failures no task in
+/// the universe owned, and could neither satisfy nor abandon them for 6h20m.
+///
+/// The commands it needed were already parsed. Each task file declares them
+/// under `## Focused Tests`, narrowly scoped and verified by the author who
+/// could run them, and they arrive here as `focused_tests`.
+pub fn render_declared_focused_tests(universe: &WorkflowV2TaskUniverse) -> String {
+    let rendered = universe
+        .tasks
+        .iter()
+        .filter(|task| !task.focused_tests.is_empty())
+        .map(|task| {
+            let commands = task
+                .focused_tests
+                .iter()
+                .filter_map(|entry| declared_command(entry))
+                .map(|command| format!("  - {command}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("- {} declares:\n{commands}", task.canonical_task_id)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if rendered.is_empty() {
+        "<no task declares any focused test; pass no focusedTests at all>".to_string()
+    } else {
+        rendered
+    }
+}
+
+/// The command out of one declared bullet.
+///
+/// A bullet is markdown: the command sits in a backticked span, often followed
+/// by prose saying what it proves. The span is the command — passing the prose
+/// with it would hand the author a string no shell could run.
+fn declared_command(entry: &str) -> Option<String> {
+    let trimmed = entry.trim();
+    let candidate = match trimmed.split_once('`') {
+        Some((_, rest)) => rest.split('`').next().unwrap_or(rest),
+        None => trimmed,
+    };
+    let candidate = candidate.trim();
+    (!candidate.is_empty()).then(|| candidate.to_string())
+}
+
+#[cfg(test)]
+#[path = "v3_author_focused_tests_tests.rs"]
+mod focused_tests_tests;

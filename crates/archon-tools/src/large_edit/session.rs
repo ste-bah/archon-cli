@@ -1,9 +1,19 @@
-use std::fs;
+//! Staging and committing a large edit, in the execution world.
+//!
+//! Every byte this module reads or writes goes through [`ToolContext::fs`], the
+//! same seam `Write`, `Edit` and `ApplyPatch` use. It did not before: it called
+//! `std::fs` directly, so under a sandbox whose world is not the host — and
+//! under docker's `/workspace` naming — the staged copy, the metadata and the
+//! commit all landed somewhere other than the file the agent was editing, with
+//! nothing reporting the split. A tool that writes the host while its shell
+//! runs elsewhere is a sandbox that reads as enforced and is not.
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::filesystem::FileSystem;
 use crate::path_guard::resolve_existing_write_target;
 use crate::tool::ToolContext;
 
@@ -24,20 +34,23 @@ pub(super) struct LargeEditSession {
     pub meta: LargeEditMeta,
 }
 
-pub(super) fn begin(file_path: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
+pub(super) async fn begin(file_path: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
+    let fs = ctx.fs();
     let target = resolve_existing_write_target(file_path, ctx)?;
-    let original = fs::read(&target)
+    let original = fs
+        .read(&target)
+        .await
         .map_err(|e| format!("Failed to read target '{}': {e}", target.display()))?;
     let edit_id = Uuid::new_v4().to_string();
-    let dir = root_dir(ctx)?.join(&edit_id);
-    fs::create_dir_all(&dir).map_err(|e| {
+    let dir = root_dir(ctx, fs.as_ref()).await?.join(&edit_id);
+    fs.create_dir_all(&dir).await.map_err(|e| {
         format!(
             "Failed to create large edit session '{}': {e}",
             dir.display()
         )
     })?;
 
-    fs::write(staged_path(&dir), &original).map_err(|e| {
+    fs.write(&staged_path(&dir), &original).await.map_err(|e| {
         format!(
             "Failed to write large edit staged copy '{}': {e}",
             staged_path(&dir).display()
@@ -49,14 +62,15 @@ pub(super) fn begin(file_path: &str, ctx: &ToolContext) -> Result<LargeEditSessi
         target_path: target.display().to_string(),
         original_hash: content_hash(&original),
     };
-    save_meta(&dir, &meta)?;
+    save_meta(fs.as_ref(), &dir, &meta).await?;
     Ok(LargeEditSession { dir, meta })
 }
 
-pub(super) fn load(edit_id: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
+pub(super) async fn load(edit_id: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
     validate_edit_id(edit_id)?;
-    let dir = root_dir(ctx)?.join(edit_id);
-    let raw = fs::read_to_string(meta_path(&dir)).map_err(|e| {
+    let fs = ctx.fs();
+    let dir = root_dir(ctx, fs.as_ref()).await?.join(edit_id);
+    let raw = fs.read_to_string(&meta_path(&dir)).await.map_err(|e| {
         format!(
             "Failed to read large edit metadata for '{edit_id}' at '{}': {e}",
             meta_path(&dir).display()
@@ -67,35 +81,44 @@ pub(super) fn load(edit_id: &str, ctx: &ToolContext) -> Result<LargeEditSession,
     Ok(LargeEditSession { dir, meta })
 }
 
-pub(super) fn mutate<F>(edit_id: &str, ctx: &ToolContext, edit: F) -> Result<String, String>
+pub(super) async fn mutate<F>(edit_id: &str, ctx: &ToolContext, edit: F) -> Result<String, String>
 where
     F: FnOnce(&str) -> Result<(String, String), String>,
 {
-    let session = load(edit_id, ctx)?;
-    let staged = fs::read_to_string(staged_path(&session.dir)).map_err(|e| {
-        format!(
-            "Failed to read staged content for '{edit_id}' at '{}': {e}",
-            staged_path(&session.dir).display()
-        )
-    })?;
+    let session = load(edit_id, ctx).await?;
+    let fs = ctx.fs();
+    let staged = fs
+        .read_to_string(&staged_path(&session.dir))
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to read staged content for '{edit_id}' at '{}': {e}",
+                staged_path(&session.dir).display()
+            )
+        })?;
     let (updated, summary) = edit(&staged)?;
-    fs::write(staged_path(&session.dir), updated).map_err(|e| {
-        format!(
-            "Failed to write staged content for '{edit_id}' at '{}': {e}",
-            staged_path(&session.dir).display()
-        )
-    })?;
+    fs.write(&staged_path(&session.dir), updated.as_bytes())
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to write staged content for '{edit_id}' at '{}': {e}",
+                staged_path(&session.dir).display()
+            )
+        })?;
     Ok(summary)
 }
 
-pub(super) fn commit(
+pub(super) async fn commit(
     edit_id: &str,
     ctx: &ToolContext,
     required_fragments: &[String],
 ) -> Result<String, String> {
-    let session = load(edit_id, ctx)?;
+    let session = load(edit_id, ctx).await?;
+    let fs = ctx.fs();
     let target = resolve_existing_write_target(&session.meta.target_path, ctx)?;
-    let current = fs::read(&target)
+    let current = fs
+        .read(&target)
+        .await
         .map_err(|e| format!("Failed to read target '{}': {e}", target.display()))?;
     let current_hash = content_hash(&current);
     if current_hash != session.meta.original_hash {
@@ -106,15 +129,17 @@ pub(super) fn commit(
         ));
     }
 
-    let staged = fs::read(staged_path(&session.dir)).map_err(|e| {
+    let staged = fs.read(&staged_path(&session.dir)).await.map_err(|e| {
         format!(
             "Failed to read staged content for '{edit_id}' at '{}': {e}",
             staged_path(&session.dir).display()
         )
     })?;
     verify_required_fragments(&staged, required_fragments)?;
-    replace_target_atomically(&target, &staged, edit_id)?;
-    let _ = fs::remove_dir_all(&session.dir);
+    replace_target_atomically(fs.as_ref(), &target, &staged, edit_id).await?;
+    // Best effort, as before: the edit has landed, and a session directory that
+    // outlives it is litter rather than a failure worth reporting.
+    let _ = discard_session_files(fs.as_ref(), &session.dir).await;
     Ok(format!(
         "Committed large edit {edit_id} to {} ({} bytes).",
         target.display(),
@@ -122,33 +147,53 @@ pub(super) fn commit(
     ))
 }
 
-pub(super) fn abort(edit_id: &str, ctx: &ToolContext) -> Result<String, String> {
-    let session = load(edit_id, ctx)?;
-    fs::remove_dir_all(&session.dir).map_err(|e| {
-        format!(
-            "Failed to remove large edit session '{}': {e}",
-            session.dir.display()
-        )
-    })?;
+pub(super) async fn abort(edit_id: &str, ctx: &ToolContext) -> Result<String, String> {
+    let session = load(edit_id, ctx).await?;
+    discard_session_files(ctx.fs().as_ref(), &session.dir).await?;
     Ok(format!("Aborted large edit {edit_id}."))
 }
 
-fn root_dir(ctx: &ToolContext) -> Result<PathBuf, String> {
+/// Remove a session's staged files from the world that holds them.
+///
+/// The staged copy and the metadata go; the directory itself stays. That is not
+/// a choice so much as the shape of [`FileSystem`], which offers `remove_file`
+/// and no `remove_dir`/`remove_dir_all` — and reaching past it to `std::fs` to
+/// unlink the directory is the exact bug this module was fixed for. An empty
+/// husk is inert: `load` fails on the missing metadata, and `begin` names every
+/// new session with a fresh UUID, so nothing collides with it.
+async fn discard_session_files(fs: &dyn FileSystem, dir: &Path) -> Result<(), String> {
+    let entries = fs
+        .read_dir(dir)
+        .await
+        .map_err(|e| format!("Failed to list large edit session '{}': {e}", dir.display()))?;
+    for entry in entries {
+        fs.remove_file(&entry).await.map_err(|e| {
+            format!(
+                "Failed to remove large edit session file '{}': {e}",
+                entry.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn root_dir(ctx: &ToolContext, fs: &dyn FileSystem) -> Result<PathBuf, String> {
     let working_dir = if ctx.working_dir.as_os_str().is_empty() {
         std::env::current_dir().map_err(|e| format!("Failed to resolve current directory: {e}"))?
     } else {
         ctx.working_dir.clone()
     };
     let root = working_dir.join(SESSION_DIR);
-    fs::create_dir_all(&root)
+    fs.create_dir_all(&root)
+        .await
         .map_err(|e| format!("Failed to create large edit root '{}': {e}", root.display()))?;
     Ok(root)
 }
 
-fn save_meta(dir: &Path, meta: &LargeEditMeta) -> Result<(), String> {
+async fn save_meta(fs: &dyn FileSystem, dir: &Path, meta: &LargeEditMeta) -> Result<(), String> {
     let raw = serde_json::to_vec_pretty(meta)
         .map_err(|e| format!("Failed to serialize large edit metadata: {e}"))?;
-    fs::write(meta_path(dir), raw).map_err(|e| {
+    fs.write(&meta_path(dir), &raw).await.map_err(|e| {
         format!(
             "Failed to write large edit metadata '{}': {e}",
             meta_path(dir).display()
@@ -156,7 +201,17 @@ fn save_meta(dir: &Path, meta: &LargeEditMeta) -> Result<(), String> {
     })
 }
 
-fn replace_target_atomically(target: &Path, content: &[u8], edit_id: &str) -> Result<(), String> {
+/// Write beside the target, then rename onto it — in the world, not on the host.
+///
+/// [`FileSystem::rename`] exists precisely so this dance survives the move off
+/// `std::fs`, so the commit is still all-or-nothing rather than a truncating
+/// write that a crash can leave half-applied.
+async fn replace_target_atomically(
+    fs: &dyn FileSystem,
+    target: &Path,
+    content: &[u8],
+    edit_id: &str,
+) -> Result<(), String> {
     let parent = target
         .parent()
         .ok_or_else(|| format!("Target '{}' has no parent directory", target.display()))?;
@@ -165,16 +220,18 @@ fn replace_target_atomically(target: &Path, content: &[u8], edit_id: &str) -> Re
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("Target '{}' has no valid file name", target.display()))?;
     let tmp = parent.join(format!(".{file_name}.{edit_id}.archon-tmp"));
-    fs::write(&tmp, content)
+    fs.write(&tmp, content)
+        .await
         .map_err(|e| format!("Failed to write temporary target '{}': {e}", tmp.display()))?;
-    fs::rename(&tmp, target).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!(
+    if let Err(e) = fs.rename(&tmp, target).await {
+        let _ = fs.remove_file(&tmp).await;
+        return Err(format!(
             "Failed to atomically replace '{}' with '{}': {e}",
             target.display(),
             tmp.display()
-        )
-    })
+        ));
+    }
+    Ok(())
 }
 
 fn verify_required_fragments(content: &[u8], fragments: &[String]) -> Result<(), String> {
@@ -226,3 +283,7 @@ fn content_hash(bytes: &[u8]) -> String {
     }
     format!("{hash:016x}")
 }
+
+#[cfg(test)]
+#[path = "session_world_tests.rs"]
+mod world_tests;

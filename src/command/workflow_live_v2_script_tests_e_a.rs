@@ -3,7 +3,8 @@ use super::*;
 #[tokio::test]
 async fn workless_authored_script_is_rejected_before_live_execution() {
     // The canned author only ever produces a phase/log-only script — the
-    // pre-flight must reject it twice and refuse to execute live.
+    // pre-flight must re-ask the author until its defect budget is spent, then
+    // refuse to execute live.
     let workless = r#"export const meta = { name: 'workless-demo', phases: [{ title: 'Only' }] }
 export default async function workflow({ phase, log }) {
   await phase("No Real Work");
@@ -47,9 +48,23 @@ export default async function workflow({ phase, log }) {
         .expect_err("workless script must be rejected");
 
     let message = error.to_string();
+    // The budget is `MAX_AUTHORING_DEFECT_ATTEMPTS`, raised from 2 to 4 in
+    // 9966b7845 so a transport blip could no longer spend the single retry
+    // reserved for fixing a real defect; the budget itself is pinned in
+    // `workflow_live_v3_author_tests`. What this test needs from the message is
+    // that the DRY-RUN PRE-FLIGHT is what refused the script — not the live
+    // executor — and that it re-asked rather than giving up on the first defect.
     assert!(
-        message.contains("dry-run pre-flight twice"),
+        message.contains("failed its dry-run pre-flight 4 times"),
         "unexpected error: {message}"
+    );
+    // And that the refusal names the defect this script actually has. Without
+    // this the assertion above would be equally satisfied by a script rejected
+    // for some unrelated reason, which is how a workless-script test stops
+    // testing worklessness.
+    assert!(
+        message.contains("plans ZERO agent calls"),
+        "the rejection must name the workless defect: {message}"
     );
     assert!(
         !authored_path.exists(),

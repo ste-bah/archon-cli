@@ -248,7 +248,18 @@ pub fn sandbox_filesystem(
 ) -> Result<Option<std::sync::Arc<dyn archon_tools::filesystem::FileSystem>>, String> {
     match config.backend_kind()? {
         SandboxBackendKind::Disabled | SandboxBackendKind::Logical => Ok(None),
-        SandboxBackendKind::Docker => Ok(Some(std::sync::Arc::new(DockerFs::new(working_dir)))),
+        // The access mode travels with the filesystem or the mount is a lie.
+        // `DockerFs` resolves a container path back to a host path and writes
+        // the host directly, so a read-only workspace stopped `Bash` and did
+        // nothing to `Write`, `Edit` or `ApplyPatch` — the default is `"ro"`,
+        // so the setting most likely to be relied on was the one enforced least.
+        SandboxBackendKind::Docker => {
+            Ok(Some(std::sync::Arc::new(DockerFs::with_workspace_access(
+                working_dir,
+                &config.workspace_access,
+                &config.docker.writable_paths,
+            ))))
+        }
         SandboxBackendKind::Ssh => ssh_filesystem(&config.ssh, working_dir).map(Some),
         SandboxBackendKind::OpenShell => {
             openshell_filesystem(&config.openshell, working_dir).map(Some)
