@@ -8,6 +8,7 @@
 //! trusted.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
@@ -16,6 +17,17 @@ use crate::types::{McpToolBridgePolicy, McpToolDef, McpToolRisk, ToolContent};
 
 const MCP_MODEL_DESCRIPTION_MAX_BYTES: usize = 1_024;
 const MCP_DESCRIPTION_TRUNCATION_MARKER: &str = "... [truncated]";
+
+/// Whole-call budget reported to the dispatcher through [`Tool::timeout`].
+///
+/// `McpClient::call_tool` already bounds the wait for a response at 120s. This
+/// sits just above it so the specific "timed out after 120s" error still wins
+/// on an ordinary slow server, and only the failures that timer cannot see —
+/// a transport whose send never completes, an event loop that has stopped
+/// draining — reach the dispatcher's generic message. Every MCP tool on every
+/// server shares this bound; per-server budgets would need config plumbing
+/// that #200 Phase 1 does not introduce.
+const CALL_BUDGET: Duration = Duration::from_secs(130);
 
 /// Build the fully qualified tool name for an MCP tool.
 pub fn qualified_tool_name(server_name: &str, tool_name: &str) -> String {
@@ -240,6 +252,17 @@ impl Tool for McpTool {
 
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         self.permission_level
+    }
+
+    /// Safe to cancel only because [`crate::client::McpClient::call_tool`] was
+    /// made cancel-aware for this. The single await sends `tools/call` and then
+    /// waits on the response channel; dropping that wait fires the guard in
+    /// `call_cancellation`, which sends `notifications/cancelled` for the
+    /// request id so the server stops working on an answer nobody will read.
+    /// Without that guard this budget would leak work on every server it timed
+    /// out against — see `tests/mcp_call_cancellation_tests.rs`.
+    fn timeout(&self) -> Option<Duration> {
+        Some(CALL_BUDGET)
     }
 }
 

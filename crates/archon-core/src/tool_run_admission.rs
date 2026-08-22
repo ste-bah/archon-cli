@@ -1,4 +1,5 @@
 use archon_observability::{AgentActivityKind, AgentActivityStatus};
+use archon_tools::execution_deadline::ExecutionDeadline;
 use archon_tools::tool::{
     PermissionLevel, Tool, ToolContext, ToolResult, ToolRunAdmission, ToolRunAdmissionRequest,
     ToolRunAttemptOutcome,
@@ -71,7 +72,7 @@ pub(crate) async fn execute_tool_attempt(
     );
     let started_at = std::time::Instant::now();
     let outcome_input = input.clone();
-    let result = tool.execute(input, ctx).await;
+    let result = execute_within_budget(tool, input, ctx).await;
     emit_tool_result_activity(ctx, tool.name(), &result, started_at.elapsed());
     record_outcome(
         ctx,
@@ -83,6 +84,43 @@ pub(crate) async fn execute_tool_attempt(
         admission_enabled,
     );
     result
+}
+
+/// Run one tool call under the budget the tool declared for itself, if any.
+///
+/// The unbudgeted path is deliberately the bare `tool.execute(..).await` the
+/// caller used before: a tool that returns `None` from [`Tool::timeout`] is not
+/// wrapped, not polled through an extra layer, and behaves exactly as it did.
+/// Of the 67 registered tools only a handful — the network- and IPC-bound ones
+/// — declare a budget, and `Bash` is not among them: it enforces its own
+/// deadline inside `bash_process.rs`, where it can kill the child it spawned,
+/// and wrapping it here would give one command two competing clocks.
+///
+/// Expiry is reported as an ordinary error `ToolResult` rather than an unwind
+/// or an abandoned turn. That matters because the alternative — letting a stall
+/// propagate as anything other than a tool result — costs the model the one
+/// thing it can act on. It gets told the call ran out of time and decides for
+/// itself whether to retry, narrow the request, or give up. The caller still
+/// emits the normal result activity with the elapsed time, so a timeout is
+/// visible in telemetry as a failed call of known duration and not as a gap.
+async fn execute_within_budget(
+    tool: &dyn Tool,
+    input: serde_json::Value,
+    ctx: &ToolContext,
+) -> ToolResult {
+    let Some(budget) = tool.timeout() else {
+        return tool.execute(input, ctx).await;
+    };
+
+    let deadline = ExecutionDeadline::new(budget);
+    match deadline.wait(tool.execute(input, ctx)).await {
+        Some(result) => result,
+        None => ToolResult::error(format!(
+            "{} timed out after {}ms",
+            tool.name(),
+            budget.as_millis()
+        )),
+    }
 }
 
 fn admission_request(
@@ -144,3 +182,7 @@ fn record_outcome(
         admission_evaluated,
     });
 }
+
+#[cfg(test)]
+#[path = "tool_run_admission_timeout_tests.rs"]
+mod timeout_tests;

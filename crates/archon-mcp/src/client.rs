@@ -5,10 +5,14 @@
 
 use std::time::Duration;
 
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, RawContent, ResourceContents};
-use rmcp::service::{RoleClient, RunningService, serve_client};
+use rmcp::model::{
+    CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest, Content, RawContent,
+    ResourceContents, ServerResult,
+};
+use rmcp::service::{PeerRequestOptions, RoleClient, RunningService, serve_client};
 use rmcp::transport::IntoTransport;
 
+use crate::call_cancellation::await_response_cancel_on_drop;
 use crate::types::{McpError, McpToolDef, McpToolResult, ServerConfig, ToolContent};
 
 /// Default timeout for the initialize handshake.
@@ -96,16 +100,41 @@ impl McpClient {
         params.name = name.to_string().into();
         params.arguments = arguments;
 
-        let result: CallToolResult =
-            tokio::time::timeout(CALL_TIMEOUT, self.service.call_tool(params))
-                .await
-                .map_err(|_| McpError::Timeout(CALL_TIMEOUT))?
-                .map_err(|e| {
-                    McpError::ToolCallFailed(format!(
-                        "tools/call '{}' failed on '{}': {}",
-                        name, self.server_name, e
-                    ))
-                })?;
+        // Deliberately not `self.service.call_tool(params)`. That helper hides
+        // the request id inside a future which, when dropped, abandons the call
+        // silently — and the per-tool budget in `execute_tool_attempt` drops
+        // exactly this future. Sending the request ourselves keeps the id in
+        // reach so `await_response_cancel_on_drop` can tell the server to stop.
+        let handle = self
+            .service
+            .send_cancellable_request(
+                ClientRequest::CallToolRequest(CallToolRequest::new(params)),
+                PeerRequestOptions::no_options(),
+            )
+            .await
+            .map_err(|e| {
+                McpError::ToolCallFailed(format!(
+                    "tools/call '{}' could not be sent to '{}': {}",
+                    name, self.server_name, e
+                ))
+            })?;
+
+        let response = await_response_cancel_on_drop(handle, CALL_TIMEOUT)
+            .await
+            .ok_or(McpError::Timeout(CALL_TIMEOUT))?
+            .map_err(|e| {
+                McpError::ToolCallFailed(format!(
+                    "tools/call '{}' failed on '{}': {}",
+                    name, self.server_name, e
+                ))
+            })?;
+
+        let ServerResult::CallToolResult(result) = response else {
+            return Err(McpError::ToolCallFailed(format!(
+                "tools/call '{}' on '{}' answered with the wrong result type",
+                name, self.server_name
+            )));
+        };
 
         Ok(convert_tool_result(&result))
     }
