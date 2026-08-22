@@ -20,6 +20,16 @@ use super::*;
 struct LinuxWorld;
 
 impl SandboxBackend for LinuxWorld {
+    // The world this fake stands in for is a container held open across
+    // commands, so `Held` is what it would really answer. Lifetime is not what
+    // these tests vary; the method is required so no backend can leave the
+    // question unanswered.
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
     fn check(
         &self,
         _tool: &str,
@@ -52,6 +62,16 @@ impl SandboxBackend for LinuxWorld {
 struct NoTerminalsWorld;
 
 impl SandboxBackend for NoTerminalsWorld {
+    // The world this fake stands in for is a container held open across
+    // commands, so `Held` is what it would really answer. Lifetime is not what
+    // these tests vary; the method is required so no backend can leave the
+    // question unanswered.
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
     fn check(
         &self,
         _tool: &str,
@@ -167,6 +187,10 @@ fn the_real_docker_backend_narrows_the_surface_to_what_a_container_has() {
             ..Default::default()
         },
         "rw",
+        // The lifetime the backend is built for. Nothing here runs, so any
+        // scope would compile; `Session` is the shipped default, so the fake
+        // agrees with the backend a real session gets.
+        archon_permissions::SandboxScope::Session,
     ));
     let registry = registry();
     let definitions = registry.tool_definitions();

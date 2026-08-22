@@ -227,7 +227,9 @@ async fn a_command_killed_by_its_container_disappearing_is_told_so() {
 
     assert!(result.is_error, "a killed command is not a success");
     assert!(
-        result.content.contains("stopped before the command finished"),
+        result
+            .content
+            .contains("stopped before the command finished"),
         "a bare exit code tells the model nothing it can act on: {}",
         result.content
     );

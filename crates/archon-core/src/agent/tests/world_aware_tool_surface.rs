@@ -9,6 +9,17 @@
 struct LinuxWorldBackend;
 
 impl archon_permissions::SandboxBackend for LinuxWorldBackend {
+
+    // The world this fake stands in for is a container held open across
+    // commands, so `Held` is what it would really answer. Lifetime is not what
+    // these tests vary; the method is required so no backend can leave the
+    // question unanswered.
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
+    }
     fn check(
         &self,
         _tool: &str,

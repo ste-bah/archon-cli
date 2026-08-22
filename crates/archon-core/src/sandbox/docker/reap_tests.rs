@@ -42,6 +42,10 @@ fn a_running_owner_reads_as_alive() {
 
 /// Pid 0 is not a process any owner can be. Not merely "unlikely to exist" —
 /// picking an arbitrary high pid would make this test flaky on a busy machine.
+///
+/// Asking the OS is not enough: on Windows pid 0 is the System Idle Process,
+/// which exists and never exits, so a container labelled `0` read as protected
+/// forever and was never reaped. `owner_is_alive` rules zero out itself.
 #[test]
 fn a_pid_that_cannot_name_a_process_reads_as_dead() {
     let mut system = sysinfo::System::new();

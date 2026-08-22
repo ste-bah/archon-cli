@@ -12,12 +12,22 @@
 use std::sync::Arc;
 
 use archon_permissions::sandbox::{
-    SandboxBackend, SandboxTerminal, SandboxTerminalCommand, SandboxTerminalRequest,
+    SandboxBackend, SandboxScope, SandboxScopeSupport, SandboxTerminal, SandboxTerminalCommand,
+    SandboxTerminalRequest,
 };
 
 use super::*;
 use crate::terminal_world::plan;
 use crate::terminal_world::tests::{FixedTerminalBackend, door};
+
+/// Every stand-in here holds its world open the way `FixedTerminalBackend` in
+/// [`crate::terminal_world::tests`] does. Lifetime is not what these fakes
+/// model -- they exist to vary what `terminal` answers -- so they all give the
+/// one answer that keeps them consistent with their sibling rather than
+/// inventing a lifetime story per fake.
+fn stand_in_scope_support(_scope: SandboxScope) -> SandboxScopeSupport {
+    SandboxScopeSupport::Held
+}
 
 /// A Linux world, answering the way `docker::container_shell` does: bash and
 /// sh exist, the two Windows shells do not, and a bare request means bash even
@@ -26,6 +36,9 @@ use crate::terminal_world::tests::{FixedTerminalBackend, door};
 struct LinuxWorld;
 
 impl SandboxBackend for LinuxWorld {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,
@@ -61,6 +74,9 @@ impl SandboxBackend for LinuxWorld {
 struct NamelessWorld;
 
 impl SandboxBackend for NamelessWorld {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,
@@ -86,6 +102,9 @@ impl SandboxBackend for NamelessWorld {
 struct HostMinusWindowsShells;
 
 impl SandboxBackend for HostMinusWindowsShells {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,
@@ -110,6 +129,9 @@ impl SandboxBackend for HostMinusWindowsShells {
 struct SandboxWithOneHostShell;
 
 impl SandboxBackend for SandboxWithOneHostShell {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,
@@ -140,6 +162,9 @@ impl SandboxBackend for SandboxWithOneHostShell {
 struct HostWithOneSandboxedShell;
 
 impl SandboxBackend for HostWithOneSandboxedShell {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,
@@ -168,6 +193,9 @@ impl SandboxBackend for HostWithOneSandboxedShell {
 struct PosixShWorld;
 
 impl SandboxBackend for PosixShWorld {
+    fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
+        stand_in_scope_support(scope)
+    }
     fn check(
         &self,
         _tool: &str,

@@ -115,6 +115,13 @@ pub(super) fn owner_is_alive(system: &mut sysinfo::System, pid: Option<u32>) -> 
     let Some(pid) = pid else {
         return false;
     };
+    // Zero is never an Archon session. On Windows it names the System Idle
+    // Process, which always exists and never exits, so asking the OS would
+    // report a container labelled `0` as protected forever and nothing would
+    // ever reap it. Ruled out here rather than trusted to the platform.
+    if pid == 0 {
+        return false;
+    }
     let pid = sysinfo::Pid::from_u32(pid);
     system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
     system
