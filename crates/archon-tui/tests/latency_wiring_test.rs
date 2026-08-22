@@ -1,33 +1,61 @@
 // Integration tests for latency wiring in archon-tui.
 //
-// NOTE: This file intentionally fails to compile until TimestampedEvent wrapper
-// type is defined in archon-core or archon-tui. This is expected and correct
-// behavior at Gate 1 (tests-written-first).
+// (The header used to say this file intentionally failed to compile until
+// `TimestampedEvent` existed. It has existed for a long time; the note was
+// stale.)
 
 use archon_core::agent::{AgentEvent, TimestampedEvent};
 use archon_tui::observability::ChannelMetrics;
 use std::time::Instant;
 
-/// Verify that a TimestampedEvent carries a `sent_at` timestamp close to Instant::now.
+/// The producer stamps `sent_at` at the moment of send, not earlier.
 ///
-/// The producer side stamps events with `Instant::now()` at send time. This test
-/// confirms the field is populated and within a reasonable 10ms window.
+/// This used to build a `TimestampedEvent` inside the test body with
+/// `Instant::now()` and then assert that `Instant::now().elapsed() <= 10ms`. It
+/// never touched the producer, so it could not fail for any reason connected to
+/// the code it claims to cover — only if the machine stalled for 10ms between
+/// two adjacent statements, which is a flake, not a finding. It measured the
+/// clock and reported it as latency wiring.
+///
+/// `Agent::send_event` is `pub(super)` inside `archon-core` and needs a live LLM
+/// client to reach, so it cannot be driven from this crate. What is checkable
+/// here is the producer's source: the stamp must be taken *in* the send, from
+/// `Instant::now()`, rather than carried in from a struct built earlier — a
+/// stale or defaulted `Instant` would leave every latency reading wrong while
+/// the field stayed dutifully populated. `tests/tc_arch_05_grep_agent_event_send.rs`
+/// guards the neighbouring line of the same function the same way.
 #[test]
-fn sent_at_populated_at_producer() {
-    // TimestampedEvent wraps AgentEvent with a sent_at timestamp.
-    // Verify sent_at is populated (within 10ms of creation).
-    let event = AgentEvent::TextDelta("test".to_string());
-    let ts_event = TimestampedEvent {
-        sent_at: Instant::now(),
-        inner: event,
-    };
-    let _now = Instant::now();
-    // Should be within 10ms
+fn sent_at_is_stamped_by_the_producer_at_send_time() {
+    let events_rs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../archon-core/src/agent/events.rs");
+    let source = std::fs::read_to_string(&events_rs)
+        .unwrap_or_else(|e| panic!("read {}: {e}", events_rs.display()));
+
+    let send_event = source
+        .split_once("async fn send_event(")
+        .map(|(_, rest)| rest)
+        .unwrap_or_else(|| {
+            panic!(
+                "no `send_event` in {} — the agent event producer has moved, and this \
+                 check is inspecting nothing",
+                events_rs.display()
+            )
+        });
+
     assert!(
-        ts_event.sent_at.elapsed().as_millis() <= 10,
-        "sent_at should be within 10ms of Instant::now; got {}ms",
-        ts_event.sent_at.elapsed().as_millis()
+        send_event.contains("sent_at: std::time::Instant::now()"),
+        "`send_event` must stamp `sent_at` from `Instant::now()` at the point of \
+         send. Without it, every send-to-render latency figure the TUI reports is \
+         measured from the wrong instant."
     );
+
+    // The type still has to carry the field the producer stamps; a rename here
+    // would otherwise leave the source check above matching dead prose.
+    let ts = TimestampedEvent {
+        sent_at: Instant::now(),
+        inner: AgentEvent::TextDelta("test".to_string()),
+    };
+    assert!(matches!(ts.inner, AgentEvent::TextDelta(_)));
 }
 
 /// Verify that draining a channel with a 5ms delay records a non-zero P95 latency.

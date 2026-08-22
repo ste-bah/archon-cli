@@ -606,6 +606,20 @@ async fn test_callback_receives_enriched_context() {
 // 10. Session hook timeout is clamped to aggregate budget
 // ---------------------------------------------------------------------------
 
+/// A session hook's own 60s timeout does not survive a 3s aggregate budget.
+///
+/// The claim is about which deadline wins, and that is visible in the outcome
+/// without a clock. `sleep 10` under a 3s budget can only end two ways: the
+/// clamp holds and the hook is killed by the budget (`RunError::Timeout`, which
+/// on a gating event with no explicit policy blocks), or the clamp is gone, the
+/// hook's own 60s wins, the sleep exits 0 and the result is a clean success.
+///
+/// This used to assert only `elapsed < 5s` and throw the result away. That is
+/// satisfied by the failure it exists to rule out — measured, with the command
+/// replaced by `archon-nonexistent-command-vacuity-probe` the test still
+/// reported `ok` in 1.3s, having proved nothing about clamping. See the same
+/// rewrite on `test_per_hook_timeout_clamped_to_remaining_budget` in
+/// `hook_timeout_budget_tests.rs`.
 #[tokio::test]
 async fn test_session_hook_timeout_clamped_to_budget() {
     // Budget = 3 seconds. Session hook has timeout=60 and runs `sleep 10`.
@@ -630,8 +644,7 @@ async fn test_session_hook_timeout_clamped_to_budget() {
     };
     registry.register_session_hook("clamp-test", HookEvent::PreToolUse, slow_hook);
 
-    let start = std::time::Instant::now();
-    let _result = registry
+    let result = registry
         .execute_hooks(
             HookEvent::PreToolUse,
             empty_input(),
@@ -639,12 +652,19 @@ async fn test_session_hook_timeout_clamped_to_budget() {
             "clamp-test",
         )
         .await;
-    let elapsed = start.elapsed();
 
+    assert_eq!(
+        result.skipped_count, 0,
+        "the hook must have been started and then cut short, not skipped before it \
+         ran; a skipped hook would prove nothing about the clamp"
+    );
+    let reason = result.block_reason().unwrap_or_default();
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "session hook should have been clamped to ~3s budget, but took {:?}",
-        elapsed
+        reason.contains("timed out"),
+        "expected the session hook to be killed by the clamped 3s budget rather than \
+         run to completion under its own 60s timeout, but the reported outcome was \
+         {reason:?} (blocked: {})",
+        result.is_blocked()
     );
 }
 

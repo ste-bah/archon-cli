@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use archon_core::hooks::{
     HookCallback, HookCallbackEntry, HookContext, HookEvent, HookRegistry, HookResult,
@@ -113,14 +113,32 @@ async fn test_callback_panic_caught_safely() {
     );
 }
 
+/// A callback that overruns its timeout is abandoned, and what it eventually
+/// returned is not merged.
+///
+/// This used to assert `elapsed < 3s` and throw the aggregate away. That is
+/// satisfied by the failure it exists to rule out: a callback that is never
+/// invoked also returns in well under three seconds. Measured — deleting the
+/// `register_callback` call entirely left the test reporting `ok` in 0.00s.
+///
+/// Both halves are now observable without a clock. `entered` proves the callback
+/// really ran, so "it was fast because nothing happened" fails here rather than
+/// passing. The absent `additional_context` proves the registry gave up on it:
+/// the callback only reaches its `HookResult` after the 5s sleep, so the marker
+/// can appear in the aggregate only if the 1s timeout was not enforced.
 #[tokio::test]
 async fn test_callback_timeout() {
     let registry = HookRegistry::new();
+    let entered = Arc::new(AtomicBool::new(false));
+    let entered_in_cb = Arc::clone(&entered);
 
-    let cb: HookCallback = Arc::new(|_ctx: &HookContext| {
-        // Block for 5 seconds -- should be interrupted by 1s timeout.
+    let cb: HookCallback = Arc::new(move |_ctx: &HookContext| {
+        entered_in_cb.store(true, Ordering::SeqCst);
+        // Blocks well past the 1s timeout registered below.
         std::thread::sleep(Duration::from_secs(5));
-        HookResult::allow()
+        let mut result = HookResult::allow();
+        result.additional_context = Some("slow-cb-finished".to_string());
+        result
     });
 
     registry.register_callback(
@@ -133,21 +151,29 @@ async fn test_callback_timeout() {
         },
     );
 
-    let start = Instant::now();
-    let _agg = registry
+    let agg = registry
         .execute_hooks(
             HookEvent::PreToolUse,
             serde_json::json!({}),
-            std::path::Path::new("/tmp"),
+            std::env::temp_dir().as_path(),
             "sess-4",
         )
         .await;
-    let elapsed = start.elapsed();
 
     assert!(
-        elapsed < Duration::from_secs(3),
-        "should timeout in ~1s, not block for 5s (elapsed: {:?})",
-        elapsed
+        entered.load(Ordering::SeqCst),
+        "control: the callback must actually have been invoked, or the timeout \
+         assertion below would hold for a callback that never ran"
+    );
+    assert!(
+        agg.additional_contexts.is_empty(),
+        "the overrunning callback was waited on: its result reached the aggregate \
+         as {:?}",
+        agg.additional_contexts
+    );
+    assert_eq!(
+        agg.skipped_count, 0,
+        "the callback must have been started and abandoned, not skipped before it ran"
     );
 }
 

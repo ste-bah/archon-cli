@@ -350,6 +350,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.run_id, run_id);
+        // `.all()` over an empty `claims` is true, so an extraction that produced
+        // nothing would satisfy both assertions below while proving nothing about
+        // provider-neutral trust metadata — which is the whole subject of this
+        // test. Establish that there is something to check first.
+        assert!(
+            !report.claims.is_empty(),
+            "the run produced no claims, so the per-claim metadata assertions \
+             below would hold vacuously"
+        );
         assert!(
             report
                 .claims

@@ -71,7 +71,20 @@ fn provider_impl_files() -> BTreeSet<String> {
 fn every_provider_declares_its_cache_strategy() {
     let mut missing = Vec::new();
 
-    for key in provider_impl_files() {
+    // A scan that finds no providers reports "none are missing a declaration",
+    // which is the same green as "all of them declare one". Rename the marker
+    // string, move the directory, and this guard goes quiet instead of loud.
+    // `provider_module_layout_is_unchanged` below pins the exact set; this only
+    // has to refuse to run on an empty one.
+    let providers = provider_impl_files();
+    assert!(
+        !providers.is_empty(),
+        "found no `impl LlmProvider for` under {} — the scan target moved, and a \
+         guard that inspects nothing must not report success",
+        providers_dir().display()
+    );
+
+    for key in providers {
         let body =
             std::fs::read_to_string(providers_dir().join(&key)).expect("source file is readable");
 

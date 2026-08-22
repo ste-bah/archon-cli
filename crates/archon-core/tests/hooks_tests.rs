@@ -943,30 +943,74 @@ async fn async_pre_tool_hook_cannot_bypass_default_blocking_policy() {
     );
 }
 
+/// A fail-open `async: true` hook is detached, so its output never reaches the
+/// caller.
+///
+/// This used to time a `sleep 10; exit 2` hook and assert `elapsed < 2s`. That
+/// number is satisfied by the failure it exists to rule out: replace the command
+/// with one that cannot be spawned and the hook fails in milliseconds, which is
+/// also under two seconds. Measured — with the command swapped for
+/// `archon-nonexistent-command-vacuity-probe` the test still reported `ok`, so it
+/// could not tell fire-and-forget from a hook that never ran.
+///
+/// The observable that distinguishes them is the aggregate. `spawn_background`
+/// returns `HookResult::allow()` without ever reading the child's stdout, so a
+/// detached hook's `additional_context` cannot appear in the result — while the
+/// same command run synchronously must produce it.
+///
+/// The synchronous leg is the environment control. If the shell cannot run
+/// `printf` here at all, that leg fails loudly rather than letting the
+/// interesting assertion pass for the wrong reason.
 #[tokio::test(flavor = "multi_thread")]
-async fn async_hook_with_allow_policy_returns_immediately() {
-    // Explicit fail-open policy preserves fire-and-forget behavior.
-    let registry = make_registry_with_async_command(
+async fn async_hook_with_allow_policy_is_detached_rather_than_awaited() {
+    let command = r#"printf '{"outcome":"success","additional_context":"hook ran"}'"#;
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    let awaited = make_registry_with_async_command(
         HookEvent::PreToolUse,
-        "sleep 10; exit 2",
+        command,
+        false,
+        false,
+        Some(HookFailurePolicy::Allow),
+    )
+    .execute_hooks(
+        HookEvent::PreToolUse,
+        pre_tool_input("Bash", "echo hello"),
+        &cwd,
+        "test-session",
+    )
+    .await;
+    assert_eq!(
+        awaited.additional_contexts,
+        vec!["hook ran"],
+        "control: the synchronous form of the same hook must run and be collected, \
+         otherwise the detachment assertion below proves nothing"
+    );
+
+    let detached = make_registry_with_async_command(
+        HookEvent::PreToolUse,
+        command,
         true,
         false,
         Some(HookFailurePolicy::Allow),
-    );
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let input = pre_tool_input("Bash", "echo hello");
+    )
+    .execute_hooks(
+        HookEvent::PreToolUse,
+        pre_tool_input("Bash", "echo hello"),
+        &cwd,
+        "test-session",
+    )
+    .await;
 
-    let start = std::time::Instant::now();
-    let result = registry
-        .execute_hooks(HookEvent::PreToolUse, input, &cwd, "test-session")
-        .await;
-    let elapsed = start.elapsed();
-
-    assert!(!result.is_blocked(), "fail-open async hook must not block");
     assert!(
-        elapsed.as_secs() < 2,
-        "fail-open async hook must return immediately (took {}ms)",
-        elapsed.as_millis()
+        !detached.is_blocked(),
+        "fail-open async hook must not block"
+    );
+    assert!(
+        detached.additional_contexts.is_empty(),
+        "a fire-and-forget hook's output must not reach the caller, but the \
+         aggregate collected {:?} — the hook was awaited",
+        detached.additional_contexts
     );
 }
 
