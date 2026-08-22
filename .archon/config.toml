@@ -345,6 +345,7 @@ mount_home = false
 # even if Archon is killed and never restarted. Must be well above any Bash
 # timeout: a command still running at this age is killed with the container.
 container_max_age_secs = 14400
+
 [sandbox.ssh]
 # Real Bash execution backend when sandbox.backend = "ssh" and enabled=true.
 enabled = false
