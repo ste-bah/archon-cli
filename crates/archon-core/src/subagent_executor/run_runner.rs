@@ -215,6 +215,10 @@ impl AgentSubagentExecutor {
             tool_run_attempt: 0,
             tool_run_admission: parent_ctx.tool_run_admission.clone(),
             tool_run_outcome: parent_ctx.tool_run_outcome.clone(),
+            // Inherited from the parent, while `subagent_id` above is what
+            // keeps the child's chain its own: one policy across the tree, one
+            // counter per agent (#200 Phase 2).
+            repeat_tool: parent_ctx.repeat_tool.clone(),
         }
     }
 

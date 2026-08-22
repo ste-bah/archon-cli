@@ -1,5 +1,6 @@
 use archon_observability::{AgentActivityKind, AgentActivityStatus};
 use archon_tools::execution_deadline::ExecutionDeadline;
+use archon_tools::repeat_tool_guard::{ChainKey, REPEAT_TOOL_CHAINS};
 use archon_tools::tool::{
     PermissionLevel, Tool, ToolContext, ToolResult, ToolRunAdmission, ToolRunAdmissionRequest,
     ToolRunAttemptOutcome,
@@ -38,6 +39,7 @@ pub(crate) async fn execute_tool_attempt(
                 true,
                 admission_enabled,
             );
+            observe_tool_attempt(ctx, tool.name(), &input, true);
             return result;
         }
     }
@@ -61,6 +63,7 @@ pub(crate) async fn execute_tool_attempt(
             true,
             admission_enabled,
         );
+        observe_tool_attempt(ctx, tool.name(), &input, true);
         return ToolResult::error(reason);
     }
 
@@ -83,7 +86,40 @@ pub(crate) async fn execute_tool_attempt(
         result.is_error,
         admission_enabled,
     );
+    observe_tool_attempt(ctx, tool.name(), &outcome_input, false);
     result
+}
+
+/// Extend this agent's repeat-tool chain by one attempt (#200 Phase 2).
+///
+/// Called at all three exits of [`execute_tool_attempt`] and deliberately
+/// *not* folded into [`record_outcome`], which returns early when no outcome
+/// callback is installed. A guard hanging off that callback would be present,
+/// compiled, and silently inert in every context that has none — the shape
+/// where a subsystem looks healthy and does nothing. This has no precondition
+/// beyond the policy on the context, so turning it off is a config change and
+/// never an accident of wiring.
+///
+/// `refused` marks an attempt that never reached the tool. It still extends
+/// the run: a call permissions keep rejecting is the loop most worth breaking,
+/// and it is the one whose result provably cannot change.
+///
+/// Records only. Nothing here can block, rewrite, or delay the call — the
+/// advisory it may queue is delivered by the tool loop after the round's
+/// results, as a separate user turn.
+fn observe_tool_attempt(
+    ctx: &ToolContext,
+    tool_name: &str,
+    input: &serde_json::Value,
+    refused: bool,
+) {
+    REPEAT_TOOL_CHAINS.observe(
+        &ChainKey::of(ctx),
+        &ctx.repeat_tool,
+        tool_name,
+        input,
+        refused,
+    );
 }
 
 /// Run one tool call under the budget the tool declared for itself, if any.
@@ -186,3 +222,7 @@ fn record_outcome(
 #[cfg(test)]
 #[path = "tool_run_admission_timeout_tests.rs"]
 mod timeout_tests;
+
+#[cfg(test)]
+#[path = "tool_run_admission_repeat_tool_tests.rs"]
+mod repeat_tool_tests;

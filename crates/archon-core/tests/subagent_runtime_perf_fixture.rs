@@ -306,6 +306,20 @@ fn build_runner(provider: Arc<CaptureProvider>, pressure: bool) -> SubagentRunne
             working_dir: std::env::temp_dir(),
             session_id: "issue-171-fixture".into(),
             mode: AgentMode::Normal,
+            // Off for this fixture, and it has to be. Three tests in this
+            // binary run the fixture concurrently, two of them run it twice,
+            // and every pass claims the same agent identity — so the
+            // repeat-tool chain (#200 Phase 2), which is keyed per agent,
+            // would see unrelated passes as one agent and could put an
+            // advisory into the very request bodies these tests assert are
+            // byte-identical. The session id is itself part of those bytes, so
+            // giving each pass its own identity is not available either. This
+            // fixture measures what the runner serializes, not what the guard
+            // advises; the guard has its own tests.
+            repeat_tool: archon_tools::repeat_tool_guard::RepeatToolConfig {
+                enabled: false,
+                ..Default::default()
+            },
             ..Default::default()
         },
         "claude-fixture-4".into(),

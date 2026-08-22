@@ -1553,3 +1553,54 @@ proposal_stale_days = 30
 # evidence for a subagent that never opened the file -- and are discarded when
 # the session ends rather than persisted.
 read_before_edit = "block"
+
+# ---------------------------------------------------------------------------
+# Advisory guards (#200)
+# ---------------------------------------------------------------------------
+#
+# A guard here observes what the agent is doing and, when a pattern is worth
+# naming, writes a message addressed to the model. It never blocks a call,
+# rewrites one, or delays one -- which is what separates this section from
+# [permissions] and [sandbox], where things are actually decided.
+
+# Repeat-tool reminder -- the loop breaker.
+#
+# A model that has stopped making progress often does not stop calling. It
+# reissues the same Grep, the same Read, the same denied Bash, and every
+# repetition costs a round trip and a slice of the context window while the
+# answer stays exactly as absent as it was the first time.
+#
+# This counts runs of consecutive calls to one tool with arguments that
+# canonicalise to the same string, per agent, and at the run lengths below
+# injects an escalating advisory: re-read the last result, change the approach,
+# or conclude. The decision stays with the model.
+#
+# Two semantics worth knowing about:
+#
+#   * an excluded tool is transparent to the chain -- with TodoWrite excluded,
+#     Grep X -> TodoWrite -> Grep X is still a run of two Grep X, so a
+#     bookkeeping tool interleaved into a loop cannot launder it
+#   * a refused call counts -- a call permissions keep rejecting is the loop
+#     most worth breaking, and the advisory says so
+#
+# In memory only. A resumed session starts with a fresh chain.
+
+[guard.repeat_tool]
+
+# Count runs at all. false restores the behaviour that predates the guard.
+enabled = true
+
+# Run lengths that produce an advisory. Ascending, each at least 2, no
+# duplicates -- a list that breaks any of those rules is an error at load, not
+# a silent fall back to these defaults. The advisory escalates with position:
+# the first entry gets a nudge, the last gets a flat instruction to stop.
+thresholds = [3, 5, 8]
+
+# Tools that neither extend a run nor break one.
+exclude = ["TodoWrite"]
+
+# How many characters of the repeated arguments a reminder quotes. This bounds
+# the reminder only -- the chain always compares the full canonical argument
+# string, so a looping Write cannot ride its whole payload into the next
+# request and two payloads sharing a prefix are still two different calls.
+arguments_preview_chars = 500

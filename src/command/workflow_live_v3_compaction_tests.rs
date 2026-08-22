@@ -386,6 +386,14 @@ async fn run_fixture(scenario: FixtureScenario) {
     }
 }
 
+/// One `Read` of one document.
+///
+/// The input names the document rather than being an empty object. The
+/// aggregate scenario issues five of these at once, and with `{}` for every one
+/// they were five byte-identical calls — which the repeat-tool chain reads as a
+/// loop and answers with an advisory (#200 Phase 2), changing the very request
+/// bodies this fixture measures. The ids were already `doc-0`..`doc-4`, so
+/// naming the document in the input is what the fixture always meant.
 fn tool_call_events(index: u32, tool_use_id: &str, tool_name: &str) -> Vec<StreamEvent> {
     vec![
         StreamEvent::ContentBlockStart {
@@ -396,7 +404,10 @@ fn tool_call_events(index: u32, tool_use_id: &str, tool_name: &str) -> Vec<Strea
         },
         StreamEvent::InputJsonDelta {
             index,
-            partial_json: "{}".into(),
+            // Deliberately not `file_path` or `path`: those are the keys the
+            // read-before-write observer reads, and this fixture's documents
+            // are not on disk.
+            partial_json: serde_json::json!({ "document": tool_use_id }).to_string(),
         },
         StreamEvent::ContentBlockStop { index },
     ]
