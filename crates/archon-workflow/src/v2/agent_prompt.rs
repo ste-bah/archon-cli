@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+#[path = "agent_prompt_contract.rs"]
+mod contract;
+use contract::{insert_task_contract_context, task_universe_digest};
+
 use super::agent_adapter::{
     FINAL_OUTPUT_RULE, IMPLEMENTATION_RULES, READ_ONLY_RULES, RESULT_SCHEMA,
     WorkflowV2AgentRequest, WorkflowV2PromptParts, write_mode_label,
@@ -98,12 +102,21 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
     let mut universes = Vec::new();
     extract_task_universes(&mut invocation, &mut universes);
     let base_call_id = base_call_id(&request.call.id);
+    // An implementation branch reduces too. It receives the universe so its own
+    // contract can be derived from it, but it is answerable for the tasks it
+    // claims and nothing else, so the copy in the stable prefix is cut to
+    // identity digests and the criteria travel in the scoped contract block
+    // below. Left whole, one reference decomposition puts over 100KB of other
+    // tasks' criteria in front of an agent responsible for one of them.
     let reduced_universe = matches!(
         request.call.method,
-        super::WorkflowV2HostMethod::Reduce | super::WorkflowV2HostMethod::FinalReport
+        super::WorkflowV2HostMethod::Reduce
+            | super::WorkflowV2HostMethod::FinalReport
+            | super::WorkflowV2HostMethod::Implementation
     ) && !uses_full_task_universe(base_call_id);
     if uses_task_contract_context(request.call.method, base_call_id) {
-        insert_task_contract_context(&mut invocation, &universes);
+        let claimed = super::branch_stamping::branch_canonical_task_ids(&invocation);
+        insert_task_contract_context(&mut invocation, &universes, &claimed);
     }
     if reduced_universe {
         universes = universes
@@ -144,8 +157,25 @@ fn uses_full_task_universe(call_id: &str) -> bool {
         || call_id == "blocked-empty-implementation-inventory"
 }
 
+/// Whether this call is judged against a task's declared contract, and so must
+/// be shown it.
+///
+/// The id predicates below read a string the SCRIPT AUTHOR chose, which is why
+/// v3 remediation calls silently missed: the dialect labels them `remediate-`
+/// while this tested `remediation-`, and both spellings read correctly in their
+/// own file. An LLM writes that label from a prompt template and can write
+/// anything, so no host decision can rest on it alone.
+///
+/// The method is the host's own: `source.rs` derives `Implementation` for every
+/// write-capable branch, which is exactly the set of calls being asked to
+/// satisfy a task — implementations and their remediations alike, whatever the
+/// author called them. The id predicates stay as an additive fallback for the
+/// read-only reviewers and verifiers, whose roles the method does not
+/// distinguish; they only ever widen the set, so a task id that happens to
+/// contain `review` costs a slightly larger prompt rather than a wrong decision.
 fn uses_task_contract_context(method: super::WorkflowV2HostMethod, call_id: &str) -> bool {
     method == super::WorkflowV2HostMethod::FinalReport
+        || method == super::WorkflowV2HostMethod::Implementation
         || call_id.contains("verification")
         || call_id.contains("review")
         || call_id.contains("artifact")
@@ -155,79 +185,6 @@ fn uses_task_contract_context(method: super::WorkflowV2HostMethod, call_id: &str
         || call_id.starts_with("final-evidence-reconciliation-")
         || call_id.starts_with("completion-claim-repair-")
         || call_id == "final-zero-gap-audit"
-}
-
-fn insert_task_contract_context(
-    invocation: &mut serde_json::Value,
-    universes: &[serde_json::Value],
-) {
-    let tasks = universes
-        .iter()
-        .flat_map(|universe| {
-            universe
-                .get("tasks")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-        })
-        .map(task_contract_digest)
-        .collect::<Vec<_>>();
-    let context = serde_json::json!({"tasks":tasks});
-    match invocation {
-        serde_json::Value::Object(object) => {
-            object.insert("task_contract_context".to_string(), context);
-        }
-        serde_json::Value::Array(values) => {
-            values.push(serde_json::json!({"task_contract_context":context}));
-        }
-        _ => {}
-    }
-}
-
-fn task_universe_digest(universe: &serde_json::Value) -> serde_json::Value {
-    let Some(object) = universe.as_object() else {
-        return universe.clone();
-    };
-    let digests = object
-        .get("tasks")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|task| serde_json::Value::Object(task_digest_fields(task)))
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "schema_version": object.get("schema_version"),
-        "source_roots": object.get("source_roots"),
-        "tasks": digests,
-    })
-}
-
-fn task_contract_digest(task: &serde_json::Value) -> serde_json::Value {
-    let mut digest = task_digest_fields(task);
-    for key in ["acceptance_criteria", "deliverable_contracts"] {
-        if let Some(value) = task.get(key) {
-            digest.insert(key.to_string(), value.clone());
-        }
-    }
-    serde_json::Value::Object(digest)
-}
-
-fn task_digest_fields(task: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-    let mut digest = serde_json::Map::new();
-    for key in [
-        "canonical_task_id",
-        "aliases",
-        "source_path",
-        "dependency_ids",
-        "artifact_requirements",
-        "required_env_keys",
-        "required_tools",
-    ] {
-        if let Some(value) = task.get(key) {
-            digest.insert(key.to_string(), value.clone());
-        }
-    }
-    digest
 }
 
 fn digest_wave_evidence(value: &mut serde_json::Value) {
@@ -467,3 +424,7 @@ fn push_unique_universe(universes: &mut Vec<serde_json::Value>, universe: serde_
         universes.push(universe);
     }
 }
+
+#[cfg(test)]
+#[path = "agent_prompt_contract_tests.rs"]
+mod contract_tests;

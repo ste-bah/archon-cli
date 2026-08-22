@@ -100,6 +100,17 @@ const TOOLCHAIN_CACHES: &[ToolchainCache] = &[
 /// Only toolchains whose marker file is actually present contribute. Returns
 /// the pairs to apply; an empty result means this repository uses nothing this
 /// engine recognises, and no cache variable should be invented for it.
+/// Whether a repository uses the toolchain a marker file identifies.
+///
+/// The same evidence `cache_env_for_repository` uses, exposed for callers that
+/// need to know a toolchain is in play before setting variables that belong to
+/// it. A repository is asked what it contains rather than a command being
+/// pattern-matched, so a toolchain invoked indirectly — through a make target,
+/// a shell script, a build wrapper — is still recognised.
+pub fn repository_uses_marker(repository_root: &Path, marker: &str) -> bool {
+    repository_root.join(marker).exists()
+}
+
 pub fn cache_env_for_repository(
     repository_root: &Path,
     lease_dir: &Path,

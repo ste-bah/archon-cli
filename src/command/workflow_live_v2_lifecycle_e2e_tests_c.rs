@@ -233,6 +233,7 @@ pub(super) fn boundary_driver(
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
         implementation_wave_max_parallelism: None,
+        build_cache_slots: None,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,

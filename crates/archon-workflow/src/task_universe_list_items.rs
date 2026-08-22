@@ -58,10 +58,7 @@ pub(super) fn declared_task_section_items(raw: &str, section: &str) -> Vec<Strin
         let trimmed = line.trim();
         if let Some(heading) = trimmed.strip_prefix('#') {
             push_section_item(&mut items, current.take());
-            in_section = heading
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case(section);
+            in_section = heading_matches_section(heading.trim_start_matches('#'), section);
             continue;
         }
         if !in_section {
@@ -94,6 +91,148 @@ pub(super) fn push_section_item(items: &mut Vec<String>, item: Option<String>) {
     }
 }
 
+/// The words of a heading, lowercased, punctuation dropped.
+///
+/// Comparing headings as whole strings makes every difference fatal, including
+/// differences that carry no meaning — trailing punctuation, doubled spaces,
+/// case. Comparing word sequences keeps the ordering that does carry meaning
+/// while discarding the decoration that does not.
+fn heading_words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| {
+            word.chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        })
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+/// Whether a heading opens the requested section.
+///
+/// Exact equality was the rule, and it is the third silent-empty defect in this
+/// file. On one reference corpus the parser asked for `files expected to
+/// change` while the task files wrote `Files Expected` (four files) and `Files
+/// Expected to Change During Implementation` (two). Six of fifteen tasks
+/// therefore declared no target files at all, and every consumer — the wave
+/// planner's write-conflict detection among them — read that as "this task
+/// changes nothing" rather than "the section was not found".
+///
+/// A heading matches when its words are a prefix of the section's, or the
+/// section's are a prefix of the heading's. That accepts an abbreviation and an
+/// elaboration of the same section name without naming either spelling here, so
+/// no per-project heading table is introduced and no future variant of the same
+/// shape needs a code change. Prefixes are compared word-wise, never as raw
+/// strings, so `files expected` cannot match `files expectedly`.
+pub(super) fn heading_matches_section(heading: &str, section: &str) -> bool {
+    let heading = heading_words(heading);
+    let section = heading_words(section);
+    if heading.is_empty() || section.is_empty() {
+        return false;
+    }
+    heading.starts_with(section.as_slice()) || section.starts_with(heading.as_slice())
+}
+
+/// Words carrying no distinguishing meaning in a heading.
+///
+/// Deliberately ordinary English function words. A heading is a phrase, not a
+/// sentence, so this list stays short; the point is only that "to" and "during"
+/// must not make two headings look different when the nouns agree.
+const HEADING_STOPWORDS: &[&str] = &[
+    "a", "an", "and", "at", "by", "during", "for", "in", "of", "on", "the", "to", "with",
+];
+
+/// A word with a common English inflection removed.
+///
+/// Applied ONLY when looking for a near miss, never when deciding a match. A
+/// heading that opens a section must say the section's words; a heading merely
+/// *reported* as resembling one may inflect them, and `Files Expected to Be
+/// Changed` plainly means the same section as `Files Expected to Change`
+/// despite sharing no whole word beyond the first two.
+///
+/// Applied repeatedly, because one pass does not converge: `changed` loses
+/// `ed` to give `chang`, while `change` keeps its trailing `e` and the two
+/// never meet. Stripping until nothing more comes off takes both to `chang`,
+/// and takes `file` and `files` both to `file` — the floor stops the second
+/// pass there rather than reducing one of them further than the other.
+///
+/// Kept to the suffixes that carry no meaning in a heading, and only on words
+/// long enough that removing one leaves something: `used` must not become `us`.
+fn stem(word: &str) -> &str {
+    let mut word = word;
+    loop {
+        // Every suffix is tried, not just the first that strips: `files` loses
+        // `es` to leave `fil`, which is below the floor, and the answer is the
+        // `s` behind it rather than no stem at all.
+        let Some(root) = ["ing", "ed", "es", "s", "e"]
+            .iter()
+            .filter_map(|suffix| word.strip_suffix(suffix))
+            .find(|root| root.len() >= 4)
+        else {
+            return word;
+        };
+        word = root;
+    }
+}
+
+fn significant_words(words: &[String]) -> Vec<&str> {
+    words
+        .iter()
+        .filter(|word| !HEADING_STOPWORDS.contains(&word.as_str()))
+        .map(|word| stem(word))
+        .collect()
+}
+
+/// Headings that plainly mean the requested section but did not match it.
+///
+/// The durable half of the fix. Widening the match rule handles the variants
+/// seen so far; it cannot handle the next one, and this file's history is that
+/// there is always a next one — list markers, then wrapped bullets, now
+/// headings, each found only after a run had already been ruined by it.
+///
+/// What made all three expensive was not the mismatch. It was that a section
+/// which failed to match and a section that was genuinely empty arrived at
+/// every consumer as the same empty list, so nothing downstream could tell a
+/// task that declares nothing from a task whose declaration was dropped. This
+/// reports the difference instead of erasing it.
+///
+/// A heading is a near miss when the significant words of one are a subset of
+/// the other's and at least two are shared — enough to catch a reordering or a
+/// renamed qualifier, while `Files Forbidden` stays clear of `Files Expected to
+/// Change` because it shares only one.
+pub(super) fn heading_near_misses(raw: &str, section: &str) -> Vec<String> {
+    let section_words = heading_words(section);
+    let section_significant = significant_words(&section_words);
+    let mut misses = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        let Some(heading) = trimmed.strip_prefix('#') else {
+            continue;
+        };
+        let heading = heading.trim_start_matches('#').trim();
+        if heading_matches_section(heading, section) {
+            // The section was found. Nothing to report, whichever spelling won.
+            return Vec::new();
+        }
+        let heading_words = heading_words(heading);
+        let heading_significant = significant_words(&heading_words);
+        let shared = heading_significant
+            .iter()
+            .filter(|word| section_significant.contains(*word))
+            .count();
+        let subset = shared == heading_significant.len() || shared == section_significant.len();
+        if shared >= 2 && subset {
+            misses.push(heading.to_string());
+        }
+    }
+    sorted_unique(misses)
+}
+
 #[cfg(test)]
 #[path = "task_universe_wrapped_criteria_tests.rs"]
 mod wrapped_criteria_tests;
+
+#[cfg(test)]
+#[path = "task_universe_heading_tests.rs"]
+mod heading_tests;

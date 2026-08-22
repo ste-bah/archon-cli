@@ -140,6 +140,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),
         files_expected_to_change: declared_task_section_items(raw, "files expected to change"),
         files_forbidden_to_change: declared_task_section_items(raw, "files forbidden to change"),
+        section_heading_issues: declared_section_heading_issues(raw),
         artifact_requirements: declared_task_artifact_requirements(raw, &metadata),
         required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
         required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),
@@ -446,7 +447,50 @@ mod tests {
 
 #[path = "task_universe_list_items.rs"]
 mod list_items;
-use list_items::declared_task_section_items;
+use list_items::{declared_task_section_items, heading_near_misses};
+
+/// Every section this parser reads out of a task file's prose.
+///
+/// Listed once so the near-miss report covers the same sections the reader
+/// does. A section added above without being added here would be readable but
+/// unwatched, which is the state the whole report exists to end.
+const DECLARED_PROSE_SECTIONS: &[&str] = &[
+    "acceptance criteria",
+    "adversarial review notes",
+    "files expected to change",
+    "files forbidden to change",
+];
+
+/// Headings that meant one of the parsed sections but did not open it.
+///
+/// Populates `WorkflowV2TaskUniverseTask::section_heading_issues`. A section
+/// that fails to match and a section that is genuinely empty otherwise arrive
+/// at every consumer as the same empty list, so nothing downstream can tell a
+/// task that declares nothing from a task whose declaration was dropped. That
+/// ambiguity has now cost three runs in this reader alone — list markers it did
+/// not accept, bullets it truncated at the wrap, and headings it compared for
+/// exact equality — and each was found only after a run had been spent on it.
+///
+/// Recorded rather than logged, so it survives into the run's persisted
+/// metadata and can be read back afterwards; that is the only reason the
+/// heading defect was provable at all.
+///
+/// Reported per task rather than raised as an error: a heading this reader
+/// cannot match is a defect in the task file, but it is the decomposition's
+/// defect to fix, and failing the parse would take down runs over documents
+/// that every other consumer reads happily. Making it visible and letting a
+/// gate decide is the honest split.
+fn declared_section_heading_issues(raw: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    for section in DECLARED_PROSE_SECTIONS {
+        for heading in heading_near_misses(raw, section) {
+            issues.push(format!(
+                "heading '{heading}' resembles section '{section}' but did not open it; that section parsed as empty"
+            ));
+        }
+    }
+    sorted_unique(issues)
+}
 
 #[cfg(test)]
 #[path = "task_universe_parsing_list_tests.rs"]

@@ -26,11 +26,12 @@ pub(super) async fn prepare_command(
     // `CARGO_INCREMENTAL=0` used to be set here, ahead of the resource defaults.
     // Since `ensure_env_default` is first-wins, that made `[tools.cargo]
     // incremental` unreachable, so the setting now lives entirely in
-    // `apply_workflow_resource_defaults` — which still applies it to every
-    // command, exactly as this line did.
+    // `apply_workflow_resource_defaults`, which additionally applies it only
+    // where the repository actually builds with cargo.
     crate::workflow_resource_env::apply_workflow_resource_defaults(
         &mut env_vars,
         raw_command,
+        &ctx.working_dir,
         &tool.cargo_limits,
     );
     // Inside a workflow run the session id IS the run id, so a task that

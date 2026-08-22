@@ -132,6 +132,9 @@ pub struct WorkflowV2TaskUniverseTask {
     pub files_expected_to_change: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files_forbidden_to_change: Vec<String>,
+    /// Near-miss headings; see `declared_section_heading_issues` for why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_heading_issues: Vec<String>,
     /// Explicit artifact declarations from the task file (paths relative to
     /// the project artifact root). Part of the declared artifact contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

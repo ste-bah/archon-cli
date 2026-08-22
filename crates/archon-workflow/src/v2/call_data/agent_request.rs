@@ -25,7 +25,7 @@ pub fn v2_agent_request(
         );
     }
     let mut input = execution.input.clone();
-    if needs_request_task_universe(&execution.call.id)
+    if needs_request_task_universe(execution.call.method, &execution.call.id)
         && let Some(universe) = task_universe
     {
         let universe =
@@ -63,11 +63,25 @@ pub fn v2_agent_request(
     }
 }
 
-pub(super) fn needs_request_task_universe(call_id: &str) -> bool {
-    call_id
-        .rsplit_once("-transport-retry-")
-        .map_or(call_id, |(base, _)| base)
-        .starts_with("completion-claim-repair-")
+/// Whether this call's request carries the task universe.
+///
+/// Implementation branches need it because they are the calls being asked to
+/// satisfy a task, and a task's acceptance criteria live nowhere else. Without
+/// this the prompt layer's contract context has nothing to read: it digests the
+/// universes it finds in the request, and finding none it produces an empty
+/// block that looks exactly like a task declaring nothing.
+///
+/// The universe is large — one reference decomposition serialises to well over
+/// 100KB — so `agent_prompt` reduces it to identity digests for these calls and
+/// carries the criteria separately, scoped to the tasks the call actually
+/// claims. Attaching it here without that reduction would put every task's
+/// criteria in every write agent's prompt.
+pub(super) fn needs_request_task_universe(method: WorkflowV2HostMethod, call_id: &str) -> bool {
+    method == WorkflowV2HostMethod::Implementation
+        || call_id
+            .rsplit_once("-transport-retry-")
+            .map_or(call_id, |(base, _)| base)
+            .starts_with("completion-claim-repair-")
 }
 
 pub(super) fn contains_task_universe(

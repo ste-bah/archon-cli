@@ -20,3 +20,5 @@ mod call_data_tests_b;
 #[path = "call_data_tests_c.rs"]
 mod call_data_tests_c;
 use call_data_tests_c::*;
+#[path = "call_data_tests_d.rs"]
+mod call_data_tests_d;
