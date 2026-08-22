@@ -1,4 +1,5 @@
 use archon_llm::effort::EffortLevel;
+use archon_tools::repeat_tool_guard::ChainKey;
 use std::sync::Arc;
 
 use super::process_message_steps::{PreparedTurnRequest, StreamRoundOutcome, ToolLoopAction};
@@ -307,16 +308,43 @@ impl Agent {
         let ctx = self.build_tool_context(effective_mode, active_model).await;
         let allowed = self.preflight_tools(pending_tools, effective_mode).await;
         let dispatch_results = self.dispatch_allowed_tools(&allowed, &ctx).await;
-        if let Some(reason) = self
+        let stop_reason = self
             .postprocess_tools(&allowed, dispatch_results, &ctx, active_model)
-            .await
-        {
+            .await;
+        // After the results are recorded and before anything decides to stop:
+        // an advisory this round earned is owed to the model whether or not a
+        // hook is about to end the turn, and leaving it queued would deliver it
+        // against a run that no longer exists.
+        self.drain_repeat_tool_reminders(&ctx);
+        if let Some(reason) = stop_reason {
             tracing::info!("Hook requested conversation stop: {}", reason);
             return ToolLoopAction::Break;
         }
         self.drain_messages_from_agents().await;
         *agentic_iterations += 1;
         self.check_agentic_turn_limit(*agentic_iterations).await
+    }
+
+    /// Deliver any repeat-tool advisory this round earned (#200 Phase 2).
+    ///
+    /// As an injected *user* message, following the completion gate's repair
+    /// prompts, and pointedly not through either existing context-injection
+    /// path. `PostToolUse` context is folded into the tool result's `content`
+    /// by `apply_post_tool_aggregate`, which would make the audit record show a
+    /// tool returning text it never produced and charge the reminder against
+    /// that result's byte budget. `inject_hook_session_context` writes into the
+    /// system array and re-injects every turn, which is right for durable
+    /// context and wrong for a nudge that must be able to stop.
+    fn drain_repeat_tool_reminders(&mut self, ctx: &ToolContext) {
+        for reminder in
+            archon_tools::repeat_tool_guard::REPEAT_TOOL_CHAINS.take_reminders(&ChainKey::of(ctx))
+        {
+            tracing::info!(
+                chars = reminder.len(),
+                "delivering a repeat-tool reminder to the model"
+            );
+            self.state.add_user_message(&reminder);
+        }
     }
 
     /// Inject anything subagents have sent to the lead, as user turns.

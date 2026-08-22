@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 // ---------------------------------------------------------------------------
 // VerbosityState
@@ -71,6 +71,10 @@ impl VerbosityToggleTool {
 impl Tool for VerbosityToggleTool {
     fn name(&self) -> &str {
         TOOL_NAME
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

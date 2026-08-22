@@ -22,7 +22,9 @@ use crate::background_agents::{
 use crate::board::DelegatedOutcome;
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::subagent_request::SubagentRequest;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // Re-exported so `agent_tool.rs`'s existing `core::AGENT_DESCRIPTION_LIMIT_BYTES`
 // path keeps resolving after the constant moved into the `descriptor` child.
@@ -75,6 +77,10 @@ fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
 impl Tool for AgentTool {
     fn name(&self) -> &str {
         "Agent"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {
@@ -139,11 +145,17 @@ impl Tool for AgentTool {
                  remove run_in_background or omit expected_target_files",
             );
         }
-        let expected_mutations =
-            match snapshot_expected_targets(&expected_target_files, request.cwd.as_deref(), ctx) {
-                Ok(snapshots) => snapshots,
-                Err(err) => return ToolResult::error(err),
-            };
+        let expected_mutations = match snapshot_expected_targets(
+            ctx.fs().as_ref(),
+            &expected_target_files,
+            request.cwd.as_deref(),
+            ctx,
+        )
+        .await
+        {
+            Ok(snapshots) => snapshots,
+            Err(err) => return ToolResult::error(err),
+        };
 
         // Record what this agent says it will write, and warn if a running
         // agent already declared something overlapping (#184 M2).
@@ -420,7 +432,7 @@ impl Tool for AgentTool {
 
         match outcome {
             SubagentOutcome::Completed(text) => {
-                match verify_expected_mutations(&expected_mutations) {
+                match verify_expected_mutations(ctx.fs().as_ref(), &expected_mutations).await {
                     // A foreground agent has already finished writing by the
                     // time this returns, so the warning is after the fact — but
                     // the caller is about to decide what to spawn next, and an

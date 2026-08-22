@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that reads captured output from a task.
 pub struct TaskOutputTool;
@@ -9,6 +11,10 @@ pub struct TaskOutputTool;
 impl Tool for TaskOutputTool {
     fn name(&self) -> &str {
         "TaskOutput"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

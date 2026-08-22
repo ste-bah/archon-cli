@@ -17,7 +17,9 @@ use serde_json::json;
 
 use crate::team_config::{MemberConfig, TeamConfig};
 use crate::team_roster;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct TeamCreateTool {
     project_dir: PathBuf,
@@ -33,6 +35,10 @@ impl TeamCreateTool {
 impl Tool for TeamCreateTool {
     fn name(&self) -> &str {
         "TeamCreate"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

@@ -14,8 +14,11 @@
 use serde_json::json;
 
 use crate::terminal_registry as registry;
-use crate::terminal_shell as shells;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::terminal_schema as schema;
+use crate::terminal_world as world;
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Most output one `TerminalRead` returns.
 ///
@@ -27,61 +30,78 @@ const MAX_READ_BYTES: usize = 16_000;
 /// Opens a shell that outlives the call.
 pub struct TerminalCreateTool;
 
+impl TerminalCreateTool {
+    /// Named rather than inlined so a world that has to prepend a refusal can
+    /// still say what the tool would do, from the one copy of the sentence.
+    const WHAT_IT_DOES: &'static str = "Start a persistent shell and return its id. Unlike Bash, the shell \
+         stays alive between calls, so a directory change, an activated \
+         environment or an exported variable is still in effect for the next \
+         TerminalWrite. Use it for interactive programs, for long-running \
+         processes you want to check on later, and for any sequence where one \
+         command depends on the state the last one left. Feed the id to \
+         TerminalWrite and TerminalRead, and call TerminalClose when done.";
+}
+
 #[async_trait::async_trait]
 impl Tool for TerminalCreateTool {
     fn name(&self) -> &str {
         "TerminalCreate"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::TERMINAL
+    }
+
     fn description(&self) -> &str {
-        "Start a persistent shell and return its id. Unlike Bash, the shell \
-         stays alive between calls, so a directory change, an activated \
-         environment or an exported variable is still in effect for the next \
-         TerminalWrite. Use it for interactive programs, for long-running \
-         processes you want to check on later, and for any sequence where one \
-         command depends on the state the last one left. Feed the id to \
-         TerminalWrite and TerminalRead, and call TerminalClose when done."
+        Self::WHAT_IT_DOES
+    }
+
+    /// A world with no terminal in it has to say so here, not only in an
+    /// argument: nothing about this tool is required, so `TerminalCreate {}` is
+    /// the call a model makes, and it reads no argument description on the way.
+    fn description_for(&self, ctx: &ToolContext) -> Option<String> {
+        schema::world_description(ctx, Self::WHAT_IT_DOES)
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "shell": {
-                    "type": "string",
-                    "enum": shells::SHELLS,
-                    "description": format!(
-                        "Which shell to run (default {}). \"cmd\" is Windows only.",
-                        shells::default_shell()
-                    )
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Directory to start in (default: the session working directory)"
-                }
-            },
-            "required": []
-        })
+        schema::host_schema()
+    }
+
+    /// Describe the shells that exist where this session runs, not the ones the
+    /// host build knows about. `None` means the world is the host, so
+    /// [`Self::input_schema`] is already the truth and nothing is rewritten.
+    fn input_schema_for(&self, ctx: &ToolContext) -> Option<serde_json::Value> {
+        schema::world_schema(ctx)
     }
 
     async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let shell = string_arg(&input, "shell").unwrap_or_else(|| shells::default_shell().into());
+        // The shell stays unresolved until the world is chosen: the host
+        // default and a Linux backend's default are different answers, and
+        // picking the host's here would refuse every sandboxed terminal opened
+        // without an explicit `shell` on Windows.
+        let shell = string_arg(&input, "shell");
         let cwd = string_arg(&input, "cwd").map_or_else(
             || ctx.working_dir.clone(),
             |value| ctx.working_dir.join(value),
         );
-        let program = match shells::build(&shell, &cwd) {
-            Ok(program) => program,
+        let launch = match world::plan(ctx, shell.as_deref(), &cwd) {
+            Ok(launch) => launch,
             Err(error) => return ToolResult::error(error),
         };
 
         let id = format!("term-{}", uuid::Uuid::new_v4().simple());
-        match registry::create(&ctx.session_id, id.clone(), shell.clone(), program) {
+        match registry::create(
+            &ctx.session_id,
+            id.clone(),
+            launch.shell.clone(),
+            launch.sandboxed,
+            launch.command,
+        ) {
             Ok(_) => ToolResult::success(format!(
-                "Terminal {id} is running {shell} in {}.\n\
+                "Terminal {id} is running {} in {}.\n\
                  Write to it with TerminalWrite, then read with TerminalRead \
                  (start at offset 0).",
-                cwd.display()
+                launch.shell, launch.location
             )),
             Err(error) => ToolResult::error(error),
         }
@@ -116,6 +136,10 @@ impl Tool for TerminalWriteTool {
         "TerminalWrite"
     }
 
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::TERMINAL
+    }
+
     fn description(&self) -> &str {
         "Send text to a terminal opened by TerminalCreate. A trailing newline \
          is added unless you set newline to false, so ordinary commands run as \
@@ -140,7 +164,7 @@ impl Tool for TerminalWriteTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let Some(id) = string_arg(&input, "id") else {
             return ToolResult::error("id is required");
         };
@@ -150,6 +174,17 @@ impl Tool for TerminalWriteTool {
         let Some(terminal) = registry::get(&id) else {
             return ToolResult::error(unknown_terminal(&id));
         };
+        // A terminal keeps the world it was opened in. Turning a sandbox on
+        // mid-session does not move an already-running host shell into it, and
+        // typing into that shell afterwards would run on the host while
+        // everything else went through the backend.
+        if !terminal.sandboxed && !world::host_terminals_allowed(ctx) {
+            return ToolResult::error(format!(
+                "terminal {id} is a host shell, opened before the sandbox took \
+                 effect. Writing to it would run outside the sandbox. Close it \
+                 with TerminalClose and open a new one with TerminalCreate."
+            ));
+        }
 
         // Where the caller resumes reading. Taken before the write so output
         // the command produces immediately cannot land in the gap.
@@ -200,6 +235,10 @@ pub struct TerminalReadTool;
 impl Tool for TerminalReadTool {
     fn name(&self) -> &str {
         "TerminalRead"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {
@@ -278,6 +317,10 @@ pub struct TerminalCloseTool;
 impl Tool for TerminalCloseTool {
     fn name(&self) -> &str {
         "TerminalClose"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::TERMINAL
     }
 
     fn description(&self) -> &str {

@@ -53,6 +53,34 @@ grep that guarantees no future PR can reintroduce the pattern.
 
 ---
 
+## Where the lint looks now
+
+`main.rs:3743` is history. The input handler left that file entirely: `src/main.rs`
+is a ~113-line argument dispatcher, the session input loop lives in
+`src/session_loop/`, and the terminal key/mouse loop in
+`crates/archon-tui/src/event_loop/`. Agent work reaches either of them only as an
+`Arc<dyn TurnRunner>` handed to `AgentDispatcher::spawn_turn`, with completion
+collected by `poll_completion` on the loop's own tick.
+
+`scripts/lint/arch-lint.sh` scopes rules 1 and 3 to those two directories. It used
+to scope them to a `BEGIN`/`END INPUT_HANDLER` marker pair in `src/main.rs` and to
+a two-file list of function names. Both stopped matching anything when the code
+moved, and the script reported success for months while inspecting zero lines —
+rule 1 printed a warning about the missing markers and continued; rule 3's loop
+body simply never executed. Each rule now declares how many files and candidate
+sites it inspected and exits non-zero if that count is zero, if a region directory
+has gone missing, or if `spawn_turn` is no longer called anywhere in the region.
+`tests/tc_arch_02_grep_input_handler.rs` asserts those counts rather than only the
+exit status, because exit 0 from a lint that looked at nothing is what this whole
+paragraph is about.
+
+The full account — including how long each rule was vacuous, and why restoring the
+markers was rejected rather than done — is
+[postmortem 0001](../postmortem/0001-arch-lint-inspected-nothing-and-reported-green.md)
+and its [decision record](../decisions/rejected/2026-08-22-restore-the-input-handler-markers.md).
+The rules that came out of it are DP-1 through DP-4 in
+[`docs/defensive-patterns.md`](../defensive-patterns.md).
+
 ## Why this is a philosophy, not a lint rule
 
 The three rules are architectural invariants: they describe **where**

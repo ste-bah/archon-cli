@@ -107,6 +107,9 @@ pub(crate) mod hooks;
 // #189 Phase 11: Agent Client Protocol over stdio.
 pub(crate) mod acp;
 pub(crate) mod ide_stdio;
+/// Spelling-complete recognition for commands whose bodies run upstream of
+/// the dispatcher (`/clear`, `/config`).
+pub(crate) mod intercept;
 pub(crate) mod kb;
 pub(crate) mod kb_ingest_output;
 /// `kb kbs` — the only surface that enumerates knowledge-base names.
@@ -138,6 +141,8 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod permissions_cli;
+/// `/permissions presets` and `/permissions preset <name>` (#200 Phase 3).
+pub(crate) mod permissions_presets;
 pub(crate) mod pipeline;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;
@@ -210,6 +215,9 @@ pub(crate) mod sandbox_doctor;
 pub(crate) mod sessions;
 // TASK-TUI-625: /session remote-URL + QR code handler.
 pub(crate) mod session;
+/// #200 Phase 4: `/session-ref` — a bounded, untrusted-wrapped excerpt of
+/// another session, injected into the next turn.
+pub(crate) mod session_ref;
 // TASK-TUI-627: /skills skills-menu overlay launcher.
 pub(crate) mod skills;
 pub(crate) mod slash;

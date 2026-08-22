@@ -26,13 +26,14 @@
 mod applier;
 mod parser;
 
-use std::fs;
 use std::path::Path;
 
 use serde_json::json;
 
 use crate::path_guard::resolve_write_target_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // Re-export submodule internals at the `apply_patch` module scope so
 // the existing `#[cfg(test)] mod tests { use super::*; }` block keeps
@@ -53,6 +54,10 @@ pub struct ApplyPatchTool;
 impl Tool for ApplyPatchTool {
     fn name(&self) -> &str {
         "ApplyPatch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -101,7 +106,8 @@ impl Tool for ApplyPatchTool {
             Err(e) => return ToolResult::error(e),
         };
 
-        let original = match fs::read_to_string(&path) {
+        let fs = ctx.fs();
+        let original = match fs.read_to_string(&path).await {
             Ok(s) => s,
             Err(e) => return ToolResult::error(format!("Failed to read file {path_str}: {e}")),
         };
@@ -116,7 +122,7 @@ impl Tool for ApplyPatchTool {
             Err(e) => return ToolResult::error(format!("Failed to apply patch: {e}")),
         };
 
-        if let Err(e) = fs::write(&path, &patched) {
+        if let Err(e) = fs.write(&path, patched.as_bytes()).await {
             return ToolResult::error(format!("Failed to write file {path_str}: {e}"));
         }
 

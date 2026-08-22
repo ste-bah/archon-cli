@@ -12,6 +12,10 @@ impl Tool for ReplaceTestTool {
         "ReplaceTest"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         self.0
     }
@@ -433,6 +437,10 @@ impl ActivityTestTool {
 impl Tool for ActivityTestTool {
     fn name(&self) -> &str {
         self.name
+    }
+
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

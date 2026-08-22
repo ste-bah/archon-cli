@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::request::AgentToolError;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 const CATALOG_PAGE_LIMIT: usize = 25;
 
@@ -94,6 +94,10 @@ impl AgentCatalogTool {
 impl Tool for AgentCatalogTool {
     fn name(&self) -> &str {
         "AgentCatalog"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

@@ -36,6 +36,7 @@ pub(super) async fn replay_tool_round(
     let exec_results = route_send_message_results(runner, &prepared, exec_results).await;
     record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
+    super::message_history::drain_repeat_tool_reminders(runner, messages);
 }
 
 /// Deliver any `SendMessage` this round produced.
@@ -268,19 +269,28 @@ async fn execute_prepared_tools(
                     Err(err) => return ToolResult::error(err),
                 };
                 let observer = crate::agent::tool_preflight_freshness::observer_for(&ctx);
+                let fs = ctx.fs();
                 if let Some(reason) = crate::agent::tool_preflight_freshness::refusal_for(
-                    filesystem, &observer, &name, &input,
-                ) {
+                    filesystem,
+                    fs.as_ref(),
+                    &observer,
+                    &name,
+                    &input,
+                )
+                .await
+                {
                     return ToolResult::error(reason);
                 }
                 let result = registry.dispatch(&name, input.clone(), &ctx).await;
                 crate::agent::tool_preflight_freshness::record(
                     filesystem,
+                    fs.as_ref(),
                     &observer,
                     &name,
                     &input,
                     !result.is_error,
-                );
+                )
+                .await;
                 result
             }
         })

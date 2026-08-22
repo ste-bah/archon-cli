@@ -7,6 +7,15 @@
 //! itself holding. These tests execute the Bash tool for real and read the
 //! variable back, because a unit test over the env-building helper would pass
 //! even if nothing called it.
+//!
+//! Every test here reads the variable back with `printf '%s' "$VAR"`, which is
+//! POSIX-shell syntax, so the whole target is `cfg(not(windows))` rather than
+//! three separately gated tests around ungated imports. Stated at file level
+//! for the reason `bash_signal_exit_code.rs` and `evidence_tools.rs` state
+//! theirs: a reader has to be able to see that this binary reports
+//! `0 passed` on Windows on purpose. It also silences the four dead-code and
+//! unused-import warnings the per-test gates left behind there.
+#![cfg(not(windows))]
 
 use serde_json::json;
 
@@ -23,7 +32,6 @@ fn ctx_for_session(session_id: &str) -> ToolContext {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn a_command_in_a_workflow_run_can_read_the_run_id() {
     let result = BashTool::default()
@@ -44,7 +52,6 @@ async fn a_command_in_a_workflow_run_can_read_the_run_id() {
 
 /// The project alias is the whole point: a task set names its own key and gets
 /// the same value, without that name existing in engine code.
-#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn a_project_alias_reaches_the_command_too() {
     let tool = BashTool {
@@ -67,7 +74,6 @@ async fn a_project_alias_reaches_the_command_too() {
 
 /// An ordinary interactive session has no run id and must not be handed a
 /// misleading one.
-#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn an_interactive_session_gets_no_run_id() {
     let result = BashTool::default()

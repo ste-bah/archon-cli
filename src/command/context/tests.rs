@@ -170,6 +170,13 @@ async fn apply_effect_set_model_override_writes_to_mutex() {
         CommandEffect::RunDraft { .. } | CommandEffect::RateMessage { .. } => {
             unreachable!("narrow apply_effect harness only exercises SetModelOverride")
         }
+        // #200 Phase 4: ReferenceSession belongs to /session-ref, whose own
+        // end-to-end coverage runs against a real SlashCommandContext in
+        // src/command/session_ref.rs. Unreachable here; the arm keeps the
+        // match exhaustive so a later variant cannot slip past this pin.
+        CommandEffect::ReferenceSession(_) => {
+            unreachable!("narrow apply_effect harness only exercises SetModelOverride")
+        }
     }
 
     let got = model_override_shared.lock().await.clone();

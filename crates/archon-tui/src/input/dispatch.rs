@@ -23,6 +23,17 @@ pub enum KeyResult {
 /// Overlay-modal keys (session picker, MCP manager, etc.) stay in
 /// `event_loop::input`.
 pub fn handle_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
+    let result = dispatch_key(app, key, keymap);
+    // Re-derive the `@`-mention picker from the buffer this key just changed
+    // (#200 Phase 4). One call here rather than one inside every editing
+    // action, so no edit path added later can forget to close a picker whose
+    // mention the caret has left — the state cannot drift from the text
+    // because it is recomputed from the text.
+    crate::event_loop::mention_input::sync_session_mention(app);
+    result
+}
+
+fn dispatch_key(app: &mut App, key: KeyEvent, keymap: &KeyMap) -> KeyResult {
     let resolved = keymap.resolve(key).cloned();
     let action = match resolved {
         Some(action) => action,

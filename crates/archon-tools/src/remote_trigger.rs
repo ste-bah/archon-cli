@@ -18,7 +18,9 @@ use std::collections::HashMap;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -171,6 +173,10 @@ impl RemoteTriggerTool {
 impl Tool for RemoteTriggerTool {
     fn name(&self) -> &str {
         "RemoteTrigger"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

@@ -19,7 +19,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::widgets::Row;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -73,40 +73,14 @@ impl TokenAttributionOverlay {
         self.list.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.list.len()
-    }
+    crate::virtual_list::delegate_virtual_list!(list, Contributor);
 
     pub fn total(&self) -> u64 {
         self.total
     }
 
-    pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
-    }
-
-    pub fn selected(&self) -> Option<&Contributor> {
-        self.list.selected()
-    }
-
     pub fn set_contributors(&mut self, contributors: Vec<Contributor>) {
         self.list.set_items(contributors);
-    }
-
-    pub fn move_up(&mut self) {
-        self.list.move_up();
-    }
-
-    pub fn move_down(&mut self) {
-        self.list.move_down();
-    }
-
-    pub fn page_up(&mut self) {
-        self.list.page_up();
-    }
-
-    pub fn page_down(&mut self) {
-        self.list.page_down();
     }
 
     /// The share the listed rows account for between them.
@@ -183,17 +157,16 @@ impl TokenAttributionOverlay {
             .style(crate::overlay::header_style(theme)),
         );
 
-        let table = Table::new(rows, &widths)
-            .header(
-                Row::new(["#", "tokens", "share", "role", "message"])
-                    .style(crate::overlay::header_style(theme)),
-            )
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .row_highlight_style(crate::overlay::selection_style(theme));
-
-        let mut state = TableState::default().with_selected(Some(self.list.selected_index()));
-        f.render_stateful_widget(table, region, &mut state);
+        crate::overlay::render_table(
+            f,
+            region,
+            block,
+            Row::new(["#", "tokens", "share", "role", "message"]),
+            rows,
+            &widths,
+            self.list.selected_index(),
+            theme,
+        );
     }
 }
 

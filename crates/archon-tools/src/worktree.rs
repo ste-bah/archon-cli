@@ -1,7 +1,9 @@
 use serde_json::json;
 
 use crate::git::open_repo;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 use crate::worktree_manager::{ExitAction, WorktreeManager};
 
 /// Tool to enter (create) a git worktree for isolated agent work.
@@ -11,6 +13,10 @@ pub struct EnterWorktreeTool;
 impl Tool for EnterWorktreeTool {
     fn name(&self) -> &str {
         "EnterWorktree"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {
@@ -72,6 +78,10 @@ pub struct ExitWorktreeTool;
 impl Tool for ExitWorktreeTool {
     fn name(&self) -> &str {
         "ExitWorktree"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

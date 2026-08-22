@@ -203,3 +203,111 @@ fn projections_are_scoped_to_their_session() {
 
     assert_eq!(projected.state.message_count, 0);
 }
+
+// ---------------------------------------------------------------------------
+// The cache must not outlive the log it was folded from (#200 Phase 4 follow-up)
+// ---------------------------------------------------------------------------
+
+/// `replace_messages` rewrites the log wholesale, and the driver resumes
+/// *after* the cached seq — so without invalidation the cache keeps serving
+/// state folded over messages that are no longer in the store. Compaction is
+/// exactly when this happens, and it happens to every projection at once, not
+/// just the one that thought to guard itself.
+#[test]
+fn a_replaced_log_does_not_serve_counts_from_the_log_it_replaced() {
+    let (_dir, store, session) = store();
+    for index in 0..6 {
+        store
+            .save_message(&session, index, &message("user", &format!("m{index}")))
+            .expect("message");
+    }
+    let before = store
+        .project(&session, &SessionStatsProjection)
+        .expect("project");
+    assert_eq!(before.state.message_count, 6);
+
+    // What `/compact` does at the store: six messages become two.
+    store
+        .replace_messages(
+            &session,
+            &[
+                message("user", "[Context Summary] the first five, distilled"),
+                message("assistant", "acknowledged"),
+            ],
+        )
+        .expect("replace");
+
+    let after = store
+        .project(&session, &SessionStatsProjection)
+        .expect("project");
+    assert_eq!(
+        after.state.message_count, 2,
+        "the cache served counts for messages the store no longer holds"
+    );
+    assert_eq!(after.state.user_messages, 1);
+    assert_eq!(after.state.assistant_messages, 1);
+}
+
+/// `truncate_messages_after` is `/rewind`: the tail is gone and the counts
+/// derived from it must go with it.
+#[test]
+fn a_truncated_log_does_not_serve_counts_for_the_tail_it_dropped() {
+    let (_dir, store, session) = store();
+    for index in 0..6 {
+        store
+            .save_message(&session, index, &message("user", &format!("m{index}")))
+            .expect("message");
+    }
+    assert_eq!(
+        store
+            .project(&session, &SessionStatsProjection)
+            .expect("project")
+            .state
+            .message_count,
+        6
+    );
+
+    store
+        .truncate_messages_after(&session, 2)
+        .expect("truncate");
+
+    assert_eq!(
+        store
+            .project(&session, &SessionStatsProjection)
+            .expect("project")
+            .state
+            .message_count,
+        3,
+        "the cache served counts for messages the rewind removed"
+    );
+}
+
+/// `/clear` empties the log. A projection that still reports the cleared
+/// conversation's shape is reporting content the user asked to be rid of.
+#[test]
+fn a_cleared_log_does_not_serve_counts_from_before_the_clear() {
+    let (_dir, store, session) = store();
+    for index in 0..4 {
+        store
+            .save_message(&session, index, &message("user", &format!("m{index}")))
+            .expect("message");
+    }
+    assert_eq!(
+        store
+            .project(&session, &SessionStatsProjection)
+            .expect("project")
+            .state
+            .message_count,
+        4
+    );
+
+    store.delete_all_messages(&session).expect("clear");
+
+    let after = store
+        .project(&session, &SessionStatsProjection)
+        .expect("project");
+    assert_eq!(
+        after.state.message_count, 0,
+        "the cache survived the clear and still describes the cleared conversation"
+    );
+}

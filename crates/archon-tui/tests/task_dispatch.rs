@@ -11,6 +11,7 @@ use archon_tui::task_dispatch::{
     TurnRunner,
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
 fn queued_prompt_fields_are_reachable() {
@@ -165,21 +166,76 @@ async fn test_spawn_turn_when_busy_queues() {
     }
 }
 
+/// A runner the test holds, so "did this get run?" is answered by the runner's
+/// own state rather than by a clock.
+struct GatedTurnRunner {
+    /// Set the moment `run_turn`'s future completes. Still false after
+    /// `spawn_turn` returns is the whole proposition.
+    finished: Arc<AtomicBool>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl TurnRunner for GatedTurnRunner {
+    fn run_turn<'a>(
+        &'a self,
+        _prompt: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        let finished = Arc::clone(&self.finished);
+        let release = Arc::clone(&self.release);
+        Box::pin(async move {
+            release.notified().await;
+            finished.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
+/// `spawn_turn` hands the turn to a task and returns; it does not run it.
+///
+/// Asserted structurally, not on a stopwatch. This required
+/// `elapsed.as_millis() < 5` against a runner that slept 500ms — a proxy for
+/// the real claim, and a bad one: a correctly non-blocking `spawn_turn` still
+/// exceeds 5ms on a loaded machine, so the test failed under concurrent load
+/// while the code was right. A timing threshold cannot separate "ran the turn"
+/// from "the scheduler was busy".
 #[tokio::test]
 async fn test_spawn_turn_does_not_await_agent() {
     let mut d = make_dispatcher();
-    let slow: Arc<dyn TurnRunner> = Arc::new(MockTurnRunner { sleep_ms: 500 });
-    let start = std::time::Instant::now();
-    let _ = d.spawn_turn("hello".into(), slow);
-    let elapsed = start.elapsed();
+    let finished = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gated: Arc<dyn TurnRunner> = Arc::new(GatedTurnRunner {
+        finished: Arc::clone(&finished),
+        release: Arc::clone(&release),
+    });
+
+    // Released BEFORE the call, so the runner can finish the instant anything
+    // polls it. That is what makes a regression fail rather than hang: an
+    // implementation that ran the turn inline would complete it and trip the
+    // assertion below, where holding the gate closed would deadlock and stall
+    // CI instead.
+    release.notify_one();
+
+    let result = d.spawn_turn("hello".into(), gated);
+
     assert!(
-        elapsed.as_millis() < 5,
-        "spawn_turn blocked for {}ms (>=5ms)",
-        elapsed.as_millis()
+        matches!(result, DispatchResult::Running { .. }),
+        "the turn should have been spawned"
     );
+    // No await between `spawn_turn` returning and this line, and a
+    // `#[tokio::test]` is a current-thread runtime — so the spawned task cannot
+    // have been polled yet unless `spawn_turn` itself drove it.
+    assert!(
+        !finished.load(Ordering::SeqCst),
+        "the runner completed before spawn_turn returned, so spawn_turn ran the turn instead of spawning it"
+    );
+
     if let Some(h) = d.current_query.take() {
         let _ = h.await;
     }
+    assert!(
+        finished.load(Ordering::SeqCst),
+        "the released runner should have completed"
+    );
 }
 
 // ---- TASK-TUI-102 tests ----
@@ -199,27 +255,51 @@ async fn test_cancel_aborts_running_turn() {
     let _ = d.spawn_turn("hello".into(), slow);
     assert!(d.is_busy());
     let outcome = d.cancel_current();
+    // `Aborted` is the claim. `elapsed_ms` reports how long the turn had been
+    // running; it is not a property under test. Bounding it made this fail
+    // whenever the machine was busy between spawn and cancel, which says
+    // nothing about whether the turn was aborted.
     assert!(
-        matches!(outcome, CancelOutcome::Aborted { elapsed_ms } if elapsed_ms < 50),
-        "expected Aborted with elapsed_ms < 50",
+        matches!(outcome, CancelOutcome::Aborted { .. }),
+        "expected the running turn to be aborted",
     );
     assert!(!d.is_busy());
     assert!(d.current_query.is_none());
 }
 
+/// `cancel_current` aborts the handle and returns; it does not await it.
+///
+/// Asserted on the runner, not the clock. The old form required the call to
+/// finish inside 10ms against a runner sleeping 10s — true of a correct
+/// implementation, and on a loaded machine also false of one.
+///
+/// The gate here is never released, so the runner cannot complete on its own.
+/// If `cancel_current` had waited for the handle it would still be waiting;
+/// the assertions catch the observable consequence — the runner must not have
+/// completed, and the dispatcher must no longer believe it is busy.
 #[tokio::test]
 async fn test_cancel_does_not_await_handle() {
     let mut d = make_dispatcher();
-    let slow: Arc<dyn TurnRunner> = Arc::new(MockTurnRunner { sleep_ms: 10_000 });
-    let _ = d.spawn_turn("hello".into(), slow);
-    let start = std::time::Instant::now();
-    let _ = d.cancel_current();
-    let elapsed = start.elapsed();
+    let finished = Arc::new(AtomicBool::new(false));
+    let never_released = Arc::new(tokio::sync::Notify::new());
+    let gated: Arc<dyn TurnRunner> = Arc::new(GatedTurnRunner {
+        finished: Arc::clone(&finished),
+        release: Arc::clone(&never_released),
+    });
+    let _ = d.spawn_turn("hello".into(), gated);
+
+    let outcome = d.cancel_current();
+
     assert!(
-        elapsed < std::time::Duration::from_millis(10),
-        "cancel_current blocked for {}ms (>=10ms) — likely awaited the handle",
-        elapsed.as_millis()
+        matches!(outcome, CancelOutcome::Aborted { .. }),
+        "expected the turn to be aborted"
     );
+    assert!(
+        !finished.load(Ordering::SeqCst),
+        "the runner completed, so cancel_current waited for it instead of aborting it"
+    );
+    assert!(!d.is_busy());
+    assert!(d.current_query.is_none());
 }
 
 #[tokio::test]

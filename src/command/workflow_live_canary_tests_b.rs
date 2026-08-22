@@ -78,7 +78,15 @@ impl CanaryAgentClient {
             ),
             "expected_evidence": "gap-audit artifact present under projectArtifactRoot",
             "artifact_requirements": [CANARY_ARTIFACT_REL],
-            "source_item_id": "impl-TASK-TDL-001"
+            "source_item_id": "impl-TASK-TDL-001",
+            // Both criteria, quoted exactly as the TASK FILE writes them — not
+            // as any inventory item words them. A plan must claim every
+            // criterion of every candidate task or it is refused, and the
+            // gate compares against the task universe parsed from that file.
+            "covered_acceptance_criteria": [
+                "Gap audit implemented in the target repository.",
+                format!("Artifact evidence written to `{CANARY_ARTIFACT_REL}`.")
+            ]
         })
     }
 
@@ -97,7 +105,7 @@ impl CanaryAgentClient {
         // Verification planners and verification repair reducers: always demand
         // the artifact evidence check, exactly as the real run's reducers did.
         if prompt.contains("Plan focused verification")
-            || prompt.contains("Repair an empty focused verification plan")
+            || prompt.contains("Repair an empty or malformed focused verification plan")
             || prompt.contains("Repair failed focused verification")
             || prompt.contains("Repair malformed focused verification retry output")
             || prompt.contains("Plan focused verification after write remediation")

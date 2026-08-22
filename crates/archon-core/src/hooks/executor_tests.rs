@@ -74,7 +74,6 @@ async fn hook_environment_is_allowlisted_and_includes_explicit_context() {
 async fn hook_parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("held-pipes.pid");
-    let started = std::time::Instant::now();
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(4),
         super::executor_process::run_command(
@@ -90,7 +89,6 @@ async fn hook_parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
     .expect("hook invocation exceeded its strict outer deadline");
 
     assert!(matches!(output, Err(super::RunError::Timeout(_))));
-    assert!(started.elapsed() < std::time::Duration::from_secs(4));
     wait_until_unix_process_is_absent(
         &std::fs::read_to_string(&pid_file).expect("descendant pid file"),
     )

@@ -130,7 +130,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::{PermissionLevel, ToolContext};
+    use crate::tool::{PermissionLevel, ToolCapability, ToolContext};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -140,6 +140,10 @@ mod tests {
     impl Tool for EchoTool {
         fn name(&self) -> &str {
             "Echo"
+        }
+
+        fn capability(&self) -> ToolCapability {
+            ToolCapability::HostLocal
         }
         fn description(&self) -> &str {
             "echoes input"
@@ -165,6 +169,10 @@ mod tests {
     impl Tool for SlowTool {
         fn name(&self) -> &str {
             "Slow"
+        }
+
+        fn capability(&self) -> ToolCapability {
+            ToolCapability::HostLocal
         }
         fn description(&self) -> &str {
             "slow"

@@ -21,7 +21,9 @@
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tracing target that observers subscribe to in order to pick up
 /// notification events. Kept as a single `const` so TUI/obs code can
@@ -34,6 +36,10 @@ pub struct PushNotificationTool;
 impl Tool for PushNotificationTool {
     fn name(&self) -> &str {
         "PushNotification"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::Egress
     }
 
     fn description(&self) -> &str {

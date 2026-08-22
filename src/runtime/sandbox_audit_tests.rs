@@ -10,12 +10,36 @@ struct FakeSandboxBackend {
 }
 
 impl SandboxBackend for FakeSandboxBackend {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         if tool == "DenyMe" {
             Err("blocked".to_string())
         } else {
             Ok(())
         }
+    }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Open(archon_permissions::SandboxTerminalCommand {
+            program: "fake".into(),
+            args: vec!["shell".into()],
+            shell: "bash".into(),
+            location: "/workspace".into(),
+        })
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Held
     }
 
     fn execute_bash<'a>(
@@ -94,7 +118,11 @@ async fn wrapper_records_redacted_check_and_bash_events() {
     );
 
     wrapper
-        .check("Read", &serde_json::json!({"path": "/secret"}))
+        .check(
+            "Read",
+            archon_permissions::ToolCapability::FILE_READ,
+            &serde_json::json!({"path": "/secret"}),
+        )
         .unwrap();
     wrapper
         .execute_bash(SandboxCommandRequest {
@@ -103,6 +131,7 @@ async fn wrapper_records_redacted_check_and_bash_events() {
             timeout_ms: 1_000,
             max_output_bytes: 1024,
             env: vec![("TOKEN".to_string(), "secret".to_string())],
+            ..SandboxCommandRequest::default()
         })
         .await;
     let audit = wrapper.flush_audit().await;
@@ -140,7 +169,11 @@ async fn wrapper_feeds_denied_sandbox_events_into_agent_ledger() {
     );
 
     let error = wrapper
-        .check("DenyMe", &serde_json::json!({"command": "secret"}))
+        .check(
+            "DenyMe",
+            archon_permissions::ToolCapability::HostLocal,
+            &serde_json::json!({"command": "secret"}),
+        )
         .unwrap_err();
     let audit = wrapper.flush_audit().await;
     let rows = archon_learning::agent_evolution_ledger::list_agent_performance_ledger_by_agent(

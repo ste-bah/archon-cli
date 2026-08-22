@@ -167,8 +167,27 @@ impl InputHandler {
     /// Used by overlays (e.g. `/skills` Enter-to-inject, TUI-627-followup)
     /// to write a command template directly into the input buffer.
     pub fn set_text(&mut self, text: &str) {
+        self.set_text_with_cursor(text, text.len());
+    }
+
+    /// Replace the input text and place the caret at `cursor` bytes in.
+    ///
+    /// [`InputHandler::set_text`] parks the caret at the end, which is right
+    /// for an overlay that injects a whole command and wrong for one that
+    /// resolves a token inside a half-written sentence: the `@`-mention picker
+    /// (#200 Phase 4) has to hand the caret back where the mention was, not
+    /// teleport it past text the user is still editing.
+    ///
+    /// `cursor` is clamped into the string and back to a character boundary,
+    /// so a caller that computed it against a stale buffer gets a usable caret
+    /// rather than a panic on the next edit.
+    pub fn set_text_with_cursor(&mut self, text: &str, cursor: usize) {
         self.current = text.to_string();
-        self.cursor_pos = self.current.len();
+        let mut cursor = cursor.min(self.current.len());
+        while cursor > 0 && !self.current.is_char_boundary(cursor) {
+            cursor -= 1;
+        }
+        self.cursor_pos = cursor;
         self.refresh_suggestions();
         self.ultrathink.scan_input(&self.current);
         self.trace("set_text");

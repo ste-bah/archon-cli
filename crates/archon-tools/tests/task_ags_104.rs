@@ -115,6 +115,13 @@ async fn execute_latency_under_10ms() {
     // AC-01: each call returns in <10ms. Allow a generous 50ms bound
     // to absorb CI jitter; the goal is to prove we are NOT blocking on
     // any agent I/O synchronously.
+    //
+    // The measured call's result is asserted rather than dropped. `let _ =` made
+    // the bound satisfiable by the very outcome it exists to exclude: a call
+    // that returns an error in microseconds — no executor installed, malformed
+    // input, a spawn that failed — is comfortably under 50ms and used to report
+    // a pass. The latency figure only means anything about a call that actually
+    // spawned an agent, so the spawn is asserted first.
     ensure_stub_executor();
     let tool = AgentTool::new();
     let input = json!({ "prompt": "Do something", "run_in_background": true });
@@ -123,8 +130,21 @@ async fn execute_latency_under_10ms() {
     let _ = tool.execute(input.clone(), &make_ctx()).await;
 
     let start = Instant::now();
-    let _ = tool.execute(input, &make_ctx()).await;
+    let result = tool.execute(input, &make_ctx()).await;
     let elapsed = start.elapsed();
+
+    assert!(
+        !result.is_error,
+        "the timed call must have spawned an agent, not failed fast: {}",
+        result.content
+    );
+    let value = parse_result(&result.content);
+    assert_eq!(
+        value["status"], "spawned",
+        "the timed call must report a spawn: {}",
+        result.content
+    );
+
     assert!(
         elapsed.as_millis() < 50,
         "execute() must return in <50ms; got {elapsed:?}"

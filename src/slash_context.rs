@@ -49,6 +49,12 @@ pub(crate) struct SlashCommandContext {
     /// show them. Loaded at session start and not mutable at runtime, so a
     /// value rather than a lock.
     pub(crate) permission_rules: archon_permissions::rules::RuleSet,
+    /// The `[sandbox]` knobs in force, carried alongside `permission_mode` so
+    /// `/permissions presets` can name the preset the pair corresponds to
+    /// (#200 Phase 3). Read-only here: the sandbox backends read the same
+    /// values from the config they were built from, and nothing consults this
+    /// copy to make a decision.
+    pub(crate) sandbox_config: archon_core::sandbox::SandboxConfig,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,
     pub(crate) mcp_manager: McpServerManager,
@@ -148,4 +154,14 @@ pub(crate) struct SlashCommandContext {
     /// GHOST-007: AgentDispatcher for is_busy() + cancel_current().
     /// Wrapped in std::sync::Mutex for interior mutability.
     pub(crate) agent_dispatcher: Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
+    /// #200 Phase 4: cross-session excerpts prepared by `/session-ref` and
+    /// waiting for the next user prompt to carry them into the turn.
+    ///
+    /// Each entry is already wrapped as untrusted by
+    /// `archon_core::session_reference` — nothing downstream re-wraps, and
+    /// nothing downstream may unwrap. Drained by `dispatch_user_prompt`, so
+    /// a prepared reference rides exactly one turn: it is context for the
+    /// question the user is about to ask, not a permanent addition to the
+    /// session.
+    pub(crate) pending_session_references: Arc<tokio::sync::Mutex<Vec<String>>>,
 }

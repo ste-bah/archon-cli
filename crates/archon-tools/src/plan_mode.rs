@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    AgentMode, PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool to enter Plan Mode. Plan Mode blocks working-tree mutations by default
 /// while the canonical Plan-safe allowlist retains explicit process-state
@@ -11,6 +13,10 @@ pub struct EnterPlanModeTool;
 impl Tool for EnterPlanModeTool {
     fn name(&self) -> &str {
         "EnterPlanMode"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {
@@ -52,6 +58,10 @@ pub struct ExitPlanModeTool;
 impl Tool for ExitPlanModeTool {
     fn name(&self) -> &str {
         "ExitPlanMode"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

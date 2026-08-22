@@ -24,6 +24,8 @@ mod input;
 /// Key-routing coverage for `input.rs`, which had none (#192).
 #[cfg(test)]
 mod input_routing_tests;
+/// `@`-mention trigger and key routing (#200 Phase 4).
+pub(crate) mod mention_input;
 mod mouse;
 /// Overlay key-routing coverage, split from `input_routing_tests.rs` for the
 /// 500-line ceiling (#192).
@@ -101,12 +103,14 @@ where
         context_threshold,
         command_catalog,
         task_store,
+        session_mentions,
     } = config;
 
     crate::commands::set_catalog(command_catalog);
 
     let mut app = App::new();
     app.task_store = task_store;
+    app.session_mention_source = session_mentions;
     app.status.model = model;
     app.status.context_window = context_window;
     app.status.context_name = Some("main".to_string());

@@ -47,6 +47,10 @@ impl Tool for RecordIdentityTool {
         "RecordIdentity"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "Records the ToolContext it receives."
     }

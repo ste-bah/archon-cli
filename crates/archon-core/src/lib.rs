@@ -30,6 +30,9 @@ pub mod git;
 pub mod hooks;
 pub mod input_format;
 pub mod logging;
+/// The `@`-mention grammar shared by the TUI picker and the send-time
+/// resolver (#200 Phase 4).
+pub mod mention;
 pub mod message_router;
 pub mod orchestrator;
 pub mod output_format;
@@ -45,6 +48,8 @@ pub mod reasoning;
 pub mod remote;
 pub mod sandbox;
 pub mod schema_validation;
+/// Bounded, untrusted-wrapped excerpts of another session (#200 Phase 4).
+pub mod session_reference;
 pub mod skills;
 pub mod spill;
 pub mod subagent;

@@ -124,6 +124,7 @@ pub(super) async fn run(
                 always_deny: config.permissions.always_deny.clone(),
                 always_ask: config.permissions.always_ask.clone(),
             },
+            sandbox_config: config.sandbox.clone(),
             memory: Arc::clone(&memory),
             garden_config: config.memory.garden.clone(),
             mcp_manager: mcp_manager.clone(),
@@ -264,6 +265,10 @@ pub(super) async fn run(
         context_threshold: config.context.compact_threshold,
         command_catalog,
         task_store: Some(crate::session::task_overlay_store::TaskManagerStore::shared()),
+        session_mentions: Some(crate::session::mention_source::StoreMentionSource::shared(
+            Arc::clone(&session_store),
+            session_id,
+        )),
     })
     .await;
 

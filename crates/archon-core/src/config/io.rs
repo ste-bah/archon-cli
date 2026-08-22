@@ -28,6 +28,7 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     let content = fs::read_to_string(&path)?;
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
+    warn_incoherent_permissions(&config, &path);
     Ok(config)
 }
 
@@ -40,7 +41,49 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
     let content = fs::read_to_string(&path)?;
     let config: ArchonConfig = toml::from_str(&content)?;
     validate(&config)?;
+    warn_incoherent_permissions(&config, &path);
     Ok(Some(config))
+}
+
+/// Report permission/sandbox combinations that validate field-by-field and
+/// still contradict each other (#200 Phase 3).
+///
+/// Warnings only. Every config that loaded before this existed still loads,
+/// with identical behaviour — the check reads the knobs and writes a log line,
+/// and changes no value and no decision.
+fn warn_incoherent_permissions(config: &ArchonConfig, path: &std::path::Path) {
+    for warning in permission_coherence_warnings(config) {
+        tracing::warn!(config = %path.display(), "{warning}");
+    }
+}
+
+/// Write a named preset's tuple into the HOME config file.
+///
+/// Same full-rewrite shape as [`save_world_model_guardrail_modes`]: the file is
+/// machine-generated from defaults and carries no hand-curated comments worth
+/// preserving. The result is validated before it is written, so a preset can
+/// never leave an unloadable config behind.
+pub fn save_permission_preset(
+    name: &str,
+) -> Result<(PathBuf, &'static PermissionPreset), ConfigError> {
+    let path = default_config_path();
+    let mut config = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        toml::from_str::<ArchonConfig>(&content)?
+    } else {
+        ArchonConfig::default()
+    };
+
+    let preset = apply_permission_preset(&mut config, name)?;
+    validate(&config)?;
+
+    let serialized = toml::to_string_pretty(&config)
+        .map_err(|e| ConfigError::ValidationError(format!("TOML serialize error: {e}")))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serialized)?;
+    Ok((path, preset))
 }
 
 /// GHOST-008: persist `voice.enabled` to the HOME config file.

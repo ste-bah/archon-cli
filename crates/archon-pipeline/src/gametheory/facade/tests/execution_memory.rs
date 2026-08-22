@@ -333,7 +333,6 @@ fn test_specialists_dispatch_in_parallel_waves() {
         created_at: "2026-05-03T00:00:00Z".into(),
     };
 
-    let started = std::time::Instant::now();
     let outcome = block_on(execute_specialists_real_with_options(
         &llm,
         &rd,
@@ -353,19 +352,17 @@ fn test_specialists_dispatch_in_parallel_waves() {
 
     assert_eq!(outcome.outputs.len(), 3);
     assert_eq!(outcome.max_observed_concurrent, 2);
+    // `max_active` is the overlap itself. The 320ms wall-clock bound that used
+    // to sit here restated the same claim through a stopwatch, where a loaded
+    // machine can blow the margin without anything having gone serial.
     assert!(
         llm.max_active() > 1,
         "specialist calls must overlap when max_concurrent > 1"
-    );
-    assert!(
-        started.elapsed() < std::time::Duration::from_millis(320),
-        "three 120ms specialists with max_concurrent=2 should not run serially"
     );
 }
 #[test]
 fn test_tier1_foundation_agents_run_as_parallel_wave() {
     let llm = SlowTier1LlmClient::new(canned_fingerprint_json());
-    let started = std::time::Instant::now();
     let (fp, audits) = block_on(execute_tier1_real(
         &llm,
         "run-tier1-parallel",
@@ -381,10 +378,6 @@ fn test_tier1_foundation_agents_run_as_parallel_wave() {
     assert!(
         llm.max_active() > 1,
         "Tier 1 mandatory agents must overlap in one parallel wave"
-    );
-    assert!(
-        started.elapsed() < std::time::Duration::from_millis(360),
-        "four 120ms Tier 1 calls should not run serially"
     );
     let prompts = llm.prompts().join("\n");
     for agent_key in TIER1_MEMORY_AGENT_KEYS {

@@ -3,7 +3,9 @@ use std::sync::{LazyLock, Mutex};
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 #[cfg(test)]
 mod tests;
@@ -276,6 +278,10 @@ pub struct ConfigTool;
 impl Tool for ConfigTool {
     fn name(&self) -> &str {
         "Config"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

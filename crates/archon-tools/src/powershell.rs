@@ -5,7 +5,9 @@ use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct PowerShellTool {
     pub timeout_secs: u64,
@@ -25,6 +27,10 @@ impl Default for PowerShellTool {
 impl Tool for PowerShellTool {
     fn name(&self) -> &str {
         "PowerShell"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

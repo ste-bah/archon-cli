@@ -202,10 +202,25 @@ fn preserve_file_size_ceiling_gate() {
     ];
 
     let mut offenders: Vec<String> = Vec::new();
+    let mut inspected = 0usize;
 
     for scan_root in &scan_roots {
         let files = collect_rs_files(scan_root);
+        // Validation criterion 4 said "walk at least 2 source roots", but nothing
+        // checked that a root yielded anything. `collect_rs_files` returns an
+        // empty vec for a directory that does not exist, so a renamed or moved
+        // source root turns this gate into a loop over nothing that reports no
+        // offenders — indistinguishable from a tree that is genuinely under the
+        // ceiling. Per-root, so one surviving root cannot cover for the other.
+        assert!(
+            !files.is_empty(),
+            "scan root {} yielded no .rs files — the gate is walking somewhere the \
+             source no longer lives, and would report success without inspecting \
+             a single file",
+            scan_root.display()
+        );
         for file in files {
+            inspected += 1;
             let contents = match fs::read_to_string(&file) {
                 Ok(c) => c,
                 // Unreadable files are not offenders — skip silently.
@@ -228,6 +243,12 @@ fn preserve_file_size_ceiling_gate() {
             ));
         }
     }
+
+    assert!(
+        inspected > 100,
+        "walked the scan roots but only reached {inspected} file(s); the gate is \
+         not looking at the codebase it guards"
+    );
 
     if !offenders.is_empty() {
         offenders.sort();

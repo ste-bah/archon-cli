@@ -1,6 +1,6 @@
-use std::fs;
 use std::path::PathBuf;
 
+use crate::filesystem::FileSystem;
 use crate::path_guard::resolve_write_target_path;
 use crate::tool::ToolContext;
 
@@ -12,24 +12,27 @@ pub(crate) struct ExpectedMutationSnapshot {
     hash: Option<String>,
 }
 
-pub(crate) fn snapshot_expected_targets(
+pub(crate) async fn snapshot_expected_targets(
+    fs: &dyn FileSystem,
     requested_paths: &[String],
     cwd: Option<&str>,
     ctx: &ToolContext,
 ) -> Result<Vec<ExpectedMutationSnapshot>, String> {
     let snapshot_ctx = mutation_context(cwd, ctx);
-    requested_paths
-        .iter()
-        .map(|requested_path| snapshot_one(requested_path, &snapshot_ctx))
-        .collect()
+    let mut snapshots = Vec::with_capacity(requested_paths.len());
+    for requested_path in requested_paths {
+        snapshots.push(snapshot_one(fs, requested_path, &snapshot_ctx).await?);
+    }
+    Ok(snapshots)
 }
 
-pub(crate) fn verify_expected_mutations(
+pub(crate) async fn verify_expected_mutations(
+    fs: &dyn crate::filesystem::FileSystem,
     snapshots: &[ExpectedMutationSnapshot],
 ) -> Result<(), String> {
     let mut unchanged = Vec::new();
     for snapshot in snapshots {
-        match fs::read(&snapshot.resolved_path) {
+        match fs.read(&snapshot.resolved_path).await {
             Ok(bytes) => {
                 let new_hash = content_hash(&bytes);
                 if snapshot.existed && snapshot.hash.as_deref() == Some(new_hash.as_str()) {
@@ -60,12 +63,13 @@ pub(crate) fn verify_expected_mutations(
     }
 }
 
-fn snapshot_one(
+async fn snapshot_one(
+    fs: &dyn FileSystem,
     requested_path: &str,
     ctx: &ToolContext,
 ) -> Result<ExpectedMutationSnapshot, String> {
     let resolved_path = resolve_write_target_path(requested_path, ctx)?;
-    let (existed, hash) = match fs::read(&resolved_path) {
+    let (existed, hash) = match fs.read(&resolved_path).await {
         Ok(bytes) => (true, Some(content_hash(&bytes))),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (false, None),
         Err(err) => {

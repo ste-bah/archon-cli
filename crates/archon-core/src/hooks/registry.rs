@@ -9,9 +9,12 @@ use super::context::HookContext;
 use super::executor;
 use super::types::{AggregatedHookResult, HookConfig, HookEvent, HookExecutionConfig, HookMatcher};
 
+mod budget;
 mod load;
 mod matching;
 mod persist;
+
+use budget::clamp_hook_to_budget;
 
 pub use matching::compute_hook_id;
 
@@ -257,18 +260,8 @@ impl HookRegistry {
             }
 
             // Clamp per-hook timeout to remaining budget.
-            let remaining = budget.saturating_sub(budget_start.elapsed());
-            let remaining_secs = remaining.as_secs().max(1) as u32;
-            let hook_timeout = hook.timeout.unwrap_or(60);
-            let clamped_timeout = hook_timeout.min(remaining_secs);
-
-            let clamped_hook = if clamped_timeout != hook_timeout {
-                let mut cloned = hook.clone();
-                cloned.timeout = Some(clamped_timeout);
-                cloned
-            } else {
-                hook.clone()
-            };
+            let clamped_hook =
+                clamp_hook_to_budget(hook, budget.saturating_sub(budget_start.elapsed()));
 
             // Execute the hook command with clamped timeout.
             let result =
@@ -318,18 +311,8 @@ impl HookRegistry {
                 continue;
             }
 
-            let remaining = budget.saturating_sub(budget_start.elapsed());
-            let remaining_secs = remaining.as_secs().max(1) as u32;
-            let hook_timeout = config.timeout.unwrap_or(60);
-            let clamped_timeout = hook_timeout.min(remaining_secs);
-
-            let clamped_config = if clamped_timeout != hook_timeout {
-                let mut cloned = config.clone();
-                cloned.timeout = Some(clamped_timeout);
-                cloned
-            } else {
-                config.clone()
-            };
+            let clamped_config =
+                clamp_hook_to_budget(config, budget.saturating_sub(budget_start.elapsed()));
 
             let result =
                 executor::execute_hook(&clamped_config, &input, cwd, session_id, &event_name).await;

@@ -1,9 +1,10 @@
-use std::fs;
 use std::path::Path;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool for editing Jupyter notebook (.ipynb) cells.
 ///
@@ -15,6 +16,10 @@ pub struct NotebookEditTool;
 impl Tool for NotebookEditTool {
     fn name(&self) -> &str {
         "NotebookEdit"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -56,7 +61,7 @@ impl Tool for NotebookEditTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let path_str = match input.get("path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error("path is required and must be a string"),
@@ -85,7 +90,8 @@ impl Tool for NotebookEditTool {
         };
 
         // Read and parse notebook
-        let raw = match fs::read_to_string(path) {
+        let fs = ctx.fs();
+        let raw = match fs.read_to_string(path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read notebook: {e}")),
         };
@@ -122,13 +128,13 @@ impl Tool for NotebookEditTool {
             Err(e) => return ToolResult::error(format!("Failed to serialize notebook: {e}")),
         };
 
-        if let Err(e) = fs::write(&tmp_path, &serialized) {
+        if let Err(e) = fs.write(&tmp_path, serialized.as_bytes()).await {
             return ToolResult::error(format!("Failed to write temp file: {e}"));
         }
 
-        if let Err(e) = fs::rename(&tmp_path, path) {
+        if let Err(e) = fs.rename(&tmp_path, path).await {
             // Clean up tmp file on rename failure
-            let _ = fs::remove_file(&tmp_path);
+            let _ = fs.remove_file(&tmp_path).await;
             return ToolResult::error(format!("Failed to rename temp file: {e}"));
         }
 

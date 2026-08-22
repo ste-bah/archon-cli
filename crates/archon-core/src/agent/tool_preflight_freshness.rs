@@ -10,7 +10,8 @@
 //! `preflight_single_tool`, which is where every other "may this run" question
 //! is already asked.
 
-use archon_tools::file_observation::{FILE_OBSERVATIONS, Observer, Verdict};
+use archon_tools::file_observation::{FILE_OBSERVATIONS, Observation, Observer, Verdict};
+use archon_tools::filesystem::FileSystem;
 
 use crate::config::ReadBeforeEdit;
 
@@ -36,8 +37,9 @@ const OBSERVING_TOOLS: &[&str] = &["Read", "NotebookRead", "Grep"];
 ///
 /// Under `Warn` this logs and returns `None`: the write happens, and the reason
 /// is on the record.
-pub(crate) fn refusal_for(
+pub(crate) async fn refusal_for(
     config: crate::config::FilesystemConfig,
+    fs: &dyn FileSystem,
     observer: &Observer,
     tool_name: &str,
     input: &serde_json::Value,
@@ -46,10 +48,14 @@ pub(crate) fn refusal_for(
         return None;
     }
     let path = guarded_path(input)?;
+    // The version comes from the world the write will land in, not the host,
+    // or under a remote workspace the guard would compare against a file the
+    // agent is not editing (#201).
+    let current = fs.version(&path).await;
     let reason = refusal(
         tool_name,
         &path,
-        &FILE_OBSERVATIONS.verdict(observer, &path),
+        &FILE_OBSERVATIONS.verdict(observer, &path, current),
     )?;
 
     if config.read_before_edit == ReadBeforeEdit::Warn {
@@ -63,8 +69,9 @@ pub(crate) fn refusal_for(
 ///
 /// A failed read observes nothing: the agent did not see the file, and
 /// pretending otherwise would licence an edit on bytes nobody looked at.
-pub(crate) fn record(
+pub(crate) async fn record(
     config: crate::config::FilesystemConfig,
+    fs: &dyn FileSystem,
     observer: &Observer,
     tool_name: &str,
     input: &serde_json::Value,
@@ -75,7 +82,7 @@ pub(crate) fn record(
     }
     if OBSERVING_TOOLS.contains(&tool_name) {
         for path in observed_paths(tool_name, input) {
-            FILE_OBSERVATIONS.record(observer, &path);
+            observe(fs, observer, &path).await;
         }
     }
     // An agent's own write is also an observation, or its second edit to a file
@@ -83,8 +90,17 @@ pub(crate) fn record(
     if GUARDED_TOOLS.contains(&tool_name)
         && let Some(path) = guarded_path(input)
     {
-        FILE_OBSERVATIONS.record(observer, &path);
+        observe(fs, observer, &path).await;
     }
+}
+
+/// Record this world's current version of `path` as what the agent saw.
+async fn observe(fs: &dyn FileSystem, observer: &Observer, path: &std::path::Path) {
+    let observation = fs
+        .version(path)
+        .await
+        .map_or(Observation::Absent, Observation::Present);
+    FILE_OBSERVATIONS.record_as(observer, path, observation);
 }
 
 /// Who is doing the looking, for a given tool invocation.
@@ -104,7 +120,16 @@ impl Agent {
         input: &serde_json::Value,
     ) -> bool {
         let observer = self.observer();
-        let Some(reason) = refusal_for(self.config.filesystem, &observer, &tool.name, input) else {
+        let fs = self.world_filesystem();
+        let Some(reason) = refusal_for(
+            self.config.filesystem,
+            fs.as_ref(),
+            &observer,
+            &tool.name,
+            input,
+        )
+        .await
+        else {
             return true;
         };
 
@@ -121,7 +146,7 @@ impl Agent {
     }
 
     /// Record what a tool just showed this agent.
-    pub(super) fn record_observation(
+    pub(super) async fn record_observation(
         &self,
         tool_name: &str,
         input: &serde_json::Value,
@@ -129,11 +154,25 @@ impl Agent {
     ) {
         record(
             self.config.filesystem,
+            self.world_filesystem().as_ref(),
             &self.observer(),
             tool_name,
             input,
             succeeded,
-        );
+        )
+        .await;
+    }
+
+    /// The filesystem this agent's tools run against.
+    ///
+    /// Reads `config.fs` — the same field `build_tool_context` puts into
+    /// `ctx.fs` — so the guard and the write can never consult different
+    /// worlds. `None` is the host, for both.
+    fn world_filesystem(&self) -> std::sync::Arc<dyn FileSystem> {
+        self.config
+            .fs
+            .clone()
+            .unwrap_or_else(archon_tools::filesystem::local_fs)
     }
 
     /// `session_id` is copied verbatim into subagents, so it cannot separate a

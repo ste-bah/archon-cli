@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 mod generated_shape;
 mod generated_tuning;
+/// `[guard]` — advisories that nudge the model without vetoing it (#200).
+mod guard;
 mod interfaces;
 mod io;
 mod learning;
@@ -12,6 +14,8 @@ mod context_section;
 mod filesystem;
 mod memory_open;
 mod observability;
+/// Named permission/sandbox presets and the cross-field coherence check (#200).
+mod permission_presets;
 mod providers;
 mod prune;
 mod runtime;
@@ -27,10 +31,12 @@ pub use context_section::ContextConfig;
 pub use filesystem::{FilesystemConfig, ReadBeforeEdit};
 pub use generated_shape::*;
 pub use generated_tuning::*;
+pub use guard::{GuardConfig, RepeatToolConfig};
 pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
 pub use observability::*;
+pub use permission_presets::*;
 pub use providers::*;
 pub use prune::*;
 pub use runtime::*;
@@ -134,6 +140,9 @@ pub struct ArchonConfig {
     /// Whether a write has to be backed by a read of the same bytes (#193).
     #[serde(default)]
     pub filesystem: FilesystemConfig,
+    /// Advisories that nudge the model without vetoing it (#200).
+    #[serde(default)]
+    pub guard: GuardConfig,
 }
 
 #[cfg(test)]

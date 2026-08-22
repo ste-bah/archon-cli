@@ -3,7 +3,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::widgets::Row;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -69,20 +69,7 @@ impl TaskOverlay {
         self.rows.is_empty()
     }
 
-    /// Returns the number of rows in the overlay.
-    pub fn len(&self) -> usize {
-        self.rows.len()
-    }
-
-    /// Returns the currently selected row index.
-    pub fn selected_index(&self) -> usize {
-        self.rows.selected_index()
-    }
-
-    /// Returns a reference to the currently selected row, if any.
-    pub fn selected(&self) -> Option<&TaskRow> {
-        self.rows.selected()
-    }
+    crate::virtual_list::delegate_virtual_list!(rows, TaskRow);
 
     /// Returns the last emitted action.
     pub fn last_action(&self) -> TaskAction {
@@ -98,26 +85,6 @@ impl TaskOverlay {
     pub fn open(&mut self, rows: Vec<TaskRow>) {
         self.rows.set_items(rows);
         self.last_action = TaskAction::None;
-    }
-
-    /// Move selection up (wrapping to last if at top).
-    pub fn move_up(&mut self) {
-        self.rows.move_up();
-    }
-
-    /// Move selection down (wrapping to first if at bottom).
-    pub fn move_down(&mut self) {
-        self.rows.move_down();
-    }
-
-    /// Move selection up by one page.
-    pub fn page_up(&mut self) {
-        self.rows.page_up();
-    }
-
-    /// Move selection down by one page.
-    pub fn page_down(&mut self) {
-        self.rows.page_down();
     }
 
     /// Request cancel for the currently selected task.
@@ -184,19 +151,19 @@ impl TaskOverlay {
             })
             .collect();
 
-        let table = Table::new(rows, &widths)
-            .header(
-                Row::new(["ID", "Elapsed", "Status"]).style(crate::overlay::header_style(theme)),
-            )
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .row_highlight_style(crate::overlay::selection_style(theme));
-
         // The selection has to reach the renderer or `move_up`/`move_down`
         // change an index nothing draws — which is what shipped: a list whose
         // cursor was invisible, so it looked like the keys did nothing.
-        let mut state = TableState::default().with_selected(Some(self.rows.selected_index()));
-        f.render_stateful_widget(table, overlay, &mut state);
+        crate::overlay::render_table(
+            f,
+            overlay,
+            block,
+            Row::new(["ID", "Elapsed", "Status"]),
+            rows,
+            &widths,
+            self.rows.selected_index(),
+            theme,
+        );
     }
 }
 

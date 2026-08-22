@@ -18,7 +18,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::widgets::Row;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -53,17 +53,7 @@ impl MemoryBrowser {
         self.list.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.list.len()
-    }
-
-    pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
-    }
-
-    pub fn selected(&self) -> Option<&MemoryEntry> {
-        self.list.selected()
-    }
+    crate::virtual_list::delegate_virtual_list!(list, MemoryEntry);
 
     pub fn query(&self) -> &str {
         &self.query
@@ -93,22 +83,6 @@ impl MemoryBrowser {
                 .collect()
         };
         self.list.set_items(filtered);
-    }
-
-    pub fn move_up(&mut self) {
-        self.list.move_up();
-    }
-
-    pub fn move_down(&mut self) {
-        self.list.move_down();
-    }
-
-    pub fn page_up(&mut self) {
-        self.list.page_up();
-    }
-
-    pub fn page_down(&mut self) {
-        self.list.page_down();
     }
 
     /// Draw the file list into a centred rect inside `area`.
@@ -153,14 +127,16 @@ impl MemoryBrowser {
             })
             .collect();
 
-        let table = Table::new(rows, &widths)
-            .header(Row::new(["Scope", "Path", "Size"]).style(crate::overlay::header_style(theme)))
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .row_highlight_style(crate::overlay::selection_style(theme));
-
-        let mut state = TableState::default().with_selected(Some(self.list.selected_index()));
-        f.render_stateful_widget(table, region, &mut state);
+        crate::overlay::render_table(
+            f,
+            region,
+            block,
+            Row::new(["Scope", "Path", "Size"]),
+            rows,
+            &widths,
+            self.list.selected_index(),
+            theme,
+        );
     }
 }
 

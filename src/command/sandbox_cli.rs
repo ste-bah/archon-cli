@@ -85,6 +85,7 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
         policy.workspace_access,
         policy.describes_isolation()
     );
+    output.push_str(&format!("Sandbox lifetime: {}\n", describe_scope(config)));
     if verbose {
         output.push_str(
             "Compatibility: /sandbox toggles the logical TUI gate only; normal permission rules still apply\n",
@@ -97,19 +98,65 @@ fn render_status(config: &archon_core::sandbox::SandboxConfig, verbose: bool) ->
     Ok(output)
 }
 
+/// What the selected backend does with the selected scope, in a sentence.
+///
+/// `Scope: session` on its own says what was configured, which for the whole
+/// life of that field was not what happened. This line says what the backend
+/// actually does, which is the question an operator wondering why their build
+/// re-downloads its dependencies is really asking.
+fn describe_scope(config: &archon_core::sandbox::SandboxConfig) -> String {
+    use archon_core::sandbox::ScopeDecision;
+    use archon_permissions::SandboxScopeSupport;
+
+    match config.scope_decision() {
+        Ok(ScopeDecision::NotApplicable) => {
+            "not applicable; this backend creates no world of its own".into()
+        }
+        Ok(ScopeDecision::Honoured { support, .. }) => match support {
+            SandboxScopeSupport::Held => "one sandbox held open for the scope and re-entered \
+                 per command; caches outside the workspace survive between commands"
+                .into(),
+            SandboxScopeSupport::Durable => "the world outlives Archon, so every scope reaches \
+                 the same durable place and state always survives"
+                .into(),
+            SandboxScopeSupport::PerCommand => "a sandbox built and destroyed per command; \
+                 nothing outside the workspace survives"
+                .into(),
+            // `scope_decision` turns this into a fallback or an error, so it
+            // never arrives here. Matched rather than wildcarded so a variant
+            // added later has to be thought about.
+            SandboxScopeSupport::Unsupported(reason) => format!("unsupported: {reason}"),
+        },
+        Ok(ScopeDecision::FellBack {
+            scope,
+            from,
+            reason,
+        }) => format!(
+            "{scope} — sandbox.scope was not set, and \"{from}\" is not something this backend \
+             can do: {reason}. Set sandbox.scope explicitly to choose for yourself"
+        ),
+        // Reachable only if something renders a status for a configuration that
+        // did not load; `archon sandbox status` cannot, because validation runs
+        // first. Printed rather than swallowed so it can never become the quiet
+        // half of a bad configuration.
+        Err(reason) => format!("unsupported: {reason}"),
+    }
+}
+
 fn append_backend_verbose_status(
     output: &mut String,
     config: &archon_core::sandbox::SandboxConfig,
 ) {
     match config.backend.as_str() {
         "docker" => output.push_str(&format!(
-            "Docker: enabled={} image={} network={} privileged={} mount_home={} mount_docker_socket={}\n",
+            "Docker: enabled={} image={} network={} privileged={} mount_home={} mount_docker_socket={}\nDocker container max age: {}s (enforced by the container's own PID 1, so a held container stops and is removed at this age even if Archon is killed)\n",
             config.docker.enabled,
             config.docker.image,
             config.docker.network,
             config.docker.privileged,
             config.docker.mount_home,
-            config.docker.mount_docker_socket
+            config.docker.mount_docker_socket,
+            config.docker.container_max_age_secs
         )),
         "ssh" => output.push_str(&format!(
             "SSH: enabled={} workspace_mode={} remote_workdir_configured={} host_configured={} host_key_checking={} host_shell_fallback={}\n",
@@ -156,13 +203,20 @@ fn render_explain(
         policy.backend = backend.parse().map_err(anyhow::Error::msg)?;
     }
     policy.validate().map_err(anyhow::Error::msg)?;
+    // The configuration this explanation is about, `--backend` included, so the
+    // backend the tool section builds is the one being explained rather than
+    // the one on disk.
+    let effective = archon_core::sandbox::SandboxConfig {
+        backend: policy.backend.as_str().to_string(),
+        ..config.clone()
+    };
     let mut output = format!(
         "Sandbox explain\nBackend: {}\nIsolation: {}\nDecision flow: UnifiedToolPreflight -> PermissionChecker -> SandboxPolicyResolver -> SandboxBackend -> ToolDispatch\nPermissions: sandbox policy cannot bypass always_deny rules, permission modes, or dangerous-bypass guards\nExecution: docker, ssh, and openshell can route Bash when selected; direct host shell fallback stays forbidden\n",
         policy.backend,
         policy.describes_isolation()
     );
     append_explain_details(&mut output, config, &policy)?;
-    sandbox_explain_tools::append_tool_explain(&mut output, &policy, tool, command);
+    sandbox_explain_tools::append_tool_explain(&mut output, &effective, &policy, tool, command);
     Ok(output)
 }
 
@@ -218,7 +272,7 @@ fn append_explain_details(
             ));
         }
         archon_core::sandbox::SandboxBackendKind::Logical => output.push_str(
-            "Isolation policy: logical permission gate only; no process, network, or filesystem isolation is claimed\n",
+            "Isolation policy: no isolation backend is installed; a session runs under the /sandbox toggle and no process, network, or filesystem isolation is claimed\n",
         ),
         archon_core::sandbox::SandboxBackendKind::Disabled => output.push_str(
             "Isolation policy: sandbox backend disabled; normal permission checks still apply\n",
@@ -333,3 +387,7 @@ fn persist_sandbox_command_event(
 #[cfg(test)]
 #[path = "sandbox_cli_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sandbox_explain_tool_tests.rs"]
+mod explain_tool_tests;

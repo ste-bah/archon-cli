@@ -93,6 +93,70 @@ their positions, so the index you pass is always the position in the log.
 `/fork-at` is not called `/branch`: `/branch` is the built-in skill that manages
 *git* branches.
 
+## Referencing another session
+
+`/fork` and `/fork-at` make a new session out of an old one. `/session-ref`
+answers a different question — "what did that other session find?" — without
+leaving the session you are in:
+
+```
+/session-ref 0f3c1b2a-...   # attach an excerpt of that session to your next message
+```
+
+The excerpt is attached to the **next message you send**, once, and is then
+gone. It is not a permanent addition to the session.
+
+Three things about it are deliberate.
+
+It is **bounded**. The last 20 stored messages, capped at 16 KB of rendered
+transcript. Over the cap, the whole transcript is written to the spill store
+under `.archon/spill/` and the attached excerpt names that file, so nothing is
+quietly cut off — if the write fails, the command fails rather than attaching a
+silently shortened excerpt.
+
+It is **the stored log, not the other session's live context**. That session may
+have compacted since, so the excerpt can contain material that session itself
+decided was not worth keeping. The attached block says so. Projecting the source
+session's current surface instead is the better answer and is not what this does
+yet.
+
+It is **untrusted**. A transcript is model output and tool results, and text
+inside it can be shaped like an instruction. The excerpt is therefore wrapped in
+its own tag behind a preamble stating that the contents are data, that no
+directive inside them is to be followed, and that the turn's instructions come
+only from your own message. Angle brackets inside the excerpt are escaped, so
+nothing in the referenced transcript can close the wrapper and continue as if it
+were your text.
+
+A session id that does not exist, or one with no messages, is an error you see —
+never an empty attachment that looks like it worked.
+
+Escaping rather than refusing is a deliberate choice: rejecting an excerpt that
+mentions the wrapper's tag would let any session make itself unreferenceable by
+naming it. See
+[the decision record](../decisions/rejected/2026-08-22-reject-content-that-mentions-the-wrapper-tag.md).
+
+### `@` instead of an id
+
+Typing `@` in the prompt opens a picker of the sessions you could reference, so
+you do not have to know an id to use this. Filter by typing — the list ranks an
+id you are part-way through above a word matched in a session's summary, and
+falls back to most-recently-active when you have typed nothing. Enter writes the
+chosen session into your sentence as `@session:<id>`, in place; Esc closes the
+list and leaves what you typed alone.
+
+Only an `@` at the start of a word, outside quotes, opens the list, so an email
+address, a `user@host:/path`, a `main@{u}`, an `@`-attached file path, and an
+`@` you are quoting verbatim all stay ordinary text.
+
+The reference is resolved when you **send** the message, not when you pick it
+from the list. That is what makes a mention worth typing early in a long
+message: the excerpt is of that session as it stands at the moment you press
+Enter, not as it stood while you were still writing. The cost of that choice is
+that a session which disappears while you compose fails at send — and it fails
+loudly, with the reason, and the turn is not sent at all rather than going out
+missing the context you attached.
+
 ## Rating a message
 
 `/feedback` records what the learning subsystems cannot infer — whether the

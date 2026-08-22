@@ -26,7 +26,24 @@ Before writing or reviewing async code, read:
 
 The rules are enforced mechanically in CI by `scripts/lint/arch-lint.sh`
 (workflow job `arch-lint`). The lint is a backstop, not a substitute for
-understanding the rules during review.
+understanding the rules during review — and for four months it was checking one
+rule out of three while reporting green, which is
+[postmortem 0001](docs/postmortem/0001-arch-lint-inspected-nothing-and-reported-green.md).
+
+## Writing checks and tests
+
+Before writing a gate, a lint, a CI step, or any test that involves a subprocess,
+a platform difference, or a clock, read
+[`docs/defensive-patterns.md`](docs/defensive-patterns.md). It is short, every rule
+is traced to a [postmortem](docs/postmortem/README.md) of something that actually
+happened here, and the one they are all instances of is:
+
+> **A check whose scan target can vanish must fail, not pass.**
+
+If your change turns down an option that a reasonable person would propose again —
+a threshold you decided not to raise, an eviction policy you decided not to add —
+record it in [`docs/decisions/rejected/`](docs/decisions/README.md#rejected).
+That bucket is the only place a decision that produced no code leaves a trace.
 
 ## Reporting bugs / proposing changes
 

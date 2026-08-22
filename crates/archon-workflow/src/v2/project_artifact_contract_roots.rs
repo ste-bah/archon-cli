@@ -160,7 +160,14 @@ fn admissible_path(raw: &str) -> Option<String> {
         || trimmed.contains("${")
         || trimmed.contains('*')
         || trimmed.contains('<')
+        // `has_root()` as well as `is_absolute()`. On Windows `/etc/passwd`
+        // carries no drive letter, so `is_absolute()` is FALSE and an absolute
+        // path went down the relative branch to be joined under the repository
+        // root instead of refused — an escape guard failing open on one
+        // platform. `archon-write-plan::normalize_target` already carries this
+        // exact fix; these newer readers repeated the narrow check.
         || std::path::Path::new(trimmed).is_absolute()
+        || std::path::Path::new(trimmed).has_root()
     {
         return None;
     }

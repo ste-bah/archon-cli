@@ -24,6 +24,7 @@ pub(super) struct SlashContextBuildInput {
     pub codex_models: archon_core::config::OpenAiCodexModelsConfig,
     pub anthropic_models: archon_core::config::AnthropicModelsConfig,
     pub permission_rules: archon_permissions::rules::RuleSet,
+    pub sandbox_config: archon_core::sandbox::SandboxConfig,
     pub memory: Arc<dyn MemoryTrait>,
     pub garden_config: archon_memory::garden::GardenConfig,
     pub mcp_manager: archon_mcp::lifecycle::McpServerManager,
@@ -85,6 +86,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         codex_models: input.codex_models,
         anthropic_models: input.anthropic_models,
         permission_rules: input.permission_rules,
+        sandbox_config: input.sandbox_config,
         memory: input.memory,
         garden_config: input.garden_config,
         mcp_manager: input.mcp_manager,
@@ -123,6 +125,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         cozo_db: input.cozo_db,
         governed_learning_db: input.governed_learning_db,
         auto_trainer: input.auto_trainer,
+        pending_session_references: Arc::new(tokio::sync::Mutex::new(Vec::new())),
     }
 }
 

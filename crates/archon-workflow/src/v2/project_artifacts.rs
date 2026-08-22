@@ -217,7 +217,11 @@ fn absolute_artifact_path(
     let Ok(relative) = clean.strip_prefix(project_root) else {
         return Ok(ProjectArtifactPath::NotArtifact);
     };
-    let relative = normalize_relative_path(item_id, &relative.to_string_lossy())?;
+    // `/` separators whatever the host uses: a Windows backslash path never
+    // matched the `/`-separated declared paths, so a written deliverable was
+    // classified NotArtifact and write-ownership rejected the branch.
+    let relative =
+        normalize_relative_path(item_id, &relative.to_string_lossy().replace('\\', "/"))?;
     if !allowed_relative_artifact(&relative, context) {
         return Ok(ProjectArtifactPath::NotArtifact);
     }

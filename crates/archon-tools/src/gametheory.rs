@@ -9,7 +9,9 @@ use std::sync::{Arc, OnceLock, RwLock};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub const GAMETHEORY_TOOL_NAMES: &[&str] = &[
     "GameTheoryRun",
@@ -131,12 +133,22 @@ macro_rules! define_gametheory_tool {
                 }
             }
 
+            fn capability(&self) -> ToolCapability {
+                GAMETHEORY_TOOL_CAPABILITY
+            }
+
             fn permission_level(&self, _input: &Value) -> PermissionLevel {
                 $perm
             }
         }
     };
 }
+
+/// Every one of these tools, the read-only ones included, is served by the same
+/// installed [`GameTheoryExecutor`] — a pipeline that runs specialist agents.
+/// Splitting the reads out would mean asserting that the executor cannot spawn
+/// on a status call, which this crate is in no position to know.
+const GAMETHEORY_TOOL_CAPABILITY: ToolCapability = ToolCapability::ControlPlane;
 
 define_gametheory_tool!(
     GameTheoryRun,

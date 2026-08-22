@@ -12,7 +12,9 @@ use archon_memory::board::{BoardAccess, BoardStatus, BoardUpdate};
 
 use super::tools::{access, render, required_str, sweep};
 use super::{BoardHandle, caller_id, run_id_for_session};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // ---------------------------------------------------------------------------
 // BoardClaim
@@ -47,6 +49,10 @@ impl Default for BoardClaimTool {
 impl Tool for BoardClaimTool {
     fn name(&self) -> &str {
         "BoardClaim"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {
@@ -149,6 +155,10 @@ impl Default for BoardResolveTool {
 impl Tool for BoardResolveTool {
     fn name(&self) -> &str {
         "BoardResolve"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

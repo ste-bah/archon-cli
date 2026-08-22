@@ -14,6 +14,10 @@ impl Tool for AdmissionFailureTestTool {
         "Bash"
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::EXECUTION
+    }
+
     fn description(&self) -> &str {
         "admission failure test"
     }

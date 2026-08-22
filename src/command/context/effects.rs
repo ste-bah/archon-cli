@@ -189,6 +189,17 @@ pub(crate) fn apply_effect<'a>(
                 )
                 .await;
             }
+            // #200 Phase 4. The whole body lives in the command module so the
+            // read, the bounding and the untrusted wrapping stay next to the
+            // command that owns them rather than accumulating here.
+            CommandEffect::ReferenceSession(referenced_id) => {
+                crate::command::session_ref::apply_reference_session(
+                    &referenced_id,
+                    slash_ctx,
+                    tui_tx,
+                )
+                .await;
+            }
         }
     })
 }

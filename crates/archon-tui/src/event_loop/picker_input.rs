@@ -247,6 +247,52 @@ pub(crate) fn handle_permissions_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while the permission-preset selector is open.
+///
+/// Enter injects `/permissions preset <name>` instead of applying anything,
+/// the same contract the `/model` and `/theme` pickers keep. One handler
+/// validates the name and persists the tuple; a second path through this
+/// overlay would be a preset layer that acts rather than one that records
+/// intent, which is the failure this whole feature exists to avoid.
+pub(crate) fn handle_permission_presets_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.permission_presets.is_none() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => {
+            if let Some(ref mut picker) = app.permission_presets {
+                picker.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut picker) = app.permission_presets {
+                picker.move_down();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut picker) = app.permission_presets {
+                picker.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut picker) = app.permission_presets {
+                picker.page_down();
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(picker) = app.permission_presets.take()
+                && let Some(entry) = picker.selected()
+            {
+                app.input
+                    .set_text(&format!("/permissions preset {}", entry.name));
+            }
+        }
+        KeyCode::Esc => app.permission_presets = None,
+        _ => {}
+    }
+    true
+}
+
 /// Route one key while the memory-files overlay is open.
 ///
 /// Typing filters by path. There is no Enter action — the files are read into
@@ -282,6 +328,23 @@ pub(crate) fn handle_memory_files_key(app: &mut App, key: KeyEvent) -> bool {
         }
         KeyCode::Esc | KeyCode::Enter => app.memory_browser = None,
         _ => {}
+    }
+    true
+}
+
+/// Route one key while an Evidence Engine inspection overlay is open.
+///
+/// Moved out of `input.rs` when the `@`-mention router arrived and that file
+/// crossed the 500-line ceiling; behaviour is unchanged. Data navigation is
+/// screen-local, so Esc closes and every other key is swallowed — the overlay
+/// must never trap the user, and must never leak a keystroke into the prompt
+/// hidden behind it.
+pub(crate) fn handle_evidence_view_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.evidence_view.is_none() {
+        return false;
+    }
+    if matches!(key.code, KeyCode::Esc) {
+        app.evidence_view = None;
     }
     true
 }

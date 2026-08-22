@@ -13,8 +13,27 @@ struct FixedSandbox {
 }
 
 impl SandboxBackend for FixedSandbox {
-    fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         Ok(())
+    }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::sandbox::SandboxTerminalRequest,
+    ) -> archon_permissions::sandbox::SandboxTerminal {
+        archon_permissions::sandbox::SandboxTerminal::Host
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
     }
 
     fn execute_bash<'a>(

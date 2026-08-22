@@ -14,8 +14,27 @@ struct AdmissionTestTool {
 struct DenyAllSandbox;
 
 impl archon_permissions::SandboxBackend for DenyAllSandbox {
-    fn check(&self, _tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        _tool: &str,
+        _capability: archon_permissions::ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         Err("sandbox denied".into())
+    }
+
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        archon_permissions::SandboxTerminal::Refused("sandbox denied".into())
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
     }
 }
 
@@ -23,6 +42,10 @@ impl archon_permissions::SandboxBackend for DenyAllSandbox {
 impl Tool for AdmissionTestTool {
     fn name(&self) -> &str {
         "AdmissionTest"
+    }
+
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

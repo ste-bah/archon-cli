@@ -17,7 +17,7 @@ fn status_merge_preserves_terminal_or_review_state() {
 }
 
 #[test]
-fn read_only_calls_cannot_accept_task_coverage_without_implementation_evidence() {
+fn a_read_only_focused_verification_cannot_accept_without_implementation_evidence() {
     let mut result = WorkflowV2Result::accepted("read-only audit claimed completion");
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Inspection,
@@ -34,7 +34,17 @@ fn read_only_calls_cannot_accept_task_coverage_without_implementation_evidence()
     });
     let execution = WorkflowV2CallExecution {
         call: WorkflowV2HostCall {
-            id: "readonly-audit".to_string(),
+            // A focused-verification call. The guard fires for THIS and only
+            // this: its accepted task coverage is an implementation-acceptance
+            // claim, and a read-only call cannot mint implementation evidence.
+            //
+            // It used to fire for every read-only call, which downgraded the
+            // accepted coverage that inventory, the repairs and discovery all
+            // carry as ordinary bookkeeping, and looped the caller into
+            // non-converging repair. This test still named a plain
+            // `readonly-audit` call and was left behind when the scope was
+            // inverted.
+            id: "verification-wave-1".to_string(),
             method: WorkflowV2HostMethod::Agent,
             write_mode: None,
             options: WorkflowV2HostOptions::default(),
@@ -54,7 +64,7 @@ fn read_only_calls_cannot_accept_task_coverage_without_implementation_evidence()
         result
             .residual_gaps
             .iter()
-            .any(|gap| gap.id == "read_only_task_acceptance_readonly-audit")
+            .any(|gap| gap.id == "read_only_task_acceptance_verification-wave-1")
     );
 }
 

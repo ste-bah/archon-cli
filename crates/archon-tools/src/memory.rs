@@ -3,7 +3,7 @@ use std::sync::Arc;
 use archon_memory::MemoryTrait;
 use archon_memory::types::MemoryType;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult};
+use crate::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 // ---------------------------------------------------------------------------
 // memory_store
@@ -26,6 +26,10 @@ impl MemoryStoreTool {
 impl Tool for MemoryStoreTool {
     fn name(&self) -> &str {
         "memory_store"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {
@@ -121,6 +125,10 @@ impl MemoryRecallTool {
 impl Tool for MemoryRecallTool {
     fn name(&self) -> &str {
         "memory_recall"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

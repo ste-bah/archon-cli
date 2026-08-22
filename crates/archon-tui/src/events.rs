@@ -188,6 +188,17 @@ pub enum TuiEvent {
         mode: String,
         rules: Vec<(String, String, String)>,
     },
+    /// Open the permission-preset selector (#200 Phase 3,
+    /// `/permissions presets`).
+    ///
+    /// `active` is the preset the live config corresponds to, or `custom` when
+    /// it matches none — derived by the sender from current knob values, never
+    /// stored. Each entry is
+    /// `(name, description, permissions.mode, sandbox.backend)`.
+    ShowPermissionPresets {
+        active: String,
+        presets: Vec<(String, String, String, String)>,
+    },
     /// Open the memory-files overlay (#192, `/memory files`).
     ///
     /// Each entry is `(scope, path, size_bytes)` in the order the files layer

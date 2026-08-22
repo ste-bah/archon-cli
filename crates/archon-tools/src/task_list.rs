@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that lists all tracked tasks.
 pub struct TaskListTool;
@@ -9,6 +11,10 @@ pub struct TaskListTool;
 impl Tool for TaskListTool {
     fn name(&self) -> &str {
         "TaskList"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

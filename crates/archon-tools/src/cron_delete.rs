@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use crate::cron_task::CronStore;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that deletes a scheduled cron task by ID.
 pub struct CronDeleteTool {
@@ -45,6 +47,10 @@ impl CronDeleteTool {
 impl Tool for CronDeleteTool {
     fn name(&self) -> &str {
         "CronDelete"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

@@ -9,7 +9,9 @@ use std::time::SystemTime;
 
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 use index::CodebaseIndex;
 use parser::{language_for_file, parse_file};
 
@@ -38,6 +40,10 @@ pub struct CartographerTool;
 impl Tool for CartographerTool {
     fn name(&self) -> &str {
         "CartographerScan"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {

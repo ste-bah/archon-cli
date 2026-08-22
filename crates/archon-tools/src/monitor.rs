@@ -33,7 +33,9 @@ use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Default collection window in milliseconds.
 const DEFAULT_TIMEOUT_MS: u64 = 3_000;
@@ -51,6 +53,10 @@ pub struct MonitorTool;
 impl Tool for MonitorTool {
     fn name(&self) -> &str {
         "Monitor"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HOST_HANDLE
     }
 
     fn description(&self) -> &str {

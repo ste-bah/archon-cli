@@ -30,6 +30,12 @@ use serde::de::DeserializeOwned;
 
 use crate::storage::{SessionError, SessionStore, db_err, extract_str};
 
+/// Remove every cached projection belonging to one session.
+///
+/// Shared with `delete_session`, which needs it inside its own transaction
+/// rather than as a standalone write.
+pub(crate) const PROJECTIONS_RM_FOR_SESSION: &str = "?[session_id, projection_key] := *session_projections{session_id, projection_key},      session_id = $sid :rm session_projections {session_id, projection_key}";
+
 /// One committed entry in a session log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionEvent {
@@ -125,6 +131,33 @@ impl SessionStore {
             through_seq,
             advanced,
         })
+    }
+
+    /// Drop every projection cached for a session.
+    ///
+    /// The driver resumes strictly *after* the cached `event_seq`, so a cache
+    /// only ever moves forward. That is correct while the log only grows, and
+    /// wrong the moment it does not: `replace_messages` rewrites it,
+    /// `truncate_messages_after` shortens it and `delete_all_messages` empties
+    /// it, and after any of those the cached state describes messages the store
+    /// no longer holds — with no seq the fold would ever revisit to notice.
+    ///
+    /// Every log-rewriting method calls this, rather than each projection
+    /// guarding itself. A unit is a pure fold over the events it was given; it
+    /// has no way to learn that the events were withdrawn, and making that
+    /// every author's problem would mean rediscovering this bug once per
+    /// projection.
+    pub fn invalidate_all_projections(&self, session_id: &str) -> Result<(), SessionError> {
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        self.db()
+            .run_mutable(
+                PROJECTIONS_RM_FOR_SESSION,
+                params,
+                "session store: invalidate all projections",
+            )
+            .map_err(db_err)?;
+        Ok(())
     }
 
     /// Drop a projection's cache, so the next fold starts from `init`.

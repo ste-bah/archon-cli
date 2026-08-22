@@ -1,31 +1,29 @@
-//! `/config` slash command handler.
-//! Extracted from main.rs to reduce main.rs from 6234 to < 500 lines.
+//! `/config` — the registry's entry for a command whose body runs upstream.
 //!
-//! # TASK-AGS-POST-6-NO-STUB: ConfigHandler (THIN-WRAPPER)
+//! # Where the work happens
 //!
-//! Historically `/config` was wired into the dispatcher via a
-//! `declare_handler!(ConfigHandler, "Show or update Archon
-//! configuration", &["settings", "prefs"])` macro invocation in
-//! `src/command/registry.rs:1346-1350`. The real async work lives
-//! UPSTREAM in `src/command/slash.rs:247` which intercepts `/config`
-//! before the dispatcher runs (it needs async file/tool access that
-//! the sync `CommandHandler::execute` signature cannot `.await`), so
-//! the registered handler was, and remains, a no-op wrapper.
+//! [`handle_config_command`] below does the real work. It is `async` and
+//! reads the whole `SlashCommandContext`, neither of which the synchronous
+//! `CommandHandler::execute` signature can reach, so `command::slash`
+//! intercepts the command before the dispatcher runs and calls it directly.
+//! `ConfigHandler` exists to give the registry a name, a description and the
+//! alias list `/help` prints.
 //!
-//! POST-6-NO-STUB eliminates the `declare_handler!` macro entirely.
-//! To do so, the macro-generated ConfigHandler struct + impl is moved
-//! into this file as a THIN-WRAPPER (same pattern as
-//! `src/command/compact.rs` and `src/command/clear.rs`). The body is
-//! byte-identical to the shipped macro stub: `execute` returns
-//! `Ok(())` WITHOUT emitting any `TuiEvent`. The description literal
-//! (`"Show or update Archon configuration"`) and aliases
-//! (`&["settings", "prefs"]`) are preserved verbatim per AGS-817
-//! shipped-wins drift-reconcile.
+//! # The gap this module used to leave open
 //!
-//! The real-work async delegate `handle_config_command` below is
-//! unchanged by POST-6-NO-STUB and continues to be the upstream
-//! intercept target at `src/command/slash.rs:247`.
+//! The interception matched the literal `/config` only. The aliases declared
+//! right here — `settings` and `prefs` — reached the dispatcher instead, and
+//! `execute` was `Ok(())`: typing `/settings` printed nothing and changed
+//! nothing, with no error to say which of the two had happened. The same
+//! shape as `/cls` against `/clear`, and found while fixing it.
+//!
+//! [`command_args`] now answers "is this the config command, and with what
+//! arguments?" from [`ConfigHandler::NAME`] plus [`ConfigHandler::aliases`] —
+//! the same list `RegistryBuilder::build` indexes. An alias added to the
+//! handler is intercepted by construction. `execute` is consequently
+//! unreachable and says so rather than returning a success it did not earn.
 
+use crate::command::intercept;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::slash_context::SlashCommandContext;
 use archon_tui::app::TuiEvent;
@@ -42,19 +40,18 @@ use archon_tui::app::TuiEvent;
 /// `&Sender<TuiEvent>` HRTB variant; the other borrow variants
 /// remain, hence the explicit Pin<Box<..>>.
 pub fn handle_config_command<'a>(
-    input: &'a str,
+    args: &'a str,
     tui_tx: &'a archon_tui::event_channel::TuiEventSender,
     ctx: &'a SlashCommandContext,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
-        let args: Vec<&str> = input
-            .strip_prefix("/config")
-            .unwrap_or_default()
-            .trim()
-            .splitn(2, ' ')
-            .collect();
-        let key = args.first().map(|s| s.trim()).unwrap_or("");
-        let value = args.get(1).map(|s| s.trim()).unwrap_or("");
+        // The caller has already stripped the command name — under whichever
+        // spelling the user typed — so what arrives here is just the argument
+        // text. Parsing `/config` back out of the input is what left
+        // `/settings` and `/prefs` unable to carry arguments at all.
+        let parts: Vec<&str> = args.trim().splitn(2, ' ').collect();
+        let key = parts.first().map(|s| s.trim()).unwrap_or("");
+        let value = parts.get(1).map(|s| s.trim()).unwrap_or("");
 
         // #189 Phase 7: the effective configuration in one place. `sources`
         // says where settings came from; this says what they resolved to and
@@ -151,26 +148,16 @@ pub fn handle_config_command<'a>(
     })
 }
 
-// ---------------------------------------------------------------------------
-// TASK-AGS-POST-6-NO-STUB: ConfigHandler (THIN-WRAPPER macro-eliminator)
-// ---------------------------------------------------------------------------
-
-/// Zero-sized handler registered as the primary `/config` command.
-///
-/// Aliases: `["settings", "prefs"]` — PRESERVED from the shipped
-/// `declare_handler!(ConfigHandler, ...)` macro invocation at
-/// `src/command/registry.rs:1346-1350` (shipped-wins drift-reconcile
-/// per AGS-813).
-///
-/// Under normal operation this handler is UNREACHABLE because
-/// `src/command/slash.rs:247` intercepts `/config` before the
-/// dispatcher runs and invokes the async `handle_config_command`
-/// delegate in this same module. If `execute` fires anyway the
-/// behavior is the shipped no-op `Ok(())` — byte-identical to the
-/// pre-POST-6-NO-STUB `declare_handler!` macro body.
+/// Registry entry for `/config`. The body is [`handle_config_command`], run
+/// from the interception in `command::slash`; see the module docs.
 pub(crate) struct ConfigHandler;
 
 impl ConfigHandler {
+    /// The primary spelling, shared by the registry entry in
+    /// `registry::default_registry` and by [`command_args`], so the name the
+    /// dispatcher knows and the name the interception matches cannot differ.
+    pub(crate) const NAME: &'static str = "config";
+
     /// Construct a fresh `ConfigHandler`. Zero-sized so this is free.
     pub(crate) fn new() -> Self {
         Self
@@ -185,36 +172,45 @@ impl Default for ConfigHandler {
 
 impl CommandHandler for ConfigHandler {
     fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        // THIN-WRAPPER no-op. Byte-identical to the shipped
-        // `declare_handler!` macro body: return `Ok(())` WITHOUT
-        // emitting any TuiEvent. Real async work happens UPSTREAM at
-        // `src/command/slash.rs:247` via `handle_config_command`.
-        Ok(())
+        // Unreachable: `command::slash` intercepts every spelling
+        // `command_args` recognises, which is every spelling the registry
+        // resolves to this handler. Reaching here means the config command
+        // did nothing, and silence about that is what hid the alias defect.
+        anyhow::bail!(
+            "/config did not run: its body is intercepted before the dispatcher \
+             and the dispatcher was reached instead. Nothing was shown or \
+             changed. This is a dispatch wiring regression — report it."
+        )
     }
 
     fn description(&self) -> &'static str {
-        // Byte-for-byte preservation of the shipped declare_handler!
-        // stub at registry.rs:1346-1350 (shipped-wins drift-reconcile).
         "Show or update Archon configuration"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        // Shipped stub used the three-arg declare_handler! form with
-        // `&["settings", "prefs"]`. Preserved per AGS-813 alias-only
-        // drift-reconcile + AGS-817 shipped-wins precedent.
         &["settings", "prefs"]
     }
 }
 
-// ---------------------------------------------------------------------------
-// TASK-AGS-POST-6-NO-STUB: tests for /config ConfigHandler THIN-WRAPPER
-// ---------------------------------------------------------------------------
+/// Every spelling the registry resolves to [`ConfigHandler`]: the primary name
+/// followed by each published alias. Tests iterate this rather than a
+/// hand-written list.
+pub(crate) fn spellings() -> Vec<&'static str> {
+    std::iter::once(ConfigHandler::NAME)
+        .chain(ConfigHandler.aliases().iter().copied())
+        .collect()
+}
+
+/// The argument text after the command name when `input` is `/config` under
+/// any of its [`spellings`]; `None` when `input` is some other command.
+pub(crate) fn command_args(input: &str) -> Option<&str> {
+    intercept::command_args(input, &spellings())
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::RegistryBuilder;
@@ -230,104 +226,66 @@ mod tests {
     }
 
     #[test]
-    fn config_handler_description_byte_identical_to_shipped() {
+    fn the_description_and_aliases_the_registry_publishes_are_unchanged() {
         let h = ConfigHandler::new();
-        assert_eq!(
-            h.description(),
-            "Show or update Archon configuration",
-            "ConfigHandler description must match the shipped \
-             declare_handler! stub verbatim (shipped-wins drift-reconcile)"
-        );
+        assert_eq!(h.description(), "Show or update Archon configuration");
+        assert_eq!(h.aliases(), &["settings", "prefs"]);
+        assert_eq!(ConfigHandler::NAME, "config");
     }
 
+    /// Every spelling the registry resolves to `ConfigHandler` must be one the
+    /// interception in `command::slash` claims, or that spelling reaches the
+    /// unreachable handler and the user gets silence. Driven off `spellings()`
+    /// so a new alias is covered the moment it is declared.
     #[test]
-    fn config_handler_aliases_match_shipped() {
-        let h = ConfigHandler::new();
-        assert_eq!(
-            h.aliases(),
-            &["settings", "prefs"],
-            "ConfigHandler aliases must preserve ['settings', 'prefs'] \
-             from the shipped declare_handler! stub (AGS-813 alias-only \
-             drift-reconcile + AGS-817 shipped-wins precedent)"
-        );
-    }
+    fn every_spelling_the_registry_resolves_here_is_one_the_interception_claims() {
+        let mut b = RegistryBuilder::new();
+        b.insert_primary(ConfigHandler::NAME, Arc::new(ConfigHandler::new()));
+        let registry = b.build();
 
-    #[test]
-    fn config_handler_execute_returns_ok_without_emission() {
-        let (mut ctx, mut rx) = make_ctx();
-        let h = ConfigHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(
-            res.is_ok(),
-            "ConfigHandler::execute must return Ok(()), got: {res:?}"
-        );
-        // No TuiEvent must be emitted — THIN-WRAPPER is byte-identical
-        // to the shipped declare_handler! no-op stub. Real async work
-        // happens UPSTREAM at slash.rs:247.
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "ConfigHandler::execute must NOT emit any TuiEvent, \
-                 got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+        for spelling in spellings() {
+            assert!(
+                registry.get(spelling).is_some(),
+                "/{spelling} does not resolve in the registry"
+            );
+            assert_eq!(
+                command_args(&format!("/{spelling}")),
+                Some(""),
+                "/{spelling} resolves to the config command but the \
+                 interception does not recognise it"
+            );
+            assert_eq!(
+                command_args(&format!("/{spelling} model")),
+                Some("model"),
+                "/{spelling} must carry its arguments through the interception"
+            );
         }
     }
 
+    /// Reaching `execute` means the config command did nothing.
     #[test]
-    fn dispatcher_routes_slash_config_returns_ok_without_emission() {
-        // Narrow `RegistryBuilder::new()` (not `default_registry`) so
-        // this test exercises ONLY the ConfigHandler wiring — no other
-        // handlers are registered. Asserts the real Dispatcher routes
-        // `/config` to `ConfigHandler::execute` and emits no event.
+    fn reaching_the_handler_body_is_an_error_not_a_silent_success() {
         let mut b = RegistryBuilder::new();
-        b.insert_primary("config", Arc::new(ConfigHandler::new()));
-        let registry = Arc::new(b.build());
-        let dispatcher = Dispatcher::new(registry);
-        let (mut ctx, mut rx) = make_ctx();
+        b.insert_primary(ConfigHandler::NAME, Arc::new(ConfigHandler::new()));
+        let dispatcher = Dispatcher::new(Arc::new(b.build()));
 
-        let res = dispatcher.dispatch(&mut ctx, "/config");
-        assert!(
-            res.is_ok(),
-            "Dispatcher::dispatch(\"/config\") must return Ok(()), \
-             got: {res:?}"
-        );
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route to ConfigHandler must NOT emit any \
-                 TuiEvent, got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
-        }
-    }
-
-    #[test]
-    fn dispatcher_routes_alias_settings_returns_ok_without_emission() {
-        // Verify the `settings` alias resolves to ConfigHandler through
-        // the Registry's alias map (TASK-AGS-802). This pins the
-        // shipped-wins alias-preservation invariant: `/settings` must
-        // reach ConfigHandler::execute and return Ok(()) with no
-        // emission — byte-identical to `/config`.
-        let mut b = RegistryBuilder::new();
-        b.insert_primary("config", Arc::new(ConfigHandler::new()));
-        let registry = Arc::new(b.build());
-        let dispatcher = Dispatcher::new(registry);
-        let (mut ctx, mut rx) = make_ctx();
-
-        let res = dispatcher.dispatch(&mut ctx, "/settings");
-        assert!(
-            res.is_ok(),
-            "Dispatcher::dispatch(\"/settings\") must return Ok(()) \
-             via the ConfigHandler alias, got: {res:?}"
-        );
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route via /settings alias to ConfigHandler \
-                 must NOT emit any TuiEvent, got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+        for spelling in spellings() {
+            let (mut ctx, mut rx) = make_ctx();
+            assert!(
+                dispatcher
+                    .dispatch(&mut ctx, &format!("/{spelling}"))
+                    .is_err(),
+                "/{spelling} reaching the dispatcher must not look like success"
+            );
+            let events = crate::command::test_support::drain_tui_events(&mut rx);
+            assert!(
+                events.iter().any(|event| matches!(
+                    event,
+                    archon_tui::app::TuiEvent::Error(message)
+                        if message.contains("Nothing was shown or changed")
+                )),
+                "the user must be told the command did not run, got: {events:?}"
+            );
         }
     }
 }

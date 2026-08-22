@@ -18,7 +18,9 @@ use serde_json::json;
 
 use crate::subagent_executor::get_subagent_executor;
 use crate::team_roster;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// How long members get to notice the shutdown request and finish their round.
 ///
@@ -55,6 +57,10 @@ impl TeamDeleteTool {
 impl Tool for TeamDeleteTool {
     fn name(&self) -> &str {
         "TeamDelete"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

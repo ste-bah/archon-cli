@@ -14,7 +14,6 @@ async fn parent_exit_with_descendant_held_pipes_is_cleaned_before_result() {
         ..Default::default()
     };
     let command = descendant_holding_pipes_command(&pid_file);
-    let started = std::time::Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(3),
         tool.execute(
@@ -33,7 +32,6 @@ async fn parent_exit_with_descendant_held_pipes_is_cleaned_before_result() {
         "completed shell with cleaned descendants should succeed: {}",
         result.content
     );
-    assert!(started.elapsed() < Duration::from_secs(3));
     wait_until_process_is_absent(&std::fs::read_to_string(&pid_file).expect("descendant pid file"))
         .await;
 }
@@ -342,8 +340,6 @@ async fn a_command_that_wants_the_terminal_fails_instead_of_stopping() {
         max_output_bytes: 4096,
         ..Default::default()
     };
-    let started = std::time::Instant::now();
-
     let result = tokio::time::timeout(
         Duration::from_secs(10),
         tool.execute(
@@ -359,11 +355,6 @@ async fn a_command_that_wants_the_terminal_fails_instead_of_stopping() {
     .await
     .expect("a terminal read must not hang the tool");
 
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "must fail promptly rather than block: {:?}",
-        started.elapsed()
-    );
     // The open fails with ENXIO — "Device not configured" on macOS, "No such
     // device or address" on Linux — rather than the process being stopped.
     let content = result.content.to_ascii_lowercase();

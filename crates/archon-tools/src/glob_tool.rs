@@ -1,7 +1,9 @@
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct GlobTool;
 
@@ -9,6 +11,10 @@ pub struct GlobTool;
 impl Tool for GlobTool {
     fn name(&self) -> &str {
         "Glob"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_READ
     }
 
     fn description(&self) -> &str {
@@ -49,35 +55,24 @@ impl Tool for GlobTool {
             },
         };
 
-        let full_pattern = base_dir.join(pattern);
-        let pattern_str = full_pattern.to_string_lossy();
-
-        let entries = match glob::glob(&pattern_str) {
+        let fs = ctx.fs();
+        let matched = match fs.glob(&base_dir, pattern).await {
             Ok(paths) => paths,
             Err(e) => {
                 return ToolResult::error(format!("Invalid glob pattern: {e}"));
             }
         };
 
-        let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
-
-        for entry in entries {
-            match entry {
-                Ok(path) => {
-                    let mtime = path
-                        .metadata()
-                        .and_then(|m| m.modified())
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    files.push((path, mtime));
-                }
-                Err(e) => {
-                    tracing::debug!("glob entry error: {e}");
-                }
-            }
+        let mut files: Vec<(std::path::PathBuf, Option<u128>)> = Vec::new();
+        for path in matched {
+            let mtime = fs.metadata(&path).await.ok().and_then(|m| m.modified_nanos);
+            files.push((path, mtime));
         }
 
-        // Sort by mtime, newest first
-        files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+        // Sort by mtime, newest first. A path whose world reports no time
+        // sorts last rather than as the epoch, so "unknown" cannot masquerade
+        // as "oldest".
+        files.sort_by_key(|(path, mtime)| (std::cmp::Reverse(*mtime), path.clone()));
 
         if files.is_empty() {
             return ToolResult::success("No files matched the pattern.");

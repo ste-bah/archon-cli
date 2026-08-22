@@ -12,6 +12,10 @@ impl Tool for TestTool {
         self.name
     }
 
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::HostLocal
+    }
+
     fn description(&self) -> &str {
         "duplicate registration test tool"
     }

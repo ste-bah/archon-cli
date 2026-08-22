@@ -1,8 +1,8 @@
 //! Tests for the terminal registry (#189 Phase 6).
 //!
 //! These open real shells. The acceptance criteria for this phase are all about
-//! what a live process does — state surviving between calls, output arriving
-//! while nobody is listening, nothing left running afterwards — and none of
+//! what a live process does â€” state surviving between calls, output arriving
+//! while nobody is listening, nothing left running afterwards â€” and none of
 //! them can be shown against a fake.
 
 use super::*;
@@ -17,7 +17,7 @@ fn open(session_id: &str) -> Arc<Terminal> {
     let program = crate::terminal_shell::build(shell_name(), &std::env::temp_dir())
         .expect("the platform shell resolves");
     let id = format!("test-{}", uuid::Uuid::new_v4().simple());
-    create(session_id, id, shell_name().to_string(), program).expect("terminal opens")
+    create(session_id, id, shell_name().to_string(), false, program).expect("terminal opens")
 }
 
 /// Poll until `needle` shows up, or give up. A shell answers when it answers.
@@ -105,7 +105,7 @@ async fn output_accumulates_while_nothing_is_reading() {
     );
 }
 
-/// Reading from the offset the last read returned gives only what is new —
+/// Reading from the offset the last read returned gives only what is new â€”
 /// the mechanism that lets an agent check on a process without re-reading
 /// everything it has ever printed.
 #[tokio::test]
@@ -192,6 +192,7 @@ async fn the_cap_refuses_one_more_and_says_how_to_make_room() {
         "session-cap",
         "test-one-too-many".to_string(),
         shell_name().to_string(),
+        false,
         program,
     ) else {
         panic!("the cap must hold");

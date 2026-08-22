@@ -60,6 +60,7 @@ fn permissions_handler_execute_with_no_args_emits_snapshot_text() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
     let h = PermissionsHandler;
@@ -120,6 +121,7 @@ fn permissions_handler_execute_with_valid_plan_stashes_effect_and_emits_set_text
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
     let h = PermissionsHandler;
@@ -177,6 +179,7 @@ fn permissions_handler_execute_bypass_without_allow_emits_error_no_effect() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
     let h = PermissionsHandler;
@@ -227,6 +230,7 @@ fn permissions_bypass_denial_records_to_governed_learning_db() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, _rx) = crate::command::test_support::CtxBuilder::new()
         .with_permissions_snapshot_opt(Some(snap))
@@ -257,6 +261,7 @@ fn permissions_handler_execute_bypass_with_allow_stashes_effect() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: true,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
     let h = PermissionsHandler;
@@ -303,6 +308,7 @@ fn permissions_handler_execute_with_invalid_arg_emits_validation_error() {
         rules: Vec::new(),
         current_mode: "default".to_string(),
         allow_bypass_permissions: false,
+        active_preset: archon_core::config::CUSTOM_PRESET.to_string(),
     };
     let (mut ctx, mut rx) = make_ctx(Some(snap));
     let h = PermissionsHandler;

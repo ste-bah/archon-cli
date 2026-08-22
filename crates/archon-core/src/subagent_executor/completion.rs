@@ -63,6 +63,44 @@ impl AgentSubagentExecutor {
         // every terminal state and not only on success.
         archon_tools::team_roster::leave(&subagent_id);
 
+        // Release this agent's read-before-write observations (#193 Phase A).
+        //
+        // A session's observations are dropped when `SessionEnd` fires, which
+        // is once per process. Subagents end constantly inside one — a plan
+        // execution runs a fresh agent per task — and each holds its own map
+        // keyed by its own id, so left here they accumulate for the life of the
+        // process for agents that will never be consulted again.
+        //
+        // This site and not the `SubagentStop` hook, for the reason
+        // `board/leases.rs` spells out: that hook fires from
+        // `on_visible_complete`, which the `AutoBackgrounded` arm deliberately
+        // skips, so the longest-running agents would never release. This
+        // function is the one that always runs — success, failure and
+        // cancellation all arrive here, including from the orphaned task of an
+        // auto-backgrounded agent.
+        //
+        // Scoped to the agent, never `forget_session`: the parent is still
+        // running and still holds readings behind edits it has not made yet.
+        // Wiping those would turn `Fresh` into `Unobserved` and refuse a
+        // legitimate write, which is a user-visible regression, not a tidy-up.
+        //
+        // The one visible consequence, stated rather than discovered: a stopped
+        // agent can be restarted from its transcript under the same id
+        // (`message_router::route_text` -> `RouterHost::resume_stopped_agent`),
+        // and it comes back with no observations, so its first `Edit` to a file
+        // it read before stopping is refused with "read it first" instead of
+        // being allowed. That is the run boundary being applied consistently,
+        // not an accident: `SubagentManager::register_with_id` already resets
+        // the status, result, shutdown flag and progress tracker of a re-run,
+        // and this function has already vacated the team seat and possibly
+        // removed the worktree the agent was editing in. Observations were the
+        // one piece of run state that outlived its run. A token minted before an
+        // unbounded pause is exactly what this module's own header argues
+        // against relying on, and the cost of not relying on it is one `Read`.
+        archon_tools::file_observation::FILE_OBSERVATIONS.forget_agent(
+            &archon_tools::file_observation::Observer::new(&self.session_id, Some(&subagent_id)),
+        );
+
         // Tell the lead. Without this a subagent ends into the background
         // task-notification path and the lead learns nothing — a failed agent
         // and a finished one are equally silent (#184 M6).
@@ -248,5 +286,135 @@ impl AgentSubagentExecutor {
         }
 
         side_effects
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use archon_llm::identity::{IdentityMode, IdentityProvider};
+    use archon_llm::provider::{
+        LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
+    };
+    use archon_llm::streaming::StreamEvent;
+    use archon_tools::file_observation::{FILE_OBSERVATIONS, Observation, Observer};
+
+    use super::*;
+    use crate::agent::AgentConfig;
+    use crate::agents::AgentRegistry;
+    use crate::dispatch::ToolRegistry;
+    use crate::subagent::SubagentManager;
+
+    struct SilentProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for SilentProvider {
+        fn name(&self) -> &str {
+            "silent"
+        }
+        fn models(&self) -> Vec<ModelInfo> {
+            vec![]
+        }
+        fn supports_feature(&self, _: ProviderFeature) -> bool {
+            false
+        }
+        async fn stream(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(rx)
+        }
+        async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            unimplemented!()
+        }
+    }
+
+    fn executor(session_id: &str) -> AgentSubagentExecutor {
+        let project_dir = std::env::temp_dir();
+        AgentSubagentExecutor::new(
+            Arc::new(SilentProvider),
+            ToolRegistry::new(),
+            Arc::new(tokio::sync::Mutex::new(SubagentManager::new(1))),
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(&project_dir))),
+            None,
+            None,
+            project_dir,
+            session_id.to_string(),
+            "claude-sonnet-4-6".into(),
+            vec![],
+            Arc::new(tokio::sync::Mutex::new("default".to_string())),
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AgentConfig::default()),
+            Arc::new(IdentityProvider::new(
+                IdentityMode::Clean,
+                session_id.to_string(),
+                String::new(),
+                String::new(),
+            )),
+        )
+    }
+
+    /// An agent that has ended must not still be holding what it read.
+    ///
+    /// This is the assertion that fails if the release is dropped from
+    /// `handle_inner_complete`. It is deliberately about the *unconditional*
+    /// completion path — every terminal state arrives here, including a
+    /// cancellation and the orphaned task of an auto-backgrounded agent, which
+    /// is why the release lives here and not on the `SubagentStop` hook.
+    ///
+    /// The second half is the other way this can be got wrong: reaching for
+    /// `forget_session` looks equivalent and is not. The parent is still
+    /// running, and taking its readings away turns `Fresh` into `Unobserved`,
+    /// which under the default `read_before_edit = "block"` refuses a write it
+    /// was entitled to make — at a moment decided by whichever child finished.
+    #[tokio::test]
+    async fn a_finished_subagent_releases_its_observations_and_only_its_own() {
+        let session = format!("obs-release-{}", uuid::Uuid::new_v4());
+        let executor = executor(&session);
+        let path = std::env::temp_dir().join("observation-lifecycle-probe.rs");
+        let version = archon_tools::file_observation::FileVersion::from_parts(1, Some(1));
+
+        let child = Observer::new(&session, Some("agent-1"));
+        let parent = Observer::new(&session, None);
+        FILE_OBSERVATIONS.record_as(&child, &path, Observation::Present(version.clone()));
+        FILE_OBSERVATIONS.record_as(&parent, &path, Observation::Present(version));
+
+        executor
+            .handle_inner_complete("agent-1".to_string(), Ok("done".to_string()))
+            .await;
+
+        assert!(
+            FILE_OBSERVATIONS.is_empty(&child),
+            "a subagent that reached its unconditional completion must not leave \
+             its observations in the process-global map"
+        );
+        assert_eq!(
+            FILE_OBSERVATIONS.len(&parent),
+            1,
+            "the still-running parent's readings are not the child's to drop"
+        );
+        FILE_OBSERVATIONS.forget_session(&session);
+    }
+
+    /// The same release on the failure arm.
+    ///
+    /// A cancelled agent arrives here as `Err`, and a cancelled agent is
+    /// exactly the one that read a lot and finished nothing.
+    #[tokio::test]
+    async fn a_failed_subagent_releases_its_observations_too() {
+        let session = format!("obs-release-fail-{}", uuid::Uuid::new_v4());
+        let executor = executor(&session);
+        let path = std::env::temp_dir().join("observation-lifecycle-probe.rs");
+
+        let child = Observer::new(&session, Some("agent-2"));
+        FILE_OBSERVATIONS.record_as(&child, &path, Observation::Absent);
+
+        executor
+            .handle_inner_complete("agent-2".to_string(), Err("subagent cancelled".to_string()))
+            .await;
+
+        assert!(FILE_OBSERVATIONS.is_empty(&child));
     }
 }

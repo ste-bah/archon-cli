@@ -48,12 +48,42 @@ fn names_for_capability(catalog: &DiscoveryCatalog, capability: &str) -> Vec<Str
         .collect()
 }
 
+/// The invariant check for the deterministic tests, which have all inserted
+/// something before calling it.
+///
+/// The emptiness guard lives here rather than in the shared helper because
+/// `immutable_published_snapshots_remain_consistent_with_concurrent_writers`
+/// calls the helper on snapshots taken while the writers are still starting, and
+/// an empty snapshot is a legitimate observation there.
 fn assert_snapshot_invariant(catalog: &DiscoveryCatalog) {
-    assert_immutable_snapshot_invariant(&catalog.snapshot_immutable());
+    let snapshot = catalog.snapshot_immutable();
+    assert!(
+        snapshot.entries().next().is_some(),
+        "the catalog is empty, so the invariant check below would inspect nothing"
+    );
+    assert_immutable_snapshot_invariant(&snapshot);
 }
 
+/// Cross-check every index in the snapshot against its entries, in both
+/// directions.
+///
+/// Every assertion below lives inside a `for` over one of the snapshot's own
+/// collections, so an index that came back empty made the whole helper a no-op
+/// that reported success — and an empty index alongside live entries is
+/// precisely the corruption it is here to catch. Nine tests call this; all nine
+/// would have gone quiet together.
+///
+/// The counters close that. Every fixture in this file carries one tag and one
+/// capability, so a snapshot that has entries must have a non-empty index of
+/// each kind; that implication is asserted below. Whether the snapshot has
+/// entries at all is the caller's business — see `assert_snapshot_invariant`.
 fn assert_immutable_snapshot_invariant(snapshot: &ImmutableCatalogSnapshot) {
+    let mut tag_checks = 0usize;
+    let mut capability_checks = 0usize;
+    let mut entry_checks = 0usize;
+
     for (tag, keys) in snapshot.tag_index() {
+        tag_checks += 1;
         assert!(!keys.is_empty());
         assert!(keys.iter().all(|key| {
             snapshot
@@ -62,6 +92,7 @@ fn assert_immutable_snapshot_invariant(snapshot: &ImmutableCatalogSnapshot) {
         }));
     }
     for (capability, keys) in snapshot.capability_index() {
+        capability_checks += 1;
         assert!(!keys.is_empty());
         assert!(keys.iter().all(|key| {
             snapshot
@@ -70,6 +101,7 @@ fn assert_immutable_snapshot_invariant(snapshot: &ImmutableCatalogSnapshot) {
         }));
     }
     for (key, entry) in snapshot.entries() {
+        entry_checks += 1;
         assert!(
             snapshot
                 .versions_for(&entry.name)
@@ -86,6 +118,14 @@ fn assert_immutable_snapshot_invariant(snapshot: &ImmutableCatalogSnapshot) {
                 .is_some_and(|keys| keys.contains(key))
         }));
     }
+
+    assert!(
+        entry_checks == 0 || (tag_checks > 0 && capability_checks > 0),
+        "snapshot has {entry_checks} entr(ies) but {tag_checks} tag index bucket(s) \
+         and {capability_checks} capability index bucket(s). Every fixture here \
+         carries a tag and a capability, so an empty index next to live entries is \
+         the corruption this helper exists to catch, not a reason to pass."
+    );
 }
 #[test]
 fn immutable_snapshot_is_exported_from_catalog_and_agents_paths() {

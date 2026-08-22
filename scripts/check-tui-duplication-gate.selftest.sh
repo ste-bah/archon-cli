@@ -42,4 +42,43 @@ if ! grep -q "EXCEEDED" <<<"$fail_output" && ! grep -q "duplication exceeds" <<<
 fi
 
 echo "SELFTEST OK: fail fixture (30-line identical blocks) exited 1 — gate fires correctly"
+
+# --- Vacuity test: an empty scan target must FAIL, not pass ------------
+#
+# The check above only ever proved the gate fires when it finds too much
+# duplication. It said nothing about the other way a gate can be wrong: finding
+# nothing because it looked at nothing. For a long time this gate printed
+# "no report file generated" and then "PASS" with exit 0, so a jscpd run that
+# produced no output — a bad flag, a failed npx fetch, a changed output path —
+# reported a clean tree. An empty source directory reproduces that state, and
+# the gate must now refuse it.
+#
+# See docs/postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md
+# and docs/defensive-patterns.md (DP-0, DP-2).
+
+EMPTY_DIR=$(mktemp -d)
+cleanup_empty() { rm -rf "$EMPTY_DIR"; }
+trap 'cleanup; cleanup_empty' EXIT
+mkdir -p "$EMPTY_DIR/src"
+
+set +e
+empty_output=$(TUI_SRC="$EMPTY_DIR/src" bash "$GATE" 2>&1)
+empty_rc=$?
+set -e
+
+if [[ "$empty_rc" -eq 0 ]]; then
+    echo "SELFTEST FAIL: empty scan target reported PASS (exit 0)." >&2
+    echo "  A gate that inspects nothing must fail, not report a clean tree." >&2
+    echo "$empty_output" >&2
+    exit 1
+fi
+
+if ! grep -qi "FAIL" <<<"$empty_output"; then
+    echo "SELFTEST FAIL: empty scan target exited ${empty_rc} but said nothing about why." >&2
+    echo "  The operator has to be told the scan was empty, not just handed a code." >&2
+    echo "$empty_output" >&2
+    exit 1
+fi
+
+echo "SELFTEST OK: empty scan target exited ${empty_rc} — gate refuses a vacuous pass"
 exit 0

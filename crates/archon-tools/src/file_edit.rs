@@ -1,9 +1,9 @@
-use std::fs;
-
 use serde_json::json;
 
 use crate::path_guard::resolve_existing_file_path;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub struct EditTool;
 
@@ -11,6 +11,10 @@ pub struct EditTool;
 impl Tool for EditTool {
     fn name(&self) -> &str {
         "Edit"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     /// Claims the default, which the old one-liner did not.
@@ -77,7 +81,8 @@ impl Tool for EditTool {
             Ok(path) => path,
             Err(e) => return ToolResult::error(e),
         };
-        let content = match fs::read_to_string(&path) {
+        let fs = ctx.fs();
+        let content = match fs.read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read file: {e}")),
         };
@@ -101,7 +106,7 @@ impl Tool for EditTool {
             content.replacen(old_string, new_string, 1)
         };
 
-        match fs::write(&path, new_content) {
+        match fs.write(&path, new_content.as_bytes()).await {
             Ok(()) => ToolResult::success(format!("File {file_path} updated successfully.")),
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }

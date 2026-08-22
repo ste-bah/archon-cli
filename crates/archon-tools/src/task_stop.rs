@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that stops a running task by setting its cancellation token.
 pub struct TaskStopTool;
@@ -9,6 +11,10 @@ pub struct TaskStopTool;
 impl Tool for TaskStopTool {
     fn name(&self) -> &str {
         "TaskStop"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

@@ -130,7 +130,6 @@ async fn bash_clamps_longer_requested_timeout_to_configured_maximum() {
         max_output_bytes: 102400,
         ..Default::default()
     };
-    let start = std::time::Instant::now();
     let result = tool
         .execute(
             json!({ "command": "sleep 2", "timeout": 5_000 }),
@@ -138,9 +137,16 @@ async fn bash_clamps_longer_requested_timeout_to_configured_maximum() {
         )
         .await;
 
-    assert!(result.is_error);
-    assert!(result.content.contains("timed out"));
-    assert!(start.elapsed() < std::time::Duration::from_millis(1_500));
+    // Which timeout won is already legible in the outcome, without a clock:
+    // under the requested 5s the two-second sleep would have finished and
+    // reported success, so an error naming a timeout can only have come from
+    // the 1s ceiling. The wall-clock bound this replaces measured how loaded
+    // the machine was and failed on a busy one against a working clamp.
+    assert!(
+        result.is_error,
+        "the 1s ceiling must terminate the 2s sleep"
+    );
+    assert!(result.content.contains("timed out"), "{}", result.content);
 }
 
 /// A requested timeout BELOW the floor is raised to it, not honoured.
@@ -193,7 +199,6 @@ async fn bash_still_clamps_a_requested_timeout_above_the_ceiling() {
         max_output_bytes: 102400,
         ..Default::default()
     };
-    let start = std::time::Instant::now();
     let result = tool
         .execute(
             json!({ "command": "sleep 30", "timeout": 600_000 }),
@@ -201,12 +206,10 @@ async fn bash_still_clamps_a_requested_timeout_above_the_ceiling() {
         )
         .await;
 
+    // A honoured 600s request would have let the sleep finish and report
+    // success, so the error is itself the evidence that the ceiling bound.
     assert!(result.is_error, "the ceiling must still terminate it");
-    assert!(result.content.contains("timed out"));
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(10),
-        "it must stop at the 1s ceiling, not run the full sleep"
-    );
+    assert!(result.content.contains("timed out"), "{}", result.content);
 }
 
 #[cfg(not(target_os = "windows"))]

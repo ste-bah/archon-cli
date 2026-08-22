@@ -27,9 +27,25 @@ fn agent_files() -> Vec<PathBuf> {
         }
     }
 
+    let dir = project_root().join(".archon/agents");
     let mut files = Vec::new();
-    walk(&project_root().join(".archon/agents"), &mut files);
+    walk(&dir, &mut files);
     files.sort();
+
+    // A walk that finds nothing is not a clean tree, it is a broken scan. Both
+    // tests below assert that a list built from these files is empty, so if
+    // `.archon/agents` is renamed, emptied, or excluded from a checkout they
+    // pass without inspecting a single agent definition. Refuse instead: the
+    // directory is tracked and holds hundreds of files, so anything near zero
+    // means the scan target moved.
+    assert!(
+        files.len() > 100,
+        "found only {} agent definition(s) under {} — the scan target has moved, \
+         and a guard that inspects nothing must not report success",
+        files.len(),
+        dir.display()
+    );
+
     files
 }
 
@@ -119,21 +135,35 @@ fn agent_tool_declarations_match_archon_tool_names() {
     );
 
     let mut unknown = Vec::new();
+    let mut declarations_inspected = 0usize;
     for file in agent_files() {
         let text = fs::read_to_string(&file).expect("read agent file");
         let Some(fm) = frontmatter(&text) else {
             continue;
         };
         for tool in declared_tools(fm) {
+            declarations_inspected += 1;
             if !allowed.contains(&tool) {
                 unknown.push(format!("{}: {tool}", file.display()));
             }
         }
     }
 
+    // The `continue` above is the second way this test can inspect nothing: if
+    // frontmatter parsing or `declared_tools` stops recognising the on-disk
+    // format, every file is skipped and `unknown` is empty for the wrong reason.
+    // Say how many declarations were actually checked, and fail if none were.
+    assert!(
+        declarations_inspected > 0,
+        "read the agent files but extracted no tool declarations at all — \
+         frontmatter parsing has stopped matching the on-disk format, so this \
+         check is inspecting nothing"
+    );
+
     assert!(
         unknown.is_empty(),
-        "agent declarations reference non-Archon tools:\n{}",
+        "agent declarations reference non-Archon tools ({declarations_inspected} \
+         declaration(s) inspected):\n{}",
         unknown.join("\n")
     );
 }

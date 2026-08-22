@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that retrieves detailed information about a task.
 pub struct TaskGetTool;
@@ -9,6 +11,10 @@ pub struct TaskGetTool;
 impl Tool for TaskGetTool {
     fn name(&self) -> &str {
         "TaskGet"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

@@ -336,6 +336,13 @@ fn command_effect_debug_and_clone() {
         CommandEffect::RunDraft { .. } | CommandEffect::RateMessage { .. } => {
             unreachable!("this test only constructs SetModelOverride")
         }
+        // #200 Phase 4: ReferenceSession arrived with /session-ref. This test
+        // only constructs SetModelOverride, so it is unreachable here; the arm
+        // exists to satisfy exhaustiveness and to fail loudly if a future
+        // variant is added without updating this pin.
+        CommandEffect::ReferenceSession(_) => {
+            unreachable!("this test only constructs SetModelOverride")
+        }
     }
     // Debug impl must not panic — format! exercises it.
     let _ = format!("{e:?}");

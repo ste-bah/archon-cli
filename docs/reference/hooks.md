@@ -245,6 +245,12 @@ still contributes a result — its failure policy applied with the reason
 many. The budget covers file-configured hooks, session-scoped hooks, and
 in-process callbacks alike.
 
+The test for that clamp spent four months passing on Windows without ever
+starting a hook, because it asserted elapsed time rather than outcome — see
+[postmortem 0002](../postmortem/0002-a-test-passed-on-the-one-platform-where-it-could-not-run.md).
+The arithmetic now lives in `crates/archon-core/src/hooks/registry/budget.rs`
+with unit tests that need no subprocess and no clock.
+
 Failure policy is what happens when a hook cannot spawn, times out, or hits an
 I/O error. It is set per hook with `on_failure = "allow" | "block"`. The default
 depends on the event and there is only one gating event:

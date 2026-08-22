@@ -1,8 +1,12 @@
 //! ToolSearch tool — lets the LLM discover deferred tools by name or keyword.
 
+use std::sync::Arc;
+
 use serde_json::json;
 
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 const DEFAULT_MAX_RESULTS: usize = 5;
 
@@ -11,13 +15,36 @@ const DEFAULT_MAX_RESULTS: usize = 5;
 /// Two query modes:
 /// - `"select:Tool1,Tool2"` — exact name match
 /// - `"keyword terms"` — fuzzy substring search across names and descriptions
+///
+/// Holds the tools themselves rather than rendered definitions, and renders on
+/// demand against the calling context. Rendering once at construction made this
+/// a second, contradicting copy of the tool surface: after `TerminalCreate`
+/// learned to describe itself per world, the live surface offered a container's
+/// two shells while a `select:TerminalCreate` here still answered with the
+/// host's four. Two copies that agree on something false are survivable; two
+/// that disagree are worse than either.
 pub struct ToolSearchTool {
-    tool_defs: Vec<serde_json::Value>,
+    tools: Vec<Arc<dyn Tool>>,
 }
 
 impl ToolSearchTool {
-    pub fn new(tool_defs: Vec<serde_json::Value>) -> Self {
-        Self { tool_defs }
+    pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
+        Self { tools }
+    }
+
+    /// One tool's definition as it stands in `ctx`'s world — the same two
+    /// declarations the live request surface is built from, so the answers
+    /// cannot differ.
+    fn definition(tool: &Arc<dyn Tool>, ctx: &ToolContext) -> serde_json::Value {
+        json!({
+            "name": tool.name(),
+            "description": tool
+                .description_for(ctx)
+                .unwrap_or_else(|| tool.description().to_string()),
+            "input_schema": tool
+                .input_schema_for(ctx)
+                .unwrap_or_else(|| tool.input_schema()),
+        })
     }
 }
 
@@ -35,6 +62,10 @@ fn score_match(haystack: &str, terms: &[&str]) -> usize {
 impl Tool for ToolSearchTool {
     fn name(&self) -> &str {
         "ToolSearch"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {
@@ -59,7 +90,7 @@ impl Tool for ToolSearchTool {
         })
     }
 
-    async fn execute(&self, input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let query = match input.get("query").and_then(|v| v.as_str()) {
             Some(q) => q.to_string(),
             None => return ToolResult::error("query is required and must be a string"),
@@ -71,19 +102,20 @@ impl Tool for ToolSearchTool {
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_MAX_RESULTS);
 
-        let all_defs = self.tool_defs.clone();
-
+        // Matching runs over the tools; only the matches are rendered, and they
+        // are rendered against `ctx`.
         let matched: Vec<serde_json::Value> = if let Some(names_csv) = query.strip_prefix("select:")
         {
             // Exact name match mode
             let requested: Vec<&str> = names_csv.split(',').map(|s| s.trim()).collect();
-            all_defs
-                .into_iter()
-                .filter(|def| {
-                    def.get("name")
-                        .and_then(|n| n.as_str())
-                        .is_some_and(|name| requested.iter().any(|r| r.eq_ignore_ascii_case(name)))
+            self.tools
+                .iter()
+                .filter(|tool| {
+                    requested
+                        .iter()
+                        .any(|r| r.eq_ignore_ascii_case(tool.name()))
                 })
+                .map(|tool| Self::definition(tool, ctx))
                 .collect()
         } else {
             // Keyword search mode
@@ -92,33 +124,28 @@ impl Tool for ToolSearchTool {
                 return ToolResult::error("query must not be empty");
             }
 
-            let mut scored: Vec<(usize, serde_json::Value)> = all_defs
-                .into_iter()
-                .filter_map(|def| {
-                    let name = def.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let desc = def
-                        .get("description")
-                        .and_then(|d| d.as_str())
-                        .unwrap_or("");
-                    let combined = format!("{name} {desc}");
+            // Scored on the world-independent description: a keyword search is
+            // for finding a tool, and a name that stopped matching because the
+            // session cannot currently run it would hide the very answer the
+            // model is looking for. The rendered match still tells the truth
+            // about the world.
+            let mut scored: Vec<(usize, &Arc<dyn Tool>)> = self
+                .tools
+                .iter()
+                .filter_map(|tool| {
+                    let combined = format!("{} {}", tool.name(), tool.description());
                     let s = score_match(&combined, &terms);
-                    if s > 0 { Some((s, def)) } else { None }
+                    if s > 0 { Some((s, tool)) } else { None }
                 })
                 .collect();
 
             // Sort descending by score, then alphabetically by name for stability
-            scored.sort_by(|a, b| {
-                b.0.cmp(&a.0).then_with(|| {
-                    let an = a.1.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let bn = b.1.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    an.cmp(bn)
-                })
-            });
+            scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name().cmp(b.1.name())));
 
             scored
                 .into_iter()
                 .take(max_results)
-                .map(|(_, def)| def)
+                .map(|(_, tool)| Self::definition(tool, ctx))
                 .collect()
         };
 
@@ -156,14 +183,70 @@ mod tests {
         }
     }
 
-    fn populated_tool_defs() -> Vec<serde_json::Value> {
+    /// A stand-in tool with a fixed name and description.
+    ///
+    /// `world_aware` makes it declare a different schema and description when
+    /// the context carries a sandbox, which is how the search's answer is
+    /// checked against the live surface's.
+    struct Stub {
+        name: &'static str,
+        description: &'static str,
+        world_aware: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for Stub {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            self.description
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            json!({"type": "object", "world": "host"})
+        }
+
+        fn input_schema_for(&self, ctx: &ToolContext) -> Option<serde_json::Value> {
+            (self.world_aware && ctx.sandbox.is_some())
+                .then(|| json!({"type": "object", "world": "sandbox"}))
+        }
+
+        fn description_for(&self, ctx: &ToolContext) -> Option<String> {
+            (self.world_aware && ctx.sandbox.is_some())
+                .then(|| "UNAVAILABLE in this session".to_string())
+        }
+
+        fn capability(&self) -> ToolCapability {
+            ToolCapability::HostLocal
+        }
+
+        async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+            ToolResult::success("stub")
+        }
+
+        fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
+            PermissionLevel::Safe
+        }
+    }
+
+    fn stub(name: &'static str, description: &'static str) -> Arc<dyn Tool> {
+        Arc::new(Stub {
+            name,
+            description,
+            world_aware: false,
+        })
+    }
+
+    fn populated_tool_defs() -> Vec<Arc<dyn Tool>> {
         vec![
-            serde_json::json!({"name": "Read", "description": "Reads a file from the filesystem", "input_schema": {"type": "object"}}),
-            serde_json::json!({"name": "Write", "description": "Writes a file to the filesystem", "input_schema": {"type": "object"}}),
-            serde_json::json!({"name": "Grep", "description": "Search file contents with regex", "input_schema": {"type": "object"}}),
-            serde_json::json!({"name": "Bash", "description": "Execute a bash command", "input_schema": {"type": "object"}}),
-            serde_json::json!({"name": "WebFetch", "description": "Fetch a web page", "input_schema": {"type": "object"}}),
-            serde_json::json!({"name": "NotebookEdit", "description": "Edit Jupyter notebooks", "input_schema": {"type": "object"}}),
+            stub("Read", "Reads a file from the filesystem"),
+            stub("Write", "Writes a file to the filesystem"),
+            stub("Grep", "Search file contents with regex"),
+            stub("Bash", "Execute a bash command"),
+            stub("WebFetch", "Fetch a web page"),
+            stub("NotebookEdit", "Edit Jupyter notebooks"),
         ]
     }
 
@@ -195,6 +278,75 @@ mod tests {
         assert!(names.contains(&"Read"));
         assert!(names.contains(&"Grep"));
         assert!(!names.contains(&"Write"));
+    }
+
+    /// The defect this rendering-on-demand exists to remove. A search that
+    /// answered from definitions rendered at construction told the model the
+    /// host's story about a tool the live surface had already re-described,
+    /// and the two contradicted each other in the same context.
+    #[tokio::test]
+    async fn a_search_answers_with_the_world_the_caller_is_in() {
+        let tool = ToolSearchTool::new(vec![Arc::new(Stub {
+            name: "TerminalCreate",
+            description: "Start a persistent shell",
+            world_aware: true,
+        })]);
+        let sandboxed = ToolContext {
+            sandbox: Some(crate::terminal_world::tests::FixedTerminalBackend::host()),
+            ..test_ctx()
+        };
+
+        let result = tool
+            .execute(json!({"query": "select:TerminalCreate"}), &sandboxed)
+            .await;
+
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
+        assert_eq!(parsed[0]["input_schema"]["world"], "sandbox");
+        assert_eq!(parsed[0]["description"], "UNAVAILABLE in this session");
+    }
+
+    /// The keyword path renders the same way. It matches on the
+    /// world-independent description — a tool must stay findable in a session
+    /// that cannot currently run it — but what it hands back is the world's.
+    #[tokio::test]
+    async fn keyword_matches_are_rendered_against_the_world_too() {
+        let tool = ToolSearchTool::new(vec![Arc::new(Stub {
+            name: "TerminalCreate",
+            description: "Start a persistent shell",
+            world_aware: true,
+        })]);
+        let sandboxed = ToolContext {
+            sandbox: Some(crate::terminal_world::tests::FixedTerminalBackend::host()),
+            ..test_ctx()
+        };
+
+        let result = tool
+            .execute(json!({"query": "persistent shell"}), &sandboxed)
+            .await;
+
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
+        assert_eq!(parsed.len(), 1, "the search must still find it");
+        assert_eq!(parsed[0]["input_schema"]["world"], "sandbox");
+    }
+
+    #[tokio::test]
+    async fn a_search_in_a_session_with_no_world_is_unchanged() {
+        let tool = ToolSearchTool::new(vec![Arc::new(Stub {
+            name: "TerminalCreate",
+            description: "Start a persistent shell",
+            world_aware: true,
+        })]);
+
+        let result = tool
+            .execute(json!({"query": "select:TerminalCreate"}), &test_ctx())
+            .await;
+
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).expect("valid json");
+        assert_eq!(parsed[0]["input_schema"]["world"], "host");
+        assert_eq!(parsed[0]["description"], "Start a persistent shell");
     }
 
     #[tokio::test]

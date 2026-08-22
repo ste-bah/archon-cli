@@ -10,7 +10,9 @@ use std::sync::Arc;
 use archon_memory::board::{BoardAccess, BoardItem, BoardItemKind, BoardStatus, NewBoardItem};
 
 use super::{BoardHandle, caller_id, leases, run_id_for_session};
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -101,6 +103,10 @@ impl Default for BoardRaiseTool {
 impl Tool for BoardRaiseTool {
     fn name(&self) -> &str {
         "BoardRaise"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {
@@ -228,6 +234,10 @@ impl Default for BoardListTool {
 impl Tool for BoardListTool {
     fn name(&self) -> &str {
         "BoardList"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
     }
 
     fn description(&self) -> &str {

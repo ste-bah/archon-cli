@@ -50,6 +50,10 @@ sha2.workspace = true
 semver.workspace = true
 hex.workspace = true
 async-trait.workspace = true
+# #201 Phase 2: the ssh/openshell remote filesystems move file payloads over
+# the command transport as base64, so stray output from a remote login profile
+# fails the decode instead of silently corrupting the file.
+base64.workspace = true
 # TASK-AGS-101: tokio-util used for CancellationToken wiring that
 # crosses archon-core boundaries. (dashmap + once_cell were moved to
 # archon-tools in TASK-AGS-104 along with the background_agents module.)
@@ -89,6 +93,9 @@ serde_yaml_ng.workspace = true
 archon-session = { path = "../archon-session", features = ["test-support"] }
 archon-tools = { path = "../archon-tools", features = ["test-support"] }
 archon-permissions = { path = "../archon-permissions" }
+# #201 Phase 6: the docker-world integration test opens the terminal the backend
+# describes, which needs a real PTY. Dev-only — archon-core never spawns one.
+archon-pty = { path = "../archon-pty" }
 # TASK-AGS-506: test-util feature needed for tokio::time::pause/advance in
 # circuit_breaker tests. This only affects test builds.
 tokio = { workspace = true, features = ["test-util"] }

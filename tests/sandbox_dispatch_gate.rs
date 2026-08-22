@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use archon_permissions::SandboxBackend;
-use archon_tools::tool::{AgentMode, PermissionLevel, Tool, ToolContext, ToolResult};
+use archon_tools::tool::{
+    AgentMode, PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorldReach,
+};
 
 /// Fake sandbox backend gated by a shared AtomicBool. Mirrors the production
 /// `SharedSandboxFlag` in archon-tui but strips all external dependencies so
@@ -20,25 +22,41 @@ struct FakeSandboxBackend {
 }
 
 impl SandboxBackend for FakeSandboxBackend {
-    fn check(&self, tool: &str, _input: &serde_json::Value) -> Result<(), String> {
+    fn check(
+        &self,
+        tool: &str,
+        capability: ToolCapability,
+        _input: &serde_json::Value,
+    ) -> Result<(), String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(());
         }
-        match tool {
-            "Write" | "Edit" | "NotebookEdit" => Err(format!(
-                "sandbox: {tool} is blocked (write operations disabled)"
-            )),
-            "Bash" | "Shell" => Err(format!(
-                "sandbox: {tool} is blocked (shell operations disabled)"
-            )),
-            "WebFetch" | "WebSearch" => Err(format!(
-                "sandbox: {tool} is blocked (network operations disabled)"
-            )),
-            "TaskCreate" | "TaskUpdate" | "Agent" => Err(format!(
-                "sandbox: {tool} is blocked (agent spawning disabled)"
-            )),
-            _ => Ok(()),
+        match capability {
+            ToolCapability::WorldBound(WorldReach::FileRead) | ToolCapability::HostLocal => Ok(()),
+            other => Err(format!("sandbox: {tool} is blocked ({})", other.label())),
         }
+    }
+
+    /// Mirrors `SharedSandboxFlag`: this backend denies rather than relocating,
+    /// so with it on there is no world to open a terminal in.
+    fn terminal(
+        &self,
+        _request: &archon_permissions::SandboxTerminalRequest,
+    ) -> archon_permissions::SandboxTerminal {
+        if self.enabled.load(Ordering::SeqCst) {
+            archon_permissions::SandboxTerminal::Refused(
+                "sandbox: terminals are blocked (shell operations disabled)".into(),
+            )
+        } else {
+            archon_permissions::SandboxTerminal::Host
+        }
+    }
+
+    fn scope_support(
+        &self,
+        _scope: archon_permissions::SandboxScope,
+    ) -> archon_permissions::SandboxScopeSupport {
+        archon_permissions::SandboxScopeSupport::Durable
     }
 }
 
@@ -49,6 +67,10 @@ struct DummyWriteTool;
 impl Tool for DummyWriteTool {
     fn name(&self) -> &str {
         "Write"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -159,7 +181,11 @@ async fn subpath_b_direct_execute_blocked_when_sandbox_on() {
     // flag = true → blocked — simulate agent.rs sandbox pre-check
     flag.store(true, Ordering::SeqCst);
     if let Some(ref backend) = ctx.sandbox {
-        if let Err(reason) = backend.check("Write", &serde_json::json!({"file_path": "/tmp/x"})) {
+        if let Err(reason) = backend.check(
+            "Write",
+            ToolCapability::FILE_WRITE,
+            &serde_json::json!({"file_path": "/tmp/x"}),
+        ) {
             assert!(
                 reason.starts_with("sandbox:"),
                 "expected 'sandbox:' prefix; got: {reason}"
@@ -173,7 +199,11 @@ async fn subpath_b_direct_execute_blocked_when_sandbox_on() {
     flag.store(false, Ordering::SeqCst);
     if let Some(ref backend) = ctx.sandbox {
         backend
-            .check("Write", &serde_json::json!({"file_path": "/tmp/x"}))
+            .check(
+                "Write",
+                ToolCapability::FILE_WRITE,
+                &serde_json::json!({"file_path": "/tmp/x"}),
+            )
             .expect("sandbox should allow Write when flag is false");
     }
 }
@@ -206,7 +236,11 @@ async fn subpath_b_full_roundtrip() {
     // Simulate what agent.rs does: pre-check sandbox before execute
     flag.store(true, Ordering::SeqCst);
     if let Some(ref backend) = ctx.sandbox {
-        match backend.check("Write", &serde_json::json!({"file_path": "/tmp/x"})) {
+        match backend.check(
+            "Write",
+            ToolCapability::FILE_WRITE,
+            &serde_json::json!({"file_path": "/tmp/x"}),
+        ) {
             Ok(()) => panic!("expected block when sandbox on"),
             Err(reason) => {
                 assert!(
@@ -225,7 +259,7 @@ async fn subpath_b_full_roundtrip() {
     let read_input = serde_json::json!({"file_path": "/tmp/x"});
     if let Some(ref backend) = ctx.sandbox {
         backend
-            .check("Read", &read_input)
+            .check("Read", ToolCapability::FILE_READ, &read_input)
             .expect("sandbox should allow Read even when flag is true");
     }
 }

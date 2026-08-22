@@ -105,6 +105,22 @@ hello.txt
 # untracked file.
 !/docs/images/
 !/docs/images/**
+# Exception: provider pages. `docs/providers/bedrock.md` was linked from three
+# committed pages for nine days without ever existing, because the commit that
+# claimed to add it ran `git add` over a path this file ignores — which skips
+# silently and exits 0. The other files in that directory are tracked only
+# because they predate the `/docs/*` rule. See docs/postmortem/0005.
+!/docs/providers/
+!/docs/providers/**
+# Exception: the written-practice tree — defensive patterns, numbered
+# postmortems, and decision records. These are linked from README.md,
+# ARCHON.md, CONTRIBUTING.md and docs/README.md; ignoring them would make
+# every one of those links dangle on a fresh clone.
+!/docs/defensive-patterns.md
+!/docs/postmortem/
+!/docs/postmortem/**
+!/docs/decisions/
+!/docs/decisions/**
 
 # Local-only artifacts (not for VCS)
 # Must stay below the /docs/architecture/ re-includes above — last match wins.

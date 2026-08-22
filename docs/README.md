@@ -119,7 +119,7 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 
 ## Operations
 
-- [Session management](operations/session-management.md) — resume, fork, fork-at, rate, checkpoint, rewind
+- [Session management](operations/session-management.md) — resume, fork, fork-at, session-ref, rate, checkpoint, rewind
 - [Web workbench](operations/web-workbench.md) — browser interface tabs, data sources, action safety, and setup
 - [TUI customization](operations/tui-customization.md) — themes, vim mode, keybindings
 - [Cost, effort, fast mode](operations/cost-effort.md) — token tracking, provider-aware model selection, latency tuning
@@ -132,6 +132,15 @@ User-facing documentation for the Rust port of the archon strategic engineering 
 - [SONA workflow tuning](operations/sona-workflow-tuning.md) — which `[workflow.generated]` limits are learned, the five-observation gate, the upward-only timeout ratchet, and how to find out why a run got a given value
 - [Setup wizard](operations/setup-wizard.md) — `/setup-archon-skills` interactive configuration walkthrough
 - [TUI drain-stall warning](operations/tui-drain-stall.md) — what the render-loop stall warning means
+
+## Engineering practice
+
+Read these before writing a gate, a lint, a CI step, or a test that touches a
+subprocess, a platform difference, or a clock.
+
+- [Defensive patterns](defensive-patterns.md) — the rules, each traced to the incident that produced it. Starts with the one they are all instances of: **a check whose scan target can vanish must fail, not pass**.
+- [Postmortems](postmortem/README.md) — numbered incident writeups. Four checks that reported green while inspecting nothing, three of them for over four months.
+- [Decision records](decisions/README.md) — dated notes in `proposed`/`implemented`/`rejected`/`archived`. The [`rejected`](decisions/README.md#rejected) bucket is the valuable one: it is the only place the option that was *not* taken leaves a trace.
 
 ## Development
 

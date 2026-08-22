@@ -33,6 +33,8 @@ mod control_input;
 mod lifecycle_hooks;
 mod loop_input;
 mod mcp_task;
+/// Send-time resolution of `@session:` mentions (#200 Phase 4).
+mod mention_resolve;
 mod personality_save;
 mod post_turn;
 mod prompt_turn;

@@ -7,7 +7,8 @@ use std::sync::Arc;
 /// 89 = 88 + `/worktrees` (#184 M7 isolated-agent review and merge).
 /// 90 = 89 + `/feedback` (#193 Phase C per-message human feedback).
 /// 91 = 90 + `/fork-at` (#192 fork from an earlier message).
-const EXPECTED_COMMAND_COUNT: usize = 91;
+/// 92 = 91 + `/session-ref` (#200 Phase 4 cross-session references).
+const EXPECTED_COMMAND_COUNT: usize = 92;
 
 mod aliases_core;
 mod aliases_more;

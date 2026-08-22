@@ -175,10 +175,21 @@ fn redacts_modern_openai_sk_svcacct_key() {
 fn redaction_regex_no_catastrophic_backtracking_on_long_input() {
     // Pathological-shape input: long alphanumeric without any secret
     // pattern. If regex had exponential backtracking, this would time out.
+    //
+    // The returned value is asserted, not discarded. A timing bound on its own
+    // is satisfied by `redact` never looking at the input at all — a length
+    // short-circuit, an early return, a no-op stub — which is the failure this
+    // test exists to rule out. Returning the input unchanged is proof the
+    // patterns ran and matched nothing.
     let long_input = "a".repeat(10_000);
     let start = std::time::Instant::now();
-    let _ = redact(&long_input);
+    let out = redact(&long_input);
     let elapsed = start.elapsed();
+    assert_eq!(
+        out, long_input,
+        "input carries no secret shape, so redact() must return it unchanged; a \
+         different answer means the patterns did not run over it"
+    );
     assert!(
         elapsed.as_millis() < 1000,
         "redact() on 10k-byte input took {}ms — suspected catastrophic backtracking",
@@ -264,8 +275,15 @@ fn redaction_regex_gcp_no_catastrophic_backtracking_on_pathological_input() {
     // backtracking engine or adding a `.*` alternation.
     let pathological = format!("{{\"type\":\"{}\"", "a".repeat(10_000));
     let start = std::time::Instant::now();
-    let _ = redact(&pathological);
+    let out = redact(&pathological);
     let elapsed = start.elapsed();
+    // Asserted, not discarded: a bound on elapsed time alone is satisfied by a
+    // `redact` that never examined the input.
+    assert_eq!(
+        out, pathological,
+        "the GCP marker is incomplete, so redact() must return the input \
+         unchanged; a different answer means the pattern did not run over it"
+    );
     assert!(
         elapsed.as_millis() < 1000,
         "GCP pattern caused catastrophic backtracking: {}ms on 10k input",
@@ -279,8 +297,15 @@ fn redaction_regex_pem_no_catastrophic_backtracking_on_near_match() {
     // long body but NO matching `-----END ... PRIVATE KEY-----` footer.
     let pathological = format!("-----BEGIN PRIVATE KEY-----{}", "A".repeat(10_000));
     let start = std::time::Instant::now();
-    let _ = redact(&pathological);
+    let out = redact(&pathological);
     let elapsed = start.elapsed();
+    // Asserted, not discarded: a bound on elapsed time alone is satisfied by a
+    // `redact` that never examined the input.
+    assert_eq!(
+        out, pathological,
+        "the PEM footer is missing, so redact() must return the input unchanged; \
+         a different answer means the pattern did not run over it"
+    );
     assert!(
         elapsed.as_millis() < 1000,
         "PEM pattern caused catastrophic backtracking: {}ms on 10k input",

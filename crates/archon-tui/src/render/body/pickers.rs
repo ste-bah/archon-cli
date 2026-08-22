@@ -179,6 +179,15 @@ pub fn draw_permissions_browser(frame: &mut Frame, app: &App) {
     browser.render(frame, frame.area(), &app.theme);
 }
 
+/// Render the permission-preset selector (#200 Phase 3, `/permissions presets`).
+pub fn draw_permission_presets(frame: &mut Frame, app: &App) {
+    let picker = match &app.permission_presets {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
 /// Render the memory-files overlay (#192, `/memory files`).
 pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
     let browser = match &app.memory_browser {
@@ -191,6 +200,15 @@ pub fn draw_memory_browser(frame: &mut Frame, app: &App) {
 /// Render the branch picker (#192, `/fork-at` with no arguments).
 pub fn draw_branch_picker(frame: &mut Frame, app: &App) {
     let picker = match &app.branch_picker {
+        Some(p) => p,
+        None => return,
+    };
+    picker.render(frame, frame.area(), &app.theme);
+}
+
+/// Render the `@`-mention picker (#200 Phase 4).
+pub fn draw_session_mention(frame: &mut Frame, app: &App) {
+    let picker = match &app.session_mention {
         Some(p) => p,
         None => return,
     };

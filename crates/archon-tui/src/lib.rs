@@ -103,6 +103,12 @@ pub mod screens;
 /// genuine export here keeps that property; widening the module back to `pub`
 /// would restore the hole.
 pub use screens::file_picker::walker::read_dir_entries;
+/// The `@`-mention seam (#200 Phase 4).
+///
+/// Same reason as the tasks overlay: the picker is crate-private and `App`
+/// constructs it, but the rows come from a `SessionStore` this crate cannot
+/// reach, so the bin crate implements the source.
+pub use screens::session_mention::{MentionCandidate, SessionMentionSource};
 /// The tasks-overlay seam (#189 Phase 9).
 ///
 /// The overlay itself stays crate-private — `App` constructs it. These three

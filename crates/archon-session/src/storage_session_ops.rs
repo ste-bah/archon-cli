@@ -152,6 +152,11 @@ impl SessionStore {
             for script in [
                 "?[session_id, message_index] := *messages{session_id, message_index}, session_id = $sid :rm messages {session_id, message_index}",
                 "?[session_id, tag] := *session_tags{session_id, tag}, session_id = $sid :rm session_tags {session_id, tag}",
+                // A deleted session's derived state outliving it is the same
+                // defect as a cleared one's: session ids are reusable, and a
+                // cache keyed on the id alone would be inherited by whatever
+                // claims it next.
+                crate::projection::PROJECTIONS_RM_FOR_SESSION,
                 "?[id] := id = $sid :rm sessions {id}",
             ] {
                 transaction

@@ -1,85 +1,62 @@
-//! TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: /clear slash-command
-//! handler (THIN-WRAPPER pattern body-migrate).
+//! `/clear` — the registry's entry for a command whose body runs upstream.
 //!
-//! # R1 DISPATCH-ORDERING (design)
+//! # Where the work happens
 //!
-//! The real `/clear` body lives at `src/session.rs:2257-...`, NOT in
-//! `src/command/slash.rs`. The TUI input loop intercepts `/clear` with
-//! a literal match and runs the body BEFORE `handle_slash_command` is
-//! ever invoked, because the body needs `agent.lock().await` to call
-//! `Agent::clear_conversation()` plus read/write the personality
-//! snapshot + inner-voice state — dependencies that `CommandContext`
-//! does not carry and that the sync `CommandHandler::execute` signature
-//! cannot `.await`.
+//! The clear body is `session_loop::slash_handlers::handle_clear_command`.
+//! It cannot live in `ClearHandler::execute`: it locks the agent to save the
+//! personality snapshot, fires the `SessionEnd` and `SessionStart` hooks,
+//! clears the conversation, and purges the session store — all `.await`s over
+//! state `CommandContext` does not carry and the synchronous
+//! `CommandHandler::execute` signature cannot reach. So `slash_dispatch`
+//! intercepts the command before `handle_slash_command` runs, and this
+//! handler exists to give the registry a name, a description and the alias
+//! list that `/help` prints.
 //!
-//! Dispatch order under normal operation:
+//! # The gap this module used to leave open
 //!
-//! ```text
-//! session.rs:2257  --> /clear intercepted --> `continue` (handler never reached)
-//! session.rs:2483  --> handle_slash_command(...)
-//! slash.rs         --> Dispatcher::dispatch --> Registry::get("clear")
-//! clear.rs         --> ClearHandler::execute    [UNREACHABLE under normal op]
-//! ```
+//! The interception was a literal `trimmed == "/clear"`. The alias published
+//! right here — `cls` — matched nothing there, so `/cls` fell through to the
+//! dispatcher and reached an `execute` whose whole body was `Ok(())`. No
+//! clear, no error, no output: the user watched their conversation stay on
+//! screen and in storage while believing it was gone.
 //!
-//! The `/cls` alias reaches this handler via the PATH A dispatcher
-//! because session.rs:2257 only matches the literal `/clear` string.
-//! A user typing `/cls` therefore bypasses the shipped clear body
-//! today and falls through to this no-op — the same situation that
-//! applies to AGS-818 `/export`'s `/save` alias. Real body-migrate
-//! will close that gap.
+//! That mattered more than a missing convenience. Clearing is a privacy
+//! operation at the store: `delete_all_messages` removes the log *and* the
+//! compaction segments, their verbatim bodies, the compaction ledger and
+//! every cached projection, because all four otherwise keep readable copies
+//! of the cleared conversation — and because segments are addressed by log
+//! index, a cleared log restarting at 0 lets survivors re-attach to whatever
+//! conversation comes next in that session. `/cls` reached none of it.
 //!
-//! # R2 SCOPE-HELD (real body-migrate deferred)
+//! # What keeps the spellings together now
 //!
-//! Real body-migrate is deferred to POST-STAGE-6. Completing it
-//! requires surfacing `Arc<Mutex<Agent>>` plus the personality-persist
-//! machinery (`PersonalitySnapshot`, `RulesEngine`, `session_start_*`
-//! timers) through `CommandContext`, plus removing the
-//! session.rs:2257 interception block without regressing shipped clear
-//! behavior.
+//! [`command_args`] answers "is this the clear command, and with what
+//! arguments?" against [`spellings`], which is [`ClearHandler::NAME`] plus
+//! [`ClearHandler::aliases`] — the same alias list `RegistryBuilder::build`
+//! indexes, and its only source.
+//! `slash_dispatch` asks that question instead of comparing strings, so a
+//! third alias added to `aliases()` is intercepted the moment it is declared.
+//! `session_loop::slash_dispatch_clear_tests` drives every spelling
+//! [`spellings`] reports through the real dispatch and reads the store back,
+//! so an alias that stopped reaching the body would fail rather than go
+//! quiet.
 //!
-//! # R3 NO-OP (behavior)
-//!
-//! This handler is a BYTE-IDENTICAL functional replacement for the
-//! shipped `declare_handler!(ClearHandler, "Clear the current
-//! conversation", &["cls"])` stub at registry.rs:1208 (pre-B24). The
-//! macro-generated body is `Ok(())` with zero emissions. The migrated
-//! handler must preserve that EXACT observable behavior — no
-//! TextDelta, no Error event, no tui_tx interaction at all. Adding a
-//! canary (AGS-818 /export style) would REGRESS observable behavior
-//! because the shipped stub emitted nothing.
-//!
-//! The sentinel at `src/command/slash.rs:98` (`"/compact" | "/clear"
-//! => true`) exists so that when the input processor intercept fires
-//! and the dispatcher never actually sees the command, the legacy
-//! match block still claims recognition (preventing the Option-3
-//! default arm and skill-registry double-fire). That sentinel is the
-//! parent task's Gate-5 deletion target, NOT this module's concern.
-//!
-//! # R4 ALIASES `&["cls"]` (preserved)
-//!
-//! Shipped stub used the three-arg `declare_handler!` form with
-//! `&["cls"]`. Per AGS-817 `/memory` (`&["mem"]`) and AGS-818
-//! `/export` (`&["save"]`) shipped-wins precedent, this handler
-//! preserves the `&["cls"]` alias. Dropping it would regress any
-//! operator workflow depending on `/cls` today. The alias resolves
-//! through the PATH A dispatcher's alias map (see `Registry::get`).
+//! `execute` is consequently unreachable, and says so loudly instead of
+//! returning the `Ok(())` that hid the defect for as long as it did.
 
+use crate::command::intercept;
 use crate::command::registry::{CommandContext, CommandHandler};
 
-/// Zero-sized handler registered as the primary `/clear` command.
-///
-/// Alias: `["cls"]` — PRESERVED from the shipped declare_handler!
-/// stub (shipped-wins drift-reconcile; see R4 in module rustdoc).
-///
-/// Under normal operation this handler is UNREACHABLE via `/clear`
-/// because `src/session.rs:2257` intercepts first with `continue`.
-/// The `/cls` alias reaches the handler through the PATH A dispatcher
-/// (session.rs does not match `/cls`). In either case the behavior is
-/// the shipped no-op `Ok(())` — byte-identical to the pre-B24
-/// `declare_handler!` stub.
+/// Registry entry for `/clear`. The body runs in
+/// `session_loop::slash_handlers::handle_clear_command`; see the module docs.
 pub(crate) struct ClearHandler;
 
 impl ClearHandler {
+    /// The primary spelling, shared by the registry entry in
+    /// `registry::default_registry` and by [`command_args`], so the name the
+    /// dispatcher knows and the name the interception matches cannot differ.
+    pub(crate) const NAME: &'static str = "clear";
+
     /// Construct a fresh `ClearHandler`. Zero-sized so this is free.
     pub(crate) fn new() -> Self {
         Self
@@ -94,147 +71,136 @@ impl Default for ClearHandler {
 
 impl CommandHandler for ClearHandler {
     fn execute(&self, _ctx: &mut CommandContext, _args: &[String]) -> anyhow::Result<()> {
-        // THIN-WRAPPER no-op. Byte-identical to the shipped
-        // `declare_handler!` macro body (registry.rs:1163-1180): return
-        // Ok(()) WITHOUT emitting any TuiEvent. Real body-migrate
-        // deferred to POST-STAGE-6 (see module rustdoc R2).
-        Ok(())
+        // Unreachable: `slash_dispatch` intercepts every spelling
+        // `command_args` recognises, which is every spelling the registry
+        // resolves to this handler. Reaching here means the interception was
+        // removed or bypassed, and the user's clear did not happen. Say so —
+        // returning `Ok(())` is what made the `/cls` defect invisible.
+        anyhow::bail!(
+            "/clear did not run: its body is intercepted in the session loop and \
+             the dispatcher was reached instead. Nothing was cleared. This is a \
+             dispatch wiring regression — report it."
+        )
     }
 
     fn description(&self) -> &'static str {
-        // Byte-for-byte preservation of the shipped declare_handler!
-        // stub at registry.rs:1208 (shipped-wins drift-reconcile).
         "Clear the current conversation"
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        // Shipped stub used the three-arg declare_handler! form with
-        // `&["cls"]`. Preserved per AGS-817 /memory and AGS-818
-        // /export shipped-wins precedent (see module rustdoc R4).
         &["cls"]
     }
 }
 
-// ---------------------------------------------------------------------------
-// TASK-AGS-POST-6-BODIES-B24-COMPACT-CLEAR: tests for /clear
-// ---------------------------------------------------------------------------
+/// Every spelling the registry resolves to [`ClearHandler`]: the primary name
+/// followed by each published alias.
+///
+/// Tests iterate this rather than a hand-written list, so a new alias joins
+/// the coverage at the moment it is declared.
+pub(crate) fn spellings() -> Vec<&'static str> {
+    std::iter::once(ClearHandler::NAME)
+        .chain(ClearHandler.aliases().iter().copied())
+        .collect()
+}
+
+/// The argument text after the command name when `input` is `/clear` under any
+/// of its [`spellings`]; `None` when `input` is some other command.
+///
+/// `/clear` takes no arguments, so the returned text is only used to tell a
+/// bare command from a non-match — but `/clear please` now clears rather than
+/// silently doing nothing, which is the same failure the alias had.
+pub(crate) fn command_args(input: &str) -> Option<&str> {
+    intercept::command_args(input, &spellings())
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
 
     use crate::command::dispatcher::Dispatcher;
     use crate::command::registry::RegistryBuilder;
 
-    /// Build a minimal `CommandContext` with a freshly-created channel.
-    /// /clear is a THIN-WRAPPER handler — no snapshot, no effect
-    /// slot, no extra context field — so every optional field stays
-    /// `None`. Mirrors the `make_ctx` fixtures in export.rs / compact.rs.
     fn make_ctx() -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
-        // TASK-AGS-POST-6-SHARED-FIXTURES-V2: migrated to CtxBuilder.
         crate::command::test_support::CtxBuilder::new().build()
     }
 
     #[test]
-    fn clear_handler_description_byte_identical_to_shipped() {
+    fn the_description_and_alias_the_registry_publishes_are_unchanged() {
         let h = ClearHandler::new();
-        assert_eq!(
-            h.description(),
-            "Clear the current conversation",
-            "ClearHandler description must match the shipped \
-             declare_handler! stub verbatim (shipped-wins drift-reconcile)"
-        );
+        assert_eq!(h.description(), "Clear the current conversation");
+        assert_eq!(h.aliases(), &["cls"]);
+        assert_eq!(ClearHandler::NAME, "clear");
     }
 
+    /// The property the interception depends on: every spelling the registry
+    /// resolves to `ClearHandler` is a spelling `command_args` claims. A new
+    /// alias declared on the handler is covered here without anyone adding a
+    /// case, and an alias the interception could not see would fail.
     #[test]
-    fn clear_handler_aliases_match_shipped() {
-        let h = ClearHandler::new();
-        assert_eq!(
-            h.aliases(),
-            &["cls"],
-            "ClearHandler aliases must preserve 'cls' from the shipped \
-             declare_handler! stub (shipped-wins drift-reconcile per \
-             AGS-817 /memory and AGS-818 /export precedent)"
-        );
-    }
+    fn every_spelling_the_registry_resolves_here_is_one_the_interception_claims() {
+        let mut b = RegistryBuilder::new();
+        b.insert_primary(ClearHandler::NAME, Arc::new(ClearHandler::new()));
+        let registry = b.build();
 
-    #[test]
-    fn execute_returns_ok_without_emission() {
-        let (mut ctx, mut rx) = make_ctx();
-        let h = ClearHandler::new();
-        let res = h.execute(&mut ctx, &[]);
-        assert!(
-            res.is_ok(),
-            "ClearHandler::execute must return Ok(()), got: {res:?}"
-        );
-        // No TuiEvent must be emitted — THIN-WRAPPER is byte-identical
-        // to the shipped declare_handler! no-op stub.
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "ClearHandler::execute must NOT emit any TuiEvent, \
-                 got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+        for spelling in spellings() {
+            assert!(
+                registry.get(spelling).is_some(),
+                "/{spelling} does not resolve in the registry"
+            );
+            assert_eq!(
+                command_args(&format!("/{spelling}")),
+                Some(""),
+                "/{spelling} resolves to the clear command but the interception \
+                 does not recognise it — it would reach the unreachable handler"
+            );
         }
     }
 
     #[test]
-    fn dispatcher_routes_slash_clear_returns_ok_without_emission() {
-        // Narrow `RegistryBuilder::new()` (not `default_registry`) so
-        // this test exercises ONLY the ClearHandler wiring — no other
-        // handlers are registered. Asserts the real Dispatcher routes
-        // `/clear` to `ClearHandler::execute` and emits no event.
-        let mut b = RegistryBuilder::new();
-        b.insert_primary("clear", Arc::new(ClearHandler::new()));
-        let registry = Arc::new(b.build());
-        let dispatcher = Dispatcher::new(registry);
-        let (mut ctx, mut rx) = make_ctx();
+    fn another_command_is_not_mistaken_for_clear() {
+        assert_eq!(command_args("/compact"), None);
+        assert_eq!(command_args("/clearing-house"), None);
+    }
 
-        let res = dispatcher.dispatch(&mut ctx, "/clear");
+    /// Reaching `execute` means the interception did not fire and the user's
+    /// conversation was not cleared. That has to be loud.
+    #[test]
+    fn reaching_the_handler_body_is_an_error_not_a_silent_success() {
+        let (mut ctx, _rx) = make_ctx();
+        let h = ClearHandler::new();
+        let error = h
+            .execute(&mut ctx, &[])
+            .expect_err("a clear that did not clear must not report success");
         assert!(
-            res.is_ok(),
-            "Dispatcher::dispatch(\"/clear\") must return Ok(()), \
-             got: {res:?}"
+            error.to_string().contains("Nothing was cleared"),
+            "the error must say the clear did not happen: {error}"
         );
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route to ClearHandler must NOT emit any \
-                 TuiEvent, got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
-        }
     }
 
     #[test]
-    fn dispatcher_routes_alias_cls_returns_ok_without_emission() {
-        // Verify the `&["cls"]` alias resolves to ClearHandler through
-        // the Registry's alias map (TASK-AGS-802). This pins the
-        // shipped-wins alias-preservation invariant: `/cls` must reach
-        // ClearHandler::execute and return Ok(()) with no emission —
-        // byte-identical to `/clear`.
+    fn the_dispatcher_surfaces_that_error_to_the_user() {
         let mut b = RegistryBuilder::new();
-        b.insert_primary("clear", Arc::new(ClearHandler::new()));
-        let registry = Arc::new(b.build());
-        let dispatcher = Dispatcher::new(registry);
-        let (mut ctx, mut rx) = make_ctx();
+        b.insert_primary(ClearHandler::NAME, Arc::new(ClearHandler::new()));
+        let dispatcher = Dispatcher::new(Arc::new(b.build()));
 
-        let res = dispatcher.dispatch(&mut ctx, "/cls");
-        assert!(
-            res.is_ok(),
-            "Dispatcher::dispatch(\"/cls\") must return Ok(()) via \
-             the ClearHandler alias, got: {res:?}"
-        );
-        match rx.try_recv() {
-            Err(mpsc::error::TryRecvError::Empty) => {}
-            Ok(ev) => panic!(
-                "Dispatcher route via /cls alias to ClearHandler must \
-                 NOT emit any TuiEvent, got: {ev:?}"
-            ),
-            Err(e) => panic!("unexpected channel error: {e:?}"),
+        for spelling in spellings() {
+            let (mut ctx, mut rx) = make_ctx();
+            assert!(
+                dispatcher
+                    .dispatch(&mut ctx, &format!("/{spelling}"))
+                    .is_err(),
+                "/{spelling} reaching the dispatcher must not look like success"
+            );
+            let events = crate::command::test_support::drain_tui_events(&mut rx);
+            assert!(
+                events.iter().any(|event| matches!(
+                    event,
+                    archon_tui::app::TuiEvent::Error(message)
+                        if message.contains("Nothing was cleared")
+                )),
+                "the user must be told the clear did not run, got: {events:?}"
+            );
         }
     }
 }

@@ -54,6 +54,28 @@ impl MessageHistory {
     }
 }
 
+/// Deliver any repeat-tool advisory this round earned to the subagent (#200
+/// Phase 2).
+///
+/// The parent's loop is not the only one that runs tools. A guard only it
+/// drained would queue reminders for every subagent and hand them to nobody —
+/// counting a loop it never tells anyone about, which is worse than not
+/// counting it, because it looks like coverage.
+///
+/// Same delivery shape as the parent: a user turn appended after the round's
+/// tool results, never folded into a `tool_result`'s content.
+pub(super) fn drain_repeat_tool_reminders(
+    runner: &super::SubagentRunner,
+    messages: &mut MessageHistory,
+) {
+    let key = archon_tools::repeat_tool_guard::ChainKey::of(&runner.tool_context);
+    for reminder in archon_tools::repeat_tool_guard::REPEAT_TOOL_CHAINS.take_reminders(&key) {
+        let message = serde_json::json!({"role": "user", "content": reminder});
+        runner.record_transcript(&message);
+        messages.push(message);
+    }
+}
+
 #[cfg(test)]
 mod message_history_tests {
     use super::MessageHistory;

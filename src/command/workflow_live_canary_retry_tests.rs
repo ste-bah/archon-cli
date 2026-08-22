@@ -100,7 +100,13 @@ impl RetryAgentClient {
             "source_item_id": "impl-retry-001",
             "focused_verification": "run schema-aware proof verification",
             "expected_evidence": "proof artifact accepted by retry verifier",
-            "artifact_requirements": [ARTIFACT_REL]
+            "artifact_requirements": [ARTIFACT_REL],
+            // Quoted exactly as the TASK FILE states it — "Proof artifact
+            // exists." — not as the inventory item words it. The coverage gate
+            // compares a plan against the task universe parsed from the task
+            // file, so the item's own phrasing never matches and the plan is
+            // refused, leaving the run blocked before any verification runs.
+            "covered_acceptance_criteria": ["Proof artifact exists."]
         })
     }
 
@@ -120,7 +126,11 @@ impl RetryAgentClient {
             return self.implementation_result();
         }
         if prompt.contains("Plan focused verification")
-            || prompt.contains("Repair an empty focused verification plan")
+            // The real prompt is "Repair an empty OR MALFORMED focused
+            // verification plan", so the old substring never matched: the
+            // repair call fell through unhandled and the run blocked at
+            // `blocked-empty-verification` before any verification ran.
+            || prompt.contains("Repair an empty or malformed focused verification plan")
         {
             return Self::accepted(
                 "Verification plan.",

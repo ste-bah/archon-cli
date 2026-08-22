@@ -115,6 +115,19 @@ pub(crate) struct ScriptToolHost {
     checker: PermissionChecker,
     working_dir: std::path::PathBuf,
     session_id: String,
+    /// The execution world these calls run in, or `None` when the config asks
+    /// for no isolation.
+    ///
+    /// A script's `Bash` used to run on the host whatever `[sandbox]` said,
+    /// because the context was built from `ToolContext::default()` and never
+    /// learned a backend existed. The permission gate above still ran, so the
+    /// call was authorised — and then executed in the wrong world. Permission
+    /// and confinement are different questions and only the first was asked.
+    sandbox: Option<Arc<dyn archon_permissions::SandboxBackend>>,
+    /// Paired with `sandbox` deliberately: the read-before-edit guard and the
+    /// file tools both read this, and a context carrying one without the other
+    /// puts them in disagreement about which world they are looking at.
+    fs: Option<Arc<dyn archon_tools::filesystem::FileSystem>>,
 }
 
 impl ScriptToolHost {
@@ -139,6 +152,21 @@ impl ScriptToolHost {
                     always_ask: config.permissions.always_ask.clone(),
                 },
             ),
+            // Same two calls session boot and the workflow CLI path make, from
+            // the same loaded config, so a script lands in the world an
+            // operator configured rather than always on the host.
+            sandbox: crate::runtime::sandbox_world::isolation_backend(&config.sandbox),
+            // A filesystem that cannot be built fails the call, exactly as it
+            // fails session boot. Degrading quietly to the host is the failure,
+            // not the mitigation.
+            fs: archon_core::sandbox::sandbox_filesystem(&config.sandbox, &working_dir).map_err(
+                |error| {
+                    WorkflowError::SpecInvalid(format!(
+                        "workflow tool calls need the sandbox filesystem, which failed to \
+                         build: {error}"
+                    ))
+                },
+            )?,
             working_dir,
             session_id,
         })
@@ -181,6 +209,8 @@ impl ScriptToolHost {
             // Plan mode would narrow the registry further; a script is not
             // planning, it is executing an authored orchestration.
             mode: AgentMode::Normal,
+            sandbox: self.sandbox.clone(),
+            fs: self.fs.clone(),
             ..ToolContext::default()
         };
         let result = tool.execute(request.input.clone(), &context).await;

@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::evidence_cli;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 pub const LEARNING_TOOL_NAMES: &[&str] = &[
     "LearningStatus",
@@ -43,12 +45,21 @@ macro_rules! learning_tool {
                 WorkingTreeEffect::Arbitrary
             }
 
+            fn capability(&self) -> ToolCapability {
+                LEARNING_TOOL_CAPABILITY
+            }
+
             fn permission_level(&self, _input: &Value) -> PermissionLevel {
                 $perm
             }
         }
     };
 }
+
+/// Like the document tools, these run the `archon` executable as a host
+/// subprocess (`evidence_cli::run_archon`). No backend can route that, so the
+/// governed-learning surface is a host handle rather than host-local state.
+const LEARNING_TOOL_CAPABILITY: ToolCapability = ToolCapability::HOST_HANDLE;
 
 learning_tool!(
     LearningStatus,

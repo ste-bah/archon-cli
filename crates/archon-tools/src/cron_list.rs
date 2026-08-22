@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use crate::cron_task::CronStore;
-use crate::tool::{PermissionLevel, Tool, ToolContext, ToolResult, WorkingTreeEffect};
+use crate::tool::{
+    PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
+};
 
 /// Tool that lists all scheduled cron tasks.
 pub struct CronListTool {
@@ -45,6 +47,10 @@ impl CronListTool {
 impl Tool for CronListTool {
     fn name(&self) -> &str {
         "CronList"
+    }
+
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::ControlPlane
     }
 
     fn description(&self) -> &str {

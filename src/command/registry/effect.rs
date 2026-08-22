@@ -158,4 +158,15 @@ pub(crate) enum CommandEffect {
         note: String,
         expected_version: Option<String>,
     },
+    /// Pull a bounded excerpt of another session into the next turn (#200
+    /// Phase 4).
+    ///
+    /// Deferred rather than done in the handler because the prepared block is
+    /// parked behind `SlashCommandContext::pending_session_references`, a
+    /// `tokio::sync::Mutex` a sync `CommandHandler::execute` cannot lock, and
+    /// because the read needs `session_store`, `working_dir` and the live
+    /// `session_id` — none of which reach `CommandContext`. Carries only the
+    /// referenced id; every failure is reported by `apply_effect` as an
+    /// error event, never as a quietly empty injection.
+    ReferenceSession(String),
 }

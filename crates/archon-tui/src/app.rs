@@ -50,6 +50,14 @@ pub struct AppConfig {
     /// `archon_tools::task_manager::TASK_MANAGER`. `None` leaves the overlay
     /// unavailable and it says so.
     pub task_store: Option<std::sync::Arc<dyn crate::screens::task_overlay::TaskStore>>,
+    /// Source of rows for the `@`-mention picker (#200 Phase 4).
+    ///
+    /// Injected from the bin crate for the same reason as `task_store`: this
+    /// crate has no `SessionStore`. `None` leaves the picker unavailable and
+    /// it says so on screen rather than opening onto an empty list that reads
+    /// as "you have no other sessions".
+    pub session_mentions:
+        Option<std::sync::Arc<dyn crate::screens::session_mention::SessionMentionSource>>,
 }
 
 /// Entry points live in `app_run.rs` (500-line gate); the path is unchanged.
@@ -116,10 +124,21 @@ pub struct App {
     /// `/permissions` rules overlay (#192). Read-only: nothing at runtime can
     /// change these rules.
     pub permissions_browser: Option<crate::screens::permissions_browser::PermissionsBrowser>,
+    /// `/permissions presets` selector (#200 Phase 3). Enter injects
+    /// `/permissions preset <name>`; the overlay itself writes nothing.
+    pub permission_presets: Option<crate::screens::permission_presets::PermissionPresetPicker>,
     /// `/memory files` overlay (#192): the ARCHON.md hierarchy in force.
     pub memory_browser: Option<crate::screens::memory_file_selector::MemoryBrowser>,
     /// `/fork-at` picker (#192): which message to fork the session from.
     pub branch_picker: Option<crate::screens::session_branching::BranchPicker>,
+    /// `@`-mention picker (#200 Phase 4): which session to reference.
+    ///
+    /// Opened and closed by the buffer scan on every edit, not by a command,
+    /// so it is never out of step with what the caret is sitting inside.
+    pub session_mention: Option<crate::screens::session_mention::SessionMentionPicker>,
+    /// Where that picker's rows come from; `None` until the bin crate injects one.
+    pub session_mention_source:
+        Option<std::sync::Arc<dyn crate::screens::session_mention::SessionMentionSource>>,
     /// `/voice` capture overlay (#192): live microphone level and the last
     /// transcription. Opened by `/voice` and by the recording hotkey.
     pub voice_capture: Option<crate::screens::voice_capture::VoiceCaptureOverlay>,
@@ -186,8 +205,11 @@ impl Default for App {
             theme_screen: None,
             hooks_menu: None,
             permissions_browser: None,
+            permission_presets: None,
             memory_browser: None,
             branch_picker: None,
+            session_mention: None,
+            session_mention_source: None,
             voice_capture: None,
             token_attribution: None,
             settings_screen: None,
@@ -228,8 +250,10 @@ impl App {
             && self.theme_screen.is_none()
             && self.hooks_menu.is_none()
             && self.permissions_browser.is_none()
+            && self.permission_presets.is_none()
             && self.memory_browser.is_none()
             && self.branch_picker.is_none()
+            && self.session_mention.is_none()
             && self.voice_capture.is_none()
             && self.token_attribution.is_none()
             && self.settings_screen.is_none()
