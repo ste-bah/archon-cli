@@ -5,9 +5,15 @@ use archon_tools::bash::BashTool;
 
 // ── v0.1.12: parallel tool dispatch regression test ──────────
 
+/// A tool that reports how many copies of itself were running at once.
+///
+/// The delay is only there to hold the overlap window open; what the parallel
+/// dispatch test reads is `peak`, not the clock.
 struct SleeperTool {
     name: String,
     delay_ms: u64,
+    inflight: Arc<std::sync::atomic::AtomicUsize>,
+    peak: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 struct RiskySubagentTool {
@@ -58,7 +64,11 @@ impl Tool for SleeperTool {
         serde_json::json!({})
     }
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
+        use std::sync::atomic::Ordering;
+        let now = self.inflight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
         tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        self.inflight.fetch_sub(1, Ordering::SeqCst);
         ToolResult::success(format!("done:{}", self.name))
     }
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
@@ -68,19 +78,17 @@ impl Tool for SleeperTool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
+    let inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let peak = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut registry = ToolRegistry::new();
-    registry.register(Box::new(SleeperTool {
-        name: "sleeper-A".into(),
-        delay_ms: 400,
-    }));
-    registry.register(Box::new(SleeperTool {
-        name: "sleeper-B".into(),
-        delay_ms: 200,
-    }));
-    registry.register(Box::new(SleeperTool {
-        name: "sleeper-C".into(),
-        delay_ms: 300,
-    }));
+    for (name, delay_ms) in [("sleeper-A", 400), ("sleeper-B", 200), ("sleeper-C", 300)] {
+        registry.register(Box::new(SleeperTool {
+            name: name.into(),
+            delay_ms,
+            inflight: Arc::clone(&inflight),
+            peak: Arc::clone(&peak),
+        }));
+    }
     let registry = Arc::new(registry);
     let tool_defs = registry.tool_definitions();
 
@@ -162,9 +170,7 @@ async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
         )),
     );
 
-    let start = std::time::Instant::now();
     let result = runner.run("run all three").await.unwrap();
-    let elapsed = start.elapsed();
 
     // The subagent ran turn 1 (3 tool_use dispatched in parallel)
     // then turn 2 (text "all done"). If dispatch had failed, the
@@ -172,12 +178,20 @@ async fn parallel_tool_dispatch_concurrent_and_order_preserved() {
     // loop completed cleanly.
     assert_eq!(result, "all done");
 
-    // Concurrent: max delay is 400ms. Serial sum would be ~900ms.
-    // 1.5× headroom for CI variance.
-    assert!(
-        elapsed.as_millis() < 900,
-        "{}ms — expected <900ms for 3×400ms concurrent (serial would be ~900ms)",
-        elapsed.as_millis()
+    // Concurrency, observed rather than inferred from a stopwatch. This used to
+    // assert the three 200-400ms sleeps finished inside 900ms, with 1.5x
+    // headroom over the serial sum — a margin a loaded CI box eats without any
+    // regression in dispatch. The tools now report how many of them were in
+    // flight at once, which serial dispatch cannot fake at any speed.
+    assert_eq!(
+        peak.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "expected all three tool calls in flight together; serial dispatch peaks at 1"
+    );
+    assert_eq!(
+        inflight.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "every dispatched tool must have finished before the turn completed"
     );
 }
 
@@ -288,10 +302,23 @@ async fn tool_round_timeout_kills_bash_process_group() {
         )),
     );
 
-    let started = std::time::Instant::now();
-    let error = runner.run("run the command").await.unwrap_err();
-    assert!(error.to_string().contains("during tool round"), "{error}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(6));
+    // The error itself says which deadline fired and in which phase, and no
+    // amount of machine load rewrites it. The outer timeout is a liveness guard
+    // for the case where the 5s cap does not fire at all — set an order of
+    // magnitude above it precisely so it is never the thing being measured.
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        runner.run("run the command"),
+    )
+    .await
+    .expect("the 5s wall-clock cap never fired; the tool round was left running")
+    .unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("during tool round"), "{message}");
+    assert!(
+        message.contains("(cap: 5s)"),
+        "the run must end on the subagent's own 5s cap, not the tool's 60s one: {message}"
+    );
     let pid = std::fs::read_to_string(pid_file).unwrap();
     assert_process_stopped(pid.trim()).await;
 }

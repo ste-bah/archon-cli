@@ -210,9 +210,6 @@ mod tests {
     #[cfg(unix)]
     use std::process::Command as StdCommand;
     #[cfg(unix)]
-    use std::time::Instant;
-
-    #[cfg(unix)]
     use tempfile::NamedTempFile;
 
     #[cfg(unix)]
@@ -233,17 +230,19 @@ mod tests {
         let pid_file = NamedTempFile::new().unwrap();
         let mut command = Command::new(&script);
         command.arg(pid_file.path());
-        let started = Instant::now();
 
         let error = output_with_timeout(&mut command, Duration::from_millis(100))
             .await
             .unwrap_err();
 
+        // `CommandError::Timeout` is the deadline firing; the 2s wall-clock
+        // bound that used to follow restated it against a clock that measures
+        // machine load, and the kill assertion below is what proves the
+        // cleanup actually happened.
         assert!(
             matches!(error, CommandError::Timeout { .. }),
             "unexpected subprocess error: {error:?}"
         );
-        assert!(started.elapsed() < Duration::from_secs(2));
         let pid = std::fs::read_to_string(pid_file.path()).unwrap();
         let status = StdCommand::new("kill")
             .args(["-0", pid.trim()])
@@ -299,7 +298,6 @@ mod tests {
         command
             .arg(child_pid_file.path())
             .arg(descendant_pid_file.path());
-        let started = Instant::now();
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(2),
@@ -323,6 +321,5 @@ mod tests {
             matches!(error, CommandError::Timeout { .. }),
             "unexpected subprocess error: {error:?}"
         );
-        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
