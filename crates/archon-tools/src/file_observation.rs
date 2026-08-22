@@ -176,6 +176,37 @@ impl ObservationRegistry {
         }
     }
 
+    /// Drop what one agent observed, leaving every other agent alone.
+    ///
+    /// A session ends once per process; subagents end constantly inside one.
+    /// `execute-plan` runs a fresh subagent per task and each gets its own
+    /// [`Observer`], so without this the map keeps a record per agent for the
+    /// life of the process — including for agents that finished hours ago and
+    /// whose ids nothing will ever present again.
+    ///
+    /// This is deliberately not eviction. A bounded cache is the right shape
+    /// for something advisory, and this is not advisory: dropping an entry
+    /// turns [`Verdict::Fresh`] into [`Verdict::Unobserved`], and under the
+    /// default `read_before_edit = "block"` that refuses a write the agent had
+    /// every right to make. Which write got refused would depend on how many
+    /// other files happened to be in the map, which is not a behaviour anyone
+    /// can reason about. A lifecycle boundary is nameable instead: what gets
+    /// dropped, and when, is the same every time and can be stated in one
+    /// sentence — the caller states it.
+    ///
+    /// Hence also the caller: the subagent executor's unconditional
+    /// `handle_inner_complete`, not the `SubagentStop` hook.
+    /// `crates/archon-tools/src/board/leases.rs` documents why that hook is the
+    /// wrong seam for anything that must always run — it fires from
+    /// `on_visible_complete`, which the `AutoBackgrounded` arm skips, so the
+    /// longest-lived agents (the ones holding the most observations) would be
+    /// exactly the ones never released.
+    pub fn forget_agent(&self, observer: &Observer) {
+        if let Ok(mut seen) = self.seen.lock() {
+            seen.remove(observer);
+        }
+    }
+
     /// How many paths this agent has observed. For tests and diagnostics.
     #[must_use]
     pub fn len(&self, observer: &Observer) -> usize {
