@@ -208,6 +208,20 @@ impl WorkflowV2ScriptRunner {
             ),
             ("source_roots", &source_roots),
             ("task_paths", &task_paths),
+            // Computed here rather than asked of the author. The universe
+            // already carries `dependency_ids` and the declared target files,
+            // so the batching is determined data, not a judgement — and left as
+            // a judgement the author declined it, emitting 60 sequential calls
+            // for a task set whose four provider ingests share no dependency
+            // and write to four separate directories.
+            (
+                "task_waves",
+                &self
+                    .task_universe
+                    .as_ref()
+                    .map(render_author_waves)
+                    .unwrap_or_else(|| "<none>".to_string()),
+            ),
             (
                 "retry_feedback",
                 // The rejected draft rides with the reason. Without it the

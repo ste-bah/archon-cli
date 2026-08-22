@@ -304,6 +304,28 @@ async fn execute_generated_v2_run(
             plan.task_universe.as_ref(),
         )
         .await;
+    // Isolated agents lease a reusable build-cache directory instead of each
+    // getting one named after itself. Installed here because a workflow is what
+    // runs many isolated agents against one repository — an interactive session
+    // gets no pool and builds where it always did.
+    //
+    // Sized to how many agents may build at once, which is also what bounds the
+    // disk: slots × one cache, however many tasks the run has. Installing is
+    // first-caller-wins, so a second run in this process keeps the pool agents
+    // may already be holding slots from.
+    let build_cache_slots = usize::from(
+        runtime
+            .generated_config
+            .build_cache_slots
+            .or(runtime.generated_config.implementation_wave_max_parallelism)
+            .unwrap_or(1)
+            .max(1),
+    );
+    archon_tools::build_cache_lease::install_shared_build_cache_pool(
+        archon_tools::worktree_manager::WorktreeManager::worktrees_dir().join("build-cache"),
+        build_cache_slots,
+    );
+
     let client = LiveV2AgentClient::new(
         llm,
         ui_sink.clone(),

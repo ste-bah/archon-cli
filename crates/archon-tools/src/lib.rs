@@ -13,6 +13,8 @@ pub use background_agents::{
 };
 pub mod bash;
 pub mod bash_evidence;
+pub mod build_cache_env;
+pub mod build_cache_lease;
 mod authoritative_bash_execution_compile_contract {
     /// ```compile_fail
     /// use archon_tools::tool::AuthoritativeBashExecution;

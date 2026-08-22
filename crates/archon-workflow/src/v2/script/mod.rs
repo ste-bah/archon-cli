@@ -50,6 +50,7 @@ mod v3_author_a;
 mod v3_author_b;
 mod v3_author_checks_a;
 mod v3_author_checks_b;
+mod v3_author_waves;
 mod v3_prelude;
 mod verification;
 
@@ -61,6 +62,7 @@ pub use v3_author_a::*;
 pub use v3_author_b::*;
 pub use v3_author_checks_a::*;
 pub use v3_author_checks_b::*;
+pub use v3_author_waves::*;
 use v3_prelude::*;
 use verification::*;
 

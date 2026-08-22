@@ -341,7 +341,15 @@ pub trait Tool: Send + Sync {
     ///
     /// `None` by default: most tools do not care how isolated their agent is.
     /// `Bash` does, because building inside a worktree is what costs disk.
-    fn with_isolation_tier(&self, _tier: crate::isolation::IsolationTier) -> Option<Box<dyn Tool>> {
+    ///
+    /// `build_cache_pool` travels with the tier because the two are decided
+    /// together — a leased cache directory applies exactly when an agent is
+    /// isolated and allowed to build.
+    fn with_isolation_tier(
+        &self,
+        _tier: crate::isolation::IsolationTier,
+        _build_cache_pool: Option<crate::build_cache_lease::BuildCachePool>,
+    ) -> Option<Box<dyn Tool>> {
         None
     }
 

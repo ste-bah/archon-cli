@@ -40,6 +40,34 @@ pub struct ToolsConfig {
     /// Empty by default: a project whose tasks declare no such key needs
     /// nothing here.
     pub run_id_env_keys: Vec<String>,
+    /// Build-cache environment variable names this project declares for itself.
+    ///
+    /// The engine recognises common toolchains by their marker files —
+    /// `Cargo.toml`, `go.mod`, `package.json` and so on — and points those at a
+    /// leased cache directory without being told. A project built with a
+    /// toolchain it does not recognise names that toolchain's cache variable
+    /// here, for the same reason `run_id_env_keys` exists: the name belongs to
+    /// the project, not to the engine.
+    ///
+    /// Empty by default.
+    pub build_cache_env_keys: Vec<String>,
+    /// How many agents may hold a build-cache directory at once.
+    ///
+    /// Each slot is a reusable directory that survives the agent using it, so
+    /// the next occupant builds incrementally instead of from nothing. The
+    /// count bounds disk: slots × one cache, however many tasks run.
+    ///
+    /// Defaults to `max_concurrency`, since that is how many agents can be
+    /// building at any moment.
+    pub build_cache_slots: Option<u8>,
+    /// A compiler-cache wrapper to route isolated agents' builds through, such
+    /// as `sccache` or `ccache`.
+    ///
+    /// Empty by default. It is opt-in rather than detected because the
+    /// trade-off is real — sccache does not cache proc macros and wants
+    /// incremental compilation off — and because a build that silently routes
+    /// through a tool nobody chose is harder to explain than a slow one.
+    pub compiler_cache_wrapper: String,
 }
 
 impl Default for ToolsConfig {
@@ -51,6 +79,9 @@ impl Default for ToolsConfig {
             max_concurrency: 4,
             cargo: CargoResourceConfig::default(),
             run_id_env_keys: Vec::new(),
+            build_cache_env_keys: Vec::new(),
+            build_cache_slots: None,
+            compiler_cache_wrapper: String::new(),
         }
     }
 }
@@ -74,6 +105,13 @@ impl ToolsConfig {
             provider_env: None,
             cargo_limits: self.cargo.to_limits(),
             run_id_env_aliases: self.run_id_env_keys.clone(),
+            // Built per call rather than shared: an interactive session gets no
+            // pool at all, and a workflow installs one sized to its own
+            // concurrency. Handing every BashTool a pool here would give an
+            // interactive shell a leased cache it has no use for.
+            build_cache_pool: None,
+            build_cache_env_keys: self.build_cache_env_keys.clone(),
+            compiler_cache_wrapper: self.compiler_cache_wrapper.clone(),
             // Unrestricted as built. A subagent's registry is narrowed to its
             // tier afterwards, by `ToolRegistry::set_bash_isolation_tier`
             // (#184 M3); the main agent's is never narrowed.

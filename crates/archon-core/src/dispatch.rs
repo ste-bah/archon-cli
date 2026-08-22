@@ -190,7 +190,17 @@ impl ToolRegistry {
         let Some(bash) = self.tools.get("Bash") else {
             return false;
         };
-        let Some(restricted) = bash.with_isolation_tier(tier) else {
+        // The same call attaches the shared build-cache pool, because this is
+        // the one place that knows the agent is isolated AND allowed to build —
+        // which is exactly when a leased cache directory applies. An agent
+        // without that tier builds where it always did.
+        let pool = matches!(
+            tier,
+            archon_tools::isolation::IsolationTier::WorktreeWithBuilds
+        )
+        .then(archon_tools::build_cache_lease::shared_build_cache_pool)
+        .flatten();
+        let Some(restricted) = bash.with_isolation_tier(tier, pool) else {
             return false;
         };
         self.replace(restricted);

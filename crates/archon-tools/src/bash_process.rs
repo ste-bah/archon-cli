@@ -41,21 +41,10 @@ pub(super) async fn prepare_command(
         &ctx.session_id,
         &tool.run_id_env_aliases,
     );
-    // An agent allowed to build inside its own worktree builds into a scratch
-    // directory beside it, so prune can remove the build output along with the
-    // checkout. Without this the build lands in the worktree's own `target/`
-    // and disappears with it — which sounds fine until the worktree is *kept*,
-    // and the gigabytes are kept with it invisibly (#184 M3).
-    if let Some(subagent_id) = ctx.subagent_id.as_deref()
-        && tool.isolation_tier == crate::isolation::IsolationTier::WorktreeWithBuilds
-    {
-        let owner_id = crate::worktree_ownership::subagent_owner_key(subagent_id);
-        let scratch = crate::worktree_manager::WorktreeManager::scratch_target_dir(&owner_id);
-        env_vars.push((
-            "CARGO_TARGET_DIR".to_string(),
-            scratch.to_string_lossy().into_owned(),
-        ));
-    }
+    // Isolated agents lease a reusable build-cache directory; see
+    // `bash_build_cache` for why leasing rather than naming one per agent.
+    let build_cache_lease =
+        super::bash_build_cache::apply_build_cache(&mut env_vars, tool, ctx).await;
 
     let provider_env = provider_env_overlay(tool.provider_env.as_ref()).await;
     if let Some(provider_env) = &provider_env {
@@ -68,6 +57,7 @@ pub(super) async fn prepare_command(
         env_vars,
         provider_env,
         cargo_lock,
+        _build_cache_lease: build_cache_lease,
         timeout_ms,
     })
 }
@@ -77,6 +67,10 @@ pub(super) struct PreparedBashCommand {
     env_vars: Vec<(String, String)>,
     provider_env: Option<ProviderEnvResolution>,
     cargo_lock: Option<CargoTargetDirLock>,
+    /// Held for the life of the command. Dropping it returns the slot, so this
+    /// field is the difference between a lease that lasts as long as the build
+    /// and one that is released the instant it is taken.
+    _build_cache_lease: Option<crate::build_cache_lease::BuildCacheLease>,
     timeout_ms: u64,
 }
 

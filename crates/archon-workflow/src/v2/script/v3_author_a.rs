@@ -129,7 +129,7 @@ Primitives:
 
 Rules the script must follow:
 - AWAIT EVERY agent(), agents(), pipeline(), and phase-with-body call. Never fire-and-forget real work: a workflow that returns while work is pending FAILS the run with a dropped-call error. (Bare phase()/log() markers are the only calls that need no await.)
-- SEQUENTIAL by default, in dependency order. Only genuinely independent tasks (no shared files, no dependency link) may run concurrently via `await agents([...])`; parallel writes outside agents() are forbidden.
+- Dependency order always. Two tasks are INDEPENDENT when neither declares the other in its dependencies (directly or transitively) AND their declared target files do not overlap. Independent tasks MUST be batched into one `await agents([...])` call — batching is the expected shape for them, not an optional optimisation, and a script that runs independent tasks one at a time wastes hours of wall clock for no safety gain. Everything else runs sequentially. Parallel writes outside `agents()` are forbidden. Apply the same test to REMEDIATION: independent tasks being remediated in the same round batch together too.
 - PER TASK, TWO STAGES, GOAL-ORIENTED PROMPTS — agents are capable sessions with their own tools; give them goals and context, never command scripts to obey:
   1. IMPLEMENT (write agent): give it the task file PATH, the repository root, and the goal; for artifact work tell it to use `project_artifact_root` from its OWN stage input (the host stamps it there — never guess or invent an artifact path yourself). Tell it to READ the task file and RE-INSPECT the current repo/artifact state FIRST — if the work is genuinely already done it returns the typed no-op (status noop, idempotent_noop true, task_coverage evidence) instead of redoing or cosmetically editing anything; the workflow must be safe to re-run. It decides how to implement and how to prove it, runs its own tests, and fixes its own command mistakes inside its session.
   2. VERIFY (fresh read-only agent with `verify: true` so it can execute commands): frame it adversarially — "you did NOT do this work; be suspicious of its self-report. Re-read the task file yourself, inspect the actual code and artifacts, and run whatever tests YOU judge prove or disprove the acceptance criteria." It chooses its own commands; if a command errors it corrects itself and re-runs within its session. Artifact checks use ABSOLUTE paths under the project artifact root — a DIFFERENT directory from the repository, stamped as `project_artifact_root` in the agent's own stage input.
@@ -156,13 +156,14 @@ Required investigation (do it; cite the files you actually read in evidence):
 1. READ the source requirements document(s) under the source roots below, and EVERY task file listed.
 2. Inspect the repository tree with Glob/Read (key directories, the files each task declares); distrust any existing status/acceptance documents — verify against the live tree.
 3. For each task, extract its EXACT declared target files, dependencies, acceptance criteria, and artifact contracts — honor them verbatim, never invent paths. Use canonical task ids verbatim in taskIds.
-4. Decide sequential vs parallel FROM THE TASK DATA: tasks editing shared files or linked by dependencies run sequentially; only genuinely independent tasks may batch.
+4. USE THE EXECUTION WAVES GIVEN BELOW. They are computed by the host from the same declared `depends_on` and target-file data you are reading, so they are fact, not a suggestion — do not re-derive them and do not second-guess them. Waves run in order; every task inside one wave group runs together in ONE `await agents([...])` call. Serialising a group that the waves batch is a defect, and so is batching across waves.
 
 Then write the script per the dialect reference and SELF-CHECK before returning:
 - every canonical task id appears in EXACTLY ONE INITIAL write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks); bounded remediation calls repeat only that same task id and target ownership;
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
 - EVERY task has a remediation path: after its verifier, a bounded loop (max 3 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
 - write agents are told to prove their change by running tests IN-SESSION; only add focusedTests commands you verified against the repo (a wrong package or module name fails the gauntlet — when unsure, omit them);
+- SCOPE EVERY TEST COMMAND TO WHAT THE TASK CHANGED. Use the project's own tooling to run the package, module or suite the task touches — never the whole repository. A task editing one component does not need the entire tree built and tested to prove itself, and on a large project that difference is hours per task, repeated for every task and every remediation attempt. Tell the write agent the same thing: prove the change with the narrowest command that actually exercises it, and widen only if the narrow one cannot;
 - the two mandatory map→reduce reviews are present after all work, read-only, critic-tier throughout, cover every accepted task exactly once, preserve map findings into reducers, and return adversarial_findings/uncovered_requirements from those reducers;
 - meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
 - the script text must not contain confirmation questions or the phrases "restored context"/"previous session summary".
@@ -173,6 +174,10 @@ Repository root: {repo_root}
 Source requirement roots: {source_roots}
 Task files (read every one; the fingerprint changes when the file changes):
 {task_paths}
+
+Execution waves (computed by the host from declared dependencies and target
+files — batch exactly as grouped here):
+{task_waves}
 
 {retry_feedback}
 Governed learning context from previous runs (apply its lessons):
@@ -207,6 +212,7 @@ pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
             "{repo_root}",
             "{source_roots}",
             "{task_paths}",
+            "{task_waves}",
             "{retry_feedback}",
             "{learning_context}",
             "{reference}"

@@ -13,6 +13,8 @@ mod bash_output;
 #[path = "bash_containment.rs"]
 mod bash_containment;
 
+#[path = "bash_build_cache.rs"]
+mod bash_build_cache;
 #[path = "bash_process.rs"]
 mod bash_process;
 use bash_process::{
@@ -124,6 +126,28 @@ pub struct BashTool {
     /// project whose tasks declare a differently-named key gets the same value
     /// without that project's key name appearing in engine code.
     pub run_id_env_aliases: Vec<String>,
+    /// Reusable build-cache directories, leased one per concurrently-building
+    /// agent.
+    ///
+    /// `None` means no pooling: each build lands wherever the toolchain puts it
+    /// by default. That is the right behaviour for an interactive session, and
+    /// the wrong one for a workflow running many isolated agents in sequence,
+    /// which is what the pool exists for.
+    pub build_cache_pool: Option<crate::build_cache_lease::BuildCachePool>,
+    /// Cache environment variable names this project declares for itself, from
+    /// `[tools] build_cache_env_keys`.
+    ///
+    /// The engine recognises common toolchains by their marker files; a project
+    /// built with something it does not know names its own variable here rather
+    /// than waiting for the engine to learn about it.
+    pub build_cache_env_keys: Vec<String>,
+    /// Compiler-cache wrapper an operator has chosen, from
+    /// `[tools] compiler_cache_wrapper`.
+    ///
+    /// Empty — the default — means none. Opt-in because a wrapper is not
+    /// free: sccache does not cache proc macros and wants incremental
+    /// compilation off, so enabling it blindly can cost more than it saves.
+    pub compiler_cache_wrapper: String,
     /// How isolated the agent owning this tool is (#184 M3).
     ///
     /// Carried on the tool rather than on `ToolContext` because the registry is
@@ -147,6 +171,9 @@ impl Default for BashTool {
             provider_env: None,
             cargo_limits: CargoResourceLimits::default(),
             run_id_env_aliases: Vec::new(),
+            build_cache_pool: None,
+            build_cache_env_keys: Vec::new(),
+            compiler_cache_wrapper: String::new(),
             // The main agent and any non-isolated subagent: unrestricted.
             isolation_tier: crate::isolation::IsolationTier::Shared,
         }
@@ -172,6 +199,17 @@ impl BashTool {
     /// Restrict this tool to what its agent's isolation tier permits (#184 M3).
     pub fn with_isolation_tier(mut self, tier: crate::isolation::IsolationTier) -> Self {
         self.isolation_tier = tier;
+        self
+    }
+
+    /// Give this tool a pool to lease build-cache directories from.
+    ///
+    /// Attached by whatever runs many isolated agents, because the pool has to
+    /// be SHARED between them to mean anything — a pool per agent would hand
+    /// every agent slot 0 of its own private pool, which is the per-agent
+    /// directory this replaced, wearing a different name.
+    pub fn with_build_cache_pool(mut self, pool: crate::build_cache_lease::BuildCachePool) -> Self {
+        self.build_cache_pool = Some(pool);
         self
     }
 }
@@ -262,8 +300,16 @@ impl Tool for BashTool {
         ))
     }
 
-    fn with_isolation_tier(&self, tier: crate::isolation::IsolationTier) -> Option<Box<dyn Tool>> {
-        Some(Box::new(self.clone().with_isolation_tier(tier)))
+    fn with_isolation_tier(
+        &self,
+        tier: crate::isolation::IsolationTier,
+        build_cache_pool: Option<crate::build_cache_lease::BuildCachePool>,
+    ) -> Option<Box<dyn Tool>> {
+        let mut restricted = self.clone().with_isolation_tier(tier);
+        if let Some(pool) = build_cache_pool {
+            restricted = restricted.with_build_cache_pool(pool);
+        }
+        Some(Box::new(restricted))
     }
 }
 
