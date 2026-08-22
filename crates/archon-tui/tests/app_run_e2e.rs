@@ -86,6 +86,7 @@ async fn app_run_drives_session_end_to_end() {
         context_threshold: 0.80,
         command_catalog: Vec::new(),
         task_store: None,
+        session_mentions: None,
     };
 
     // ── Act ────────────────────────────────────────────────────────

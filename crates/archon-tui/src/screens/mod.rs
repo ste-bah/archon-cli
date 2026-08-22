@@ -31,6 +31,8 @@ pub(crate) mod permission_presets;
 pub(crate) mod permissions_browser;
 pub(crate) mod search_results;
 pub(crate) mod session_branching;
+// #200 Phase 4: the `@`-mention picker for cross-session references.
+pub(crate) mod session_mention;
 pub(crate) mod settings_screen;
 pub(crate) mod skills_menu;
 pub(crate) mod task_overlay;

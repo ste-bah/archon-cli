@@ -131,6 +131,27 @@ were your text.
 A session id that does not exist, or one with no messages, is an error you see —
 never an empty attachment that looks like it worked.
 
+### `@` instead of an id
+
+Typing `@` in the prompt opens a picker of the sessions you could reference, so
+you do not have to know an id to use this. Filter by typing — the list ranks an
+id you are part-way through above a word matched in a session's summary, and
+falls back to most-recently-active when you have typed nothing. Enter writes the
+chosen session into your sentence as `@session:<id>`, in place; Esc closes the
+list and leaves what you typed alone.
+
+Only an `@` at the start of a word, outside quotes, opens the list, so an email
+address, a `user@host:/path`, a `main@{u}`, an `@`-attached file path, and an
+`@` you are quoting verbatim all stay ordinary text.
+
+The reference is resolved when you **send** the message, not when you pick it
+from the list. That is what makes a mention worth typing early in a long
+message: the excerpt is of that session as it stands at the moment you press
+Enter, not as it stood while you were still writing. The cost of that choice is
+that a session which disappears while you compose fails at send — and it fails
+loudly, with the reason, and the turn is not sent at all rather than going out
+missing the context you attached.
+
 ## Rating a message
 
 `/feedback` records what the learning subsystems cannot infer — whether the

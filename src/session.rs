@@ -38,6 +38,8 @@ mod interactive_learning_init_tests;
 mod interactive_setup;
 mod interactive_ui;
 mod leann_startup;
+/// `@`-mention candidate rows over the real session store (#200 Phase 4).
+mod mention_source;
 mod model_selection;
 mod modes;
 mod pipeline_adapter;

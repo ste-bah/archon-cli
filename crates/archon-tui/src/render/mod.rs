@@ -125,6 +125,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays: search results (TASK-#208 /search)
     body::draw_search_results(frame, app);
 
+    // Overlays: `@`-mention session picker (#200 Phase 4). Drawn last of the
+    // pickers because it is a completion over the input line and must sit on
+    // top of anything else that happens to be open.
+    body::draw_session_mention(frame, app);
+
     // Overlays: Evidence Engine inspection views.
     evidence::draw_evidence_view(frame, app);
 

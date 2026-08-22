@@ -21,6 +21,19 @@ pub(super) async fn dispatch_user_prompt(
     dispatcher: &Arc<std::sync::Mutex<archon_tui::AgentDispatcher>>,
     adapter: &Arc<crate::agent_handle::AgentHandle>,
 ) {
+    // Mentions resolve here, before anything about this turn is announced.
+    // A reference that cannot be read must stop the turn, and stopping it
+    // before `GenerationStarted` means the UI never enters a generating state
+    // it would then have to be talked out of. See `mention_resolve` for why
+    // the snapshot is taken now rather than when the user picked the session.
+    let mention_references =
+        match super::mention_resolve::resolve_prompt_mentions(&input, cmd_ctx).await {
+            Ok(references) => references,
+            Err(reason) => {
+                let _ = input_tui_tx.send_async(TuiEvent::Error(reason)).await;
+                return;
+            }
+        };
     if !notify_generation_started(input_tui_tx).await {
         return;
     }
@@ -73,7 +86,8 @@ pub(super) async fn dispatch_user_prompt(
             .await;
     }
     let current_mode = current_permission_mode(cmd_ctx).await;
-    let session_references = drain_pending_session_references(cmd_ctx).await;
+    let mut session_references = drain_pending_session_references(cmd_ctx).await;
+    session_references.extend(mention_references);
     let effective_input = compose_turn_input(
         input,
         initial_prompt_pending,
@@ -117,7 +131,11 @@ async fn drain_pending_session_references(cmd_ctx: &SlashCommandContext) -> Vec<
     std::mem::take(&mut *cmd_ctx.pending_session_references.lock().await)
 }
 
-fn compose_turn_input(
+/// Assemble the text the model actually receives.
+///
+/// `pub(super)` so the mention tests can assert on the real composition
+/// rather than on an approximation of it.
+pub(super) fn compose_turn_input(
     input: String,
     initial_prompt_pending: &mut Option<String>,
     session_references: Vec<String>,

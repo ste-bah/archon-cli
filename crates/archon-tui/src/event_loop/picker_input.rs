@@ -332,6 +332,23 @@ pub(crate) fn handle_memory_files_key(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// Route one key while an Evidence Engine inspection overlay is open.
+///
+/// Moved out of `input.rs` when the `@`-mention router arrived and that file
+/// crossed the 500-line ceiling; behaviour is unchanged. Data navigation is
+/// screen-local, so Esc closes and every other key is swallowed — the overlay
+/// must never trap the user, and must never leak a keystroke into the prompt
+/// hidden behind it.
+pub(crate) fn handle_evidence_view_key(app: &mut App, key: KeyEvent) -> bool {
+    if app.evidence_view.is_none() {
+        return false;
+    }
+    if matches!(key.code, KeyCode::Esc) {
+        app.evidence_view = None;
+    }
+    true
+}
+
 /// Route one key while the branch picker is open.
 ///
 /// Enter injects `/fork-at <index>`. The command owns the fork, so there is one
