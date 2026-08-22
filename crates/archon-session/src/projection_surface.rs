@@ -191,14 +191,23 @@ impl SessionSurfaceProjection {
     }
 
     /// Whether a fold's result was produced under different inputs than these.
+    ///
+    /// The fingerprint half is load-bearing and has no alternative: closing or
+    /// summarising a segment changes what this unit derives while touching no
+    /// message at all, so nothing in the log-write path can notice it. The
+    /// cache key is a `&'static str` and cannot carry the segment set either.
+    ///
+    /// The length half is now belt-and-braces. `replace_messages`,
+    /// `truncate_messages_after` and `delete_all_messages` all call
+    /// `invalidate_all_projections`, so a shrunken log should never reach a
+    /// cache in the first place. It is kept because the check is one integer
+    /// comparison and the failure it catches is silent: any future writer that
+    /// reaches the `messages` relation by another route would otherwise serve
+    /// a surface describing messages the store no longer has.
     fn is_stale(&self, projected: &Projected<SessionSurfaceState>, log_len: usize) -> bool {
         if projected.state.segments_fingerprint != self.fingerprint {
             return true;
         }
-        // A log that shrank under the cache — `replace_messages` after a
-        // compaction does exactly that — leaves the cached state folded
-        // through events that no longer exist. The driver resumes *after* the
-        // cached seq, so it would never notice on its own.
         projected
             .through_seq
             .is_some_and(|seq| seq as usize + 1 != log_len)

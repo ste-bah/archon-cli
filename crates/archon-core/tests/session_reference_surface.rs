@@ -305,3 +305,109 @@ fn a_session_that_never_compacted_reads_exactly_as_before() {
         "a session that never compacted must not carry a compaction note"
     );
 }
+
+// ---------------------------------------------------------------------------
+// A cleared session must stop being reachable (#200 Phase 4 follow-up)
+// ---------------------------------------------------------------------------
+
+/// `/clear` is the user saying "this conversation is over, be rid of it".
+///
+/// `handle_clear_command` calls `delete_all_messages`, which empties the
+/// `messages` relation and nothing else. The closed compaction segments, their
+/// verbatim bodies, their ledgers and every cached projection all survive it.
+/// Because the segments are addressed by *log index* and the cleared log
+/// restarts at index 0, they then apply themselves to whatever conversation
+/// comes next in that session — so referencing the session afterwards replaces
+/// the fresh messages with stand-ins carrying the summaries of the cleared one.
+/// That is both a wrong answer and a disclosure of exactly the content the
+/// clear was supposed to remove.
+#[test]
+fn a_cleared_session_does_not_hand_over_the_conversation_it_cleared() {
+    let fixture = fixture();
+    let stored: Vec<String> = (0..8)
+        .map(|i| message("user", &format!("private-matter-{i}")))
+        .collect();
+    let id = seed(&fixture, &stored);
+    compact_span(
+        &fixture,
+        &id,
+        0,
+        4,
+        "the user's salary negotiation and their reasons for leaving",
+    );
+
+    // The store-side effect of `/clear`, exactly as `handle_clear_command`
+    // performs it.
+    fixture
+        .store
+        .delete_all_messages(&id)
+        .expect("clear the session");
+
+    // The session is reused for something else entirely.
+    for index in 0..6u64 {
+        fixture
+            .store
+            .save_message(
+                &id,
+                index,
+                &message("user", &format!("fresh-topic-{index}")),
+            )
+            .expect("save message");
+    }
+
+    let snapshot = prepare(&fixture, &id, SessionReferenceLimits::default());
+    let text = snapshot.injectable_text();
+
+    assert!(
+        !text.contains("salary negotiation"),
+        "a summary of the cleared conversation was handed to another session"
+    );
+    assert!(
+        !text.contains("Compacted segment"),
+        "a segment belonging to the cleared conversation was applied to the new one"
+    );
+    assert_eq!(
+        snapshot.messages_replaced, 0,
+        "the cleared conversation's segments still claim the new conversation's indices"
+    );
+    for index in 0..6 {
+        assert!(
+            text.contains(&format!("fresh-topic-{index}")),
+            "fresh-topic-{index} was displaced by the cleared conversation's compaction"
+        );
+    }
+}
+
+/// The narrower half of the same defect: even with nothing written after the
+/// clear, the cleared session must read as empty rather than as its own
+/// compaction summaries.
+#[test]
+fn a_cleared_session_reads_as_empty_rather_than_as_its_summaries() {
+    let fixture = fixture();
+    let stored: Vec<String> = (0..8)
+        .map(|i| message("user", &format!("private-matter-{i}")))
+        .collect();
+    let id = seed(&fixture, &stored);
+    compact_span(&fixture, &id, 0, 4, "the user's salary negotiation");
+    fixture
+        .store
+        .delete_all_messages(&id)
+        .expect("clear the session");
+
+    let error = prepare_session_reference(
+        &fixture.store,
+        &id,
+        "current-session",
+        &fixture.working_dir,
+        SessionReferenceLimits::default(),
+    )
+    .expect_err("a cleared session has nothing to hand over");
+
+    assert!(
+        matches!(
+            error,
+            archon_core::session_reference::SessionReferenceError::Empty(_)
+        ),
+        "a cleared session must refuse, not inject: {error}"
+    );
+}

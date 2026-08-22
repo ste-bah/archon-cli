@@ -174,6 +174,13 @@ fn a_segment_closed_after_the_cache_was_written_is_not_served_stale() {
 /// `replace_messages` after a log-level compaction shrinks the log under a
 /// cache the driver resumes from, and the driver resumes *after* the cached
 /// seq so it never revisits the gap.
+///
+/// Since the follow-up fix this is satisfied twice over: `replace_messages`
+/// now drops the session's projection caches outright, and this unit's own
+/// length check would catch it anyway. The assertion is on the observable
+/// result rather than on which of the two did the work, so it holds if either
+/// is removed — the store-level fix has its own mutation coverage in
+/// `crates/archon-session/tests/session_projection.rs`.
 #[test]
 fn a_log_that_shrank_under_the_cache_is_refolded_rather_than_served() {
     let fixture = fixture();

@@ -56,7 +56,14 @@ impl SessionStore {
             transaction.commit().map_err(db_err)?;
         } else {
             let _ = transaction.abort();
+            return result;
         }
+        // The log this session's projections were folded from no longer
+        // exists. Invalidating after the commit rather than inside it is
+        // deliberate: a cache dropped for a write that then rolled back costs
+        // one refold, whereas a cache kept for a write that succeeded is
+        // served as though it were current.
+        self.invalidate_all_projections(&session.id)?;
         result
     }
 
@@ -124,10 +131,59 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Empty a session's log, and everything the store derived from it.
+    ///
+    /// This is what `/clear` does at the store, and "clear" has to mean the
+    /// conversation stops being reachable. Emptying the `messages` relation
+    /// alone did not achieve that. Staged compaction keeps a verbatim copy of
+    /// every summarised span in `compaction_segment_bodies`, its summary in
+    /// `compaction_segments` and facts drawn from it in `compaction_ledger`;
+    /// projections keep a folded copy in `session_projections`. All four
+    /// survived the clear.
+    ///
+    /// That is a disclosure and a correctness bug at once. Segments are
+    /// addressed by *log index*, and a cleared log restarts at index 0, so the
+    /// surviving segments re-attach themselves to whatever conversation comes
+    /// next in that session — a cross-session reference then reads the new
+    /// conversation with its first messages replaced by stand-ins carrying the
+    /// cleared conversation's summaries.
+    ///
+    /// Derived state is removed before the log, so a failure part-way leaves
+    /// the copies gone and the original intact. The other order is the one
+    /// that leaks.
     pub fn delete_all_messages(&self, session_id: &str) -> Result<(), SessionError> {
         self.get_session(session_id)?;
+        self.purge_state_derived_from_messages(session_id)?;
         self.delete_messages_from(session_id, 0)?;
         self.set_message_count(session_id, 0)
+    }
+
+    /// Drop the compaction record and every cached projection for a session.
+    fn purge_state_derived_from_messages(&self, session_id: &str) -> Result<(), SessionError> {
+        let transaction = self.db.multi_transaction(true);
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        let result = (|| {
+            for script in [
+                // Bodies first: they are found by joining through the segments,
+                // so removing the segments first would strand them.
+                "?[id] := *compaction_segments{id, session_id}, session_id = $sid :rm compaction_segment_bodies {id}",
+                "?[id] := *compaction_segments{id, session_id}, session_id = $sid :rm compaction_segments {id}",
+                "?[id] := *compaction_ledger{id, session_id}, session_id = $sid :rm compaction_ledger {id}",
+                crate::projection::PROJECTIONS_RM_FOR_SESSION,
+            ] {
+                transaction
+                    .run_script(script, params.clone())
+                    .map_err(db_err)?;
+            }
+            Ok(())
+        })();
+        if result.is_ok() {
+            transaction.commit().map_err(db_err)?;
+        } else {
+            let _ = transaction.abort();
+        }
+        result
     }
 
     pub fn truncate_messages_after(
@@ -140,6 +196,45 @@ impl SessionStore {
         let transaction = self.db.multi_transaction(true);
         let result =
             self.truncate_messages_in_transaction(&transaction, &session, keep_up_to, new_count);
+        if result.is_ok() {
+            transaction.commit().map_err(db_err)?;
+        } else {
+            let _ = transaction.abort();
+            return result;
+        }
+        // A segment that reached past the cut now claims indices the log no
+        // longer has. The live agent skips such a segment, but a reader that
+        // renders one — the session-surface projection does — would hide the
+        // restored messages behind a stand-in for a span that is gone.
+        self.drop_compaction_segments_past(&session.id, keep_up_to)?;
+        self.invalidate_all_projections(&session.id)?;
+        result
+    }
+
+    /// Remove compaction segments extending beyond `keep_up_to`.
+    fn drop_compaction_segments_past(
+        &self,
+        session_id: &str,
+        keep_up_to: u64,
+    ) -> Result<(), SessionError> {
+        let transaction = self.db.multi_transaction(true);
+        let mut params = BTreeMap::new();
+        params.insert("sid".to_string(), DataValue::from(session_id));
+        params.insert(
+            "keep".to_string(),
+            DataValue::from(clamp_u64_to_i64(keep_up_to)),
+        );
+        let result = (|| {
+            for script in [
+                "?[id] := *compaction_segments{id, session_id, end_index}, session_id = $sid, end_index > $keep :rm compaction_segment_bodies {id}",
+                "?[id] := *compaction_segments{id, session_id, end_index}, session_id = $sid, end_index > $keep :rm compaction_segments {id}",
+            ] {
+                transaction
+                    .run_script(script, params.clone())
+                    .map_err(db_err)?;
+            }
+            Ok(())
+        })();
         if result.is_ok() {
             transaction.commit().map_err(db_err)?;
         } else {
