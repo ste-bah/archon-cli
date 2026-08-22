@@ -198,6 +198,7 @@ async fn greeting_turn_short_circuits_before_provider_or_tools() {
 }
 
 include!("tests/finalization.rs");
+include!("tests/repeat_tool_reminder.rs");
 
 /// Verify that thinking blocks include the `signature` field when built
 /// as assistant message content. This is required by the Anthropic API

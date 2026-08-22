@@ -153,6 +153,7 @@ pub(crate) async fn build_session_agent(
         subagent_auto_isolation: config.subagent.auto_isolation,
         subagent_isolation_max_tier: config.subagent.isolation_max_tier,
         filesystem: config.filesystem,
+        repeat_tool: config.guard.repeat_tool.clone(),
         // The top-level agent. The executor stamps a real id on a child.
         subagent_id: None,
     };

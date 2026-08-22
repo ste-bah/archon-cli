@@ -135,6 +135,7 @@ fn workflow_cli_agent_config(
         // It failed closed rather than open, which makes it milder, not
         // correct — a knob that silently does not apply is not a knob.
         filesystem: config.filesystem,
+        repeat_tool: config.guard.repeat_tool.clone(),
         working_dir: cwd.to_path_buf(),
         session_id: session_id.to_string(),
         max_tool_concurrency: config.tools.max_concurrency as usize,

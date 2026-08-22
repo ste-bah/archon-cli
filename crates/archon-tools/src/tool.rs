@@ -186,6 +186,16 @@ pub struct ToolContext {
     pub tool_run_admission: Option<ToolRunAdmissionCallback>,
     /// Records exactly one terminal outcome for each admitted attempt.
     pub tool_run_outcome: Option<ToolRunOutcomeCallback>,
+    /// `[guard.repeat_tool]` — when to tell the model it is repeating itself
+    /// (#200 Phase 2).
+    ///
+    /// Threaded rather than read from a process-global, so a test can put a
+    /// policy on one context without reaching into shared state, and so the
+    /// default is the documented one instead of whatever the last caller
+    /// installed. Not an `Option`: absent configuration means the documented
+    /// defaults, and a context that forgot to set it gets the guard rather than
+    /// silently getting nothing.
+    pub repeat_tool: crate::repeat_tool_guard::RepeatToolConfig,
 }
 
 impl ToolContext {
@@ -235,6 +245,7 @@ impl std::fmt::Debug for ToolContext {
                 "tool_run_outcome",
                 &self.tool_run_outcome.as_ref().map(|_| "<callback>"),
             )
+            .field("repeat_tool", &self.repeat_tool)
             .finish()
     }
 }

@@ -179,6 +179,15 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
     validate_world_model_guardrails(&config.learning.world_model.guardrails)?;
     validate_world_model_jepa(&config.learning.world_model.jepa)?;
 
+    // `[guard]` — a threshold list that cannot mean what it says is rejected
+    // here rather than silently replaced by the defaults, which would leave the
+    // operator reading their own settings in the file while the guard ran on
+    // something else (#200 Phase 2).
+    config
+        .guard
+        .validate()
+        .map_err(ConfigError::ValidationError)?;
+
     // personality profile
     config
         .personality
