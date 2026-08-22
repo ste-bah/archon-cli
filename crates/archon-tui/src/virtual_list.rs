@@ -2,6 +2,57 @@
 //! Renders only visible viewport slice of a potentially long list.
 //! Layer 1 module — no imports from screens/ or app/.
 
+/// Generate the seven cursor methods an overlay forwards to its
+/// [`VirtualList`].
+///
+/// Ten screens each wrote out `len`, `selected_index`, `selected`, `move_up`,
+/// `move_down`, `page_up` and `page_down` as one-line forwards to the same
+/// list, character for character. That is the single largest duplicated shape
+/// in this crate — the duplication gate counted the family against six
+/// different file pairs — and the copies exist for no reason: there is nothing
+/// per-screen about forwarding a keypress to a cursor.
+///
+/// `$field` is the list field's name, because two screens call theirs
+/// something else, and `$item` is the row type `selected` hands back.
+///
+/// `is_empty` is deliberately NOT generated. Three screens answer it from a
+/// separate backing `Vec` rather than the list, and a macro that quietly
+/// changed which collection they consulted would be a behaviour change wearing
+/// a refactor's clothes.
+macro_rules! delegate_virtual_list {
+    ($field:ident, $item:ty) => {
+        pub fn len(&self) -> usize {
+            self.$field.len()
+        }
+
+        pub fn selected_index(&self) -> usize {
+            self.$field.selected_index()
+        }
+
+        pub fn selected(&self) -> Option<&$item> {
+            self.$field.selected()
+        }
+
+        pub fn move_up(&mut self) {
+            self.$field.move_up();
+        }
+
+        pub fn move_down(&mut self) {
+            self.$field.move_down();
+        }
+
+        pub fn page_up(&mut self) {
+            self.$field.page_up();
+        }
+
+        pub fn page_down(&mut self) {
+            self.$field.page_down();
+        }
+    };
+}
+
+pub(crate) use delegate_virtual_list;
+
 /// VirtualList is a generic virtualized list that tracks selection
 /// and viewport offset without rendering directly (rendering belongs
 /// to the caller via `visible_items()`).

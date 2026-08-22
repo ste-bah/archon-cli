@@ -12,6 +12,8 @@ mod context_section;
 mod filesystem;
 mod memory_open;
 mod observability;
+/// Named permission/sandbox presets and the cross-field coherence check (#200).
+mod permission_presets;
 mod providers;
 mod prune;
 mod runtime;
@@ -31,6 +33,7 @@ pub use interfaces::*;
 pub use io::*;
 pub use learning::*;
 pub use observability::*;
+pub use permission_presets::*;
 pub use providers::*;
 pub use prune::*;
 pub use runtime::*;

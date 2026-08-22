@@ -11,7 +11,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::widgets::Row;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -62,36 +62,10 @@ impl SettingsScreen {
         self.list.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.list.len()
-    }
-
-    pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
-    }
-
-    pub fn selected(&self) -> Option<&SettingField> {
-        self.list.selected()
-    }
+    crate::virtual_list::delegate_virtual_list!(list, SettingField);
 
     pub fn set_fields(&mut self, fields: Vec<SettingField>) {
         self.list.set_items(fields);
-    }
-
-    pub fn move_up(&mut self) {
-        self.list.move_up();
-    }
-
-    pub fn move_down(&mut self) {
-        self.list.move_down();
-    }
-
-    pub fn page_up(&mut self) {
-        self.list.page_up();
-    }
-
-    pub fn page_down(&mut self) {
-        self.list.page_down();
     }
 
     /// Draw the settings list into a centred rect inside `area`.
@@ -132,14 +106,16 @@ impl SettingsScreen {
             })
             .collect();
 
-        let table = Table::new(rows, &widths)
-            .header(Row::new(["Key", "Value", ""]).style(crate::overlay::header_style(theme)))
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .row_highlight_style(crate::overlay::selection_style(theme));
-
-        let mut state = TableState::default().with_selected(Some(self.list.selected_index()));
-        f.render_stateful_widget(table, region, &mut state);
+        crate::overlay::render_table(
+            f,
+            region,
+            block,
+            Row::new(["Key", "Value", ""]),
+            rows,
+            &widths,
+            self.list.selected_index(),
+            theme,
+        );
     }
 }
 

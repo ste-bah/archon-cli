@@ -27,6 +27,7 @@ pub(crate) mod learning;
 pub(crate) mod memory_file_selector;
 pub(crate) mod message_selector;
 pub(crate) mod model_picker;
+pub(crate) mod permission_presets;
 pub(crate) mod permissions_browser;
 pub(crate) mod search_results;
 pub(crate) mod session_branching;

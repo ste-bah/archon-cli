@@ -49,6 +49,12 @@ pub(crate) struct SlashCommandContext {
     /// show them. Loaded at session start and not mutable at runtime, so a
     /// value rather than a lock.
     pub(crate) permission_rules: archon_permissions::rules::RuleSet,
+    /// The `[sandbox]` knobs in force, carried alongside `permission_mode` so
+    /// `/permissions presets` can name the preset the pair corresponds to
+    /// (#200 Phase 3). Read-only here: the sandbox backends read the same
+    /// values from the config they were built from, and nothing consults this
+    /// copy to make a decision.
+    pub(crate) sandbox_config: archon_core::sandbox::SandboxConfig,
     pub(crate) memory: Arc<dyn MemoryTrait>,
     pub(crate) garden_config: GardenConfig,
     pub(crate) mcp_manager: McpServerManager,

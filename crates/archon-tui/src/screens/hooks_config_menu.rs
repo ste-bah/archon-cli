@@ -12,7 +12,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::widgets::Row;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -64,36 +64,10 @@ impl HooksMenu {
         self.list.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.list.len()
-    }
-
-    pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
-    }
-
-    pub fn selected(&self) -> Option<&HookRow> {
-        self.list.selected()
-    }
+    crate::virtual_list::delegate_virtual_list!(list, HookRow);
 
     pub fn set_hooks(&mut self, hooks: Vec<HookRow>) {
         self.list.set_items(hooks);
-    }
-
-    pub fn move_up(&mut self) {
-        self.list.move_up();
-    }
-
-    pub fn move_down(&mut self) {
-        self.list.move_down();
-    }
-
-    pub fn page_up(&mut self) {
-        self.list.page_up();
-    }
-
-    pub fn page_down(&mut self) {
-        self.list.page_down();
     }
 
     /// Draw the hooks list into a centred rect inside `area`.
@@ -133,17 +107,16 @@ impl HooksMenu {
             })
             .collect();
 
-        let table = Table::new(rows, &widths)
-            .header(
-                Row::new(["On", "ID", "Event", "Command", "Source"])
-                    .style(crate::overlay::header_style(theme)),
-            )
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .row_highlight_style(crate::overlay::selection_style(theme));
-
-        let mut state = TableState::default().with_selected(Some(self.list.selected_index()));
-        f.render_stateful_widget(table, region, &mut state);
+        crate::overlay::render_table(
+            f,
+            region,
+            block,
+            Row::new(["On", "ID", "Event", "Command", "Source"]),
+            rows,
+            &widths,
+            self.list.selected_index(),
+            theme,
+        );
     }
 }
 

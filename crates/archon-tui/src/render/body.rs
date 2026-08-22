@@ -20,9 +20,10 @@ use super::layout::{input_scroll_for_cursor, wrapped_cursor_position};
 mod pickers;
 pub use pickers::{
     draw_branch_picker, draw_file_picker, draw_hooks_menu, draw_mcp_manager, draw_memory_browser,
-    draw_message_selector, draw_model_picker, draw_permissions_browser, draw_search_results,
-    draw_session_picker, draw_settings_screen, draw_skills_menu, draw_task_overlay,
-    draw_theme_screen, draw_thinking_archive, draw_token_attribution, draw_voice_capture,
+    draw_message_selector, draw_model_picker, draw_permission_presets, draw_permissions_browser,
+    draw_search_results, draw_session_picker, draw_settings_screen, draw_skills_menu,
+    draw_task_overlay, draw_theme_screen, draw_thinking_archive, draw_token_attribution,
+    draw_voice_capture,
 };
 
 /// Render the output area (top section with scrollable content).

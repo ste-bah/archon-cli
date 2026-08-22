@@ -138,6 +138,8 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod permissions_cli;
+/// `/permissions presets` and `/permissions preset <name>` (#200 Phase 3).
+pub(crate) mod permissions_presets;
 pub(crate) mod pipeline;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;

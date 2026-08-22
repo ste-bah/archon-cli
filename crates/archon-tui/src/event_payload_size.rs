@@ -88,6 +88,19 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                     })
                     .sum::<usize>()
         }
+        TuiEvent::ShowPermissionPresets { active, presets } => {
+            string_bytes(active)
+                + vec_bytes(presets)
+                + presets
+                    .iter()
+                    .map(|(name, description, mode, backend)| {
+                        string_bytes(name)
+                            + string_bytes(description)
+                            + string_bytes(mode)
+                            + string_bytes(backend)
+                    })
+                    .sum::<usize>()
+        }
         TuiEvent::ShowPermissions { mode, rules } => {
             string_bytes(mode)
                 + vec_bytes(rules)

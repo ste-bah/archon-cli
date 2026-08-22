@@ -111,6 +111,7 @@ pub fn build_test_slash_context(
         codex_models: archon_core::config::OpenAiCodexModelsConfig::default(),
         anthropic_models: archon_core::config::AnthropicModelsConfig::default(),
         permission_rules: archon_permissions::rules::RuleSet::empty(),
+        sandbox_config: archon_core::sandbox::SandboxConfig::default(),
         memory: Arc::clone(&memory),
         garden_config: archon_memory::garden::GardenConfig::default(),
         mcp_manager: archon_mcp::lifecycle::McpServerManager::new(),

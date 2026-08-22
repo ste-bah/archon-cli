@@ -3,7 +3,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::widgets::{List, ListItem, ListState};
+use ratatui::widgets::ListItem;
 
 use crate::theme::Theme;
 use crate::virtual_list::VirtualList;
@@ -34,17 +34,7 @@ impl ThemeScreen {
         self.themes.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.list.len()
-    }
-
-    pub fn selected_index(&self) -> usize {
-        self.list.selected_index()
-    }
-
-    pub fn selected(&self) -> Option<&ThemeEntry> {
-        self.list.selected()
-    }
+    crate::virtual_list::delegate_virtual_list!(list, ThemeEntry);
 
     /// Set themes list.
     pub fn set_themes(&mut self, themes: Vec<ThemeEntry>) {
@@ -65,22 +55,6 @@ impl ThemeScreen {
         if let Some(index) = self.themes.iter().position(|t| t.name == name) {
             self.list.select_index(index);
         }
-    }
-
-    pub fn move_up(&mut self) {
-        self.list.move_up();
-    }
-
-    pub fn move_down(&mut self) {
-        self.list.move_down();
-    }
-
-    pub fn page_up(&mut self) {
-        self.list.page_up();
-    }
-
-    pub fn page_down(&mut self) {
-        self.list.page_down();
     }
 
     /// Render theme screen into area.
@@ -114,13 +88,7 @@ impl ThemeScreen {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_symbol(crate::overlay::HIGHLIGHT_SYMBOL)
-            .highlight_style(crate::overlay::selection_style(theme));
-
-        let mut state = ListState::default().with_selected(Some(self.list.selected_index()));
-        f.render_stateful_widget(list, region, &mut state);
+        crate::overlay::render_list(f, region, block, items, self.list.selected_index(), theme);
     }
 }
 
