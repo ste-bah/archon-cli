@@ -18,7 +18,7 @@ subprocess, a platform difference, or a clock.
 *(from [0001](postmortem/0001-arch-lint-inspected-nothing-and-reported-green.md),
 [0002](postmortem/0002-a-test-passed-on-the-one-platform-where-it-could-not-run.md),
 [0003](postmortem/0003-a-cfg-unix-test-was-cleared-by-a-windows-only-verification.md),
-[0004](postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md),
+[0004](postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md),
 [0005](postmortem/0005-a-documented-page-was-never-committed-because-git-add-skips-ignored-paths.md)
 — all of them)*
 
@@ -34,7 +34,7 @@ That collapse is the single defect class behind every incident recorded here:
 | [0001](postmortem/0001-arch-lint-inspected-nothing-and-reported-green.md) | a marked region of `src/main.rs` | a refactor carried the markers to another file | `all checks passed`, for 128 days |
 | [0002](postmortem/0002-a-test-passed-on-the-one-platform-where-it-could-not-run.md) | a hook subprocess | no `sleep` and no `/tmp` on Windows, so it never spawned | passed in ~0 ms, for 136 days |
 | [0003](postmortem/0003-a-cfg-unix-test-was-cleared-by-a-windows-only-verification.md) | a `#[cfg(unix)]` test | `cfg`-stripped before compilation on the verifying platform | `cargo test` exit 0 |
-| [0004](postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md) | `gh` check rows | `gh` not on `PATH`, no output at all | `ALL GREEN` |
+| [0004](postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md) | a jscpd duplication report | jscpd wrote none, or one covering zero files | `duplication = 0.00%` … `PASS`, for 128 days |
 | [0005](postmortem/0005-a-documented-page-was-never-committed-because-git-add-skips-ignored-paths.md) | a file being staged | matched an ignore rule, so `git add` skipped it | exit 0, and a commit message naming it |
 
 **So: a check must be able to distinguish "I looked and found nothing wrong" from
@@ -239,47 +239,72 @@ at all.
 
 ### DP-13 — judge by exit code, never by counting matches in output
 
-*(from [0004](postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md))*
+*(from [0004](postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md))*
 
 Grepping a command's output tests the output, not the command. If the command did
 not run, was not on `PATH`, errored, wrote to stderr, changed its format, or
 printed nothing, the grep still returns a number — and `0` is indistinguishable
 from a real clean result.
 
-```bash
-# No: counts zero when `gh` is missing, and calls that success.
-failing=$(gh pr checks "$PR" | grep -c fail)
+The live example in this tree is in the coding-pipeline agent prompts, under a
+heading marked `MANDATORY`:
 
-# Yes: the tool must be reachable, must return rows, and its status is the verdict.
-command -v gh >/dev/null || { echo "gh not on PATH" >&2; exit 2; }
-gh pr checks "$PR"          # non-zero while pending or failing
+```bash
+# No: if `npm run typecheck` crashed, the file is empty or absent, grep finds
+# nothing, and the agent reports zero type errors and declares the pass complete.
+cd $TARGET_DIR && npm run typecheck 2>&1 | tee /tmp/phase6-typecheck.txt
+TYPE_ERRORS=$(grep -c "error TS" /tmp/phase6-typecheck.txt || echo "0")
 ```
 
-Note that `grep -c` exits 1 on no match — a real signal, discarded by `$(...)`.
-When you must parse, require a non-zero row count before believing a verdict, and
-print the denominator (DP-2).
+The tool's own status is the verdict. `grep -c` exits 1 on no match — a real
+signal, discarded by `$(...)`. When you genuinely must parse, as
+`scripts/check-tui-duplication.sh` must because jscpd does not encode the
+threshold in its exit code, then: establish the tool answered, require the output
+to be parseable, **assert a non-zero denominator**, and print it (DP-2). That gate
+now reports `duplication = 1.13% over 147 files / 34719 lines` rather than a bare
+percentage, because 0% over 0 files used to read the same as a clean tree.
 
-### DP-14 — a verification step that is not committed did not happen
+### DP-14 — *(retired)*
 
-*(from [0004](postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md))*
+This number held "a verification step that is not committed did not happen". The
+rule was sound but its only evidence was an uncommitted script outside this
+repository, so it failed the standard the series is built on: a numbered
+postmortem must be an incident in this codebase, verifiable from this history.
+0004 was rewritten around a committed gate instead, and the rule was retired with
+it rather than left resting on evidence nobody can read.
 
-An ad-hoc script in a shell history cannot be reviewed, cannot be fixed, and cannot
-be shown to have been wrong afterwards. The watcher in 0004 is unrecoverable; its
-logic in that postmortem is reconstructed and labelled as such. If a check is worth
-running before a push, it belongs in `scripts/` under version control.
+The number is left as a gap on purpose. Renumbering would break every reference,
+and the gap records that a rule was removed rather than inviting a new one to be
+written here without a source.
 
 ### DP-15 — never turn a tool failure into a benign message
 
-*(from [0004](postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md))*
+*(from [0004](postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md))*
+
+An absence of findings and an absence of problems are different facts, and this
+shape reports the first as the second:
 
 ```bash
-gh pr checks || echo 'No PR checks available'
+# The gate printed this, then printed PASS and exited 0, for 128 days.
+else
+  printf 'TuiDuplicationGuard: no report file generated\n'
+fi
+printf 'TuiDuplicationGuard: PASS\n'
+exit 0
+
+# Same file: a missing python3 or a changed schema became a printed word.
+DUP_PCT=$(python3 -c "..." 2>/dev/null || echo "unknown")
 ```
 
-This converts *every* failure — missing binary, unauthenticated, rate limited,
-network down, PR not found, **and checks actually failing** — into a reassuring
-sentence and a zero exit. `|| true`, `|| echo`, and `2>/dev/null` on a command
-whose exit status is the signal all have this property.
+`|| true`, `|| echo`, and `2>/dev/null` on a command whose exit status is the
+signal all have this property. So does a `PASS` printed outside the `if` that was
+supposed to guard it.
+
+A second illustration, worth knowing because the numbers are surprising:
+`gh pr checks || echo 'No PR checks available'` prints that sentence when checks
+are **failing** (exit 1), when they are **pending** (exit 8), when the PR does not
+exist (exit 1), and when `gh` is not installed (exit 127) — every state except
+all-green, which is the only one where it is suppressed.
 
 Suppress a failure only when you have named the specific one you expect and
 established that every other failure still propagates.

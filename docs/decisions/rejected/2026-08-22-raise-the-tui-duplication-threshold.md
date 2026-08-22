@@ -2,16 +2,35 @@
 
 - **Status:** Rejected
 - **Date:** 2026-08-22
-- **Area:** TUI maintainability gate — `scripts/check-tui-duplication.sh`
+- **Area:** TUI duplication gates — `scripts/ci/check-duplicate-code.sh`, `scripts/check-tui-duplication.sh`
 - **Decided in:** [`c48af3d79`](https://github.com/ste-bah/archon-cli/commit/c48af3d79) — `refactor(tui): give the list overlays one cursor delegation and one render tail`
 - **Chosen instead:** extract the two duplicated shapes
 
 ## What was proposed
 
-`scripts/check-tui-duplication.sh` runs jscpd over `crates/archon-tui/src` with
-`THRESHOLD=5` and `MIN_LINES=20` (NFR-TUI-MOD-003, AC-MOD-04). Adding the
-permission-preset selector screen took duplication from 4.97% to **5.07%** and the
-gate went red.
+Duplication over `crates/archon-tui/src` is capped at 5% (NFR-TUI-MOD-003,
+AC-MOD-04). Adding the permission-preset selector screen took it from 4.97% to
+**5.07%** and the gate went red.
+
+> **Which gate.** There are two, over the same directory, and they measure
+> differently — an earlier draft of this record named the wrong one.
+> `scripts/ci/check-duplicate-code.sh` runs jscpd at its default clone length and
+> is the one that produced the numbers in this record;
+> `scripts/check-tui-duplication.sh` passes `--min-lines 20` and reads much lower.
+> Re-measured on the tree today: **4.18%** at the default length, **1.13%** at
+> `--min-lines 20`. The 4.18% sits right beside the 4.02% the commit reports, which
+> is what pins the attribution.
+>
+> The enforcement is inverted, which matters for how much this decision was worth:
+> the sensitive gate that went red is `continue-on-error: true` in
+> `tui-observability.yml` and cannot fail a build, while the gate wired into
+> `ci.yml` without that flag is the one reading 1.13% — comfortably clear of 5% and
+> so not much of a constraint. See
+> [postmortem 0004](../../postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md),
+> which is about the second gate reporting `PASS` over an empty scan.
+>
+> None of this changes the decision below. The duplication was real at either
+> setting, and it was extracted rather than legislated away.
 
 The proposal was to raise `THRESHOLD` — to 6, or to 5.5, or to whatever cleared the
 current number. The supporting argument was reasonable on its face: the new screen

@@ -54,7 +54,7 @@ archon-cli's CI flow is `scripts/ci-gate.sh` — 8 technical gates (file-size, b
 
 See [CI gates](dev-flow-gates.md) for the full step list and rationale.
 
-Judge every gate by its **exit code**. Counting matches in a command's output tests the output, not the command: a tool that is missing, unauthenticated, or silently reformatted still yields a number, and zero is indistinguishable from clean. That is [postmortem 0004](../postmortem/0004-a-ci-watcher-reported-all-green-because-gh-was-not-on-path.md).
+Judge every gate by its **exit code**. Counting matches in a command's output tests the output, not the command: a tool that is missing, unauthenticated, or silently reformatted still yields a number, and zero is indistinguishable from clean. That is [postmortem 0004](../postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md).
 
 ## Cargo discipline
 

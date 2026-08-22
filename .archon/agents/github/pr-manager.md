@@ -13,16 +13,44 @@ tools:
   - TodoWrite
   - memory_recall
 hooks:
+  # "the tool could not answer" and "the answer is that there is nothing wrong"
+  # are different facts, and `cmd || echo '<reassuring sentence>'` reports the
+  # first as the second. Every command below establishes that the tool answered
+  # before anything believes what the answer was.
+  # See docs/postmortem/0004-a-swallowed-failure-reported-an-absence-of-problems.md
+  # and docs/defensive-patterns.md (DP-13, DP-15).
   pre: |
-    gh auth status || (echo 'GitHub CLI not authenticated' && exit 1)
+    command -v gh >/dev/null 2>&1 || { echo 'ABORT: gh is not installed or not on PATH - PR state is UNKNOWN, not clean' >&2; exit 1; }
+    gh auth status >/dev/null 2>&1 || { echo 'ABORT: gh is not authenticated - PR state is UNKNOWN, not clean' >&2; exit 1; }
     git status --porcelain
-    gh pr list --state open --limit 1 >/dev/null || echo 'No open PRs'
-    npm test --silent || echo 'Tests may need attention'
+    gh pr list --state open --limit 1 >/dev/null || { echo 'ABORT: could not list open PRs - that is not the same as there being none' >&2; exit 1; }
+    # (removed: `npm test --silent || echo 'Tests may need attention'`. This is a
+    # Rust workspace with no root package.json, so that command exited non-zero on
+    # every run this agent has ever had and printed a mild suggestion instead of
+    # failing. Use `cargo test` via scripts/ci-gate.sh; a check that cannot pass is
+    # not a check.)
   post: |
-    gh pr status || echo 'No active PR in current branch'
+    command -v gh >/dev/null 2>&1 || { echo 'ABORT: gh is not installed or not on PATH - PR check state is UNKNOWN' >&2; exit 1; }
     git branch --show-current
-    gh pr checks || echo 'No PR checks available'
     git log --oneline -3
+    gh pr status || { echo 'ABORT: could not read PR status - that is not the same as there being no active PR' >&2; exit 1; }
+    # `gh pr checks` exits 0 only when every reported check passed. It exits 8
+    # while checks are pending, and 1 for failing checks, for "no checks reported"
+    # and for a PR that does not exist. The exit code below is the verdict; the
+    # output is read only to word the message, never to decide it.
+    checks_output=$(gh pr checks 2>&1); checks_rc=$?
+    printf '%s\n' "$checks_output"
+    case "$checks_rc" in
+      0) echo "PR checks: every reported check passed (gh exit 0)" ;;
+      8) echo "PR checks: PENDING (gh exit 8) - not a pass; re-read when they settle" >&2; exit 1 ;;
+      *)
+        if printf '%s' "$checks_output" | grep -q 'no checks reported'; then
+          echo "PR checks: none are configured for this branch (gh exit ${checks_rc}) - nothing about this PR has been verified" >&2
+        else
+          echo "PR checks: FAILING or unreadable (gh exit ${checks_rc}) - see the rows above; NOT a pass" >&2
+        fi
+        exit 1 ;;
+    esac
     # (removed: Archon memory store "github/pr-manager/output" '{"status":"complete","timestamp":"'$(date -Iseconds)'"}' --namespace "agents")
 ---
 
