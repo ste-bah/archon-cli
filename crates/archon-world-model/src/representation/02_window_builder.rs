@@ -13,10 +13,19 @@ pub struct TraceWindowBuilder<'a> {
 impl<'a> TraceWindowBuilder<'a> {
     pub fn new(rows: &[WorldTraceRow]) -> Self {
         let mut rows = rows.to_vec();
+        // `sequence` before `row_id`, and that ordering is the whole point.
+        // Rows recorded in the same clock tick used to be separated by
+        // `row_id`, which is a UUID — so a tie was resolved at random and then
+        // handed downstream as causal order. `adjacent_transitions` builds
+        // (context, action, target) triples from this sequence for the
+        // trainer, so a mis-ordered tie teaches a transition whose action came
+        // after its outcome. `row_id` stays last, to keep the order total for
+        // rows written before `sequence` existed.
         rows.sort_by(|left, right| {
             left.session_id
                 .cmp(&right.session_id)
                 .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.sequence.cmp(&right.sequence))
                 .then_with(|| left.row_id.cmp(&right.row_id))
         });
         Self {

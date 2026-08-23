@@ -178,6 +178,35 @@ pub struct WorldTraceRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archon_version: Option<String>,
     pub created_at: DateTime<Utc>,
+    /// Order among rows recorded in the same instant.
+    ///
+    /// `created_at` has finite resolution, so two rows in one session
+    /// routinely share a timestamp. Before this field the tie was broken by
+    /// `row_id` — a UUID — which is to say at random, and the window builder
+    /// hands that order to the trainer as CAUSAL sequence. A transition's
+    /// "action" could therefore be a row that actually happened after it.
+    ///
+    /// A process-wide counter, stamped at construction. It only ever has to
+    /// separate rows sharing a timestamp, and rows that share a timestamp
+    /// within a session came from one process, so a process-local counter is
+    /// sufficient and needs no coordination between writers.
+    ///
+    /// `#[serde(default)]` so rows written before this existed still
+    /// deserialize; they read as 0, tie with each other, and fall through to
+    /// the `row_id` tiebreaker exactly as they did before.
+    #[serde(default)]
+    pub sequence: u64,
+}
+
+/// Hands out [`WorldTraceRow::sequence`].
+///
+/// `Relaxed` is enough: the only requirement is that two rows never receive
+/// the same value, which `fetch_add` guarantees on its own. Nothing here
+/// orders other memory.
+static ROW_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_row_sequence() -> u64 {
+    ROW_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Default for WorldTraceRow {
@@ -205,6 +234,10 @@ impl Default for WorldTraceRow {
             // running build.
             archon_version: None,
             created_at: Utc::now(),
+            // Stamped in `Default` rather than in `new`, so every construction
+            // path gets one — including the struct literals that build a row
+            // with `..Default::default()` and never call `new`.
+            sequence: next_row_sequence(),
         }
     }
 }

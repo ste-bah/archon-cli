@@ -184,4 +184,62 @@ mod tests {
             assert_eq!(b, s);
         }
     }
+
+    /// Rows recorded in the same instant keep the order they were recorded in.
+    ///
+    /// The timestamp is set explicitly and identically here rather than left to
+    /// the clock, because the clock is exactly what made this intermittent: on
+    /// a fast machine three rows share a `created_at`, and the tie used to be
+    /// broken by `row_id`. With ids that sort against causality — as UUIDs do
+    /// in production — the middle row of a transition became whichever id
+    /// happened to sort second. Measured at roughly one run in seven before
+    /// `sequence` existed.
+    #[test]
+    fn rows_sharing_a_timestamp_keep_the_order_they_were_recorded_in() {
+        let stamp = chrono::Utc::now();
+        // Ids chosen to sort AGAINST the recorded order, so an alphabetical
+        // tiebreaker cannot pass this by luck.
+        let mut first = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("zzz-first");
+        first.created_at = stamp;
+        let mut second = WorldTraceRow::new("s1", WorldActionKind::Retry).with_row_id("mmm-second");
+        second.created_at = stamp;
+        let mut third =
+            WorldTraceRow::new("s1", WorldActionKind::Verification).with_row_id("aaa-third");
+        third.created_at = stamp;
+
+        let builder = TraceWindowBuilder::new(&[first, second, third]);
+        let transitions = builder.adjacent_transitions(2, 1, 1).unwrap();
+
+        assert_eq!(transitions[0].action.action_ref, "zzz-first");
+        assert_eq!(
+            transitions[1].action.action_ref, "mmm-second",
+            "a transition's action must be the row recorded second, not the id that sorts second"
+        );
+    }
+
+    /// A row written before `sequence` existed reads as 0 and still loads.
+    ///
+    /// Built by serialising a real row and REMOVING the field, rather than by
+    /// hand-writing the old JSON. A literal would encode today's guess at the
+    /// old shape — the first attempt at this test invented a `source` variant
+    /// that does not exist — and would keep passing while drifting away from
+    /// whatever the schema actually is.
+    #[test]
+    fn a_row_without_a_sequence_still_deserializes() {
+        let row = WorldTraceRow::new("s1", WorldActionKind::ToolCall).with_row_id("old-row");
+        assert!(row.sequence > 0, "a freshly built row must carry a sequence");
+
+        let mut older = serde_json::to_value(&row).expect("serialize");
+        older
+            .as_object_mut()
+            .expect("row serializes to an object")
+            .remove("sequence")
+            .expect("the field must be present to be removed, or this proves nothing");
+
+        let loaded: WorldTraceRow =
+            serde_json::from_value(older).expect("older rows must still load");
+
+        assert_eq!(loaded.sequence, 0);
+        assert_eq!(loaded.row_id, "old-row");
+    }
 }
