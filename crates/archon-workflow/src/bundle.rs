@@ -11,7 +11,71 @@ use crate::store::WorkflowStore;
 
 pub const MANIFEST_FILE: &str = "manifest.toml";
 pub const HARNESS_FILE: &str = "workflow.js";
+/// The decomposed-PRD plan record.
+///
+/// It is a YAML document, not JavaScript, and it used to be written as
+/// `workflow.js` because one constant named the run's record whatever format
+/// that record happened to be in. The lie had a cost: the v3 authoring agent
+/// searches the project for an example of the script dialect it must write,
+/// found these under a `.js` extension, and read a plan record (and the large
+/// metadata sitting beside it) instead of a script — repeatedly, losing its
+/// context each time.
+pub const PLAN_RECORD_FILE: &str = "workflow-plan.yaml";
 pub const COMPILED_SPEC_FILE: &str = "workflow.compiled.yaml";
+
+/// The first line of a decomposed-PRD plan record.
+///
+/// Written by `v2::decomposed_prd_plan::decomposed_prd_scaffold` and read back
+/// here to decide the record's filename, so the format and the extension can
+/// never disagree again.
+pub const DECOMPOSED_PLAN_RECORD_HEADER: &str = "# Archon decomposed-PRD workflow";
+
+/// What a run's recorded workflow document actually is.
+///
+/// Determined from the document itself rather than threaded down from the
+/// planner: the header IS the format, and one producer emits it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowRecordKind {
+    /// Provider-authored (or spec-wrapper) JavaScript executed by the harness.
+    JavaScriptHarness,
+    /// The approved plan record for a natively-executed decomposed-PRD run.
+    DecomposedPlanRecord,
+}
+
+impl WorkflowRecordKind {
+    pub fn of_source(source: &str) -> Self {
+        if source
+            .trim_start()
+            .starts_with(DECOMPOSED_PLAN_RECORD_HEADER)
+        {
+            Self::DecomposedPlanRecord
+        } else {
+            Self::JavaScriptHarness
+        }
+    }
+
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Self::JavaScriptHarness => HARNESS_FILE,
+            Self::DecomposedPlanRecord => PLAN_RECORD_FILE,
+        }
+    }
+}
+
+/// Where a run or saved-command directory keeps its workflow document.
+///
+/// Prefers the plan record, then falls back to the legacy `workflow.js` so run
+/// directories written before the split still resume, still verify, and still
+/// render in the web API. Returns the legacy path when neither exists, so the
+/// caller's own `io` error names the file a reader would expect.
+pub fn record_path(dir: &Path) -> PathBuf {
+    let planned = dir.join(PLAN_RECORD_FILE);
+    if planned.exists() {
+        planned
+    } else {
+        dir.join(HARNESS_FILE)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +119,11 @@ impl WorkflowBundle {
         let compiled = run.spec.to_yaml()?;
         let manifest =
             manifest_for_run(run, harness_source.as_bytes(), compiled.as_bytes(), origin);
-        store.write_run_file(&run.id, HARNESS_FILE, harness_source.as_bytes())?;
+        store.write_run_file(
+            &run.id,
+            WorkflowRecordKind::of_source(harness_source).file_name(),
+            harness_source.as_bytes(),
+        )?;
         store.write_run_file(&run.id, COMPILED_SPEC_FILE, compiled.as_bytes())?;
         store.write_run_file(
             &run.id,
@@ -84,8 +152,9 @@ impl WorkflowBundle {
 
     pub fn verify(store: &WorkflowStore, run_id: &str) -> WorkflowResult<WorkflowBundleManifest> {
         let manifest = read_manifest(store, run_id)?;
-        let harness = std::fs::read(store.run_dir(run_id).join(HARNESS_FILE))
-            .map_err(|err| WorkflowError::io(store.run_dir(run_id).join(HARNESS_FILE), err))?;
+        let harness_path = record_path(&store.run_dir(run_id));
+        let harness =
+            std::fs::read(&harness_path).map_err(|err| WorkflowError::io(&harness_path, err))?;
         let compiled =
             std::fs::read(store.run_dir(run_id).join(COMPILED_SPEC_FILE)).map_err(|err| {
                 WorkflowError::io(store.run_dir(run_id).join(COMPILED_SPEC_FILE), err)
@@ -346,5 +415,56 @@ mod tests {
             .expect_err("secret should be rejected");
 
         assert!(error.to_string().contains("credential-like text"));
+    }
+
+    #[test]
+    fn a_decomposed_plan_record_is_named_for_the_yaml_it_actually_is() {
+        let record =
+            format!("{DECOMPOSED_PLAN_RECORD_HEADER} (native lifecycle v1)\ntask: \"x\"\n");
+
+        let kind = WorkflowRecordKind::of_source(&record);
+
+        assert_eq!(kind, WorkflowRecordKind::DecomposedPlanRecord);
+        assert_eq!(kind.file_name(), PLAN_RECORD_FILE);
+        assert!(
+            !kind.file_name().ends_with(".js"),
+            "the plan record must not wear a JavaScript extension: the v3 author searches for `.js` examples of the script dialect and reads whatever it finds"
+        );
+    }
+
+    #[test]
+    fn a_javascript_harness_keeps_its_javascript_name() {
+        let source =
+            "export default async function workflow(w) {\n  return w.checkpoint(\"x\", {});\n}\n";
+
+        let kind = WorkflowRecordKind::of_source(source);
+
+        assert_eq!(kind, WorkflowRecordKind::JavaScriptHarness);
+        assert_eq!(kind.file_name(), HARNESS_FILE);
+    }
+
+    #[test]
+    fn record_path_prefers_the_plan_record_and_falls_back_to_the_legacy_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        assert_eq!(
+            record_path(dir.path()),
+            dir.path().join(HARNESS_FILE),
+            "with neither file present the legacy path is what a reader expects to be named in the error"
+        );
+
+        std::fs::write(dir.path().join(HARNESS_FILE), "legacy").expect("write legacy");
+        assert_eq!(
+            record_path(dir.path()),
+            dir.path().join(HARNESS_FILE),
+            "run directories written before the split must still resolve"
+        );
+
+        std::fs::write(dir.path().join(PLAN_RECORD_FILE), "current").expect("write record");
+        assert_eq!(
+            record_path(dir.path()),
+            dir.path().join(PLAN_RECORD_FILE),
+            "the plan record wins once it exists"
+        );
     }
 }

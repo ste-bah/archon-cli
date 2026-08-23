@@ -471,7 +471,7 @@ The flags:
 
 | Flag | Effect |
 |------|--------|
-| `--decomposed` | Select the decomposed-PRD lifecycle, which plans directly from the declared task graph. Without it you get the v3 authored-script lifecycle, which has a model author a `workflow.js` and executes that. Both read the task universe — see below. |
+| `--decomposed` | Select the decomposed-PRD lifecycle, which plans directly from the declared task graph. Without it you get the v3 authored-script lifecycle, which has a model author an `authored-workflow.js` and executes that. Both read the task universe — see below. |
 | `--live` | **Required.** Use the configured provider. |
 | `--yes` | Approve a non-interactive live run. Omit it inside the TUI, where you approve at the prompt. |
 | `--resume-from <RUN_ID>` | Resume a prior run, reusing its accepted and no-op calls. |

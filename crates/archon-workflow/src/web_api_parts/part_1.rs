@@ -9,7 +9,7 @@ use crate::approval::{
     project_root_from_workflow_root,
 };
 use crate::bundle::{
-    COMPILED_SPEC_FILE, HARNESS_FILE, WorkflowBundle, WorkflowBundleOrigin, read_manifest,
+    COMPILED_SPEC_FILE, WorkflowBundle, WorkflowBundleOrigin, read_manifest, record_path,
 };
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEvent, WorkflowEventKind, contains_forbidden_field, sanitize_value};
@@ -285,7 +285,7 @@ fn read_events(store: &WorkflowStore, run_id: &str) -> WorkflowResult<Vec<Workfl
 }
 
 fn read_harness(store: &WorkflowStore, run_id: &str) -> WorkflowResult<String> {
-    let path = store.run_dir(run_id).join(HARNESS_FILE);
+    let path = record_path(&store.run_dir(run_id));
     let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
     let value = sanitize_value(serde_json::json!({ "source": raw }));
     Ok(value
@@ -310,7 +310,10 @@ fn bundle_view(store: &WorkflowStore, run_id: &str) -> WorkflowResult<WorkflowBu
     WorkflowBundle::verify(store, run_id)?;
     let manifest = read_manifest(store, run_id)?;
     Ok(WorkflowBundleView {
-        workflow_path: HARNESS_FILE.to_string(),
+        workflow_path: record_path(&store.run_dir(run_id))
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         compiled_spec_path: COMPILED_SPEC_FILE.to_string(),
         workflow_hash: manifest.workflow_hash,
         compiled_hash: manifest.compiled_hash,

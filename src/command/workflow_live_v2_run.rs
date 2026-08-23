@@ -179,7 +179,7 @@ async fn live_plan_from_generated_bundle(
     ) {
         return Ok(None);
     }
-    let harness_path = store.run_dir(&run.id).join("workflow.js");
+    let harness_path = archon_workflow::bundle::record_path(&store.run_dir(&run.id));
     let harness_source = fs::read_to_string(&harness_path).map_err(|err| WorkflowError::Io {
         path: harness_path.clone(),
         source: err,
@@ -205,8 +205,11 @@ async fn live_plan_from_generated_bundle(
             && scaffold_hash != current_hash
         {
             return Err(WorkflowError::ArtifactInvalid(format!(
-                "generated V2 scaffold hash mismatch for run '{}': metadata {}, workflow.js {}",
-                run.id, scaffold_hash, current_hash
+                "generated V2 scaffold hash mismatch for run '{}': metadata {}, {} {}",
+                run.id,
+                scaffold_hash,
+                harness_path.display(),
+                current_hash
             ))
             .into());
         }
@@ -214,8 +217,11 @@ async fn live_plan_from_generated_bundle(
             && scaffold.scaffold_hash != current_hash
         {
             return Err(WorkflowError::ArtifactInvalid(format!(
-                "generated V2 scaffold record hash mismatch for run '{}': metadata {}, workflow.js {}",
-                run.id, scaffold.scaffold_hash, current_hash
+                "generated V2 scaffold record hash mismatch for run '{}': metadata {}, {} {}",
+                run.id,
+                scaffold.scaffold_hash,
+                harness_path.display(),
+                current_hash
             ))
             .into());
         }
@@ -477,7 +483,7 @@ async fn execute_generated_v2_run(
     }
     output.push_str(&format!(
         "harness: {}\nv2_results: {}\n",
-        store.run_dir(&run.id).join("workflow.js").display(),
+        archon_workflow::bundle::record_path(&store.run_dir(&run.id)).display(),
         v2_store.root().display()
     ));
     output.push_str(&learning_note);

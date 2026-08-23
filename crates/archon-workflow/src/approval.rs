@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::bundle::{COMPILED_SPEC_FILE, HARNESS_FILE, WorkflowBundle, WorkflowBundleOrigin};
+use crate::bundle::{COMPILED_SPEC_FILE, WorkflowBundle, WorkflowBundleOrigin, record_path};
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::run::WorkflowRun;
 use crate::spec::StageKind;
@@ -127,11 +127,7 @@ impl WorkflowApprovalStore {
             &manifest.compiled_hash,
             generated_metadata_hash.as_deref(),
         )?;
-        let raw_script_path = store
-            .run_dir(&run.id)
-            .join(HARNESS_FILE)
-            .display()
-            .to_string();
+        let raw_script_path = record_path(&store.run_dir(&run.id)).display().to_string();
         let compiled_spec_path = store
             .run_dir(&run.id)
             .join(COMPILED_SPEC_FILE)

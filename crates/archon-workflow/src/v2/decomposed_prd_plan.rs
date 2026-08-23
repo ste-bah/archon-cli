@@ -33,7 +33,10 @@ pub fn decomposed_prd_scaffold(
     let max_dependency_waves = task_universe.tasks.len().saturating_mul(3).max(1);
 
     let mut descriptor = String::new();
-    descriptor.push_str("# Archon decomposed-PRD workflow (native lifecycle v1)\n");
+    descriptor.push_str(&format!(
+        "{} (native lifecycle v1)\n",
+        crate::bundle::DECOMPOSED_PLAN_RECORD_HEADER
+    ));
     descriptor.push_str(
         "# Executed by the Rust lifecycle driver; this document is the approved plan record.\n\n",
     );

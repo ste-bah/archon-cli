@@ -40,10 +40,10 @@ async fn generated_live_run_executes_read_only_fanout_in_parallel() {
         .expect("workflow root exists")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .find(|path| path.join("workflow.js").exists())
+        .find(|path| archon_workflow::bundle::record_path(path).exists())
         .expect("generated workflow run directory");
-    let harness_source =
-        std::fs::read_to_string(run_dir.join("workflow.js")).expect("generated workflow harness");
+    let harness_source = std::fs::read_to_string(archon_workflow::bundle::record_path(&run_dir))
+        .expect("generated workflow record");
     assert!(harness_source.contains("w.fanout"));
     let compiled = std::fs::read_to_string(run_dir.join("workflow.compiled.yaml"))
         .expect("approval metadata workflow spec");
@@ -194,7 +194,7 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
         .expect("workflow root")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .find(|path| path.join("workflow.js").exists())
+        .find(|path| archon_workflow::bundle::record_path(path).exists())
         .expect("run directory");
     let implementation_record = std::fs::read_dir(run_dir.join("v2/results"))
         .expect("v2 results")

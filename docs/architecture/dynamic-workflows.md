@@ -86,6 +86,20 @@ The run directory contains `manifest.toml`, `spec.yaml`, `state.json`,
 `learning/`. (A `reducers/` directory used to be created here and never
 written to; it went with the unreachable reducer registry.)
 
+It also contains the run's workflow record, whose name follows its format:
+
+| File | Written by | Format |
+| --- | --- | --- |
+| `workflow.js` | the provider-authored harness planner, and the imported-spec wrapper | JavaScript executed by the harness |
+| `workflow-plan.yaml` | the decomposed-PRD planner | YAML; the approved plan record for a lifecycle that executes natively in Rust |
+| `authored-workflow.js` | the v3 authoring agent | JavaScript executed by the script host |
+
+Only one of the first two exists per run. `workflow-plan.yaml` used to be
+written as `workflow.js` — it was never JavaScript, and the extension misled
+both readers and the v3 authoring agent, which searches for `.js` files as
+examples of the dialect it must write. Run directories created before the
+split keep the old name and are still read, so nothing needs migrating.
+
 State writes use temp-file plus rename. Artifacts carry content hashes,
 producer stage, source-input hash, and accepted status so resume/reuse can
 reject stale or poisoned outputs.

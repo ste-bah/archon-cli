@@ -39,7 +39,7 @@ pub(super) async fn gate_live_approval(
     ui_sink: &SharedWorkflowUiSink,
 ) -> Result<LiveApprovalOutcome> {
     let run_dir = store.run_dir(&run.id);
-    if !run_dir.join(archon_workflow::bundle::HARNESS_FILE).exists()
+    if !archon_workflow::bundle::record_path(&run_dir).exists()
         || !run_dir
             .join(archon_workflow::bundle::COMPILED_SPEC_FILE)
             .exists()

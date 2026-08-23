@@ -70,9 +70,10 @@ fn generated_learning_evidence_refs(
     let mut refs = vec![
         WorkflowLearningEvidenceRef::path(
             "workflow_js",
-            store
-                .run_dir(run_id)
-                .join("workflow.js")
+            // Resolved, not hardcoded: a decomposed run records its plan as
+            // `workflow-plan.yaml`, and a learning reference to a file that is
+            // not there is evidence of nothing.
+            archon_workflow::bundle::record_path(&store.run_dir(run_id))
                 .display()
                 .to_string(),
         ),

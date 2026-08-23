@@ -123,7 +123,7 @@ pub(super) async fn wait_for_generated_run_id(cwd: &std::path::Path) -> String {
         if let Ok(entries) = std::fs::read_dir(&workflow_root)
             && let Some(run_id) = entries.filter_map(|entry| entry.ok()).find_map(|entry| {
                 let path = entry.path();
-                if path.join("workflow.js").exists() {
+                if archon_workflow::bundle::record_path(&path).exists() {
                     path.file_name()
                         .and_then(|name| name.to_str())
                         .map(str::to_string)

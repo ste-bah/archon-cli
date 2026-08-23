@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::bundle::{
-    COMPILED_SPEC_FILE, HARNESS_FILE, MANIFEST_FILE, WorkflowBundle, WorkflowBundleManifest,
-    WorkflowBundleOrigin, sanitize_command_name, sanitized_harness, user_command_dir,
+    COMPILED_SPEC_FILE, MANIFEST_FILE, WorkflowBundle, WorkflowBundleManifest,
+    WorkflowBundleOrigin, record_path, sanitize_command_name, sanitized_harness, user_command_dir,
     workflow_command_dir, write_capable_stage_ids,
 };
 use crate::error::{WorkflowError, WorkflowResult};
@@ -91,15 +91,21 @@ impl WorkflowCommandRegistry {
         let safe = sanitize_command_name(name)?;
         let command_dir = workflow_command_dir(&self.project_root, &safe)?;
         fs::create_dir_all(&command_dir).map_err(|e| WorkflowError::io(&command_dir, e))?;
-        let harness_path = store.run_dir(&run.id).join(HARNESS_FILE);
+        let harness_path = record_path(&store.run_dir(&run.id));
         let harness =
             fs::read_to_string(&harness_path).map_err(|e| WorkflowError::io(&harness_path, e))?;
+        // The saved command keeps the run's own basename, so a JavaScript
+        // harness stays `.js` and a plan record stays `.yaml`.
+        let record_file = harness_path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_else(|| crate::bundle::HARNESS_FILE.into());
         let harness = sanitized_harness(&harness)?;
         validate_saved_harness(&harness)?;
         let spec = sanitize_spec(&run.spec)?;
         let compiled = spec.to_yaml()?;
         let manifest = command_manifest(&safe, &spec, harness.as_bytes(), compiled.as_bytes());
-        write_atomic(&command_dir.join(HARNESS_FILE), harness.as_bytes())?;
+        write_atomic(&command_dir.join(&record_file), harness.as_bytes())?;
         write_atomic(&command_dir.join(COMPILED_SPEC_FILE), compiled.as_bytes())?;
         write_atomic(
             &command_dir.join(MANIFEST_FILE),
@@ -119,7 +125,7 @@ impl WorkflowCommandRegistry {
         let Some(command_dir) = self.resolve(&safe)? else {
             return Ok(None);
         };
-        let harness_path = command_dir.join(HARNESS_FILE);
+        let harness_path = record_path(&command_dir);
         let compiled_path = command_dir.join(COMPILED_SPEC_FILE);
         let manifest_path = command_dir.join(MANIFEST_FILE);
         let harness_source =

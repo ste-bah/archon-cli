@@ -151,9 +151,10 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
         .expect("workflow root exists")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .find(|path| path.join("workflow.js").exists())
+        .find(|path| archon_workflow::bundle::record_path(path).exists())
         .expect("generated workflow run directory");
-    let workflow_js = std::fs::read_to_string(run_dir.join("workflow.js")).expect("workflow js");
+    let workflow_js = std::fs::read_to_string(archon_workflow::bundle::record_path(&run_dir))
+        .expect("workflow record");
     let generated_metadata_body =
         std::fs::read_to_string(run_dir.join("v2/generated-metadata.json"))
             .expect("generated v2 metadata");
