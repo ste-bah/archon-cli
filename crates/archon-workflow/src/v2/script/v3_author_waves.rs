@@ -187,6 +187,59 @@ pub fn render_author_waves(universe: &WorkflowV2TaskUniverse) -> String {
         .join("\n")
 }
 
+/// The example wave literal used when there is no task universe to stamp from.
+const PLACEHOLDER_EXAMPLE_WAVES: &str =
+    "  const waves = [\n    ['TASK-X-001'],\n    ['TASK-X-002', 'TASK-X-003'],\n  ]";
+
+/// The worked example's `const waves = [...]`, stamped with this run's real
+/// wave groups.
+///
+/// The example used to carry `TASK-X-001` placeholders while the wave data
+/// beside it carried the real ids, so the author had to bridge fiction to fact
+/// — and a bridge is a judgement, which is where it wanders off. The host has
+/// already computed these groups from the declared dependencies and target
+/// files, so handing them to the example is determined data, not a
+/// PRD-specific assumption. A universe with no tasks keeps the placeholders.
+pub fn render_example_wave_literal(universe: &WorkflowV2TaskUniverse) -> String {
+    let groups = author_wave_groups(universe);
+    if groups.is_empty() {
+        return PLACEHOLDER_EXAMPLE_WAVES.to_string();
+    }
+    let rows = groups
+        .iter()
+        .map(|group| {
+            let ids = group
+                .task_ids
+                .iter()
+                .map(|id| format!("'{id}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let note = if group.task_ids.len() > 1 {
+                format!("  // wave {}: independent, run TOGETHER", group.wave + 1)
+            } else {
+                format!("  // wave {}", group.wave + 1)
+            };
+            format!("    [{ids}],{note}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("  const waves = [\n{rows}\n  ]")
+}
+
+/// The dialect reference with its worked example stamped for this run.
+///
+/// The reference is handed to the brief as the value of `{reference}`, and
+/// `compose_author_brief` never rescans substituted values (so run-derived text
+/// cannot inject placeholders). The example therefore has to be filled in here,
+/// before it is passed.
+pub fn render_dialect_reference(universe: Option<&WorkflowV2TaskUniverse>) -> String {
+    let example = match universe {
+        Some(universe) => render_example_wave_literal(universe),
+        None => PLACEHOLDER_EXAMPLE_WAVES.to_string(),
+    };
+    super::v3_author_a::V3_PRIMITIVE_REFERENCE.replace("{example_waves}", &example)
+}
+
 #[cfg(test)]
 #[path = "v3_author_waves_tests.rs"]
 mod tests;

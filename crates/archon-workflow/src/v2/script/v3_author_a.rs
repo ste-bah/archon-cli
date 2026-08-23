@@ -39,11 +39,7 @@ Shape — top-level script, exactly like this (no wrapper function):
   ]
   // The waves come from the brief's EXECUTION WAVES section, which the host
   // computed. Copy that grouping exactly — task ids only.
-  const waves = [
-    ['TASK-X-001'],                   // wave 1
-    ['TASK-X-002', 'TASK-X-003'],     // wave 2: independent, run TOGETHER
-    // ...one entry per wave, in order...
-  ]
+{example_waves}
   const acceptedTaskIds = []
   const blockedTasks = []
   const byId = (id) => tasks.find((t) => t.id === id)
@@ -97,7 +93,7 @@ Shape — top-level script, exactly like this (no wrapper function):
   for (const t of tasks) {
     let impl = implOf[t.id]
     // A verifier that demotes the task is not the end: feed its verbatim findings
-    // to a fresh write agent and re-verify, up to 3 attempts, then record blocked.
+    // to a fresh write agent and re-verify, up to 6 attempts, then record blocked.
     let check = await agent(`You did NOT implement ${t.id} — be suspicious of its self-report. Re-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}`, verify: true, taskIds: [t.id] })
     // Budget follows PROGRESS, not a flat count: it extends past the base
     // attempts only while the FIRST verifier's gap set is still shrinking, and
@@ -191,7 +187,7 @@ Rules the script must follow:
 - PER TASK, TWO STAGES, GOAL-ORIENTED PROMPTS — agents are capable sessions with their own tools; give them goals and context, never command scripts to obey:
   1. IMPLEMENT (write agent): give it the task file PATH, the repository root, and the goal; for artifact work tell it to use `project_artifact_root` from its OWN stage input (the host stamps it there — never guess or invent an artifact path yourself). Tell it to READ the task file and RE-INSPECT the current repo/artifact state FIRST — if the work is genuinely already done it returns the typed no-op (status noop, idempotent_noop true, task_coverage evidence) instead of redoing or cosmetically editing anything; the workflow must be safe to re-run. It decides how to implement and how to prove it, runs its own tests, and fixes its own command mistakes inside its session.
   2. VERIFY (fresh read-only agent with `verify: true` so it can execute commands): frame it adversarially — "you did NOT do this work; be suspicious of its self-report. Re-read the task file yourself, inspect the actual code and artifacts, and run whatever tests YOU judge prove or disprove the acceptance criteria." It chooses its own commands; if a command errors it corrects itself and re-runs within its session. Artifact checks use ABSOLUTE paths under the project artifact root — a DIFFERENT directory from the repository, stamped as `project_artifact_root` in the agent's own stage input.
-- REMEDIATION IS MANDATORY, NOT OPTIONAL — this is the difference between a workflow that REPORTS problems and one that FIXES them, which is the entire point. Every task MUST follow implement -> verify -> remediate-and-re-verify, exactly as the example shows. A rejected implement or a verifier that returns anything other than accepted/noop is NOT the end of that task: feed the verifier's VERBATIM findings to a fresh write agent ("fix exactly what they name, do not re-argue them"), then re-verify, up to 3 attempts total. Only after the last attempt still fails do you record the task as blocked with the evidence. A script that runs each task once and records the failure is INCOMPLETE and will be rejected — the tasks must actually be implemented.
+- REMEDIATION IS MANDATORY, NOT OPTIONAL — this is the difference between a workflow that REPORTS problems and one that FIXES them, which is the entire point. Every task MUST follow implement -> verify -> remediate-and-re-verify, exactly as the example shows. A rejected implement or a verifier that returns anything other than accepted/noop is NOT the end of that task: feed the verifier's VERBATIM findings to a fresh write agent ("fix exactly what they name, do not re-argue them"), then re-verify, up to 6 attempts total. Only after the last attempt still fails do you record the task as blocked with the evidence. A script that runs each task once and records the failure is INCOMPLETE and will be rejected — the tasks must actually be implemented.
 - Retry prompts carry the COMPLETE implementation and verifier envelope structure plus the original goal. Preserve every finding, blocker, status, changed-file claim, and tool-evidence field verbatim. Only commands_run[*].output_summary may be bounded: share a 4,000-character budget across those strings in each envelope and mark truncation explicitly. Never reduce findings to a wrapper summary, add constraints, or argue about whether a finding is fair.
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
@@ -219,7 +215,7 @@ Required investigation (do it; cite the files you actually read in evidence):
 Then write the script per the dialect reference and SELF-CHECK before returning:
 - every canonical task id appears in EXACTLY ONE INITIAL write agent() call's taskIds with that task's declared target files (never one umbrella call claiming many tasks); bounded remediation calls repeat only that same task id and target ownership;
 - a task that is already implemented still gets its write agent — instruct that agent to return the typed no-op (status noop, idempotent_noop true, task_coverage evidence) when it verifies nothing needs changing; NEVER make cosmetic edits just to show work;
-- EVERY task has a remediation path: after its verifier, a bounded loop (max 3 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
+- EVERY task has a remediation path: after its verifier, a bounded loop (max 6 attempts) that re-runs a write agent with the verifier's verbatim findings and re-verifies, before recording blocked. A script without remediation does not implement the tasks and is incomplete;
 - write agents are told to prove their change by running tests IN-SESSION; the ONLY focusedTests you may pass are the commands the task itself declares, listed verbatim under DECLARED FOCUSED TESTS below — copy them character for character. You have no shell, so you cannot check a command of your own; NEVER invent one, never widen a declared one into a broader filter, and never pattern-match a name out of the repository tree. An invented command fails the gauntlet or drags in work the task never owned. A task that declares none gets no focusedTests at all: omit the option and let its agent choose;
 - SCOPE EVERY TEST COMMAND TO WHAT THE TASK CHANGED. Use the project's own tooling to run the package, module or suite the task touches — never the whole repository. A task editing one component does not need the entire tree built and tested to prove itself, and on a large project that difference is hours per task, repeated for every task and every remediation attempt. Tell the write agent the same thing: prove the change with the narrowest command that actually exercises it, and widen only if the narrow one cannot;
 - the two mandatory map→reduce reviews are present after all work, read-only, critic-tier throughout, cover every accepted task exactly once, preserve map findings into reducers, and return adversarial_findings/uncovered_requirements from those reducers;
@@ -243,8 +239,25 @@ files — batch exactly as grouped here):
 {task_waves}
 
 {retry_feedback}
-Governed learning context from previous runs (apply its lessons):
-{learning_context}
+WHAT KEEPS GOING WRONG. These are the failures that actually recur, distilled
+into rules. They are not history to look up — everything you need is in this
+brief:
+- A WRITE AGENT THAT CHANGES NOTHING HAS NOT SUCCEEDED. The most common failure
+  by far is an implementation call that returns a cheerful summary with no files
+  changed and no commands run. Treat an outcome with empty files_changed and
+  empty commands_run as FAILED and send it to remediation, unless it is an
+  explicit typed no-op (status noop, idempotent_noop true) carrying task_coverage
+  evidence that the work was already done. "I reviewed it and it looks fine" is
+  not a no-op, it is a miss.
+- A TASK IS NOT DONE UNTIL ITS COMPLETION IS RECORDED. Runs repeatedly ended with
+  work performed but no accounting entry for it. Every canonical task id must
+  appear exactly once in the accounting return, with its real status.
+- A NO-OP MUST CARRY ITS PROOF. A task claimed as already-implemented needs the
+  evidence that proves it — the file or test output that shows the work exists.
+  A bare noop claim is rejected.
+- A CALL THAT DIES IN TRANSPORT IS NOT A TASK THAT FAILED. Transport errors are
+  by far the most frequent error in practice. Do not record a task as blocked
+  because its call was cancelled or dropped; that is a retry, not a verdict.
 
 DIALECT REFERENCE:
 {reference}"#;
@@ -278,7 +291,7 @@ pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
             "{declared_focused_tests}",
             "{task_waves}",
             "{retry_feedback}",
-            "{learning_context}",
+            "{example_waves}",
             "{reference}"
         ]
         .iter()

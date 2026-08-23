@@ -218,7 +218,7 @@ export default async function workflow({ agent, phase, log, w }) {
     let authored_path = workflow_store.run_dir(&run.id).join("authored-workflow.js");
 
     let summary = runner
-        .run_authored_script_lifecycle(authored_path.clone(), serde_json::Value::Null)
+        .run_authored_script_lifecycle(authored_path.clone())
         .await
         .expect("authored lifecycle summary");
 

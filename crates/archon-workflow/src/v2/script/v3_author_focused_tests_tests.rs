@@ -58,8 +58,10 @@ fn composed_author_brief_carries_a_declared_command() {
         ("declared_focused_tests", &declared),
         ("task_waves", "- wave 1: TASK-TDL-020"),
         ("retry_feedback", ""),
-        ("learning_context", "{}"),
-        ("reference", V3_PRIMITIVE_REFERENCE),
+        (
+            "reference",
+            &crate::v2::script::render_dialect_reference(Some(&real_universe())),
+        ),
     ]);
 
     assert!(
@@ -126,7 +128,11 @@ fn author_brief_never_asks_for_commands_the_author_cannot_verify() {
 /// instruction contradicted by the worked example loses.
 #[test]
 fn the_worked_example_implements_by_wave_rather_than_one_task_at_a_time() {
-    let reference = super::V3_PRIMITIVE_REFERENCE;
+    // The stamped reference, because the raw constant now carries the
+    // `{example_waves}` placeholder the host fills with this run's real wave
+    // groups — the author never sees the unstamped text.
+    let reference = crate::v2::script::render_dialect_reference(Some(&real_universe()));
+    let reference = reference.as_str();
 
     assert!(
         reference.contains("await agents("),

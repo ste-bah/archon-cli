@@ -15,13 +15,13 @@ use super::*;
 /// author can learn from — it now receives its own rejected draft and repairs
 /// it — so the budget matches `max_repair_iterations`' reasoning rather than
 /// being the smallest number that is not one.
-const MAX_AUTHORING_DEFECT_ATTEMPTS: usize = 4;
+const MAX_AUTHORING_DEFECT_ATTEMPTS: usize = 6;
 
 /// How many times the authoring call may die in transport before the run gives
 /// up. Separate from the defect budget on purpose: a cancelled or dropped call
 /// produced no script, taught the author nothing, and must not consume the
 /// chances reserved for actually fixing a defect.
-const MAX_AUTHORING_TRANSPORT_ATTEMPTS: usize = 3;
+const MAX_AUTHORING_TRANSPORT_ATTEMPTS: usize = 6;
 
 /// A failure that produced no script to learn from, rather than a defective one.
 ///
@@ -48,7 +48,6 @@ impl WorkflowV2ScriptRunner {
     pub(in super::super::super) async fn run_authored_script_lifecycle(
         self,
         authored_path: std::path::PathBuf,
-        governed_learning_context: serde_json::Value,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let expected_task_ids = self
             .task_universe
@@ -98,9 +97,7 @@ impl WorkflowV2ScriptRunner {
                     Some((reason, draft)) => (Some(reason.as_str()), draft.as_deref()),
                     None => (None, None),
                 };
-                let authored = self
-                    .author_workflow_source(feedback, draft, &governed_learning_context)
-                    .await;
+                let authored = self.author_workflow_source(feedback, draft).await;
                 match authored {
                     Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
                         Ok(()) => break source,
@@ -167,7 +164,6 @@ impl WorkflowV2ScriptRunner {
         &self,
         retry_feedback: Option<&str>,
         rejected_draft: Option<&str>,
-        governed_learning_context: &serde_json::Value,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
         // Frontier reuse is content-keyed now, so the authoring call needs no
@@ -269,8 +265,12 @@ impl WorkflowV2ScriptRunner {
                     })
                     .unwrap_or_default(),
             ),
-            ("learning_context", &governed_learning_context.to_string()),
-            ("reference", V3_PRIMITIVE_REFERENCE),
+            (
+                "reference",
+                &archon_workflow::v2::script::render_dialect_reference(
+                    self.task_universe.as_ref(),
+                ),
+            ),
         ]);
         bootstrap.script_args = Some(serde_json::json!({ "author_task": author_task }));
         let summary = bootstrap

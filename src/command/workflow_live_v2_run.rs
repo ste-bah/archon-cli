@@ -408,11 +408,7 @@ async fn execute_generated_v2_run(
     }
     let run_result = if plan.task_universe.is_some() && script_lifecycle {
         runner
-            .run_authored_script_lifecycle(
-                store.run_dir(&run.id).join("authored-workflow.js"),
-                serde_json::to_value(&plan.governed_learning_context)
-                    .unwrap_or(serde_json::Value::Array(Vec::new())),
-            )
+            .run_authored_script_lifecycle(store.run_dir(&run.id).join("authored-workflow.js"))
             .await
     } else if plan.task_universe.is_some() {
         // TODO(remove-decomposed): delete the legacy native lifecycle after v3 live proof.
