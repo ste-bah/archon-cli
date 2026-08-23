@@ -106,6 +106,14 @@ pub struct SubagentInfo {
     pub request: SubagentRequest,
     pub status: SubagentStatus,
     pub created_at: DateTime<Utc>,
+    /// Which occupancy of this id this is, counted from 1.
+    ///
+    /// An id outlives its runs — `register_with_id` deliberately reuses a
+    /// stopped entry — so "the entry for id X" does not identify a run. Anything
+    /// acting on a run it no longer holds has to be able to tell that it has
+    /// been superseded, and a timestamp cannot: two registrations of one id can
+    /// land inside the same clock tick.
+    pub generation: u64,
     pub result: Option<String>,
     /// Flag for graceful shutdown (set by SendMessage shutdown_request).
     pub shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -146,6 +154,9 @@ pub struct SubagentManager {
     /// Pending messages queued for delivery at next tool round boundary.
     /// Key: agent_id, Value: queued messages (FIFO order).
     pending_messages: HashMap<String, Vec<String>>,
+    /// Registrations made by this manager, ever. Stamped onto each entry so a
+    /// late release can tell its own run from the one that replaced it.
+    registrations: u64,
 }
 
 impl SubagentManager {
@@ -158,6 +169,7 @@ impl SubagentManager {
             max_concurrent,
             name_registry: HashMap::new(),
             pending_messages: HashMap::new(),
+            registrations: 0,
         }
     }
 
@@ -205,9 +217,11 @@ impl SubagentManager {
             self.pending_messages.remove(&id);
             self.name_registry
                 .retain(|_, existing_id| existing_id != &id);
+            self.registrations += 1;
             existing.request = request;
             existing.status = SubagentStatus::Running;
             existing.created_at = Utc::now();
+            existing.generation = self.registrations;
             existing.result = None;
             existing.shutdown_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             existing.progress =
@@ -219,11 +233,13 @@ impl SubagentManager {
             return Err(SubagentError::MaxConcurrent(self.max_concurrent));
         }
 
+        self.registrations += 1;
         let info = SubagentInfo {
             id: id.clone(),
             request,
             status: SubagentStatus::Running,
             created_at: Utc::now(),
+            generation: self.registrations,
             result: None,
             shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             progress: std::sync::Arc::new(std::sync::Mutex::new(ProgressTracker::default())),
@@ -274,6 +290,32 @@ impl SubagentManager {
 
         info.status = SubagentStatus::TimedOut;
         Ok(())
+    }
+
+    /// Which occupancy of `id` is current, if any.
+    pub fn generation(&self, id: &str) -> Option<u64> {
+        self.agents.get(id).map(|info| info.generation)
+    }
+
+    /// Fail `id` only while it is still the run that `generation` names.
+    ///
+    /// The release a dropped run performs cannot always happen inside the drop
+    /// — if the manager is locked it has to be handed to the runtime — and by
+    /// the time it is served the retry may already have re-registered the same
+    /// id. An unconditional `mark_failed` would then kill the replacement,
+    /// turning a leak into something worse: a healthy run reported as failed
+    /// for a reason belonging to its predecessor. Superseded is not an error;
+    /// it is the release finding its work already done.
+    pub fn mark_failed_at_generation(
+        &mut self,
+        id: &str,
+        generation: u64,
+        reason: String,
+    ) -> Result<(), SubagentError> {
+        match self.agents.get(id) {
+            Some(info) if info.generation != generation => Ok(()),
+            _ => self.mark_failed(id, reason),
+        }
     }
 
     /// Mark a subagent as failed with a reason.

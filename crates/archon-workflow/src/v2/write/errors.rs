@@ -175,22 +175,41 @@ pub(super) fn branch_validation_failure_fields(
     }
 }
 
-pub(super) fn write_branch_runtime_timeout_result(
+/// A branch that was INTERRUPTED rather than one that did the work badly.
+///
+/// Kept apart from the validation and unhandled results because the difference
+/// is what happens next: this is `NeedsReview` with the branch's evidence
+/// retained, so the wave survives and the work can be re-asked. A branch
+/// stopped by the host reaching a limit has said nothing about whether its
+/// implementation was right.
+pub(super) fn write_branch_interrupted_result(
     item_id: &str,
     input: &serde_json::Value,
     error: &str,
 ) -> WorkflowV2Result {
     let source = input.get("item").unwrap_or(input);
     let canonical_task_ids = canonical_task_ids_from_generated_value(source, None);
+    let contention = is_host_resource_contention(error);
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
-        summary: format!("write branch '{item_id}' timed out before returning usable output"),
+        summary: if contention {
+            format!(
+                "write branch '{item_id}' could not start because a host resource was still held                  by an earlier run of it"
+            )
+        } else {
+            format!("write branch '{item_id}' timed out before returning usable output")
+        },
         ..WorkflowV2Result::default()
     };
     result.evidence.push(WorkflowV2Evidence::new(
         WorkflowV2EvidenceKind::Review,
-        "write branch timeout was retained as item-level remediation data for workflow.js",
+        "write branch interruption was retained as item-level remediation data for workflow.js",
     ));
+    // The gap id stays `write_branch_timeout_*` for a contention case too. It
+    // is a key, not a description: the authored script and the aggregation in
+    // `result.rs` match on it, and splitting it by cause would make the new
+    // cause invisible to every consumer that already handles this class. What
+    // distinguishes them is `branch_host_resource_contention` below.
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!("write_branch_timeout_{}", sanitize_v2_path_segment(item_id)),
         description: truncate_for_result(error, 500),
@@ -201,6 +220,7 @@ pub(super) fn write_branch_runtime_timeout_result(
         "item_id": item_id,
         "canonical_task_ids": canonical_task_ids,
         "branch_runtime_timeout": true,
+        "branch_host_resource_contention": contention,
         "failure_kind": BranchFailureKind::Contract,
         "error": truncate_for_result(error, 2_000),
     });
@@ -231,7 +251,13 @@ pub(super) fn failure_kind_from_write_result(
 /// recoverable and nobody would see it in the diff.
 pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time budget";
 
-pub(super) fn is_recoverable_write_branch_timeout(error: &str) -> bool {
+/// Errors that mean the branch was STOPPED, not that its work was wrong.
+///
+/// Named for the class rather than for timeouts, which is all it used to hold.
+/// Everything here shares one property: the branch never got to say whether its
+/// implementation was correct, so discarding the wave over it throws away work
+/// that no evidence has faulted.
+pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("subagent timed out")
         || lower.contains("timed out after")
@@ -241,6 +267,32 @@ pub(super) fn is_recoverable_write_branch_timeout(error: &str) -> bool {
         // worth keeping. Treated as a hard error it would take the wave with it
         // and discard what the branch had learned.
         || lower.contains(CALL_TIME_BUDGET_EXHAUSTED)
+        || is_host_resource_contention(error)
+}
+
+/// A host-side resource the branch could not take, rather than anything the
+/// branch did.
+///
+/// Observed live as the error that ended a fifteen-task run at its third task:
+/// a killed branch left its subagent registration in `Running`, and the retry —
+/// which re-dispatches under the SAME id — was refused with "subagent already
+/// exists and is running". The leak itself is fixed where it belongs, by making
+/// that registration release on drop. This predicate is the second half: the
+/// message arrived here wrapped in "agent transport failed", which routed it
+/// past every validation branch into the unclassified result, and an
+/// unclassified result is terminal. So a resource collision — a class that can
+/// arise again from any concurrent holder — permanently failed a task whose
+/// implementation nothing had examined.
+pub(super) fn is_host_resource_contention(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    // Matched WITH the word "subagent", not on the bare phrase. This predicate
+    // runs before the validation classifier, so anything it captures is treated
+    // as an interruption and re-askable — and an agent is free to write
+    // "already exists and is running" in its own summary, which can reach here
+    // inside a validation error. Requiring the noun keeps the match to the
+    // registry's own wording.
+    lower.contains("subagent already exists and is running")
+        || lower.contains("max concurrent subagents reached")
 }
 
 pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {
@@ -338,4 +390,73 @@ pub(super) fn sanitize_v2_path_segment(raw: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Turn one branch's dispatch `Result` into the branch outcome it deserves.
+///
+/// Lives beside the predicates it consults rather than beside the loop that
+/// calls it: this is entirely classification — which of "stopped", "judged
+/// wrong", or "not ours to classify" an error is — and the loop has no say in
+/// it. Keeping them apart is what stopped a classification change from having
+/// to be read against dispatch control flow to be understood.
+/// Takes the branch's id and input rather than the branch itself, which is what
+/// lets this live here at all: `WorktreeBranchExecution` is private to the
+/// dispatch module, and reaching for it from a sibling would have meant
+/// widening a type's visibility to satisfy a classifier that never needed the
+/// type. Two values are all the classification reads.
+pub(super) fn normalize_worktree_agent_result(
+    result: crate::WorkflowResult<WorkflowV2Result>,
+    branch_id: &str,
+    input: &serde_json::Value,
+) -> crate::WorkflowResult<WorkflowV2Result> {
+    match result {
+        Ok(result) => Ok(result),
+        Err(err) if is_recoverable_write_branch_interruption(&err.to_string()) => Ok(
+            write_branch_interrupted_result(branch_id, input, &err.to_string()),
+        ),
+        Err(err) if is_write_branch_validation_error(&err.to_string()) => Ok(
+            write_branch_validation_error_result(branch_id, Some(input), &err.to_string()),
+        ),
+        Err(err) => Err(err),
+    }
+}
+
+/// Mark an outcome as one that stopped because it stopped getting CLOSER.
+///
+/// Additive on purpose. The underlying rejection is still the most actionable
+/// thing in the record — it names the file and the cap — so it is left exactly
+/// as it is. What was missing is why the branch stopped: a record reading only
+/// "produced invalid implementation evidence after repair" describes one bad
+/// answer, when what actually happened is that the branch was re-asked
+/// `attempts` times and never improved. Those call for different remediation —
+/// one is a fix, the other is a change of scope or approach — and a consumer
+/// that cannot tell them apart will keep prescribing the first.
+///
+/// A stall is reported, never inferred: only the loop knows it re-asked and got
+/// nowhere, and no amount of reading the error text recovers that.
+pub(super) fn stamp_no_progress(
+    result: crate::WorkflowResult<WorkflowV2Result>,
+    attempts: usize,
+) -> crate::WorkflowResult<WorkflowV2Result> {
+    let mut outcome = match result {
+        Ok(outcome) => outcome,
+        // An error the classification declined to own stays declined. Stamping
+        // it would claim a diagnosis this function did not make.
+        Err(err) => return Err(err),
+    };
+    if let Some(data) = outcome.data.as_object_mut() {
+        data.insert(
+            "branch_no_progress".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        data.insert(
+            "branch_attempts".to_string(),
+            serde_json::Value::from(attempts),
+        );
+    }
+    outcome.summary = format!(
+        "{} — it stopped getting closer after {attempts} re-ask(s)",
+        outcome.summary
+    );
+    Ok(outcome)
 }

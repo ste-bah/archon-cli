@@ -65,6 +65,7 @@ mod completion;
 mod paths;
 mod run;
 mod run_prepare;
+mod run_registration;
 mod run_runner;
 
 /// Snapshot of the `Agent` fields that the executor needs.

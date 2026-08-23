@@ -72,21 +72,29 @@ pub(super) async fn run_coordinated_v2_write_fanout(
                     input: branch.input,
                     depends_on: vec![execution.call.id.clone()],
                 };
-                let result = dispatch
-                    .run_call(
+                // Raced against the run's control state, not merely checked
+                // either side of it: without this a cancel is invisible until
+                // the call returns, so stopping a wave of branches meant
+                // waiting out every one of their agent calls first.
+                let result = crate::control_race::until_run_stops(
+                    &control_store,
+                    &run_id,
+                    &assignment.item_id,
+                    dispatch.run_call(
                         task,
                         target_repository_root.map(str::to_string),
                         &branch_execution,
                         &adapter,
                         Some(v2_store),
                         task_universe,
-                    )
-                    .await;
+                    ),
+                )
+                .await;
                 active.fetch_sub(1, Ordering::SeqCst);
                 let result = match result {
                     Ok(result) => result,
-                    Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {
-                        write_branch_runtime_timeout_result(
+                    Err(err) if is_recoverable_write_branch_interruption(&err.to_string()) => {
+                        write_branch_interrupted_result(
                             &assignment.item_id,
                             &branch_execution.input,
                             &err.to_string(),

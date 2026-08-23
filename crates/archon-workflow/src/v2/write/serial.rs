@@ -45,20 +45,26 @@ pub(super) async fn run_serial_v2_write_fanout(
             input: branch.input,
             depends_on: vec![execution.call.id.clone()],
         };
-        let mut result = match dispatch
-            .run_call(
+        // Raced against control, for the same reason the coordinated path is:
+        // a checkpoint either side of a call cannot stop the call itself.
+        let mut result = match crate::control_race::until_run_stops(
+            store_for_control,
+            run_id,
+            &branch_id,
+            dispatch.run_call(
                 task,
                 target_repository_root.map(str::to_string),
                 &branch_execution,
                 &adapter,
                 Some(v2_store),
                 task_universe,
-            )
-            .await
+            ),
+        )
+        .await
         {
             Ok(result) => result,
-            Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {
-                write_branch_runtime_timeout_result(
+            Err(err) if is_recoverable_write_branch_interruption(&err.to_string()) => {
+                write_branch_interrupted_result(
                     &branch_id,
                     &branch_execution.input,
                     &err.to_string(),

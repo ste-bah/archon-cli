@@ -57,4 +57,10 @@ uuid.workspace = true
 # Dev-only deliberately: pulling it in at build time would put wiremock and the
 # mock doubles into this crate's production dependency graph.
 archon-test-support = { path = "../archon-test-support" }
+# `features = ["full"]` does NOT include `test-util`, and `control_race_tests`
+# uses `#[tokio::test(start_paused = true)]`. Without this the crate only built
+# when some OTHER workspace member's dev-dependencies unified the feature in —
+# so `cargo test -p archon-workflow` failed on its own in a clean target dir.
+# Same one-liner archon-core, archon-llm and archon-pipeline already carry.
+tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

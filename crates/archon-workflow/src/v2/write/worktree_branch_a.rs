@@ -10,14 +10,23 @@ pub(crate) async fn run_one_worktree_branch(
         ctx.run_id,
         &prepared,
     )?;
-    let mut result = run_worktree_branch_agent(
-        ctx.task,
-        ctx.target_repository_root.map(str::to_string),
-        ctx.dispatch,
-        ctx.v2_store,
-        ctx.adapter,
-        &branch,
-        ctx.task_universe,
+    // Wrapped at the branch, not at the dispatch inside it, and deliberately:
+    // this covers the whole re-ask loop, so a cancelled run stops re-asking
+    // rather than working through its remaining size and transport budgets
+    // first. The checkpoint below still runs for a stop observed between calls.
+    let mut result = crate::control_race::until_run_stops(
+        ctx.store_for_control,
+        ctx.run_id,
+        &branch.id,
+        run_worktree_branch_agent(
+            ctx.task,
+            ctx.target_repository_root.map(str::to_string),
+            ctx.dispatch,
+            ctx.v2_store,
+            ctx.adapter,
+            &branch,
+            ctx.task_universe,
+        ),
     )
     .await?;
     poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
@@ -129,15 +138,13 @@ pub(super) async fn run_worktree_branch_agent(
     // is not an answer about the work, so it must not consume the budget that
     // exists for correcting a rejection.
     let mut transport_failures = 0usize;
-    // Every budget above counts ATTEMPTS, none counts time, and the transport
-    // branch consumes no attempt at all — so the loop could re-dispatch far past
-    // any timeout set: observed as one task at 6h20m under a two-hour one.
+    let mut size_retries = 0usize;
     let started = std::time::Instant::now();
     let time_budget = dispatch.call_time_budget();
-    for _ in 0..=super::size_retry::MAX_SIZE_RETRIES {
+    for _ in 0..super::size_retry::MAX_BRANCH_DISPATCHES {
         if super::size_retry::call_time_budget_exhausted(started, time_budget) {
             let err = super::size_retry::call_time_budget_error(&branch.id, started, time_budget);
-            return normalize_worktree_agent_result(Err(err), branch);
+            return normalize_worktree_agent_result(Err(err), &branch.id, &branch.execution.input);
         }
         let result = dispatch
             .run_call(
@@ -150,7 +157,7 @@ pub(super) async fn run_worktree_branch_agent(
             )
             .await;
         let Err(err) = &result else {
-            return normalize_worktree_agent_result(result, branch);
+            return normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
         };
         let text = err.to_string();
         // The provider dropped the call. Nothing landed and no verdict was
@@ -160,52 +167,44 @@ pub(super) async fn run_worktree_branch_agent(
             && !crate::v2::transport_retry::is_content_rejection(&text)
         {
             if transport_failures >= crate::v2::transport_retry::MAX_TRANSPORT_RETRIES {
-                return normalize_worktree_agent_result(result, branch);
+                return normalize_worktree_agent_result(
+                    result,
+                    &branch.id,
+                    &branch.execution.input,
+                );
             }
             transport_failures += 1;
             continue;
         }
         if !super::size_retry::is_line_cap_rejection(&text) {
-            return normalize_worktree_agent_result(result, branch);
+            return normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
+        }
+        // Counted here rather than by the loop, so a dropped transport cannot
+        // spend an attempt that exists for correcting a rejection.
+        if size_retries >= super::size_retry::MAX_SIZE_RETRIES {
+            let outcome =
+                normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
+            return stamp_no_progress(outcome, size_retries);
         }
         let overshoot = super::size_retry::rejected_line_count(&text);
         if !super::size_retry::should_retry(previous_overshoot, overshoot) {
-            return normalize_worktree_agent_result(result, branch);
+            let outcome =
+                normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
+            return stamp_no_progress(outcome, size_retries);
         }
+        size_retries += 1;
         previous_overshoot = overshoot;
         prompt = format!("{}\n\n{}", task, super::size_retry::retry_notice(&text));
     }
-    normalize_worktree_agent_result(
+    let exhausted = normalize_worktree_agent_result(
         Err(crate::WorkflowError::port(format!(
             "write branch '{}' could not fit its patch under the source-file line cap",
             branch.id
         ))),
-        branch,
-    )
-}
-
-pub(super) fn normalize_worktree_agent_result(
-    result: crate::WorkflowResult<WorkflowV2Result>,
-    branch: &WorktreeBranchExecution,
-) -> crate::WorkflowResult<WorkflowV2Result> {
-    match result {
-        Ok(result) => Ok(result),
-        Err(err) if is_recoverable_write_branch_timeout(&err.to_string()) => {
-            Ok(write_branch_runtime_timeout_result(
-                &branch.id,
-                &branch.execution.input,
-                &err.to_string(),
-            ))
-        }
-        Err(err) if is_write_branch_validation_error(&err.to_string()) => {
-            Ok(write_branch_validation_error_result(
-                &branch.id,
-                Some(&branch.execution.input),
-                &err.to_string(),
-            ))
-        }
-        Err(err) => Err(err),
-    }
+        &branch.id,
+        &branch.execution.input,
+    );
+    stamp_no_progress(exhausted, size_retries)
 }
 
 /// Record that a schema-repair failure nonetheless left a real patch on disk.

@@ -22,11 +22,24 @@ impl AgentSubagentExecutor {
     ) -> Result<String, ExecutorError> {
         let _capacity_permit = self.acquire_subagent_capacity(&cancel).await?;
         let ids = self.register_subagent_run(&subagent_id, &request).await?;
+        // Held across everything below. The two statements that follow used to
+        // be the only release, which covered every way a run can finish and no
+        // way it can be abandoned — and an abandoned run left an id nothing,
+        // including its own retry, could ever register again. See
+        // `run_registration`.
+        let mut registration = super::run_registration::RunRegistration::take(
+            std::sync::Arc::clone(&self.subagent_manager),
+            ids.manager_id.clone(),
+        )
+        .await;
         let result = self
             .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel)
             .await;
         self.on_inner_complete(ids.cache_id, result.clone().map_err(|err| err.to_string()))
             .await;
+        // Last, not before: a completion interrupted part-way through has still
+        // left the entry `Running`, and the drop is what covers that.
+        registration.settle();
         result
     }
 

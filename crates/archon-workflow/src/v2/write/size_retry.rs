@@ -23,7 +23,32 @@
 /// what normally ends the loop.
 pub(super) const MAX_SIZE_RETRIES: usize = 12;
 
+/// The most provider dispatches one write branch can make.
+///
+/// DERIVED, not chosen. A branch re-asks for exactly two reasons and each has
+/// its own budget: the patch was rejected by the size policy
+/// ([`MAX_SIZE_RETRIES`]), or the transport dropped the call
+/// ([`crate::v2::transport_retry::MAX_TRANSPORT_RETRIES`]). The total is the
+/// first attempt plus both, so the ceiling cannot drift away from the budgets
+/// it is made of — raising one raises this, visibly, in the same diff.
+///
+/// Writing it down matters because the ceiling was previously a product of
+/// separate counters that no one had multiplied out. The loop bound also has to
+/// be the SUM rather than either budget alone: bounding it by
+/// `MAX_SIZE_RETRIES` made a transport blip consume an attempt reserved for
+/// correcting a rejection, which is the opposite of what the loop's own comment
+/// promised. Every attempt is still counted; none of them counts time, which is
+/// what `call_time_budget_exhausted` is for.
+pub(super) const MAX_BRANCH_DISPATCHES: usize =
+    1 + MAX_SIZE_RETRIES + crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
+
 /// Has this call spent the wall clock it was given, across every re-dispatch?
+///
+/// Needed because every budget in the branch loop counts ATTEMPTS and none of
+/// them counts time. A branch could therefore re-dispatch far past any timeout
+/// set for it: observed as one task still running at 6h20m under a two-hour
+/// timeout, because the timeout bounded one attempt and nothing bounded the
+/// call.
 ///
 /// Separated from the loop so it can be exercised without a clock: a test that
 /// sleeps to prove a timeout is the kind this repository has been deleting for

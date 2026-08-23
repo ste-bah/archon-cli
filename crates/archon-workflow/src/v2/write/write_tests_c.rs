@@ -158,7 +158,7 @@ fn write_branch_timeout_returns_js_visible_review_data() {
             "canonical_task_ids": ["TASK-001"]
         }
     });
-    let branch_result = write_branch_runtime_timeout_result(
+    let branch_result = write_branch_interrupted_result(
         "impl-task",
         &branch_input,
         "agent transport failed: subagent timed out after 7200s",

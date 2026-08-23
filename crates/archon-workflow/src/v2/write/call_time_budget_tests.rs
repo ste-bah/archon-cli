@@ -119,13 +119,150 @@ fn budget_exhaustion_is_treated_as_a_recoverable_timeout() {
         "write branch 'implement-1-0' {} of 7200s after 7300s across re-dispatches",
         super::errors::CALL_TIME_BUDGET_EXHAUSTED
     );
-    assert!(super::errors::is_recoverable_write_branch_timeout(&message));
+    assert!(super::errors::is_recoverable_write_branch_interruption(
+        &message
+    ));
 }
 
 /// And an unrelated failure is still not a timeout.
 #[test]
 fn other_failures_are_not_budget_exhaustion() {
-    assert!(!super::errors::is_recoverable_write_branch_timeout(
+    assert!(!super::errors::is_recoverable_write_branch_interruption(
         "changed files outside declared ownership"
     ));
+}
+
+/// The error that ended a fifteen-task run at its third task.
+///
+/// It arrived wrapped in "agent transport failed", which is why it reached the
+/// unclassified result and became terminal. The classification has to see
+/// through the wrapping, because that is the form it actually has in the wild.
+#[test]
+fn a_stranded_subagent_registration_is_an_interruption_not_a_verdict() {
+    let live = "workflow stage failed: agent transport failed: workflow stage failed: subagent \
+                failed: Failed to register subagent: subagent already exists and is running: \
+                wf-06ff5242-stage-implement-tdl-020-11-0-attempt-1-1991183-coder";
+
+    assert!(super::errors::is_host_resource_contention(live));
+    assert!(super::errors::is_recoverable_write_branch_interruption(
+        live
+    ));
+}
+
+#[test]
+fn a_full_subagent_pool_is_an_interruption_too() {
+    let busy = "subagent failed: max concurrent subagents reached (8)";
+
+    assert!(super::errors::is_recoverable_write_branch_interruption(
+        busy
+    ));
+}
+
+/// The phrase alone is not enough. This predicate runs BEFORE the validation
+/// classifier, so anything it captures becomes re-askable — and an agent can
+/// put any words it likes in a summary that ends up inside a validation error.
+#[test]
+fn an_agents_own_prose_cannot_pose_as_a_registry_collision() {
+    let agent_prose = "agent result failed validation: summary says the dataset \
+                       already exists and is running in production";
+
+    assert!(!super::errors::is_host_resource_contention(agent_prose));
+    assert!(!super::errors::is_recoverable_write_branch_interruption(
+        agent_prose
+    ));
+}
+
+/// The class must stay narrow: work that was examined and found wrong is not
+/// an interruption, and treating it as one would re-ask a branch forever.
+#[test]
+fn a_real_verdict_on_the_work_is_not_an_interruption() {
+    for verdict in [
+        "implementation agent changed files outside declared target_files: src/a.rs",
+        "agent result failed validation: missing task_coverage",
+        "write target 'src/a.rs' for item 'x' is unsafe",
+    ] {
+        assert!(
+            !super::errors::is_recoverable_write_branch_interruption(verdict),
+            "{verdict}"
+        );
+        assert!(
+            !super::errors::is_host_resource_contention(verdict),
+            "{verdict}"
+        );
+    }
+}
+
+/// The ceiling is a SUM of the budgets it is made of, not a number someone
+/// picked. If a budget is raised, this fails unless the ceiling moved with it —
+/// which is the point: the previous arrangement let separate counters multiply
+/// into a total nobody had worked out.
+#[test]
+fn the_dispatch_ceiling_is_derived_from_the_budgets_it_is_made_of() {
+    use super::size_retry::{MAX_BRANCH_DISPATCHES, MAX_SIZE_RETRIES};
+    use crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
+
+    assert_eq!(
+        MAX_BRANCH_DISPATCHES,
+        1 + MAX_SIZE_RETRIES + MAX_TRANSPORT_RETRIES,
+        "the ceiling must be the first attempt plus both re-ask budgets"
+    );
+}
+
+/// A branch must be able to spend its FULL size budget even after losing
+/// dispatches to the transport — which the loop's own comment promised and its
+/// bound did not deliver, because `for _ in 0..=MAX_SIZE_RETRIES` counted every
+/// iteration including the transport ones.
+#[test]
+fn transport_retries_do_not_eat_the_size_retry_budget() {
+    use super::size_retry::{MAX_BRANCH_DISPATCHES, MAX_SIZE_RETRIES};
+    use crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
+
+    let worst_case_dispatches = 1 + MAX_SIZE_RETRIES + MAX_TRANSPORT_RETRIES;
+    assert!(
+        MAX_BRANCH_DISPATCHES >= worst_case_dispatches,
+        "a branch that loses {MAX_TRANSPORT_RETRIES} dispatches to the transport must still have \
+         all {MAX_SIZE_RETRIES} size re-asks available: ceiling {MAX_BRANCH_DISPATCHES} < needed \
+         {worst_case_dispatches}"
+    );
+}
+
+/// A stall has to be reported, not inferred — so the marker must survive onto
+/// the record a consumer actually reads.
+#[test]
+fn a_branch_that_stopped_improving_says_so_in_its_record() {
+    let rejected = super::errors::write_branch_validation_error_result(
+        "implement-x-1-0",
+        None,
+        "source file src/a.rs exceeds max 500 lines",
+    );
+
+    let stamped = super::errors::stamp_no_progress(Ok(rejected), 12).expect("stamped outcome");
+
+    assert_eq!(stamped.data["branch_no_progress"], serde_json::json!(true));
+    assert_eq!(stamped.data["branch_attempts"], serde_json::json!(12));
+    assert!(
+        stamped.summary.contains("stopped getting closer"),
+        "the summary must say why it stopped, not just that it failed: {}",
+        stamped.summary
+    );
+    // The actionable rejection is still there — the stamp is additive.
+    assert!(
+        stamped
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.description.contains("exceeds max")),
+        "stamping must not discard the rejection that names the remedy"
+    );
+}
+
+/// An error the classification declined to own must stay declined: stamping it
+/// would claim a diagnosis that was never made.
+#[test]
+fn an_unclassified_error_is_not_given_a_stall_diagnosis() {
+    let declined: crate::WorkflowResult<crate::WorkflowV2Result> =
+        Err(crate::WorkflowError::port("something else entirely"));
+
+    let after = super::errors::stamp_no_progress(declined, 3);
+
+    assert!(after.is_err(), "an error must pass through untouched");
 }
